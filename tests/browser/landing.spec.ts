@@ -121,3 +121,98 @@ test.describe('P16 landing — stories, demo and honest availability', () => {
 		await expect(mail).toBeVisible();
 	});
 });
+
+test.describe('P16 landing — mobile, motion and keyboard checks', () => {
+	test('no horizontal overflow at 390px viewport', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto('/');
+		const overflow = await page.evaluate(() => ({
+			scrollWidth: document.documentElement.scrollWidth,
+			clientWidth: document.documentElement.clientWidth,
+		}));
+		expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+	});
+
+	test('prefers-reduced-motion: reduce disables every CSS animation', async ({
+		browser,
+	}) => {
+		const reduce = await browser.newContext({
+			reducedMotion: 'reduce',
+			viewport: { width: 1280, height: 800 },
+		});
+		const pageReduce = await reduce.newPage();
+		await pageReduce.goto('/');
+		// Allow any late-animating nodes to attach, then count.
+		await pageReduce.waitForTimeout(300);
+		expect(
+			await pageReduce.evaluate(() => document.getAnimations().length),
+		).toBe(0);
+
+		// Control: the same page under "no preference" does run quiet motion,
+		// proving the gating is real rather than vacuous.
+		const full = await browser.newContext({
+			reducedMotion: 'no-preference',
+			viewport: { width: 1280, height: 800 },
+		});
+		const pageFull = await full.newPage();
+		await pageFull.goto('/');
+		await pageFull.waitForTimeout(300);
+		expect(
+			await pageFull.evaluate(() => document.getAnimations().length),
+		).toBeGreaterThan(0);
+
+		await reduce.close();
+		await full.close();
+	});
+
+	test('keyboard: skip link is first, focus is visible, primary CTA reachable in order', async ({
+		page,
+	}) => {
+		await page.goto('/');
+		await page.keyboard.press('Tab');
+		await expect(page.locator('.skip')).toBeFocused();
+
+		// Keyboard focus must produce a visible outline (:focus-visible rule).
+		const outline = await page.evaluate(() => {
+			const el = document.activeElement;
+			if (!el) return 'none';
+			return getComputedStyle(el).outlineStyle;
+		});
+		expect(outline).not.toBe('none');
+
+		// Walk forward: primary CTA becomes the active element within a few
+		// stops (nav links interleave), proving a logical, DOM-order tab sequence.
+		let focusedPrimary = false;
+		for (let i = 0; i < 12 && !focusedPrimary; i++) {
+			await page.keyboard.press('Tab');
+			focusedPrimary = await page.evaluate(() =>
+				document.activeElement?.classList.contains('cta-primary'),
+			);
+		}
+		expect(focusedPrimary).toBe(true);
+	});
+
+	test('links are internal or mailto only; external links would require safe rel', async ({
+		page,
+	}) => {
+		await page.goto('/');
+		const hrefs = await page.evaluate(() =>
+			[...document.querySelectorAll('a')].map((a) => a.getAttribute('href')),
+		);
+		expect(hrefs.length).toBeGreaterThan(0);
+		for (const href of hrefs) {
+			// The page intentionally has no external http(s) links; any future
+			// external link must add target="_blank" + rel="noopener noreferrer"
+			// and update this assertion.
+			expect(href).toMatch(/^(#|\/|mailto:)/);
+		}
+		const unsafe = await page.evaluate(
+			() =>
+				[...document.querySelectorAll('a[target="_blank"]')].filter(
+					(a) =>
+						!(a.getAttribute('rel') ?? '').includes('noopener'),
+				).length,
+		);
+		expect(unsafe).toBe(0);
+	});
+});
