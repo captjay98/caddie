@@ -5,6 +5,10 @@
 // availability — no testimonials, no metrics, no build-success claims.
 import '../styles/site.css';
 import Hero from '../components/Hero.astro';
+import ProductDemo from '../components/ProductDemo.astro';
+import Stories from '../components/Stories.astro';
+import Availability from '../components/Availability.astro';
+import Contact from '../components/Contact.astro';
 ---
 
 <!doctype html>
@@ -29,11 +33,19 @@ import Hero from '../components/Hero.astro';
   <body>
     <a class="skip" href="#main">Skip to content</a>
     <Hero />
-    <main id="main"></main>
+    <main id="main">
+      <ProductDemo />
+      <Stories />
+      <Availability />
+      <Contact />
+    </main>
     <footer class="site-foot">
       <div class="shell foot-row">
         <a class="wordmark" href="/">Caddie</a>
         <nav class="foot-links" aria-label="Footer">
+          <a href="#demo">Demo</a>
+          <a href="#stories">How it works</a>
+          <a href="#availability">Availability</a>
           <a href="#access">Request access</a>
         </nav>
       </div>

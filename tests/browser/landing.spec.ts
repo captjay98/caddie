@@ -51,10 +51,73 @@ test.describe('P16 landing — shell', () => {
 		request,
 	}) => {
 		await page.goto('/');
-		const cta = page.locator('a.cta-primary');
+		const cta = page.locator('.hero a.cta-primary');
 		await expect(cta).toBeVisible();
 		await expect(cta).toHaveAttribute('href', '/app/');
 		const res = await request.get('/app/');
 		expect(res.status()).toBe(200);
+	});
+});
+
+test.describe('P16 landing — stories, demo and honest availability', () => {
+	test('workspace demo carries the "not a live run" disclosure', async ({
+		request,
+		page,
+	}) => {
+		const html = await (await request.get('/')).text();
+		expect(html).toContain('not a live run');
+
+		// The disclosure is visible markup, not a hidden comment.
+		await page.goto('/');
+		const banner = page.locator('.demo-banner');
+		await expect(banner).toBeVisible();
+		await expect(banner).toContainText('not a live run');
+	});
+
+	test('three stories render: discover, build, prepare', async ({ page }) => {
+		await page.goto('/');
+		const stories = page.locator('#stories article');
+		await expect(stories).toHaveCount(3);
+		await expect(
+			page.getByRole('heading', { name: /discover opportunities/i }),
+		).toBeVisible();
+		await expect(
+			page.getByRole('heading', { name: /build through specialists/i }),
+		).toBeVisible();
+		await expect(
+			page.getByRole('heading', { name: /prepare verifiable submissions/i }),
+		).toBeVisible();
+	});
+
+	test('stack availability is honest per the feature ledger', async ({
+		request,
+		page,
+	}) => {
+		const html = await (await request.get('/')).text();
+		expect(html).toContain('proving first');
+
+		await page.goto('/');
+		// react-hono is proving first (P09 gate); the other four are planned.
+		await expect(page.locator('[data-status="proving-first"]')).toContainText(
+			/react \+ hono/i,
+		);
+		await expect(page.locator('[data-status="planned"]')).toHaveCount(4);
+		// No verified label anywhere while gates are open.
+		expect(
+			await page.locator('[data-status="verified"]').count(),
+		).toBe(0);
+	});
+
+	test('request access uses an explicit mailto placeholder awaiting the owner address', async ({
+		request,
+		page,
+	}) => {
+		const html = await (await request.get('/')).text();
+		// Source comment marks the address as a placeholder for the owner.
+		expect(html).toMatch(/<!--\s*PLACEHOLDER CONTACT[^>]*hello@example\.com/);
+
+		await page.goto('/');
+		const mail = page.locator('a[href^="mailto:hello@example.com"]');
+		await expect(mail).toBeVisible();
 	});
 });

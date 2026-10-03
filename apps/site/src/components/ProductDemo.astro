@@ -1,0 +1,111 @@
+---
+// ProductDemo: a clearly-labeled, static illustration of the planned Caddie
+// workspace. This is NOT a screenshot and NOT a live run — the banner says
+// so in plain text. Every "control" is a non-interactive element (span, div,
+// list) so keyboard users never land on dead UI, and no runtime fetches or
+// client scripts are involved. Numbers shown are illustrative states from
+// the planned product (e.g. a plan revision), not results or metrics.
+---
+
+<section class="section demo" id="demo" aria-labelledby="demo-title">
+  <div class="shell">
+    <p class="kicker-inline">Planned workspace</p>
+    <h2 id="demo-title">One conversation. Card, tasks and channel in step.</h2>
+    <p class="section-lede">
+      Work happens in a single project conversation: decisions arrive as cards
+      with trade-offs and sources, the task lane tracks what each specialist
+      owes, and the channel explains what happened — without exposing raw
+      chain-of-thought.
+    </p>
+
+    <figure class="demo-window">
+      <figcaption class="demo-banner">
+        <span class="demo-flag">Illustrative preview — not a live run</span>
+        <span class="demo-sub">Static markup of the planned workspace; nothing here is interactive.</span>
+      </figcaption>
+
+      <div class="demo-grid">
+        <div class="demo-pane demo-pane-card" aria-label="Decision card illustration">
+          <div class="pane-head">
+            Decision card
+            <span class="pane-tag">needs you</span>
+          </div>
+          <h3>Approve the design boundary</h3>
+          <p class="pane-sub">
+            Tracker UI · plan revision 3 — approving locks the scope this run
+            builds against.
+          </p>
+
+          <div class="option">
+            <p class="option-name">
+              A · React + Hono
+              <span class="chip chip-blue">proving first</span>
+            </p>
+            <p class="option-why">
+              The stack being proven end to end, with its acceptance gate
+              ahead of it.
+            </p>
+          </div>
+          <div class="option">
+            <p class="option-name">
+              B · Flutter + Hono
+              <span class="chip">planned</span>
+            </p>
+            <p class="option-why">
+              Mobile coverage from day one, but its stack gate opens later.
+            </p>
+          </div>
+
+          <div class="card-foot">
+            <span class="foot-label">Sources</span>
+            <span class="chip">plan · rev 3</span>
+            <span class="chip">rules · snapshot</span>
+          </div>
+        </div>
+
+        <div class="demo-pane" aria-label="Task lane illustration">
+          <div class="pane-head">Tasks</div>
+          <ul class="task-list">
+            <li>
+              <span class="chip chip-ok">done</span>
+              Capture contest rules into evidence
+            </li>
+            <li>
+              <span class="chip chip-warn">needs you</span>
+              Approve the design boundary
+            </li>
+            <li>
+              <span class="chip">queued</span>
+              Build the tracker UI
+            </li>
+            <li>
+              <span class="chip">queued</span>
+              Run browser acceptance
+            </li>
+          </ul>
+        </div>
+
+        <div class="demo-pane" aria-label="Channel illustration">
+          <div class="pane-head">Channel</div>
+          <div class="msg">
+            <span class="msg-from">tech-lead</span>
+            <p>
+              Scope is versioned at revision 3. QA acceptance runs only after
+              the boundary is approved.
+            </p>
+          </div>
+          <div class="msg">
+            <span class="msg-from">caddie</span>
+            <p>
+              Waiting on your approval — nothing gets built until the boundary
+              is locked.
+            </p>
+          </div>
+          <p class="pane-note">
+            Agent messages will link the evidence behind each claim.
+          </p>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
