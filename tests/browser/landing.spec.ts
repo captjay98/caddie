@@ -7,6 +7,20 @@ import { expect, test } from '@playwright/test';
  * availability: no testimonials, no metrics, no build-success claims.
  */
 
+// The root tsconfig intentionally omits the "dom" lib (it typechecks Node and
+// bun code). The callbacks below run inside the browser via page.evaluate, so
+// declare the minimal surface this spec touches — module-scoped, so it never
+// conflicts with a future "dom" lib addition in shared config.
+declare const document: {
+	documentElement: { scrollWidth: number; clientWidth: number };
+	activeElement: { classList: { contains(name: string): boolean } } | null;
+	querySelectorAll(selectors: string): Array<{
+		getAttribute(name: string): string | null;
+	}>;
+	getAnimations(): unknown[];
+};
+declare function getComputedStyle(element: object): { outlineStyle: string };
+
 test.describe('P16 landing — shell', () => {
 	test('/ returns 200 and serves meaningful content in raw HTML (no JS required)', async ({
 		request,
@@ -185,8 +199,10 @@ test.describe('P16 landing — mobile, motion and keyboard checks', () => {
 		let focusedPrimary = false;
 		for (let i = 0; i < 12 && !focusedPrimary; i++) {
 			await page.keyboard.press('Tab');
-			focusedPrimary = await page.evaluate(() =>
-				document.activeElement?.classList.contains('cta-primary'),
+			focusedPrimary = await page.evaluate(
+				() =>
+					document.activeElement?.classList.contains('cta-primary') ??
+					false,
 			);
 		}
 		expect(focusedPrimary).toBe(true);
