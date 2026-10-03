@@ -14,7 +14,9 @@
 		"@vitejs/plugin-react": "^4.7.0",
 		"hono": "^4.12.32",
 		"react": "^19.2.0",
-		"react-dom": "^19.2.0"
+		"react-dom": "^19.2.0",
+		"better-auth": "1.7.7",
+		"@caddie/contracts": "workspace:*"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "1.39.2",

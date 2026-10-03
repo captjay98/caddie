@@ -11,6 +11,16 @@
 	// for each one. Append a new tag when you add an agent:
 	// https://flueframework.com/docs/guide/cloudflare-target/#managing-migrations
 	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["FlueHelloAgent"] }],
+	// Product state (P02 owns migrations/0001_product.sql onward; migration
+	// numbering is integration-lead-owned). database_id is a local-dev
+	// placeholder — a real id is a setup input before any deployment (P17).
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "caddie",
+			"database_id": "local-dev-placeholder"
+		}
+	],
 	// Composed static assets (Astro landing + React SPA) written by
 	// scripts/compose-assets.ts. run_worker_first keeps /api, /agents and
 	// /app in the Worker so API 404s stay JSON and /app deep links fall back
