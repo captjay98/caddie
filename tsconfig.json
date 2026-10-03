@@ -1,0 +1,18 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"lib": ["ESNext"],
+		"types": ["bun"],
+		"strict": true,
+		"skipLibCheck": true,
+		"noEmit": true,
+		"allowImportingTsExtensions": true,
+		"verbatimModuleSyntax": true,
+		"paths": {
+			"@caddie/contracts": ["./packages/contracts/src/index.ts"]
+		}
+	},
+	"include": ["scripts/**/*.ts", "tests/**/*.ts", "packages/contracts/src/**/*.ts"]
+}

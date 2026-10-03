@@ -1,0 +1,25 @@
+{
+	"name": "caddie-forge",
+	"private": true,
+	"type": "module",
+	"workspaces": [
+		"apps/*",
+		"packages/*"
+	],
+	"scripts": {
+		"dev": "bun --cwd=apps/app run dev",
+		"dev:site": "bun --cwd=apps/site run dev",
+		"build": "rm -rf apps/app/dist && bun --cwd=apps/site run build && bun --cwd=apps/app run build && bun run compose:assets",
+		"compose:assets": "bun scripts/compose-assets.ts",
+		"typecheck": "tsc --noEmit && bun --cwd=apps/app run check:types",
+		"test": "bun test tests/",
+		"verify:packet": "bun scripts/verify-packet.ts",
+		"test:live": "bun scripts/verify-packet.ts --live",
+		"test:browser": "bun scripts/verify-packet.ts --browser"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.2.0",
+		"typescript": "^7.0.2",
+		"valibot": "^1.1.0"
+	}
+}

@@ -7,3 +7,7 @@ dist/
 *.db
 *.db-*
 .DS_Store
+.astro/
+*.tsbuildinfo
+test-results/
+playwright-report/
