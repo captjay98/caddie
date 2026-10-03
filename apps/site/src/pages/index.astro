@@ -1,7 +1,10 @@
 ---
-// P00 scaffold page: proves static Astro output composes into the Worker
-// assets tree at /. The real landing (identity, stories, demo) is P16.
-// Copy must match docs/feature-ledger.md availability — no invented claims.
+// P16 landing. Static Astro output composed into the Worker assets tree at /
+// by scripts/compose-assets.ts. No client JavaScript: every meaningful
+// string is server-rendered markup. Copy must match docs/feature-ledger.md
+// availability — no testimonials, no metrics, no build-success claims.
+import '../styles/site.css';
+import Hero from '../components/Hero.astro';
 ---
 
 <!doctype html>
@@ -9,32 +12,38 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Caddie — build with evidence</title>
-    <style>
-      :root { color-scheme: light dark; }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        font-family: system-ui, sans-serif;
-        background: #0b1f3a;
-        color: #eef4ff;
-      }
-      main { max-width: 40rem; padding: 3rem 1.5rem; }
-      h1 { font-size: 2.5rem; margin: 0 0 0.75rem; }
-      a { color: #8db8ff; }
-    </style>
+    <title>Caddie — discover, build, deliver with evidence</title>
+    <meta
+      name="description"
+      content="Caddie is a persistent, evidence-backed assistant that discovers opportunities, plans and builds applications through specialist agents, and prepares verifiable submissions. Under active development; access by invitation."
+    />
+    <meta property="og:title" content="Caddie — discover, build, deliver with evidence" />
+    <meta
+      property="og:description"
+      content="Discover opportunities, build through specialists, prepare verifiable submissions. Under active development; access by invitation."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#071120" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
   <body>
-    <main>
-      <h1>Caddie</h1>
-      <p>
-        A persistent, evidence-backed assistant that discovers opportunities,
-        plans projects, and builds applications through specialist agents.
-        Under active development — this page is a scaffold.
-      </p>
-      <p><a href="/app/">Open the workspace</a></p>
-    </main>
+    <a class="skip" href="#main">Skip to content</a>
+    <Hero />
+    <main id="main"></main>
+    <footer class="site-foot">
+      <div class="shell foot-row">
+        <a class="wordmark" href="/">Caddie</a>
+        <nav class="foot-links" aria-label="Footer">
+          <a href="#access">Request access</a>
+        </nav>
+      </div>
+      <div class="shell">
+        <p class="foot-note">
+          Under active development. Statements on this page mirror the
+          availability recorded in the project feature ledger; nothing here is
+          a verified build claim.
+        </p>
+      </div>
+    </footer>
   </body>
 </html>
