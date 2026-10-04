@@ -20,7 +20,7 @@
 	--pb-danger: var(--color-danger);
 	--pb-on-key: var(--color-ink);
 	--pb-muted: var(--color-muted);
-	--pb-quiet: color-mix(in srgb, var(--color-muted) 80%, transparent);
+	--pb-quiet: color-mix(in srgb, var(--color-muted) 88%, transparent);
 	--pb-line: var(--color-line);
 	--pb-line-soft: var(--color-line-soft);
 	--pb-line-hard: color-mix(in srgb, var(--color-bright) 28%, transparent);
@@ -117,12 +117,6 @@
 .pb .nested { border-radius: 6px; padding: 0.5rem 0.625rem; margin-top: 0.5rem; display: grid; gap: 0.25rem; }
 .pb .note { margin-top: 0.5rem; font-size: 0.75rem; line-height: 1.55; color: color-mix(in srgb, var(--pb-fg) 88%, var(--pb-bg)); }
 .pb .note .mk { font-family: var(--font-mono); font-size: 0.5625rem; margin-right: 0.3125rem; }
-.pb .bars { display: grid; gap: 0.5rem; margin-top: 0.5rem; }
-.pb .bar-head { display: flex; align-items: center; gap: 0.5rem; }
-.pb .bar-name { width: 5.5rem; flex: none; font-family: var(--font-mono); font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pb-quiet); }
-.pb .bar-track { flex: 1; height: 5px; background: color-mix(in srgb, var(--pb-fg) 11%, transparent); border-radius: 9999px; overflow: hidden; }
-.pb .bar-score { width: 1.5rem; text-align: right; font-family: var(--font-mono); font-size: 0.625rem; font-weight: 700; }
-.pb .bar-why { margin-left: 6rem; font-size: 0.625rem; color: var(--pb-muted); line-height: 1.45; }
 .pb .chips { display: flex; flex-wrap: wrap; gap: 0.3125rem; margin-top: 0.5rem; }
 .pb .chip { border: 1px solid var(--pb-line-soft); background: color-mix(in srgb, var(--pb-raised) 60%, var(--pb-bg)); border-radius: 9999px; padding: 0.0625rem 0.4375rem; font-family: var(--font-mono); font-size: 0.5625rem; color: var(--pb-muted); }
 .pb .chip b { color: var(--pb-ok); font-weight: 700; }

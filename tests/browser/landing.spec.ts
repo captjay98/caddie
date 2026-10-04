@@ -22,7 +22,6 @@ declare const document: {
 	activeElement: { classList: { contains(name: string): boolean }; className: string } | null;
 	querySelectorAll(selectors: string): Array<{
 		id: string;
-		getAttribute(name: string): string | null;
 		className: string;
 		getBoundingClientRect(): { right: number };
 	}>;
@@ -174,9 +173,9 @@ test.describe('P16 landing — mobile, motion and keyboard checks', () => {
 		const overflow = await page.evaluate(() => ({
 			scrollWidth: document.documentElement.scrollWidth,
 			clientWidth: document.documentElement.clientWidth,
-			// body uses overflow-x: clip as a backstop, which hides overflow
-			// from scrollWidth — also require every section to fit the
-			// viewport so content-loss breakage cannot hide behind the clip.
+			// scrollWidth alone can miss content clipped by an ancestor
+			// overflow rule, so also require every section's right edge to
+			// fit the viewport — content-loss breakage cannot hide.
 			sections: [...document.querySelectorAll('section')].map((el) => ({
 				id: el.id || el.className,
 				right: el.getBoundingClientRect().right,

@@ -5,7 +5,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | Packet | Status | Owner | Spec review | Quality review | Evidence / SHA |
 |---|---|---|---|---|---|
 | P00 | LOCAL VERIFIED | Integration lead (coordinator) | PASS | PASS (RECHECK: PASS after fixes) | 879e0f1 |
-| P01 | LOCAL VERIFIED (real OAuth callbacks BLOCKED on owner credentials) | Backend identity engineer (subagent); integrated by lead | PENDING (quota — re-review when subagent dispatch returns) | PENDING (quota) | see evidence records (c41dc19 + integration b1b4d4e) |
+| P01 | LOCAL VERIFIED (real OAuth callbacks BLOCKED on owner credentials) | Backend identity engineer (subagent); integrated by lead | PASS | PASS (fixes applied: AUTH_TEST_MODE fence, dead helper removal, DDL-drift guard, log cleanup) | see evidence records (c41dc19 + integration b1b4d4e + review fixes) |
 | P02 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P03 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P04 | NOT STARTED | Unassigned | Pending | Pending | — |
@@ -71,10 +71,11 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   "artifacts": [{"path": "apps/app/migrations/0001_product.sql", "note": "identity tables = Better Auth 1.7.7 migrator output, byte-matched to tests/fixtures/auth-schema.sql"}],
   "environment": "local workerd + local D1 (miniflare), better-auth 1.7.7 (Kysely adapter on D1 binding)",
   "providerCalls": "none (stub provider inside workerd — OAuth boundary SIMULATED)",
-  "specReview": "PENDING — reviewers blocked by provider rate limit (resets 2026-10-10)",
-  "qualityReview": "PENDING — same",
+  "specReview": "PASS (independent subagent; 8 acceptance items verified; noted: session.ts plan-slot not materialized — mechanics live in auth.ts; forged-state test cannot attribute rejection to state-validation specifically; empty-allowlist fail-closed documented but untested; staging verification owed when credentials arrive)",
+  "qualityReview": "PASS (independent subagent; P2 fixed: test-only env knobs now require AUTH_TEST_MODE=1 or createAuth throws; P3s fixed: dead mount helpers removed, DDL-drift guard added, /tmp log cleanup; P3s noted: app.ts typing honesty kept as deployment contract, browser error-path env-sensitivity acknowledged, emailVerified hardening deferred to P02/P03 authorization work)",
   "limitations": [
     "SPIKE PASSED: Better Auth 1.7.7 accepts the D1 binding directly (bundled Kysely adapter); documented at better-auth.com/docs/concepts/database",
+    "PLAN DRIFT (recorded, packets.md is owner-amended only): packets.md P01 file list names src/server/session.ts; session mechanics live in auth.ts instead — feature-ledger C18 destination updated to match reality",
     "session secret is dedicated BETTER_AUTH_SECRET — audit defect #5 (derive-from-model-key) verified absent",
     "real Google/GitHub callbacks BLOCKED pending owner-provided OAuth registrations + BETTER_AUTH_URL; callback URLs documented in docs/setup/auth.md",
     "lead integration diff (b1b4d4e): auth router mounted at /api, SignInPanel in SPA scaffold, identity DDL seeded into 0001_product.sql"

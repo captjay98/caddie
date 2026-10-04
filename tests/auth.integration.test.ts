@@ -284,6 +284,9 @@ async function startFixtureWorker(
 			// email + provider subject so tests stay order-independent)
 			INVITE_ALLOWLIST: [INVITED_EMAIL, LINKED_EMAIL, REPLAY_EMAIL, LOGOUT_EMAIL].join(','),
 			AUTH_STUB_BASE_URL: stub.url,
+			// Gates the test-only knobs above: without it createAuth refuses to
+			// start (fail-closed against stray test vars in real deployments).
+			AUTH_TEST_MODE: '1',
 			...extraVars,
 		},
 	};
@@ -344,6 +347,7 @@ function stopFixtureWorker(port: number) {
 		Bun.spawnSync(['pkill', signal, '-f', `workerd.*entry=127.0.0.1:${port} `]);
 		Bun.sleepSync(300);
 	}
+	rmSync(`/tmp/caddie-p01-auth-worker-${port}.log`, { force: true });
 }
 
 async function applyDdl(port: number): Promise<void> {
@@ -800,5 +804,25 @@ describe('P01 slice 2: invite allowlist, provider-subject identity, sessions', (
 		const res = await worker(new Jar(), '/api/auth/status');
 		expect(res.status).toBe(200);
 		expect(await res.json()).toEqual({ authenticated: false });
+	});
+
+	test('identity DDL in 0001_product.sql never drifts from the fixture', () => {
+		// The fixture and the production migration must stay byte-identical at
+		// the statement level: the fixture proves the migration's schema, so a
+		// divergence would make every test here lie about production D1.
+		const migration = readFileSync(
+			join(import.meta.dir, '..', 'apps', 'app', 'migrations', '0001_product.sql'),
+			'utf8',
+		);
+		const fixture = readFileSync(
+			join(import.meta.dir, 'fixtures', 'auth-schema.sql'),
+			'utf8',
+		);
+		const statements = (sql: string) =>
+			sql
+				.split('\n')
+				.filter((line) => /^\s*(create|drop|alter)\b/i.test(line))
+				.map((line) => line.trim());
+		expect(statements(migration)).toEqual(statements(fixture));
 	});
 });

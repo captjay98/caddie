@@ -1,6 +1,5 @@
 import { createAuthClient } from 'better-auth/client';
 import { createElement, useCallback, useState, type ReactElement } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
 
 /**
  * P01 client identity: sign-in panel for the Caddie SPA.
@@ -134,26 +133,4 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 				)
 			: null,
 	);
-}
-
-let mountedRoot: Root | null = null;
-
-/**
- * Standalone mount for hosts that render the panel outside a React tree
- * (and for the browser spec). Idempotent: a second call into the same target
- * is a no-op.
- */
-export function mountSignInPanel(target?: HTMLElement, props: SignInPanelProps = {}): void {
-	const host = target ?? document.getElementById('caddie-sign-in');
-	if (!host) return;
-	if (host.dataset.signInMounted === 'true') return;
-	host.dataset.signInMounted = 'true';
-	mountedRoot = createRoot(host);
-	mountedRoot.render(createElement(SignInPanel as (props: SignInPanelProps) => ReactElement, props));
-}
-
-/** Unmount helper for hosts that swap views (tests, HMR). */
-export function unmountSignInPanel(): void {
-	mountedRoot?.unmount();
-	mountedRoot = null;
 }

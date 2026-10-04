@@ -53,12 +53,15 @@ export interface AuthEnv {
 	INVITE_ALLOWLIST?: string;
 	/**
 	 * Test-only: base URL of the stub OAuth provider used by the local
-	 * integration fixture. Never set in production; when absent the fixture
-	 * providers are not registered and the built-in providers above apply.
+	 * integration fixture. Honored ONLY when AUTH_TEST_MODE=1 (the fixture
+	 * sets it); any other environment carrying it is a misconfiguration and
+	 * createAuth refuses to start.
 	 */
 	AUTH_STUB_BASE_URL?: string;
-	/** Test-only: short session TTL in seconds for expiry tests. */
+	/** Test-only: short session TTL in seconds for expiry tests. Same fence. */
 	AUTH_SESSION_TTL_SECONDS?: string;
+	/** Test-only marker that gates the knobs above. */
+	AUTH_TEST_MODE?: string;
 }
 
 export type AuthInstance = ReturnType<typeof createAuth>;
@@ -103,6 +106,17 @@ export interface CreateAuthOverrides {
  * the bare `Auth` alias when plugins are registered.
  */
 export function createAuth(env: AuthEnv, overrides: CreateAuthOverrides = {}) {
+	// Fail-closed fence for test-only knobs (AUTH_STUB_BASE_URL swaps in
+	// static-credential stub providers; AUTH_SESSION_TTL_SECONDS shortens
+	// sessions). They are honored ONLY when AUTH_TEST_MODE=1 is set
+	// explicitly — the integration fixture sets it. Any other environment
+	// carrying these vars is a misconfiguration and must be loud.
+	const testMode = env.AUTH_TEST_MODE === '1';
+	if ((env.AUTH_STUB_BASE_URL || env.AUTH_SESSION_TTL_SECONDS) && !testMode) {
+		throw new Error(
+			'auth: AUTH_STUB_BASE_URL/AUTH_SESSION_TTL_SECONDS are test-only and require AUTH_TEST_MODE=1',
+		);
+	}
 	const secret = requireEnv(env, 'BETTER_AUTH_SECRET');
 	const baseURL = requireEnv(env, 'BETTER_AUTH_URL').replace(/\/$/, '');
 	const allowlist = inviteAllowlist(env.INVITE_ALLOWLIST);
