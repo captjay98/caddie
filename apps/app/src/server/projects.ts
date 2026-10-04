@@ -200,7 +200,7 @@ function artifactRevisionFromRow(row: Record<string, unknown>): ArtifactRevision
 export async function createWorkspace(
 	db: D1Database,
 	actorId: string,
-	input: WorkspaceCreateInput,
+	input: unknown,
 ): Promise<Workspace> {
 	const verifiedActor = requireActorId(actorId);
 	const parsed = parseOr400(WorkspaceCreateInputSchema, input);
@@ -236,7 +236,7 @@ export async function createWorkspace(
 export async function createProject(
 	db: D1Database,
 	scope: WorkspaceScope,
-	input: ProjectCreateInput,
+	input: unknown,
 ): Promise<Project> {
 	const verified = await assertWorkspaceScope(db, scope);
 	const parsed = parseOr400(ProjectCreateInputSchema, input);
@@ -297,7 +297,7 @@ export async function getProject(db: D1Database, scope: Scope): Promise<Project>
 export async function updateProject(
 	db: D1Database,
 	scope: Scope,
-	patch: ProjectUpdateInput,
+	patch: unknown,
 ): Promise<Project> {
 	const verified = await assertProjectScope(db, scope);
 	const parsed = parseOr400(ProjectUpdateInputSchema, patch);
@@ -385,7 +385,7 @@ export async function listProjectsForActor(
 export async function createPlanDocRevision(
 	db: D1Database,
 	scope: Scope,
-	input: PlanDocCreateInput,
+	input: unknown,
 ): Promise<PlanDocRevision> {
 	const verified = await assertProjectScope(db, scope);
 	const parsed = parseOr400(PlanDocCreateInputSchema, input);
@@ -457,7 +457,7 @@ export async function listPlanDocRevisions(
 export async function createRunBinding(
 	db: D1Database,
 	scope: Scope,
-	input: RunBindingCreateInput,
+	input: unknown,
 ): Promise<RunBindingRecord> {
 	const verified = await assertProjectScope(db, scope);
 	const parsed = parseOr400(RunBindingCreateInputSchema, input);
@@ -537,7 +537,7 @@ export async function listRunBindings(
 export async function createArtifactRevision(
 	db: D1Database,
 	scope: Scope,
-	input: ArtifactCreateInput,
+	input: unknown,
 ): Promise<ArtifactRevision> {
 	const verified = await assertProjectScope(db, scope);
 	const parsed = parseOr400(ArtifactCreateInputSchema, input);

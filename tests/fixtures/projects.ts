@@ -1,15 +1,15 @@
-import { createAuthApp } from '../../apps/app/src/server/routes/auth.ts';
+import { createProjectsApp } from '../../apps/app/src/server/routes/projects.ts';
 import type { AuthEnv, D1Database } from '../../apps/app/src/server/auth.ts';
 
 /**
  * Minimal local workerd fixture for P02 (REAL workerd via `wrangler dev`,
  * real local SQLite-backed D1 — never deployed).
  *
- * It mounts the exact production auth composition (createAuthApp — the same
- * router app.ts mounts at /api) and adds /__test/* control routes used only
- * by tests/project-isolation.integration.test.ts to prepare the database and
+ * It mounts the exact production /api composition (createProjectsApp — the
+ * auth router plus the P02 projects router, the same mount app.ts uses) and
+ * adds /__test/* control routes used only by
+ * tests/project-isolation.integration.test.ts to prepare the database and
  * assert on rows. These control routes are NOT part of the app Worker.
- * The projects router is mounted by this fixture from P02 slice 3 onward.
  */
 
 interface FixtureEnv extends AuthEnv {
@@ -21,7 +21,7 @@ async function d1All(db: D1Database, sql: string): Promise<{ results: unknown[] 
 	return { results: (res.results ?? []) as unknown[] };
 }
 
-const authApp = createAuthApp();
+const apiApp = createProjectsApp();
 
 export default {
 	async fetch(request: Request, env: FixtureEnv): Promise<Response> {
@@ -54,6 +54,6 @@ export default {
 				return Response.json({ error: String(error) }, { status: 500 });
 			}
 		}
-		return authApp.fetch(request, env);
+		return apiApp.fetch(request, env);
 	},
 };

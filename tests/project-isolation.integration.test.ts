@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { createServer } from 'node:http';
+import { createHash, randomBytes } from 'node:crypto';
 import net from 'node:net';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -110,6 +112,7 @@ async function waitFor(url: string, timeoutMs: number): Promise<string | undefin
 
 async function startFixtureWorker(
 	port: number,
+	extraVars: Record<string, string> = {},
 ): Promise<{ process: Bun.Subprocess; cleanup: () => void }> {
 	const tmp = mkdtempSync(join(tmpdir(), 'caddie-p02-'));
 	const config = {
@@ -129,12 +132,11 @@ async function startFixtureWorker(
 			BETTER_AUTH_URL: `http://127.0.0.1:${port}`,
 			BETTER_AUTH_SECRET: 'fixture-only-secret-0123456789abcdef0123456789abcdef',
 			INVITE_ALLOWLIST: [ALICE_EMAIL, BOB_EMAIL].join(','),
-			// Gates the test-only stub-provider knob (fail-closed fence from P01).
+			// Gates the test-only knobs above (fail-closed fence from P01).
 			AUTH_TEST_MODE: '1',
+			...extraVars,
 		},
 	};
-	// The stub provider URL is filled in by the test's beforeAll via the
-	// AUTH_STUB_BASE_URL extra var (see startWorker below).
 	const configPath = join(tmp, 'projects.wrangler.json');
 	writeFileSync(configPath, JSON.stringify(config, null, 2));
 	const logFile = `/tmp/caddie-p02-projects-worker-${port}.log`;
@@ -222,6 +224,192 @@ async function d1Count(base: string, table: string, where = '1=1'): Promise<numb
 	return Number(rows[0]?.n ?? -1);
 }
 
+// --- authenticated-session helpers (P01 fixture pattern) ------------------------
+
+class Jar {
+	private map = new Map<string, string>();
+	absorb(res: Response) {
+		for (const cookie of res.headers.getSetCookie()) {
+			const pair = cookie.split(';')[0] ?? '';
+			const eq = pair.indexOf('=');
+			if (eq <= 0) continue;
+			const name = pair.slice(0, eq).trim();
+			const value = pair.slice(eq + 1).trim();
+			const expired = /max-age=0|expires=Thu, 01 Jan 1970/i.test(cookie);
+			if (expired || value === '') this.map.delete(name);
+			else this.map.set(name, value);
+		}
+	}
+	header(): string {
+		return [...this.map].map(([k, v]) => `${k}=${v}`).join('; ');
+	}
+	set(name: string, value: string) {
+		this.map.set(name, value);
+	}
+}
+
+interface StubProfile {
+	sub: string;
+	email: string;
+	name: string;
+	email_verified: boolean;
+}
+
+/** Stub OAuth2 provider (authorization endpoint, token endpoint, userinfo). */
+class StubProvider {
+	profile: StubProfile = {
+		sub: 'stub-sub-initial',
+		email: ALICE_EMAIL,
+		name: 'Stub User',
+		email_verified: true,
+	};
+	private codes = new Map<
+		string,
+		{ challenge: string; redirectUri: string; scope: string; profile: StubProfile }
+	>();
+	private tokens = new Map<string, StubProfile>();
+	private server: import('node:http').Server | undefined;
+	url = '';
+
+	setProfile(p: StubProfile) {
+		this.profile = p;
+	}
+
+	start(port: number): Promise<void> {
+		const server = createServer((req, res) => {
+			const u = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
+			if (u.pathname === '/authorize') {
+				const state = u.searchParams.get('state');
+				const redirectUri = u.searchParams.get('redirect_uri');
+				const challenge = u.searchParams.get('code_challenge');
+				if (!state || !redirectUri || !challenge) {
+					res.writeHead(400, { 'content-type': 'text/plain' });
+					res.end('stub provider: missing state/redirect_uri/code_challenge');
+					return;
+				}
+				const code = randomBytes(16).toString('hex');
+				this.codes.set(code, {
+					challenge,
+					redirectUri,
+					scope: u.searchParams.get('scope') ?? '',
+					profile: { ...this.profile },
+				});
+				const target = new URL(redirectUri);
+				target.searchParams.set('code', code);
+				target.searchParams.set('state', state);
+				res.writeHead(302, { location: target.toString() });
+				res.end();
+				return;
+			}
+			if (u.pathname === '/token' && req.method === 'POST') {
+				let body = '';
+				req.on('data', (chunk: Buffer) => (body += chunk));
+				req.on('end', () => {
+					const params = new URLSearchParams(body);
+					const issued = this.codes.get(params.get('code') ?? '');
+					const verifier = params.get('code_verifier') ?? '';
+					if (
+						!issued ||
+						params.get('client_id') !== 'stub-client-id' ||
+						params.get('redirect_uri') !== issued.redirectUri
+					) {
+						res.writeHead(400, { 'content-type': 'application/json' });
+						res.end(JSON.stringify({ error: 'invalid_grant' }));
+						return;
+					}
+					const expected = createHash('sha256').update(verifier).digest('base64url');
+					if (expected !== issued.challenge) {
+						res.writeHead(400, { 'content-type': 'application/json' });
+						res.end(JSON.stringify({ error: 'invalid_grant', error_description: 'pkce mismatch' }));
+						return;
+					}
+					this.codes.delete(params.get('code') ?? '');
+					const token = randomBytes(24).toString('hex');
+					this.tokens.set(token, issued.profile);
+					res.writeHead(200, { 'content-type': 'application/json' });
+					res.end(
+						JSON.stringify({
+							access_token: token,
+							token_type: 'Bearer',
+							expires_in: 3600,
+							scope: issued.scope,
+						}),
+					);
+				});
+				return;
+			}
+			if (u.pathname === '/userinfo') {
+				const auth = req.headers.authorization ?? '';
+				const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+				const profile = this.tokens.get(token);
+				if (!profile) {
+					res.writeHead(401, { 'content-type': 'application/json' });
+					res.end(JSON.stringify({ error: 'invalid_token' }));
+					return;
+				}
+				res.writeHead(200, { 'content-type': 'application/json' });
+				res.end(JSON.stringify({ ...profile, id: profile.sub }));
+				return;
+			}
+			res.writeHead(404, { 'content-type': 'text/plain' });
+			res.end('stub provider: unknown path');
+		});
+		this.server = server;
+		return new Promise((resolve, reject) => {
+			server.once('error', reject);
+			server.listen(port, '127.0.0.1', () => {
+				this.url = `http://127.0.0.1:${port}`;
+				resolve();
+			});
+		});
+	}
+
+	stop() {
+		return new Promise<void>((resolve) => this.server?.close(() => resolve()));
+	}
+}
+
+function makeWorker(base: string) {
+	return async (jar: Jar, path: string, init?: RequestInit): Promise<Response> => {
+		const headers = new Headers(init?.headers);
+		if (jar.header()) headers.set('cookie', jar.header());
+		const url = path.startsWith('http://') || path.startsWith('https://') ? path : `${base}${path}`;
+		const res = await fetch(url, { ...init, headers, redirect: 'manual' });
+		jar.absorb(res);
+		return res;
+	};
+}
+
+let stub: StubProvider;
+
+/** Worker fetch bound lazily after beforeAll allocates the port. */
+const worker = (jar: Jar, path: string, init?: RequestInit) => makeWorker(WORKER_BASE)(jar, path, init);
+
+/**
+ * Drive the OAuth round trip exactly like a browser would (SIMULATED at the
+ * provider boundary; everything after it is the real worker + real D1).
+ */
+async function driveOAuth(jar: Jar, provider: string, profile: StubProfile) {
+	stub.setProfile(profile);
+	const start = await worker(jar, '/api/auth/sign-in/social', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ provider, callbackURL: '/' }),
+	});
+	const startBody = (await start.json()) as { url?: string };
+	if (!startBody.url) throw new Error(`sign-in did not return an authorization url: ${start.status}`);
+	const providerRes = await fetch(startBody.url, { redirect: 'manual' });
+	const callbackUrl = providerRes.headers.get('location');
+	if (!callbackUrl) throw new Error('stub provider did not redirect back');
+	await worker(jar, callbackUrl);
+}
+
+async function signIn(email: string, sub: string, name: string): Promise<Jar> {
+	const jar = new Jar();
+	await driveOAuth(jar, 'google', { sub, email, name, email_verified: true });
+	return jar;
+}
+
 // --- setup ---------------------------------------------------------------------
 
 beforeAll(async () => {
@@ -231,15 +419,19 @@ beforeAll(async () => {
 	if (!existsSync(MIGRATION_PATH)) {
 		throw new Error('production migration missing: apps/app/migrations/0001_product.sql');
 	}
+	stub = new StubProvider();
+	const stubPort = await freePort();
+	await stub.start(stubPort);
 	WORKER_PORT = await freePort();
 	WORKER_BASE = `http://127.0.0.1:${WORKER_PORT}`;
-	const main = await startFixtureWorker(WORKER_PORT);
+	const main = await startFixtureWorker(WORKER_PORT, { AUTH_STUB_BASE_URL: stub.url });
 	workerProcess = main.process;
 	await applyMigration(WORKER_PORT);
 }, 180_000);
 
-afterAll(() => {
+afterAll(async () => {
 	stopFixtureWorker(WORKER_PORT);
+	await stub.stop();
 });
 
 // --- slice 1: product data model --------------------------------------------------
@@ -873,5 +1065,334 @@ describe('P02 slice 2: scope enforcement and project services (unit)', () => {
 		expect(archived.status).toBe('archived');
 		// a second archive is idempotent state, still archived
 		expect((await projectsService.archiveProject(db, aliceScope)).status).toBe('archived');
+	});
+});
+
+// --- slice 3: project isolation over real HTTP sessions -------------------------------
+
+/**
+ * Every test here drives the REAL production composition in REAL workerd with
+ * REAL authenticated sessions (stub OAuth provider = SIMULATED provider
+ * boundary, exactly like P01). Acceptance: two users / two projects cannot
+ * list, read, update or archive each other's records, artifact metadata or
+ * run identifiers; switching projects never mixes latest plan docs; missing
+ * scope fails loudly instead of silently succeeding.
+ */
+describe('P02 slice 3: project isolation over real workerd HTTP sessions', () => {
+	// Populated by the setup test (bun runs tests in declaration order).
+	let jarA: Jar;
+	let jarB: Jar;
+	let wsA = '';
+	let wsB = '';
+	let projA = '';
+	let projA2 = '';
+	let projB = '';
+	let aliceRunId = '';
+
+	const jsonHeaders = { 'content-type': 'application/json' } as const;
+
+	test('both users sign in through the real worker OAuth flow and hold distinct sessions', async () => {
+		jarA = await signIn(ALICE_EMAIL, 'alice-sub', 'Alice');
+		jarB = await signIn(BOB_EMAIL, 'bob-sub', 'Bob');
+		expect(jarA.header()).toContain(SESSION_COOKIE);
+		expect(jarB.header()).toContain(SESSION_COOKIE);
+		expect(jarA.header()).not.toBe(jarB.header());
+	});
+
+	test('each user creates a workspace (owner membership) and projects stay inside it', async () => {
+		const resA = await worker(jarA, '/api/workspaces', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ name: 'Alice Hangar' }),
+		});
+		expect(resA.status).toBe(201);
+		wsA = ((await resA.json()) as { workspace: { id: string } }).workspace.id;
+		const resB = await worker(jarB, '/api/workspaces', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ name: 'Bob Hangar' }),
+		});
+		expect(resB.status).toBe(201);
+		wsB = ((await resB.json()) as { workspace: { id: string } }).workspace.id;
+		expect(wsA).not.toBe(wsB);
+
+		const projRes = await worker(jarA, '/api/projects', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ workspaceId: wsA, name: 'Alice Rocket' }),
+		});
+		expect(projRes.status).toBe(201);
+		projA = ((await projRes.json()) as { project: { id: string } }).project.id;
+
+		// optional contest link: nullable when absent, settable later
+		const projRes2 = await worker(jarA, '/api/projects', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ workspaceId: wsA, name: 'Alice Sidecar' }),
+		});
+		projA2 = ((await projRes2.json()) as { project: { id: string } }).project.id;
+		const contest = await worker(jarA, `/api/projects/${projA2}`, {
+			method: 'PATCH',
+			headers: jsonHeaders,
+			body: JSON.stringify({ contestId: 'devpost-42', contestUrl: 'https://www.devpost.com/software/sidecar' }),
+		});
+		expect(contest.status).toBe(200);
+		expect(((await contest.json()) as { project: { contestId: string | null } }).project.contestId).toBe(
+			'devpost-42',
+		);
+
+		const projResB = await worker(jarB, '/api/projects', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ workspaceId: wsB, name: 'Bob Satellite' }),
+		});
+		expect(projResB.status).toBe(201);
+		projB = ((await projResB.json()) as { project: { id: string } }).project.id;
+		expect(projA).not.toBe(projB);
+	});
+
+	test('list is scoped to memberships: alice never sees bob rows and vice versa (zero cross rows leaked)', async () => {
+		const aliceList = await worker(jarA, '/api/projects');
+		expect(aliceList.status).toBe(200);
+		const aliceBody = JSON.stringify(await aliceList.json());
+		expect(aliceBody).toContain(projA);
+		expect(aliceBody).toContain(projA2);
+		expect(aliceBody).not.toContain(projB);
+		expect(aliceBody).not.toContain('Bob Satellite');
+		expect(aliceBody).not.toContain('Bob Hangar');
+		expect(aliceBody).not.toContain('DDL Project'); // seed rows have no membership: invisible
+
+		const bobList = await worker(jarB, '/api/projects');
+		const bobBody = JSON.stringify(await bobList.json());
+		expect(bobBody).toContain(projB);
+		expect(bobBody).not.toContain(projA);
+		expect(bobBody).not.toContain('Alice Rocket');
+
+		// workspace-scoped listing requires membership of THAT workspace
+		const bobOnWsA = await worker(jarB, `/api/projects?workspaceId=${wsA}`);
+		expect(bobOnWsA.status).toBe(403);
+		const aliceOnWsB = await worker(jarA, `/api/projects?workspaceId=${wsB}`);
+		expect(aliceOnWsB.status).toBe(403);
+		const aliceOnWsA = await worker(jarA, `/api/projects?workspaceId=${wsA}`);
+		expect(aliceOnWsA.status).toBe(200);
+		const wsAList = JSON.stringify(await aliceOnWsA.json());
+		expect(wsAList).toContain('Alice Rocket');
+		expect(wsAList).not.toContain('Bob Satellite');
+	});
+
+	test('read is membership-scoped: 403 across users, 200 within, 404 for unknown projects', async () => {
+		const cross = await worker(jarB, `/api/projects/${projA}`);
+		expect(cross.status).toBe(403);
+		const own = await worker(jarA, `/api/projects/${projA}`);
+		expect(own.status).toBe(200);
+		expect(((await own.json()) as { project: { name: string } }).project.name).toBe('Alice Rocket');
+		const missing = await worker(jarA, '/api/projects/proj_does_not_exist');
+		expect(missing.status).toBe(404);
+	});
+
+	test('update and archive are denied across users and never touch the victim row', async () => {
+		const crossUpdate = await worker(jarB, `/api/projects/${projA}`, {
+			method: 'PATCH',
+			headers: jsonHeaders,
+			body: JSON.stringify({ name: 'Bob Was Here' }),
+		});
+		expect(crossUpdate.status).toBe(403);
+		const crossArchive = await worker(jarB, `/api/projects/${projA}/archive`, { method: 'POST' });
+		expect(crossArchive.status).toBe(403);
+
+		// database truth: the denied writes changed nothing
+		const rows = await d1Exec(WORKER_BASE, `select "name", "status" from "projects" where "id" = '${projA}'`);
+		const row = rows.results[0] as { name: string; status: string };
+		expect(row.name).toBe('Alice Rocket');
+		expect(row.status).toBe('active');
+
+		// a body-supplied workspace move cannot ride through update (strict contract)
+		const smuggle = await worker(jarA, `/api/projects/${projA}`, {
+			method: 'PATCH',
+			headers: jsonHeaders,
+			body: JSON.stringify({ workspaceId: wsB }),
+		});
+		expect(smuggle.status).toBe(400);
+
+		// own update + own archive work, and archive keeps the row readable
+		const ownUpdate = await worker(jarA, `/api/projects/${projA}`, {
+			method: 'PATCH',
+			headers: jsonHeaders,
+			body: JSON.stringify({ description: 'first stage recovery' }),
+		});
+		expect(ownUpdate.status).toBe(200);
+		const ownArchive = await worker(jarA, `/api/projects/${projA2}/archive`, { method: 'POST' });
+		expect(ownArchive.status).toBe(200);
+		expect(((await ownArchive.json()) as { project: { status: string } }).project.status).toBe('archived');
+		const stillReadable = await worker(jarA, `/api/projects/${projA2}`);
+		expect(stillReadable.status).toBe(200);
+	});
+
+	test('plan-doc revisions: latest is per PROJECT — A/B switching never mixes them', async () => {
+		const r1 = await worker(jarA, `/api/projects/${projA}/plan-docs`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ kind: 'plan', body: 'PA plan v1' }),
+		});
+		expect(r1.status).toBe(201);
+		expect(((await r1.json()) as { revision: { revision: number } }).revision.revision).toBe(1);
+		const r2 = await worker(jarA, `/api/projects/${projA}/plan-docs`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ kind: 'plan', body: 'PA plan v2' }),
+		});
+		expect(((await r2.json()) as { revision: { revision: number } }).revision.revision).toBe(2);
+
+		// same actor, her OTHER project: independent sequence and independent latest
+		const ra2 = await worker(jarA, `/api/projects/${projA2}/plan-docs`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ kind: 'plan', body: 'PA2 plan v1' }),
+		});
+		expect(ra2.status).toBe(201);
+		// bob's project: independent sequence, starts at 1
+		const rb = await worker(jarB, `/api/projects/${projB}/plan-docs`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ kind: 'plan', body: 'PB plan v1' }),
+		});
+		expect(((await rb.json()) as { revision: { revision: number } }).revision.revision).toBe(1);
+
+		// latest for each project, checked while "switching" between them
+		const latestA = await worker(jarA, `/api/projects/${projA}/plan-docs?kind=plan`);
+		expect(latestA.status).toBe(200);
+		const aPayload = (await latestA.json()) as {
+			revisions: { body: string }[];
+			latest: { body: string } | null;
+		};
+		expect(aPayload.latest?.body).toBe('PA plan v2');
+		expect(aPayload.revisions.map((r) => r.body)).toEqual(['PA plan v2', 'PA plan v1']);
+		expect(JSON.stringify(aPayload)).not.toContain('PB plan v1');
+
+		const latestA2 = await worker(jarA, `/api/projects/${projA2}/plan-docs?kind=plan`);
+		const a2Payload = (await latestA2.json()) as { latest: { body: string } | null };
+		expect(a2Payload.latest?.body).toBe('PA2 plan v1');
+
+		const latestB = await worker(jarB, `/api/projects/${projB}/plan-docs?kind=plan`);
+		const bPayload = (await latestB.json()) as {
+			revisions: { body: string }[];
+			latest: { body: string } | null;
+		};
+		expect(bPayload.latest?.body).toBe('PB plan v1');
+		expect(JSON.stringify(bPayload)).not.toContain('PA plan');
+
+		// cross-project plan-doc reads are denied outright
+		const crossRead = await worker(jarB, `/api/projects/${projA}/plan-docs?kind=plan`);
+		expect(crossRead.status).toBe(403);
+	});
+
+	test('run identifiers are isolated: bindings store their project and lookups go by the stored project', async () => {
+		const created = await worker(jarA, `/api/projects/${projA}/run-bindings`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				conversationId: 'conv-iso-1',
+				submissionId: 'sub-iso-1',
+				planRevision: 'plan@2',
+				stackId: 'react-hono',
+				payerId: 'alice',
+				modelRouteId: 'route-iso',
+				pricingVersion: '2026-10',
+			}),
+		});
+		expect(created.status).toBe(201);
+		const record = (await created.json()) as { runBinding: { runId: string; projectId: string } };
+		aliceRunId = record.runBinding.runId;
+		// projectId is server-derived from the scope — the payload has no such field
+		expect(record.runBinding.projectId).toBe(projA);
+
+		// a smuggled projectId key in the body is rejected by the strict contract
+		const smuggled = await worker(jarA, `/api/projects/${projA}/run-bindings`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				conversationId: 'conv-smuggle',
+				submissionId: 'sub-smuggle',
+				planRevision: 'plan@2',
+				stackId: 'react-hono',
+				payerId: 'alice',
+				modelRouteId: 'route-iso',
+				pricingVersion: '2026-10',
+				projectId: projB,
+			}),
+		});
+		expect(smuggled.status).toBe(400);
+
+		// the owning member finds the run under the stored project
+		const ownerRead = await worker(jarA, `/api/projects/${projA}/run-bindings/${aliceRunId}`);
+		expect(ownerRead.status).toBe(200);
+		// bob cannot see it under HIS project (404: not his project's run) ...
+		const crossStored = await worker(jarB, `/api/projects/${projB}/run-bindings/${aliceRunId}`);
+		expect(crossStored.status).toBe(404);
+		// ...nor under alice's project (403: not his membership)
+		const crossDirect = await worker(jarB, `/api/projects/${projA}/run-bindings/${aliceRunId}`);
+		expect(crossDirect.status).toBe(403);
+		// and bob's run listing never contains alice's run identifier
+		const bobRuns = await worker(jarB, `/api/projects/${projB}/run-bindings`);
+		expect(bobRuns.status).toBe(200);
+		const bobRunBody = JSON.stringify(await bobRuns.json());
+		expect(bobRunBody).not.toContain(aliceRunId);
+	});
+
+	test('artifact metadata is isolated per project', async () => {
+		const bobArtifact = await worker(jarB, `/api/projects/${projB}/artifacts`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ kind: 'preview', metadata: '{"url":"/preview/bob-only"}' }),
+		});
+		expect(bobArtifact.status).toBe(201);
+		const bobRecord = (await bobArtifact.json()) as { artifact: { artifactId: string; projectId: string } };
+		expect(bobRecord.artifact.projectId).toBe(projB);
+
+		// alice's project shows no bob artifact rows at all
+		const aliceArtifacts = await worker(jarA, `/api/projects/${projA}/artifacts`);
+		expect(aliceArtifacts.status).toBe(200);
+		const aliceArtifactBody = JSON.stringify(await aliceArtifacts.json());
+		expect(aliceArtifactBody).not.toContain(bobRecord.artifact.artifactId);
+		expect(aliceArtifactBody).not.toContain('/preview/bob-only');
+		// direct read of bob's artifact metadata is denied
+		const crossRead = await worker(jarA, `/api/projects/${projB}/artifacts`);
+		expect(crossRead.status).toBe(403);
+		// bob still sees his own artifact
+		const bobList = await worker(jarB, `/api/projects/${projB}/artifacts`);
+		expect(JSON.stringify(await bobList.json())).toContain(bobRecord.artifact.artifactId);
+	});
+
+	test('missing scope fails loudly at the route: no session is 401, never silent success', async () => {
+		const noCookieJar = new Jar();
+		const createNoSession = await worker(noCookieJar, '/api/projects', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ workspaceId: wsA, name: 'Ghost Project' }),
+		});
+		expect(createNoSession.status).toBe(401);
+		const createBody = (await createNoSession.json()) as { error?: string };
+		expect(createBody.error).toBe('unauthenticated');
+		// database truth: nothing was written without a scope
+		expect(await d1Count(WORKER_BASE, 'projects', "name = 'Ghost Project'")).toBe(0);
+
+		const garbageCookieJar = new Jar();
+		garbageCookieJar.set(SESSION_COOKIE, 'forged-token-value');
+		const garbage = await worker(garbageCookieJar, '/api/projects');
+		expect(garbage.status).toBe(401);
+
+		const readNoSession = await worker(noCookieJar, `/api/projects/${projA}`);
+		expect(readNoSession.status).toBe(401);
+		const workspaceNoSession = await worker(noCookieJar, '/api/workspaces', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ name: 'Ghost WS' }),
+		});
+		expect(workspaceNoSession.status).toBe(401);
+		expect(await d1Count(WORKER_BASE, 'workspaces', "name = 'Ghost WS'")).toBe(0);
+
+		// membership of another workspace is 403, not 404 — and leaks no rows
+		const bobOnAProject = await worker(jarB, `/api/projects/${projA}`);
+		expect(bobOnAProject.status).toBe(403);
 	});
 });
