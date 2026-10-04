@@ -143,8 +143,18 @@ test.describe('P16 landing — mobile, motion and keyboard checks', () => {
 		const overflow = await page.evaluate(() => ({
 			scrollWidth: document.documentElement.scrollWidth,
 			clientWidth: document.documentElement.clientWidth,
+			// body uses overflow-x: clip as a backstop, which hides overflow
+			// from scrollWidth — also require every section to fit the
+			// viewport so content-loss breakage cannot hide behind the clip.
+			sections: [...document.querySelectorAll('section')].map((el) => ({
+				id: el.id || el.className,
+				right: el.getBoundingClientRect().right,
+			})),
 		}));
 		expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+		for (const section of overflow.sections) {
+			expect(section.right).toBeLessThanOrEqual(390);
+		}
 	});
 
 	test('prefers-reduced-motion: reduce disables every CSS animation', async ({
