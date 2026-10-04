@@ -1,11 +1,14 @@
 import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import { Hello } from './agents/hello.ts';
+import { createAuthRouter } from './server/routes/auth.ts';
+import type { AuthEnv } from './server/auth.ts';
 
 /**
  * The Worker's single fetch entry. Composition order:
  *
- *   /api/*      product API (auth router arrives in P01; JSON 404 fallback)
+ *   /api/*      product API (auth: Better Auth under /api/auth/*; JSON 404
+ *               fallback for unknown paths)
  *   /agents/*   Flue agent routers, one mount per agent identity
  *   /app/*      React SPA assets, deep links falling back to /app/index.html
  *   everything else: served straight from the composed assets tree (Astro
@@ -19,15 +22,21 @@ type AssetsBinding = {
 
 type Env = {
 	ASSETS?: AssetsBinding;
+	DB: AuthEnv['DB'];
+	BETTER_AUTH_SECRET: string;
+	BETTER_AUTH_URL: string;
+	GOOGLE_CLIENT_ID?: string;
+	GOOGLE_CLIENT_SECRET?: string;
+	GITHUB_CLIENT_ID?: string;
+	GITHUB_CLIENT_SECRET?: string;
+	INVITE_ALLOWLIST?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
 
 // --- product API -----------------------------------------------------------
-// P01 replaces this stub with the real auth router; the mount point and the
-// JSON 404 contract below are the frozen composition surface.
 const api = new Hono<{ Bindings: Env }>();
-api.get('/auth/status', (c) => c.json({ authenticated: false }));
+api.route('/', createAuthRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------

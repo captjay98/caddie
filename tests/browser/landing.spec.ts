@@ -15,7 +15,10 @@ declare const document: {
 	documentElement: { scrollWidth: number; clientWidth: number };
 	activeElement: { classList: { contains(name: string): boolean } } | null;
 	querySelectorAll(selectors: string): Array<{
+		id: string;
 		getAttribute(name: string): string | null;
+		className: string;
+		getBoundingClientRect(): { right: number };
 	}>;
 	getAnimations(): unknown[];
 };
