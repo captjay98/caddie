@@ -39,6 +39,7 @@
     "apps/site": {
       "name": "@caddie/site",
       "dependencies": {
+        "@caddie/ui": "workspace:*",
         "astro": "^5.13.0",
       },
     },
@@ -50,6 +51,9 @@
       "devDependencies": {
         "typescript": "^7.0.2",
       },
+    },
+    "packages/ui": {
+      "name": "@caddie/ui",
     },
   },
   "packages": {
@@ -184,6 +188,8 @@
     "@caddie/contracts": ["@caddie/contracts@workspace:packages/contracts"],
 
     "@caddie/site": ["@caddie/site@workspace:apps/site"],
+
+    "@caddie/ui": ["@caddie/ui@workspace:packages/ui"],
 
     "@capsizecss/unpack": ["@capsizecss/unpack@4.0.1", "", { "dependencies": { "fontkitten": "^1.0.3" } }, "sha512-CuNiSqg7+e1cO/GjffyMOm5Tt2jUF9CWHHnvQ/UkqvtkGfHdgwEC0wpmq7fkN3gxwpRnrAN0WzO3vREKmNolMQ=="],
 

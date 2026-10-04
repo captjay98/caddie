@@ -1,10 +1,16 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * P16 landing acceptance — runs against the COMPOSED build (`bun run build`
- * first): Astro landing at /, React SPA at /app/, served by local workerd on
- * 127.0.0.1:4173. Copy assertions intentionally mirror docs/feature-ledger.md
- * availability: no testimonials, no metrics, no build-success claims.
+ * P16 landing acceptance — pit-board port (plan amendment 3054ee2).
+ *
+ * The landing ports the existing Caddie design (run-spine composition, halo
+ * tokens, amber key actions, mono type) with content updated for the fresh
+ * product. Runs against the COMPOSED build (`bun run build` first): Astro
+ * landing at /, React SPA at /app/, served by local workerd on 127.0.0.1:4173.
+ *
+ * Copy assertions intentionally mirror docs/feature-ledger.md availability:
+ * no testimonials, no metrics presented as real, no build-success claims,
+ * and the synthetic demo never masquerades as a live run.
  */
 
 // The root tsconfig intentionally omits the "dom" lib (it typechecks Node and
@@ -13,7 +19,7 @@ import { expect, test } from '@playwright/test';
 // conflicts with a future "dom" lib addition in shared config.
 declare const document: {
 	documentElement: { scrollWidth: number; clientWidth: number };
-	activeElement: { classList: { contains(name: string): boolean } } | null;
+	activeElement: { classList: { contains(name: string): boolean }; className: string } | null;
 	querySelectorAll(selectors: string): Array<{
 		id: string;
 		getAttribute(name: string): string | null;
@@ -22,9 +28,13 @@ declare const document: {
 	}>;
 	getAnimations(): unknown[];
 };
-declare function getComputedStyle(element: object): { outlineStyle: string };
+declare function getComputedStyle(element: object): {
+	outlineStyle: string;
+	backgroundColor: string;
+	color: string;
+};
 
-test.describe('P16 landing — shell', () => {
+test.describe('P16 landing — pit-board shell', () => {
 	test('/ returns 200 and serves meaningful content in raw HTML (no JS required)', async ({
 		request,
 	}) => {
@@ -32,110 +42,128 @@ test.describe('P16 landing — shell', () => {
 		expect(res.status()).toBe(200);
 		expect(res.headers()['content-type']).toContain('text/html');
 		const html = await res.text();
-
-		// Core narrative copy must exist in the served document itself — Astro
-		// static output readable with JavaScript disabled.
-		expect(html).toContain('Caddie');
-		expect(html).toContain('persistent, evidence-backed assistant');
-
-		// Metadata: title and description present.
-		expect(html).toContain(
-			'<title>Caddie — discover, build, deliver with evidence</title>',
-		);
-		expect(html).toMatch(/<meta name="description" content="[^"]{20,}"/);
+		// Static-readable: the pit-board structure ships in the HTML itself.
+		expect(html).toContain('class="pb"');
+		expect(html).toContain('pb-hero-h');
+		expect(html).toContain('spine-rail');
+		expect(html).toContain('LOCKED LINE');
+		// Zero client scripts — Astro output must stay script-free.
+		expect(html).not.toContain('<script');
 	});
 
-	test('hero headline and lede render with JavaScript disabled', async ({
-		browser,
-	}) => {
-		const context = await browser.newContext({
-			javaScriptEnabled: false,
-			viewport: { width: 1280, height: 800 },
-		});
-		const page = await context.newPage();
+	test('topbar wordmark and section navigation render', async ({ page }) => {
 		await page.goto('/');
-		const h1 = page.getByRole('heading', { level: 1 });
-		await expect(h1).toBeVisible();
-		await expect(h1).toContainText(/deliver with evidence/i);
-		await expect(page.locator('.hero .lede')).toContainText(
-			'persistent, evidence-backed assistant',
+		await expect(page.locator('.topbar .wordmark')).toHaveText('Caddie');
+		const nav = page.locator('.topbar nav a');
+		await expect(nav).toHaveCount(5);
+		const hrefs = await nav.evaluateAll((links) =>
+			links.map((a) => a.getAttribute('href')),
 		);
-		await context.close();
+		expect(hrefs).toContain('#pb-discover');
+		expect(hrefs).toContain('#pb-honest');
 	});
 
-	test('primary CTA routes to /app/ and the workspace responds in the composed build', async ({
+	test('hero headline and both CTAs render; primary routes to /app/', async ({
 		page,
-		request,
 	}) => {
 		await page.goto('/');
-		const cta = page.locator('.hero a.cta-primary');
-		await expect(cta).toBeVisible();
-		await expect(cta).toHaveAttribute('href', '/app/');
-		const res = await request.get('/app/');
+		await expect(page.locator('#pb-hero-h')).toBeVisible();
+		const key = page.locator('.hero-cta .btn-key');
+		await expect(key).toHaveAttribute('href', '/app/');
+		await expect(page.locator('.hero-cta .btn-line')).toHaveAttribute(
+			'href',
+			'#pb-card',
+		);
+		const res = await page.request.get('/app/');
 		expect(res.status()).toBe(200);
 	});
-});
 
-test.describe('P16 landing — stories, demo and honest availability', () => {
-	test('workspace demo carries the "not a live run" disclosure', async ({
-		request,
-		page,
-	}) => {
-		const html = await (await request.get('/')).text();
-		expect(html).toContain('not a live run');
-
-		// The disclosure is visible markup, not a hidden comment.
+	test('run spine: sticky rail covers the six acts in order', async ({ page }) => {
 		await page.goto('/');
-		const banner = page.locator('.demo-banner');
-		await expect(banner).toBeVisible();
-		await expect(banner).toContainText('not a live run');
-	});
-
-	test('three stories render: discover, build, prepare', async ({ page }) => {
-		await page.goto('/');
-		const stories = page.locator('#stories article');
-		await expect(stories).toHaveCount(3);
-		await expect(
-			page.getByRole('heading', { name: /discover opportunities/i }),
-		).toBeVisible();
-		await expect(
-			page.getByRole('heading', { name: /build through specialists/i }),
-		).toBeVisible();
-		await expect(
-			page.getByRole('heading', { name: /prepare verifiable submissions/i }),
-		).toBeVisible();
-	});
-
-	test('stack availability is honest per the feature ledger', async ({
-		request,
-		page,
-	}) => {
-		const html = await (await request.get('/')).text();
-		expect(html).toContain('proving first');
-
-		await page.goto('/');
-		// react-hono is proving first (P09 gate); the other four are planned.
-		await expect(page.locator('[data-status="proving-first"]')).toContainText(
-			/react \+ hono/i,
+		const rail = page.locator('.spine-rail .rail-link');
+		await expect(rail).toHaveCount(6);
+		const steps = await rail.evaluateAll((links) =>
+			links.map((a) => {
+				const spans = a.querySelectorAll('span');
+				return `${spans[0]?.textContent} ${spans[1]?.textContent}`;
+			}),
 		);
-		await expect(page.locator('[data-status="planned"]')).toHaveCount(4);
-		// No verified label anywhere while gates are open.
-		expect(
-			await page.locator('[data-status="verified"]').count(),
-		).toBe(0);
+		expect(steps).toEqual([
+			'01 Discover',
+			'02 Vet',
+			'03 Plan',
+			'04 Forge',
+			'05 Deliver',
+			'06 Prepare',
+		]);
+		for (const id of [
+			'pb-discover',
+			'pb-vet',
+			'pb-plan',
+			'pb-forge',
+			'pb-deliver',
+			'pb-prepare',
+		]) {
+			await expect(page.locator(`section.act#${id}`)).toBeVisible();
+		}
 	});
 
-	test('request access uses an explicit mailto placeholder awaiting the owner address', async ({
-		request,
+	test('act step kickers use the amber key color (mono grammar)', async ({
 		page,
 	}) => {
-		const html = await (await request.get('/')).text();
-		// Source comment marks the address as a placeholder for the owner.
-		expect(html).toMatch(/<!--\s*PLACEHOLDER CONTACT[^>]*hello@example\.com/);
-
 		await page.goto('/');
-		const mail = page.locator('a[href^="mailto:hello@example.com"]');
-		await expect(mail).toBeVisible();
+		const color = await page
+			.locator('#pb-discover .act-step b')
+			.evaluate((el) => getComputedStyle(el).color);
+		// --pb-warn resolves to rgb(240, 168, 60) in the dark theme (halo port).
+		expect(color.replace(/\s/g, '')).toBe('rgb(240,168,60)');
+	});
+
+	test('honesty band: four rails, will-not list, locked line', async ({ page }) => {
+		await page.goto('/');
+		await expect(page.locator('#pb-honest .honest > div')).toHaveCount(4);
+		const willNot = page.locator('#pb-honest .locked li');
+		expect(await willNot.count()).toBeGreaterThanOrEqual(3);
+		await expect(page.locator('#pb-honest .lockline')).toContainText(
+			'LOCKED LINE',
+		);
+		// Honest rule: unread rules are never called "clear" — unknown surfaces.
+		await expect(page.locator('#pb-honest .locked')).toContainText(
+			/unknown/i,
+		);
+	});
+
+	test('synthetic card demo carries the not-a-live-run disclosure', async ({
+		page,
+	}) => {
+		await page.goto('/');
+		const demo = page.locator('#pb-card');
+		await expect(demo).toBeVisible();
+		await expect(demo).toContainText(/not a live run/i);
+		await expect(demo.locator('.stackgrid .frag').first()).toBeVisible();
+		// No interactive fakes: the demo uses static tags, not buttons.
+		expect(await demo.locator('button').count()).toBe(0);
+	});
+
+	test('stack availability is honest: one proving-first, four planned, zero verified', async ({
+		page,
+	}) => {
+		await page.goto('/');
+		const stacks = page.locator('#pb-stacks [data-status]');
+		expect(await stacks.count()).toBe(5);
+		expect(await page.locator('#pb-stacks [data-status="proving-first"]').count()).toBe(1);
+		expect(await page.locator('#pb-stacks [data-status="planned"]').count()).toBe(4);
+		expect(await page.locator('#pb-stacks [data-status="verified"]').count()).toBe(0);
+	});
+
+	test('closing: request access works through the configured mailto (placeholder pending owner)', async ({
+		request,
+	}) => {
+		const res = await request.get('/');
+		const html = await res.text();
+		expect(html).toContain('href="mailto:hello@example.com');
+		// The placeholder must be marked in the shipped HTML, not just the source.
+		expect(html).toMatch(/PLACEHOLDER CONTACT/i);
 	});
 });
 
@@ -169,27 +197,25 @@ test.describe('P16 landing — mobile, motion and keyboard checks', () => {
 		});
 		const pageReduce = await reduce.newPage();
 		await pageReduce.goto('/');
-		// Allow any late-animating nodes to attach, then count.
-		await pageReduce.waitForTimeout(300);
-		expect(
-			await pageReduce.evaluate(() => document.getAnimations().length),
-		).toBe(0);
+		const reduceCount = await pageReduce.evaluate(
+			() => document.getAnimations().length,
+		);
+		expect(reduceCount).toBe(0);
+		await reduce.close();
 
-		// Control: the same page under "no preference" does run quiet motion,
-		// proving the gating is real rather than vacuous.
-		const full = await browser.newContext({
+		// Control: with motion allowed the page HAS animations (blink cursor),
+		// proving the reduce assertion is not vacuous.
+		const motion = await browser.newContext({
 			reducedMotion: 'no-preference',
 			viewport: { width: 1280, height: 800 },
 		});
-		const pageFull = await full.newPage();
-		await pageFull.goto('/');
-		await pageFull.waitForTimeout(300);
-		expect(
-			await pageFull.evaluate(() => document.getAnimations().length),
-		).toBeGreaterThan(0);
-
-		await reduce.close();
-		await full.close();
+		const pageMotion = await motion.newPage();
+		await pageMotion.goto('/');
+		const motionCount = await pageMotion.evaluate(
+			() => document.getAnimations().length,
+		);
+		expect(motionCount).toBeGreaterThan(0);
+		await motion.close();
 	});
 
 	test('keyboard: skip link is first, focus is visible, primary CTA reachable in order', async ({
@@ -197,51 +223,41 @@ test.describe('P16 landing — mobile, motion and keyboard checks', () => {
 	}) => {
 		await page.goto('/');
 		await page.keyboard.press('Tab');
-		await expect(page.locator('.skip')).toBeFocused();
-
-		// Keyboard focus must produce a visible outline (:focus-visible rule).
-		const outline = await page.evaluate(() => {
-			const el = document.activeElement;
-			if (!el) return 'none';
-			return getComputedStyle(el).outlineStyle;
-		});
-		expect(outline).not.toBe('none');
-
-		// Walk forward: primary CTA becomes the active element within a few
-		// stops (nav links interleave), proving a logical, DOM-order tab sequence.
-		let focusedPrimary = false;
-		for (let i = 0; i < 12 && !focusedPrimary; i++) {
+		const first = await page.evaluate(() => ({
+			cls: document.activeElement?.className ?? '',
+		}));
+		expect(first.cls).toContain('skip');
+		await expect(page.locator('.skip')).toHaveAttribute('href', '#pb-main');
+		const focusVisible = await page.evaluate(() =>
+			document.activeElement ? getComputedStyle(document.activeElement).outlineStyle : '',
+		);
+		expect(focusVisible).not.toBe('none');
+		let ctaReachable = false;
+		for (let i = 0; i < 15; i++) {
 			await page.keyboard.press('Tab');
-			focusedPrimary = await page.evaluate(
-				() =>
-					document.activeElement?.classList.contains('cta-primary') ??
-					false,
+			const cls = await page.evaluate(
+				() => document.activeElement?.className ?? '',
 			);
+			if (String(cls).includes('btn-key')) {
+				ctaReachable = true;
+				break;
+			}
 		}
-		expect(focusedPrimary).toBe(true);
+		expect(ctaReachable).toBe(true);
 	});
 
-	test('links are internal or mailto only; external links would require safe rel', async ({
-		page,
+	test('metadata: title, description, favicon; no external font or image URLs', async ({
+		request,
 	}) => {
-		await page.goto('/');
-		const hrefs = await page.evaluate(() =>
-			[...document.querySelectorAll('a')].map((a) => a.getAttribute('href')),
-		);
-		expect(hrefs.length).toBeGreaterThan(0);
-		for (const href of hrefs) {
-			// The page intentionally has no external http(s) links; any future
-			// external link must add target="_blank" + rel="noopener noreferrer"
-			// and update this assertion.
-			expect(href).toMatch(/^(#|\/|mailto:)/);
-		}
-		const unsafe = await page.evaluate(
-			() =>
-				[...document.querySelectorAll('a[target="_blank"]')].filter(
-					(a) =>
-						!(a.getAttribute('rel') ?? '').includes('noopener'),
-				).length,
-		);
-		expect(unsafe).toBe(0);
+		const res = await request.get('/');
+		const html = await res.text();
+		expect(html).toContain('<title>Caddie');
+		expect(html).toContain('name="description"');
+		expect(html).toMatch(/rel="icon"/);
+		// No external fetches: only the mailto may appear as an absolute URL.
+		const externals = [
+			...html.matchAll(/(?:src|href)="(https?:\/\/[^"]+)"/g),
+		].map((m) => m[1]);
+		expect(externals).toEqual([]);
 	});
 });

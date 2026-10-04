@@ -1,61 +1,383 @@
 ---
-// P16 landing. Static Astro output composed into the Worker assets tree at /
-// by scripts/compose-assets.ts. No client JavaScript: every meaningful
-// string is server-rendered markup. Copy must match docs/feature-ledger.md
-// availability — no testimonials, no metrics, no build-success claims.
+// Caddie pit-board landing — PORT of the reference Caddie landing structure
+// (plan amendment 3054ee2: run-spine composition, halo tokens, amber key
+// actions, mono type). Content updated for the fresh product and honest
+// availability per docs/feature-ledger.md. Static output: no client JS.
 import '../styles/site.css';
 import Hero from '../components/Hero.astro';
 import ProductDemo from '../components/ProductDemo.astro';
-import Stories from '../components/Stories.astro';
-import Availability from '../components/Availability.astro';
-import Contact from '../components/Contact.astro';
 ---
 
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Caddie — discover, build, deliver with evidence</title>
-    <meta
-      name="description"
-      content="Caddie is a persistent, evidence-backed assistant that discovers opportunities, plans and builds applications through specialist agents, and prepares verifiable submissions. Under active development; access by invitation."
-    />
-    <meta property="og:title" content="Caddie — discover, build, deliver with evidence" />
-    <meta
-      property="og:description"
-      content="Discover opportunities, build through specialists, prepare verifiable submissions. Under active development; access by invitation."
-    />
-    <meta property="og:type" content="website" />
-    <meta name="theme-color" content="#071120" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  </head>
-  <body>
-    <a class="skip" href="#main">Skip to content</a>
-    <Hero />
-    <main id="main">
-      <ProductDemo />
-      <Stories />
-      <Availability />
-      <Contact />
-    </main>
-    <footer class="site-foot">
-      <div class="shell foot-row">
-        <a class="wordmark" href="/">Caddie</a>
-        <nav class="foot-links" aria-label="Footer">
-          <a href="#demo">Demo</a>
-          <a href="#stories">How it works</a>
-          <a href="#availability">Availability</a>
-          <a href="#access">Request access</a>
-        </nav>
-      </div>
-      <div class="shell">
-        <p class="foot-note">
-          Under active development. Statements on this page mirror the
-          availability recorded in the project feature ledger; nothing here is
-          a verified build claim.
-        </p>
-      </div>
-    </footer>
-  </body>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta
+			name="description"
+			content="Caddie is an evidence-backed build assistant: discover opportunities, plan with cited evidence, build through specialists in a sandbox, and deliver with receipts. Invite-only while the first supported stack completes its acceptance gate."
+		/>
+		<meta name="theme-color" content="#090b10" />
+		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<title>Caddie — it carries the build</title>
+	</head>
+	<body>
+		<div class="pb">
+			<a class="skip" href="#pb-main">Skip to content</a>
+
+			<div class="topbar">
+				<span class="wordmark">Caddie</span>
+				<nav aria-label="Board sections">
+					<a href="#pb-discover">Discover</a>
+					<a href="#pb-forge">Forge</a>
+					<a href="#pb-deliver">Deliver</a>
+					<a href="#pb-prepare">Prepare</a>
+					<a href="#pb-honest">Honesty</a>
+				</nav>
+				<div class="actions">
+					<a class="link-quiet" href="#pb-start">Request access</a>
+					<a class="btn btn-key" href="/app/">Open the workspace</a>
+				</div>
+			</div>
+
+			<main id="pb-main">
+				<Hero />
+
+				{/* RUN SPINE ─────────────────────────────────────────── */}
+				<div class="spine-wrap" id="pb-run">
+					<div class="spine-head">
+						<p class="lbl mono">the run, in order</p>
+						<h2 class="h2" style="margin-top: 1rem; max-width: 26ch;">
+							A build is not one task. It is a dozen, spread over weeks.
+						</h2>
+						<p class="lede" style="margin-top: 1.25rem;">
+							So this is not a feature list — it is the run itself. Each step
+							leaves an artifact on the record. The graphics below are
+							illustrative compositions of the planned workspace, not live
+							captures.
+						</p>
+					</div>
+					<div class="spine">
+						<nav class="spine-rail" aria-label="Steps of a run">
+							<p class="rail-title lbl mono">The run</p>
+							<a class="rail-link" href="#pb-discover"><span>01</span><span>Discover</span></a>
+							<a class="rail-link" href="#pb-vet"><span>02</span><span>Vet</span></a>
+							<a class="rail-link" href="#pb-plan"><span>03</span><span>Plan</span></a>
+							<a class="rail-link" href="#pb-forge"><span>04</span><span>Forge</span></a>
+							<a class="rail-link" href="#pb-deliver"><span>05</span><span>Deliver</span></a>
+							<a class="rail-link" href="#pb-prepare"><span>06</span><span>Prepare</span></a>
+						</nav>
+
+						<div class="acts">
+							<section class="act" id="pb-discover" aria-labelledby="pb-discover-h">
+								<p class="act-step"><b>Step 01</b><span>Discover</span></p>
+								<h3 id="pb-discover-h">It reads the live feed, so nothing current slips past.</h3>
+								<p class="lede">
+									Open opportunities straight from the source listings — filtered
+									to open, ranked against your stack, with every fit claim
+									pointing at the evidence it came from.
+								</p>
+								<dl class="figures">
+									<div>
+										<dt>Feed</dt>
+										<dd class="fig-value">planned</dd>
+										<dd class="fig-note">Open listings, filtered and ranked against your stack and hours.</dd>
+									</div>
+									<div class="is-ok">
+										<dt>Fit</dt>
+										<dd class="fig-value">cited</dd>
+										<dd class="fig-note">Explainable fit with the claims it rests on — never a bare score.</dd>
+									</div>
+									<div>
+										<dt>Partial data</dt>
+										<dd class="fig-value">visible</dd>
+										<dd class="fig-note">A failed retrieval shows as a gap, never a confident guess.</dd>
+									</div>
+								</dl>
+							</section>
+
+							<section class="act" id="pb-vet" aria-labelledby="pb-vet-h">
+								<p class="act-step"><b>Step 02</b><span>Vet</span></p>
+								<h3 id="pb-vet-h">It reads the fine print and pins every claim.</h3>
+								<p class="lede">
+									A rules page becomes an immutable snapshot, then verbatim
+									claims — each citing the line it came from — and a fit verdict
+									against your country, stack and hours.
+								</p>
+								<div class="act-grid">
+									<div class="frag">
+										<p class="frag-k"><span style=`color: var(--pb-ok)`>verdict · fit</span><span class="pill" style=`background: var(--pb-tint-ok); color: var(--pb-ok)`>strong fit</span></p>
+										<h4>Strong fit — 4 days left to decide</h4>
+										<div class="nested" style=`background: var(--pb-tint-ok)`>
+											<p class="mrow"><span class="k">Country</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">Nigeria · eligible</span></p>
+											<p class="mrow"><span class="k">Hours</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">12/wk clears a 6-day window</span></p>
+											<p class="mrow"><span class="k">Risk</span><span class="ar" style=`color: var(--pb-warn)`>→</span><span class="v">pre-existing code barred</span></p>
+										</div>
+										<p class="note"><span class="mk" style=`color: var(--pb-ok)`>▸</span>Build clean. Snapshot and rules URL are pinned if you need to argue it.</p>
+										<p class="fresh">· updated 6h ago</p>
+									</div>
+									<div class="frag">
+										<p class="frag-k"><span style=`color: var(--pb-primary)`>rules · digest</span><span class="pill" style=`background: var(--pb-tint-primary); color: var(--pb-primary)`>cited</span></p>
+										<h4>One clause moved since last read</h4>
+										<p class="mrow" style="margin-top: 0.5rem;"><span class="k">§4.2</span><span class="ar" style=`color: var(--pb-primary)`>→</span><span class="v">"Pre-existing code is out of bounds."</span></p>
+										<p class="mrow"><span class="k">Delta</span><span class="ar" style=`color: var(--pb-primary)`>→</span><span class="v">tightened · ideas still allowed</span></p>
+										<p class="mrow"><span class="k">Receipt</span><span class="ar" style=`color: var(--pb-primary)`>→</span><span class="v">snapshot + rules URL retained</span></p>
+										<p class="fresh">· rechecked 18:40 · source pinned</p>
+									</div>
+								</div>
+							</section>
+
+							<section class="act" id="pb-plan" aria-labelledby="pb-plan-h">
+								<p class="act-step"><b>Step 03</b><span>Plan</span></p>
+								<h3 id="pb-plan-h">One brief. Three documents. A review gate.</h3>
+								<p class="lede">
+									Versioned scope, PRD and spec for your actual idea — contest or
+									no contest. Design approval binds to the exact revision, and a
+									locked scope line flags anything that tries to grow.
+								</p>
+								<div class="act-grid">
+									<div class="frag">
+										<p class="frag-k"><span style=`color: var(--pb-ok)`>ideate · scope</span><span class="pill" style=`background: var(--pb-tint-ok); color: var(--pb-ok)`>locked</span></p>
+										<h4>Locked line: brief + repo + review</h4>
+										<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Cut</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">scheduler · push · auth · crawler</span></p>
+										<p class="mrow"><span class="k">Build fits</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">12 hrs × 6 days, with slack</span></p>
+										<p class="note"><span class="mk" style=`color: var(--pb-ok)`>▸</span>Anything that tries to grow into the bag gets flagged.</p>
+									</div>
+									<div class="frag">
+										<p class="frag-k"><span style=`color: var(--pb-ok)`>plan · docs</span><span class="pill" style=`background: var(--pb-tint-ok); color: var(--pb-ok)`>ready</span></p>
+										<h4>Scope cut to what one person can ship</h4>
+										<div class="chips"><span class="chip"><b>✓</b> scope.md</span><span class="chip"><b>✓</b> prd.md</span><span class="chip"><b>✓</b> spec.md</span></div>
+										<p class="mrow" style="margin-top: 0.625rem;"><span class="k">Approval</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">bound to revision rev_3</span></p>
+										<p class="mrow"><span class="k">Revise</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">one section, without regenerating all</span></p>
+										<p class="fresh">· rev_2 superseded, history kept</p>
+									</div>
+								</div>
+							</section>
+
+							<section class="act" id="pb-forge" aria-labelledby="pb-forge-h">
+								<p class="act-step"><b>Step 04</b><span>Forge</span></p>
+								<h3 id="pb-forge-h">Specialists build in a sandbox. You hold the gates.</h3>
+								<p class="lede">
+									A coordinator delegates to restricted specialists building in an
+									isolated sandbox. Review mode pauses at feature gates;
+									production, destructive and default-branch actions always need
+									your explicit approval. Three failed repairs on the same issue
+									pause the run.
+								</p>
+								<dl class="figures">
+									<div>
+										<dt>Sandbox</dt>
+										<dd class="fig-value">isolated</dd>
+										<dd class="fig-note">Generated code never runs on Caddie's own host or your machine.</dd>
+									</div>
+									<div class="is-ok">
+										<dt>Acceptance</dt>
+										<dd class="fig-value">machine-checked</dd>
+										<dd class="fig-note">Agent self-reports never count as success; command exits and browser proof do.</dd>
+									</div>
+									<div class="is-warn">
+										<dt>Repairs</dt>
+										<dd class="fig-value">bounded</dd>
+										<dd class="fig-note">Three failed attempts on the same issue pause for a human.</dd>
+									</div>
+								</dl>
+							</section>
+
+							<section class="act" id="pb-deliver" aria-labelledby="pb-deliver-h">
+								<p class="act-step"><b>Step 05</b><span>Deliver</span></p>
+								<h3 id="pb-deliver-h">Receipts, not vibes.</h3>
+								<p class="lede">
+									The verified patch lands as a feature-branch PR in your own
+									GitHub — one logical PR per intent, operation receipts
+									retained, never a force-push. Merging to a default branch is
+									your call, explicitly.
+								</p>
+								<dl class="figures">
+									<div>
+										<dt>Delivery</dt>
+										<dd class="fig-value">receipted</dd>
+										<dd class="fig-note">Unique operation keys; a retried intent reconciles instead of duplicating.</dd>
+									</div>
+									<div class="is-danger">
+										<dt>Force-push</dt>
+										<dd class="fig-value">never</dd>
+										<dd class="fig-note">Unrelated source files are preserved; conflicts come back reviewable.</dd>
+									</div>
+									<div class="is-warn">
+										<dt>Default branch</dt>
+										<dd class="fig-value">your call</dd>
+										<dd class="fig-note">Explicit owner approval at execution time — no exceptions.</dd>
+									</div>
+								</dl>
+							</section>
+
+							<section class="act" id="pb-prepare" aria-labelledby="pb-prepare-h">
+								<p class="act-step"><b>Step 06</b><span>Prepare</span></p>
+								<h3 id="pb-prepare-h">Then it stops, and the human presses Submit.</h3>
+								<p class="lede">
+									Judging against the contest's actual rubric, a submission
+									package with missing fields honestly missing, and demo/live
+									integrations labelled. Caddie prepares; it never submits.
+								</p>
+								<dl class="figures">
+									<div>
+										<dt>Rubric</dt>
+										<dd class="fig-value">actual</dd>
+										<dd class="fig-note">Scores compare artifact evidence against the real criteria — not generic ones.</dd>
+									</div>
+									<div class="is-warn">
+										<dt>Missing fields</dt>
+										<dd class="fig-value">missing</dd>
+										<dd class="fig-note">No invented video links, no invented licenses, no win probabilities.</dd>
+									</div>
+									<div class="is-ok">
+										<dt>Submissions by Caddie</dt>
+										<dd class="fig-value">0</dd>
+										<dd class="fig-note">It will never swing for you.</dd>
+									</div>
+								</dl>
+							</section>
+						</div>
+					</div>
+				</div>
+
+				{/* STACKS — honest availability ───────────────────────── */}
+				<section class="band" id="pb-stacks" aria-labelledby="pb-stacks-h">
+					<div class="band-head">
+						<div>
+							<p class="lbl mono" style="margin-bottom: 1rem;">supported stacks</p>
+							<h2 id="pb-stacks-h" class="h2">One proven first. The rest activate only after their own gates.</h2>
+						</div>
+						<p class="lede">
+							Each stack must pass its own install, build, test, repair and
+							acceptance path before it earns the badge. Nothing here is
+							verified until the evidence exists.
+						</p>
+					</div>
+					<dl class="figures">
+						<div class="is-ok" data-status="proving-first">
+							<dt>React + Vite + TanStack, Bun + Hono</dt>
+							<dd class="fig-value">proving first</dd>
+							<dd class="fig-note">The first complete journey; the benchmark the other stacks must match.</dd>
+						</div>
+						<div data-status="planned">
+							<dt>TanStack Start</dt>
+							<dd class="fig-value">planned</dd>
+							<dd class="fig-note">Full-stack server behavior; activates after its own gate.</dd>
+						</div>
+						<div data-status="planned">
+							<dt>Laravel + React/Inertia</dt>
+							<dd class="fig-value">planned</dd>
+							<dd class="fig-note">PHP backend with session behavior proven in its real runtime.</dd>
+						</div>
+						<div data-status="planned">
+							<dt>FastAPI + React</dt>
+							<dd class="fig-value">planned</dd>
+							<dd class="fig-note">Python API and frontend under one private preview.</dd>
+						</div>
+						<div data-status="planned">
+							<dt>Flutter + supported backend</dt>
+							<dd class="fig-value">planned</dd>
+							<dd class="fig-note">Real APK and emulator evidence, not a web screenshot.</dd>
+						</div>
+					</dl>
+				</section>
+
+				{/* HONESTY ────────────────────────────────────────────── */}
+				<section class="band" id="pb-honest" aria-labelledby="pb-hon-h" style="padding-bottom: 56px;">
+					<div class="band-head">
+						<div>
+							<p class="lbl mono" style="margin-bottom: 1rem;">keep it honest</p>
+							<h2 id="pb-hon-h" class="h2">An AI that reads the rules can also misread them.</h2>
+						</div>
+						<p class="lede">
+							So the product is built around being checkable rather than around
+							sounding confident.
+						</p>
+					</div>
+
+					<div class="honest">
+						<div>
+							<p class="lbl mono">evidence</p>
+							<h3>Machine-checked, never self-reported</h3>
+							<p>Success is a command exit and a browser assertion — never the agent's own account of the work.</p>
+						</div>
+						<div>
+							<p class="lbl mono">freshness</p>
+							<h3>Stamped with its age</h3>
+							<p>Each card carries the time it last updated. Three hours old says three hours old.</p>
+						</div>
+						<div>
+							<p class="lbl mono">re-check</p>
+							<h3>Changes become deltas</h3>
+							<p>The previous snapshot and source URL are retained, so a moved clause shows up as a delta you can see.</p>
+						</div>
+						<div>
+							<p class="lbl mono">privacy</p>
+							<h3>Your build stays yours</h3>
+							<p>Projects, plans and artifacts are private to your account. Previews are private and expiring by default.</p>
+						</div>
+					</div>
+
+					<div class="locked">
+						<div>
+							<p class="lbl mono">what caddie will not do</p>
+							<h3>The club stays in your hands.</h3>
+						</div>
+						<ul>
+							<li><i aria-hidden="true">✕</i><span>It will not swing for you — the build, the demo and the pitch are yours.</span></li>
+							<li><i aria-hidden="true">✕</i><span>It will not spend, deploy or merge without your explicit approval; production, destructive and default-branch actions stay owner-gated at execution time.</span></li>
+							<li><i aria-hidden="true">✕</i><span>It will not call a rule it couldn't read "clear". A failed read shows up as unknown.</span></li>
+						</ul>
+						<p class="lockline">LOCKED LINE: APPROVED BOUNDARIES ONLY<span class="blink" aria-hidden="true"> ▍</span></p>
+					</div>
+				</section>
+
+				<ProductDemo />
+
+				{/* CLOSING — request access ───────────────────────────── */}
+				<section class="close" id="pb-start" aria-labelledby="pb-close-h">
+					<div class="close-l">
+						<p class="lbl mono">start here</p>
+						<h2 id="pb-close-h" class="h2" style="margin-top: 1.25rem; max-width: 18ch;">Put the bag down. Go build.</h2>
+						<p class="lede" style="margin-top: 1.25rem;">
+							Access is by invitation while the first supported stack completes
+							its acceptance gate. Sign-in exists and is tested locally;
+							the invite-only launch follows the first proven build.
+						</p>
+					</div>
+					<div class="close-r">
+						<div class="frag">
+							<p class="frag-k"><span style=`color: var(--pb-primary)`>access · request</span><span class="pill" style=`background: var(--pb-tint-primary); color: var(--pb-primary)`>invite-only</span></p>
+							<h4>Get on the list</h4>
+							<!-- PLACEHOLDER CONTACT: hello@example.com awaits the owner's
+							     real address; replace before any public deployment. -->
+							<p class="mrow" style="margin-top: 0.625rem;"><span class="k">Contact</span><span class="ar" style=`color: var(--pb-primary)`>→</span><span class="v"><a class="btn btn-key" href="mailto:hello@example.com?subject=Caddie%20access%20request">Request access by email</a></span></p>
+							<p class="note"><span class="mk" style=`color: var(--pb-primary)`>▸</span>Tell us your stack and the build you have in mind.</p>
+						</div>
+					</div>
+				</section>
+			</main>
+
+			<footer class="foot">
+				<p class="foot-mark" aria-hidden="true">Caddie</p>
+				<div class="foot-grid">
+					<p>
+						Under active development. The plan, feature ledger and verification
+						evidence live in the repository — this page claims only what the
+						ledger says is available.
+					</p>
+					<nav class="foot-links" aria-label="Footer">
+						<a href="/app/">Open the workspace</a>
+						<a href="mailto:hello@example.com?subject=Caddie%20access%20request">Request access</a>
+					</nav>
+				</div>
+			</footer>
+
+			<div class="mbar">
+				<span>invite-only · first stack in proving</span>
+				<a class="btn btn-key" href="/app/" style="padding: 0.4375rem 0.75rem; font-size: 0.75rem;">Open the workspace</a>
+			</div>
+		</div>
+	</body>
 </html>

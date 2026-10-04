@@ -1,111 +1,71 @@
 ---
-// ProductDemo: a clearly-labeled, static illustration of the planned Caddie
-// workspace. This is NOT a screenshot and NOT a live run — the banner says
-// so in plain text. Every "control" is a non-interactive element (span, div,
-// list) so keyboard users never land on dead UI, and no runtime fetches or
-// client scripts are involved. Numbers shown are illustrative states from
-// the planned product (e.g. a plan revision), not results or metrics.
+// The card — pit-board sample stack, PORT of the reference "sample bag" band.
+// Clearly synthetic: every figure below is an illustrative composition of the
+// planned workspace, labeled in-page; nothing here is a live run.
 ---
 
-<section class="section demo" id="demo" aria-labelledby="demo-title">
-  <div class="shell">
-    <p class="kicker-inline">Planned workspace</p>
-    <h2 id="demo-title">One conversation. Card, tasks and channel in step.</h2>
-    <p class="section-lede">
-      Work happens in a single project conversation: decisions arrive as cards
-      with trade-offs and sources, the task lane tracks what each specialist
-      owes, and the channel explains what happened — without exposing raw
-      chain-of-thought.
-    </p>
+<section class="band" id="pb-card" aria-labelledby="pb-card-h">
+	<div class="band-head">
+		<div>
+			<p class="lbl mono" style="margin-bottom: 1rem;">the card</p>
+			<h2 id="pb-card-h" class="h2">One card, the whole state of the build.</h2>
+		</div>
+		<p class="lede">
+			Ordered by what needs you next — the clock first, then the verdict,
+			then the work that is actually open.
+		</p>
+	</div>
 
-    <figure class="demo-window">
-      <figcaption class="demo-banner">
-        <span class="demo-flag">Illustrative preview — not a live run</span>
-        <span class="demo-sub">Static markup of the planned workspace; nothing here is interactive.</span>
-      </figcaption>
+	<p class="demo-banner">Illustrative preview — not a live run</p>
 
-      <div class="demo-grid">
-        <div class="demo-pane demo-pane-card" aria-label="Decision card illustration">
-          <div class="pane-head">
-            Decision card
-            <span class="pane-tag">needs you</span>
-          </div>
-          <h3>Approve the design boundary</h3>
-          <p class="pane-sub">
-            Tracker UI · plan revision 3 — approving locks the scope this run
-            builds against.
-          </p>
+	<div class="stackgrid">
+		<div class="frag span2">
+			<p class="frag-k"><span style=`color: var(--pb-warn)`><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>clock · deadline</span><span class="pill" style=`background: var(--pb-tint-warn); color: var(--pb-warn)`>locked</span></p>
+			<h4>Submit by Oct 26 · 5pm EDT — video is the artifact</h4>
+			<div class="nested" style=`background: var(--pb-tint-warn); display: flex; gap: 1.25rem; align-items: center`>
+				<p class="big" style=`font-size: 2rem; color: var(--pb-warn); margin: 0`>31<span style="font-size: 0.5em; letter-spacing: 0.1em;">d</span></p>
+				<div>
+					<p class="mrow"><span class="k">Your time</span><span class="ar" style=`color: var(--pb-warn)`>→</span><span class="v">Sun 26 Oct, 10:00</span></p>
+					<p class="mrow"><span class="k">Review</span><span class="ar" style=`color: var(--pb-warn)`>→</span><span class="v">Oct 22</span></p>
+				</div>
+			</div>
+			<p class="note"><span class="mk" style=`color: var(--pb-warn)`>▸</span>Judges will not run your code. Presentation is 25% of the score.</p>
+			<p class="fresh">· updated 3h ago</p>
+		</div>
 
-          <div class="option">
-            <p class="option-name">
-              A · React + Hono
-              <span class="chip chip-blue">proving first</span>
-            </p>
-            <p class="option-why">
-              The stack being proven end to end, with its acceptance gate
-              ahead of it.
-            </p>
-          </div>
-          <div class="option">
-            <p class="option-name">
-              B · Flutter + Hono
-              <span class="chip">planned</span>
-            </p>
-            <p class="option-why">
-              Mobile coverage from day one, but its stack gate opens later.
-            </p>
-          </div>
+		<div class="frag">
+			<p class="frag-k"><span style=`color: var(--pb-danger)`><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M12 3 2 20h20z"></path><path d="M12 10v4M12 17.5v.5"></path></svg>fault · rules</span><span class="pill" style=`background: var(--pb-tint-danger); color: var(--pb-danger)`>blocked</span></p>
+			<h4>No deadline parsed from the rules yet</h4>
+			<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Page</span><span class="ar" style=`color: var(--pb-danger)`>→</span><span class="v">the contest rules</span></p>
+			<p class="mrow"><span class="k">Meaning</span><span class="ar" style=`color: var(--pb-danger)`>→</span><span class="v">unknown, not "no deadline"</span></p>
+			<span class="cta-tag" style=`background: var(--pb-danger); color: var(--pb-on-key)`>Retry in chat</span>
+		</div>
 
-          <div class="card-foot">
-            <span class="foot-label">Sources</span>
-            <span class="chip">plan · rev 3</span>
-            <span class="chip">rules · snapshot</span>
-          </div>
-        </div>
+		<div class="frag">
+			<p class="frag-k"><span style=`color: var(--pb-ok)`>verdict · fit</span><span class="pill" style=`background: var(--pb-tint-ok); color: var(--pb-ok)`>strong fit</span></p>
+			<h4>Eligible, and it fits your week</h4>
+			<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Stack</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">React + Hono</span></p>
+			<p class="mrow"><span class="k">Payout</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">wire to personal account</span></p>
+			<p class="fresh">· updated 6h ago</p>
+		</div>
 
-        <div class="demo-pane" aria-label="Task lane illustration">
-          <div class="pane-head">Tasks</div>
-          <ul class="task-list">
-            <li>
-              <span class="chip chip-ok">done</span>
-              Capture contest rules into evidence
-            </li>
-            <li>
-              <span class="chip chip-warn">needs you</span>
-              Approve the design boundary
-            </li>
-            <li>
-              <span class="chip">queued</span>
-              Build the tracker UI
-            </li>
-            <li>
-              <span class="chip">queued</span>
-              Run browser acceptance
-            </li>
-          </ul>
-        </div>
+		<div class="frag">
+			<p class="frag-k"><span style=`color: var(--pb-ok)`>plan · docs</span><span class="pill" style=`background: var(--pb-tint-ok); color: var(--pb-ok)`>ready</span></p>
+			<h4>Build brief is signed off</h4>
+			<div class="chips"><span class="chip"><b>✓</b> scope.md</span><span class="chip"><b>✓</b> prd.md</span><span class="chip"><b>✓</b> spec.md</span></div>
+			<span class="cta-tag" style=`background: var(--pb-ok); color: var(--pb-on-key)`>Read the plan</span>
+		</div>
 
-        <div class="demo-pane" aria-label="Channel illustration">
-          <div class="pane-head">Channel</div>
-          <div class="msg">
-            <span class="msg-from">tech-lead</span>
-            <p>
-              Scope is versioned at revision 3. QA acceptance runs only after
-              the boundary is approved.
-            </p>
-          </div>
-          <div class="msg">
-            <span class="msg-from">caddie</span>
-            <p>
-              Waiting on your approval — nothing gets built until the boundary
-              is locked.
-            </p>
-          </div>
-          <p class="pane-note">
-            Agent messages will link the evidence behind each claim.
-          </p>
-        </div>
-      </div>
-    </figure>
-  </div>
+		<div class="frag">
+			<p class="frag-k"><span>watch · rules</span><span class="pill">quiet</span></p>
+			<h4>Nothing moved since yesterday</h4>
+			<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Last check</span><span class="ar">→</span><span class="v">18:40 · clean</span></p>
+			<p class="fresh">· low stakes, deliberately muted</p>
+		</div>
+	</div>
+	<p class="bagnote">
+		Illustrative composition of the planned workspace card — reconstructed from
+		the fresh-build plan, not a live capture. Every state shown is one Caddie
+		will render; no run produced this board.
+	</p>
 </section>

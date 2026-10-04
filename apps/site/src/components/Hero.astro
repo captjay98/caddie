@@ -1,39 +1,64 @@
 ---
-// Hero: restrained top navigation + large readable headline. Static markup
-// only — every meaningful string below is server-rendered and readable with
-// JavaScript disabled. Copy matches docs/feature-ledger.md availability:
-// no build-success claims while the first stack is still proving out.
+// Pit-board hero — PORT of the reference Caddie landing structure
+// (Landing.tsx hero + .pb styles), content updated for the fresh product.
+// The device composition is clearly-labelled illustrative markup: no real
+// captures of the fresh build exist yet (plan amendment: hero art is
+// illustrative until real fresh-workspace captures exist).
 ---
 
-<header class="site-head">
-  <div class="shell head-row">
-    <a class="wordmark" href="/">Caddie</a>
-    <nav class="head-nav" aria-label="Primary">
-      <a href="#demo">Demo</a>
-      <a href="#stories">How it works</a>
-      <a href="#availability">Availability</a>
-    </nav>
-    <a class="head-cta" href="#access">Request access</a>
-  </div>
-</header>
-
-<section class="hero shell" aria-labelledby="hero-title">
-  <p class="kicker rise">
-    <span class="dot pulse" aria-hidden="true"></span>
-    Persistent · Evidence-backed · Human-approved
-  </p>
-  <h1 class="rise rise-1" id="hero-title">Discover, build, deliver with evidence.</h1>
-  <p class="lede rise rise-2">
-    Caddie is a persistent, evidence-backed assistant that discovers
-    opportunities, plans projects, builds and repairs applications through
-    specialist agents, and prepares verifiable submissions — every claim
-    carrying its source, every delivery its receipts.
-  </p>
-  <div class="cta-row rise rise-3">
-    <a class="cta cta-primary" href="/app/">Open the workspace</a>
-    <a class="cta cta-ghost" href="#access">Request access</a>
-  </div>
-  <p class="hero-note rise rise-3">
-    Invite-only while the first supported stack completes its acceptance gate.
-  </p>
+<section class="hero" aria-labelledby="pb-hero-h">
+	<div class="hero-l">
+		<p class="eyebrow"><span class="rule" aria-hidden="true"></span><span class="lbl mono">an evidence-backed build assistant</span></p>
+		<h1 id="pb-hero-h" class="h1">It carries the build.<br />You swing.</h1>
+		<p class="lede">
+			Builds rarely die from bad code. They die from fine print nobody read,
+			scope that ate the weekend, and a delivery nobody can verify. Caddie
+			works all three so the hours you have go into the build.
+		</p>
+		<div class="hero-cta">
+			<a class="btn btn-key" href="/app/">Open the workspace</a>
+			<a class="btn btn-line" href="#pb-card">See the card</a>
+		</div>
+	</div>
+	<div class="hero-r">
+		<div class="devices">
+			<div class="shot">
+				<div class="bar" aria-hidden="true"><i></i><i></i><i></i><span class="host mono">illustrative · planned workspace</span></div>
+				<div class="shot-body">
+					<div class="frag">
+						<p class="frag-k"><span style=`color: var(--pb-warn)`>clock · deadline</span><span class="pill" style=`background: var(--pb-tint-warn); color: var(--pb-warn)`>locked</span></p>
+						<h4>Submit by Oct 26 · 5pm EDT — video is the artifact</h4>
+						<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Your time</span><span class="ar" style=`color: var(--pb-warn)`>→</span><span class="v">Sun 26 Oct, 10:00</span></p>
+						<p class="mrow"><span class="k">Review</span><span class="ar" style=`color: var(--pb-warn)`>→</span><span class="v">Oct 22</span></p>
+						<p class="fresh">· updated 3h ago</p>
+					</div>
+					<div class="frag">
+						<p class="frag-k"><span style=`color: var(--pb-ok)`>verdict · fit</span><span class="pill" style=`background: var(--pb-tint-ok); color: var(--pb-ok)`>strong fit</span></p>
+						<h4>Eligible, and it fits your week</h4>
+						<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Stack</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">React + Hono</span></p>
+						<p class="mrow"><span class="k">Evidence</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">3 claims, all cited</span></p>
+						<p class="fresh">· updated 6h ago</p>
+					</div>
+				</div>
+			</div>
+			<div class="mobile-shot" role="img" aria-label="Illustrative phone composition: blocked-rules and quiet-watch cards in one column">
+				<div class="shot-body">
+					<div class="frag">
+						<p class="frag-k"><span style=`color: var(--pb-danger)`>fault · rules</span><span class="pill" style=`background: var(--pb-tint-danger); color: var(--pb-danger)`>blocked</span></p>
+						<h4>No deadline parsed yet</h4>
+						<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Meaning</span><span class="ar" style=`color: var(--pb-danger)`>→</span><span class="v">unknown, not "no deadline"</span></p>
+					</div>
+					<div class="frag">
+						<p class="frag-k"><span>watch · rules</span><span class="pill">quiet</span></p>
+						<h4>Nothing moved since yesterday</h4>
+						<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Last check</span><span class="ar">→</span><span class="v">18:40 · clean</span></p>
+					</div>
+				</div>
+			</div>
+		</div>
+		<p class="devices-cap">
+			Illustrative composition of the planned workspace — not a live capture.
+			The fresh build proves itself in the open before the screenshots are real.
+		</p>
+	</div>
 </section>
