@@ -820,7 +820,7 @@ describe('P01 slice 2: invite allowlist, provider-subject identity, sessions', (
 			join(import.meta.dir, 'fixtures', 'auth-schema.sql'),
 			'utf8',
 		);
-		const identitySection = migration.split('PRODUCT-TABLES MARKER')[0];
+		const identitySection = migration.split('IDENTITY-DDL-BOUNDARY')[0];
 		const statements = (sql: string) =>
 			sql
 				.split('\n')
