@@ -5,7 +5,8 @@
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
-		"check:types": "tsc --noEmit"
+		"check:types": "tsc --noEmit",
+		"preview": "vite preview --host 127.0.0.1"
 	},
 	"dependencies": {
 		"@flue/react": "2.2.2",
