@@ -477,7 +477,7 @@ Commit procedure: `git diff --check`, inspect `git diff`, stage named owned path
 
 **Tests:** `tests/browser/landing.spec.ts`.
 
-1. Build static Astro with Caddie blue identity and DeepSeek-inspired spacious hierarchy, atmospheric background, rounded CTA and coherent workspace demo. Keep meaningful text readable without JS.
+1. PORT the existing Caddie landing design (read-only reference: /Users/captjay98/projects/caddie/src/components/Landing.tsx + `.pb` styles in src/styles/halo.css; tokens via the packages/ui halo port): run-spine composition (sticky-rail acts, hero with product captures + overlapping phone, honesty rails, closing access board), amber action color, mono type, full-bleed gutter. Content updated for the fresh product and honest availability; hero art is clearly-labelled illustrative until real fresh-workspace captures exist. This SUPERSEDES the previously committed P16 landing slices — replace the atmospheric-blue implementation; retain the proven invariants (static-readable, reduced-motion, keyboard, mobile, honest availability, working request-access endpoint) and update tests/browser/landing.spec.ts to the ported structure. Keep meaningful text readable without JS.
 2. Show discover/build/prepare stories and honest stack availability; use synthetic clearly illustrative demo until real accepted evidence. Request-access action must work through explicit intended endpoint or configured contact, not no-op UI.
 3. Check mobile, keyboard, contrast, reduced motion, metadata, external links and bounded asset weight; avoid heavy video/autoplay dependencies.
 

@@ -20,7 +20,7 @@ Sources:
 - `/Users/captjay98/projects/caddie/docs/flue-carryover-audit.md` and `flue-carryover-audit-feedback.md`.
 - `/Users/captjay98/projects/nebius-forge-eval/adjudication/ADJUDICATION.md`, `evidence/flue-react.md`, `evidence/flue-deploy-mode.md`, Flue app and shared fixture.
 - `/Users/captjay98/projects/hacksteward/docs/ux/2026-09-workspace-overhaul/reference-observations.md` and `docs/mockups-ops-workspace/today-ai-feature-map.md`: historical observations; private screenshots are not to be copied.
-- Public design inspiration: https://today.ai/ and https://www.deepseek.com/en/harness/ . Adapt patterns and original Caddie assets; do not reuse brands or imply their demos are our proof.
+- Interaction-pattern inspiration is ALREADY captured in-repo: the two HackSteward reference docs above (authenticated-app observations) and the existing Caddie implementation (the design reference and benchmark for this build). Do NOT browse external sites (today.ai, deepseek.com) — their public pages add nothing beyond the in-repo references and browsing them is out of scope for all packets.
 
 The evaluation established useful local workerd behavior and real provider experiments. Its single successful React send is not reconnect/failure coverage. A gate file is not human authorization. A local abort is not necessarily remote termination. Operational counters are not monetary reservations. These remain packet acceptance gates.
 
@@ -65,7 +65,7 @@ Auth implementation proposal: Better Auth, contingent on the P01 Workers+D1 adap
 
 ## Design direction
 
-Landing: atmospheric blue background, restrained navigation, large readable hero, clear access/demo actions, large authentic product preview, three stories (discover, build, prepare), real evidence and quiet motion/reduced-motion. Astro serves meaningful content without client JS. Launch copy must match feature ledger.
+Landing: PORT the existing Caddie landing design (READ-ONLY reference: `/Users/captjay98/projects/caddie/src/components/Landing.tsx` + the `.pb` style blocks in `src/styles/halo.css`) as the structure and visual identity — run-spine composition (hero with product captures + overlapping phone, act sections with sticky rail, honesty rails, the card, closing access board), halo tokens, amber action color, mono type, full-bleed 24px gutter. Update content for the fresh product: acts reflect the new journey (discover → build/Forge → deliver with evidence), copy matches feature-ledger availability (request access / invite-only until auth lands), and hero art uses clearly-labelled illustrative composition until real fresh-workspace captures exist (old screenshots are design reference, not new-build proof). Keep the invariants the P16 slices already proved: static-readable without client JS, reduced-motion, keyboard, mobile behavior, honest stack availability. Astro serves meaningful content without client JS.
 
 App: Caddie's blue identity, warm readable light theme and dark alternative, Card/Tasks/Channel continuity, visible project/run context, collapsible detail. Today-inspired actionable editorial cards, genuine trade-off options, source/fact provenance, task-linked artifacts, Tasks/Scheduled toggle, scoped search, inline errors/limits, editable memory. Completed runs remain inspectable. No human-facing raw chain-of-thought; show concise progress and tool/verification evidence.
 
