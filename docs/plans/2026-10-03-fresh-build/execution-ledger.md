@@ -6,7 +6,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 |---|---|---|---|---|---|
 | P00 | LOCAL VERIFIED | Integration lead (coordinator) | PASS | PASS (RECHECK: PASS after fixes) | 879e0f1 |
 | P01 | LOCAL VERIFIED (real OAuth callbacks BLOCKED on owner credentials) | Backend identity engineer (subagent); integrated by lead | PASS | PASS (fixes applied: AUTH_TEST_MODE fence, dead helper removal, DDL-drift guard, log cleanup) | see evidence records (c41dc19 + integration b1b4d4e + review fixes) |
-| P02 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P02 | LOCAL VERIFIED | Backend product engineer (subagent; slice 3 completed by lead after dispatch loss) | PASS | PASS (fixes applied + re-verified) | see evidence records (4a0eda2/66c2cf2/0ea748a + integration 801f97e + fixes 196ac63) |
 | P03 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P04 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P05 | NOT STARTED | Unassigned | Pending | Pending | — |
@@ -27,6 +27,31 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | NOT STARTED | Unassigned | Pending | Pending | — |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P02", "status": "LOCAL VERIFIED", "sha": "0ea748a + integration 801f97e + review fixes 196ac63",
+  "commands": [
+    {"command": "bun run verify:packet P02", "exitCode": 0, "receipt": "27 test(s) passed"},
+    {"command": "bun test tests/project-isolation.integration.test.ts", "exitCode": 0,
+     "receipt": "27 passed — two-user isolation (list/read/update/archive/plan-docs/run-bindings/artifacts) with database-truth assertions; A/B latest-plan-doc independence; missing-scope throw; 401/403 route mapping; run-binding stored-project lookups; duplicate runId typed 409; identity-DDL drift guard"},
+    {"command": "bun test tests/auth.integration.test.ts", "exitCode": 0, "receipt": "15 passed (identity untouched, drift guard intact)"},
+    {"command": "bun test tests/routing.test.ts", "exitCode": 0, "receipt": "13 passed (incl. new composed-worker /api/projects 401 probe)"},
+    {"command": "bun run typecheck", "exitCode": 0},
+    {"command": "bun run build", "exitCode": 0}
+  ],
+  "artifacts": [{"path": "apps/app/migrations/0001_product.sql", "note": "product tables appended after IDENTITY-DDL-BOUNDARY: workspaces, workspace_memberships, projects (nullable contest link), project_repo_bindings, plan_doc_revisions, run_bindings, artifact_revisions; additive; identity section drift-guarded"}],
+  "environment": "local workerd + local SQLite-backed D1 (miniflare), bun 1.4.0",
+  "providerCalls": "none (stub OAuth in-process — SIMULATED at provider boundary)",
+  "specReview": "PASS (independent subagent; 7 acceptance items verified incl. built-worker spot-check of the projects mount)",
+  "qualityReview": "PASS (independent subagent; P2s fixed: malformed JSON now 400 invalid_input, workspaceId validated 400 before scope derivation; P3s fixed: atomic workspace+membership via db.batch, duplicate-runId 409 test, composed-worker probe, stale comments; P3s noted: 409 message embeds constraint text, DDL splitter is fixture-only, plan-doc latest without kind spans incomparable counters — documented in route)",
+  "limitations": [
+    "session.ts plan-slot note also applies to P02 file-list drift handling (lead-owned ledgers updated instead of editing packets.md)",
+    "plan-doc latest without ?kind= compares per-kind counters; clients should pass kind (documented in route)"
+  ]
+}
+```
+
 
 ```json
 {
