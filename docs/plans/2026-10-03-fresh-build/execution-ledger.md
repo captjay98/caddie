@@ -23,10 +23,35 @@ Planning only. No packet implemented. Keep status, evidence, review verdicts and
 | P15b | NOT STARTED | Unassigned | Pending | Pending | — |
 | P15c | NOT STARTED | Unassigned | Pending | Pending | — |
 | P15d | NOT STARTED | Unassigned | Pending | Pending | — |
-| P16 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P16 | LOCAL VERIFIED | Frontend design engineer (subagent) | PASS | PASS | see evidence records (merged to main; synthetic wave-1 version) |
 | P17 | NOT STARTED | Unassigned | Pending | Pending | — |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P16", "status": "LOCAL VERIFIED", "sha": "merge of p16-landing (head a191bd9) + test hardening",
+  "commands": [
+    {"command": "bun run build", "exitCode": 0},
+    {"command": "bunx playwright test tests/browser/landing.spec.ts", "exitCode": 0,
+     "receipt": "11 passed (incl. hardened overflow assertion and reduced-motion control)"},
+    {"command": "bun test tests/routing.test.ts", "exitCode": 0, "receipt": "12 passed"},
+    {"command": "bun run test:browser -- P16", "exitCode": 0, "receipt": "1 check PASS"},
+    {"command": "bun run verify:packet P16", "exitCode": 0, "receipt": "NOT APPLICABLE (no unit tests mapped) — named, not faked"}
+  ],
+  "artifacts": [{"path": "apps/site/dist/index.html", "note": "zero <script> tags; synthetic-demo disclosure present; mailto placeholder marked in-file"}],
+  "environment": "local workerd via vite preview (playwright webServer), chromium via playwright; composed build",
+  "providerCalls": "none",
+  "specReview": "PASS (independent subagent: acceptance 1-7 verified against built output)",
+  "qualityReview": "PASS (independent subagent: 1 P2 fixed — overflow assertion now independent of overflow-x clip; 3 P3s noted)",
+  "limitations": [
+    "mailto contact uses placeholder hello@example.com — OWNER INPUT needed before any public deployment (marked in Contact.astro)",
+    "og:image / canonical URL deferred (pre-launch polish, needs domain)",
+    "wave-1 version: demo is synthetic by design; real build-success claims require P09"
+  ]
+}
+```
+
 
 ```json
 {
