@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createServer, type Server } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
+import net from 'node:net';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -35,6 +36,35 @@ const LOGOUT_EMAIL = 'logout@example.com';
 const SESSION_COOKIE = 'better-auth.session_token';
 
 // --- small helpers -----------------------------------------------------------
+
+/**
+ * A currently-free loopback port. Ports are allocated per run (instead of
+ * derived from the pid) so a leaked workerd from an earlier run can never be
+ * mistaken for this run's fixture.
+ */
+function freePort(): Promise<number> {
+	return new Promise((resolve, reject) => {
+		// Minimal structural typing: bun-types' net Server does not re-declare
+		// the node EventEmitter methods this probe uses.
+		const srv = net.createServer() as unknown as {
+			listen(port: number, host: string, cb: () => void): void;
+			close(cb?: () => void): void;
+			on(event: string, listener: () => void): void;
+			address(): { port: number } | string | null;
+		};
+		srv.listen(0, '127.0.0.1', () => {
+			const addr = srv.address();
+			if (addr && typeof addr === 'object') {
+				const port = addr.port;
+				srv.close(() => resolve(port));
+			} else {
+				srv.close();
+				reject(new Error('no port'));
+			}
+		});
+		srv.on('error', reject);
+	});
+}
 
 class Jar {
 	private map = new Map<string, string>();
@@ -194,14 +224,13 @@ class StubProvider {
 
 // --- fixture worker lifecycle -------------------------------------------------
 
-// Disjoint port ranges per role so per-process offsets can never collide;
-// each worker additionally verifies the fixture's own health payload before
-// the tests talk to it.
-const WORKER_PORT = 9600 + (process.pid % 100);
-const TTL_WORKER_PORT = 9700 + (process.pid % 100);
-const STUB_PORT = 9900 + (process.pid % 100);
-const WORKER_BASE = `http://127.0.0.1:${WORKER_PORT}`;
-const TTL_WORKER_BASE = `http://127.0.0.1:${TTL_WORKER_PORT}`;
+// Ports are allocated dynamically in beforeAll (stub first, then workers);
+// each worker's readiness check verifies the fixture's own health payload so
+// a stray listener can never stand in for the fixture.
+let WORKER_PORT = 0;
+let TTL_WORKER_PORT = 0;
+let WORKER_BASE = '';
+let TTL_WORKER_BASE = '';
 
 let workerProcess: Bun.Subprocess | undefined;
 let ttlWorkerProcess: Bun.Subprocess | undefined;
@@ -281,16 +310,17 @@ async function startFixtureWorker(
 		const log = existsSync(logFile) ? readFileSync(logFile, 'utf8') : '(no log)';
 		throw new Error(`fixture worker failed to start: ${notReady}\nlog:\n${log}`);
 	}
-	// The readiness probe above accepts any HTTP response (a stray listener on
-	// this port would satisfy it); confirm the fixture's own payload answers.
+	// The readiness probe above accepts any HTTP response; confirm the fixture
+	// itself answers — with THIS run's identity, not a leaked older process.
 	const health = await fetch(`http://127.0.0.1:${port}/__test/health`, {
 		signal: AbortSignal.timeout(5000),
 	});
-	const healthBody = (await health.json()) as { ok?: boolean; d1?: boolean };
-	if (!healthBody.ok || !healthBody.d1) {
+	const healthBody = (await health.json()) as { ok?: boolean; d1?: boolean; betterAuthUrl?: string };
+	const expectedBase = `http://127.0.0.1:${port}`;
+	if (!healthBody.ok || !healthBody.d1 || healthBody.betterAuthUrl !== expectedBase) {
 		const log = existsSync(logFile) ? readFileSync(logFile, 'utf8') : '(no log)';
 		throw new Error(
-			`fixture worker health check failed (ok=${healthBody.ok}, d1=${healthBody.d1}) — port ${port} is not the fixture worker\nlog:\n${log}`,
+			`fixture worker identity check failed (got ${JSON.stringify(healthBody)}, want ok+d1+betterAuthUrl=${expectedBase})\nlog:\n${log}`,
 		);
 	}
 	const cleanup = () => {
@@ -304,17 +334,15 @@ async function startFixtureWorker(
 }
 
 function stopFixtureWorker(port: number) {
-	try {
-		Bun.spawnSync(['pkill', '-f', `wrangler.*--port ${port} `]);
-		for (let attempt = 0; attempt < 2; attempt++) {
-			const owner = Bun.spawnSync(['lsof', '-ti', '-sTCP:LISTEN', `tcp:${port}`]);
-			const pids = owner.stdout.toString().trim();
-			if (!pids) return;
-			Bun.spawnSync(['kill', attempt === 0 ? '-15' : '-9', ...pids.split('\n')]);
-			Bun.sleepSync(500);
-		}
-	} catch {
-		// best-effort cleanup
+	// Pattern-based cleanup only: lsof output is not dependable in every
+	// environment (sandboxed hosts report unrelated pids), so listeners are
+	// never killed by socket scan. Both patterns match only this suite's own
+	// processes — the wrangler CLI started with our unique temp config dir,
+	// and the workerd bound to exactly this run's fixture port.
+	for (const signal of ['-15', '-9']) {
+		Bun.spawnSync(['pkill', signal, '-f', `caddie-p01-.*wrangler.auth.json --port ${port} `]);
+		Bun.spawnSync(['pkill', signal, '-f', `workerd.*entry=127.0.0.1:${port} `]);
+		Bun.sleepSync(300);
 	}
 }
 
@@ -360,7 +388,9 @@ function makeWorker(base: string) {
 		return res;
 	};
 }
-const worker = makeWorker(WORKER_BASE);
+// Bound lazily: WORKER_BASE is allocated in beforeAll, after module load.
+const worker = ((jar: Jar, path: string, init?: RequestInit) =>
+	makeWorker(WORKER_BASE)(jar, path, init)) as ReturnType<typeof makeWorker>;
 
 /**
  * Drive the OAuth round trip exactly like a browser would: sign-in request,
@@ -407,11 +437,16 @@ beforeAll(async () => {
 	if (!existsSync(DDL_PATH)) {
 		throw new Error('auth schema fixture missing: tests/fixtures/auth-schema.sql');
 	}
-	await stub.start(STUB_PORT);
+	const stubPort = await freePort();
+	await stub.start(stubPort);
+	WORKER_PORT = await freePort();
+	WORKER_BASE = `http://127.0.0.1:${WORKER_PORT}`;
 	const main = await startFixtureWorker(WORKER_PORT, {});
 	workerProcess = main.process;
 	await applyDdl(WORKER_PORT);
 	// Second worker with a 2-second session TTL for the real-clock expiry test.
+	TTL_WORKER_PORT = await freePort();
+	TTL_WORKER_BASE = `http://127.0.0.1:${TTL_WORKER_PORT}`;
 	const ttl = await startFixtureWorker(TTL_WORKER_PORT, { AUTH_SESSION_TTL_SECONDS: '2' });
 	ttlWorkerProcess = ttl.process;
 	await applyDdl(TTL_WORKER_PORT);
