@@ -22,7 +22,7 @@ repository's P00 verification.
 
 | # | Area | Disposition | Destination | Packet | Evidence | Availability |
 |---|------|-------------|-------------|--------|----------|--------------|
-| C1 | Halo identity, dark/light colors, typography, status colors | PORT AS-IS selectively | `packages/ui/src/tokens.css` | P06 | AUDIT (token blocks in `src/styles/halo.css`) | planned |
+| C1 | Halo identity, dark/light colors, typography, status colors | PORT AS-IS selectively | `packages/ui/src/tokens.css` | P06 (tokens ported early via P16 amendment 3054ee2) | AUDIT (token blocks in `src/styles/halo.css`); LOCAL P16 (tokens live on the landing) | available (Markdown/time remain P06) |
 | C2 | Markdown rendering | PORT AS-IS | `packages/ui/src/Markdown.tsx` | P06 | AUDIT (`src/components/Markdown.tsx`) | planned |
 | C3 | Honest time formatting | PORT AS-IS | `packages/ui/src/time.ts` | P06 | AUDIT (`src/lib/format.ts`) | planned |
 | C4 | Brand voice, compact status grammar (`CADDIE_SYSTEM`) | PORT AS-IS as editorial guidance | Coordinator instruction | P05 | AUDIT (`src/lib/llm.ts`); no Google-only wiring | planned |
@@ -42,7 +42,7 @@ repository's P00 verification.
 | C18 | Authentication and password recovery | REBUILD — Better Auth on Workers+D1, dedicated secrets, explicit linking | `src/server/auth.ts`, `routes/auth.ts`, `session.ts` | P01 | AUDIT defect #5 (session key from LLM key must not travel); P01 spike gates the choice | planned |
 | C19 | Task runner and scheduled jobs | REBUILD — Flue machinery (leases, alarms) + app-owned schedule/operation records | `src/server/tasks.ts`, `schedules.ts` | P12 | AUDIT + FB (durable cross-process abort LIVE VERIFIED, `evidence/flue-deploy-mode.md`) | planned |
 | C20 | Email and digests | ADAPT / IMPROVE — escaped templates, opt-in, dedupe, delivery receipts | `src/server/notifications.ts` | P12 | AUDIT | planned (email provider chosen in P12) |
-| C21 | Landing page | ADAPT — fresh claims only, synthetic demo until real evidence | `apps/site/src/pages/` | P16 | AUDIT | planned (P00 scaffold LOCAL P00) |
+| C21 | Landing page | ADAPT — pit-board port of the reference design (amendment 3054ee2); fresh claims only, synthetic demo until real evidence | `apps/site/src/pages/` | P16 | AUDIT + plan amendment | available (LOCAL P16: 13 browser checks) |
 | C22 | Existing SQL migrations, destructive reset, "latest per user" queries | DROP implementation | — (fresh D1 schema; explicit import mapping only if later requested) | — | AUDIT; no-migration stance FB item 7 | dropped (capability retained via C9 rebuild) |
 
 ## HackSteward recovery rows

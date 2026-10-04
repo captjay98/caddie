@@ -23,61 +23,31 @@ Planning only. No packet implemented. Keep status, evidence, review verdicts and
 | P15b | NOT STARTED | Unassigned | Pending | Pending | — |
 | P15c | NOT STARTED | Unassigned | Pending | Pending | — |
 | P15d | NOT STARTED | Unassigned | Pending | Pending | — |
-| P16 | LOCAL VERIFIED | Frontend design engineer (subagent) | PASS | PASS | see evidence records (merged to main; synthetic wave-1 version) |
+| P16 | LOCAL VERIFIED | Integration lead (rework; initial slices by subagent) | PENDING (quota — re-review when subagent dispatch returns) | PENDING (quota) | see evidence records (pit-board port per amendment 3054ee2) |
 | P17 | NOT STARTED | Unassigned | Pending | Pending | — |
 
 ## Evidence records
 
 ```json
 {
-  "packet": "P16", "status": "LOCAL VERIFIED", "sha": "merge of p16-landing (head a191bd9) + test hardening",
+  "packet": "P16", "status": "LOCAL VERIFIED (rework per amendment 3054ee2)", "sha": "see git log feat(p16): port pit-board landing",
   "commands": [
     {"command": "bun run build", "exitCode": 0},
-    {"command": "bunx playwright test tests/browser/landing.spec.ts", "exitCode": 0,
-     "receipt": "11 passed (incl. hardened overflow assertion and reduced-motion control)"},
+    {"command": "bunx playwright test tests/browser/landing.spec.ts", "exitCode": 0, "receipt": "13 passed — pit-board structure, amber kickers rgb(240,168,60), honesty band, stackgrid disclosure, availability honesty, invariants (static-readable/no scripts, reduced-motion w/ control, keyboard/skip, 390px sections-in-viewport, metadata/no external URLs)"},
     {"command": "bun test tests/routing.test.ts", "exitCode": 0, "receipt": "12 passed"},
-    {"command": "bun run test:browser -- P16", "exitCode": 0, "receipt": "1 check PASS"},
-    {"command": "bun run verify:packet P16", "exitCode": 0, "receipt": "NOT APPLICABLE (no unit tests mapped) — named, not faked"}
+    {"command": "bun run typecheck", "exitCode": 0}
   ],
-  "artifacts": [{"path": "apps/site/dist/index.html", "note": "zero <script> tags; synthetic-demo disclosure present; mailto placeholder marked in-file"}],
-  "environment": "local workerd via vite preview (playwright webServer), chromium via playwright; composed build",
+  "artifacts": [{"path": "apps/site/dist/index.html", "note": "pit-board port: run-spine (6 acts, sticky rail), honesty rails, card band, stacks band, request-access close; zero <script> tags; mailto placeholder marked in shipped HTML"}],
+  "environment": "local workerd via vite preview (playwright webServer), chromium; composed build; @caddie/ui halo tokens",
   "providerCalls": "none",
-  "specReview": "PASS (independent subagent: acceptance 1-7 verified against built output)",
-  "qualityReview": "PASS (independent subagent: 1 P2 fixed — overflow assertion now independent of overflow-x clip; 3 P3s noted)",
+  "specReview": "PENDING — independent reviewers blocked by provider rate limit (resets 2026-10-10); re-review scheduled",
+  "qualityReview": "PENDING — same",
   "limitations": [
-    "mailto contact uses placeholder hello@example.com — OWNER INPUT needed before any public deployment (marked in Contact.astro)",
-    "og:image / canonical URL deferred (pre-launch polish, needs domain)",
-    "wave-1 version: demo is synthetic by design; real build-success claims require P09"
-  ]
-}
-```
-
-
-```json
-{
-  "packet": "P00", "status": "LOCAL VERIFIED", "sha": "879e0f1",
-  "commands": [
-    {"command": "bun run build", "exitCode": 0},
-    {"command": "bun run verify:packet P00", "exitCode": 0,
-     "receipt": "contracts: 11 tests passed; routing: 12 tests passed"},
-    {"command": "bun run typecheck", "exitCode": 0},
-    {"command": "bun run verify:packet P07", "exitCode": 1,
-     "receipt": "honest failure: MISSING tests/preview-access.integration.test.ts"},
-    {"command": "bun run verify:packet P99", "exitCode": 1,
-     "receipt": "honest failure: unknown packet"},
-    {"command": "bun run test:live -- P04", "exitCode": 1,
-     "receipt": "BLOCKED without CADDIE_LIVE_AUTHORIZED=1"}
-  ],
-  "artifacts": [{"path": "apps/app/dist/composition-manifest.json",
-                 "note": "collisions: [], spa.scanned/landing.scanned > 0 asserted by tests/routing.test.ts"}],
-  "environment": "local workerd via `vite preview` (miniflare), bun 1.4.0, node v26.3.0, macOS arm64; @flue/* 2.2.2 pinned, @cloudflare/vite-plugin 1.39.2, vite 8.0.14, wrangler 4.113.0",
-  "providerCalls": "none",
-  "specReview": "PASS (independent subagent; 9 acceptance items verified incl. live HTTP spot-checks)",
-  "qualityReview": "PASS (independent subagent; 8 findings fixed and RECHECK: PASS)",
-  "limitations": [
-    "browser/live tests not applicable to P00 (test:browser -- P00 reports NOT APPLICABLE, exit 0)",
-    "agents mount but do not execute under the preview harness (flue 2.2.2 startActiveSpan bug — documented in docs/flue-contracts.md); agent execution evidence belongs to P05",
-    "landing assets resolution loop becomes meaningful in P16 (scaffold Astro page emits no external assets)"
+    "AMENDMENT 3054ee2 SUPERSESSION: the atmospheric-blue landing (merged earlier same-day) is replaced by this pit-board port; blue site token set retired",
+    "DEPENDENCY AMENDMENT: halo token port (packages/ui/src/tokens.css) pulled forward from P06 — feature-ledger row C1 updated; P06 still owns Markdown.tsx, time.ts and app-side verification",
+    "reveal-on-scroll/scroll-spy from the reference intentionally NOT ported (client JS) — static readability without scripts is an acceptance invariant",
+    "mailto contact uses placeholder hello@example.com — OWNER INPUT needed before public deployment (marked in shipped HTML)",
+    "hero art is illustrative composition (plan amendment) — real captures require a real accepted build (P09)"
   ]
 }
 ```
