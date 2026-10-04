@@ -1,0 +1,116 @@
+# Authentication setup (P01)
+
+Caddie uses Better Auth 1.7.7 with Google and GitHub sign-in on Cloudflare
+Workers + D1. This page lists every credential and callback URL an owner needs
+to provision. No secret values belong in chat, tickets, or this repository:
+they live in `wrangler secret` / `.dev.vars` (gitignored) only.
+
+## Canonical origin
+
+Pick the canonical public origin of the app, for example
+`https://caddie.example.com`. Everything below derives from it. It must be set
+explicitly as `BETTER_AUTH_URL` — the auth layer never guesses its own origin.
+
+## Environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `BETTER_AUTH_SECRET` | yes | Dedicated session/state signing secret. Generate with `openssl rand -base64 32`. Never reuse a model/API key here. |
+| `BETTER_AUTH_URL` | yes | Canonical origin, e.g. `https://caddie.example.com` (no trailing slash). |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | for Google sign-in | Google OAuth client credentials. |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | for GitHub sign-in | GitHub OAuth app credentials. |
+| `INVITE_ALLOWLIST` | yes for sign-ups | Comma-separated, lower-cased emails allowed to create an account. Unset/empty means no new sign-ups (fail closed). Already-registered users keep signing in. |
+
+Missing `BETTER_AUTH_SECRET`/`BETTER_AUTH_URL` is a hard configuration error:
+`/api/auth/*` answers `503 {"error":"auth_not_configured"}` and
+`/api/auth/status` stays `{"authenticated":false}` (fail closed). The auth
+layer never derives secrets from any other key material.
+
+Set them for deployments with:
+
+```sh
+wrangler secret put BETTER_AUTH_SECRET
+wrangler secret put BETTER_AUTH_URL
+wrangler secret put GOOGLE_CLIENT_ID
+wrangler secret put GOOGLE_CLIENT_SECRET
+wrangler secret put GITHUB_CLIENT_ID
+wrangler secret put GITHUB_CLIENT_SECRET
+# INVITE_ALLOWLIST can be a plain var (wrangler.jsonc vars) or a secret.
+```
+
+For local dev, put fake-but-well-formed values in `apps/app/.dev.vars`
+(gitignored):
+
+```
+BETTER_AUTH_SECRET=local-only-secret-replace-me-0123456789abcdef
+BETTER_AUTH_URL=http://127.0.0.1:8787
+INVITE_ALLOWLIST=you@example.com
+```
+
+`AUTH_STUB_BASE_URL` exists only for the local test fixture
+(`tests/auth.integration.test.ts`); never set it outside tests.
+
+## Provider registration
+
+### Google
+
+1. Google Cloud Console → APIs & Services → Credentials → *Create OAuth client
+   ID* → Web application.
+2. Authorized redirect URI (exact):
+
+   ```
+   {BETTER_AUTH_URL}/api/auth/callback/google
+   ```
+
+   e.g. `https://caddie.example.com/api/auth/callback/google`. For local
+   browser testing add `http://127.0.0.1:<port>/api/auth/callback/google` for
+   the port you actually run on — Google does not allow wildcard ports.
+3. Scopes requested by Caddie: `openid email profile` (identity only).
+4. Put the client id/secret in `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+
+### GitHub
+
+1. GitHub → Settings → Developer settings → OAuth Apps → *New OAuth App*.
+2. Authorization callback URL (exact):
+
+   ```
+   {BETTER_AUTH_URL}/api/auth/callback/github
+   ```
+
+3. Scopes requested by Caddie: `read:user user:email` — deliberately **no
+   repository scopes**. GitHub sign-in never grants repo access; repository
+   authorization is a separate mechanism (GitHub App, later packet).
+4. Put the client id/secret in `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`.
+
+## Database schema
+
+The identity tables (`user`, `session`, `account`, `verification` + indexes)
+must exist in D1 before the first sign-in. The canonical SQLite/D1 DDL is
+`tests/fixtures/auth-schema.sql` (byte-identical to Better Auth 1.7.7's own
+migrator output for this configuration). The integration lead merges those
+statements into `apps/app/migrations/0001_product.sql` (P02's file) — do not
+duplicate identity tables elsewhere.
+
+## Identity rules this build enforces
+
+- **Invite allowlist**: creating an account requires the email to be on
+  `INVITE_ALLOWLIST`. Uninvited sign-ins are denied with an error before any
+  user row is written.
+- **Provider-subject identity**: an identity is keyed on the provider's
+  immutable subject (Google OIDC `sub`, GitHub account `id`), not the email.
+- **No auto-merge**: signing in with a second provider that shares the email
+  does NOT merge accounts. Use "link" while signed in
+  (`POST /api/auth/link-social`) to attach a second provider explicitly.
+- **Sessions**: server-side sessions in D1; logout/revocation takes effect
+  immediately for every bearer of the cookie. Default TTL 7 days
+  (override with the fixture-only `AUTH_SESSION_TTL_SECONDS` in tests).
+
+## Verification status (honest classification)
+
+- Workers + D1 + Better Auth mechanics (schema, sessions, allowlist, linking,
+  logout/expiry, forged-state/replay rejection): LOCAL VERIFIED via
+  `bun test tests/auth.integration.test.ts` (real workerd + local D1).
+- OAuth provider round trips: SIMULATED in tests (in-process stub provider).
+- Real Google/GitHub callbacks: BLOCKED until the owner registers both
+  providers with the callback URLs above and provisions the secrets. Verify
+  with a staging deployment after applying the D1 migration.
