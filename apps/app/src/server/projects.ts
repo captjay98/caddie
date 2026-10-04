@@ -14,7 +14,7 @@ import {
 	RunBindingRecordSchema,
 	WorkspaceCreateInputSchema,
 	WorkspaceSchema,
-} from '../../../../packages/contracts/src/projects.ts';
+} from '@caddie/contracts';
 import type {
 	ArtifactCreateInput,
 	ArtifactRevision,
@@ -27,7 +27,7 @@ import type {
 	RunBindingRecord,
 	Workspace,
 	WorkspaceCreateInput,
-} from '../../../../packages/contracts/src/projects.ts';
+} from '@caddie/contracts';
 import type { WorkspaceScope } from './scope.ts';
 
 /**

@@ -209,3 +209,7 @@ export const StackRecipeSchema = v.pipe(
 	v.readonly(),
 );
 export type StackRecipe = v.InferOutput<typeof StackRecipeSchema>;
+
+// --- projects (P02) -----------------------------------------------------------
+
+export * from './projects.ts';

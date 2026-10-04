@@ -2,13 +2,15 @@ import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import { Hello } from './agents/hello.ts';
 import { createAuthRouter } from './server/routes/auth.ts';
+import { createProjectsRouter } from './server/routes/projects.ts';
 import type { AuthEnv } from './server/auth.ts';
 
 /**
  * The Worker's single fetch entry. Composition order:
  *
- *   /api/*      product API (auth: Better Auth under /api/auth/*; JSON 404
- *               fallback for unknown paths)
+ *   /api/*      product API (auth: Better Auth under /api/auth/*; projects:
+ *               workspaces/projects/plan-docs/run-bindings/artifacts; JSON
+ *               404 fallback for unknown paths)
  *   /agents/*   Flue agent routers, one mount per agent identity
  *   /app/*      React SPA assets, deep links falling back to /app/index.html
  *   everything else: served straight from the composed assets tree (Astro
@@ -37,6 +39,7 @@ const app = new Hono<{ Bindings: Env }>();
 // --- product API -----------------------------------------------------------
 const api = new Hono<{ Bindings: Env }>();
 api.route('/', createAuthRouter());
+api.route('/', createProjectsRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------
