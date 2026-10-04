@@ -27,3 +27,37 @@ create index "verification_identifier_idx" on "verification" ("identifier");
 
 -- IDENTITY-DDL-BOUNDARY: identity DDL ends here (drift-guard split token).
 -- Everything below is appended by P02 and later packets. ===
+
+-- P02 product state (D1/SQLite dialect, text PKs, ISO-8601 strings in date
+-- columns). Ownership chain: workspace -> membership -> project -> scoped
+-- records. Scope is server-derived (session + membership) and every per-project
+-- access path below leads with projectId — the carryover "latest per user"
+-- query pattern (audit defect #2) has no supporting structure here.
+
+create table "workspaces" ("id" text not null primary key, "name" text not null, "createdAt" date not null);
+
+create table "workspace_memberships" ("id" text not null primary key, "workspaceId" text not null references "workspaces" ("id") on delete cascade, "userId" text not null references "user" ("id") on delete cascade, "role" text not null, "createdAt" date not null);
+
+create table "projects" ("id" text not null primary key, "workspaceId" text not null references "workspaces" ("id") on delete cascade, "name" text not null, "description" text, "contestId" text, "contestUrl" text, "status" text not null default 'active' check ("status" in ('active', 'archived')), "createdAt" date not null, "updatedAt" date not null);
+
+create table "project_repo_bindings" ("id" text not null primary key, "projectId" text not null references "projects" ("id") on delete cascade, "provider" text not null, "owner" text not null, "repo" text not null, "defaultBranch" text, "createdAt" date not null);
+
+create table "plan_doc_revisions" ("id" text not null primary key, "projectId" text not null references "projects" ("id") on delete cascade, "kind" text not null, "revision" integer not null, "bodyHash" text not null, "body" text not null, "createdBy" text not null references "user" ("id"), "createdAt" date not null);
+
+create table "run_bindings" ("runId" text not null primary key, "projectId" text not null references "projects" ("id") on delete cascade, "conversationId" text not null, "submissionId" text not null, "planRevision" text not null, "stackId" text not null check ("stackId" in ('react-hono', 'tanstack-start', 'laravel-inertia', 'fastapi-react', 'flutter')), "payerId" text not null, "modelRouteId" text not null, "pricingVersion" text not null, "createdBy" text not null references "user" ("id"), "createdAt" date not null);
+
+create table "artifact_revisions" ("id" text not null primary key, "projectId" text not null references "projects" ("id") on delete cascade, "artifactId" text not null, "kind" text not null, "revision" integer not null, "metadataHash" text not null, "metadata" text not null, "createdBy" text not null references "user" ("id"), "createdAt" date not null);
+
+create unique index "workspace_memberships_workspace_user_idx" on "workspace_memberships" ("workspaceId", "userId");
+
+create index "workspace_memberships_userId_idx" on "workspace_memberships" ("userId");
+
+create index "projects_workspaceId_idx" on "projects" ("workspaceId");
+
+create unique index "project_repo_bindings_projectId_idx" on "project_repo_bindings" ("projectId");
+
+create unique index "plan_doc_revisions_project_kind_revision_idx" on "plan_doc_revisions" ("projectId", "kind", "revision");
+
+create index "run_bindings_projectId_idx" on "run_bindings" ("projectId");
+
+create unique index "artifact_revisions_project_artifact_revision_idx" on "artifact_revisions" ("projectId", "artifactId", "revision");
