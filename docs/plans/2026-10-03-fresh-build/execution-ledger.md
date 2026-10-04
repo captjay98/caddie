@@ -1,16 +1,16 @@
 # Execution ledger
 
-Planning only. No packet implemented. Keep status, evidence, review verdicts and integrated SHA current.
+Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT STARTED.
 
 | Packet | Status | Owner | Spec review | Quality review | Evidence / SHA |
 |---|---|---|---|---|---|
 | P00 | LOCAL VERIFIED | Integration lead (coordinator) | PASS | PASS (RECHECK: PASS after fixes) | 879e0f1 |
-| P01 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P01 | LOCAL VERIFIED (real OAuth callbacks BLOCKED on owner credentials) | Backend identity engineer (subagent); integrated by lead | PENDING (quota — re-review when subagent dispatch returns) | PENDING (quota) | see evidence records (c41dc19 + integration b1b4d4e) |
 | P02 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P03 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P04 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P05 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P06 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P06 | NOT STARTED | Unassigned | Pending | Pending | — (tokens port pulled forward to P16, see P16 record) |
 | P07 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P08 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P09 | NOT STARTED | Unassigned | Pending | Pending | — |
@@ -27,6 +27,60 @@ Planning only. No packet implemented. Keep status, evidence, review verdicts and
 | P17 | NOT STARTED | Unassigned | Pending | Pending | — |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P00", "status": "LOCAL VERIFIED", "sha": "879e0f1",
+  "commands": [
+    {"command": "bun run build", "exitCode": 0},
+    {"command": "bun run verify:packet P00", "exitCode": 0,
+     "receipt": "contracts: 11 tests passed; routing: 12 tests passed"},
+    {"command": "bun run typecheck", "exitCode": 0},
+    {"command": "bun run verify:packet P07", "exitCode": 1,
+     "receipt": "honest failure: MISSING tests/preview-access.integration.test.ts"},
+    {"command": "bun run verify:packet P99", "exitCode": 1,
+     "receipt": "honest failure: unknown packet"},
+    {"command": "bun run test:live -- P04", "exitCode": 1,
+     "receipt": "BLOCKED without CADDIE_LIVE_AUTHORIZED=1"}
+  ],
+  "artifacts": [{"path": "apps/app/dist/composition-manifest.json",
+                 "note": "collisions: [], spa.scanned/landing.scanned > 0 asserted by tests/routing.test.ts"}],
+  "environment": "local workerd via `vite preview` (miniflare), bun 1.4.0, node v26.3.0, macOS arm64; @flue/* 2.2.2 pinned, @cloudflare/vite-plugin 1.39.2, vite 8.0.14, wrangler 4.113.0",
+  "providerCalls": "none",
+  "specReview": "PASS (independent subagent; 9 acceptance items verified incl. live HTTP spot-checks)",
+  "qualityReview": "PASS (independent subagent; 8 findings fixed and RECHECK: PASS)",
+  "limitations": [
+    "browser/live tests not applicable to P00 (test:browser -- P00 reports NOT APPLICABLE, exit 0)",
+    "agents mount but do not execute under the preview harness (flue 2.2.2 startActiveSpan bug — documented in docs/flue-contracts.md); agent execution evidence belongs to P05",
+    "landing assets resolution loop becomes meaningful in P16"
+  ]
+}
+```
+
+```json
+{
+  "packet": "P01", "status": "LOCAL VERIFIED — real OAuth callbacks BLOCKED on owner credentials", "sha": "c41dc19 (branch), integrated b1b4d4e",
+  "commands": [
+    {"command": "bun test tests/auth.integration.test.ts", "exitCode": 0,
+     "receipt": "14 passed — real workerd + local D1 + in-process stub provider; forged-state/replay, session fixation/expiry/logout, invite allowlist both ways, explicit linking preserves identity, GitHub scopes read:user user:email asserted"},
+    {"command": "bun test tests/routing.test.ts", "exitCode": 0, "receipt": "12 passed with auth router mounted (post-integration)"},
+    {"command": "bunx playwright test tests/browser/auth.spec.ts", "exitCode": 0, "receipt": "2 passed — sign-in buttons render, error state visible"},
+    {"command": "bun run verify:packet P01", "exitCode": 0, "receipt": "14 test(s) passed"},
+    {"command": "bun run typecheck", "exitCode": 0}
+  ],
+  "artifacts": [{"path": "apps/app/migrations/0001_product.sql", "note": "identity tables = Better Auth 1.7.7 migrator output, byte-matched to tests/fixtures/auth-schema.sql"}],
+  "environment": "local workerd + local D1 (miniflare), better-auth 1.7.7 (Kysely adapter on D1 binding)",
+  "providerCalls": "none (stub provider inside workerd — OAuth boundary SIMULATED)",
+  "specReview": "PENDING — reviewers blocked by provider rate limit (resets 2026-10-10)",
+  "qualityReview": "PENDING — same",
+  "limitations": [
+    "SPIKE PASSED: Better Auth 1.7.7 accepts the D1 binding directly (bundled Kysely adapter); documented at better-auth.com/docs/concepts/database",
+    "session secret is dedicated BETTER_AUTH_SECRET — audit defect #5 (derive-from-model-key) verified absent",
+    "real Google/GitHub callbacks BLOCKED pending owner-provided OAuth registrations + BETTER_AUTH_URL; callback URLs documented in docs/setup/auth.md",
+    "lead integration diff (b1b4d4e): auth router mounted at /api, SignInPanel in SPA scaffold, identity DDL seeded into 0001_product.sql"
+  ]
+}
+```
 
 ```json
 {
