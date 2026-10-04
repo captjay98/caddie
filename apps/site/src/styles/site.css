@@ -33,6 +33,10 @@
 	--pb-rail: 1px solid var(--pb-line-soft);
 	background: var(--horizon), var(--pb-bg);
 	color: var(--pb-fg);
+	/* Base typography: the reference inherits this from the app's base layer;
+	   the landing is standalone, so it carries its own. Inter (bundled via
+	   @fontsource in index.astro) with the token stack as fallback. */
+	font-family: var(--font-ui);
 	min-height: 100%;
 }
 .pb * { box-sizing: border-box; }
@@ -236,6 +240,8 @@
 	.pb .hero-l, .pb .hero-r { padding-block: 44px; }
 	.pb .topbar { gap: 0.625rem; }
 	.pb .topbar .actions { gap: 0.625rem; }
+	/* One CTA on the mobile header — the closing board owns request-access */
+	.pb .topbar .link-quiet[href="#pb-start"] { display: none; }
 }
 @media (max-width: 390px) {
 	.pb .hero-cta .btn { flex: 1 1 auto; justify-content: center; }

@@ -9,6 +9,8 @@
 	},
 	"dependencies": {
 		"astro": "^5.13.0",
-		"@caddie/ui": "workspace:*"
+		"@caddie/ui": "workspace:*",
+		"@fontsource/inter": "^5.3.0",
+		"@fontsource/ibm-plex-mono": "^5.3.0"
 	}
 }

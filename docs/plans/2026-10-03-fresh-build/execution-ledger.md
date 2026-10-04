@@ -89,9 +89,12 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
     {"command": "bun run build", "exitCode": 0},
     {"command": "bunx playwright test tests/browser/landing.spec.ts", "exitCode": 0, "receipt": "13 passed — pit-board structure, amber kickers rgb(240,168,60), honesty band, stackgrid disclosure, availability honesty, invariants (static-readable/no scripts, reduced-motion w/ control, keyboard/skip, 390px sections-in-viewport, metadata/no external URLs)"},
     {"command": "bun test tests/routing.test.ts", "exitCode": 0, "receipt": "12 passed"},
-    {"command": "bun run typecheck", "exitCode": 0}
+    {"command": "bun run typecheck", "exitCode": 0},
+    {"command": "typography slice (owner-directed): @fontsource/inter 400-700 + @fontsource/ibm-plex-mono 400/500 added to apps/site, imported in index.astro, bundled by Vite", "exitCode": 0,
+     "receipt": "38 woff2 subset files in dist/_astro, zero external font URLs; document.fonts.check true for Inter 400/600 + Plex Mono 400/500; computed h1 = Inter 600, letterSpacing -3.08px (-0.035em), lineHeight 1.050; visual comparison vs caddie/docs/screens/landing-pitboard-top.png and landing-run-spine.png confirms tight-and-confident h1, legible 9px mono at 390px, visible 550/700 weight steps; port bug found+fixed: .pb had no base font-family (serif fallback) — font-family: var(--font-ui) added; reference mobile single-CTA rule ported (quiet topbar link hidden <=640px)"}
   ],
-  "artifacts": [{"path": "apps/site/dist/index.html", "note": "pit-board port: run-spine (6 acts, sticky rail), honesty rails, card band, stacks band, request-access close; zero <script> tags; mailto placeholder marked in shipped HTML"}],
+  "artifacts": [{"path": "apps/site/dist/index.html", "note": "pit-board port: run-spine (6 acts, sticky rail), honesty rails, card band, stacks band, request-access close; zero <script> tags; mailto placeholder marked in shipped HTML"},
+                {"path": "apps/site/dist/_astro/*.woff2", "note": "38 self-hosted font subsets (Inter 400/500/600/700, IBM Plex Mono 400/500) — no runtime font fetches"}],
   "environment": "local workerd via vite preview (playwright webServer), chromium; composed build; @caddie/ui halo tokens",
   "providerCalls": "none",
   "specReview": "PENDING — independent reviewers blocked by provider rate limit (resets 2026-10-10); re-review scheduled",

@@ -3,6 +3,15 @@
 // (plan amendment 3054ee2: run-spine composition, halo tokens, amber key
 // actions, mono type). Content updated for the fresh product and honest
 // availability per docs/feature-ledger.md. Static output: no client JS.
+// Typefaces self-hosted via fontsource — same weights the reference loaded
+// (Inter 400-700 + IBM Plex Mono 400/500), bundled into the static build so
+// nothing is fetched at runtime.
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
 import '../styles/site.css';
 import Hero from '../components/Hero.astro';
 import ProductDemo from '../components/ProductDemo.astro';
