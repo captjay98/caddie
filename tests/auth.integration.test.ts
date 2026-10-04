@@ -809,7 +809,9 @@ describe('P01 slice 2: invite allowlist, provider-subject identity, sessions', (
 	test('identity DDL in 0001_product.sql never drifts from the fixture', () => {
 		// The fixture and the production migration must stay byte-identical at
 		// the statement level: the fixture proves the migration's schema, so a
-		// divergence would make every test here lie about production D1.
+		// divergence would make every test here lie about production D1. Only
+		// the identity section is compared — P02 appends product tables after
+		// the PRODUCT-TABLES marker.
 		const migration = readFileSync(
 			join(import.meta.dir, '..', 'apps', 'app', 'migrations', '0001_product.sql'),
 			'utf8',
@@ -818,11 +820,12 @@ describe('P01 slice 2: invite allowlist, provider-subject identity, sessions', (
 			join(import.meta.dir, 'fixtures', 'auth-schema.sql'),
 			'utf8',
 		);
+		const identitySection = migration.split('PRODUCT-TABLES MARKER')[0];
 		const statements = (sql: string) =>
 			sql
 				.split('\n')
 				.filter((line) => /^\s*(create|drop|alter)\b/i.test(line))
 				.map((line) => line.trim());
-		expect(statements(migration)).toEqual(statements(fixture));
+		expect(statements(identitySection)).toEqual(statements(fixture));
 	});
 });

@@ -6,7 +6,11 @@
 -- fixture and production migrations cannot drift). Auth never derives
 -- secrets from model/API keys; sessions live in D1 (revocation is immediate).
 -- Product tables (workspaces, memberships, projects, runs, artifacts) are
--- added by P02 in this same file.
+-- added by P02 in this same file, AFTER the PRODUCT-TABLES marker below.
+-- The identity section above that marker is frozen (see tests/fixtures/
+-- auth-schema.sql and the drift guard in tests/auth.integration.test.ts).
+
+-- === PRODUCT-TABLES MARKER: identity DDL ends here (drift-guard boundary) ===
 
 create table "user" ("id" text not null primary key, "name" text not null, "email" text not null unique, "emailVerified" integer not null, "image" text, "createdAt" date not null, "updatedAt" date not null);
 
