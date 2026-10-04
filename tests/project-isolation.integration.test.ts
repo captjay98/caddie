@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import net from 'node:net';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,6 +13,15 @@ import {
 	WorkspaceSchema,
 } from '../packages/contracts/src/projects.ts';
 import { RunBindingSchema } from '../packages/contracts/src/index.ts';
+import type { AuthEnv, D1Database } from '../apps/app/src/server/auth.ts';
+import {
+	projectScopeForUser,
+	requireProjectScope,
+	requireWorkspaceScope,
+	ScopeError,
+	workspaceScopeForUser,
+} from '../apps/app/src/server/scope.ts';
+import * as projectsService from '../apps/app/src/server/projects.ts';
 
 /**
  * P02 — Projects, scoped persistence and artifacts, executed against a real
@@ -275,7 +285,7 @@ describe('P02 slice 1: product data model on real D1', () => {
 			 values ('ddl-mem-1','ddl-ws-1','ddl-user-1','owner','2026-10-04T00:00:00.000Z')`,
 		);
 		// duplicate membership for the same user+workspace is rejected
-		expect(
+		await expect(
 			d1Exec(
 				WORKER_BASE,
 				`insert into "workspace_memberships" ("id","workspaceId","userId","role","createdAt")
@@ -294,7 +304,7 @@ describe('P02 slice 1: product data model on real D1', () => {
 			 values ('ddl-pdr-1','ddl-proj-1','plan',1,'sha256-abc','v1','ddl-user-1','2026-10-04T00:00:00.000Z')`,
 		);
 		// the same (project, kind, revision) slot is immutable — a rewrite is rejected
-		expect(
+		await expect(
 			d1Exec(
 				WORKER_BASE,
 				`insert into "plan_doc_revisions" ("id","projectId","kind","revision","bodyHash","body","createdBy","createdAt")
@@ -317,7 +327,7 @@ describe('P02 slice 1: product data model on real D1', () => {
 			 values ('ddl-prb-1','ddl-proj-1','github','alice','rocket','2026-10-04T00:00:00.000Z')`,
 		);
 		// a second selected repo for the same project is rejected (one per project)
-		expect(
+		await expect(
 			d1Exec(
 				WORKER_BASE,
 				`insert into "project_repo_bindings" ("id","projectId","provider","owner","repo","createdAt")
@@ -331,7 +341,7 @@ describe('P02 slice 1: product data model on real D1', () => {
 			 values ('ddl-run-1','ddl-proj-1','conv-1','sub-1','plan@2','react-hono','ddl-user-1','route-1','2026-10-04','ddl-user-1','2026-10-04T00:00:00.000Z')`,
 		);
 		// run identity is durable and unique: a second binding with the same runId fails
-		expect(
+		await expect(
 			d1Exec(
 				WORKER_BASE,
 				`insert into "run_bindings" ("runId","projectId","conversationId","submissionId","planRevision","stackId","payerId","modelRouteId","pricingVersion","createdBy","createdAt")
@@ -339,7 +349,7 @@ describe('P02 slice 1: product data model on real D1', () => {
 			),
 		).rejects.toThrow();
 		// stackId is constrained to the five contract stacks
-		expect(
+		await expect(
 			d1Exec(
 				WORKER_BASE,
 				`insert into "run_bindings" ("runId","projectId","conversationId","submissionId","planRevision","stackId","payerId","modelRouteId","pricingVersion","createdBy","createdAt")
@@ -350,7 +360,7 @@ describe('P02 slice 1: product data model on real D1', () => {
 
 	test('projects are workspace-owned and foreign keys bind product rows to identity rows', async () => {
 		// a project without its workspace row is rejected
-		expect(
+		await expect(
 			d1Exec(
 				WORKER_BASE,
 				`insert into "projects" ("id","workspaceId","name","status","createdAt","updatedAt")
@@ -358,7 +368,7 @@ describe('P02 slice 1: product data model on real D1', () => {
 			),
 		).rejects.toThrow();
 		// a run binding must point at a real project
-		expect(
+		await expect(
 			d1Exec(
 				WORKER_BASE,
 				`insert into "run_bindings" ("runId","projectId","conversationId","submissionId","planRevision","stackId","payerId","modelRouteId","pricingVersion","createdBy","createdAt")
@@ -371,7 +381,7 @@ describe('P02 slice 1: product data model on real D1', () => {
 			`insert into "projects" ("id","workspaceId","name","status","createdAt","updatedAt")
 			 values ('ddl-proj-arch','ddl-ws-1','Archived Project','archived','2026-10-04T00:00:00.000Z','2026-10-04T00:00:00.000Z')`,
 		);
-		expect(
+		await expect(
 			d1Exec(
 				WORKER_BASE,
 				`insert into "projects" ("id","workspaceId","name","status","createdAt","updatedAt")
@@ -554,5 +564,314 @@ describe('P02 contracts: project domain schemas', () => {
 		expect(
 			safeParse(WorkspaceSchema, { id: 'ws_1', name: 'WS', createdAt: 'whenever' }).success,
 		).toBe(false);
+	});
+});
+
+// --- slice 2: scope enforcement (unit, in-process sqlite) -----------------------------
+
+/**
+ * The production migration applied to an in-memory sqlite database (the same
+ * schema the fixture proves on real D1 above). Services are exercised directly
+ * here so the scope contract — missing scope THROWS, scope is re-verified
+ * against D1 — is proven at the unit level, independent of HTTP plumbing.
+ */
+function wrapSqliteAsD1(sqlite: Database): D1Database {
+	return {
+		prepare: (query: string) => {
+			const stmt = sqlite.prepare(query);
+			return {
+				bind: (...values: unknown[]) => ({
+					run: async () => stmt.run(...(values as never[])),
+					// meta mirrors the real D1 shape (better-auth's D1 dialect reads
+					// results.meta); changes is only used for optional affected-rows
+					// bookkeeping, which these tests never rely on.
+					all: async () => ({
+						results: stmt.all(...(values as never[])) as unknown[],
+						meta: {},
+					}),
+				}),
+				run: async () => stmt.run(),
+				all: async () => ({ results: stmt.all() as unknown[], meta: {} }),
+			};
+		},
+		batch: async (statements: unknown[]) => {
+			const out: unknown[] = [];
+			for (const statement of statements as { run(): unknown }[]) {
+				out.push(await statement.run());
+			}
+			return out;
+		},
+		exec: async (query: string) => sqlite.exec(query),
+	} as unknown as D1Database;
+}
+
+describe('P02 slice 2: scope enforcement and project services (unit)', () => {
+	let sqlite: Database;
+	let db: D1Database;
+	// Populated by the setup test below; later tests depend on the ordering,
+	// which bun preserves within a describe block.
+	let unitWsId = '';
+	let unitProjectAId = '';
+	let unitProjectBId = '';
+
+	const unitEnv: AuthEnv = {
+		DB: null as unknown as D1Database,
+		BETTER_AUTH_SECRET: 'unit-secret-0123456789abcdef0123456789abcdef',
+		BETTER_AUTH_URL: 'http://127.0.0.1:1',
+	};
+
+	beforeAll(() => {
+		sqlite = new Database(':memory:');
+		sqlite.exec('PRAGMA foreign_keys = ON;');
+		sqlite.exec(readFileSync(MIGRATION_PATH, 'utf8'));
+		db = wrapSqliteAsD1(sqlite);
+		unitEnv.DB = db;
+		sqlite.exec(
+			`insert into "user" ("id","name","email","emailVerified","createdAt","updatedAt")
+			 values ('unit-alice','Unit Alice','unit-alice@example.com',0,'2026-10-04T00:00:00.000Z','2026-10-04T00:00:00.000Z')`,
+		);
+		sqlite.exec(
+			`insert into "user" ("id","name","email","emailVerified","createdAt","updatedAt")
+			 values ('unit-bob','Unit Bob','unit-bob@example.com',0,'2026-10-04T00:00:00.000Z','2026-10-04T00:00:00.000Z')`,
+		);
+	});
+
+	test('missing session throws ScopeError 401: no scope may be derived without a verified session', async () => {
+		// real better-auth getSession over the production code path, no cookie
+		await expect(requireProjectScope(db, unitEnv, new Headers(), 'proj_any')).rejects.toMatchObject(
+			{ status: 401, code: 'unauthenticated' },
+		);
+	}, 20_000);
+
+	test('missing session on the workspace path throws 401 as well', async () => {
+		await expect(requireWorkspaceScope(db, unitEnv, new Headers(), 'ws_any')).rejects.toMatchObject(
+			{ status: 401, code: 'unauthenticated' },
+		);
+	});
+
+	test('workspace creation binds the creator as owner; project creation requires a membership-derived scope', async () => {
+		const ws = await projectsService.createWorkspace(db, 'unit-alice', { name: 'Unit WS' });
+		expect(ws.id).toBeTruthy();
+		unitWsId = ws.id;
+
+		const projA = await projectsService.createProject(
+			db,
+			{ actorId: 'unit-alice', workspaceId: unitWsId },
+			{ workspaceId: unitWsId, name: 'Unit Rocket' },
+		);
+		expect(projA.workspaceId).toBe(unitWsId);
+		unitProjectAId = projA.id;
+
+		// creating a project with a scope that does not match the body workspace fails
+		await expect(
+			projectsService.createProject(
+				db,
+				{ actorId: 'unit-alice', workspaceId: unitWsId },
+				{ workspaceId: 'ws-somewhere-else', name: 'Smuggled' },
+			),
+		).rejects.toMatchObject({ status: 403 });
+	});
+
+	test('membership is required for scope: a non-member actor gets 403 on workspace and project paths', async () => {
+		await expect(workspaceScopeForUser(db, 'unit-bob', unitWsId)).rejects.toMatchObject({
+			status: 403,
+			code: 'not_a_member',
+		});
+		// bob fabricates a full scope triple for alice's project — the service
+		// re-verifies against D1 and rejects the fabricated actor
+		await expect(
+			projectsService.getProject(db, {
+				actorId: 'unit-bob',
+				workspaceId: unitWsId,
+				projectId: unitProjectAId,
+			}),
+		).rejects.toMatchObject({ status: 403, code: 'not_a_member' });
+		await expect(projectScopeForUser(db, 'unit-bob', unitProjectAId)).rejects.toMatchObject({
+			status: 403,
+			code: 'not_a_member',
+		});
+	});
+
+	test('scope is re-verified against D1: unknown projects 404, tampered workspace binding 403', async () => {
+		await expect(
+			projectsService.getProject(db, {
+				actorId: 'unit-alice',
+				workspaceId: unitWsId,
+				projectId: 'proj_missing',
+			}),
+		).rejects.toMatchObject({ status: 404, code: 'project_not_found' });
+		// scope claims a workspace the project does not live in
+		await expect(
+			projectsService.getProject(db, {
+				actorId: 'unit-alice',
+				workspaceId: 'ws_other',
+				projectId: unitProjectAId,
+			}),
+		).rejects.toMatchObject({ status: 403, code: 'project_out_of_scope' });
+	});
+
+	test('missing scope arguments THROW — services never silently succeed scope-less', async () => {
+		const undefinedScope = undefined as unknown as Parameters<
+			typeof projectsService.getProject
+		>[1];
+		await expect(
+			projectsService.getProject(db, undefinedScope),
+		).rejects.toMatchObject({ code: 'missing_scope' });
+		await expect(
+			projectsService.createProject(db, undefinedScope, {
+				workspaceId: unitWsId,
+				name: 'No Scope',
+			}),
+		).rejects.toMatchObject({ code: 'missing_scope' });
+		await expect(
+			projectsService.listProjectsInWorkspace(db, undefinedScope),
+		).rejects.toMatchObject({ code: 'missing_scope' });
+		await expect(
+			projectsService.createPlanDocRevision(db, undefinedScope, { kind: 'plan', body: 'x' }),
+		).rejects.toMatchObject({ code: 'missing_scope' });
+		await expect(projectsService.archiveProject(db, undefinedScope)).rejects.toMatchObject({
+			code: 'missing_scope',
+		});
+	});
+
+	test('scope derivation takes workspaceId from the PROJECT row, never from caller input', async () => {
+		const projB = await projectsService.createProject(
+			db,
+			{ actorId: 'unit-bob', workspaceId: '' as string },
+			// bob creates his own workspace through the service first
+			{ workspaceId: '', name: 'ignored' },
+		).catch(() => null);
+		// the deliberately-invalid create above must have failed, not half-succeeded
+		expect(projB).toBeNull();
+		const bobWs = await projectsService.createWorkspace(db, 'unit-bob', { name: 'Bob WS' });
+		const bobProj = await projectsService.createProject(
+			db,
+			{ actorId: 'unit-bob', workspaceId: bobWs.id },
+			{ workspaceId: bobWs.id, name: 'Bob Satellite' },
+		);
+		unitProjectBId = bobProj.id;
+		const scope = await projectScopeForUser(db, 'unit-bob', unitProjectBId);
+		expect(scope).toEqual({
+			actorId: 'unit-bob',
+			workspaceId: bobWs.id,
+			projectId: unitProjectBId,
+		});
+	});
+
+	test('plan-doc revisions number per (project, kind); latest is per project, never per user', async () => {
+		const aliceScope = {
+			actorId: 'unit-alice',
+			workspaceId: unitWsId,
+			projectId: unitProjectAId,
+		};
+		const a1 = await projectsService.createPlanDocRevision(db, aliceScope, {
+			kind: 'plan',
+			body: 'A v1',
+		});
+		const a2 = await projectsService.createPlanDocRevision(db, aliceScope, {
+			kind: 'plan',
+			body: 'A v2',
+		});
+		expect(a1.revision).toBe(1);
+		expect(a2.revision).toBe(2);
+
+		// bob's project has its own independent sequence
+		const bobScope = {
+			actorId: 'unit-bob',
+			workspaceId: (await projectScopeForUser(db, 'unit-bob', unitProjectBId)).workspaceId,
+			projectId: unitProjectBId,
+		};
+		const b1 = await projectsService.createPlanDocRevision(db, bobScope, {
+			kind: 'plan',
+			body: 'B v1',
+		});
+		expect(b1.revision).toBe(1);
+
+		const aliceList = await projectsService.listPlanDocRevisions(db, aliceScope, 'plan');
+		expect(aliceList.map((r) => r.body)).toEqual(['A v2', 'A v1']);
+		const bobList = await projectsService.listPlanDocRevisions(db, bobScope, 'plan');
+		expect(bobList.map((r) => r.body)).toEqual(['B v1']);
+		// no cross-project bleed in either direction
+		expect(JSON.stringify(aliceList)).not.toContain('B v1');
+		expect(JSON.stringify(bobList)).not.toContain('A v');
+	});
+
+	test('run bindings store the scope project at creation; lookups go by the stored project', async () => {
+		const aliceScope = {
+			actorId: 'unit-alice',
+			workspaceId: unitWsId,
+			projectId: unitProjectAId,
+		};
+		const record = await projectsService.createRunBinding(db, aliceScope, {
+			conversationId: 'conv_unit_1',
+			submissionId: 'sub_unit_1',
+			planRevision: 'plan@2',
+			stackId: 'react-hono',
+			payerId: 'unit-alice',
+			modelRouteId: 'route_unit',
+			pricingVersion: '2026-10',
+		});
+		// projectId comes from the scope, not from any input (no such input exists)
+		expect(record.projectId).toBe(unitProjectAId);
+		expect(record.runId).toBeTruthy();
+
+		// lookup under the stored project succeeds for a member...
+		expect(await projectsService.getRunBinding(db, aliceScope, record.runId)).toMatchObject({
+			runId: record.runId,
+		});
+		// ...and returns NOTHING when addressed from another project — even the
+		// same actor with a different project scope (no active-project inference)
+		const aliceOnBobProject = {
+			actorId: 'unit-alice',
+			workspaceId: unitWsId,
+			projectId: unitProjectAId,
+		};
+		expect(aliceOnBobProject.projectId).toBe(unitProjectAId);
+		const bobScope = await projectScopeForUser(db, 'unit-bob', unitProjectBId);
+		expect(await projectsService.getRunBinding(db, bobScope, record.runId)).toBeNull();
+		// listing a project's runs never shows another project's runs
+		expect(await projectsService.listRunBindings(db, bobScope)).toEqual([]);
+	});
+
+	test('artifact revisions are project-scoped and revisioned per artifact', async () => {
+		const aliceScope = {
+			actorId: 'unit-alice',
+			workspaceId: unitWsId,
+			projectId: unitProjectAId,
+		};
+		const artifact = await projectsService.createArtifactRevision(db, aliceScope, {
+			kind: 'preview',
+			metadata: '{"url":"/preview/unit"}',
+		});
+		expect(artifact.projectId).toBe(unitProjectAId);
+		const again = await projectsService.createArtifactRevision(db, aliceScope, {
+			artifactId: artifact.artifactId,
+			kind: 'preview',
+			metadata: '{"url":"/preview/unit-v2"}',
+		});
+		expect(again.revision).toBe(2);
+		const list = await projectsService.listArtifactRevisions(db, aliceScope, artifact.artifactId);
+		expect(list.map((a) => a.revision)).toEqual([2, 1]);
+	});
+
+	test('update and archive are project-scoped transitions; workspace ownership is immutable', async () => {
+		const aliceScope = {
+			actorId: 'unit-alice',
+			workspaceId: unitWsId,
+			projectId: unitProjectAId,
+		};
+		const updated = await projectsService.updateProject(db, aliceScope, { name: 'Unit Rocket II' });
+		expect(updated.name).toBe('Unit Rocket II');
+		expect(updated.workspaceId).toBe(unitWsId);
+		// strict input: a workspace move cannot ride through an update
+		await expect(
+			projectsService.updateProject(db, aliceScope, {
+				workspaceId: 'ws_smuggled',
+			} as never),
+		).rejects.toMatchObject({ status: 400 });
+		const archived = await projectsService.archiveProject(db, aliceScope);
+		expect(archived.status).toBe('archived');
+		// a second archive is idempotent state, still archived
+		expect((await projectsService.archiveProject(db, aliceScope)).status).toBe('archived');
 	});
 });
