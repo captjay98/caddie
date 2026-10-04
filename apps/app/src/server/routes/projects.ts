@@ -43,12 +43,29 @@ function errorJson(error: unknown): { status: number; body: { error: string; mes
 	return { status: 500, body: { error: 'internal_error' } };
 }
 
-async function requireActorId(env: Env, headers: Headers): Promise<string> {
+async function requireSessionActorId(env: Env, headers: Headers): Promise<string> {
 	const userId = await sessionUserId(env, headers);
 	if (!userId) {
 		throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
 	}
 	return userId;
+}
+
+/** Parse a JSON body, mapping malformed JSON to a 400 (client error class). */
+async function readJson(request: Request): Promise<unknown> {
+	try {
+		return await request.json();
+	} catch {
+		throw new ScopeError(400, 'invalid_input', 'body must be valid JSON');
+	}
+}
+
+/** Validate an addressing field before it reaches scope derivation (400, not 403). */
+function requireNonEmptyString(value: unknown, field: string): string {
+	if (typeof value !== 'string' || value.trim() === '') {
+		throw new ScopeError(400, 'invalid_request', `${field} is required`);
+	}
+	return value;
 }
 
 export function createProjectsRouter(): Hono<{ Bindings: Env }> {
@@ -61,17 +78,21 @@ export function createProjectsRouter(): Hono<{ Bindings: Env }> {
 
 	// --- workspaces -----------------------------------------------------------
 	router.post('/workspaces', async (c) => {
-		const actorId = await requireActorId(c.env, c.req.raw.headers);
-		const workspace = await createWorkspace(c.env.DB, actorId, await c.req.json());
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const workspace = await createWorkspace(c.env.DB, actorId, await readJson(c.req.raw));
 		return c.json({ workspace }, 201);
 	});
 
 	// --- projects ---------------------------------------------------------------
 	router.post('/projects', async (c) => {
-		const body: unknown = await c.req.json();
-		const workspaceId = (body as { workspaceId?: string })?.workspaceId;
-		const scope = await requireWorkspaceScope(c.env.DB, c.env, c.req.raw.headers, String(workspaceId));
-		const project = await createProject(c.env.DB, scope, body);
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const body = await readJson(c.req.raw);
+		const workspaceId = requireNonEmptyString(
+			(body as { workspaceId?: unknown })?.workspaceId,
+			'workspaceId',
+		);
+		const scope = await requireWorkspaceScope(c.env.DB, c.env, c.req.raw.headers, workspaceId);
+		const project = await createProject(c.env.DB, { actorId, workspaceId }, body);
 		return c.json({ project }, 201);
 	});
 
@@ -81,7 +102,7 @@ export function createProjectsRouter(): Hono<{ Bindings: Env }> {
 			const scope = await requireWorkspaceScope(c.env.DB, c.env, c.req.raw.headers, workspaceId);
 			return c.json({ projects: await listProjectsInWorkspace(c.env.DB, scope) });
 		}
-		const actorId = await requireActorId(c.env, c.req.raw.headers);
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
 		return c.json({ projects: await listProjectsForActor(c.env.DB, actorId) });
 	});
 
@@ -92,7 +113,7 @@ export function createProjectsRouter(): Hono<{ Bindings: Env }> {
 
 	router.patch('/projects/:projectId', async (c) => {
 		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
-		const project = await updateProject(c.env.DB, scope, await c.req.json());
+		const project = await updateProject(c.env.DB, scope, await readJson(c.req.raw));
 		return c.json({ project });
 	});
 
@@ -105,13 +126,15 @@ export function createProjectsRouter(): Hono<{ Bindings: Env }> {
 	// --- plan-doc revisions -------------------------------------------------------
 	router.post('/projects/:projectId/plan-docs', async (c) => {
 		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
-		const revision = await createPlanDocRevision(c.env.DB, scope, await c.req.json());
+		const revision = await createPlanDocRevision(c.env.DB, scope, await readJson(c.req.raw));
 		return c.json({ revision }, 201);
 	});
 
 	router.get('/projects/:projectId/plan-docs', async (c) => {
 		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
 		const kind = c.req.query('kind');
+		// Revision counters are allocated per (project, kind); without ?kind=
+		// `latest` spans incomparable counters — clients should pass kind.
 		const revisions = await listPlanDocRevisions(c.env.DB, scope, kind);
 		return c.json({ revisions, latest: revisions[0] ?? null });
 	});
@@ -119,7 +142,7 @@ export function createProjectsRouter(): Hono<{ Bindings: Env }> {
 	// --- run bindings ----------------------------------------------------------------
 	router.post('/projects/:projectId/run-bindings', async (c) => {
 		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
-		const runBinding = await createRunBinding(c.env.DB, scope, await c.req.json());
+		const runBinding = await createRunBinding(c.env.DB, scope, await readJson(c.req.raw));
 		return c.json({ runBinding }, 201);
 	});
 
@@ -140,7 +163,7 @@ export function createProjectsRouter(): Hono<{ Bindings: Env }> {
 	// --- artifact revisions --------------------------------------------------------
 	router.post('/projects/:projectId/artifacts', async (c) => {
 		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
-		const artifact = await createArtifactRevision(c.env.DB, scope, await c.req.json());
+		const artifact = await createArtifactRevision(c.env.DB, scope, await readJson(c.req.raw));
 		return c.json({ artifact }, 201);
 	});
 

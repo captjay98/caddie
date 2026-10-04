@@ -811,7 +811,7 @@ describe('P01 slice 2: invite allowlist, provider-subject identity, sessions', (
 		// the statement level: the fixture proves the migration's schema, so a
 		// divergence would make every test here lie about production D1. Only
 		// the identity section is compared — P02 appends product tables after
-		// the PRODUCT-TABLES marker.
+		// the IDENTITY-DDL-BOUNDARY marker.
 		const migration = readFileSync(
 			join(import.meta.dir, '..', 'apps', 'app', 'migrations', '0001_product.sql'),
 			'utf8',

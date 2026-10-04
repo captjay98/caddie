@@ -47,11 +47,6 @@ import type { WorkspaceScope } from './scope.ts';
  * scope's projectId — "latest" is per PROJECT, never per user, and run
  * lookups go by the STORED project of the binding, never an active-project
  * inference.
- *
- * NOTE: project-domain schemas are imported from the contracts source until
- * the integration lead applies `export * from './projects.ts';` to
- * packages/contracts/src/index.ts, after which these imports can move to
- * '@caddie/contracts'.
  */
 
 // --- small helpers -------------------------------------------------------------
@@ -209,24 +204,18 @@ export async function createWorkspace(
 		name: parsed.name,
 		createdAt: nowIso(),
 	};
-	await insertOrConflict(
-		db,
-		'workspace_conflict',
-		'insert into "workspaces" ("id","name","createdAt") values (?,?,?)',
-		workspace.id,
-		workspace.name,
-		workspace.createdAt,
-	);
-	await insertOrConflict(
-		db,
-		'membership_conflict',
-		'insert into "workspace_memberships" ("id","workspaceId","userId","role","createdAt") values (?,?,?,?,?)',
-		newId('mem'),
-		workspace.id,
-		verifiedActor,
-		'owner',
-		workspace.createdAt,
-	);
+	// Workspace + owner membership commit atomically: an orphaned workspace
+	// row without its owner membership would be unreachable by anyone.
+	await db.batch([
+		db
+			.prepare('insert into "workspaces" ("id","name","createdAt") values (?,?,?)')
+			.bind(workspace.id, workspace.name, workspace.createdAt),
+		db
+			.prepare(
+				'insert into "workspace_memberships" ("id","workspaceId","userId","role","createdAt") values (?,?,?,?,?)',
+			)
+			.bind(newId('mem'), workspace.id, verifiedActor, 'owner', workspace.createdAt),
+	]);
 	return workspace;
 }
 

@@ -86,7 +86,6 @@ function freePort(): Promise<number> {
 let WORKER_PORT = 0;
 let WORKER_BASE = '';
 
-let workerProcess: Bun.Subprocess | undefined;
 
 function wranglerCliPath(): string {
 	// wrangler is a devDependency of apps/app; resolve without registry access.
@@ -425,7 +424,6 @@ beforeAll(async () => {
 	WORKER_PORT = await freePort();
 	WORKER_BASE = `http://127.0.0.1:${WORKER_PORT}`;
 	const main = await startFixtureWorker(WORKER_PORT, { AUTH_STUB_BASE_URL: stub.url });
-	workerProcess = main.process;
 	await applyMigration(WORKER_PORT);
 }, 180_000);
 
@@ -1023,6 +1021,39 @@ describe('P02 slice 2: scope enforcement and project services (unit)', () => {
 		expect(await projectsService.getRunBinding(db, bobScope, record.runId)).toBeNull();
 		// listing a project's runs never shows another project's runs
 		expect(await projectsService.listRunBindings(db, bobScope)).toEqual([]);
+
+		// a client-supplied duplicate runId collides into a typed 409 — the
+		// unique key elects no second owner and no silent overwrite happens
+		const explicit = await projectsService.createRunBinding(db, aliceScope, {
+			runId: 'run_explicit_1',
+			conversationId: 'conv_unit_2',
+			submissionId: 'sub_unit_2',
+			planRevision: 'plan@2',
+			stackId: 'react-hono',
+			payerId: 'unit-alice',
+			modelRouteId: 'route_unit',
+			pricingVersion: '2026-10',
+		});
+		expect(explicit.runId).toBe('run_explicit_1');
+		let conflict: { status: number; code: string } | null = null;
+		try {
+			await projectsService.createRunBinding(db, aliceScope, {
+				runId: 'run_explicit_1',
+				conversationId: 'conv_unit_3',
+				submissionId: 'sub_unit_3',
+				planRevision: 'plan@2',
+				stackId: 'react-hono',
+				payerId: 'unit-alice',
+				modelRouteId: 'route_unit',
+				pricingVersion: '2026-10',
+			});
+		} catch (error) {
+			conflict = {
+				status: (error as { status?: number }).status ?? 0,
+				code: (error as { code?: string }).code ?? '',
+			};
+		}
+		expect(conflict).toMatchObject({ status: 409, code: 'run_id_conflict' });
 	});
 
 	test('artifact revisions are project-scoped and revisioned per artifact', async () => {

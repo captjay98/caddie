@@ -169,6 +169,15 @@ describe('P00 routing composition', () => {
 		expect(await res.json()).toEqual({ authenticated: false });
 	});
 
+	test('projects router is composed: unauthenticated list is 401 JSON, not the 404 fallback', async () => {
+		const res = await fetch(`${BASE}/api/projects`, {
+			signal: AbortSignal.timeout(5000),
+		});
+		expect(res.status).toBe(401);
+		expect(res.headers.get('content-type')).toContain('application/json');
+		expect(((await res.json()) as { error?: string }).error).toBe('unauthenticated');
+	});
+
 	test('unknown /api path is a JSON 404, never the SPA or landing', async () => {
 		const res = await fetch(`${BASE}/api/definitely-not-a-route`, {
 			signal: AbortSignal.timeout(5000),
