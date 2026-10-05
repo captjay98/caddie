@@ -22,7 +22,8 @@
 		"@tanstack/react-router": "1.170.41",
 		"react-markdown": "10.1.0",
 		"remark-gfm": "4.0.1",
-		"@caddie/ui": "workspace:*"
+		"@caddie/ui": "workspace:*",
+		"@earendil-works/pi-ai": "0.87.1"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "1.39.2",

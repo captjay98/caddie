@@ -16,6 +16,7 @@
       "dependencies": {
         "@caddie/contracts": "workspace:*",
         "@caddie/ui": "workspace:*",
+        "@earendil-works/pi-ai": "0.87.1",
         "@flue/react": "2.2.2",
         "@flue/runtime": "2.2.2",
         "@flue/sdk": "2.2.2",

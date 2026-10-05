@@ -1,0 +1,23 @@
+{
+	"version": "1",
+	"skills": [
+		{
+			"name": "planning",
+			"version": "1.0.0",
+			"path": "planning/SKILL.md",
+			"sha256": "01ae4031d6144266275120d0d368e47513006f4ad093c071cee0962b148ed927"
+		},
+		{
+			"name": "build-verify",
+			"version": "1.0.0",
+			"path": "build-verify/SKILL.md",
+			"sha256": "f4f29376e2259b943756335d58381801848be7af5520b637ef22a859a80436fa"
+		},
+		{
+			"name": "delivery-checklist",
+			"version": "1.0.0",
+			"path": "delivery-checklist/SKILL.md",
+			"sha256": "33cb7d45ebfe3dc0b30f541275498a1d9484419875294042f171b59bde903bac"
+		}
+	]
+}
