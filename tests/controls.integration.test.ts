@@ -630,3 +630,64 @@ describe('P03 slice 2: external-effects ledger over real workerd + D1', () => {
 		expect(missing.status).toBe(404);
 	});
 });
+
+// --- slice 3a: credential handles (redaction-only BYOK placeholder) ---------------------
+
+/**
+ * BYOK credential handles are a REDACTION-ONLY placeholder this packet: the
+ * store persists ONLY a non-reversible fingerprint plus an envelope marker —
+ * never the secret — and the module exports NO function that can return secret
+ * material. Real envelope encryption/key rotation lands with P04/P08 usage
+ * (documented limitation, see the module header).
+ */
+describe('P03 credentials: redaction-only BYOK handles', () => {
+	const SECRET = 'sk-byok-supersecret-value-9f2c7a';
+
+	test('module surface: no function that could reveal secret material is exported', async () => {
+		const credentials = await import('../apps/app/src/server/credentials.ts');
+		const dangerous = Object.keys(credentials).filter((name) =>
+			/reveal|decrypt|plaintext|getsecret|secretvalue|material/i.test(name),
+		);
+		expect(dangerous).toEqual([]);
+	});
+
+	test('redact output never contains the secret; the fingerprint is stable', async () => {
+		const credentials = await import('../apps/app/src/server/credentials.ts');
+		const redacted = await credentials.redactCredential(SECRET);
+		expect(JSON.stringify(redacted)).not.toContain(SECRET);
+		expect(redacted.preview).not.toContain('supersecret-value');
+		const again = await credentials.redactCredential(SECRET);
+		expect(again.fingerprint).toBe(redacted.fingerprint);
+		// different secret -> different fingerprint
+		const other = await credentials.redactCredential('sk-byok-other-value-aaaa');
+		expect(other.fingerprint).not.toBe(redacted.fingerprint);
+	});
+
+	test('stored handles persist only the fingerprint + envelope marker — database truth contains no secret', async () => {
+		const res = await fetch(`${WORKER_BASE}/__test/credentials/register`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ projectId: ledgerProjectId, provider: 'nebius', secret: SECRET }),
+		});
+		expect(res.status).toBe(200);
+		const handle = ((await res.json()) as { handle: { fingerprint: string; envelope: string } }).handle;
+		const credentials = await import('../apps/app/src/server/credentials.ts');
+		const redacted = await credentials.redactCredential(SECRET);
+		expect(handle.fingerprint).toBe(redacted.fingerprint);
+		expect(handle.envelope).not.toContain(SECRET);
+
+		// database truth: no row anywhere carries the secret value
+		const rows = await d1Rows(`select * from "credential_handles" where "projectId" = '${ledgerProjectId}'`);
+		expect(rows.length).toBeGreaterThanOrEqual(1);
+		expect(JSON.stringify(rows)).not.toContain(SECRET);
+
+		// the same (project, provider, secret) is one handle; a second is a conflict
+		const dup = await fetch(`${WORKER_BASE}/__test/credentials/register`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ projectId: ledgerProjectId, provider: 'nebius', secret: SECRET }),
+		});
+		expect(dup.status).toBe(409);
+		expect(((await dup.json()) as { error: string }).error).toBe('credential_handle_conflict');
+	});
+});
