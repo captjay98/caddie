@@ -500,14 +500,27 @@ export class SandboxDriver {
 			updatedAt: nowIso(),
 		});
 
+		// The caller-abort listener is registered BEFORE the final awaits: an
+		// abort landing inside those awaits must still cancel the dispatch.
+		const controller = new AbortController();
+		const onCallerAbort = () => controller.abort();
+		input.signal?.addEventListener('abort', onCallerAbort, { once: true });
+		// Re-check immediately before the dispatch awaits: addEventListener
+		// does not fire for an already-aborted signal, so the earlier check is
+		// not sufficient once awaits intervene.
+		if (input.signal?.aborted) {
+			input.signal?.removeEventListener('abort', onCallerAbort);
+			throw new SandboxError(
+				409,
+				'ABORTED_BEFORE_DISPATCH',
+				'signal was aborted before dispatch — nothing was dispatched',
+			);
+		}
 		// Durable identity BEFORE dispatch: a crash right after the dispatch can
 		// always be reconciled by this key.
 		await this.persistence.save(record('dispatching', null));
 
 		let remoteId: string | null = null;
-		const controller = new AbortController();
-		const onCallerAbort = () => controller.abort();
-		input.signal?.addEventListener('abort', onCallerAbort, { once: true });
 		const dispatchTimer = setTimeout(() => controller.abort(), this.dispatchTimeoutMs);
 		dispatchTimer.unref?.();
 		try {
@@ -524,9 +537,20 @@ export class SandboxDriver {
 			);
 			remoteId = dispatched.operationId;
 		} catch (error) {
-			// Transport failure: the operation MAY exist remotely. Persist the
-			// ambiguity; never retry blindly — reconcile by operation key.
-			void error;
+			// A received 4xx proves the operation was NOT created — a definitive
+			// rejection, not an ambiguity. Transport failures and aborts are the
+			// ambiguous set: the operation MAY exist remotely. Never retry
+			// blindly either way — reconcile by operation key.
+			const status = (error as { status?: number }).status;
+			if (typeof status === 'number' && status >= 400 && status < 500 && status !== 408) {
+				await this.persistence.save(record('failed', null));
+				throw new SandboxError(
+					502,
+					'DISPATCH_REJECTED',
+					`dispatch of operation key ${operationKey} was rejected by the sandbox service (status ${status})`,
+					{ operationKey, upstreamStatus: status },
+				);
+			}
 			await this.persistence.save(record('ambiguous', null));
 			throw new SandboxError(
 				502,

@@ -7,5 +7,15 @@
 		"./markdown.css": "./src/markdown.css",
 		"./Markdown": "./src/Markdown.tsx",
 		"./time": "./src/time.ts"
+	},
+	"dependencies": {
+		"react-markdown": "10.1.0",
+		"remark-gfm": "4.0.1"
+	},
+	"peerDependencies": {
+		"react": ">=18"
+	},
+	"devDependencies": {
+		"@types/react": "^19.2.0"
 	}
 }

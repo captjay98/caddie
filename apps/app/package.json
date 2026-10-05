@@ -17,7 +17,12 @@
 		"react": "^19.2.0",
 		"react-dom": "^19.2.0",
 		"better-auth": "1.7.7",
-		"@caddie/contracts": "workspace:*"
+		"@caddie/contracts": "workspace:*",
+		"@tanstack/react-query": "5.104.1",
+		"@tanstack/react-router": "1.170.41",
+		"react-markdown": "10.1.0",
+		"remark-gfm": "4.0.1",
+		"@caddie/ui": "workspace:*"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "1.39.2",
