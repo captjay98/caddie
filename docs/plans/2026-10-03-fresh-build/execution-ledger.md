@@ -7,7 +7,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P00 | LOCAL VERIFIED | Integration lead (coordinator) | PASS | PASS (RECHECK: PASS after fixes) | 879e0f1 |
 | P01 | LOCAL VERIFIED (real OAuth callbacks BLOCKED on owner credentials) | Backend identity engineer (subagent); integrated by lead | PASS | PASS (fixes applied: AUTH_TEST_MODE fence, dead helper removal, DDL-drift guard, log cleanup) | see evidence records (c41dc19 + integration b1b4d4e + review fixes) |
 | P02 | LOCAL VERIFIED | Backend product engineer (subagent; slice 3 completed by lead after dispatch loss) | PASS | PASS (fixes applied + re-verified) | see evidence records (4a0eda2/66c2cf2/0ea748a + integration 801f97e + fixes 196ac63) |
-| P03 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P03 | LOCAL VERIFIED (gate for ALL paid/effectful work — now open for local, closed for live until P04/P05 credentials) | Backend governance engineer (subagent); integrated by lead | PASS | PASS (P2 currency fence applied + re-verified) | see evidence records (164eace/0de2638/71f0a66 + integration ee5fca4 + fence fix) |
 | P04 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P05 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P06 | NOT STARTED | Unassigned | Pending | Pending | — (tokens port pulled forward to P16, see P16 record) |
@@ -27,6 +27,33 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | NOT STARTED | Unassigned | Pending | Pending | — |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P03", "status": "LOCAL VERIFIED", "sha": "71f0a66 + integration ee5fca4 + currency fence",
+  "commands": [
+    {"command": "bun run verify:packet P03", "exitCode": 0, "receipt": "2 checks PASS: controls 23 + budget-races 7"},
+    {"command": "bun test tests/controls.integration.test.ts", "exitCode": 0,
+     "receipt": "23 passed — stale/expired/revoked/wrong-actor/wrong-project approvals rejected AT EFFECT TIME with distinct codes and ZERO provider invocations (D1-counted fake); duplicate operationKey 409; reconciliation-required + late-receipt reconcile; agent bridge request/read only (no decide route exists, DB-truth pending rows)"},
+    {"command": "bun test tests/budget-races.integration.test.ts", "exitCode": 0,
+     "receipt": "7 passed — contracts.md race proven: limit 100, two simultaneous 70-unit HTTP reserves, exactly 1×200 + 1×402 budget_exceeded, row-sum 70, 3 rounds, real workerd D1 (trigger-guarded INSERT, no JS mutex); settle idempotent; unknown pricing fails closed; cancelled run stays reserved"},
+    {"command": "bun test tests/project-isolation.integration.test.ts tests/auth.integration.test.ts", "exitCode": 0, "receipt": "42 passed unchanged"},
+    {"command": "bun run typecheck", "exitCode": 0}
+  ],
+  "artifacts": [{"path": "apps/app/migrations/0002_controls.sql", "note": "approvals (partial unique index on pending intentHash), external_operations (unique operationKey), budget_payers/pricing/reservations + budget_reservations_cap_guard trigger (server-side atomicity), credential_handles (fingerprints only)"}],
+  "environment": "local workerd + local D1 (miniflare); provider is a counting fake in fixtures — zero-call proofs are about the GATE, not about any real provider",
+  "providerCalls": "none",
+  "specReview": "PASS (independent subagent; 8 acceptance items incl. independent bun:sqlite reproduction of the cap trigger)",
+  "qualityReview": "PASS (independent subagent; P2 fixed: currency change refused while reservations outstanding — fence + re-verified 30/30; P3s noted: reservationKey-duplicate error precedence, safe-integer uniformity, concurrent-receipt idempotent branch, release/settle window honesty, substring error classification, date-affinity nits, expired-pending refresh behavior documented)",
+  "limitations": [
+    "credentials.ts is a REDACTION-ONLY placeholder: fingerprints + envelope marker, no encryption at rest, no reveal path (module-surface test proves no secret export) — real envelope encryption/rotation lands with P04/P08 usage; classified DOCUMENTATION ONLY for encryption-at-rest",
+    "agent-bridge request/read is FK-validity-only; agent identity binding to run scopes arrives with P05",
+    "budget cap = outstanding-liability cap; period/billing-window accounting is P05 run accounting",
+    "race proven on local workerd D1 (SQLite serialization); hosted-D1 reproduction is P17 staged work"
+  ]
+}
+```
+
 
 ```json
 {

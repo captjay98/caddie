@@ -190,6 +190,29 @@ function requireReservationRow(row: Record<string, unknown> | null, key: string)
 export async function setBudgetLimit(db: D1Database, input: unknown): Promise<BudgetPayer> {
 	const parsed = parseOr400(BudgetLimitInputSchema, input);
 	const now = nowIso();
+	// A currency change while reservations are outstanding would let the cap
+	// trigger sum mixed currencies against one limit — refuse it up front.
+	const existing = await queryAll(
+		db,
+		'select "currency" from "budget_payers" where "payerId" = ?',
+		parsed.payerId,
+	);
+	const current = existing[0];
+	if (current && String(current['currency']) !== parsed.currency) {
+		const outstanding = await queryAll(
+			db,
+			`select coalesce(sum("amountMinorUnits"), 0) as "reserved" from "budget_reservations"
+			 where "payerId" = ? and "status" = 'reserved'`,
+			parsed.payerId,
+		);
+		if (Number(outstanding[0]?.['reserved'] ?? 0) > 0) {
+			throw new ScopeError(
+				409,
+				'currency_change_with_outstanding_reservations',
+				'release or settle outstanding reservations before changing the payer currency',
+			);
+		}
+	}
 	await db
 		.prepare(
 			`insert into "budget_payers" ("payerId","limitMinorUnits","currency","createdAt","updatedAt")
