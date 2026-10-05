@@ -1,0 +1,16 @@
+{
+	"name": "forge-app-template",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"test": "bun test src/",
+		"build": "bun build src/index.ts --outdir dist --target browser",
+		"start": "bun run src/server.ts"
+	},
+	"dependencies": {
+		"hono": "^4.12.32"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.2.0"
+	}
+}

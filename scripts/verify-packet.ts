@@ -70,7 +70,7 @@ const PACKET_MAP: Record<string, Record<Category, string[]>> = {
 		live: ['tests/live/github.spec.ts'],
 	},
 	P09: {
-		tests: [],
+		tests: ['tests/p09-local.test.ts'],
 		browser: ['tests/browser/forge-journey.spec.ts'],
 		live: ['tests/live/forge-react-hono.spec.ts'],
 	},
