@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -975,5 +975,267 @@ describe('P10 slice 2: deadline normalization', () => {
 		);
 		expect(deadlineInstantKey('September 21, 2026')).toBeNull(); // date-only: no instant
 		expect(deadlineInstantKey('sometime in the fall')).toBeNull();
+	});
+});
+
+// --- slice 3: fetch policy (ALLOWED-URL policy against a local stub server) --------------
+// REAL fetches happen against 127.0.0.1 ONLY (the stub servers below). External
+// fetches are BLOCKED without explicit owner authorization — the default mode
+// refuses every destination that could leave the machine.
+
+import { createServer, type Server } from 'node:http';
+import { freePort } from './fixtures/controls-harness.ts';
+import {
+	assertFetchableUrl,
+	captureFromUrl,
+	classifyUrlHost,
+	fetchWithPolicy,
+	type FetchPolicyNetworkMode,
+} from '../apps/app/src/server/evidence/sources.ts';
+
+describe('P10 slice 3: fetch policy — private-network classification', () => {
+	test('loopback, RFC1918, link-local, localhost names and IPv6 loopback are PRIVATE', () => {
+		for (const host of [
+			'localhost',
+			'sub.localhost',
+			'127.0.0.1',
+			'127.9.9.9',
+			'10.1.2.3',
+			'192.168.0.5',
+			'169.254.1.1',
+			'172.16.0.1',
+			'172.31.255.255',
+			'0.0.0.0',
+			'[::1]',
+			'fd00::1',
+			'fe80::1',
+		]) {
+			expect(classifyUrlHost(host)).toBe('private');
+		}
+	});
+
+	test('public hosts classify as public', () => {
+		for (const host of ['example.com', '8.8.8.8', 'devpost.com']) {
+			expect(classifyUrlHost(host)).toBe('public');
+		}
+	});
+
+	test('the scheme allowlist is http/https only, checked before any request', () => {
+		expect(() => assertFetchableUrl('ftp://example.com/rules')).toThrow(UnsupportedSourceUrlError);
+		expect(() => assertFetchableUrl('file:///etc/passwd')).toThrow(UnsupportedSourceUrlError);
+		expect(() => assertFetchableUrl('javascript:alert(1)')).toThrow(UnsupportedSourceUrlError);
+		expect(assertFetchableUrl('https://example.com/rules').hostname).toBe('example.com');
+	});
+});
+
+/** A tiny HTTP stub bound to 127.0.0.1 — the ONLY thing the policy tests fetch. */
+class PolicyStub {
+	readonly hitCounts: Record<string, number> = {};
+	crossOriginTarget = '';
+	private server: Server | undefined;
+	port = 0;
+	base = '';
+
+	get hits(): number {
+		return Object.values(this.hitCounts).reduce((a, b) => a + b, 0);
+	}
+
+	start(): Promise<void> {
+		const server = createServer((req, res) => {
+			this.hitCounts[req.url ?? '/'] = (this.hitCounts[req.url ?? '/'] ?? 0) + 1;
+			const send = (status: number, contentType: string, body: string) => {
+				res.writeHead(status, { 'content-type': contentType });
+				res.end(body);
+			};
+			if (req.url === '/ok') {
+				send(200, 'text/html; charset=utf-8', '<html><body><p>STUB RULES PAGE: entries close soon.</p></body></html>');
+				return;
+			}
+			if (req.url === '/big') {
+				send(200, 'text/html', 'x'.repeat(4 * 1024 * 1024));
+				return;
+			}
+			if (req.url === '/binary') {
+				send(200, 'application/octet-stream', 'raw-bytes');
+				return;
+			}
+			if (req.url === '/redirect-same') {
+				res.writeHead(302, { location: '/ok' });
+				res.end();
+				return;
+			}
+			if (req.url === '/redirect-cross') {
+				res.writeHead(302, { location: this.crossOriginTarget });
+				res.end();
+				return;
+			}
+			if (req.url === '/redirect-loop') {
+				res.writeHead(302, { location: '/redirect-loop' });
+				res.end();
+				return;
+			}
+			send(404, 'text/plain', 'not found');
+		});
+		this.server = server;
+		return new Promise((resolve) => {
+			server.listen(0, '127.0.0.1', () => {
+				const addr = server.address();
+				if (addr && typeof addr === 'object') {
+					this.port = addr.port;
+					this.base = `http://127.0.0.1:${this.port}`;
+				}
+				resolve();
+			});
+		});
+	}
+
+	stop(): Promise<void> {
+		return new Promise((resolve) => this.server?.close(() => resolve()));
+	}
+}
+
+describe('P10 slice 3: fetch policy — real fetches against the 127.0.0.1 stub only', () => {
+	let stub: PolicyStub;
+	let other: PolicyStub;
+
+	beforeAll(async () => {
+		stub = new PolicyStub();
+		await stub.start();
+		other = new PolicyStub();
+		await other.start();
+		stub.crossOriginTarget = `${other.base}/ok`;
+	});
+
+	afterAll(async () => {
+		await stub.stop();
+		await other.stop();
+	});
+
+	test('DEFAULT mode refuses a private-network host BEFORE any request is made', async () => {
+		const before = stub.hits;
+		const failure = await catchScopeError(() => fetchWithPolicy(`${stub.base}/ok`, { env: {} }));
+		expect(failure).toMatchObject({ code: 'blocked_private_network' });
+		expect(stub.hits).toBe(before); // no request left the policy layer
+	});
+
+	test('DEFAULT mode refuses an external host without explicit owner authorization', async () => {
+		const failure = await catchScopeError(() =>
+			fetchWithPolicy('https://example.com/rules', { env: {} }),
+		);
+		expect(failure).toMatchObject({ code: 'blocked_external_without_authorization' });
+	});
+
+	test('loopback-stub mode performs a REAL fetch against 127.0.0.1 and captures the response', async () => {
+		const result = await fetchWithPolicy(`${stub.base}/ok`, { network: 'loopback-stub', env: {} });
+		expect(result.status).toBe(200);
+		expect(result.mediaType).toBe('text/html');
+		expect(result.content).toContain('STUB RULES PAGE');
+		expect(result.finalUrl).toBe(`${stub.base}/ok`);
+	});
+
+	test('loopback-stub mode BLOCKS external hosts (no live fetch without authorization)', async () => {
+		const failure = await catchScopeError(() =>
+			fetchWithPolicy('https://example.com/rules', { network: 'loopback-stub', env: {} }),
+		);
+		expect(failure).toMatchObject({ code: 'blocked_external_without_authorization' });
+	});
+
+	test('the response size bound rejects an oversized body', async () => {
+		const failure = await catchScopeError(() =>
+			fetchWithPolicy(`${stub.base}/big`, { network: 'loopback-stub', maxBytes: 1024, env: {} }),
+		);
+		expect(failure).toMatchObject({ code: 'response_too_large' });
+	});
+
+	test('the content-type bound rejects non-document media types', async () => {
+		const failure = await catchScopeError(() =>
+			fetchWithPolicy(`${stub.base}/binary`, { network: 'loopback-stub', env: {} }),
+		);
+		expect(failure).toMatchObject({ code: 'unsupported_media_type' });
+	});
+
+	test('redirect control: same-origin redirect is followed to the content', async () => {
+		const result = await fetchWithPolicy(`${stub.base}/redirect-same`, {
+			network: 'loopback-stub',
+			env: {},
+		});
+		expect(result.finalUrl).toBe(`${stub.base}/ok`);
+		expect(result.content).toContain('STUB RULES PAGE');
+	});
+
+	test('redirect control: a redirect that leaves the original origin is REJECTED before contact', async () => {
+		const failure = await catchScopeError(() =>
+			fetchWithPolicy(`${stub.base}/redirect-cross`, { network: 'loopback-stub', env: {} }),
+		);
+		expect(failure).toMatchObject({ code: 'redirect_cross_origin' });
+		expect(other.hits).toBe(0); // the cross-origin target was never contacted
+	});
+
+	test('redirect control: a redirect loop is bounded', async () => {
+		const failure = await catchScopeError(() =>
+			fetchWithPolicy(`${stub.base}/redirect-loop`, {
+				network: 'loopback-stub',
+				maxRedirects: 2,
+				env: {},
+			}),
+		);
+		expect(failure).toMatchObject({ code: 'too_many_redirects' });
+	});
+
+	test('captureFromUrl records the fetch as a snapshot, and failures do not advance freshness', async () => {
+		const world = makeEvidenceWorld();
+		const source = await registerSource(world.db, world.aliceScope, {
+			url: `${stub.base}/ok`,
+			kind: 'page',
+			authority: 'official_overview',
+		});
+		const captured = await captureFromUrl(
+			world.db,
+			world.aliceScope,
+			source.id,
+			{ url: `${stub.base}/ok` },
+			{ network: 'loopback-stub' as FetchPolicyNetworkMode },
+		);
+		expect(captured.outcome).toBe('created');
+		expect(captured.snapshot.originalUrl).toBe(`${stub.base}/ok`);
+		expect(captured.snapshot.content).toContain('STUB RULES PAGE');
+		const afterSuccess = await getSource(world.db, world.aliceScope, source.id);
+		expect(afterSuccess.lastOutcome).toBe('succeeded');
+		expect(afterSuccess.observedAt).toBeTruthy();
+
+		// a fetch that does not succeed records the attempt WITHOUT advancing
+		// freshness (HackSteward rule: a fetch that did not succeed never
+		// advances freshness) and leaves the source with no snapshot at all
+		const failingSource = await registerSource(world.db, world.aliceScope, {
+			url: `${stub.base}/missing`,
+			kind: 'page',
+			authority: 'community',
+		});
+		const failure = await catchScopeError(() =>
+			captureFromUrl(
+				world.db,
+				world.aliceScope,
+				failingSource.id,
+				{ url: `${stub.base}/missing` },
+				{ network: 'loopback-stub' as FetchPolicyNetworkMode },
+			),
+		);
+		expect(failure).toMatchObject({ code: 'fetch_failed' });
+		const afterFailure = await getSource(world.db, world.aliceScope, failingSource.id);
+		expect(afterFailure.lastOutcome).toBe('failed');
+		expect(afterFailure.observedAt).toBeNull(); // freshness never advanced
+		expect(afterFailure.latestSnapshotId).toBeNull();
+
+		// a fetch target that is not the registered source document is refused
+		const mismatch = await catchScopeError(() =>
+			captureFromUrl(
+				world.db,
+				world.aliceScope,
+				source.id,
+				{ url: `${stub.base}/big` },
+				{ network: 'loopback-stub' as FetchPolicyNetworkMode },
+			),
+		);
+		expect(mismatch).toMatchObject({ code: 'url_mismatch' });
 	});
 });

@@ -541,3 +541,268 @@ export async function getSnapshot(
 	if (!rows[0]) fail(404, 'snapshot_not_found', 'no such evidence snapshot in this project');
 	return snapshotFromRow(rows[0]!);
 }
+
+// --- freshness bookkeeping (HackSteward rule: a failed fetch never advances it) ----
+
+/**
+ * Record a failed/blocked fetch attempt WITHOUT advancing freshness: the
+ * prior snapshot and observedAt are deliberately preserved — the evidence we
+ * already hold is still the newest we have, and it must remain visibly stale
+ * rather than appearing re-verified. Success outcomes are rejected here (they
+ * have their own path through {@link captureSnapshot}).
+ */
+export async function recordFetchFailure(
+	db: D1Database,
+	scope: Scope,
+	sourceId: string,
+	outcome: 'failed' | 'blocked',
+	reason: string,
+): Promise<SourceRecord> {
+	if (outcome !== 'failed' && outcome !== 'blocked') {
+		fail(400, 'invalid_input', 'outcome must be "failed" or "blocked"');
+	}
+	if (typeof reason !== 'string' || reason.trim().length === 0) {
+		fail(400, 'invalid_input', 'a failure reason is required');
+	}
+	const source = await getSource(db, scope, sourceId);
+	const now = nowIso();
+	await db
+		.prepare(
+			'update "evidence_sources" set "lastOutcome" = ?, "lastFailureReason" = ?, ' +
+				'"attemptedAt" = ?, "updatedAt" = ? where "id" = ? and "projectId" = ?',
+		)
+		.bind(outcome, reason, now, now, source.id, scope.projectId)
+		.run();
+	return getSource(db, scope, sourceId);
+}
+
+// --- fetch policy (slice 3) ------------------------------------------------------
+
+export type FetchPolicyNetworkMode = 'loopback-stub' | 'owner-authorized';
+
+export interface FetchPolicyEnv {
+	CADDIE_LIVE_AUTHORIZED?: string;
+}
+
+export interface FetchPolicyOptions {
+	/** Response size bound in bytes. Default 2 MiB. */
+	maxBytes?: number;
+	/** Redirect hop bound. Default 3. */
+	maxRedirects?: number;
+	/**
+	 * 'owner-authorized' (default): private-network hosts are refused
+	 * outright; public hosts require CADDIE_LIVE_AUTHORIZED=1 in the provided
+	 * env. 'loopback-stub': the inverse — ONLY private (loopback) hosts may be
+	 * fetched (the local stub-server escape used by tests), external hosts are
+	 * refused. Both directions fail closed.
+	 */
+	network?: FetchPolicyNetworkMode;
+	allowedMediaTypes?: readonly string[];
+	env?: FetchPolicyEnv;
+}
+
+export interface FetchPolicyResult {
+	finalUrl: string;
+	status: number;
+	mediaType: string;
+	byteLength: number;
+	content: string;
+}
+
+/**
+ * Document media types the evidence pipeline can quote from. PDFs are
+ * deliberately absent: they need a renderer pass to produce quotable text
+ * (the HackSteward page-renderer step) and are not fetched raw.
+ */
+export const DEFAULT_ALLOWED_MEDIA_TYPES: readonly string[] = [
+	'text/html',
+	'text/plain',
+	'text/markdown',
+	'application/json',
+];
+
+const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
+const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
+const DEFAULT_MAX_REDIRECTS = 3;
+
+/**
+ * The ALLOWED-URL gate applied BEFORE every request (and before every
+ * redirect hop): scheme allowlist (http/https) plus the network-mode gate.
+ */
+export function assertFetchableUrl(raw: string): URL {
+	const candidate = raw.trim();
+	let url: URL;
+	try {
+		url = new URL(candidate);
+	} catch {
+		throw new UnsupportedSourceUrlError('fetch target is not a valid absolute URL');
+	}
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+		throw new UnsupportedSourceUrlError(
+			`unsupported fetch scheme: ${url.protocol.replace(/:$/, '') || '(none)'} — only http/https`,
+		);
+	}
+	return url;
+}
+
+/**
+ * Fetch a URL through the ALLOWED-URL policy. Real network egress from this
+ * function is possible ONLY in 'loopback-stub' mode AND only to
+ * private-network hosts (the local stub server); every external fetch is
+ * BLOCKED unless the caller explicitly carries owner authorization
+ * (CADDIE_LIVE_AUTHORIZED=1) — and even then private networks stay refused.
+ * Redirects are followed only when each hop re-passes the policy AND stays
+ * on the original origin. Response size and media type are bounded.
+ */
+export async function fetchWithPolicy(
+	rawUrl: string,
+	options: FetchPolicyOptions = {},
+): Promise<FetchPolicyResult> {
+	const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+	const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
+	const network: FetchPolicyNetworkMode = options.network ?? 'owner-authorized';
+	const allowedMediaTypes = options.allowedMediaTypes ?? DEFAULT_ALLOWED_MEDIA_TYPES;
+	const env = options.env ?? (globalThis.process?.env as FetchPolicyEnv | undefined) ?? {};
+
+	let current = assertFetchableUrl(rawUrl);
+	const originalOrigin = current.origin;
+	for (let hop = 0; hop <= maxRedirects; hop++) {
+		// Network gate, re-applied per hop (redirects cannot smuggle a hop in).
+		const hostClass = classifyUrlHost(current.hostname);
+		if (network === 'owner-authorized') {
+			if (hostClass === 'private') {
+				fail(
+					400,
+					'blocked_private_network',
+					`refusing to fetch private-network host ${current.hostname} (loopback/RFC1918/link-local are never fetched)`,
+				);
+			}
+			if (env.CADDIE_LIVE_AUTHORIZED !== '1') {
+				fail(
+					403,
+					'blocked_external_without_authorization',
+					'external fetches are BLOCKED without explicit owner authorization (CADDIE_LIVE_AUTHORIZED=1)',
+				);
+			}
+		} else {
+			if (hostClass === 'public') {
+				fail(
+					403,
+					'blocked_external_without_authorization',
+					'loopback-stub mode fetches ONLY the local stub server; external fetch is blocked without owner authorization',
+				);
+			}
+		}
+
+		const response = await fetch(current, { redirect: 'manual' });
+		if (REDIRECT_STATUSES.has(response.status)) {
+			const location = response.headers.get('location');
+			if (!location) {
+				fail(400, 'redirect_without_location', `redirect ${response.status} without a location`);
+			}
+			const next = new URL(location, current);
+			assertFetchableUrl(next.toString());
+			if (next.origin !== originalOrigin) {
+				fail(
+					400,
+					'redirect_cross_origin',
+					`redirect leaves the original origin (${originalOrigin} -> ${next.origin}); cross-origin redirects are not followed`,
+				);
+			}
+			current = next;
+			continue;
+		}
+		const mediaType = baseMediaType(response.headers.get('content-type') ?? '');
+		if (!allowedMediaTypes.includes(mediaType)) {
+			fail(
+				400,
+				'unsupported_media_type',
+				`media type ${mediaType || '(none)'} is not an accepted evidence media type (allowed: ${allowedMediaTypes.join(', ')})`,
+			);
+		}
+		const declaredLength = response.headers.get('content-length');
+		if (declaredLength !== null && Number(declaredLength) > maxBytes) {
+			fail(400, 'response_too_large', `declared response size ${declaredLength} exceeds the ${maxBytes}-byte bound`);
+		}
+		const buffer = await response.arrayBuffer();
+		if (buffer.byteLength > maxBytes) {
+			fail(400, 'response_too_large', `response size ${buffer.byteLength} exceeds the ${maxBytes}-byte bound`);
+		}
+		return {
+			finalUrl: current.toString(),
+			status: response.status,
+			mediaType,
+			byteLength: buffer.byteLength,
+			content: new TextDecoder().decode(buffer),
+		};
+	}
+	fail(400, 'too_many_redirects', `more than ${maxRedirects} redirects`);
+}
+
+export interface CaptureFromUrlInput {
+	url: string;
+	maxBytes?: number;
+}
+
+export interface CaptureFromUrlOptions {
+	network?: FetchPolicyNetworkMode;
+	env?: FetchPolicyEnv;
+}
+
+/**
+ * Fetch a source's own canonical URL through the fetch policy and archive the
+ * response as a snapshot. The fetch target must BE the registered source
+ * document (canonical-URL match) — the registry defines what may be fetched,
+ * and arbitrary URLs cannot ride an evidence route. Transport failures are
+ * recorded via {@link recordFetchFailure} and never advance freshness.
+ */
+export async function captureFromUrl(
+	db: D1Database,
+	scope: Scope,
+	sourceId: string,
+	input: CaptureFromUrlInput,
+	options: CaptureFromUrlOptions = {},
+): Promise<CaptureResult> {
+	const source = await getSource(db, scope, sourceId);
+	const targetUrl = requireString(input.url, 'url');
+	if (canonicalizeUrl(targetUrl) !== source.canonicalUrl) {
+		fail(
+			400,
+			'url_mismatch',
+			'the fetch target must be the registered source URL (canonical form)',
+		);
+	}
+	let result: FetchPolicyResult;
+	try {
+		result = await fetchWithPolicy(targetUrl, {
+			network: options.network,
+			maxBytes: input.maxBytes,
+			env: options.env,
+		});
+	} catch (error) {
+		// Policy refusals happen BEFORE any request; record them as blocked.
+		const code = (error as { code?: string }).code;
+		if (code === 'blocked_private_network' || code === 'blocked_external_without_authorization') {
+			await recordFetchFailure(db, scope, sourceId, 'blocked', String((error as Error).message)).catch(
+				() => undefined,
+			);
+		}
+		throw error;
+	}
+	if (result.status !== 200) {
+		await recordFetchFailure(db, scope, sourceId, 'failed', `fetch returned status ${result.status}`);
+		fail(502, 'fetch_failed', `source fetch returned status ${result.status}`);
+	}
+	try {
+		return await captureSnapshot(db, scope, sourceId, {
+			content: result.content,
+			mediaType: result.mediaType,
+			originalUrl: result.finalUrl,
+		});
+	} catch (error) {
+		await recordFetchFailure(db, scope, sourceId, 'failed', `snapshot capture failed: ${String(error)}`).catch(
+			() => undefined,
+		);
+		throw error;
+	}
+}
