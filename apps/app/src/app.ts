@@ -4,6 +4,7 @@ import { Hello } from './agents/hello.ts';
 import { createAuthRouter } from './server/routes/auth.ts';
 import { createProjectsRouter } from './server/routes/projects.ts';
 import { createApprovalsRouter } from './server/routes/approvals.ts';
+import { createEvidenceRouter } from './server/routes/evidence.ts';
 import type { AuthEnv } from './server/auth.ts';
 
 /**
@@ -42,6 +43,7 @@ const api = new Hono<{ Bindings: Env }>();
 api.route('/', createAuthRouter());
 api.route('/', createProjectsRouter());
 api.route('/', createApprovalsRouter());
+api.route('/', createEvidenceRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------
