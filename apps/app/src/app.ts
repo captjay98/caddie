@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { Hello } from './agents/hello.ts';
 import { createAuthRouter } from './server/routes/auth.ts';
 import { createProjectsRouter } from './server/routes/projects.ts';
+import { createApprovalsRouter } from './server/routes/approvals.ts';
 import type { AuthEnv } from './server/auth.ts';
 
 /**
@@ -40,6 +41,7 @@ const app = new Hono<{ Bindings: Env }>();
 const api = new Hono<{ Bindings: Env }>();
 api.route('/', createAuthRouter());
 api.route('/', createProjectsRouter());
+api.route('/', createApprovalsRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------
