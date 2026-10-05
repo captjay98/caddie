@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun.test';
+import { describe, expect, test } from 'bun:test';
 
 /**
  * P09 live journey — the complete React+Hono build proof against the REAL
