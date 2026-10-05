@@ -1,0 +1,16 @@
+{
+	"name": "forge-task-tracker",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"test": "bun test src/",
+		"build": "bun build src/main.tsx --outdir dist --target browser --minify",
+		"start": "bun run src/server.ts"
+	},
+	"dependencies": {
+		"hono": "^4.12.32"
+	},
+	"devDependencies": {
+		"@types/bun": "^1.2.0"
+	}
+}

@@ -1,0 +1,32 @@
+{
+	"$comment": "P09 acceptance manifest — the immutable evaluator contract. This file lives OUTSIDE any editable workspace; the journey runner verifies its hash before and after each run. Candidate changes to runner/config/dependencies can never substitute this evaluator (contracts.md: protected acceptance fixture).",
+	"manifestVersion": "1",
+	"stack": "react-hono",
+	"fixture": {
+		"path": "tests/fixtures/forge-task-tracker",
+		"$comment": "sha256 recorded per file at seed time; the runner refuses to start on mismatch"
+	},
+	"phases": [
+		{ "id": "install", "commands": ["bun install --frozen-lockfile"], "expect": "exit 0" },
+		{ "id": "seeded-tests-green", "commands": ["bun test src/"], "expect": "exit 0" },
+		{ "id": "build", "commands": ["bun run build"], "expect": "exit 0" },
+		{
+			"id": "deliberate-red",
+			"$comment": "the journey must show a real red before repair: the acceptance harness flips a seeded test's expectation and demands a failing run",
+			"commands": ["bun test src/routes.test.ts"],
+			"expect": "exit nonzero, then repaired to exit 0 within the repair budget"
+		},
+		{ "id": "server-start", "commands": ["bun run start"], "expect": "HTTP 200 on /api/health within 10s" },
+		{ "id": "browser-check", "$comment": "Playwright asserts the UI renders seeded data and the modified behavior", "expect": "all assertions pass" }
+	],
+	"protectedPaths": [
+		"tests/acceptance/",
+		"scripts/run-journey.ts",
+		"scripts/verify-packet.ts"
+	],
+	"repairPolicy": {
+		"maxAttemptsPerIssue": 3,
+		"countedKinds": ["repair_attempt"],
+		"uncountedKinds": ["diagnosis", "verification", "transport_retry", "framework_recovery"]
+	}
+}
