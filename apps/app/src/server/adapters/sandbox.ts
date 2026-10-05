@@ -174,6 +174,56 @@ function isTerminalState(
 	return state === 'SUCCEEDED' || state === 'FAILED' || state === 'CANCELLED';
 }
 
+function encodedByteLength(text: string): number {
+	return new TextEncoder().encode(text).length;
+}
+
+/**
+ * Resolve a caller-supplied workspace-relative upload path against the session
+ * workspace root. HARDENING (slice 2): absolute paths and any '..' segment are
+ * rejected BEFORE anything is sent; '.' segments are resolved; the result is
+ * always inside the root. Symlink escapes cannot be seen from the client side,
+ * so they are enforced by the sandbox service (path_escape) and mapped to the
+ * same typed error — defense in depth, both layers proven by tests.
+ */
+function resolveSandboxPath(root: string, relativePath: string): string {
+	if (relativePath.includes('\0')) {
+		throw new SandboxError(400, 'INVALID_INPUT', 'upload path contains a NUL byte');
+	}
+	if (relativePath.startsWith('/')) {
+		throw new SandboxError(
+			400,
+			'UPLOAD_PATH_ESCAPE',
+			`upload path must be relative to the session workspace, got absolute: ${relativePath}`,
+		);
+	}
+	const segments: string[] = [];
+	for (const segment of relativePath.split('/')) {
+		if (segment === '' || segment === '.') continue;
+		if (segment === '..') {
+			throw new SandboxError(
+				400,
+				'UPLOAD_PATH_ESCAPE',
+				`upload path must not contain '..' segments: ${relativePath}`,
+			);
+		}
+		segments.push(segment);
+	}
+	if (segments.length === 0) {
+		throw new SandboxError(400, 'INVALID_INPUT', 'upload path resolves to the workspace root');
+	}
+	return `${root}/${segments.join('/')}`;
+}
+
+/**
+ * Exact decoded size of (valid) base64 without allocating the payload — enough
+ * to enforce the upload bound BEFORE any decode or network call.
+ */
+function base64ByteLength(contentBase64: string): number {
+	const withoutPadding = contentBase64.replace(/=+$/, '');
+	return Math.floor((withoutPadding.length * 3) / 4);
+}
+
 function terminalSandboxState(state: 'SUCCEEDED' | 'FAILED' | 'CANCELLED'): Exclude<SandboxState, 'running' | 'unknown'> {
 	switch (state) {
 		case 'SUCCEEDED':
@@ -337,15 +387,31 @@ export class SandboxDriver {
 		}
 		const session = await this.requireActiveSession(sessionId);
 		const root = `${this.config.workspaceRoot.replace(/\/+$/, '')}/${session.projectId ?? ''}`;
-		for (const file of files) {
-			const absolutePath = `${root}/${file.path}`;
+		// Validate EVERYTHING first: a rejected batch must not partially upload.
+		const prepared = files.map((file) => {
+			const path = requireNonEmpty(file.path, 'path');
+			if (typeof file.contentBase64 !== 'string') {
+				throw new SandboxError(400, 'INVALID_INPUT', 'contentBase64 is required');
+			}
+			const absolutePath = resolveSandboxPath(root, path);
+			const decodedBytes = base64ByteLength(file.contentBase64);
+			if (decodedBytes > this.config.quotas.maxUploadBytes) {
+				throw new SandboxError(
+					413,
+					'UPLOAD_TOO_LARGE',
+					`upload of ${path} is ${decodedBytes} bytes, above the ${this.config.quotas.maxUploadBytes}-byte quota`,
+				);
+			}
+			return { absolutePath, contentBase64: file.contentBase64, path };
+		});
+		for (const file of prepared) {
 			try {
-				await this.contree.uploadFile(sessionId, absolutePath, file.contentBase64);
+				await this.contree.uploadFile(sessionId, file.absolutePath, file.contentBase64);
 			} catch (error) {
 				throw this.mapContreeError(error, 'UPLOAD_FAILED', `upload of ${file.path} failed`);
 			}
 		}
-		return { saved: files.length };
+		return { saved: prepared.length };
 	}
 
 	// --- execution -------------------------------------------------------------------
@@ -361,12 +427,37 @@ export class SandboxDriver {
 		) {
 			throw new SandboxError(400, 'INVALID_INPUT', 'timeoutMs must be a positive integer');
 		}
+		// TIME QUOTA (hardening): refuse misconfigured timeouts before dispatch —
+		// fail closed instead of silently clamping.
+		if (input.timeoutMs > this.config.quotas.maxCommandTimeoutMs) {
+			throw new SandboxError(
+				400,
+				'QUOTA_TIME_LIMIT',
+				`timeoutMs ${input.timeoutMs} exceeds the configured command time quota (${this.config.quotas.maxCommandTimeoutMs}ms)`,
+			);
+		}
 		if (input.signal?.aborted) {
 			// Never dispatch on an already-aborted signal — zero remote calls.
 			throw new SandboxError(
 				409,
 				'ABORTED_BEFORE_DISPATCH',
 				'signal was already aborted — nothing was dispatched',
+			);
+		}
+		// CREDENTIAL EXCLUSION (hardening): the platform token must never reach
+		// the sandbox — not in generated command text, not in the env. (The token
+		// travels in the Authorization header only, which the sandbox service
+		// observes but the sandboxed code does not.)
+		const token = this.config.contree.apiToken;
+		if (
+			token.length > 0 &&
+			(command.includes(token) ||
+				Object.values(input.env ?? {}).some((value) => typeof value === 'string' && value.includes(token)))
+		) {
+			throw new SandboxError(
+				400,
+				'CREDENTIAL_IN_ENV',
+				'refusing to send the platform token into the sandbox: command text or an env value contains it',
 			);
 		}
 		await this.requireActiveSession(sessionId);
@@ -433,6 +524,7 @@ export class SandboxDriver {
 		const hardDeadline = deadline + 2_000; // grace to PROVE the kill we requested
 		let cancelRequested = false;
 		let timedOut = false;
+		let outputQuotaBreached = false;
 
 		for (;;) {
 			if (input.signal?.aborted) {
@@ -452,6 +544,21 @@ export class SandboxDriver {
 			if (operation && isTerminalState(operation.state)) {
 				const outcome = terminalSandboxState(operation.state);
 				await this.persistence.save(record(outcome, remoteId));
+				if (outputQuotaBreached) {
+					throw new SandboxError(
+						413,
+						'QUOTA_OUTPUT_EXCEEDED',
+						'command output exceeded the configured quota — the command was killed and the terminal outcome is proven',
+						{
+							remoteId,
+							provenState: outcome,
+							outputBytes:
+								operation.outputBytes ??
+								encodedByteLength(operation.stdout) + encodedByteLength(operation.stderr),
+							maxOutputBytes: this.config.quotas.maxOutputBytes,
+						},
+					);
+				}
 				if (timedOut) {
 					throw new SandboxError(
 						504,
@@ -468,11 +575,27 @@ export class SandboxDriver {
 				};
 			}
 
+			if (operation && !outputQuotaBreached) {
+				// OUTPUT QUOTA (hardening): while still running, growing output past
+				// the bound triggers a kill — then we poll to the proven terminal.
+				const bytes =
+					operation.outputBytes ??
+					encodedByteLength(operation.stdout) + encodedByteLength(operation.stderr);
+				if (bytes > this.config.quotas.maxOutputBytes) {
+					outputQuotaBreached = true;
+					cancelRequested = true;
+					await this.requestCancelNow(remoteId);
+					await this.persistence.save(record('cancel-requested', remoteId));
+				}
+			}
+
 			if (!timedOut && Date.now() >= deadline) {
 				timedOut = true;
-				cancelRequested = true;
-				await this.requestCancelNow(remoteId);
-				await this.persistence.save(record('cancel-requested', remoteId));
+				if (!cancelRequested) {
+					cancelRequested = true;
+					await this.requestCancelNow(remoteId);
+					await this.persistence.save(record('cancel-requested', remoteId));
+				}
 			}
 			if (timedOut && Date.now() >= hardDeadline) {
 				throw new SandboxError(

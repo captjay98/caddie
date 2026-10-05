@@ -56,7 +56,9 @@ describe('P04 sandbox driver contract (local contree REST stub)', () => {
 				quotas: {
 					maxUploadBytes: 64 * 1024,
 					maxOutputBytes: 64 * 1024,
-					maxCommandTimeoutMs: 5_000,
+					// Generous here: slice 1 proves mechanics; the tight bound and its
+					// refusal behavior are exercised by the slice 2 suite below.
+					maxCommandTimeoutMs: 30_000,
 				},
 				workspaceRoot: '/work',
 				pollIntervalMs: 10,
@@ -378,5 +380,251 @@ describe('P04 sandbox driver contract (local contree REST stub)', () => {
 				(error: unknown) => error,
 			),
 		).resolves.toMatchObject({ code: 'SESSION_LOST' });
+	});
+});
+
+describe('P04 slice 2 — sandbox hardening (traversal, quotas, credential exclusion)', () => {
+	let stub: SandboxStub;
+
+	beforeAll(async () => {
+		stub = new SandboxStub({ expectedToken: TOKEN, workspaceRoot: '/work' });
+		await stub.start();
+	});
+
+	afterAll(async () => {
+		await stub.stop();
+	});
+
+	function makeDriver(port: InMemorySandboxPersistence): SandboxDriver {
+		return new SandboxDriver(
+			{
+				contree: {
+					baseUrl: stub.url,
+					apiToken: TOKEN,
+					platformProjectId: 'platform-project-test',
+				},
+				quotas: {
+					maxUploadBytes: 1024,
+					maxOutputBytes: 64 * 1024,
+					maxCommandTimeoutMs: 5_000,
+				},
+				workspaceRoot: '/work',
+				pollIntervalMs: 10,
+				dispatchTimeoutMs: 2_000,
+				isolation: { networkEgressDisabled: true },
+			},
+			port,
+		);
+	}
+
+	async function newSession(driver: SandboxDriver): Promise<string> {
+		const { sessionId } = await driver.create({
+			projectId: 'p2',
+			runId: `run-${Math.random().toString(36).slice(2, 8)}`,
+			image: 'tag:base:1',
+		});
+		return sessionId;
+	}
+
+	function fileRequestCount(): number {
+		return stub.requests.filter((r) => r.path.endsWith('/files')).length;
+	}
+
+	function execRequestCount(): number {
+		return stub.requests.filter((r) => r.path.endsWith('/exec')).length;
+	}
+
+	test('upload rejects absolute paths, dot-dot segments and empty paths before any request', async () => {
+		const port = new InMemorySandboxPersistence();
+		const driver = makeDriver(port);
+		const sessionId = await newSession(driver);
+		const filesBefore = fileRequestCount();
+		const cases: Array<{ path: string; code: string }> = [
+			{ path: '../escape.txt', code: 'UPLOAD_PATH_ESCAPE' },
+			{ path: '/etc/passwd', code: 'UPLOAD_PATH_ESCAPE' },
+			{ path: 'a/../../escape', code: 'UPLOAD_PATH_ESCAPE' },
+			{ path: 'ok/../../escape', code: 'UPLOAD_PATH_ESCAPE' },
+			{ path: '', code: 'INVALID_INPUT' },
+			{ path: '.', code: 'INVALID_INPUT' },
+		];
+		for (const testCase of cases) {
+			expect(
+				driver
+					.uploadFiles(sessionId, [{ path: testCase.path, contentBase64: b64('nope') }])
+					.then(
+						() => {
+							throw new Error(`upload should have rejected: ${JSON.stringify(testCase.path)}`);
+						},
+						(error: unknown) => error,
+					),
+			).resolves.toMatchObject({ code: testCase.code });
+		}
+		// Rejections happen client-side: nothing reached the service.
+		expect(fileRequestCount() - filesBefore).toBe(0);
+	});
+
+	test('service-side symlink escape is surfaced as a typed UPLOAD_PATH_ESCAPE', async () => {
+		const port = new InMemorySandboxPersistence();
+		const driver = makeDriver(port);
+		const sessionId = await newSession(driver);
+		stub.seedSymlink(sessionId, 'link', '/etc');
+		const filesBefore = fileRequestCount();
+		expect(
+			driver
+				.uploadFiles(sessionId, [{ path: 'link/passwd', contentBase64: b64('root:x') }])
+				.then(
+					() => {
+						throw new Error('upload should have rejected');
+					},
+					(error: unknown) => error,
+				),
+		).resolves.toMatchObject({ code: 'UPLOAD_PATH_ESCAPE' });
+		// The lexically-clean path WAS sent; the service's containment check
+		// refused it (defense in depth) and the driver mapped it to a typed error.
+		expect(fileRequestCount() - filesBefore).toBe(1);
+	});
+
+	test('uploads above the size quota are refused before any request', async () => {
+		const port = new InMemorySandboxPersistence();
+		const driver = makeDriver(port);
+		const sessionId = await newSession(driver);
+		const filesBefore = fileRequestCount();
+		expect(
+			driver
+				.uploadFiles(sessionId, [
+					{ path: 'big.bin', contentBase64: b64('x'.repeat(2048)) },
+				])
+				.then(
+					() => {
+						throw new Error('upload should have been refused');
+					},
+					(error: unknown) => error,
+				),
+		).resolves.toMatchObject({ code: 'UPLOAD_TOO_LARGE' });
+		expect(fileRequestCount() - filesBefore).toBe(0);
+	});
+
+	test('command time quota bound refuses over-long timeouts before dispatch', async () => {
+		const port = new InMemorySandboxPersistence();
+		const driver = makeDriver(port);
+		const sessionId = await newSession(driver);
+		const execBefore = execRequestCount();
+		expect(
+			driver
+				.execute({
+					sessionId,
+					command: 'echo never dispatched',
+					operationKey: 'op-overquota',
+					timeoutMs: 60_000,
+				})
+				.then(
+					() => {
+						throw new Error('execute should have been refused');
+					},
+					(error: unknown) => error,
+				),
+		).resolves.toMatchObject({ code: 'QUOTA_TIME_LIMIT' });
+		expect(execRequestCount() - execBefore).toBe(0);
+		expect(await port.load('op:op-overquota')).toBeNull();
+	});
+
+	test('output above the quota kills the command and is reported as a typed error', async () => {
+		const port = new InMemorySandboxPersistence();
+		const driver = makeDriver(port);
+		const sessionId = await newSession(driver);
+		// ~32KB per 20ms tick crosses the 64KB output cap while still RUNNING.
+		stub.setBehavior('spam', { outputBytesPerTick: 32 * 1024, tickMs: 20 });
+		const cancelCountBefore = stub.requests.filter((r) => r.path.endsWith('/cancel')).length;
+		expect(
+			driver
+				.execute({
+					sessionId,
+					command: 'run spam',
+					operationKey: 'op-spam',
+					timeoutMs: 5_000,
+				})
+				.then(
+					() => {
+						throw new Error('execute should have failed the output quota');
+					},
+					(error: unknown) => error,
+				),
+		).resolves.toMatchObject({ code: 'QUOTA_OUTPUT_EXCEEDED' });
+		// The oversized command was KILLED, not left running: a cancel was issued
+		// and the status proves the terminal outcome.
+		expect(
+			stub.requests.filter((r) => r.path.endsWith('/cancel')).length - cancelCountBefore,
+		).toBeGreaterThanOrEqual(1);
+		const remoteId = stub.operationIdByKey('op-spam');
+		const terminal = await driver.status(remoteId as string);
+		expect(terminal.state).toBe('cancelled');
+	});
+
+	test('platform credentials are never sent into the sandbox command or env', async () => {
+		const port = new InMemorySandboxPersistence();
+		const driver = makeDriver(port);
+		const sessionId = await newSession(driver);
+		const execBefore = execRequestCount();
+		// (a) command text embedding the platform token
+		expect(
+			driver
+				.execute({
+					sessionId,
+					command: `echo ${TOKEN}`,
+					operationKey: 'op-leak-cmd',
+					timeoutMs: 2_000,
+				})
+				.then(
+					() => {
+						throw new Error('execute should have refused the credential leak');
+					},
+					(error: unknown) => error,
+				),
+		).resolves.toMatchObject({ code: 'CREDENTIAL_IN_ENV' });
+		// (b) env value embedding the platform token
+		expect(
+			driver
+				.execute({
+					sessionId,
+					command: 'printenv',
+					operationKey: 'op-leak-env',
+					timeoutMs: 2_000,
+					env: { LEAK: `bearer ${TOKEN}` },
+				})
+				.then(
+					() => {
+						throw new Error('execute should have refused the credential leak');
+					},
+					(error: unknown) => error,
+				),
+		).resolves.toMatchObject({ code: 'CREDENTIAL_IN_ENV' });
+		// Neither leaked call reached the wire.
+		expect(execRequestCount() - execBefore).toBe(0);
+		// (c) the clean path: the sandbox sees ONLY caller-passed env keys and
+		// never the platform token anywhere in the request body.
+		await driver.execute({
+			sessionId,
+			command: 'printenv',
+			operationKey: 'op-clean-env',
+			timeoutMs: 2_000,
+			env: { ALLOWED_X: '1' },
+		});
+		const exec = stub.requests.find(
+			(r) => r.path.endsWith('/exec') && (r.body as Record<string, unknown>)['operationKey'] === 'op-clean-env',
+		);
+		expect(exec).toBeTruthy();
+		const body = exec?.body as Record<string, unknown>;
+		expect(body['env']).toEqual({ ALLOWED_X: '1' });
+		expect(JSON.stringify(body)).not.toContain(TOKEN);
+	});
+
+	test('session creation carries the configured isolation flags', async () => {
+		const port = new InMemorySandboxPersistence();
+		const driver = makeDriver(port);
+		await driver.create({ projectId: 'p2', runId: 'iso', image: 'tag:base:1' });
+		const create = stub.requests.filter((r) => r.method === 'POST' && r.path === '/v1/sessions').at(-1);
+		expect((create?.body as Record<string, unknown>)['isolation']).toEqual({
+			networkEgressDisabled: true,
+		});
 	});
 });

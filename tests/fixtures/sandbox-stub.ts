@@ -505,12 +505,13 @@ export class SandboxStub {
 		}
 		if (segments.length === 0) return null;
 		let current = `/${segments.join('/')}`;
-		// Resolve one level of session-known symlinks (walk from the shortest
-		// prefix so nested links compose).
+		// Resolve one level of session-known symlinks. Keys are workspace-relative;
+		// walk from the shortest prefix so nested links compose.
+		const rootPrefix = session.root.endsWith('/') ? session.root.slice(0, -1) : session.root;
 		for (const [from, to] of [...session.symlinks.entries()].sort(
 			([a], [b]) => b.length - a.length,
 		)) {
-			const prefix = `/${from}`;
+			const prefix = `${rootPrefix}/${from}`;
 			if (current === prefix || current.startsWith(`${prefix}/`)) {
 				current = `${to}${current.slice(prefix.length)}`;
 				break;
