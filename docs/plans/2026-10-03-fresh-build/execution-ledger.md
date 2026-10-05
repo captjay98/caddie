@@ -9,7 +9,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P02 | LOCAL VERIFIED | Backend product engineer (subagent; slice 3 completed by lead after dispatch loss) | PASS | PASS (fixes applied + re-verified) | see evidence records (4a0eda2/66c2cf2/0ea748a + integration 801f97e + fixes 196ac63) |
 | P03 | LOCAL VERIFIED (gate for ALL paid/effectful work — now open for local, closed for live until P04/P05 credentials) | Backend governance engineer (subagent); integrated by lead | PASS | PASS (P2 currency fence applied + re-verified) | see evidence records (164eace/0de2638/71f0a66 + integration ee5fca4 + fence fix) |
 | P04 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P05 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P05 | LOCAL VERIFIED (live model round-trips BLOCKED on NEBIUS_API_KEY) | Integration lead (quota window); specialist wiring from subagent scripts | PENDING (queued) | PENDING (queued) | see evidence records |
 | P06 | NOT STARTED | Unassigned | Pending | Pending | — (tokens port pulled forward to P16, see P16 record) |
 | P07 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P08 | NOT STARTED | Unassigned | Pending | Pending | — |
@@ -27,6 +27,33 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | NOT STARTED | Unassigned | Pending | Pending | — |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P05", "status": "LOCAL VERIFIED (live model round-trips BLOCKED on NEBIUS_API_KEY)", "sha": "74c613b + integration b074a29",
+  "commands": [
+    {"command": "bun test tests/agent-permissions.test.ts", "exitCode": 0, "receipt": "20 passed — permission matrix (QA holds no write tools; every policy name is a known tool), protected-path guard refuses driver calls, skill hash integrity, completion gate (no record / failing record / stale revision all refuse; corrupt line skipped; latest-per-check wins), run lifecycle (frozen route fails closed on unknown; 3 failed repairs pause with diagnosis exempt; completion needs machine-checked evidence under current revision; cross-project snapshot 404)"},
+    {"command": "bun test tests/routing.test.ts", "exitCode": 0, "receipt": "13 passed (worker boots with FlueCoordinatorAgent DO)"},
+    {"command": "bunx playwright test tests/browser/conversation.spec.ts", "exitCode": 0, "receipt": "3 passed — standby channel honest, draft key stable across retry, drafts survive reload"},
+    {"command": "bun run test:live -- P05", "exitCode": 1, "receipt": "BLOCKED: requires CADDIE_LIVE_AUTHORIZED=1 + NEBIUS_API_KEY (spec fails clearly, never silently)"},
+    {"command": "bun run typecheck", "exitCode": 0},
+    {"command": "bun run build", "exitCode": 0, "receipt": "worker boots with FlueCoordinatorAgent; SPA composed"}
+  ],
+  "artifacts": [{"path": "apps/app/src/agents/", "note": "coordinator.ts (use agent; completion gate via useAgentFinish reading .caddie/gates ledger), specialists.ts (7 roles, no model on definitions), permissions.ts (role policy + protected paths), tools.ts (Valibot schemas), skills.ts (hash-verified ?raw), providers.ts (Nebius compat block, frozen routes)"}],
+  "environment": "local workerd; no model calls (all provider interaction BLOCKED)",
+  "providerCalls": "none",
+  "specReview": "PENDING (queued for next dispatch window)",
+  "qualityReview": "PENDING (queued)",
+  "limitations": [
+    "PLAN DRIFT: packets.md lists coordinator.tsx/specialists.tsx — the flue plugin scans .ts/.mts only, so agent modules are .ts (renamed; no JSX was used)",
+    "PLAN DRIFT: conversation.spec.ts was P06-listed; delivered under P05 as the shared conversation-surface file (transport acceptance items remain in tests/live/flue-lifecycle.spec.ts)",
+    "coordinator context uses InMemorySandboxPersistence per isolate — D1-backed port + real revision cache are P09 wiring; agent runs fail closed without CONTREE_* env",
+    "DecisionCard onAction is unwired (no transport produces cards yet) — P05/P09 wiring",
+    "repair delegation records round starts; outcome reporting path is P09"
+  ]
+}
+```
+
 
 ```json
 {
