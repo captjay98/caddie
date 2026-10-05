@@ -35,7 +35,12 @@ describe('P09 acceptance scaffolding (local invariants)', () => {
 		for (const file of ['package.json', 'src/app.ts', 'src/app.test.ts', 'src/server.ts']) {
 			expect(existsSync(join(FIXTURE, file)), file).toBe(true);
 		}
-		// Run the fixture's own tests as a subprocess — the real seeded baseline.
+		// The fixture is a standalone app: install its deps if missing (fresh
+		// clone), then run its own tests as the seeded baseline.
+		if (!existsSync(join(FIXTURE, 'node_modules'))) {
+			const install = Bun.spawnSync(['bun', 'install'], { cwd: FIXTURE, stdout: 'pipe', stderr: 'pipe' });
+			expect(install.exitCode, `${install.stdout}${install.stderr}`).toBe(0);
+		}
 		const proc = Bun.spawnSync(['bun', 'test', 'src/'], { cwd: FIXTURE, stdout: 'pipe', stderr: 'pipe' });
 		const output = `${proc.stdout}${proc.stderr}`;
 		expect(proc.exitCode).toBe(0);
