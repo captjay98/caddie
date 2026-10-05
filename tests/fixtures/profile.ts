@@ -5,9 +5,10 @@ import type { AuthEnv, D1Database } from '../../apps/app/src/server/auth.ts';
  * Minimal local workerd fixture for P14 (REAL workerd via `wrangler dev`,
  * real local SQLite-backed D1 — never deployed).
  *
- * It mounts the exact production /api composition that P14 proposes for
- * app.ts (createProfileApp — the auth router plus the profile/memory/search
- * router) and adds /__test/* control routes used only by
+ * It mounts the production /api composition the P14 tests need (auth +
+ * projects + the P14 profile/memory/search router — P14 is mounted alongside
+ * the existing routers, exactly as the proposed app.ts diff does) and adds
+ * /__test/* control routes used only by
  * tests/memory.integration.test.ts and tests/search-isolation.test.ts to
  * prepare the database and assert on rows. These control routes are NOT part
  * of the app Worker.

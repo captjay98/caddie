@@ -1,8 +1,18 @@
 import { Hono } from 'hono';
 import type { AuthEnv } from '../auth.ts';
 import { createAuthRouter } from './auth.ts';
+import { createProjectsRouter } from './projects.ts';
 import { ScopeError, sessionUserId } from '../scope.ts';
 import { getProfile, upsertProfile } from '../profiles.ts';
+import {
+	addMemoryFact,
+	confirmMemoryFact,
+	correctMemoryFact,
+	listMemoryFacts,
+	memoryForInjection,
+	proposeMemoryFact,
+	retractMemoryFact,
+} from '../memory.ts';
 
 /**
  * P14 profile/memory/search router — every route derives its user id
@@ -51,6 +61,15 @@ async function requireSessionActorId(env: Env, headers: Headers): Promise<string
 	return userId;
 }
 
+/** Parse a JSON body, mapping malformed JSON to a 400 (client error class). */
+async function readJson(request: Request): Promise<unknown> {
+	try {
+		return await request.json();
+	} catch {
+		throw new ScopeError(400, 'invalid_input', 'body must be valid JSON');
+	}
+}
+
 export function createProfileRouter(): Hono<{ Bindings: Env }> {
 	const router = new Hono<{ Bindings: Env }>();
 
@@ -78,16 +97,67 @@ export function createProfileRouter(): Hono<{ Bindings: Env }> {
 		return c.json({ profile });
 	});
 
+	// --- memory (living builder memory; personal + project-scoped) -------------
+	// Specific paths are registered before the parameterized /:id routes.
+
+	router.get('/memory', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const projectId = c.req.query('projectId');
+		const facts = await listMemoryFacts(c.env.DB, actorId, {
+			...(projectId ? { projectId } : {}),
+			includeRetracted: c.req.query('includeRetracted') === '1',
+		});
+		return c.json({ facts });
+	});
+
+	router.get('/memory/injection', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const facts = await memoryForInjection(c.env.DB, actorId, c.req.query('projectId') ?? null);
+		return c.json({ facts });
+	});
+
+	router.post('/memory/proposals', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const fact = await proposeMemoryFact(c.env.DB, actorId, await readJson(c.req.raw));
+		return c.json({ fact }, 201);
+	});
+
+	router.post('/memory', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const fact = await addMemoryFact(c.env.DB, actorId, await readJson(c.req.raw));
+		return c.json({ fact }, 201);
+	});
+
+	router.post('/memory/:factId/confirm', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const fact = await confirmMemoryFact(c.env.DB, actorId, c.req.param('factId'));
+		return c.json({ fact });
+	});
+
+	router.post('/memory/:factId/retract', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const fact = await retractMemoryFact(c.env.DB, actorId, c.req.param('factId'));
+		return c.json({ fact });
+	});
+
+	router.post('/memory/:factId/correct', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const fact = await correctMemoryFact(c.env.DB, actorId, c.req.param('factId'), await readJson(c.req.raw));
+		return c.json({ fact }, 201);
+	});
+
 	return router;
 }
 
 /**
- * The full /api composition for the P14 fixture — the auth router next to the
- * P14 router, exactly the mount app.ts will use (proposed diff).
+ * The full /api composition for the P14 fixture — the auth and projects
+ * routers plus the P14 router, mirroring how app.ts will mount it (P14 is
+ * added alongside the existing routers, not instead of them).
  */
 export function createProfileApp(): Hono<{ Bindings: Env }> {
 	const app = new Hono<{ Bindings: Env }>();
 	app.route('/api', createAuthRouter());
+	app.route('/api', createProjectsRouter());
 	app.route('/api', createProfileRouter());
 	app.onError((error, c) => {
 		const mapped = errorJson(error);
