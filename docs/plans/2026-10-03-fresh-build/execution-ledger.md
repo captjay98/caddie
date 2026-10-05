@@ -13,7 +13,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P06 | NOT STARTED | Unassigned | Pending | Pending | — (tokens port pulled forward to P16, see P16 record) |
 | P07 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P08 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P09 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P09 | PARTIAL — local scaffolding done; live journey BLOCKED on owner credentials | Integration lead | PENDING | PENDING | see evidence records |
 | P10 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P11 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P12 | NOT STARTED | Unassigned | Pending | Pending | — |
@@ -27,6 +27,31 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | NOT STARTED | Unassigned | Pending | Pending | — |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P09", "status": "PARTIAL — local scaffolding LOCAL VERIFIED; live journey BLOCKED on owner credentials", "sha": "merge of p09-journey + fixture self-install fix",
+  "commands": [
+    {"command": "bun test tests/p09-local.test.ts", "exitCode": 0, "receipt": "4 passed — manifest valid with protected paths; fixture complete and its own tests pass (self-installs deps on fresh clone); recipe validates against frozen StackRecipeSchema with availability=unverified; journey runner fails honestly BLOCKED without credentials (never fakes a run)"},
+    {"command": "bun run verify:packet P09", "exitCode": 0, "receipt": "1 check PASS"}
+  ],
+  "artifacts": [
+    {"path": "tests/acceptance/manifest.json", "note": "immutable evaluator contract with phases (install/seeded-tests-green/build/deliberate-red/server-start/browser-check) and repair policy"},
+    {"path": "tests/fixtures/forge-task-tracker/", "note": "standalone fixture app (Hono API + tests) with seeded baseline"},
+    {"path": "stacks/react-hono/recipe.ts", "note": "frozen StackRecipe, commands curated"},
+    {"path": "scripts/run-journey.ts", "note": "journey harness: verifies manifest+fixture hashes, fails BLOCKED without credentials, never fakes"}
+  ],
+  "environment": "local bun",
+  "providerCalls": "none",
+  "specReview": "PENDING (packet partially complete)",
+  "qualityReview": "PENDING",
+  "limitations": [
+    "LIVE journey execution BLOCKED: requires CADDIE_LIVE_AUTHORIZED=1, CONTREE_* sandbox credentials, NEBIUS_API_KEY",
+    "remaining P09 work (journey phases, repair injection, browser proof against sandboxed server, cost/latency recording) executes in the live window"
+  ]
+}
+```
+
 
 ```json
 {
