@@ -628,3 +628,198 @@ describe('P04 slice 2 — sandbox hardening (traversal, quotas, credential exclu
 		});
 	});
 });
+
+describe('P04 slice 3 — chaos stub: restart recovery, orphaned cancellations, export survival', () => {
+	let stub: SandboxStub;
+
+	beforeAll(async () => {
+		stub = new SandboxStub({ expectedToken: TOKEN, workspaceRoot: '/work' });
+		await stub.start();
+	});
+
+	afterAll(async () => {
+		await stub.stop();
+	});
+
+	function makeDriver(port: InMemorySandboxPersistence): SandboxDriver {
+		return new SandboxDriver(
+			{
+				contree: {
+					baseUrl: stub.url,
+					apiToken: TOKEN,
+					platformProjectId: 'platform-project-test',
+				},
+				quotas: {
+					maxUploadBytes: 64 * 1024,
+					maxOutputBytes: 64 * 1024,
+					maxCommandTimeoutMs: 30_000,
+				},
+				workspaceRoot: '/work',
+				pollIntervalMs: 10,
+				dispatchTimeoutMs: 2_000,
+			},
+			port,
+		);
+	}
+
+	test('a restarted driver adopts the persisted session/operation identity and settles the same work', async () => {
+		// The persistence port stands in for D1: it is SHARED across driver
+		// instances, exactly like the production table will be.
+		const port = new InMemorySandboxPersistence();
+		const driverA = makeDriver(port);
+		const { sessionId } = await driverA.create({
+			projectId: 'p3',
+			runId: 'restart-run',
+			image: 'tag:base:1',
+		});
+		stub.setBehavior('slow-start', { delayMs: 400, exitCode: 0, stdout: 'recovered' });
+		const pending = driverA.execute({
+			sessionId,
+			command: 'run slow-start',
+			operationKey: 'op-restart',
+			timeoutMs: 10_000,
+		});
+		// Dispatch happened; the operation is NOT finished yet — and the remote
+		// identity must already be persisted (persist BEFORE exposing completion).
+		await sleep(60);
+		const persisted = await port.load('op:op-restart');
+		expect(persisted?.remoteId).toBe(stub.operationIdByKey('op-restart'));
+		expect(persisted?.state).toBe('dispatched');
+
+		// driverA dies mid-exec (crash): its in-flight execute is abandoned. A NEW
+		// driver over the SAME persistence settles the SAME logical operation —
+		// no re-dispatch, no duplicate.
+		void pending.catch(() => {});
+		const driverB = makeDriver(port);
+		const settled = await driverB.reconcileOperation('op-restart');
+		expect(settled.state).toBe('succeeded');
+		expect(settled.exitCode).toBe(0);
+		const record = await port.load('op:op-restart');
+		expect(record?.state).toBe('succeeded');
+		// Exactly one dispatch happened on the wire for this operation key.
+		const execRequests = stub.requests.filter(
+			(r) => r.path.endsWith('/exec') && (r.body as Record<string, unknown>)['operationKey'] === 'op-restart',
+		);
+		expect(execRequests).toHaveLength(1);
+		// The persisted SESSION binding is adopted too: driverB keeps using the
+		// session driverA created.
+		const continued = await driverB.execute({
+			sessionId,
+			command: 'echo adopted-session',
+			operationKey: 'op-restart-continued',
+			timeoutMs: 5_000,
+		});
+		expect(continued.exitCode).toBe(0);
+	});
+
+	test('restart after ambiguous dispatch correlates by the operation key alone', async () => {
+		const port = new InMemorySandboxPersistence();
+		const driverA = makeDriver(port);
+		const { sessionId } = await driverA.create({
+			projectId: 'p3',
+			runId: 'amb-restart-run',
+			image: 'tag:base:1',
+		});
+		stub.chaos.resetNextDispatch = true;
+		expect(
+			driverA
+				.execute({
+					sessionId,
+					command: 'echo lost-response-restart',
+					operationKey: 'op-amb-restart',
+					timeoutMs: 5_000,
+				})
+				.then(
+					() => {
+						throw new Error('execute should have rejected');
+					},
+					(error: unknown) => error,
+				),
+		).resolves.toMatchObject({ code: 'AMBIGUOUS_DISPATCH' });
+		// Persisted state: ambiguous, remoteId unknown — yet the op ran remotely.
+		const record = await port.load('op:op-amb-restart');
+		expect(record?.state).toBe('ambiguous');
+		expect(record?.remoteId).toBeNull();
+
+		// A fresh driver correlates by the PERSISTED KEY (never a blind retry)
+		// and adopts the remote identity it finds.
+		const driverB = makeDriver(port);
+		const settled = await driverB.reconcileOperation('op-amb-restart');
+		expect(settled.state).toBe('succeeded');
+		const adopted = await port.load('op:op-amb-restart');
+		expect(adopted?.remoteId).toBe(stub.operationIdByKey('op-amb-restart'));
+		expect(adopted?.state).toBe('succeeded');
+	});
+
+	test('a cancellation request the remote ignores keeps status running until proven otherwise', async () => {
+		const port = new InMemorySandboxPersistence();
+		const driver = makeDriver(port);
+		const { sessionId } = await driver.create({
+			projectId: 'p3',
+			runId: 'orphan-run',
+			image: 'tag:base:1',
+		});
+		stub.setBehavior('ignore-kill', { delayMs: 5_000, exitCode: 0 });
+		stub.chaos.ignoreCancel = true;
+		const controller = new AbortController();
+		const startedAt = Date.now();
+		const outcome = driver
+			.execute({
+				sessionId,
+				command: 'run ignore-kill',
+				operationKey: 'op-orphan',
+				timeoutMs: 10_000,
+				signal: controller.signal,
+			})
+			.then(
+				() => {
+					throw new Error('execute should have rejected');
+				},
+				(error: unknown) => error,
+			);
+		await sleep(50);
+		controller.abort();
+		expect(await outcome).toMatchObject({ code: 'ABORTED_CANCEL_REQUESTED' });
+		expect(Date.now() - startedAt).toBeLessThan(1_000);
+		const remoteId = stub.operationIdByKey('op-orphan');
+		// The cancel REQUEST is not confirmed termination: the remote ignored it,
+		// so the honest status is still 'running' — never 'cancelled' by fiat.
+		const stillRunning = await driver.status(remoteId as string);
+		expect(stillRunning.state).toBe('running');
+		// Chaos off: the cancel lands, and now the STATUS proves termination.
+		stub.chaos.ignoreCancel = false;
+		const cancel = await driver.cancel(remoteId as string);
+		expect(cancel.requested).toBe(true);
+		const terminal = await driver.status(remoteId as string);
+		expect(terminal.state).toBe('cancelled');
+	});
+
+	test('export survives session loss because the artifactRef was persisted first', async () => {
+		const port = new InMemorySandboxPersistence();
+		const driver = makeDriver(port);
+		const { sessionId } = await driver.create({
+			projectId: 'p3',
+			runId: 'loss-run',
+			image: 'tag:base:1',
+		});
+		await driver.uploadFiles(sessionId, [{ path: 'artifact.txt', contentBase64: b64('keep me\n') }]);
+		const exported = await driver.export(sessionId);
+		expect(exported.artifactRef).toBeTruthy();
+		expect(exported.sha256).toMatch(/^[0-9a-f]{64}$/);
+
+		// The session is LOST remotely (crash/eviction/dispose of the backing env).
+		stub.loseSession(sessionId);
+		expect(
+			driver.export(sessionId).then(
+				() => {
+					throw new Error('export should have rejected');
+				},
+				(error: unknown) => error,
+			),
+		).resolves.toMatchObject({ code: 'SESSION_LOST' });
+		// Loss of the sandbox does NOT lose the export: the persisted artifact
+		// identity is resumable and honest.
+		const survived = await driver.getExportedArtifact(sessionId);
+		expect(survived).toEqual({ artifactRef: exported.artifactRef, sha256: exported.sha256 });
+	});
+});

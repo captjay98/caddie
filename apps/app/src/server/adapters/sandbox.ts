@@ -282,10 +282,15 @@ export class SandboxDriver {
 	async checkpoint(sessionId: string): Promise<{ checkpointRef: string }> {
 		requireNonEmpty(sessionId, 'sessionId');
 		await this.requireActiveSession(sessionId);
-		const { checkpointRef } = await this.contree.checkpoint(
-			sessionId,
-			AbortSignal.timeout(this.dispatchTimeoutMs),
-		);
+		let checkpointRef: string;
+		try {
+			({ checkpointRef } = await this.contree.checkpoint(
+				sessionId,
+				AbortSignal.timeout(this.dispatchTimeoutMs),
+			));
+		} catch (error) {
+			throw this.mapContreeError(error, 'CHECKPOINT_FAILED', `checkpoint of session ${sessionId} failed`);
+		}
 		const existing = await this.persistence.load(`session:${sessionId}`);
 		await this.persistence.save({
 			...(existing ?? this.sessionRecord(sessionId, {}, 'active')),
@@ -306,15 +311,27 @@ export class SandboxDriver {
 		const runId = requireNonEmpty(input.runId, 'runId');
 		const image = requireNonEmpty(input.image, 'image');
 		const workspaceRoot = `${this.config.workspaceRoot.replace(/\/+$/, '')}/${projectId}`;
-		const { sessionId } = await this.contree.createSession(
-			{
-				sessionKey: `caddie:${projectId}:${runId}:restore:${checkpointRef}`,
-				image,
-				restoreFrom: checkpointRef,
-				workspaceRoot,
-			},
-			AbortSignal.timeout(this.dispatchTimeoutMs),
-		);
+		let sessionId: string;
+		try {
+			({ sessionId } = await this.contree.createSession(
+				{
+					sessionKey: `caddie:${projectId}:${runId}:restore:${checkpointRef}`,
+					image,
+					restoreFrom: checkpointRef,
+					workspaceRoot,
+				},
+				AbortSignal.timeout(this.dispatchTimeoutMs),
+			));
+		} catch (error) {
+			if (error instanceof ContreeApiError && error.status === 404) {
+				throw new SandboxError(
+					404,
+					'CHECKPOINT_NOT_FOUND',
+					`no such checkpoint ${checkpointRef} — restore refused`,
+				);
+			}
+			throw this.mapContreeError(error, 'RESTORE_FAILED', `restore from ${checkpointRef} failed`);
+		}
 		await this.persistence.save(
 			this.sessionRecord(sessionId, { projectId, runId, image, checkpointRef }, 'active'),
 		);
@@ -324,10 +341,15 @@ export class SandboxDriver {
 	async export(sessionId: string): Promise<{ artifactRef: string; sha256: string }> {
 		requireNonEmpty(sessionId, 'sessionId');
 		await this.requireActiveSession(sessionId);
-		const exported = await this.contree.exportSession(
-			sessionId,
-			AbortSignal.timeout(this.dispatchTimeoutMs),
-		);
+		let exported: { artifactRef: string; sha256: string };
+		try {
+			exported = await this.contree.exportSession(
+				sessionId,
+				AbortSignal.timeout(this.dispatchTimeoutMs),
+			);
+		} catch (error) {
+			throw this.mapContreeError(error, 'EXPORT_FAILED', `export of session ${sessionId} failed`);
+		}
 		// Artifact identity persisted BEFORE exposure: session loss after this
 		// point cannot lose the export (slice-3 test proves the recovery).
 		await this.persistence.save({
