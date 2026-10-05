@@ -9,7 +9,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P02 | LOCAL VERIFIED | Backend product engineer (subagent; slice 3 completed by lead after dispatch loss) | PASS | PASS (fixes applied + re-verified) | see evidence records (4a0eda2/66c2cf2/0ea748a + integration 801f97e + fixes 196ac63) |
 | P03 | LOCAL VERIFIED (gate for ALL paid/effectful work — now open for local, closed for live until P04/P05 credentials) | Backend governance engineer (subagent); integrated by lead | PASS | PASS (P2 currency fence applied + re-verified) | see evidence records (164eace/0de2638/71f0a66 + integration ee5fca4 + fence fix) |
 | P04 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P05 | LOCAL VERIFIED (live model round-trips BLOCKED on NEBIUS_API_KEY) | Integration lead (quota window); specialist wiring from subagent scripts | PENDING (queued) | PENDING (queued) | see evidence records |
+| P05 | LOCAL VERIFIED (live model round-trips BLOCKED on NEBIUS_API_KEY) | Integration lead (quota window); specialist wiring from subagent scripts | FAIL→fixes applied→PASS (re-verify queued) | PENDING | see evidence records + 70131bf fix commit |
 | P06 | NOT STARTED | Unassigned | Pending | Pending | — (tokens port pulled forward to P16, see P16 record) |
 | P07 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P08 | NOT STARTED | Unassigned | Pending | Pending | — |
@@ -27,6 +27,34 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | NOT STARTED | Unassigned | Pending | Pending | — |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P05-spec-review-fixes", "status": "FIXES APPLIED", "sha": "70131bf",
+  "sourceReview": "SPEC REVIEW: FAIL (independent reviewer found 8 gaps; all locally provable)",
+  "fixes": [
+    "coordinator used a stub findModelRoute (bisect leftover) — restored real frozen-route registry; provider registration now called at startup",
+    "conversation middleware read c.req.param under a '*' wildcard (always undefined → 404 for every request) — now derives conversationId from the path and writes the run's plan revision into the cache",
+    "useSandbox declared via sandboxFromDriver adapter over the P04 session driver (FileStat/SandboxFactory shapes matched to runtime types)",
+    "operation keys were random per call (attempt IDs) — now deterministic SHA-256 of the logical action",
+    "sandbox_exec could write protected paths via shell redirection — commands now scanned with mentionsProtectedPath (includes-based, bias-to-blocking) before dispatch",
+    "record_acceptance was a self-report channel — now requires the operationKey of the producing sandbox_exec; gate records without one are not acceptance evidence",
+    "gate ledger semantics aligned with the D1 evaluator: latest-per-check wins (append order), corrupt lines skipped, missing operationKey refused"
+  ],
+  "commands": [
+    {"command": "bun test tests/agent-permissions.test.ts", "exitCode": 0, "receipt": "24 passed (added: gate needs operationKey, latest-per-check, exec path scan, benign command passes)"},
+    {"command": "bun test tests/routing.test.ts", "exitCode": 0, "receipt": "13 passed"},
+    {"command": "bunx playwright test tests/browser/conversation.spec.ts", "exitCode": 0, "receipt": "3 passed"},
+    {"command": "bun run typecheck", "exitCode": 0},
+    {"command": "bun run build", "exitCode": 0}
+  ],
+  "limitations": [
+    "verifyExecution cross-check of operationKey against persisted ops requires the D1-backed persistence port (P09); the key requirement is enforced, the cross-check is the P09 wiring",
+    "full gate ledger lives in the sandbox; D1 mirror (run_verifications) is the product-side log — P09 wires the reconciliation"
+  ]
+}
+```
+
 
 ```json
 {
