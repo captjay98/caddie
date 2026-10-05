@@ -48,6 +48,9 @@ const REPO_ROOT = join(import.meta.dir, '..');
 // deploy-production action (contracts.md "Approval and effect" example).
 const RESOURCE_ID = 'plan:main';
 const POLICY_VERSION = 'policies/2026-10-04';
+// Set by the slice-1 setup test; used by the operations/budget/credentials
+// slices (they need an existing project for foreign keys, nothing more).
+let ledgerProjectId = '';
 
 // --- fixture lifecycle ----------------------------------------------------------
 
@@ -241,6 +244,7 @@ describe('P03 slice 1: revision-bound approvals over real workerd + D1', () => {
 		});
 		expect(projRes.status).toBe(201);
 		projA = ((await projRes.json()) as { project: { id: string } }).project.id;
+		ledgerProjectId = projA;
 
 		const projRes2 = await worker(jarA, '/api/projects', {
 			method: 'POST',
@@ -494,5 +498,135 @@ describe('P03 slice 1: revision-bound approvals over real workerd + D1', () => {
 			body: JSON.stringify({ intent: intentFor(projA, planV1Hash), decision: 'approved' }),
 		});
 		expect((await noSession).status).toBe(401);
+	});
+});
+
+// --- slice 2: external-effects ledger --------------------------------------------------
+
+/**
+ * The narrow external-operation ledger (feature-ledger H5): unique operation
+ * key elects ONE dispatcher; a cancellation request is NOT confirmed
+ * termination; an ambiguous dispatch leaves reconciliation-required and can
+ * only leave it via a real receipt — never a blind retry. All of this runs
+ * through the fixture control routes into the production service on real D1.
+ */
+describe('P03 slice 2: external-effects ledger over real workerd + D1', () => {
+	const json = jsonHeaders;
+
+	function opsPost(path: string, body: Record<string, unknown>): Promise<Response> {
+		return fetch(`${WORKER_BASE}${path}`, { method: 'POST', headers: json, body: JSON.stringify(body) });
+	}
+
+	async function opsRow(operationKey: string): Promise<Record<string, unknown> | null> {
+		const res = await fetch(`${WORKER_BASE}/__test/operations/get/${encodeURIComponent(operationKey)}`);
+		const body = (await res.json()) as { operation: Record<string, unknown> | null };
+		return body.operation;
+	}
+
+	async function opCount(operationKey: string): Promise<number> {
+		return d1Count(WORKER_BASE, 'external_operations', `"operationKey" = '${operationKey}'`);
+	}
+
+	test('prepare inserts one row; a duplicate prepare with the same operationKey conflicts 409 and exactly one row remains', async () => {
+		const res = await opsPost('/__test/operations/prepare', {
+			projectId: ledgerProjectId,
+			runId: 'run-ops-1',
+			provider: 'contree',
+			operationKey: 'deploy/main@rev-a',
+		});
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as { operation: { status: string } }).operation.status).toBe('prepared');
+
+		const dup = await opsPost('/__test/operations/prepare', {
+			projectId: ledgerProjectId,
+			runId: 'run-ops-2',
+			provider: 'contree',
+			operationKey: 'deploy/main@rev-a',
+		});
+		expect(dup.status).toBe(409);
+		expect(((await dup.json()) as { error: string }).error).toBe('operation_key_conflict');
+		expect(await opCount('deploy/main@rev-a')).toBe(1);
+	});
+
+	test('dispatch -> receipt -> succeeded (idempotent receipt replay, conflicting receipt rejected)', async () => {
+		const key = 'deploy/main@rev-b';
+		expect((await opsPost('/__test/operations/prepare', { projectId: ledgerProjectId, runId: 'run-ops-1', provider: 'contree', operationKey: key })).status).toBe(200);
+		const dispatched = await opsPost('/__test/operations/dispatch', { operationKey: key, remoteId: 'remote-1' });
+		expect(dispatched.status).toBe(200);
+		expect(((await dispatched.json()) as { operation: { status: string; remoteId: string } }).operation).toMatchObject({ status: 'dispatched', remoteId: 'remote-1' });
+
+		const receipt = await opsPost('/__test/operations/receipt', { operationKey: key, receiptId: 'rcpt-1', outcome: 'succeeded' });
+		expect(receipt.status).toBe(200);
+		expect(((await receipt.json()) as { operation: { status: string; receiptId: string } }).operation).toMatchObject({ status: 'succeeded', receiptId: 'rcpt-1' });
+
+		// replaying the same receipt is a no-op, not a duplicate effect
+		const replay = await opsPost('/__test/operations/receipt', { operationKey: key, receiptId: 'rcpt-1', outcome: 'succeeded' });
+		expect(replay.status).toBe(200);
+		expect(await opCount(key)).toBe(1);
+		// a DIFFERENT receipt on a terminal row is a conflict
+		const conflict = await opsPost('/__test/operations/receipt', { operationKey: key, receiptId: 'rcpt-2', outcome: 'failed' });
+		expect(conflict.status).toBe(409);
+		expect(((await conflict.json()) as { error: string }).error).toBe('receipt_conflict');
+	});
+
+	test('dispatch timeout path: reconciliation-required, and a later receipt with the same key RECONCILES instead of duplicating', async () => {
+		const key = 'sandbox/exec@rev-c';
+		expect((await opsPost('/__test/operations/prepare', { projectId: ledgerProjectId, runId: 'run-ops-1', provider: 'contree', operationKey: key })).status).toBe(200);
+		expect((await opsPost('/__test/operations/dispatch', { operationKey: key, remoteId: 'remote-2' })).status).toBe(200);
+
+		// uncertain outcome: mark reconciliation-required (NEVER a blind retry)
+		const ambiguous = await opsPost('/__test/operations/reconciliation-required', { operationKey: key });
+		expect(ambiguous.status).toBe(200);
+		expect(((await ambiguous.json()) as { operation: { status: string } }).operation.status).toBe('reconciliation-required');
+
+		// re-dispatch from reconciliation-required is refused (no blind retry)
+		const redispatch = await opsPost('/__test/operations/dispatch', { operationKey: key, remoteId: 'remote-3' });
+		expect(redispatch.status).toBe(409);
+		expect(((await redispatch.json()) as { error: string }).error).toBe('operation_invalid_transition');
+
+		// the provider's late receipt with the SAME operation key reconciles the row
+		const receipt = await opsPost('/__test/operations/receipt', { operationKey: key, receiptId: 'rcpt-3', outcome: 'succeeded' });
+		expect(receipt.status).toBe(200);
+		expect(((await receipt.json()) as { operation: { status: string } }).operation.status).toBe('succeeded');
+		// still exactly one logical operation — the effect did not duplicate
+		expect(await opCount(key)).toBe(1);
+
+		// provider correlation lookup by (provider, operationKey) finds it
+		const correlate = await fetch(`${WORKER_BASE}/__test/operations/correlate?provider=contree&operationKey=${encodeURIComponent(key)}`);
+		expect(((await correlate.json()) as { operation: { status: string } | null }).operation?.status).toBe('succeeded');
+	});
+
+	test('cancel-requested is NOT cancelled: pending-remote until a cancelled receipt proves termination', async () => {
+		const key = 'sandbox/exec@rev-d';
+		expect((await opsPost('/__test/operations/prepare', { projectId: ledgerProjectId, runId: 'run-ops-1', provider: 'contree', operationKey: key })).status).toBe(200);
+		expect((await opsPost('/__test/operations/dispatch', { operationKey: key, remoteId: 'remote-4' })).status).toBe(200);
+
+		const requested = await opsPost('/__test/operations/cancel-request', { operationKey: key });
+		expect(requested.status).toBe(200);
+		const requestedOp = ((await requested.json()) as { operation: { status: string; receiptId: string | null } }).operation;
+		expect(requestedOp.status).toBe('cancel-requested');
+		expect(requestedOp.receiptId).toBeNull();
+		// database truth: still pending-remote, no confirmation
+		expect((await opsRow(key))?.['status']).toBe('cancel-requested');
+
+		// only a provider receipt turns cancel-requested into cancelled
+		const confirmed = await opsPost('/__test/operations/cancel-confirm', { operationKey: key, receiptId: 'rcpt-cancel-1' });
+		expect(confirmed.status).toBe(200);
+		const confirmedOp = ((await confirmed.json()) as { operation: { status: string; receiptId: string } }).operation;
+		expect(confirmedOp.status).toBe('cancelled');
+		expect(confirmedOp.receiptId).toBe('rcpt-cancel-1');
+	});
+
+	test('receipts cannot fabricate completion without a dispatch; unknown keys 404', async () => {
+		const key = 'sandbox/exec@rev-e';
+		expect((await opsPost('/__test/operations/prepare', { projectId: ledgerProjectId, runId: 'run-ops-1', provider: 'contree', operationKey: key })).status).toBe(200);
+		const phantom = await opsPost('/__test/operations/receipt', { operationKey: key, receiptId: 'rcpt-x', outcome: 'succeeded' });
+		expect(phantom.status).toBe(409);
+		expect(((await phantom.json()) as { error: string }).error).toBe('operation_invalid_transition');
+		// database truth: still prepared, no fabricated receipt
+		expect((await opsRow(key))?.['status']).toBe('prepared');
+
+		const missing = await opsPost('/__test/operations/receipt', { operationKey: 'no-such-key', receiptId: 'r', outcome: 'failed' });
+		expect(missing.status).toBe(404);
 	});
 });
