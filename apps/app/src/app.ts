@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import { createAgentRouter } from '@flue/runtime/routing';
 import { Hono } from 'hono';
 import { Hello } from './agents/hello.ts';
+import { registerNebiusProvider } from './agents/providers.ts';
 import { Coordinator, provideCoordinatorContext } from './agents/coordinator.ts';
 import type { SandboxToolDeps } from './agents/tools.ts';
 import type { SpecialistBuildContext } from './agents/specialists.ts';
@@ -10,6 +12,7 @@ import { createApprovalsRouter } from './server/routes/approvals.ts';
 import { createEvidenceRouter } from './server/routes/evidence.ts';
 import { createRunsRouter, conversationGuard } from './server/routes/runs.ts';
 import { lookupRunByConversation, recordRepairRound, recordVerification } from './server/runs.ts';
+import type { RunBindingRecord } from '@caddie/contracts';
 import { createPlanDocRevision } from './server/projects.ts';
 import { SandboxDriver, SandboxError, InMemorySandboxPersistence, type SandboxExecuteInput } from './server/adapters/sandbox.ts';
 import { sessionUserId, projectScopeForUser } from './server/scope.ts';
@@ -49,6 +52,8 @@ type Env = {
 	CONTREE_PROJECT_ID?: string;
 };
 
+registerNebiusProvider();
+
 const app = new Hono<{ Bindings: Env }>();
 
 // --- product API -----------------------------------------------------------
@@ -68,11 +73,17 @@ app.route('/agents', conversationGuard());
 app.use('/agents/coordinator/*', async (c, next) => {
 	const userId = await sessionUserId(c.env, c.req.raw.headers);
 	if (!userId) return c.json({ error: 'unauthenticated' }, 401);
-	const conversationId = c.req.param('conversationId');
+		// The '*' wildcard pattern provides no named params — derive the
+		// conversation id from the path: /agents/coordinator/<conversationId>/…
+		const parts = c.req.path.split('/');
+		const conversationId = parts[3];
 	const run = conversationId ? await lookupRunByConversation(c.env.DB, conversationId) : null;
 	if (!run) return c.json({ error: 'conversation_not_found' }, 404);
 	const scope = await projectScopeForUser(c.env.DB, userId, run.projectId);
-	provideCoordinatorContext(coordinatorContext(c.env, scope, run.runId));
+		// The binding's plan revision is the run's current revision until a
+		// plan update changes it (P07 wires revision-bump invalidation).
+		currentRevisionCache.set(run.runId, run.planRevision);
+		provideCoordinatorContext(coordinatorContext(c.env, scope, run.runId, run));
 	await next();
 });
 app.route('/agents/coordinator', createAgentRouter(Coordinator));
@@ -89,7 +100,11 @@ function coordinatorContext(
 	env: Env,
 	scope: { actorId: string; workspaceId: string; projectId: string },
 	runId: string,
-): SpecialistBuildContext & { currentPlanRevision: () => string } {
+	run: RunBindingRecord,
+): SpecialistBuildContext & {
+	currentPlanRevision: () => string;
+	sandboxDriver: import('@flue/runtime').SandboxDriver | null;
+} {
 	if (!env.CONTREE_BASE_URL || !env.CONTREE_API_TOKEN || !env.CONTREE_PROJECT_ID) {
 		throw new SandboxError(
 			503,
@@ -130,7 +145,7 @@ function coordinatorContext(
 			const result = await driver.execute({
 				sessionId: input.sessionId,
 				command: `cat -- '${input.path}'`,
-				operationKey: `read:${runId}:${Math.random().toString(36).slice(2, 10)}`,
+				operationKey: `read:${runId}:${createHash('sha256').update(input.path).digest('hex').slice(0, 16)}`,
 				timeoutMs: 30_000,
 			});
 			if (result.exitCode !== 0) throw new SandboxError(404, 'FILE_NOT_FOUND', `cannot read ${input.path}`);
@@ -140,10 +155,79 @@ function coordinatorContext(
 			await driver.uploadFiles(input.sessionId, [{ path: input.path, contentBase64: btoa(input.content) }]);
 		},
 	};
+	// Flue-compatible driver adapter: maps the flue SandboxDriver interface
+	// (readFile/writeFile/exists/mkdir/rm/exec) onto the P04 session driver.
+	const flueDriver: import('@flue/runtime').SandboxDriver = {
+		readFile: async (path) => deps.readFile({ sessionId, path }),
+		readFileBuffer: async (path) => {
+			const text = await deps.readFile({ sessionId, path });
+			return new TextEncoder().encode(text);
+		},
+		writeFile: async (path, content) => {
+			const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
+			await deps.writeFile({ sessionId, path, content: text });
+		},
+		stat: async (path) => {
+			const result = await driver.execute({
+				sessionId,
+				command: `stat -c '%s %F' -- '${path}'`,
+				operationKey: `stat:${runId}:${createHash('sha256').update(path).digest('hex').slice(0, 16)}`,
+				timeoutMs: 15_000,
+			});
+			if (result.exitCode !== 0) throw new Error(`stat failed for ${path}`);
+			const size = Number(result.stdout.trim().split(' ')[0]);
+			return { isFile: true, isDirectory: false, size, mtime: new Date() };
+		},
+		readdir: async (path) => {
+			const result = await driver.execute({
+				sessionId,
+				command: `ls -1 -- '${path}'`,
+				operationKey: `ls:${runId}:${createHash('sha256').update(path).digest('hex').slice(0, 16)}`,
+				timeoutMs: 15_000,
+			});
+			if (result.exitCode !== 0) throw new Error(`readdir failed for ${path}`);
+			return result.stdout.split('\n').filter(Boolean);
+		},
+		exists: async (path) => {
+			const result = await driver.execute({
+				sessionId,
+				command: `test -e -- '${path}' && echo yes || echo no`,
+				operationKey: `exists:${runId}:${createHash('sha256').update(path).digest('hex').slice(0, 16)}`,
+				timeoutMs: 15_000,
+			});
+			return result.stdout.trim() === 'yes';
+		},
+		mkdir: async (path) => {
+			await driver.execute({
+				sessionId,
+				command: `mkdir -p -- '${path}'`,
+				operationKey: `mkdir:${runId}:${createHash('sha256').update(path).digest('hex').slice(0, 16)}`,
+				timeoutMs: 15_000,
+			});
+		},
+		rm: async (path, options) => {
+			await driver.execute({
+				sessionId,
+				command: `rm -${options?.recursive ? 'r' : ''}${options?.force ? 'f' : ''} -- '${path}'`,
+				operationKey: `rm:${runId}:${createHash('sha256').update(path).digest('hex').slice(0, 16)}`,
+				timeoutMs: 30_000,
+			});
+		},
+		exec: async (command, options) => {
+			const result = await driver.execute({
+				sessionId,
+				command,
+				operationKey: `exec:${runId}:${createHash('sha256').update(command).digest('hex').slice(0, 16)}`,
+				timeoutMs: options?.timeoutMs ?? 60_000,
+			});
+			return { exitCode: result.exitCode ?? -1, stdout: result.stdout, stderr: result.stderr };
+		},
+	};
 	return {
 		driver: deps,
 		sessionId,
 		runId,
+		sandboxDriver: flueDriver,
 		readPlanNote: async (kind) => {
 			const rows = await env.DB.prepare(
 				`select "body" from "plan_doc_revisions" where "projectId" = ? and "kind" = ? order by "revision" desc limit 1`,

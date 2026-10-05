@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import * as v from 'valibot';
 import { defineTool } from '@flue/runtime';
-import { isProtectedPath } from './permissions.ts';
+import { isProtectedPath, mentionsProtectedPath } from './permissions.ts';
 
 /**
  * P05 agent tools — Valibot schemas (flue contract lesson), one definition
@@ -137,11 +138,21 @@ export function makeSandboxExec(deps: {
 			'Run a command inside the project sandbox session. Time- and output-quota bound; cancellations are propagated.',
 		input: SandboxExecInput,
 		run: async (ctx) => {
+			// Protected surfaces can also be written via shell redirection —
+			// scan the command string for each protected prefix before any
+			// dispatch (string-level, documented; the P09 manifest hash check
+			// is the tamper-evident backstop).
+			if (mentionsProtectedPath(ctx.data.command)) {
+				throw new Error(
+					`PROTECTED_PATH: command references an acceptance-harness path and was not dispatched`,
+				);
+			}
 			const result = await deps.driver.execute({
 				sessionId: deps.sessionId,
 				command: ctx.data.command,
-				// Operation key derived from the run: stable per logical action.
-				operationKey: `exec:${deps.runId}:${Math.random().toString(36).slice(2, 10)}`,
+				// Deterministic key: hash of the logical action (run + command).
+				// A retry of the same command reuses the key — never an attempt ID.
+				operationKey: `exec:${deps.runId}:${createHash('sha256').update(ctx.data.command).digest('hex').slice(0, 24)}`,
 				timeoutMs: ctx.data.timeoutMs,
 			});
 			return { output: `dispatched ${result.remoteId}` };
@@ -246,6 +257,9 @@ const RecordAcceptanceInput = v.object({
 	exitCode: v.pipe(v.number(), v.integer()),
 	/** Short digest of the command output used as evidence. */
 	outputDigest: v.string(),
+	/** The sandbox_exec operation key that ran this command — binds the
+	 *  record to an actual execution instead of a self-report. */
+	operationKey: v.pipe(v.string(), v.minLength(8)),
 	planRevision: v.string(),
 });
 
@@ -254,6 +268,7 @@ export interface GateRecord {
 	command: string;
 	exitCode: number;
 	outputDigest: string;
+	operationKey: string;
 	planRevision: string;
 	recordedAt: string;
 }
@@ -284,6 +299,7 @@ export function makeRecordAcceptance() {
 				command: ctx.data.command,
 				exitCode: ctx.data.exitCode,
 				outputDigest: ctx.data.outputDigest,
+				operationKey: ctx.data.operationKey,
 				planRevision: ctx.data.planRevision,
 				recordedAt: new Date().toISOString(),
 			};

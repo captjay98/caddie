@@ -38,21 +38,31 @@ export function evaluateGateLedger(content: string, currentPlanRevision: string)
 			// skip
 		}
 	}
-	const relevant = records.filter((r) => r.planRevision === currentPlanRevision);
+	const relevant = records.filter(
+		(r) => r.planRevision === currentPlanRevision && typeof r.operationKey === 'string' && r.operationKey.length >= 8,
+	);
 	if (relevant.length === 0) {
 		return {
 			completable: false,
 			reason: 'no acceptance record under the current plan revision — run the checks and record_acceptance',
 		};
 	}
-	const passing = relevant.filter((r) => r.exitCode === 0);
-	if (passing.length === 0) {
+	// Latest record per check decides, matching evaluateCompletion in the D1
+	// evaluator. The ledger file is in append order (oldest first), so the
+	// LAST record per check is the latest: a failure later re-run and passed
+	// does not block, but an unresolved failure does.
+	const latestByCheck = new Map<string, number>();
+	for (const record of relevant) {
+		latestByCheck.set(record.check, record.exitCode);
+	}
+	const failed = [...latestByCheck.entries()].filter(([, exitCode]) => exitCode !== 0).map(([check]) => check);
+	if (failed.length > 0) {
 		return {
 			completable: false,
-			reason: 'acceptance records exist for the current revision but none passed — fix and re-run',
+			reason: `unresolved failing checks under the current revision: ${failed.join(', ')}`,
 		};
 	}
-	return { completable: true, reason: `accepted by ${passing.length} passing record(s) under ${currentPlanRevision}` };
+	return { completable: true, reason: `accepted by ${latestByCheck.size} passing check(s) under ${currentPlanRevision}` };
 }
 
 export function gatePathFor(planRevision: string): string {

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
 	ALL_TOOL_NAMES,
+	mentionsProtectedPath,
 	PROTECTED_PATH_PREFIXES,
 	REPAIR_PAUSE_THRESHOLD,
 	ROLE_TOOL_POLICY,
@@ -14,6 +15,7 @@ import {
 import { SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
 import {
 	makeRecordVerification,
+	makeSandboxExec,
 	makeWriteSandboxFile,
 	assertNotProtectedPath,
 } from '../apps/app/src/agents/tools';
@@ -158,6 +160,45 @@ describe('P05 protected acceptance surfaces', () => {
 		expect(calls).toEqual([]); // the driver was never touched
 	});
 
+	test('sandbox_exec refuses commands referencing protected paths', async () => {
+		const calls: string[] = [];
+		const driver = {
+			execute: async (input: { command: string }) => {
+				calls.push(input.command);
+				return { remoteId: 'x' };
+			},
+			readFile: async () => {
+				calls.push('read');
+				return '';
+			},
+			writeFile: async () => {
+				calls.push('write');
+			},
+		};
+		const tool = makeSandboxExec({ driver, sessionId: 's1', runId: 'r1' });
+		let error: unknown = null;
+		try {
+			await (tool as unknown as { run: (ctx: { data: { command: string; sessionId: string; timeoutMs: number } }) => Promise<unknown> }).run({
+				data: { command: "echo hacked > tests/acceptance/manifest.json", sessionId: 's1', timeoutMs: 1000 },
+			});
+		} catch (caught) {
+			error = caught;
+		}
+		expect(String(error)).toContain('PROTECTED_PATH');
+		expect(calls).toEqual([]);
+		// a benign command passes through
+		await (tool as unknown as { run: (ctx: { data: { command: string; sessionId: string; timeoutMs: number } }) => Promise<unknown> }).run({
+			data: { command: 'bun test src/', sessionId: 's1', timeoutMs: 1000 },
+		});
+		expect(calls).toEqual(['bun test src/']);
+	});
+
+	test('mentionsProtectedPath catches paths embedded mid-command', () => {
+		expect(mentionsProtectedPath("echo hacked > tests/acceptance/manifest.json")).toBe(true);
+		expect(mentionsProtectedPath("cat scripts/verify-packet.ts")).toBe(true);
+		expect(mentionsProtectedPath('bun test src/')).toBe(false);
+	});
+
 	test('assertNotProtectedPath blocks the gate directory for regular agents', () => {
 		expect(() => assertNotProtectedPath('.caddie/gates/rev-1.jsonl')).toThrow('PROTECTED_PATH');
 	});
@@ -184,7 +225,7 @@ describe('P05 versioned skills', () => {
 describe('P05 completion gate', () => {
 	test('no record under the current revision refuses completion', () => {
 		const verdict = evaluateGateLedger(
-			`${JSON.stringify({ check: 'x', command: 'bun test', exitCode: 0, planRevision: 'rev-1', outputDigest: 'd', recordedAt: 't' })}\n`,
+			`${JSON.stringify({ check: 'x', command: 'bun test', exitCode: 0, planRevision: 'rev-1', outputDigest: 'd', operationKey: 'exec:r1:aaaaaaaaaaaaaaaaaaaaaaaa', recordedAt: 't' })}\n`,
 			'rev-2',
 		);
 		expect(verdict.completable).toBe(false);
@@ -192,16 +233,16 @@ describe('P05 completion gate', () => {
 	});
 
 	test('a failing record refuses completion even with passing history', () => {
-		const pass = `${JSON.stringify({ check: 'old', command: 'bun test', exitCode: 0, planRevision: 'rev-1', outputDigest: 'd', recordedAt: 't' })}\n`;
-		const fail = `${JSON.stringify({ check: 'new', command: 'bun test', exitCode: 1, planRevision: 'rev-2', outputDigest: 'd', recordedAt: 't' })}\n`;
+		const pass = `${JSON.stringify({ check: 'old', command: 'bun test', exitCode: 0, planRevision: 'rev-1', outputDigest: 'd', operationKey: 'exec:r1:aaaaaaaaaaaaaaaaaaaaaaaa', recordedAt: 't' })}\n`;
+		const fail = `${JSON.stringify({ check: 'new', command: 'bun test', exitCode: 1, planRevision: 'rev-2', outputDigest: 'd', operationKey: 'exec:r1:bbbbbbbbbbbbbbbbbbbbbbbb', recordedAt: 't' })}\n`;
 		const verdict = evaluateGateLedger(pass + fail, 'rev-2');
 		expect(verdict.completable).toBe(false);
-		expect(verdict.reason).toContain('none passed');
+		expect(verdict.reason).toContain('unresolved failing checks');
 	});
 
 	test('a passing record under the current revision completes', () => {
 		const verdict = evaluateGateLedger(
-			`${JSON.stringify({ check: 'tests', command: 'bun test', exitCode: 0, planRevision: 'rev-2', outputDigest: 'd', recordedAt: 't' })}\n`,
+			`${JSON.stringify({ check: 'tests', command: 'bun test', exitCode: 0, planRevision: 'rev-2', outputDigest: 'd', operationKey: 'exec:r1:cccccccccccccccccccccccc', recordedAt: 't' })}\n`,
 			'rev-2',
 		);
 		expect(verdict.completable).toBe(true);
@@ -210,11 +251,25 @@ describe('P05 completion gate', () => {
 	test('a corrupt line does not erase passing records around it', () => {
 		const content = [
 			'{not json',
-			JSON.stringify({ check: 't', command: 'bun test', exitCode: 0, planRevision: 'rev-1', outputDigest: 'd', recordedAt: 't' }),
+			JSON.stringify({ check: 't', command: 'bun test', exitCode: 0, planRevision: 'rev-1', outputDigest: 'd', operationKey: 'exec:r1:aaaaaaaaaaaaaaaaaaaaaaaa', recordedAt: 't' }),
 			'',
 		].join('\n');
 		const verdict = evaluateGateLedger(content, 'rev-1');
 		expect(verdict.completable).toBe(true);
+	});
+
+	test('a record without an operation key is not acceptance evidence', () => {
+		const noKey = `${JSON.stringify({ check: 'x', command: 'bun test', exitCode: 0, planRevision: 'rev-1', outputDigest: 'd', recordedAt: 't' })}\n`;
+		const verdict = evaluateGateLedger(noKey, 'rev-1');
+		expect(verdict.completable).toBe(false);
+		expect(verdict.reason).toContain('no acceptance record');
+	});
+
+	test('latest record per check decides: a re-run failure after a pass blocks', () => {
+		const pass = `${JSON.stringify({ check: 'tests', command: 'bun test', exitCode: 0, planRevision: 'rev-1', outputDigest: 'd', operationKey: 'exec:r1:dddddddddddddddddddddddd', recordedAt: 't1' })}\n`;
+		const fail = `${JSON.stringify({ check: 'tests', command: 'bun test', exitCode: 1, planRevision: 'rev-1', outputDigest: 'd', operationKey: 'exec:r1:eeeeeeeeeeeeeeeeeeeeeeee', recordedAt: 't2' })}\n`;
+		// Both orders: the latest (by array order in the ledger) wins
+		expect(evaluateGateLedger(pass + fail, 'rev-1').completable).toBe(false);
 	});
 
 	test('empty gate (fail closed) refuses completion', () => {

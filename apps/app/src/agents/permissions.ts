@@ -72,6 +72,16 @@ export function isProtectedPath(path: string): boolean {
 }
 
 /**
+ * For command strings (sandbox_exec): the protected path may appear anywhere
+ * in the command (e.g. after a redirect). Broader than isProtectedPath —
+ * a false positive blocks a legitimate command, a false negative writes the
+ * acceptance harness. Deliberately biased to blocking.
+ */
+export function mentionsProtectedPath(command: string): boolean {
+	return PROTECTED_PATH_PREFIXES.some((prefix) => command.includes(prefix));
+}
+
+/**
  * Repair-ledger round taxonomy (adjudication harness pattern): retries,
  * diagnosis, transport problems and framework recovery are NOT repairs — the
  * pause rule counts only `repair_attempt` failures per issue.
