@@ -616,3 +616,364 @@ describe('P10 slice 1: claims — deterministic identity bound to the exact snap
 	});
 });
 
+
+// --- slice 2: authority reconciliation (ported from test_domain_discovery.py) -----------
+
+import {
+	currentReadings,
+	reconcileClaimsByAuthority,
+	surveyClaims,
+	type ReconciliationClaim,
+} from '../apps/app/src/server/evidence/claims.ts';
+import {
+	deadlineGap,
+	deadlineInstantKey,
+	normalizeDeadline,
+	sameInstant,
+} from '../apps/app/src/server/evidence/deadlines.ts';
+
+function rClaim(overrides: Partial<ReconciliationClaim> & { claimId: string }): ReconciliationClaim {
+	return {
+		projectId: 'unit-proj-a',
+		claimType: 'deadline',
+		value: '2026-09-10T00:00:00Z',
+		confidence: 0.9,
+		snapshotId: `snap_${overrides.claimId}`,
+		sourceId: `src_${overrides.claimId}`,
+		capturedAt: '2026-08-27T12:00:00.000Z',
+		authorityRank: 1,
+		...overrides,
+	};
+}
+
+describe('P10 slice 2: authority reconciliation (HackSteward fixtures)', () => {
+	test('binding rules strictly outrank an overview — the loser is retained, not deleted', async () => {
+		const rules = rClaim({
+			claimId: 'c_rules',
+			value: '2026-09-12T00:00:00Z',
+			authorityRank: 1,
+			confidence: 0.98,
+		});
+		const overview = rClaim({
+			claimId: 'c_overview',
+			value: '2026-09-10T00:00:00Z',
+			authorityRank: 2,
+			confidence: 0.95,
+		});
+		const { winner, conflict } = await reconcileClaimsByAuthority([rules, overview]);
+		expect(conflict).toBeNull();
+		expect(winner?.claimId).toBe('c_rules');
+	});
+
+	test('same-rank disagreement creates a RETAINED conflict, never an auto-resolution', async () => {
+		const a = rClaim({ claimId: 'c_a', value: 'individual_only', authorityRank: 1 });
+		const b = rClaim({ claimId: 'c_b', value: 'team_only', authorityRank: 1 });
+		const { winner, conflict } = await reconcileClaimsByAuthority([a, b]);
+		expect(winner).toBeNull();
+		expect(conflict).not.toBeNull();
+		expect(conflict!.claimType).toBe('deadline');
+		expect([...conflict!.claimIds].sort()).toEqual(['c_a', 'c_b']);
+		// deterministic conflict id: same inputs, same id
+		const again = await reconcileClaimsByAuthority([b, a]);
+		expect(again.conflict!.conflictId).toBe(conflict!.conflictId);
+	});
+
+	test('a source superseding itself is not a conflict — the newest word wins', async () => {
+		const old = rClaim({
+			claimId: 'c_old',
+			value: 'Submissions close September 9, 2026',
+			sourceId: 'src_1',
+			snapshotId: 'snap_old',
+			capturedAt: '2026-08-27T12:00:00.000Z',
+		});
+		const updated = rClaim({
+			claimId: 'c_new',
+			value: 'Submissions close October 1, 2026',
+			sourceId: 'src_1',
+			snapshotId: 'snap_new',
+			capturedAt: '2026-08-28T12:00:00.000Z',
+		});
+		const { winner, conflict } = await reconcileClaimsByAuthority([old, updated]);
+		expect(conflict).toBeNull();
+		expect(winner?.claimId).toBe('c_new');
+		// and the superseded reading is excluded before conflict detection even
+		// when the older reading had higher nominal authority
+		expect(currentReadings([old, updated]).map((c) => c.claimId)).toEqual(['c_new']);
+	});
+
+	test('disagreement inside ONE snapshot still conflicts (a page stating two deadlines at once)', async () => {
+		const a = rClaim({ claimId: 'c_1', value: 'Closes September 9, 2026', sourceId: 'src_1', snapshotId: 'snap_1' });
+		const b = rClaim({ claimId: 'c_2', value: 'Closes October 1, 2026', sourceId: 'src_1', snapshotId: 'snap_1' });
+		const { winner, conflict } = await reconcileClaimsByAuthority([a, b]);
+		expect(winner).toBeNull();
+		expect(conflict!.claimIds.length).toBe(2);
+	});
+
+	test('instant keys make equivalent wordings agree (DST/offset equivalence)', async () => {
+		const a = rClaim({
+			claimId: 'c_a',
+			value: 'endDate: 2026-08-31T20:00:00-04:00',
+			authorityRank: 1,
+		});
+		const b = rClaim({
+			claimId: 'c_b',
+			value: 'endDate: 2026-09-01T00:00:00Z',
+			authorityRank: 1,
+		});
+		const textOnly = await reconcileClaimsByAuthority([a, b]);
+		expect(textOnly.conflict).not.toBeNull(); // rendered text alone disagrees
+		const withKeys = await reconcileClaimsByAuthority([a, b], (c) => deadlineInstantKey(c.value));
+		expect(withKeys.conflict).toBeNull();
+		expect(withKeys.winner).not.toBeNull();
+	});
+
+	test('one unpinnable reading falls the group back to text comparison (fact vs guess)', async () => {
+		const pinned = rClaim({ claimId: 'c_a', value: 'endDate: 2026-09-01T00:00:00Z' });
+		const guess = rClaim({ claimId: 'c_b', value: 'sometime in the fall' });
+		const { winner, conflict } = await reconcileClaimsByAuthority(
+			[pinned, guess],
+			(c) => deadlineInstantKey(c.value),
+		);
+		expect(winner).toBeNull();
+		expect(conflict).not.toBeNull();
+	});
+
+	test('UNKNOWN authority never wins: unknown vs ranked goes to the ranked claim; unknown vs unknown stays conflicted', async () => {
+		const unknownClaim = rClaim({ claimId: 'c_unknown', value: 'v_unknown', authorityRank: null });
+		const community = rClaim({ claimId: 'c_community', value: 'v_community', authorityRank: 4 });
+		const againstRanked = await reconcileClaimsByAuthority([unknownClaim, community]);
+		expect(againstRanked.conflict).toBeNull();
+		expect(againstRanked.winner?.claimId).toBe('c_community');
+		const bothUnknown = rClaim({ claimId: 'c_unknown2', value: 'v_other', authorityRank: null });
+		const retained = await reconcileClaimsByAuthority([unknownClaim, bothUnknown]);
+		expect(retained.winner).toBeNull();
+		expect(retained.conflict).not.toBeNull();
+	});
+});
+
+describe('P10 slice 2: reconciliation over real rows (survey service)', () => {
+	let world: UnitWorld;
+	let sourceRules = '';
+	let sourceOverview = '';
+	let sourceRules2 = '';
+
+	beforeAll(async () => {
+		world = makeEvidenceWorld();
+		const rules = await registerSource(world.db, world.aliceScope, {
+			url: 'https://example.com/rules',
+			kind: 'page',
+			authority: 'binding_rules',
+		});
+		const overview = await registerSource(world.db, world.aliceScope, {
+			url: 'https://example.com/overview',
+			kind: 'page',
+			authority: 'official_overview',
+		});
+		const rules2 = await registerSource(world.db, world.aliceScope, {
+			url: 'https://example.com/faq',
+			kind: 'page',
+			authority: 'official_faq',
+		});
+		sourceRules = rules.id;
+		sourceOverview = overview.id;
+		sourceRules2 = rules2.id;
+	});
+
+	test('higher authority wins over HTTP-less service path; equal-authority conflict is retained with both rows intact', async () => {
+		const rulesSnap = await captureSnapshot(world.db, world.aliceScope, sourceRules, {
+			content: 'Rules say: entries close September 12.',
+			mediaType: 'text/plain',
+		});
+		const overviewSnap = await captureSnapshot(world.db, world.aliceScope, sourceOverview, {
+			content: 'Overview says: entries close September 10.',
+			mediaType: 'text/plain',
+		});
+		await addClaim(world.db, world.aliceScope, {
+			snapshotId: rulesSnap.snapshot.id,
+			claimType: 'deadline',
+			value: '2026-09-12',
+			quote: 'entries close September 12.',
+			extractionVersion: 'p10-evidence-v1',
+		});
+		await addClaim(world.db, world.aliceScope, {
+			snapshotId: overviewSnap.snapshot.id,
+			claimType: 'deadline',
+			value: '2026-09-10',
+			quote: 'entries close September 10.',
+			extractionVersion: 'p10-evidence-v1',
+		});
+		const surveys = await surveyClaims(world.db, world.aliceScope, { claimType: 'deadline' });
+		expect(surveys).toHaveLength(1);
+		expect(surveys[0]!.conflict).toBeNull();
+		expect(surveys[0]!.winner?.value).toBe('2026-09-12');
+
+		// a same-tier source (official_faq, also rank 1) disagreeing with the
+		// binding rules is a RETAINED conflict — a lower-tier overview cannot
+		// rescue it, and nothing is auto-resolved
+		const faqSnap = await captureSnapshot(world.db, world.aliceScope, sourceRules2, {
+			content: 'FAQ says: entries close September 14.',
+			mediaType: 'text/plain',
+		});
+		await addClaim(world.db, world.aliceScope, {
+			snapshotId: faqSnap.snapshot.id,
+			claimType: 'deadline',
+			value: '2026-09-14',
+			quote: 'entries close September 14.',
+			extractionVersion: 'p10-evidence-v1',
+		});
+		const afterFaq = await surveyClaims(world.db, world.aliceScope, { claimType: 'deadline' });
+		expect(afterFaq[0]!.winner).toBeNull();
+		expect(afterFaq[0]!.conflict).not.toBeNull();
+		// retained: every conflicting reading is still on record, nothing deleted
+		expect(await listClaims(world.db, world.aliceScope, { claimType: 'deadline' })).toHaveLength(3);
+
+		// equal-authority disagreement on another claim type, same story
+		const equalSnap = await captureSnapshot(world.db, world.aliceScope, sourceRules2, {
+			content: 'FAQ clarified: teams may include mentors.',
+			mediaType: 'text/plain',
+		});
+		await addClaim(world.db, world.aliceScope, {
+			snapshotId: equalSnap.snapshot.id,
+			claimType: 'eligibility',
+			value: 'mentors_allowed',
+			quote: 'teams may include mentors.',
+			extractionVersion: 'p10-evidence-v1',
+		});
+		await addClaim(world.db, world.aliceScope, {
+			snapshotId: rulesSnap.snapshot.id,
+			claimType: 'eligibility',
+			value: 'no_mentors',
+			quote: 'Rules say: entries close September 12.',
+			extractionVersion: 'p10-evidence-v1',
+		});
+		const eligibility = await surveyClaims(world.db, world.aliceScope, { claimType: 'eligibility' });
+		expect(eligibility[0]!.winner).toBeNull();
+		expect(eligibility[0]!.conflict).not.toBeNull();
+		expect(await listClaims(world.db, world.aliceScope, { claimType: 'eligibility' })).toHaveLength(2);
+	});
+});
+
+// --- slice 2: deadline normalization (ported from test_domain_deadlines.py) --------------
+// WITH the HackSteward midnight fix: a date-only deadline keeps DATE-ONLY
+// semantics — the time of day stays unknown even when the zone is known.
+
+describe('P10 slice 2: deadline normalization', () => {
+	test('a zoned local deadline normalizes across the date line (5 PM PT Sep 9 is Sep 10 UTC)', () => {
+		const normalized = normalizeDeadline(
+			'Submissions close September 9, 2026 at 5:00 PM PT.',
+			'America/Los_Angeles',
+		);
+		expect(normalized.status).toBe('resolved');
+		expect(normalized.utc).toBe('2026-09-10T00:00:00.000Z');
+	});
+
+	test('a UTC deadline normalizes to itself', () => {
+		const normalized = normalizeDeadline('Deadline: September 10, 2026, 01:00 UTC.', 'UTC');
+		expect(normalized.status).toBe('resolved');
+		expect(normalized.utc).toBe('2026-09-10T01:00:00.000Z');
+	});
+
+	test('the fixture pair is ONE hour apart, not one day — rendered text lies, instants do not', () => {
+		const left = normalizeDeadline(
+			'Submissions close September 9, 2026 at 5:00 PM PT.',
+			'America/Los_Angeles',
+		);
+		const right = normalizeDeadline('Deadline: September 10, 2026, 01:00 UTC.', 'UTC');
+		expect(deadlineGap(left, right)).toBe(3_600_000);
+	});
+
+	test('meridiem edges: 12:00 PM is noon, 12:00 AM is midnight', () => {
+		const noon = normalizeDeadline('Due September 9, 2026 at 12:00 PM', 'UTC');
+		const midnight = normalizeDeadline('Due September 9, 2026 at 12:00 AM', 'UTC');
+		expect(noon.utc).toBe('2026-09-09T12:00:00.000Z');
+		expect(midnight.utc).toBe('2026-09-09T00:00:00.000Z');
+	});
+
+	test('a date-only deadline KEEPS date-only semantics — no midnight assumption (the HackSteward fix)', () => {
+		const normalized = normalizeDeadline('September 21, 2026', 'Africa/Lagos');
+		expect(normalized.status).toBe('date_only');
+		expect(normalized.date).toBe('2026-09-21');
+		expect(normalized.utc).toBeNull(); // NOT 2026-09-20T23:00:00Z — that would invent a time
+		expect(normalized.hasTime).toBe(false);
+		expect(normalized.reason).toBeTruthy();
+	});
+
+	test('a date-only deadline with NO zone is ambiguous (a date can roll at zone boundaries)', () => {
+		const normalized = normalizeDeadline('September 21, 2026');
+		expect(normalized.status).toBe('ambiguous');
+		expect(normalized.utc).toBeNull();
+		expect(normalized.date).toBeNull();
+		expect(normalized.reason?.toLowerCase()).toContain('timezone');
+	});
+
+	test('a deadline without a timezone is AMBIGUOUS — never silently assumed UTC or local', () => {
+		const normalized = normalizeDeadline('Submissions close September 9, 2026 at 5:00 PM.');
+		expect(normalized.status).toBe('ambiguous');
+		expect(normalized.utc).toBeNull();
+		expect(normalized.reason?.toLowerCase()).toContain('timezone');
+	});
+
+	test('an unrecognized timezone is ambiguous and the reason names it', () => {
+		const normalized = normalizeDeadline(
+			'Submissions close September 9, 2026 at 5:00 PM.',
+			'Mars/Olympus_Mons',
+		);
+		expect(normalized.status).toBe('ambiguous');
+		expect(normalized.utc).toBeNull();
+		expect(normalized.reason).toContain('Mars/Olympus_Mons');
+	});
+
+	test('an unparseable deadline is ambiguous (never guessed)', () => {
+		const normalized = normalizeDeadline('soon-ish', 'UTC');
+		expect(normalized.status).toBe('ambiguous');
+		expect(normalized.reason?.toLowerCase()).toContain('date format');
+	});
+
+	test('an impossible calendar date is ambiguous', () => {
+		const normalized = normalizeDeadline('February 30, 2026 at 5:00 PM', 'UTC');
+		expect(normalized.status).toBe('ambiguous');
+		expect(normalized.utc).toBeNull();
+	});
+
+	test('an invalid 12-hour clock value is ambiguous', () => {
+		expect(normalizeDeadline('September 9, 2026 at 0:30 PM', 'UTC').status).toBe('ambiguous');
+	});
+
+	test('an invalid 24-hour clock value is ambiguous', () => {
+		expect(normalizeDeadline('September 9, 2026 at 25:00', 'UTC').status).toBe('ambiguous');
+	});
+
+	test('blank deadline text is ambiguous', () => {
+		const normalized = normalizeDeadline('   ');
+		expect(normalized.status).toBe('ambiguous');
+		expect(normalized.reason?.toLowerCase()).toContain('blank');
+	});
+
+	test('the gap to an ambiguous deadline is unknown, not zero', () => {
+		const resolved = normalizeDeadline('September 10, 2026 at 1:00', 'UTC');
+		const ambiguous = normalizeDeadline('September 9, 2026 at 5:00 PM.');
+		expect(deadlineGap(resolved, ambiguous)).toBeNull();
+	});
+
+	test('DST is respected through the zone database: same wall time, different offset', () => {
+		// December is PST (UTC-8); September is PDT (UTC-7) — only the zone db knows.
+		const december = normalizeDeadline('December 9, 2026 at 5:00 PM', 'America/Los_Angeles');
+		expect(december.utc).toBe('2026-12-10T01:00:00.000Z');
+		const september = normalizeDeadline('September 9, 2026 at 5:00 PM', 'America/Los_Angeles');
+		expect(september.utc).toBe('2026-09-10T00:00:00.000Z');
+	});
+
+	test('DST/offset equivalence: the same instant written with different offsets is EQUAL', () => {
+		expect(sameInstant('2026-08-31T20:00:00-04:00', '2026-09-01T00:00:00Z')).toBe(true);
+		expect(sameInstant('2026-08-31T20:00:00-04:00', '2026-09-01T00:00:01Z')).toBe(false);
+		expect(sameInstant('not a date', '2026-09-01T00:00:00Z')).toBe(false);
+	});
+
+	test('deadlineInstantKey pins ISO instants and refuses date-only or prose (fact vs guess)', () => {
+		expect(deadlineInstantKey('endDate: 2026-08-31T20:00:00-04:00')).toBe(
+			deadlineInstantKey('2026-09-01T00:00:00Z'),
+		);
+		expect(deadlineInstantKey('September 21, 2026')).toBeNull(); // date-only: no instant
+		expect(deadlineInstantKey('sometime in the fall')).toBeNull();
+	});
+});
