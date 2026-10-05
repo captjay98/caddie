@@ -3,6 +3,9 @@
 	"private": true,
 	"type": "module",
 	"exports": {
-		"./tokens.css": "./src/tokens.css"
+		"./tokens.css": "./src/tokens.css",
+		"./markdown.css": "./src/markdown.css",
+		"./Markdown": "./src/Markdown.tsx",
+		"./time": "./src/time.ts"
 	}
 }

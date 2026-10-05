@@ -1,22 +1,44 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { SignInPanel } from './auth.ts';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RouterProvider } from '@tanstack/react-router';
+import { router } from './routes.tsx';
+import '@caddie/ui/tokens.css';
+import '@caddie/ui/markdown.css';
+import './workspace.css';
 
-// P00 scaffold: proves the React client composes into the Worker assets
-// under /app. The workspace shell, TanStack Router/Query and @flue/react
-// transport arrive in P06.
-function App() {
-	return (
-		<main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem' }}>
-			<h1>Caddie</h1>
-			<p>Workspace scaffold — product UI lands in P06.</p>
-			<SignInPanel />
-		</main>
-	);
+/**
+ * Workspace SPA entry. P00 proved composition under /app; P06 replaces the
+ * scaffold with the TanStack Router/Query shell over the halo tokens.
+ *
+ * Theme: the halo tokens default to dark; a persisted light preference is
+ * applied to <html data-theme> before first paint. No runtime font/CDN
+ * fetches — the token font stacks fall back to system faces here.
+ */
+
+try {
+	const saved = localStorage.getItem('caddie-theme');
+	document.documentElement.setAttribute('data-theme', saved === 'light' ? 'light' : 'dark');
+} catch {
+	document.documentElement.setAttribute('data-theme', 'dark');
 }
+
+const queryClient = new QueryClient({
+	defaultOptions: {
+		queries: {
+			// The explicit state surfaces own failure rendering; a blind retry
+			// storm would fight the honest denied/limit/offline grammar.
+			retry: false,
+			refetchOnWindowFocus: true,
+			staleTime: 10_000,
+		},
+	},
+});
 
 createRoot(document.getElementById('root')!).render(
 	<StrictMode>
-		<App />
+		<QueryClientProvider client={queryClient}>
+			<RouterProvider router={router} />
+		</QueryClientProvider>
 	</StrictMode>,
 );

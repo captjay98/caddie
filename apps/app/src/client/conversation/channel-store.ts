@@ -1,0 +1,136 @@
+import { useCallback, useEffect, useState } from 'react';
+import type { FlueConversationMessage, FlueConversationSettlement } from '@flue/react';
+
+/**
+ * Props-driven channel store — feature-ledger row C7 (transport ADOPT
+ * @flue/react; presentation ADAPT here).
+ *
+ * P06 ships the typed presentation: the Shell feeds the channel a
+ * {@link ChannelSource} shaped exactly like `useFlueAgent()`'s snapshot, so
+ * P05 plugs the real transport in one place (pass its result as `source`)
+ * without touching any rendering code. Nothing here simulates streaming or
+ * invents assistant output — an empty source is the honest standby state.
+ *
+ * Optimistic sends: until a transport exists, a send is retained as a draft
+ * carrying a generated idempotency key. When P05 lands, `addDraft` becomes
+ * `sendMessage(text, { idempotencyKey })` and the draft becomes the failedSends
+ * retry affordance (same shape, same key contract: one key per submission
+ * attempt, retries reuse or rotate the key explicitly, never implicitly).
+ */
+
+export interface ChannelSource {
+	messages: readonly FlueConversationMessage[];
+	status: 'idle' | 'connecting' | 'submitted' | 'streaming' | 'error';
+	historyReady: boolean;
+	error: Error | undefined;
+	failedSends: ReadonlyArray<{ id: string; message: string; error: Error }>;
+	settlements: readonly FlueConversationSettlement[];
+}
+
+/** P06 standby source: no transport yet, so the channel shows honest standby. */
+export const standbySource: ChannelSource = {
+	messages: [],
+	status: 'idle',
+	historyReady: true,
+	error: undefined,
+	failedSends: [],
+	settlements: [],
+};
+
+export interface ChannelDraft {
+	id: string;
+	/** Idempotency key concept: generated at compose time, one per send. */
+	idempotencyKey: string;
+	text: string;
+	createdAt: string;
+	attempts: number;
+	state: 'unsent' | 'cancelled';
+}
+
+function newDraft(text: string): ChannelDraft {
+	const id = crypto.randomUUID();
+	return {
+		id: `draft-${id}`,
+		idempotencyKey: `idem-${id}`,
+		text,
+		createdAt: new Date().toISOString(),
+		attempts: 0,
+		state: 'unsent',
+	};
+}
+
+const DRAFTS_KEY = 'caddie-channel-drafts';
+
+function storageKey(sessionKey: string, projectId: string | null): string {
+	return `${DRAFTS_KEY}:${sessionKey}:${projectId ?? 'none'}`;
+}
+
+function loadDrafts(key: string): ChannelDraft[] {
+	try {
+		const raw = sessionStorage.getItem(key);
+		if (!raw) return [];
+		const parsed: unknown = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return [];
+		return parsed.filter(
+			(item): item is ChannelDraft =>
+				item !== null &&
+				typeof item === 'object' &&
+				typeof (item as ChannelDraft).id === 'string' &&
+				typeof (item as ChannelDraft).idempotencyKey === 'string' &&
+				typeof (item as ChannelDraft).text === 'string' &&
+				((item as ChannelDraft).state === 'unsent' || (item as ChannelDraft).state === 'cancelled'),
+		);
+	} catch {
+		return [];
+	}
+}
+
+export function useChannelStore(options: {
+	/** Cache-scope boundary: drafts never cross accounts or projects. */
+	sessionKey: string;
+	projectId: string | null;
+}) {
+	const { sessionKey, projectId } = options;
+	const key = storageKey(sessionKey, projectId);
+	const [drafts, setDrafts] = useState<ChannelDraft[]>(() => loadDrafts(key));
+
+	// Reload when the scope changes (project switch / account switch) —
+	// sessionStorage keeps unsent work across reloads, scoped per account+project.
+	useEffect(() => {
+		setDrafts(loadDrafts(key));
+	}, [key]);
+
+	useEffect(() => {
+		try {
+			sessionStorage.setItem(key, JSON.stringify(drafts));
+		} catch {
+			// storage full/blocked: drafts stay in memory for the session
+		}
+	}, [key, drafts]);
+
+	const addDraft = useCallback((text: string) => {
+		const trimmed = text.trim();
+		if (!trimmed) return;
+		setDrafts((existing) => [...existing, newDraft(trimmed)]);
+	}, []);
+
+	const retryDraft = useCallback((id: string) => {
+		setDrafts((existing) =>
+			existing.map((draft) =>
+				draft.id === id && draft.state === 'unsent'
+					? { ...draft, attempts: draft.attempts + 1 }
+					: draft,
+			),
+		);
+	}, []);
+
+	const discardDraft = useCallback((id: string) => {
+		setDrafts((existing) =>
+			existing.map((draft) =>
+				draft.id === id && draft.state === 'unsent' ? { ...draft, state: 'cancelled' } : draft,
+			),
+		);
+	}, []);
+
+	return { drafts, addDraft, retryDraft, discardDraft };
+}
