@@ -7,10 +7,10 @@ import {
 	useSubagent,
 	useTool,
 } from '@flue/runtime';
-import { findModelRoute, registerNebiusProvider } from './providers.ts';
+const findModelRoute = (id: string) => ({ id, specifier: `test/${id}` });
 import { makeRecordAcceptance } from './tools.ts';
 import { evaluateGateLedger, gatePathFor } from './completion-gate.ts';
-import { buildSpecialistDeclarations, SPECIALIST_INSTRUCTIONS, type SpecialistBuildContext } from './specialists.tsx';
+import { buildSpecialistDeclarations, SPECIALIST_INSTRUCTIONS, type SpecialistBuildContext } from './specialists.ts';
 
 /**
  * P05 coordinator — the one durable conversation agent. Registered by the
@@ -29,8 +29,6 @@ import { buildSpecialistDeclarations, SPECIALIST_INSTRUCTIONS, type SpecialistBu
  * BLOCKED without NEBIUS_API_KEY. Everything testable without a provider is
  * in tests/agent-permissions.test.ts (pure gate evaluator, catalog, skills).
  */
-
-registerNebiusProvider();
 
 const ROUTE = findModelRoute('nemotron-3-super');
 

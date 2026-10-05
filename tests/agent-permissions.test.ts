@@ -11,7 +11,7 @@ import {
 	SPECIALIST_ROLES,
 	isProtectedPath,
 } from '../apps/app/src/agents/permissions';
-import { SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists';
+import { SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
 import {
 	makeRecordVerification,
 	makeWriteSandboxFile,
@@ -34,12 +34,6 @@ import { ScopeError, assertProjectScope } from '../apps/app/src/server/scope';
  */
 
 // ---- in-memory D1-shaped database -------------------------------------------
-
-function makeDb(): Database & {
-	prepare(sql: string): ReturnType<Database['prepare']> & { bind(...v: unknown[]): { run(): unknown; all(): { results: unknown[] } } };
-} {
-	return new Database(':memory:');
-}
 
 // The services use the D1 idiom (prepare().bind().run()/all()); wrap
 // bun:sqlite to match, the same way the P02 fixture does.
@@ -117,8 +111,8 @@ describe('P05 permission matrix', () => {
 		const declarations = buildSpecialistDeclarations(context);
 		expect(declarations.map((d) => d.name)).toEqual(SPECIALIST_CATALOG.map((d) => d.name));
 		for (const declaration of declarations) {
-			// model lives on the coordinator's turn — definitions inherit it
-			expect(declaration.model).toBeUndefined();
+			// model lives on the coordinator's turn — definitions omit it
+			expect('model' in declaration).toBe(false);
 			expect(declaration.description.length).toBeGreaterThan(10);
 		}
 	});
@@ -290,9 +284,8 @@ describe('P05 run lifecycle', () => {
 	}
 
 	function count(sql: string): number {
-		return (d1db.prepare(sql).all() as { results: Record<string, unknown>[] }[]).length > 0
-			? Number(((d1db.prepare(sql).all() as { results: Record<string, unknown>[] })[0].results[0] as Record<string, unknown>)['n'])
-			: 0;
+		const result = d1db.prepare(sql).all() as unknown as { results: Record<string, unknown>[] };
+		return Number(result.results[0]?.['n'] ?? 0);
 	}
 
 	test('createRun freezes a registered model route and binds the conversation durably', async () => {

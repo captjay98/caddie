@@ -1,13 +1,14 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import manifestRaw from './skills/manifest.json?raw';
+import planningRaw from './skills/planning/SKILL.md?raw';
+import buildVerifyRaw from './skills/build-verify/SKILL.md?raw';
+import deliveryChecklistRaw from './skills/delivery-checklist/SKILL.md?raw';
 
 /**
- * P05 skills loader — versioned, hash-verified. A skill mounts into an agent
- * catalog only if its SKILL.md sha256 matches the manifest; a tampered or
- * missing file is a hard error, never a silent downgrade. Content is read at
- * module load (bundled with the Worker); the manifest is the version ledger.
+ * P05 skills loader — versioned, hash-verified. Contents are bundled at build
+ * time via Vite `?raw` imports (no filesystem access exists in workerd); the
+ * manifest's sha256 is checked against the bundled content at module load, so
+ * a tampered skill or manifest fails the worker loudly instead of mounting.
  */
 
 export interface VersionedSkill {
@@ -17,8 +18,6 @@ export interface VersionedSkill {
 	sha256: string;
 }
 
-const SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'skills');
-
 interface ManifestEntry {
 	name: string;
 	version: string;
@@ -26,29 +25,30 @@ interface ManifestEntry {
 	sha256: string;
 }
 
-const manifest = JSON.parse(readFileSync(join(SKILLS_DIR, 'manifest.json'), 'utf8')) as {
-	version: string;
-	skills: ManifestEntry[];
-};
+const manifest = JSON.parse(manifestRaw) as { version: string; skills: ManifestEntry[] };
 
 function sha256(content: string): string {
 	return createHash('sha256').update(content).digest('hex');
 }
 
+const CONTENT_BY_PATH: Record<string, string> = {
+	'planning/SKILL.md': planningRaw,
+	'build-verify/SKILL.md': buildVerifyRaw,
+	'delivery-checklist/SKILL.md': deliveryChecklistRaw,
+};
+
 function loadSkill(entry: ManifestEntry): VersionedSkill {
-	const content = readFileSync(join(SKILLS_DIR, entry.path), 'utf8');
+	const content = CONTENT_BY_PATH[entry.path];
+	if (content === undefined) {
+		throw new Error(`skill ${entry.name}: bundled content missing for ${entry.path}`);
+	}
 	const actual = sha256(content);
 	if (actual !== entry.sha256) {
 		throw new Error(
 			`skill ${entry.name}@${entry.version}: content hash mismatch (manifest ${entry.sha256}, actual ${actual}) — refusing to mount`,
 		);
 	}
-	return {
-		name: entry.name,
-		version: entry.version,
-		instructions: content,
-		sha256: actual,
-	};
+	return { name: entry.name, version: entry.version, instructions: content, sha256: actual };
 }
 
 const loaded = manifest.skills.map((entry) => loadSkill(entry));

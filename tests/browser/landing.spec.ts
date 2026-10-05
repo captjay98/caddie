@@ -56,7 +56,7 @@ test.describe('P16 landing — pit-board shell', () => {
 		const nav = page.locator('.topbar nav a');
 		await expect(nav).toHaveCount(5);
 		const hrefs = await nav.evaluateAll((links) =>
-			links.map((a) => a.getAttribute('href')),
+			links.map((a) => (a as unknown as { getAttribute(name: string): string | null }).getAttribute('href')),
 		);
 		expect(hrefs).toContain('#pb-discover');
 		expect(hrefs).toContain('#pb-honest');
@@ -82,8 +82,8 @@ test.describe('P16 landing — pit-board shell', () => {
 		const rail = page.locator('.spine-rail .rail-link');
 		await expect(rail).toHaveCount(6);
 		const steps = await rail.evaluateAll((links) =>
-			links.map((a) => {
-				const spans = a.querySelectorAll('span');
+			links.map((a: unknown) => {
+				const spans = (a as { querySelectorAll(selectors: string): { textContent: string | null }[] }).querySelectorAll('span');
 				return `${spans[0]?.textContent} ${spans[1]?.textContent}`;
 			}),
 		);

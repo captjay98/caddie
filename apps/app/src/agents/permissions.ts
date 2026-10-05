@@ -1,6 +1,6 @@
 /**
  * P05 specialist permission policy — the single source of truth consumed by
- * both the agent definitions (apps/app/src/agents/specialists.tsx) and the
+ * both the agent definitions (apps/app/src/agents/specialists.ts) and the
  * permission tests. A specialist is instructions + allowed tools + skills +
  * scoped context; the policy below is the "allowed tools" contract.
  *
