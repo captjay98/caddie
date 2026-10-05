@@ -50,7 +50,7 @@ export interface NormalizedDeadline {
 // unknown instead of collapsing to midnight (rule 2). The separator between
 // date and time may be ", ", " at ", or any mix.
 const DEADLINE_RE =
-	/([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})(?:[\s,]+(?:at\s+)?)?[\s,]*(?:(\d{1,2}):(\d{2})(?:\s*([APap])\.?[Mm]?\.?)?)?/;
+	/([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})(?:[\s,]+(?:at\s+)?)?[\s,]*(?:(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([APap])\.?[Mm]?\.?)?)?/;
 
 const MONTHS: Readonly<Record<string, number>> = {
 	january: 1,
@@ -109,9 +109,10 @@ function zonedWallTimeToUtcMs(
 	day: number,
 	hour: number,
 	minute: number,
+	second: number,
 	timeZone: string,
 ): number {
-	const wallAsUtc = Date.UTC(year, month - 1, day, hour, minute);
+	const wallAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
 	const offset1 = tzOffsetMinutes(new Date(wallAsUtc), timeZone);
 	const guess = wallAsUtc - offset1 * 60000;
 	const offset2 = tzOffsetMinutes(new Date(guess), timeZone);
@@ -196,7 +197,8 @@ export function normalizeDeadline(originalText: string, zoneName?: string | null
 
 	let hour = Number(match[4]);
 	const minute = Number(match[5]);
-	const meridiem = match[6]?.toUpperCase();
+	const second = match[6] === undefined ? 0 : Number(match[6]);
+	const meridiem = match[7]?.toUpperCase();
 	if (meridiem) {
 		if (hour < 1 || hour > 12) {
 			return ambiguous(originalText, statedZone, `hour ${hour} is invalid on a 12-hour clock`);
@@ -206,8 +208,17 @@ export function normalizeDeadline(originalText: string, zoneName?: string | null
 	} else if (hour > 23) {
 		return ambiguous(originalText, statedZone, `hour ${hour} is invalid on a 24-hour clock`);
 	}
+	// Range validation BEFORE any date arithmetic: minute/second rollovers
+	// would produce a confidently wrong instant (a mis-parsed deadline is
+	// worse than an unparsed one).
+	if (minute > 59) {
+		return ambiguous(originalText, statedZone, `minute ${minute} is out of range`);
+	}
+	if (second > 59) {
+		return ambiguous(originalText, statedZone, `second ${second} is out of range`);
+	}
 
-	const utcMs = zonedWallTimeToUtcMs(year, month, day, hour, minute, statedZone);
+	const utcMs = zonedWallTimeToUtcMs(year, month, day, hour, minute, second, statedZone);
 	return {
 		originalText,
 		zone: statedZone,

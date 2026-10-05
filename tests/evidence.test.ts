@@ -873,6 +873,24 @@ describe('P10 slice 2: deadline normalization', () => {
 		expect(normalized.utc).toBe('2026-09-10T01:00:00.000Z');
 	});
 
+	test('quality-review P2: out-of-range minutes stay ambiguous (no rollover)', () => {
+		const d = normalizeDeadline('September 9, 2026 at 5:99 PM', 'UTC');
+		expect(d.status).toBe('ambiguous');
+		expect(d.reason).toContain('out of range');
+	});
+
+	test('quality-review P2: seconds parse and the meridiem anchors them', () => {
+		const d = normalizeDeadline('September 9, 2026 at 5:00:30 PM', 'UTC');
+		expect(d.status).toBe('resolved');
+		expect(d.utc).toBe('2026-09-09T17:00:30.000Z');
+	});
+
+	test('quality-review P2: out-of-range seconds stay ambiguous', () => {
+		const d = normalizeDeadline('September 9, 2026 at 5:00:99 PM', 'UTC');
+		expect(d.status).toBe('ambiguous');
+		expect(d.reason).toContain('out of range');
+	});
+
 	test('the fixture pair is ONE hour apart, not one day — rendered text lies, instants do not', () => {
 		const left = normalizeDeadline(
 			'Submissions close September 9, 2026 at 5:00 PM PT.',
@@ -1009,13 +1027,30 @@ describe('P10 slice 3: fetch policy — private-network classification', () => {
 			'[::1]',
 			'fd00::1',
 			'fe80::1',
+			// quality-review P2: CGNAT, benchmark, and mapped-IPv6 ranges
+			'100.64.0.1',
+			'100.127.255.255',
+			'198.18.0.1',
+			'198.19.255.255',
+			'[::ffff:10.0.0.1]',
+			'::ffff:192.168.1.1',
+			'::ffff:127.0.0.1',
 		]) {
 			expect(classifyUrlHost(host)).toBe('private');
 		}
 	});
 
-	test('public hosts classify as public', () => {
-		for (const host of ['example.com', '8.8.8.8', 'devpost.com']) {
+	test('public hosts classify as public (incl. CGNAT-adjacent and mapped-public)', () => {
+		for (const host of [
+			'example.com',
+			'8.8.8.8',
+			'devpost.com',
+			'100.63.255.255', // just below CGNAT
+			'100.128.0.1', // just above CGNAT
+			'198.17.255.255', // just below benchmark
+			'198.20.0.1', // just above benchmark
+			'::ffff:8.8.8.8', // mapped public stays public
+		]) {
 			expect(classifyUrlHost(host)).toBe('public');
 		}
 	});

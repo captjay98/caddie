@@ -205,10 +205,21 @@ export function classifyUrlHost(hostname: string): UrlHostClass {
 		if (a === 169 && b === 254) return 'private'; // link-local 169.254.0.0/16
 		if (a === 172 && b >= 16 && b <= 31) return 'private'; // 172.16.0.0/12
 		if (a === 192 && b === 168) return 'private'; // 192.168.0.0/16
+		if (a === 100 && b >= 64 && b <= 127) return 'private'; // CGNAT 100.64.0.0/10
+		if (a === 198 && (b === 18 || b === 19)) return 'private'; // benchmark 198.18.0.0/15
+		// IPv4-mapped IPv6 (::ffff:10.0.0.1) reaches here with a dotted tail —
+		// the mapped address must be classified by its real v4 ranges.
+		if (bare.toLowerCase().startsWith('::ffff:')) {
+			return classifyUrlHost(bare.slice(7));
+		}
 		return 'public';
 	}
 	// IPv6 unique-local fc00::/7 and link-local fe80::/10.
 	if (/^f[cd][0-9a-f]{2}:/.test(bare) || /^fe[89ab][0-9a-f]:/.test(bare)) return 'private';
+	// IPv4-mapped IPv6 in compressed or bracketed form.
+	if (bare.toLowerCase().startsWith('::ffff:')) {
+		return classifyUrlHost(bare.slice(7));
+	}
 	return 'public';
 }
 
