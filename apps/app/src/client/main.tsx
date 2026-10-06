@@ -3,6 +3,14 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { router } from './routes.tsx';
+// Same self-hosted faces the landing uses (site/src/pages/index.astro) — the
+// token stacks (--font-ui/--font-mono) name Inter and IBM Plex Mono first.
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/inter/700.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
 import '@caddie/ui/tokens.css';
 import '@caddie/ui/markdown.css';
 import './workspace.css';
@@ -12,8 +20,8 @@ import './workspace.css';
  * scaffold with the TanStack Router/Query shell over the halo tokens.
  *
  * Theme: the halo tokens default to dark; a persisted light preference is
- * applied to <html data-theme> before first paint. No runtime font/CDN
- * fetches — the token font stacks fall back to system faces here.
+ * applied to <html data-theme> before first paint. Fonts are the self-hosted
+ * @fontsource imports above — nothing is fetched from a CDN at runtime.
  */
 
 try {
