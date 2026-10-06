@@ -35,6 +35,21 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 
 ```json
 {
+  "packet": "P13-integration", "status": "ALL 21 PACKETS IMPLEMENTED", "sha": "50ba37a",
+  "releaseCheck": "bun scripts/release-check.ts → 23 PASS, 0 FAIL, 5 BLOCKED (live gates + deployment authorization)",
+  "fullRegression": "466 tests, 2054 expects: 459 pass, 7 honest BLOCKED-fails (live specs without credentials), 2 unhandled errors (Playwright .spec.ts files under bun test — pre-existing invocation artifact, per-category verify:packet is the supported path)",
+  "completionStatus": [
+    "IMPLEMENTED+REVIEWED: P00 P01 P02 P03 P04 P05(spec) P06 P07(spec) P08(spec) P10 P11(spec) P12(spec) P14(spec+quality) P16 P17-local",
+    "IMPLEMENTED+PENDING-REVIEW: P05-quality(re-dispatched) P09 P13",
+    "LIVE VERIFIED: sandbox exec (P04), model route (P05), email delivery (P12), P09 journey (stack #1)",
+    "BLOCKED on owner: staging OAuth callbacks, Devpost/Tavily live, real GitHub App, toolchains for P15a-d, deployment authorization"
+  ]
+}
+```
+
+
+```json
+{
   "packet": "P13", "status": "LOCAL VERIFIED (external submission BLOCKED by design)", "sha": "80954f5/1ae4de7/1c5e15d/4afe172 + integration mount",
   "commands": [
     {"command": "bun run verify:packet P13", "exitCode": 0, "receipt": "2 checks PASS: judge 16 + submission 19"},
