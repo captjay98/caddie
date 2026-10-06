@@ -130,6 +130,25 @@ a {
 	border-color: var(--color-line);
 }
 
+/* Sign-in panel: full-width provider buttons on the token surfaces */
+.sign-in-btn {
+	display: block;
+	width: 100%;
+	margin: 0.5rem 0;
+	padding: 0.7rem 1rem;
+	font-size: 1rem;
+}
+
+.sign-in-btn:disabled {
+	opacity: 0.45;
+	cursor: wait;
+}
+
+.sign-in-error {
+	color: var(--color-danger);
+	margin-top: 0.75rem;
+}
+
 .mono-id {
 	font-family: var(--font-mono);
 	font-size: 10.5px;

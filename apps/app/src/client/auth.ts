@@ -95,18 +95,11 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 				{
 					key: id,
 					type: 'button',
+					className: 'btn-ghost sign-in-btn',
 					'data-testid': `sign-in-${id}`,
 					'data-provider': id,
 					disabled: pending !== null,
 					onClick: () => void signIn(id),
-					style: {
-						display: 'block',
-						width: '100%',
-						margin: '0.5rem 0',
-						padding: '0.75rem 1rem',
-						fontSize: '1rem',
-						cursor: pending ? 'wait' : 'pointer',
-					},
 				},
 				pending === id ? 'Signing in…' : label,
 			),
@@ -117,14 +110,15 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 					{
 						key: 'error',
 						role: 'alert',
+						className: 'sign-in-error',
 						'data-testid': 'sign-in-error',
-						style: { color: '#b00020', marginTop: '0.75rem' },
 					},
 					`${error.view.title}: ${error.view.detail} `,
 					createElement(
 						'button',
 						{
 							type: 'button',
+							className: 'btn-ghost',
 							'data-testid': 'sign-in-retry',
 							onClick: () => void signIn(error.provider),
 						},
