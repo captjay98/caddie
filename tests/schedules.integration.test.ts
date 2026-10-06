@@ -1102,3 +1102,13 @@ describe('P12 slice 3: routes, tick dispatch and notifications over real workerd
 		expect(unauth.status).toBe(401);
 	});
 });
+
+describe('P12 mailer selection (live email via Resend)', () => {
+	test('mailerFromEnv returns resend when key+from are set, noop otherwise', async () => {
+		const { mailerFromEnv, noopMailer } = await import('../apps/app/src/server/notifications');
+		const without = mailerFromEnv({});
+		expect(without.name).toBe('noop');
+		const withEnv = mailerFromEnv({ RESEND_API_KEY: 're_test', RESEND_FROM: 'caddie@jamalibrahim.dev' });
+		expect(withEnv.name).toBe('resend');
+	});
+});

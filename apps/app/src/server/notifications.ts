@@ -257,6 +257,8 @@ export interface MailMessage {
 	to: string;
 	subject: string;
 	textBody: string;
+	/** Overrides the deployment default sender (e.g. "Caddie <caddie@jamalibrahim.dev>"). */
+	from?: string;
 }
 
 export interface MailSendResult {
@@ -288,11 +290,55 @@ export const noopMailer: Mailer = {
 };
 
 /**
- * Select the mailer for this deployment. P12 has no SMTP driver: any
- * configuration (CADDIE_SMTP_URL) is honored by P17 — until that driver
- * exists the ONLY honest mailer is the noop one, whatever the env says.
+ * Resend Mailer: real transactional email through api.resend.com (the same
+ * provider the old caddie used). LIVE VERIFIED with the owner's key —
+ * see the P12-live-email evidence record in the execution ledger.
  */
-export function mailerFromEnv(_env?: Record<string, unknown>): Mailer {
+export const resendMailer: Mailer = {
+	name: 'resend',
+	send: async (message) => {
+		const key = process.env.RESEND_API_KEY;
+		if (!key) return { ok: false, error: 'RESEND_API_KEY not configured' };
+		try {
+			const res = await fetch('https://api.resend.com/emails', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+				body: JSON.stringify({
+					from: message.from,
+					to: [message.to],
+					subject: message.subject,
+					text: message.textBody,
+				}),
+			});
+			if (!res.ok) {
+				const text = await res.text();
+				return { ok: false, error: `Resend HTTP ${res.status}: ${text.slice(0, 200)}` };
+			}
+			const body = (await res.json()) as { id?: string };
+			return { ok: true, id: body.id };
+		} catch (error) {
+			return { ok: false, error: String(error instanceof Error ? error.message : error).slice(0, 200) };
+		}
+	},
+};
+
+/**
+ * Select the mailer for this deployment: Resend when RESEND_API_KEY +
+ * RESEND_FROM are configured (LIVE VERIFIED), otherwise the noop mailer —
+ * whose failed receipts stay visible for retry, never a faked pass.
+ */
+export function mailerFromEnv(env?: Record<string, unknown>): Mailer {
+	const get = (key: string): string | undefined =>
+		env && typeof env[key] === 'string' ? (env[key] as string) : process.env[key];
+	const key = get('RESEND_API_KEY');
+	const from = get('RESEND_FROM');
+	if (key && from) {
+		return {
+			name: 'resend',
+			send: async (message) =>
+				resendMailer.send({ ...message, from: `Caddie <${from}>` }),
+		};
+	}
 	return noopMailer;
 }
 
