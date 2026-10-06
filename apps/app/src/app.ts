@@ -21,7 +21,14 @@ import { createPreviewsRouter } from './server/routes/previews.ts';
 import { lookupRunByConversation, recordRepairRound, recordVerification } from './server/runs.ts';
 import type { RunBindingRecord } from '@caddie/contracts';
 import { createPlanDocRevision } from './server/projects.ts';
-import { SandboxDriver, SandboxError, InMemorySandboxPersistence, type SandboxExecuteInput } from './server/adapters/sandbox.ts';
+import { LruCache } from './server/lru-cache.ts';
+import {
+	SandboxDriver,
+	SandboxError,
+	InMemorySandboxPersistence,
+	type SandboxExecuteInput,
+} from './server/adapters/sandbox.ts';
+import { base64ToBytes, bytesToBase64 } from './server/adapters/contree.ts';
 import { sessionUserId, projectScopeForUser } from './server/scope.ts';
 import type { AuthEnv } from './server/auth.ts';
 
@@ -57,6 +64,8 @@ type Env = {
 	CONTREE_BASE_URL?: string;
 	CONTREE_API_TOKEN?: string;
 	CONTREE_PROJECT_ID?: string;
+	/** Base image reference sessions bootstrap from (default: the adjudication-proven `tag:tt-base:1`). */
+	CONTREE_IMAGE?: string;
 	GITHUB_APP_ID?: string;
 	GITHUB_APP_PRIVATE_KEY?: string;
 	GITHUB_WEBHOOK_SECRET?: string;
@@ -117,6 +126,17 @@ app.route('/agents/hello', createAgentRouter(Hello));
  * the run's current plan revision. Requires configured CONTREE credentials —
  * without them the context fails honestly on first use; there is no silent
  * local fallback for agent execution.
+ *
+ * THE SESSION IS CREATED ON FIRST USE (audit P05 finding 1): the run's
+ * session key is a LOGICAL identity the driver realizes lazily —
+ * `ensureRunSession()` is memoized once per (run, isolate) and every
+ * execution/file operation awaits it before touching the driver. Concurrent
+ * callers share the single-flight promise inside the driver.
+ *
+ * NO SHELL IS BUILT FROM MODEL-CONTROLLED PATHS (audit P05 finding 2):
+ * readFile/writeFile/stat/readdir/exists/mkdir/rm travel over the driver's
+ * real endpoint operations; only model-issued `exec` commands are free-form,
+ * by design.
  */
 function coordinatorContext(
 	env: Env,
@@ -126,6 +146,8 @@ function coordinatorContext(
 ): SpecialistBuildContext & {
 	currentPlanRevision: () => string;
 	sandboxDriver: import('@flue/runtime').SandboxDriver | null;
+	/** cwd for the flue sandbox: the session workspace root. */
+	sandboxCwd: string;
 } {
 	if (!env.CONTREE_BASE_URL || !env.CONTREE_API_TOKEN || !env.CONTREE_PROJECT_ID) {
 		throw new SandboxError(
@@ -146,17 +168,31 @@ function coordinatorContext(
 				maxOutputBytes: 5 * 1024 * 1024,
 				maxUploadBytes: 20 * 1024 * 1024,
 			},
-			workspaceRoot: `/workspace/${scope.projectId}`,
+			// The driver derives each session's workspace root under this prefix:
+			// `/workspace/<projectId>`.
+			workspaceRoot: '/workspace',
 		},
 		// Per-isolate persistence: crash recovery across restarts requires the
 		// D1-backed port (P09 wiring); this is the honest minimum for now.
 		new InMemorySandboxPersistence(),
 	);
+	const image = env.CONTREE_IMAGE ?? 'tag:tt-base:1';
 	const sessionId = `session:${runId}`;
+	const workspaceRoot = `/workspace/${scope.projectId}`;
+	// Single-flight per (run, isolate): the FIRST tool call creates the remote
+	// session (one real bootstrap run) and every later call reuses it.
+	let sessionReady: Promise<string> | null = null;
+	const ensureRunSession = (): Promise<string> => {
+		sessionReady ??= driver
+			.ensureSession({ sessionKey: sessionId, image, projectId: scope.projectId, runId })
+			.then((created) => created.sessionId);
+		return sessionReady;
+	};
 	const deps: SandboxToolDeps = {
 		execute: async (input) => {
+			const id = await ensureRunSession();
 			const execInput: SandboxExecuteInput = {
-				sessionId: input.sessionId,
+				sessionId: id,
 				command: input.command,
 				operationKey: input.operationKey,
 				timeoutMs: input.timeoutMs,
@@ -164,83 +200,78 @@ function coordinatorContext(
 			return driver.execute(execInput);
 		},
 		readFile: async (input) => {
-			const result = await driver.execute({
-				sessionId: input.sessionId,
-				command: `cat -- '${input.path}'`,
-				operationKey: `read:${runId}:${createHash('sha256').update(input.path).digest('hex').slice(0, 16)}`,
-				timeoutMs: 30_000,
-			});
-			if (result.exitCode !== 0) throw new SandboxError(404, 'FILE_NOT_FOUND', `cannot read ${input.path}`);
-			return result.stdout;
+			const id = await ensureRunSession();
+			const file = await driver.readFile(id, input.path);
+			// SandboxToolDeps carries file content as text; binary reads go
+			// through the flue driver's readFileBuffer instead.
+			return new TextDecoder().decode(base64ToBytes(file.contentBase64));
 		},
 		writeFile: async (input) => {
-			await driver.uploadFiles(input.sessionId, [{ path: input.path, contentBase64: btoa(input.content) }]);
+			const id = await ensureRunSession();
+			await driver.writeFile(id, input.path, bytesToBase64(new TextEncoder().encode(input.content)));
 		},
 	};
 	// Flue-compatible driver adapter: maps the flue SandboxDriver interface
-	// (readFile/writeFile/exists/mkdir/rm/exec) onto the P04 session driver.
+	// (readFile/writeFile/exists/mkdir/rm/exec) onto the P04 session driver
+	// with FULL fidelity (audit P05 finding 5): real stat, mkdir's recursive
+	// option, rm's recursive/force, and exec's cwd/env/signal.
 	const flueDriver: import('@flue/runtime').SandboxDriver = {
-		readFile: async (path) => deps.readFile({ sessionId, path }),
+		readFile: async (path) => {
+			const id = await ensureRunSession();
+			const file = await driver.readFile(id, path);
+			return new TextDecoder().decode(base64ToBytes(file.contentBase64));
+		},
 		readFileBuffer: async (path) => {
-			const text = await deps.readFile({ sessionId, path });
-			return new TextEncoder().encode(text);
+			const id = await ensureRunSession();
+			const file = await driver.readFile(id, path);
+			return base64ToBytes(file.contentBase64);
 		},
 		writeFile: async (path, content) => {
-			const text = typeof content === 'string' ? content : new TextDecoder().decode(content);
-			await deps.writeFile({ sessionId, path, content: text });
+			const id = await ensureRunSession();
+			const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content;
+			await driver.writeFile(id, path, bytesToBase64(bytes));
 		},
 		stat: async (path) => {
-			const result = await driver.execute({
-				sessionId,
-				command: `stat -c '%s %F' -- '${path}'`,
-				operationKey: `stat:${runId}:${createHash('sha256').update(path).digest('hex').slice(0, 16)}`,
-				timeoutMs: 15_000,
-			});
-			if (result.exitCode !== 0) throw new Error(`stat failed for ${path}`);
-			const size = Number(result.stdout.trim().split(' ')[0]);
-			return { isFile: true, isDirectory: false, size, mtime: new Date() };
+			const id = await ensureRunSession();
+			const fileStat = await driver.statFile(id, path);
+			return {
+				isFile: fileStat.isFile,
+				isDirectory: fileStat.isDirectory,
+				...(fileStat.isSymbolicLink !== undefined ? { isSymbolicLink: fileStat.isSymbolicLink } : {}),
+				...(fileStat.size !== null ? { size: fileStat.size } : {}),
+				...(fileStat.mtime !== undefined ? { mtime: fileStat.mtime } : {}),
+			};
 		},
 		readdir: async (path) => {
-			const result = await driver.execute({
-				sessionId,
-				command: `ls -1 -- '${path}'`,
-				operationKey: `ls:${runId}:${createHash('sha256').update(path).digest('hex').slice(0, 16)}`,
-				timeoutMs: 15_000,
-			});
-			if (result.exitCode !== 0) throw new Error(`readdir failed for ${path}`);
-			return result.stdout.split('\n').filter(Boolean);
+			const id = await ensureRunSession();
+			return driver.listDir(id, path);
 		},
 		exists: async (path) => {
-			const result = await driver.execute({
-				sessionId,
-				command: `test -e -- '${path}' && echo yes || echo no`,
-				operationKey: `exists:${runId}:${createHash('sha256').update(path).digest('hex').slice(0, 16)}`,
-				timeoutMs: 15_000,
-			});
-			return result.stdout.trim() === 'yes';
+			const id = await ensureRunSession();
+			return driver.pathExists(id, path);
 		},
-		mkdir: async (path) => {
-			await driver.execute({
-				sessionId,
-				command: `mkdir -p -- '${path}'`,
-				operationKey: `mkdir:${runId}:${createHash('sha256').update(path).digest('hex').slice(0, 16)}`,
-				timeoutMs: 15_000,
-			});
+		mkdir: async (path, options) => {
+			const id = await ensureRunSession();
+			await driver.mkdir(id, path, { recursive: options?.recursive });
 		},
 		rm: async (path, options) => {
-			await driver.execute({
-				sessionId,
-				command: `rm -${options?.recursive ? 'r' : ''}${options?.force ? 'f' : ''} -- '${path}'`,
-				operationKey: `rm:${runId}:${createHash('sha256').update(path).digest('hex').slice(0, 16)}`,
-				timeoutMs: 30_000,
+			const id = await ensureRunSession();
+			await driver.removePath(id, path, {
+				recursive: options?.recursive,
+				force: options?.force,
 			});
 		},
 		exec: async (command, options) => {
+			const id = await ensureRunSession();
 			const result = await driver.execute({
-				sessionId,
+				sessionId: id,
 				command,
-				operationKey: `exec:${runId}:${createHash('sha256').update(command).digest('hex').slice(0, 16)}`,
+				// Deterministic key: hash of the logical action (run + command).
+				operationKey: `exec:${runId}:${createHash('sha256').update(command).digest('hex').slice(0, 24)}`,
 				timeoutMs: options?.timeoutMs ?? 60_000,
+				...(options?.cwd !== undefined ? { cwd: options.cwd } : {}),
+				...(options?.env !== undefined ? { env: options.env } : {}),
+				...(options?.signal !== undefined ? { signal: options.signal } : {}),
 			});
 			return { exitCode: result.exitCode ?? -1, stdout: result.stdout, stderr: result.stderr };
 		},
@@ -250,6 +281,7 @@ function coordinatorContext(
 		sessionId,
 		runId,
 		sandboxDriver: flueDriver,
+		sandboxCwd: workspaceRoot,
 		readPlanNote: async (kind) => {
 			const rows = await env.DB.prepare(
 				`select "body" from "plan_doc_revisions" where "projectId" = ? and "kind" = ? order by "revision" desc limit 1`,
@@ -278,7 +310,13 @@ function coordinatorContext(
 	};
 }
 
-const currentRevisionCache = new Map<string, string>();
+/**
+ * Run id → current plan revision, populated per request and read later by the
+ * agent turn (which runs beyond the HTTP request lifecycle, in this isolate).
+ * BOUNDED (audit P05 finding 4): an LRU of 128 runs — a plain Map here grew
+ * without limit for the isolate's lifetime.
+ */
+const currentRevisionCache = new LruCache<string, string>(128);
 
 // --- SPA under /app --------------------------------------------------------
 app.get('/app', (c) => c.redirect('/app/', 307));

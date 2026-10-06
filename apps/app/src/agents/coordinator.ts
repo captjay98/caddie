@@ -56,6 +56,8 @@ let hostContext:
 			currentPlanRevision: () => string;
 			/** Flue-compatible driver for useSandbox; null = no sandbox configured. */
 			sandboxDriver: SandboxDriver | null;
+			/** cwd of the flue sandbox: the session workspace root. */
+			sandboxCwd?: string;
 	  })
 	| null = null;
 
@@ -63,6 +65,7 @@ export function provideCoordinatorContext(
 	context: SpecialistBuildContext & {
 		currentPlanRevision: () => string;
 		sandboxDriver: SandboxDriver | null;
+		sandboxCwd?: string;
 	},
 ): void {
 	hostContext = context;
@@ -86,9 +89,13 @@ export function Coordinator() {
 	if (context.sandboxDriver) {
 		// The run's real environment (P04 session driver adapted to the flue
 		// Sandbox interface). The factory is called once per initialized
-		// harness and the sandbox is shared across its sessions.
+		// harness and the sandbox is shared across its sessions. The cwd is
+		// the session workspace root, so the runtime's path resolution
+		// (relative → cwd-joined absolute) lands inside the workspace the
+		// driver enforces.
 		const driver = context.sandboxDriver;
-		useSandbox({ createSandbox: async () => sandboxFromDriver(driver, '/workspace') }, {});
+		const sandboxCwd = context.sandboxCwd ?? '/workspace';
+		useSandbox({ createSandbox: async () => sandboxFromDriver(driver, sandboxCwd) }, {});
 	}
 
 	useSkill({
