@@ -1,0 +1,20 @@
+# Caddie Forge local secrets — copy to .dev.vars and fill in.
+# NEVER commit .dev.vars. Never print secret values in chat.
+
+# Auth (P01) — required for sign-in
+BETTER_AUTH_SECRET=            # openssl rand -base64 32
+BETTER_AUTH_URL=               # canonical origin, e.g. http://localhost:5173
+GOOGLE_CLIENT_ID=              # Google Cloud Console OAuth client (Web application)
+GOOGLE_CLIENT_SECRET=
+GITHUB_CLIENT_ID=              # GitHub OAuth App (no repo scopes)
+GITHUB_CLIENT_SECRET=
+# Comma-separated invited emails; empty = no sign-ups (fail closed)
+INVITE_ALLOWLIST=
+
+# Model (P05) — Nebius Token Factory
+NEBIUS_API_KEY=
+
+# Sandbox (P04) — TF Sandboxes
+CONTREE_BASE_URL=
+CONTREE_API_TOKEN=
+CONTREE_PROJECT_ID=
