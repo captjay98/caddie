@@ -13,7 +13,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P06 | NOT STARTED | Unassigned | Pending | Pending | — (tokens port pulled forward to P16, see P16 record) |
 | P07 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P08 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P09 | PARTIAL — local scaffolding done; live journey BLOCKED on owner credentials | Integration lead | PENDING | PENDING | see evidence records |
+| P09 | LIVE VERIFIED (complete React+Hono build proof — stack #1 verified; journey exit 0 in the live sandbox) | QA/integration engineer (P09 execution window, branch p09-journey) | PENDING | PENDING | see evidence records (P09-journey) |
 | P10 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P11 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P12 | NOT STARTED | Unassigned | Pending | Pending | — |
@@ -27,6 +27,30 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | PARTIAL — local harness LOCAL VERIFIED; hosted acceptance BLOCKED (needs all packets + live credentials + deployment authorization) | Integration lead | PENDING | PENDING | see evidence records |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P09-journey", "status": "LIVE VERIFIED (complete React+Hono build proof — stack #1 labeled verified)", "sha": "branch p09-journey at journey time",
+  "commands": [
+    {"command": "CADDIE_LIVE_AUTHORIZED=1 bun scripts/run-journey.ts", "exitCode": 0,
+     "receipt": "all 8 phases PASS in the live contree sandbox — seed: 8 fixture files uploaded and sha256-verified in /work/forge-task-tracker; install: bun install --frozen-lockfile exit 0 (fresh, node_modules removed first); seeded-tests-green: bun test src/ exit 0 (4 pass, 0 fail); build: bun run build exit 0 (React bundle dist/main.js); deliberate-red: expectation flipped 2→3 → red exit 1 with 1 failing test, repaired in attempt 1/3 → exit 0 (4 pass) with the file sha-verified against the seed; server-start: bun run start in-sandbox, GET /api/health → HTTP 200 within 10s; artifact: dist/main.js exported to host, sha256 3b2d3e8d… matches the sandbox copy; browser-check: 3 Playwright assertions against the sandbox-built bundle (seeded task list renders 2 tasks; API-added task renders on reload)"},
+    {"command": "bun test tests/p09-local.test.ts", "exitCode": 0, "receipt": "4 pass — manifest invariants, fixture seeded baseline, recipe contract, runner honest-BLOCKED gate"},
+    {"command": "bun run verify:packet P09", "exitCode": 0, "receipt": "tests category: 1/1 PASS"},
+    {"command": "bun run test:browser -- P09", "exitCode": 0, "receipt": "3 browser test(s) passed"},
+    {"command": "bun run test:live -- P09", "exitCode": 0, "receipt": "2 live test(s) passed — the live spec drives the full journey end-to-end (re-run PASS)"},
+    {"command": "bun run typecheck", "exitCode": 0}
+  ],
+  "artifacts": [{"path": "dist/main.js (sandbox-built React client bundle, exported to host)", "sha256": "3b2d3e8df029aa4b23145c1f3ca89aea1b93fe33e550c6bf917e0fe1e142db22"}],
+  "environment": "contree CLI session 'p09-journey', image tag:tt-base:1 (bun 1.4.0 pinned in-session after diagnosing the extraction issue; node 20), workspace /work/forge-task-tracker; CADDIE_LIVE_AUTHORIZED=1; CONTREE_*/NEBIUS_API_KEY provisioned via .dev.vars (values never printed); acceptance manifest sha256 85640c82dcba88e81… verified unchanged before/after every run",
+  "providerCalls": "contree sandbox: ~60 remote operations (file uploads, install, tests, build, server run, artifact export); host Playwright/Chromium: 3 UI assertions; zero model calls (see limitations)",
+  "limitations": [
+    "model-driven coordinator phases (brief→plan→specialists→implement) were NOT executed: they need the Flue DO runtime (dev-server integration, P05 follow-up). The acceptance manifest phases are model-free and fully machine-checked; nothing model-driven was simulated",
+    "browser-check runs on the HOST against the exported sandbox-built bundle (contree exposes no host→sandbox port forwarding); server-start separately proves the same server answers HTTP 200 in-sandbox",
+    "bun cannot extract the react-dom tarball under this sandbox isolation — reproduced on bun 1.4.0 and 1.4.2, hardlink and copyfile backends, relocated cache dirs, while GNU tar extracts the same tarball fine and the same bun version extracts it fine off-sandbox (root cause inside bun's extractor × the sandbox syscall layer; not fully diagnosed). The install phase therefore applied framework_recovery (uncounted per the manifest repairPolicy): in-sandbox registry fetch + GNU tar extraction of the failing package, then the frozen install verified the whole tree",
+    "the fixture was COMPLETED to satisfy the immutable manifest at journey time (gaps found when first executing it): the build script referenced a nonexistent src/main.tsx; the manifest's deliberate-red command names src/routes.test.ts while the seeded test file was src/app.test.ts (bun exits 0 on a no-match filter — a fake red); a React 19 client (src/main.tsx + public/index.html + static serving in server.ts) was added so the UI assertions are real. tests/acceptance/manifest.json itself was never modified"
+  ]
+}
+```
 
 ```json
 {

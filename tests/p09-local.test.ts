@@ -32,7 +32,16 @@ describe('P09 acceptance scaffolding (local invariants)', () => {
 	});
 
 	test('the fixture app is complete and its tests pass locally', async () => {
-		for (const file of ['package.json', 'src/app.ts', 'src/app.test.ts', 'src/server.ts']) {
+		for (const file of [
+			'package.json',
+			'bun.lock',
+			'tsconfig.json',
+			'public/index.html',
+			'src/app.ts',
+			'src/routes.test.ts',
+			'src/server.ts',
+			'src/main.tsx',
+		]) {
 			expect(existsSync(join(FIXTURE, file)), file).toBe(true);
 		}
 		// The fixture is a standalone app: install its deps if missing (fresh
@@ -55,7 +64,10 @@ describe('P09 acceptance scaffolding (local invariants)', () => {
 		const { parse } = await import('valibot');
 		const validated = parse(StackRecipeSchema, recipe);
 		expect(validated.id).toBe('react-hono');
-		expect(validated.availability).toBe('unverified'); // until the journey proves it
+		// "verified" since the P09 journey (scripts/run-journey.ts) executed the
+		// acceptance manifest in the live sandbox with exit 0 — see the P09
+		// evidence record in docs/plans/2026-10-03-fresh-build/execution-ledger.md.
+		expect(validated.availability).toBe('verified');
 	});
 
 	test('the journey runner fails honestly without credentials (never fakes a run)', () => {
