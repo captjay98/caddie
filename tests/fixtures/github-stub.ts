@@ -165,6 +165,20 @@ function safeJson(buf: Buffer): unknown {
 	}
 }
 
+
+/** Real-GitHub PR JSON shape (head/base objects, snake_case url). */
+function serializePullRequest(pr: StubPullRequest): Record<string, unknown> {
+	return {
+		number: pr.number,
+		title: pr.title,
+		body: pr.body,
+		state: pr.state,
+		head: { ref: pr.head, sha: pr.headSha },
+		base: { ref: pr.base },
+		html_url: pr.htmlUrl,
+	};
+}
+
 export class GithubStub {
 	readonly requests: StubRequest[] = [];
 	/** Every ref update ATTEMPT, with the requested force flag. */
@@ -470,7 +484,7 @@ export class GithubStub {
 				});
 			}
 
-			const refGetMatch = sub.match(/^\/git\/ref\/heads\/([^/]+)$/);
+			const refGetMatch = sub.match(/^\/git\/ref\/heads\/(.+)$/);
 			if (method === 'GET' && refGetMatch) {
 				const branch = repo.branches.get(refGetMatch[1] ?? '');
 				if (!branch) return this.json(res, 404, { message: 'Not Found' });
@@ -491,7 +505,7 @@ export class GithubStub {
 				return this.json(res, 201, { ref: `refs/heads/${branchName}`, object: { sha: String(payload.sha) } });
 			}
 
-			const refPatchMatch = sub.match(/^\/git\/refs\/heads\/([^/]+)$/);
+			const refPatchMatch = sub.match(/^\/git\/refs\/heads\/(.+)$/);
 			if (method === 'PATCH' && refPatchMatch) {
 				const branchName = refPatchMatch[1] ?? '';
 				const payload = (body ?? {}) as { sha?: string; force?: boolean };
@@ -577,18 +591,20 @@ export class GithubStub {
 					}
 				}
 				const number = (repo.nextPullNumber += 1);
+				const headSha = repo.branches.get(headBranch)?.sha ?? '';
 				const pr: StubPullRequest = {
 					number,
 					title: String(payload.title ?? ''),
 					body: String(payload.body ?? ''),
 					head: headBranch,
 					base: String(payload.base ?? ''),
-					headSha: repo.branches.get(headBranch)?.sha ?? '',
+					headSha,
 					state: 'open',
 					htmlUrl: `https://github.example/${fullName}/pull/${number}`,
 				};
 				repo.pullRequests.set(`pr-${number}`, pr);
-				return this.json(res, 201, pr);
+				// Wire shape mirrors the real GitHub PR object (head/base objects).
+				return this.json(res, 201, serializePullRequest(pr));
 			}
 
 			if (method === 'GET' && sub === '/pulls') {
@@ -598,7 +614,7 @@ export class GithubStub {
 				const list = [...repo.pullRequests.values()].filter(
 					(pr) => pr.head === headBranch && (state === 'all' || pr.state === state),
 				);
-				return this.json(res, 200, list);
+				return this.json(res, 200, list.map(serializePullRequest));
 			}
 
 			return this.json(res, 404, { message: `stub: no route for ${method} ${path}` });

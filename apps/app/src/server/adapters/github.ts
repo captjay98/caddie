@@ -490,7 +490,9 @@ export class GithubRestClient {
 		try {
 			const body = (await this.request(
 				'GET',
-				`/repos/${fullName}/git/ref/heads/${encodeURIComponent(branch)}`,
+				// Branch refs may contain slashes; GitHub treats the whole
+				// remainder of refs/heads/ as the ref name — no encoding here.
+				`/repos/${fullName}/git/ref/heads/${branch}`,
 				{ auth: { installationId } },
 			)) as { object?: { sha?: unknown } };
 			return String(body.object?.sha ?? '');
@@ -523,7 +525,7 @@ export class GithubRestClient {
 		branch: string,
 		sha: string,
 	): Promise<void> {
-		await this.request('PATCH', `/repos/${fullName}/git/refs/heads/${encodeURIComponent(branch)}`, {
+		await this.request('PATCH', `/repos/${fullName}/git/refs/heads/${branch}`, {
 			auth: { installationId },
 			body: { sha, force: false },
 		});

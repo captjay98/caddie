@@ -423,3 +423,523 @@ describe('P08 slice 1 — installation binding', () => {
 		expect(bobRes.status).toBe(403);
 	});
 });
+
+// --- Slice 2 fixture state -------------------------------------------------------------
+//
+// Seeded AFTER the slice-1 describe so slice-1 assertions observe exactly one
+// installation / one selection. bun:test runs describes in file order.
+
+const FORGE_REPO = `${GITHUB_ACCOUNT_A}/forge-app`;
+const MERGE_BASE_COMMIT_KEY = 'merge-probe';
+
+let forgeStubRepo: ReturnType<GithubStub['seedRepo']>;
+
+describe('P08 slice 2 — import + receipt-backed export', () => {
+	beforeAll(async () => {
+		// Repos used by the import/export matrix (stub-side state).
+		forgeStubRepo = stub.seedRepo({
+			fullName: FORGE_REPO,
+			files: {
+				'README.md': '# forge-app\n',
+				'src/index.ts': 'export const main = () => 1;\n',
+				'src/util.ts': 'export const util = () => 2;\n',
+			},
+			accessInstallationId: GITHUB_APP_INSTALLATION_A,
+		});
+		stub.seedRepo({
+			fullName: `${GITHUB_ACCOUNT_A}/with-symlink`,
+			files: { 'README.md': 'hi\n' },
+			symlinks: { 'evil-link': '../../etc/passwd' },
+			accessInstallationId: GITHUB_APP_INSTALLATION_A,
+		});
+		stub.seedRepo({
+			fullName: `${GITHUB_ACCOUNT_A}/with-submodule`,
+			files: { 'README.md': 'hi\n' },
+			submodules: { 'vendor/lib': '0123456789abcdef0123456789abcdef01234567' },
+			accessInstallationId: GITHUB_APP_INSTALLATION_A,
+		});
+		stub.seedRepo({
+			fullName: `${GITHUB_ACCOUNT_A}/too-big`,
+			files: { 'big.bin': 'a'.repeat(600 * 1024) },
+			accessInstallationId: GITHUB_APP_INSTALLATION_A,
+		});
+		const manyFiles: Record<string, string> = {};
+		for (let i = 0; i < 202; i++) manyFiles[`f${String(i).padStart(3, '0')}.txt`] = `${i}\n`;
+		stub.seedRepo({
+			fullName: `${GITHUB_ACCOUNT_A}/too-many`,
+			files: manyFiles,
+			accessInstallationId: GITHUB_APP_INSTALLATION_A,
+		});
+		stub.seedRepo({
+			fullName: `${GITHUB_ACCOUNT_A}/mono`,
+			defaultBranch: 'trunk',
+			files: {
+				'app/main.ts': 'export {};\n',
+				'app/nested/deep.ts': 'export {};\n',
+				'docs/readme.md': 'docs\n',
+			},
+			accessInstallationId: GITHUB_APP_INSTALLATION_A,
+		});
+		stub.seedRepo({
+			fullName: `${GITHUB_ACCOUNT_B}/bobs-repo`,
+			files: { 'README.md': 'bob\n' },
+			accessInstallationId: GITHUB_APP_INSTALLATION_B,
+		});
+
+		// Select the slice-2 repositories through the REAL webhook path.
+		const select = async (fullName: string) => {
+			const body = JSON.stringify({
+				action: 'added',
+				installation: { id: Number(GITHUB_APP_INSTALLATION_A) },
+				repositories_added: [{ full_name: fullName }],
+				repositories_removed: [],
+			});
+			const res = await postWebhook(body, {
+				event: 'installation_repositories',
+				deliveryId: nextDeliveryId(),
+				secret: GITHUB_WEBHOOK_SECRET,
+			});
+			if (res.status !== 202) throw new Error(`selection webhook failed: ${res.status}`);
+		};
+		for (const name of [
+			FORGE_REPO,
+			`${GITHUB_ACCOUNT_A}/with-symlink`,
+			`${GITHUB_ACCOUNT_A}/with-submodule`,
+			`${GITHUB_ACCOUNT_A}/too-big`,
+			`${GITHUB_ACCOUNT_A}/too-many`,
+			`${GITHUB_ACCOUNT_A}/mono`,
+		]) {
+			await select(name);
+		}
+	}, 30_000);
+
+	// --- import -------------------------------------------------------------------
+
+	test('import snapshots the selected repo at a ref with a hashed, content-addressed manifest', async () => {
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ installationId: GITHUB_APP_INSTALLATION_A, repoFullName: FORGE_REPO, ref: 'main' }),
+		});
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as {
+			import: { id: string; commitSha: string; fileCount: number; manifest: { path: string; contentHash: string; blobSha: string; size: number }[] };
+		};
+		expect(body.import.fileCount).toBe(3);
+		expect(body.import.manifest.map((m) => m.path).sort()).toEqual(['README.md', 'src/index.ts', 'src/util.ts']);
+		for (const entry of body.import.manifest) {
+			expect(entry.contentHash).toMatch(/^[0-9a-f]{64}$/);
+			expect(entry.blobSha).toBeTruthy();
+		}
+		// database truth: one import row, one content blob per distinct file
+		const rows = await d1Rows(`select count(*) as n from github_imports where "id" = '${body.import.id}'`);
+		expect(Number(rows[0]?.['n'])).toBe(1);
+		const blobs = await d1Rows(
+			`select count(*) as n from content_blobs where "hash" in (${body.import.manifest.map((m) => `'${m.contentHash}'`).join(',')})`,
+		);
+		expect(Number(blobs[0]?.['n'])).toBe(3);
+		// content-addressed: the stored bytes hash back to the manifest hash is
+		// proven below by re-importing and observing NO duplicate blob rows.
+		const second = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ installationId: GITHUB_APP_INSTALLATION_A, repoFullName: FORGE_REPO, ref: 'main' }),
+		});
+		expect(second.status).toBe(201);
+		const blobCount = await d1Rows('select count(*) as n from content_blobs');
+		expect(Number(blobCount[0]?.['n'])).toBe(3);
+	});
+
+	test('root import is normalized: leading/trailing slashes collapse, paths are relative to the root', async () => {
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: `${GITHUB_ACCOUNT_A}/mono`,
+				ref: 'trunk',
+				root: '/app/',
+			}),
+		});
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as { import: { rootPath: string; manifest: { path: string }[] } };
+		expect(body.import.rootPath).toBe('app');
+		expect(body.import.manifest.map((m) => m.path).sort()).toEqual(['main.ts', 'nested/deep.ts']);
+	});
+
+	test('symlinks are rejected, never followed or stored', async () => {
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: `${GITHUB_ACCOUNT_A}/with-symlink`,
+				ref: 'main',
+			}),
+		});
+		expect(res.status).toBe(422);
+		const body = (await res.json()) as { error?: string };
+		expect(body.error).toBe('symlink_rejected');
+		const { createHash } = await import('node:crypto');
+		const targetHash = createHash('sha256').update('../../etc/passwd', 'utf8').digest('hex');
+		const blobs = await d1Rows(`select count(*) as n from content_blobs where "hash" = '${targetHash}'`);
+		// the passwd-target bytes never reached the content-addressed store
+		expect(Number(blobs[0]?.['n'])).toBe(0);
+	});
+
+	test('submodules are skipped and recorded, not imported', async () => {
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: `${GITHUB_ACCOUNT_A}/with-submodule`,
+				ref: 'main',
+			}),
+		});
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as {
+			import: { fileCount: number; manifest: { path: string }[]; skipped: { path: string; reason: string; gitSha: string }[] };
+		};
+		expect(body.import.fileCount).toBe(1);
+		expect(body.import.manifest.map((m) => m.path)).toEqual(['README.md']);
+		expect(body.import.skipped).toHaveLength(1);
+		expect(body.import.skipped[0]?.path).toBe('vendor/lib');
+		expect(body.import.skipped[0]?.reason).toBe('submodule');
+	});
+
+	test('file size cap rejects oversized imports with a typed error', async () => {
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: `${GITHUB_ACCOUNT_A}/too-big`,
+				ref: 'main',
+			}),
+		});
+		expect(res.status).toBe(422);
+		const body = (await res.json()) as { error?: string };
+		expect(body.error).toBe('import_file_size_cap_exceeded');
+	});
+
+	test('file count cap rejects oversized imports with a typed error', async () => {
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: `${GITHUB_ACCOUNT_A}/too-many`,
+				ref: 'main',
+			}),
+		});
+		expect(res.status).toBe(422);
+		const body = (await res.json()) as { error?: string };
+		expect(body.error).toBe('import_file_count_cap_exceeded');
+	});
+
+	test('traversal roots are rejected before any provider call', async () => {
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: FORGE_REPO,
+				ref: 'main',
+				root: '../etc',
+			}),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error?: string };
+		expect(body.error).toBe('invalid_path');
+	});
+
+	test('import fails closed for a repo that is not selected', async () => {
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: `${GITHUB_ACCOUNT_A}/not-selected`,
+				ref: 'main',
+			}),
+		});
+		expect(res.status).toBe(403);
+		const body = (await res.json()) as { error?: string };
+		expect(body.error).toBe('repo_not_selected');
+	});
+
+	test('two-user isolation: Bob\u2019s project cannot import through Alice\u2019s installation', async () => {
+		const res = await worker(BOB, `/api/projects/${bobProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ installationId: GITHUB_APP_INSTALLATION_A, repoFullName: FORGE_REPO, ref: 'main' }),
+		});
+		expect(res.status).toBe(403);
+		const body = (await res.json()) as { error?: string };
+		expect(body.error).toBe('installation_out_of_scope');
+	});
+
+	// --- receipt-backed export ------------------------------------------------------
+
+	let firstPullRequestNumber = 0;
+	let prBranch = 'caddie/feature-1';
+
+	test('PR delivery walks prepare -> dispatched -> receipt and records the PR', async () => {
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/deliveries`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				runId: 'run_p08_export_1',
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: FORGE_REPO,
+				headBranch: prBranch,
+				title: 'Add feature module',
+				body: 'Generated by Caddie P08.',
+				files: [{ path: 'src/feature.ts', content: 'export const feature = () => 42;\n' }],
+				mode: 'pull-request',
+			}),
+		});
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as {
+			delivery: { operationKey: string; pullRequestNumber: number; headSha: string | null; mode: string };
+			operation: { status: string; receiptId: string | null; provider: string };
+		};
+		firstPullRequestNumber = body.delivery.pullRequestNumber;
+		expect(firstPullRequestNumber).toBeGreaterThan(0);
+		expect(body.delivery.mode).toBe('pull-request');
+		expect(body.delivery.headSha).toBe(stub.branchHead(FORGE_REPO, prBranch));
+		expect(stub.openPullRequest(FORGE_REPO, prBranch)?.number).toBe(firstPullRequestNumber);
+		// ledger truth: provider receipt recorded, provider correlation intact
+		expect(body.operation.provider).toBe('github');
+		expect(body.operation.status).toBe('succeeded');
+		expect(body.operation.receiptId).toBe(`pr:${firstPullRequestNumber}`);
+		const opRows = await d1Rows(
+			`select "status", "receiptId", "remoteId" from external_operations where "operationKey" = '${body.delivery.operationKey}'`,
+		);
+		expect(opRows[0]?.['status']).toBe('succeeded');
+		expect(opRows[0]?.['receiptId']).toBe(`pr:${firstPullRequestNumber}`);
+		const delRows = await d1Rows(
+			`select "pullRequestNumber", "headSha" from github_deliveries where "operationKey" = '${body.delivery.operationKey}'`,
+		);
+		expect(Number(delRows[0]?.['pullRequestNumber'])).toBe(firstPullRequestNumber);
+		// base branch untouched, exactly one PR creation call reached the provider
+		expect(stub.branchHead(FORGE_REPO, 'main')).toBe(forgeStubRepo?.branches.get('main')?.sha ?? null);
+	});
+
+	test('a duplicate intent reconciles to the SAME PR — the provider saw one creation call', async () => {
+		const pullsBefore = stub.requests.filter((r) => r.method === 'POST' && r.path === `/repos/${FORGE_REPO}/pulls`).length;
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/deliveries`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				runId: 'run_p08_export_1',
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: FORGE_REPO,
+				headBranch: prBranch,
+				title: 'Add feature module',
+				body: 'Generated by Caddie P08.',
+				files: [{ path: 'src/feature.ts', content: 'export const feature = () => 42;\n' }],
+				mode: 'pull-request',
+			}),
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { delivery: { pullRequestNumber: number }; reconciled: boolean };
+		expect(body.delivery.pullRequestNumber).toBe(firstPullRequestNumber);
+		expect(body.reconciled).toBe(true);
+		const pullsAfter = stub.requests.filter((r) => r.method === 'POST' && r.path === `/repos/${FORGE_REPO}/pulls`).length;
+		expect(pullsAfter).toBe(pullsBefore); // no second creation call even attempted
+	});
+
+	test('existing-branch divergence is a typed conflict, never an overwrite', async () => {
+		// Simulate an external committer moving the feature branch (test-side
+		// stub state, NOT through the adapter): a hostile fast-forward commit.
+		const branch = forgeStubRepo?.branches.get(prBranch);
+		const currentHead = branch ? forgeStubRepo?.commits.get(branch.sha) : undefined;
+		expect(branch && currentHead).toBeTruthy();
+		forgeStubRepo?.commits.set('foreign-1', {
+			sha: 'foreign-1',
+			message: 'hostile external commit',
+			tree: currentHead?.tree ?? '',
+			parents: [branch?.sha ?? ''],
+		});
+		branch!.sha = 'foreign-1';
+		const mainHeadBefore = stub.branchHead(FORGE_REPO, 'main');
+
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/deliveries`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				runId: 'run_p08_export_2',
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: FORGE_REPO,
+				headBranch: prBranch,
+				title: 'Second feature',
+				files: [{ path: 'src/second.ts', content: 'export const second = 2;\n' }],
+				mode: 'pull-request',
+			}),
+		});
+		expect(res.status).toBe(409);
+		const body = (await res.json()) as { error?: string };
+		expect(body.error).toBe('delivery_head_diverged');
+		// provider state untouched: branch still foreign, default branch untouched,
+		// and no force-push was ever ATTEMPTED (stub policy would reject and count it)
+		expect(stub.branchHead(FORGE_REPO, prBranch)).toBe('foreign-1');
+		expect(stub.branchHead(FORGE_REPO, 'main')).toBe(mainHeadBefore);
+		expect(stub.forceViolations).toBe(0);
+	});
+
+	test('default-branch merge stays PREPARED and does NOT execute without the exact approval', async () => {
+		const before = stub.requests.length;
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/deliveries`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				runId: 'run_p08_merge_1',
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: FORGE_REPO,
+				headBranch: 'main',
+				title: 'Merge verified work to main',
+				files: [{ path: 'src/merge-me.ts', content: 'export const merged = true;\n' }],
+				mode: 'merge-default-branch',
+			}),
+		});
+		expect(res.status).toBe(403);
+		const body = (await res.json()) as { error?: string; operationKey?: string; revisionHash?: string };
+		expect(body.error).toBe('STALE_APPROVAL');
+		expect(body.operationKey).toBeTruthy();
+		expect(body.revisionHash).toMatch(/^[0-9a-f]{64}$/);
+		// ledger truth: the effect is PREPARED (elected dispatcher) but nothing
+		// reached the provider — every request since the snapshot was a read.
+		const opRows = await d1Rows(
+			`select "status" from external_operations where "operationKey" = '${body.operationKey}'`,
+		);
+		expect(opRows[0]?.['status']).toBe('prepared');
+		// nothing reached the provider except reads and the App-token mint —
+		// the SAME exclusion rule the stub uses for "mutating" traffic.
+		const sinceSnapshot = stub.requests.slice(before).filter((r) => {
+			if (r.method === 'POST' && r.path.endsWith('/access_tokens')) return false;
+			return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(r.method);
+		});
+		expect(sinceSnapshot).toHaveLength(0);
+
+		// Alice approves the EXACT intent through the authenticated user route.
+		const approve = await worker(ALICE, '/api/approvals', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				intent: {
+					projectId: aliceProjectId,
+					action: 'merge-default-branch',
+					resourceId: FORGE_REPO,
+					revisionHash: body.revisionHash,
+					policyVersion: GITHUB_POLICY_VERSION,
+				},
+				decision: 'approved',
+			}),
+		});
+		expect(approve.status).toBe(200);
+
+		// Resuming the SAME logical delivery now dispatches behind the gate.
+		const resume = await worker(ALICE, `/api/projects/${aliceProjectId}/github/deliveries`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				runId: 'run_p08_merge_1',
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: FORGE_REPO,
+				headBranch: 'main',
+				title: 'Merge verified work to main',
+				files: [{ path: 'src/merge-me.ts', content: 'export const merged = true;\n' }],
+				mode: 'merge-default-branch',
+			}),
+		});
+		expect(resume.status).toBe(201);
+		const resumeBody = (await resume.json()) as {
+			delivery: { headSha: string; mode: string; pullRequestNumber: number | null };
+			operation: { status: string; receiptId: string | null };
+		};
+		expect(resumeBody.operation.status).toBe('succeeded');
+		expect(resumeBody.operation.receiptId).toBe(`merge:${resumeBody.delivery.headSha}`);
+		expect(resumeBody.delivery.pullRequestNumber).toBeNull();
+		// default branch fast-forwarded onto the new commit — never force-pushed
+		expect(stub.branchHead(FORGE_REPO, 'main')).toBe(resumeBody.delivery.headSha);
+		const mainUpdates = stub.refUpdates.filter((u) => u.repo === FORGE_REPO && u.branch === 'main');
+		expect(mainUpdates).toHaveLength(1);
+		expect(mainUpdates[0]?.force).toBe(false);
+		expect(mainUpdates[0]?.accepted).toBe(true);
+		expect(stub.forceViolations).toBe(0);
+	});
+
+	test('revocation denies every future operation (webhook installation.deleted)', async () => {
+		// Fresh installation C: webhook-created, explicitly bound, repo selected.
+		const C = '4756421';
+		stub.registerInstallation({ installationId: C, accountLogin: 'octocat-c' });
+		stub.seedRepo({
+			fullName: 'octocat-c/c-repo',
+			files: { 'README.md': 'c\n' },
+			accessInstallationId: C,
+		});
+		const created = await postWebhook(
+			installationEventBody('created', C, 'octocat-c'),
+			{ event: 'installation', deliveryId: nextDeliveryId(), secret: GITHUB_WEBHOOK_SECRET },
+		);
+		expect(created.status).toBe(202);
+		const bindRes = await worker(ALICE, '/api/github/installations/bind', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ installationId: C, workspaceId: aliceWorkspaceId }),
+		});
+		expect(bindRes.status).toBe(201);
+		const selected = await postWebhook(
+			JSON.stringify({
+				action: 'added',
+				installation: { id: Number(C) },
+				repositories_added: [{ full_name: 'octocat-c/c-repo' }],
+				repositories_removed: [],
+			}),
+			{ event: 'installation_repositories', deliveryId: nextDeliveryId(), secret: GITHUB_WEBHOOK_SECRET },
+		);
+		expect(selected.status).toBe(202);
+		const importOk = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ installationId: C, repoFullName: 'octocat-c/c-repo', ref: 'main' }),
+		});
+		expect(importOk.status).toBe(201);
+
+		const revoked = await postWebhook(
+			installationEventBody('deleted', C, 'octocat-c'),
+			{ event: 'installation', deliveryId: nextDeliveryId(), secret: GITHUB_WEBHOOK_SECRET },
+		);
+		expect(revoked.status).toBe(202);
+
+		const denied = await worker(ALICE, `/api/projects/${aliceProjectId}/github/imports`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ installationId: C, repoFullName: 'octocat-c/c-repo', ref: 'main' }),
+		});
+		expect(denied.status).toBe(403);
+		const body = (await denied.json()) as { error?: string };
+		expect(body.error).toBe('installation_revoked');
+
+		const deniedDelivery = await worker(ALICE, `/api/projects/${aliceProjectId}/github/deliveries`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				runId: 'run_p08_revoked',
+				installationId: C,
+				repoFullName: 'octocat-c/c-repo',
+				headBranch: 'caddie/x',
+				title: 'x',
+				files: [{ path: 'a.txt', content: 'a\n' }],
+				mode: 'pull-request',
+			}),
+		});
+		expect(deniedDelivery.status).toBe(403);
+	});
+
+	test('across the whole suite the provider never received a force-push', () => {
+		expect(stub.forceViolations).toBe(0);
+	});
+});

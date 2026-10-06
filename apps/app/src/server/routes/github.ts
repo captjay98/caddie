@@ -2,12 +2,16 @@ import { Hono } from 'hono';
 import { createAuthRouter } from './auth.ts';
 import { createProjectsRouter } from './projects.ts';
 import { createApprovalsRouter } from './approvals.ts';
-import { ScopeError, requireWorkspaceScope, sessionUserId } from '../scope.ts';
+import { ScopeError, requireProjectScope, requireWorkspaceScope, sessionUserId } from '../scope.ts';
 import { GithubError, verifyWebhookSignature, type GithubEnv } from '../adapters/github.ts';
 import {
+	DeliveryGateError,
 	bindInstallation,
+	deliverPatch,
 	githubClientFromEnv,
 	getInstallationForActor,
+	importRepoSnapshot,
+	listImports,
 	listInstallations,
 	listSelectedRepos,
 	processGithubWebhook,
@@ -41,9 +45,22 @@ import {
 
 type Env = GithubEnv;
 
-function errorJson(error: unknown): { status: number; body: { error: string; message?: string } } {
+function errorJson(error: unknown): { status: number; body: { error: string; message?: string; operationKey?: string; revisionHash?: string } } {
 	if (error instanceof ScopeError) {
 		return { status: error.status, body: { error: error.code, message: error.message } };
+	}
+	if (error instanceof DeliveryGateError) {
+		// the approval gate refused: surface the EXACT intent so the user can
+		// approve precisely this effect (the route never re-asks GitHub)
+		return {
+			status: error.gate.status,
+			body: {
+				error: error.gate.code,
+				message: error.gate.message,
+				operationKey: error.operationKey,
+				revisionHash: error.revisionHash,
+			},
+		};
 	}
 	if (error instanceof GithubError) {
 		return { status: error.status, body: { error: error.code, message: error.message } };
@@ -154,6 +171,27 @@ export function createGithubRouter(): Hono<{ Bindings: Env }> {
 			c.req.param('installationId'),
 		);
 		return c.json({ installation });
+	});
+
+	// --- project-scoped import / delivery (scope derived server-side) -----------------
+	router.post('/projects/:projectId/github/imports', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		// githubClientFromEnv -> readGithubConfig fails closed (typed 503).
+		const client = githubClientFromEnv(c.env);
+		const imported = await importRepoSnapshot(c.env.DB, client, scope, await readJson(c.req.raw));
+		return c.json({ import: imported }, 201);
+	});
+
+	router.get('/projects/:projectId/github/imports', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		return c.json({ imports: await listImports(c.env.DB, scope) });
+	});
+
+	router.post('/projects/:projectId/github/deliveries', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		const client = githubClientFromEnv(c.env);
+		const result = await deliverPatch(c.env.DB, client, scope, await readJson(c.req.raw));
+		return c.json(result, result.reconciled ? 200 : 201);
 	});
 
 	return router;
