@@ -4,6 +4,7 @@ import { createAuthRouter } from './auth.ts';
 import { createProjectsRouter } from './projects.ts';
 import { ScopeError, sessionUserId } from '../scope.ts';
 import { getProfile, upsertProfile } from '../profiles.ts';
+import { searchContent } from '../search.ts';
 import {
 	addMemoryFact,
 	confirmMemoryFact,
@@ -146,7 +147,62 @@ export function createProfileRouter(): Hono<{ Bindings: Env }> {
 		return c.json({ fact }, 201);
 	});
 
+	// --- search (permission-filtered; items AND counts stay inside scope) ------
+
+	router.get('/search', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const result = await searchContent(c.env.DB, actorId, c.req.query('q') ?? '', {
+			limit: c.req.query('limit'),
+			offset: clampedQueryNumber(c.req.query('offset')),
+		});
+		return c.json(result);
+	});
+
+	// --- integration health (honest presence checks; values never echoed) -------
+
+	router.get('/integrations/health', (c) => {
+		const providerConfigured = (id?: string, secret?: string) => Boolean(id && secret);
+		const sandboxMissing = (
+			['CONTREE_BASE_URL', 'CONTREE_API_TOKEN', 'CONTREE_PROJECT_ID'] as const
+		).filter((name) => !c.env[name]);
+		return c.json({
+			auth: {
+				// the session itself is running, so the auth core is configured;
+				// providers are only reported when BOTH halves of their pair exist
+				providers: {
+					google: providerConfigured(c.env.GOOGLE_CLIENT_ID, c.env.GOOGLE_CLIENT_SECRET),
+					github: providerConfigured(c.env.GITHUB_CLIENT_ID, c.env.GITHUB_CLIENT_SECRET),
+				},
+			},
+			sandbox: {
+				configured: sandboxMissing.length === 0,
+				// names of missing variables only — never values
+				missing: sandboxMissing,
+			},
+		});
+	});
+
+	// --- enabled stacks (honest, no inherited pricing or fake availability) -----
+
+	router.get('/stacks', (c) =>
+		c.json({
+			stacks: [
+				{ id: 'react-hono', status: 'enabled', note: 'proving in the forge' },
+				{ id: 'tanstack-start', status: 'planned' },
+				{ id: 'laravel-inertia', status: 'planned' },
+				{ id: 'fastapi-react', status: 'planned' },
+				{ id: 'flutter', status: 'planned' },
+			],
+		}),
+	);
+
 	return router;
+}
+
+function clampedQueryNumber(raw: string | undefined): number | undefined {
+	if (raw === undefined || raw === '') return undefined;
+	const n = Number(raw);
+	return Number.isFinite(n) ? n : undefined;
 }
 
 /**
