@@ -283,8 +283,12 @@ app.get('/app/*', async (c) => {
 	const asset = await assets.fetch(c.req.raw);
 	if (asset.status !== 404) return asset;
 	// Client-side routing fallback: any /app/* path without a file serves
-	// the SPA shell.
-	return assets.fetch(new Request(new URL('/app/index.html', c.req.url)));
+	// the SPA shell. The composed build emits the shell at /app/index.html;
+	// the dev assets tree has no /app prefix — its SPA entry is / — so fall
+	// through to that when the shell path misses.
+	const shell = await assets.fetch(new Request(new URL('/app/index.html', c.req.url)));
+	if (shell.status !== 404) return shell;
+	return assets.fetch(new Request(new URL('/', c.req.url)));
 });
 
 // --- fallbacks -------------------------------------------------------------
