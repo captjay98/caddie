@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Project } from '@caddie/contracts';
 import { SignInPanel, authClient } from '../auth.ts';
@@ -232,6 +232,32 @@ function AuthedShell(props: { actorId: string | null }): ReactElement {
 					</label>
 				)}
 				<div className="topbar-actions">
+					{/* P11/P13 surfaces: real client routes (surface.tsx); the
+					    selected project rides along in the search param. */}
+					<Link
+						to="/discovery"
+						className="btn-ghost topbar-nav-link"
+						data-testid="nav-discovery"
+						search={{ project: search.project }}
+					>
+						Discovery
+					</Link>
+					<Link
+						to="/judge"
+						className="btn-ghost topbar-nav-link"
+						data-testid="nav-judge"
+						search={{ project: search.project }}
+					>
+						Judge
+					</Link>
+					<Link
+						to="/submission"
+						className="btn-ghost topbar-nav-link"
+						data-testid="nav-submission"
+						search={{ project: search.project }}
+					>
+						Submission
+					</Link>
 					<button
 						type="button"
 						className="btn-ghost"

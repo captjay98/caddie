@@ -6,10 +6,14 @@ import type { ReactElement } from 'react';
  *
  *   - "Start from an idea" routes into the workspace, where creating a
  *     project from an idea exists today (P02/P06 surface).
- *   - "Start from a GitHub repo" and "Start from discovery" are PLANNED
- *     capabilities (P08 GitHub integration, P11 discovery). They render as
- *     visibly unavailable cards with the packet that will ship them — never
- *     as buttons that pretend to work.
+ *   - "Start from discovery" is the P11 discovery surface — it EXISTS now
+ *     (browse candidates with evidence-backed fit/eligibility, accept onto a
+ *     shortlist), so its card is a real link. Creating a project FROM an
+ *     accepted candidate is not wired yet; the card copy says only what the
+ *     surface really does.
+ *   - "Start from a GitHub repo" is a PLANNED capability (P08 GitHub
+ *     integration). It renders as a visibly unavailable card with the packet
+ *     that will ship it — never as a button that pretends to work.
  *   - There is NO complete-profile wall before useful work: the profile is
  *     optional and lives in Settings.
  */
@@ -85,8 +89,12 @@ export function Start(props: { onStartIdea?: () => void } = {}): ReactElement {
 					testId="start-card-discovery"
 					kicker="FROM DISCOVERY"
 					title="Start from a contest pick"
-					detail="Browse curated hackathon discovery and start a project from a validated candidate."
-					comingWith="P11 (discovery)"
+					detail="Browse curated hackathon discovery — every fit claim carries its evidence, and accepting a candidate keeps it on your shortlist."
+					action={
+						<a className="btn-key" href="./discovery" data-testid="start-discovery-go">
+							Browse discovery
+						</a>
+					}
 				/>
 			</div>
 		</main>

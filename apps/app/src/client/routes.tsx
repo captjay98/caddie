@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
 import { Start } from './onboarding/Start.tsx';
+import { DiscoveryPage, JudgePage, SubmissionPage } from './surface.tsx';
 
 /**
  * TanStack Router setup (SPA mode, decision "Product UI: React SPA +
@@ -68,7 +69,38 @@ const onboardingRoute = createRoute({
 	},
 });
 
-export const routeTree = rootRoute.addChildren([workspaceRoute, settingsRoute, onboardingRoute]);
+// P11/P13 surfaces — the slice-3 components mounted behind the shared
+// fail-closed gate (surface.tsx): sign-in for unverified sessions, the
+// ?project= param resolved against the actor's own project list.
+const discoveryRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/discovery',
+	validateSearch,
+	component: DiscoveryPage,
+});
+
+const judgeRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/judge',
+	validateSearch,
+	component: JudgePage,
+});
+
+const submissionRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/submission',
+	validateSearch,
+	component: SubmissionPage,
+});
+
+export const routeTree = rootRoute.addChildren([
+	workspaceRoute,
+	settingsRoute,
+	onboardingRoute,
+	discoveryRoute,
+	judgeRoute,
+	submissionRoute,
+]);
 
 function detectBasepath(): string {
 	return typeof window !== 'undefined' && window.location.pathname.startsWith('/app') ? '/app' : '/';

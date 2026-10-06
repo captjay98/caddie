@@ -207,11 +207,12 @@ describe('P05 protected acceptance surfaces', () => {
 // ---- skills -------------------------------------------------------------------
 
 describe('P05 packaged skills', () => {
-	test('all three skills are packaged via the flue mechanism', () => {
+	test('every packaged skill is exported via the flue mechanism', () => {
 		const names = Object.keys(PACKAGED_SKILLS);
 		expect(names).toContain('planning');
 		expect(names).toContain('build-verify');
 		expect(names).toContain('delivery-checklist');
+		expect(names).toContain('submission'); // P13 — judge coaching + submission prep
 		for (const name of names) {
 			const skill = PACKAGED_SKILLS[name as keyof typeof PACKAGED_SKILLS];
 			expect(skill).toBeDefined();
@@ -219,9 +220,9 @@ describe('P05 packaged skills', () => {
 	});
 
 	test('unknown skill lookup is type-unsafe by design (compile-time union)', () => {
-		// PackagedSkillName is a union of the three known names — a typo fails
-		// at compile time, not runtime.
-		expect(Object.keys(PACKAGED_SKILLS)).toHaveLength(3);
+		// PackagedSkillName is a union of the known names — a typo fails at
+		// compile time, not runtime. (Four since P13 added `submission`.)
+		expect(Object.keys(PACKAGED_SKILLS)).toHaveLength(4);
 	});
 });
 

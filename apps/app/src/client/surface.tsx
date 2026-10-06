@@ -1,0 +1,143 @@
+import { Fragment } from 'react';
+import type { ReactElement } from 'react';
+import { useSearch } from '@tanstack/react-router';
+import { SignInPanel } from './auth.ts';
+import { failureKind, StatePanel } from './states.tsx';
+import { DiscoveryResults } from './discovery/Results.tsx';
+import { JudgeScorecard } from './judge/Scorecard.tsx';
+import { SubmissionPackage } from './submission/Package.tsx';
+import { useAuthStatus, useProjects, useSessionActor } from './queries.ts';
+
+/**
+ * P11/P13 standalone surfaces — the workspace-shell integration pattern for
+ * the unmounted slice-3 components (discovery results, judge scorecard,
+ * submission package), following the /settings page grammar: a `<main>` page
+ * route wrapping the real component.
+ *
+ * The gate is the SAME fail-closed contract as the Shell (feature-ledger
+ * C5/P06): the real /api/auth/status probe decides sign-in vs. surface, the
+ * project is resolved from the ?project= search param against the actor's OWN
+ * project list (Shell semantics: first project is the fallback; a param
+ * pointing at a project the account cannot see renders the explicit
+ * not-in-your-list error — it is never probed or trusted directly), and every
+ * failure kind renders as an explicit state panel. No component data is
+ * fetched before a project is resolved, so a deep link can never leak another
+ * account's rows (every query is actor-keyed, and the resolved surface is
+ * keyed by actor like the Shell — an account switch remounts it fresh).
+ */
+
+function SignInGate(): ReactElement {
+	return (
+		<section className="sign-in-card card-surface">
+			<p className="kicker" data-tone="action">
+				CADDIE · WORKSPACE
+			</p>
+			<h1 className="sign-in-title">Sign in to your workspace</h1>
+			<SignInPanel callbackURL="/app/" />
+		</section>
+	);
+}
+
+function ProjectSurface(props: { children: (projectId: string) => ReactElement }): ReactElement {
+	const auth = useAuthStatus();
+	const actor = useSessionActor(Boolean(auth.data?.authenticated));
+	const projects = useProjects({ actorId: actor.data ?? null });
+	const search = useSearch({ strict: false }) as { project?: string };
+
+	if (auth.isPending) {
+		return <StatePanel kind="loading" title="Checking your session…" />;
+	}
+	if (auth.error) {
+		return (
+			<StatePanel
+				kind={failureKind(auth.error)}
+				detail={auth.error instanceof Error ? auth.error.message : undefined}
+				onRetry={() => void auth.refetch()}
+				retryLabel="Check again"
+			/>
+		);
+	}
+	if (!auth.data.authenticated) {
+		return <SignInGate />;
+	}
+	if (actor.isPending || projects.isPending) {
+		return <StatePanel kind="loading" title="Fetching your projects…" />;
+	}
+	const loadError = actor.error ?? projects.error;
+	if (loadError) {
+		return (
+			<StatePanel
+				kind={failureKind(loadError)}
+				detail={loadError instanceof Error ? loadError.message : undefined}
+				onRetry={failureKind(loadError) === 'denied' ? undefined : () => void projects.refetch()}
+			/>
+		);
+	}
+
+	const projectList = projects.data?.projects ?? [];
+	const paramProject = search.project;
+	const selectedProject =
+		projectList.find((project) => project.id === paramProject) ?? projectList[0] ?? null;
+	const projectMissing = Boolean(paramProject) && projectList.length > 0 && !selectedProject;
+	if (projectMissing) {
+		return (
+			<>
+				<StatePanel
+					kind="error"
+					title="That project is not in your list"
+					detail="The link points at a project your account cannot see (or that no longer exists)."
+				/>
+				<p>
+					<a className="btn-ghost" href="./">
+						Back to your projects
+					</a>
+				</p>
+			</>
+		);
+	}
+	if (!selectedProject) {
+		return (
+			<>
+				<StatePanel
+					kind="empty"
+					title="No project selected"
+					detail="Create a project in the workspace first — this surface reads one project's data."
+				/>
+				<p>
+					<a className="btn-key" href="./">
+						Open the workspace
+					</a>
+				</p>
+			</>
+		);
+	}
+	return (
+		<Fragment key={actor.data ?? 'pending'}>
+			{props.children(selectedProject.id)}
+		</Fragment>
+	);
+}
+
+export function DiscoveryPage(): ReactElement {
+	return (
+		<main className="shell-loading" id="main">
+			<ProjectSurface>{(projectId) => <DiscoveryResults projectId={projectId} />}</ProjectSurface>
+		</main>
+	);
+}
+
+export function JudgePage(): ReactElement {
+	return (
+		<main className="shell-loading" id="main">
+			<ProjectSurface>{(projectId) => <JudgeScorecard projectId={projectId} />}</ProjectSurface>
+		</main>
+	);
+}
+
+export function SubmissionPage(): ReactElement {
+	return (
+		<main className="shell-loading" id="main">
+			<ProjectSurface>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectSurface>
+		</main>
+	);
+}

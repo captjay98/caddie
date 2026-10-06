@@ -216,11 +216,15 @@ test.describe('P06 workspace shell (composed build)', () => {
 		await expect(page.getByTestId('project-selector')).toBeVisible();
 		await expect(page.getByTestId('project-selector')).toHaveValue('');
 		// Zero projects + a clean load: the onboarding IS the workspace body —
-		// three entry cards, no profile wall, no fake empty panes.
+		// three entry cards, no profile wall, no fake empty panes. The repo
+		// card is still honestly "planned" (P08); the discovery card is a REAL
+		// link now that the P11 surface exists — planned pills are removed
+		// only when the destination is real.
 		await expect(page.getByTestId('start-screen')).toBeVisible();
 		await expect(page.getByTestId('start-card-idea')).toBeVisible();
 		await expect(page.getByTestId('start-card-repo')).toHaveAttribute('data-coming-with', /P08/);
-		await expect(page.getByTestId('start-card-discovery')).toHaveAttribute('data-coming-with', /P11/);
+		await expect(page.getByTestId('start-card-discovery')).not.toHaveAttribute('data-coming-with');
+		await expect(page.getByTestId('start-discovery-go')).toHaveAttribute('href', './discovery');
 		// The idea card opens the real new-project form in place.
 		await page.getByTestId('start-idea-go').click();
 		await expect(page.getByTestId('new-project-name')).toBeVisible();

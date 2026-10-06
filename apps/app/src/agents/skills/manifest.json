@@ -18,6 +18,12 @@
 			"version": "1.0.0",
 			"path": "delivery-checklist/SKILL.md",
 			"sha256": "33cb7d45ebfe3dc0b30f541275498a1d9484419875294042f171b59bde903bac"
+		},
+		{
+			"name": "submission",
+			"version": "1.0.0",
+			"path": "submission/SKILL.md",
+			"sha256": "c94fbaa86fa1f7b2c21955a16eda60e973894c84698c163c5bddd20f2d72d033"
 		}
 	]
 }
