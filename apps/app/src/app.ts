@@ -12,7 +12,10 @@ import { createApprovalsRouter } from './server/routes/approvals.ts';
 import { createEvidenceRouter } from './server/routes/evidence.ts';
 import { createRunsRouter, conversationGuard } from './server/routes/runs.ts';
 import { createTasksRouter } from './server/routes/tasks.ts';
+import { createGithubRouter } from './server/routes/github.ts';
 import { createProfileRouter } from './server/routes/profile.ts';
+import { createArtifactsRouter } from './server/routes/artifacts.ts';
+import { createPreviewsRouter } from './server/routes/previews.ts';
 import { lookupRunByConversation, recordRepairRound, recordVerification } from './server/runs.ts';
 import type { RunBindingRecord } from '@caddie/contracts';
 import { createPlanDocRevision } from './server/projects.ts';
@@ -52,6 +55,10 @@ type Env = {
 	CONTREE_BASE_URL?: string;
 	CONTREE_API_TOKEN?: string;
 	CONTREE_PROJECT_ID?: string;
+	GITHUB_APP_ID?: string;
+	GITHUB_APP_PRIVATE_KEY?: string;
+	GITHUB_WEBHOOK_SECRET?: string;
+	GITHUB_API_BASE_URL?: string;
 };
 
 registerNebiusProvider();
@@ -65,6 +72,11 @@ api.route('/', createProjectsRouter());
 api.route('/', createApprovalsRouter());
 api.route('/', createEvidenceRouter());
 api.route('/', createRunsRouter());
+api.route('/', createProfileRouter());
+api.route('/', createArtifactsRouter());
+api.route('/', createPreviewsRouter());
+api.route('/', createTasksRouter());
+api.route('/', createGithubRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------
