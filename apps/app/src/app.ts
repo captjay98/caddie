@@ -78,6 +78,7 @@ api.route('/', createArtifactsRouter());
 api.route('/', createPreviewsRouter());
 api.route('/', createTasksRouter());
 api.route('/', createGithubRouter());
+api.route('/', createDiscoveryRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------
