@@ -39,7 +39,7 @@ function StartCard(props: {
 	);
 }
 
-export function Start(): ReactElement {
+export function Start(props: { onStartIdea?: () => void } = {}): ReactElement {
 	return (
 		<main className="shell-loading" id="main" data-testid="start-screen">
 			<p className="kicker" data-tone="action">
@@ -58,9 +58,20 @@ export function Start(): ReactElement {
 					title="Start from an idea"
 					detail="Describe what you want to build; Caddie helps you turn it into a project, a plan and runnable work."
 					action={
-						<a className="btn-key" href="./" data-testid="start-idea-go">
-							Open the workspace
-						</a>
+						props.onStartIdea ? (
+							<button
+								type="button"
+								className="btn-key"
+								data-testid="start-idea-go"
+								onClick={props.onStartIdea}
+							>
+								Start from an idea
+							</button>
+						) : (
+							<a className="btn-key" href="./" data-testid="start-idea-go">
+								Open the workspace
+							</a>
+						)
 					}
 				/>
 				<StartCard

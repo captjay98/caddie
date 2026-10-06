@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { Project } from '@caddie/contracts';
 import { SignInPanel, authClient } from '../auth.ts';
 import { failureKind, StatePanel } from '../states.tsx';
+import { Start } from '../onboarding/Start.tsx';
 import {
 	useArtifacts,
 	useAuthStatus,
@@ -294,7 +295,17 @@ function AuthedShell(props: { actorId: string | null }): ReactElement {
 				/>
 			) : null}
 
-			<div className="shell-body">
+			{/* Zero projects + a clean load = the onboarding IS the workspace.
+			    Any doubt (pending, offline, error, a stale ?project= param) keeps
+			    the honest state panels below — onboarding never masks a failure. */}
+			{!projects.isPending &&
+			projects.fetchStatus !== 'paused' &&
+			!projects.error &&
+			!projectMissing &&
+			projectList.length === 0 ? (
+				<Start onStartIdea={() => setFormOpen(true)} />
+			) : (
+				<div className="shell-body">
 				<aside className="aside" data-collapsed={asideHidden} data-testid="aside">
 					{isDesktop ? (
 						<div className="aside-tabs" role="tablist" aria-label="Workspace panes">
@@ -394,7 +405,8 @@ function AuthedShell(props: { actorId: string | null }): ReactElement {
 					onRetryDraft={channel.retryDraft}
 					onDiscardDraft={channel.discardDraft}
 				/>
-			</div>
+				</div>
+			)}
 
 			<nav className="bottom-nav" aria-label="Workspace panes">
 				<button

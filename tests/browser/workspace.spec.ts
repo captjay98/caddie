@@ -206,7 +206,7 @@ test.describe('P06 workspace shell (composed build)', () => {
 		await expect(page.getByTestId('project-selector')).toHaveCount(0);
 	});
 
-	test('authed workspace with no projects renders explicit empty states everywhere', async ({ browser }) => {
+	test('authed workspace with no projects renders the onboarding entry', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubSession(context);
 		await stubProjectList(context, { current: { status: 200, body: { projects: [] } } });
@@ -215,15 +215,15 @@ test.describe('P06 workspace shell (composed build)', () => {
 
 		await expect(page.getByTestId('project-selector')).toBeVisible();
 		await expect(page.getByTestId('project-selector')).toHaveValue('');
-		// Brief pane: explicit empty (no cards need the user yet) + channel
-		// standby — no fake transcript, no fake streaming.
-		await expect(page.getByTestId('channel')).toBeVisible();
-		await expect(page.getByTestId('state-empty')).toHaveCount(2);
-		// No project selected: the runs pane says so instead of a fake loading
-		// skeleton (disabled queries never render as loading).
-		await page.getByTestId('tab-runs').click();
-		await expect(page.getByTestId('state-empty')).toHaveCount(2);
-		await expect(page.getByTestId('state-loading')).toHaveCount(0);
+		// Zero projects + a clean load: the onboarding IS the workspace body —
+		// three entry cards, no profile wall, no fake empty panes.
+		await expect(page.getByTestId('start-screen')).toBeVisible();
+		await expect(page.getByTestId('start-card-idea')).toBeVisible();
+		await expect(page.getByTestId('start-card-repo')).toHaveAttribute('data-coming-with', /P08/);
+		await expect(page.getByTestId('start-card-discovery')).toHaveAttribute('data-coming-with', /P11/);
+		// The idea card opens the real new-project form in place.
+		await page.getByTestId('start-idea-go').click();
+		await expect(page.getByTestId('new-project-name')).toBeVisible();
 		await context.close();
 	});
 
