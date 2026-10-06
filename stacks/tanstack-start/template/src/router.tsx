@@ -1,7 +1,8 @@
 import { createRouter } from "@tanstack/react-router";
-import { Route as rootRoute } from "./routes/__root";
-import { Route as indexRoute } from "./routes/index";
+import { routeTree } from "./routeTree.gen";
 
-const routeTree = rootRoute.addChildren([indexRoute]);
-
-export const router = createRouter({ routeTree });
+// The Start vite plugin generates src/routeTree.gen.ts from src/routes/ at
+// build/dev time and binds both client and server entries to this factory.
+export function getRouter() {
+	return createRouter({ routeTree });
+}
