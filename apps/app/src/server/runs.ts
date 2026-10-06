@@ -126,6 +126,22 @@ export interface RepairRoundInput {
 }
 
 /**
+ * OWNERSHIP CHECK: the run binding must exist AND belong to the verified
+ * scope's project. A valid project scope alone must never authorize writes
+ * against a run bound to a DIFFERENT project (audit P05 finding 3) — the
+ * runId in a request is untrusted input, the scope is not.
+ */
+async function requireRunInProject(db: D1Database, runId: string, projectId: string): Promise<void> {
+	const rows = await queryAll(db, 'select "projectId" from "run_bindings" where "runId" = ?', runId);
+	const boundProjectId = rows[0] ? String(rows[0]['projectId']) : null;
+	if (boundProjectId !== projectId) {
+		// 404 (not 403): the run is invisible under this project's scope —
+		// same rule as runSnapshot.
+		throw new ScopeError(404, 'run_not_found', 'no such run under this project');
+	}
+}
+
+/**
  * Ledger one round. Returns the pause verdict AFTER recording: when the
  * issue's failed repair_attempts reach the threshold, the run pauses — the
  * caller (coordinator loop / route) must stop dispatching further repairs.
@@ -137,6 +153,7 @@ export async function recordRepairRound(
 	input: RepairRoundInput,
 ): Promise<{ paused: boolean; failedRepairAttempts: number }> {
 	const verified = await assertProjectScope(db, scope);
+	await requireRunInProject(db, runId, verified.projectId);
 	if (!REPAIR_ROUND_KINDS.includes(input.round)) {
 		throw new ScopeError(400, 'invalid_request', `unknown round kind ${input.round}`);
 	}
@@ -191,6 +208,7 @@ export async function recordVerification(
 	input: { check: string; passed: boolean; evidence: string; planRevision: string },
 ): Promise<void> {
 	const verified = await assertProjectScope(db, scope);
+	await requireRunInProject(db, runId, verified.projectId);
 	await db
 		.prepare(
 			'insert into "run_verifications" ("id","runId","projectId","check","passed","evidence","planRevision","recordedBy","createdAt") values (?,?,?,?,?,?,?,?,?)',

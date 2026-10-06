@@ -23,6 +23,7 @@ import { PACKAGED_SKILLS } from '../apps/app/src/agents/skills';
 import { evaluateGateLedger, gatePathFor } from '../apps/app/src/agents/completion-gate';
 import * as runsService from '../apps/app/src/server/runs';
 import { ScopeError, assertProjectScope } from '../apps/app/src/server/scope';
+import { LruCache } from '../apps/app/src/server/lru-cache';
 
 /**
  * P05 agent permissions + run lifecycle (unit level — no model calls).
@@ -481,5 +482,150 @@ describe('P05 run lifecycle', () => {
 		}
 		expect(error).toBeInstanceOf(ScopeError);
 		expect((error as ScopeError).status).toBe(404);
+	});
+
+	test('repair rounds are run-owned: a cross-project runId is rejected (404)', async () => {
+		const otherScope = { actorId: 'user_alice', workspaceId: 'ws_t', projectId: 'proj_other' };
+		let error: unknown = null;
+		try {
+			// runAId is bound to proj_t; recording under proj_other's scope must
+			// not write a ledger row for a run the project does not own.
+			await runsService.recordRepairRound(d1db as never, otherScope, runAId, {
+				issue: 'cross-project',
+				round: 'repair_attempt',
+				outcome: 'failed',
+			});
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(ScopeError);
+		expect((error as ScopeError).status).toBe(404);
+		expect((error as ScopeError).code).toBe('run_not_found');
+		// Nothing was written for the foreign run.
+		expect(count(`select count(*) as n from "run_rounds" where "runId" = '${runAId}' and "projectId" = 'proj_other'`)).toBe(0);
+	});
+
+	test('repair rounds reject an unknown runId (404, nothing written)', async () => {
+		let error: unknown = null;
+		try {
+			await runsService.recordRepairRound(d1db as never, aliceScope!, 'run_missing', {
+				issue: 'no-such-run',
+				round: 'diagnosis',
+				outcome: 'failed',
+			});
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(ScopeError);
+		expect((error as ScopeError).status).toBe(404);
+		expect(count(`select count(*) as n from "run_rounds" where "runId" = 'run_missing'`)).toBe(0);
+	});
+
+	test('verification records are run-owned: a cross-project runId is rejected (404)', async () => {
+		const otherScope = { actorId: 'user_alice', workspaceId: 'ws_t', projectId: 'proj_other' };
+		let error: unknown = null;
+		try {
+			await runsService.recordVerification(d1db as never, otherScope, runAId, {
+				check: 'cross-project',
+				passed: true,
+				evidence: 'must not land',
+				planRevision: 'rev-1',
+			});
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(ScopeError);
+		expect((error as ScopeError).status).toBe(404);
+		expect((error as ScopeError).code).toBe('run_not_found');
+		expect(count(`select count(*) as n from "run_verifications" where "runId" = '${runAId}' and "projectId" = 'proj_other'`)).toBe(0);
+		// No checkpoint was created for the foreign pairing either.
+		expect(count(`select count(*) as n from "run_checkpoints" where "runId" = '${runAId}' and "projectId" = 'proj_other'`)).toBe(0);
+	});
+
+	test('verification records reject an unknown runId (404, nothing written)', async () => {
+		let error: unknown = null;
+		try {
+			await runsService.recordVerification(d1db as never, aliceScope!, 'run_missing', {
+				check: 'no-such-run',
+				passed: true,
+				evidence: 'must not land',
+				planRevision: 'rev-1',
+			});
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(ScopeError);
+		expect((error as ScopeError).status).toBe(404);
+		expect(count(`select count(*) as n from "run_verifications" where "runId" = 'run_missing'`)).toBe(0);
+	});
+
+	test('in-project recording still works after the ownership checks', async () => {
+		const round = await runsService.recordRepairRound(d1db as never, aliceScope!, runAId, {
+			issue: 'ownership-regression',
+			round: 'diagnosis',
+			outcome: 'started',
+		});
+		expect(round.paused).toBe(false);
+		await runsService.recordVerification(d1db as never, aliceScope!, runAId, {
+			check: 'ownership-regression',
+			passed: true,
+			evidence: 'bun test exit 0',
+			planRevision: 'rev-1',
+		});
+		const snapshot = await runsService.runSnapshot(d1db as never, aliceScope!, runAId);
+		expect(snapshot.verifications.some((v) => v.check === 'ownership-regression')).toBe(true);
+	});
+});
+
+// ---- bounded revision cache -----------------------------------------------------
+
+describe('P05 bounded currentRevisionCache', () => {
+	test('evicts the least-recently-used entry beyond the bound', () => {
+		const cache = new LruCache<string, string>(3);
+		cache.set('r1', 'rev-1');
+		cache.set('r2', 'rev-2');
+		cache.set('r3', 'rev-3');
+		expect(cache.get('r1')).toBe('rev-1'); // r1 is now most-recent
+		cache.set('r4', 'rev-4'); // evicts r2 (least recently used), not r1
+		expect(cache.has('r2')).toBe(false);
+		expect(cache.has('r1')).toBe(true);
+		expect(cache.has('r3')).toBe(true);
+		expect(cache.has('r4')).toBe(true);
+		expect(cache.size).toBe(3);
+	});
+
+	test('re-setting a key refreshes recency and never grows past the bound', () => {
+		const cache = new LruCache<string, string>(2);
+		cache.set('a', '1');
+		cache.set('b', '2');
+		cache.set('a', '1b'); // refresh a
+		cache.set('c', '3'); // evicts b
+		expect(cache.has('a')).toBe(true);
+		expect(cache.get('a')).toBe('1b');
+		expect(cache.has('b')).toBe(false);
+		expect(cache.has('c')).toBe(true);
+		cache.set('d', '4'); // the get('a') above refreshed it — c is now the LRU victim
+		expect(cache.has('c')).toBe(false);
+		expect(cache.has('a')).toBe(true);
+		expect(cache.has('d')).toBe(true);
+		expect(cache.size).toBe(2);
+	});
+
+	test('a get on a missing key does not evict anything', () => {
+		const cache = new LruCache<string, string>(1);
+		cache.set('a', '1');
+		expect(cache.get('missing')).toBeUndefined();
+		expect(cache.has('a')).toBe(true);
+	});
+
+	test('the production cache is bounded at 128 entries', () => {
+		const cache = new LruCache<string, string>(128);
+		for (let i = 0; i < 500; i++) cache.set(`run-${i}`, `rev-${i}`);
+		expect(cache.size).toBe(128);
+		// the OLDEST 372 runs were evicted; the newest survive
+		expect(cache.has('run-0')).toBe(false);
+		expect(cache.has('run-371')).toBe(false);
+		expect(cache.has('run-372')).toBe(true);
+		expect(cache.has('run-499')).toBe(true);
 	});
 });
