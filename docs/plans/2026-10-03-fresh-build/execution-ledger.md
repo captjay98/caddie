@@ -20,7 +20,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P08 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P09 | LIVE VERIFIED (complete React+Hono build proof — stack #1 verified; journey exit 0 in the live sandbox) | QA/integration engineer (P09 execution window, branch p09-journey) | PENDING | PENDING | see evidence records (P09-journey) |
 | P10 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P11 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P11 | LOCAL VERIFIED | Product/backend engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records |
 | P12 | LOCAL VERIFIED (real cron dispatch + real email BLOCKED: cron timer = P09/P17, SMTP = P17) | Scheduling engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records |
 | P13 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P14 | LOCAL VERIFIED | Full-stack product engineer (subagent); integrated by lead | PASS (spec found mount gap — fixed) | PASS (P2 SPA route wiring — fixed; P3s noted) | see evidence records |
@@ -32,6 +32,28 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | PARTIAL — local harness LOCAL VERIFIED; hosted acceptance BLOCKED (needs all packets + live credentials + deployment authorization) | Integration lead | PENDING | PENDING | see evidence records |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P11", "status": "LOCAL VERIFIED (no real Devpost/Tavily calls — P17 live wiring)", "sha": "a2e6ec5/f7cc9f6/c4a66fa + integration mount",
+  "commands": [
+    {"command": "bun run verify:packet P11", "exitCode": 0, "receipt": "2 checks PASS: discovery 13 + planning 11"},
+    {"command": "bun test tests/discovery.test.ts tests/planning.integration.test.ts", "exitCode": 0, "receipt": "24 passed — deterministic candidate ids, fabricated id rejection, hard-ineligible cannot rank, unknown stays unknown, partial feed failure visible, cross-project invisibility, plan-doc lifecycle with revision provenance, contest-free projects, user revision preservation, DST-aware milestones, 401/403/404 scoping"},
+    {"command": "bun run typecheck", "exitCode": 0}
+  ],
+  "artifacts": [{"path": "apps/app/migrations/0009_discovery.sql", "note": "discovery seeds/feed runs/candidates (composite PK), planning milestones (deadline status from P10), planning revision provenance"}],
+  "environment": "local workerd + D1",
+  "providerCalls": "none",
+  "specReview": "PENDING (queued)", "qualityReview": "PENDING (queued)",
+  "limitations": [
+    "local seed adapter only — no real Devpost/Tavily (P17 live wiring; DiscoverySourceAdapter is the seam)",
+    "plan bodies are deterministic requirement-derived drafts — no model call",
+    "fit matching is claim-type reconciliation (labeled heuristic count); eligibility interpreter covers a narrow claim-type grammar",
+    "Results.tsx standalone (P06/P11 shell integration pending); no browser spec authored"
+  ]
+}
+```
+
 
 ```json
 {
