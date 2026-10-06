@@ -1,4 +1,4 @@
-import { createArtifactsApp } from '../../apps/app/src/server/routes/artifacts.ts';
+import { createPreviewsApp } from '../../apps/app/src/server/routes/previews.ts';
 import { markStaleForPlan } from '../../apps/app/src/server/artifacts.ts';
 import type { AuthEnv, D1Database } from '../../apps/app/src/server/auth.ts';
 
@@ -7,11 +7,11 @@ import type { AuthEnv, D1Database } from '../../apps/app/src/server/auth.ts';
  * real local SQLite-backed D1 — never deployed).
  *
  * It mounts the exact production composition shape app.ts will use at /api
- * (createArtifactsApp — auth router + P02 projects router + P07 artifacts
- * router; the P07 previews router joins this mount with slice 2) and adds
- * /__test/* control routes used only by tests/preview-access.integration
- * .test.ts to prepare the database and drive the system-side
- * markStaleForPlan hook. These control routes are NOT part of the app Worker.
+ * (createPreviewsApp — auth router + P02 projects router + P07 artifacts
+ * router + P07 previews router) and adds /__test/* control routes used only
+ * by tests/preview-access.integration.test.ts to prepare the database and
+ * drive the system-side markStaleForPlan hook. These control routes are NOT
+ * part of the app Worker.
  *
  * Like the other fixtures, this entry imports only the app's own composition
  * exports — resolving hono from tests/ would escape the app package's
@@ -27,7 +27,7 @@ async function d1All(db: D1Database, sql: string): Promise<{ results: unknown[] 
 	return { results: (res.results ?? []) as unknown[] };
 }
 
-const apiApp = createArtifactsApp();
+const apiApp = createPreviewsApp();
 
 export default {
 	async fetch(request: Request, env: FixtureEnv): Promise<Response> {

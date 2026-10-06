@@ -98,6 +98,9 @@ afterAll(async () => {
 // --- shared slice-1 session state (populated in declaration order) --------------
 
 let jarA: Jar;
+// bob signs in ONCE per suite (same email + different subject would trip the
+// explicit-linking-only account policy — one identity per email)
+let jarB: Jar;
 let wsA = '';
 let projA = '';
 
@@ -286,7 +289,7 @@ describe('P07 slice 1: content-addressed artifacts on real workerd D1', () => {
 
 	test('two users are denied each other’s artifacts: list, content, download and create are membership-checked', async () => {
 		// bob has his own session but no membership in alice's workspace
-		const jarB = await signIn(worker, stub, BOB_EMAIL, 'bob-sub-p07', 'Bob P07');
+		jarB = await signIn(worker, stub, BOB_EMAIL, 'bob-sub-p07', 'Bob P07');
 		await createWorkspaceAndProject(jarB, 'Bob P07 Hangar');
 
 		const aliceArtifactId = (
@@ -481,5 +484,199 @@ describe('P07 slice 1: line diff (pure function)', () => {
 			{ type: 'add', text: 'C' },
 			{ type: 'context', text: 'd' },
 		]);
+	});
+});
+
+// --- slice 2: private preview gateway -------------------------------------------------
+
+/**
+ * The preview gateway is TOKEN-ONLY: management routes are session-scoped,
+ * but resolution never reads a cookie (a separate isolated origin cannot
+ * carry one). Every resolve attempt appends a preview_access_log row.
+ */
+describe('P07 slice 2: private preview gateway (token-only resolution)', () => {
+	let previewWs = '';
+	let previewProj = '';
+	let previewRevision = '';
+	let previewId = '';
+	let previewToken = '';
+
+	async function createPreview(
+		jar: Jar,
+		projectId: string,
+		body: Record<string, unknown>,
+	): Promise<{ status: number; preview: Record<string, unknown> | null; token?: string; error?: string }> {
+		const res = await worker(jar, `/api/projects/${projectId}/previews`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(body),
+		});
+		const json = (await res.json()) as {
+			preview?: Record<string, unknown>;
+			token?: string;
+			error?: string;
+		};
+		return { status: res.status, preview: json.preview ?? null, token: json.token, error: json.error };
+	}
+
+	test('scaffold: alice stores one artifact revision for the preview slices', async () => {
+		const created = await postArtifact(jarA, projA, {
+			kind: 'browser-capture',
+			planRevision: 30,
+			contentType: 'text/html',
+			filename: 'capture.html',
+			contentBase64: toBase64(utf8('<!doctype html><p>private preview body</p>')),
+		});
+		expect(created.status).toBe(201);
+		previewRevision = created.artifact!.id;
+	});
+
+	test('preview creation returns the secret exactly once and persists only its hash', async () => {
+		const created = await createPreview(jarA, projA, { revisionId: previewRevision, ttlSeconds: 3600 });
+		expect(created.status).toBe(201);
+		expect(created.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		previewToken = created.token!;
+		previewId = String(created.preview?.id);
+		expect(created.preview).toMatchObject({
+			projectId: projA,
+			revisionId: previewRevision,
+			revoked: false,
+		});
+
+		// stored form: hex sha256 of the secret, never the secret itself
+		const rows = await d1Exec(WORKER_BASE, `select * from "preview_tokens" where "id" = '${previewId}'`);
+		const row = rows.results[0] as Record<string, unknown>;
+		expect(row['tokenHash']).toBe(sha256Hex(utf8(previewToken)));
+		expect(JSON.stringify(row)).not.toContain(previewToken);
+
+		// the management list never carries the secret either
+		const list = await worker(jarA, `/api/projects/${projA}/previews`);
+		expect(list.status).toBe(200);
+		expect(JSON.stringify(await list.json())).not.toContain(previewToken);
+	});
+
+	test('resolve serves the artifact content with sandbox headers using the TOKEN ALONE (no cookies) and logs the hit', async () => {
+		// bare fetch: no cookie jar, no session — the token IS the credential
+		const res = await fetch(`${WORKER_BASE}/api/previews/resolve/${previewToken}`);
+		expect(res.status).toBe(200);
+		expect(new Uint8Array(await res.arrayBuffer())).toEqual(
+			utf8('<!doctype html><p>private preview body</p>'),
+		);
+		expect(res.headers.get('content-type')).toContain('text/html');
+		expect(res.headers.get('content-security-policy')).toContain('sandbox');
+		expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+		expect(res.headers.get('cache-control')).toContain('no-store');
+		expect(res.headers.get('set-cookie')).toBeNull();
+
+		// the access log row landed with outcome 'served' under the token id
+		const served = await d1Exec(
+			WORKER_BASE,
+			`select "outcome", "tokenId", "projectId" from "preview_access_log" order by "rowid" desc limit 1`,
+		);
+		expect(served.results[0]).toMatchObject({ outcome: 'served', tokenId: previewId, projectId: projA });
+	});
+
+	test('unknown or malformed tokens are a bare 404 that leaks nothing — and the attempts are logged', async () => {
+		const unknown = await fetch(`${WORKER_BASE}/api/previews/resolve/${'b'.repeat(43)}`);
+		expect(unknown.status).toBe(404);
+		const unknownBody = await unknown.text();
+		expect(JSON.parse(unknownBody)).toMatchObject({ error: 'not_found' });
+		const malformed = await fetch(`${WORKER_BASE}/api/previews/resolve/not-a-token!!`);
+		expect(malformed.status).toBe(404);
+		// no artifact content, no identity hint, no 401/403 distinction
+		expect(unknownBody).not.toContain(projA);
+
+		const logged = await d1Exec(
+			WORKER_BASE,
+			`select "outcome", "tokenId" from "preview_access_log" order by "rowid" desc limit 2`,
+		);
+		const outcomes = (logged.results as { outcome: string; tokenId: string }[]).map((r) => r.outcome);
+		expect(outcomes).toEqual(['denied', 'denied']);
+		// unknown secrets are logged as a non-reversible marker, never the secret
+		const tokenIds = (logged.results as { tokenId: string }[]).map((r) => r.tokenId);
+		expect(tokenIds.every((id) => !id.includes('b'.repeat(43)))).toBe(true);
+	});
+
+	test('expired tokens resolve 410 Gone (logged); extend revives without re-revealing the secret', async () => {
+		const created = await createPreview(jarA, projA, { revisionId: previewRevision, ttlSeconds: 3600 });
+		const id = String(created.preview?.id);
+		const token = created.token!;
+		// deterministic expiry: move expiresAt into the past via the control route
+		await d1Exec(
+			WORKER_BASE,
+			`update "preview_tokens" set "expiresAt" = '2026-01-01T00:00:00.000Z' where "id" = '${id}'`,
+		);
+		const gone = await fetch(`${WORKER_BASE}/api/previews/resolve/${token}`);
+		expect(gone.status).toBe(410);
+		expect(await gone.json()).toMatchObject({ error: 'preview_gone', reason: 'expired' });
+		const goneLog = await d1Exec(
+			WORKER_BASE,
+			`select "outcome" from "preview_access_log" order by "rowid" desc limit 1`,
+		);
+		expect((goneLog.results[0] as { outcome: string }).outcome).toBe('gone');
+
+		// extend: owner action, never re-reveals the token, revives resolution
+		const extended = await worker(jarA, `/api/projects/${projA}/previews/${id}/extend`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ ttlSeconds: 3600 }),
+		});
+		expect(extended.status).toBe(200);
+		const extendedBody = JSON.stringify(await extended.json());
+		expect(extendedBody).not.toContain(token);
+		const served = await fetch(`${WORKER_BASE}/api/previews/resolve/${token}`);
+		expect(served.status).toBe(200);
+	});
+
+	test('revoked tokens resolve 410 Gone; revoke and extend are membership-checked', async () => {
+		const created = await createPreview(jarA, projA, { revisionId: previewRevision, ttlSeconds: 3600 });
+		const id = String(created.preview?.id);
+		const token = created.token!;
+
+		// bob (no membership) can neither revoke nor extend alice's preview
+		const crossRevoke = await worker(jarB, `/api/projects/${projA}/previews/${id}/revoke`, { method: 'POST' });
+		expect(crossRevoke.status).toBe(403);
+		const crossExtend = await worker(jarB, `/api/projects/${projA}/previews/${id}/extend`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ ttlSeconds: 60 }),
+		});
+		expect(crossExtend.status).toBe(403);
+
+		// alice revokes through the real route; resolution goes 410 and logs gone
+		const revoked = await worker(jarA, `/api/projects/${projA}/previews/${id}/revoke`, { method: 'POST' });
+		expect(revoked.status).toBe(200);
+		expect(await revoked.json()).toMatchObject({ preview: { id, revoked: true } });
+		const gone = await fetch(`${WORKER_BASE}/api/previews/resolve/${token}`);
+		expect(gone.status).toBe(410);
+		expect(await gone.json()).toMatchObject({ error: 'preview_gone', reason: 'revoked' });
+		// a second revoke is a typed conflict, and revocation beats extension
+		const again = await worker(jarA, `/api/projects/${projA}/previews/${id}/revoke`, { method: 'POST' });
+		expect(again.status).toBe(409);
+		const extendRevoked = await worker(jarA, `/api/projects/${projA}/previews/${id}/extend`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ ttlSeconds: 60 }),
+		});
+		expect(extendRevoked.status).toBe(409);
+		const goneLog = await d1Exec(
+			WORKER_BASE,
+			`select "outcome" from "preview_access_log" order by "rowid" desc limit 1`,
+		);
+		expect((goneLog.results[0] as { outcome: string }).outcome).toBe('gone');
+	});
+
+	test('preview management is scope-checked end to end; two users are denied each other’s previews', async () => {
+		// bob cannot mint a token for alice's revision in alice's project
+		const crossCreate = await createPreview(jarB, projA, { revisionId: previewRevision, ttlSeconds: 60 });
+		expect(crossCreate.status).toBe(403);
+		// alice cannot mint a token for a revision that does not exist (404)
+		const missing = await createPreview(jarA, projA, { revisionId: 'art_missing', ttlSeconds: 60 });
+		expect(missing.status).toBe(404);
+		// bob cannot list alice's previews
+		const crossList = await worker(jarB, `/api/projects/${projA}/previews`);
+		expect(crossList.status).toBe(403);
+		// and resolution without ANY token is 404 — the gateway never reads cookies
+		expect((await fetch(`${WORKER_BASE}/api/previews/resolve/`)).status).toBe(404);
 	});
 });
