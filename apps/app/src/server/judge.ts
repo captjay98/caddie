@@ -123,6 +123,9 @@ interface CriterionReading {
 	readonly authority: string;
 	readonly rank: number | null;
 	readonly capturedAt: string;
+	/** SQLite rowid — the true insertion order, a monotonic tie-break when two
+	 * captures land in the same millisecond (capturedAt has ms precision). */
+	readonly rowId: number;
 }
 
 interface CriterionCandidate {
@@ -130,6 +133,7 @@ interface CriterionCandidate {
 	readonly claimIds: readonly string[];
 	readonly tokens: ReadonlySet<string>;
 	readonly capturedAt: string;
+	readonly rowId: number;
 }
 
 /** Internal, mutable cluster form used while merging restatements. */
@@ -138,6 +142,7 @@ interface MutableCriterionCandidate {
 	claimIds: string[];
 	tokens: Set<string>;
 	capturedAt: string;
+	rowId: number;
 }
 
 function criterionSignature(text: string): string {
@@ -146,6 +151,13 @@ function criterionSignature(text: string): string {
 
 function claimIdsOf(reading: CriterionReading): string[] {
 	return [reading.id];
+}
+
+/** The reading's recency rank: capture instant, then true insertion order. */
+function isNewerReading(a: { capturedAt: string; rowId: number }, b: { capturedAt: string; rowId: number }): boolean {
+	return (
+		a.capturedAt > b.capturedAt || (a.capturedAt === b.capturedAt && a.rowId > b.rowId)
+	);
 }
 
 /**
@@ -174,19 +186,19 @@ function resolveSignatureGroup(
 			claimIds: claimIdsOf(winner),
 			tokens: new Set(significantTokens(winner.value)),
 			capturedAt: winner.capturedAt,
+			rowId: winner.rowId,
 		};
 	}
 	// Equal authority (or unrankable): agreement corroborates, disagreement conflicts.
 	const normalized = new Set(readings.map((r) => r.value.trim().toLowerCase()));
 	if (normalized.size === 1) {
-		const newest = [...readings].sort((a, b) =>
-			a.capturedAt === b.capturedAt ? (a.id < b.id ? -1 : 1) : a.capturedAt > b.capturedAt ? -1 : 1,
-		)[0]!;
+		const newest = readings.reduce((acc, reading) => (isNewerReading(reading, acc) ? reading : acc));
 		return {
 			text: newest.value,
 			claimIds: readings.map((r) => r.id).sort(),
 			tokens: new Set(significantTokens(newest.value)),
 			capturedAt: newest.capturedAt,
+			rowId: newest.rowId,
 		};
 	}
 	conflicts.push({
@@ -212,10 +224,10 @@ export async function extractRubric(db: D1Database, scope: Scope): Promise<Rubri
 
 	const rows = await db
 		.prepare(
-			'select c."id" as id, c."value" as value, c."snapshotCapturedAt" as capturedAt, src."authority" as authority ' +
+			'select c."rowid" as rowId, c."id" as id, c."value" as value, c."snapshotCapturedAt" as capturedAt, src."authority" as authority ' +
 				'from "evidence_claims" c join "evidence_sources" src on src."id" = c."sourceId" and src."projectId" = c."projectId" ' +
 				'where c."projectId" = ? and c."claimType" = \'judging.criterion\' and c."status" = \'active\' ' +
-				'order by c."snapshotCapturedAt" asc, c."id" asc',
+				'order by c."snapshotCapturedAt" asc, c."rowid" asc',
 		)
 		.bind(scope.projectId)
 		.all();
@@ -227,6 +239,7 @@ export async function extractRubric(db: D1Database, scope: Scope): Promise<Rubri
 			authority,
 			rank: isSourceAuthority(authority) ? authorityRank(authority) : null,
 			capturedAt: String(row['capturedAt']),
+			rowId: Number(row['rowId']),
 		};
 	});
 
@@ -258,14 +271,15 @@ export async function extractRubric(db: D1Database, scope: Scope): Promise<Rubri
 		if (cluster) {
 			// Restatement: the newer wording is the criterion; the older reading
 			// is history (its ids stay on the underlying claims, not the rubric).
-			const newerWins =
-				candidate.capturedAt > cluster.capturedAt ||
-				(candidate.capturedAt === cluster.capturedAt && candidate.text > cluster.text);
+			// Recency is (capturedAt, insertion order) — deterministic even when
+			// two captures share a millisecond.
+			const newerWins = isNewerReading(candidate, cluster);
 			cluster.tokens = new Set([...cluster.tokens, ...candidate.tokens]);
 			if (newerWins) {
 				cluster.text = candidate.text;
 				cluster.claimIds = [...candidate.claimIds];
 				cluster.capturedAt = candidate.capturedAt;
+				cluster.rowId = candidate.rowId;
 			}
 		} else {
 			candidates.push({
@@ -273,6 +287,7 @@ export async function extractRubric(db: D1Database, scope: Scope): Promise<Rubri
 				claimIds: [...candidate.claimIds],
 				tokens: new Set(candidate.tokens),
 				capturedAt: candidate.capturedAt,
+				rowId: candidate.rowId,
 			});
 		}
 	}
