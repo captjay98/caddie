@@ -12,6 +12,7 @@ import {
 } from '@flue/runtime';
 import { findModelRoute } from './providers.ts';
 import { makeRecordAcceptance } from './tools.ts';
+import { PACKAGED_SKILLS } from './skills.ts';
 import { evaluateGateLedger, gatePathFor } from './completion-gate.ts';
 import { buildSpecialistDeclarations, SPECIALIST_INSTRUCTIONS, type SpecialistBuildContext } from './specialists.ts';
 

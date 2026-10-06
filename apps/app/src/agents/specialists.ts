@@ -1,5 +1,5 @@
 import { SPECIALIST_ROLES, ROLE_TOOL_POLICY, type SpecialistRole } from './permissions.ts';
-import { skillByName } from './skills.ts';
+import { PACKAGED_SKILLS, type PackagedSkillName } from './skills.ts';
 import {
 	makeReadProjectContext,
 	makeReadSandboxFile,
@@ -102,12 +102,8 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 			useTool(toolFor[toolName]);
 		}
 		for (const skillName of descriptor.skills) {
-			const skill = skillByName(skillName);
-			useSkill({
-				name: skill.name,
-				description: `${skill.name} (v${skill.version})`,
-				instructions: skill.instructions,
-			});
+			
+			useSkill(PACKAGED_SKILLS[skillName as keyof typeof PACKAGED_SKILLS]);
 		}
 		useInstruction(SPECIALIST_INSTRUCTIONS[role]);
 		return SPECIALIST_INSTRUCTIONS[role];

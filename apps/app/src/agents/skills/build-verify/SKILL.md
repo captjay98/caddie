@@ -1,3 +1,8 @@
+---
+name: build-verify
+description: Implement and verify a change in the sandbox without touching the acceptance harness
+---
+
 # Build-verify skill (P05 v1)
 
 Implement and verify a change inside the sandbox without touching the

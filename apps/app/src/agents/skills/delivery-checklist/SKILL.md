@@ -1,3 +1,8 @@
+---
+name: delivery-checklist
+description: Prepare verifiable delivery artifacts from real receipts
+---
+
 # Delivery-checklist skill (P05 v1)
 
 Prepare verifiable delivery artifacts from real receipts.

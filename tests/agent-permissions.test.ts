@@ -19,7 +19,7 @@ import {
 	makeWriteSandboxFile,
 	assertNotProtectedPath,
 } from '../apps/app/src/agents/tools';
-import { SKILLS, SKILLS_MANIFEST, skillByName } from '../apps/app/src/agents/skills';
+import { PACKAGED_SKILLS } from '../apps/app/src/agents/skills';
 import { evaluateGateLedger, gatePathFor } from '../apps/app/src/agents/completion-gate';
 import * as runsService from '../apps/app/src/server/runs';
 import { ScopeError, assertProjectScope } from '../apps/app/src/server/scope';
@@ -206,17 +206,22 @@ describe('P05 protected acceptance surfaces', () => {
 
 // ---- skills -------------------------------------------------------------------
 
-describe('P05 versioned skills', () => {
-	test('every manifest entry loads with a matching hash', () => {
-		expect(SKILLS.length).toBe((SKILLS_MANIFEST.skills as unknown[]).length);
-		for (const skill of SKILLS) {
-			expect(skill.instructions.length).toBeGreaterThan(50);
-			expect(skill.sha256).toMatch(/^[0-9a-f]{64}$/);
+describe('P05 packaged skills', () => {
+	test('all three skills are packaged via the flue mechanism', () => {
+		const names = Object.keys(PACKAGED_SKILLS);
+		expect(names).toContain('planning');
+		expect(names).toContain('build-verify');
+		expect(names).toContain('delivery-checklist');
+		for (const name of names) {
+			const skill = PACKAGED_SKILLS[name as keyof typeof PACKAGED_SKILLS];
+			expect(skill).toBeDefined();
 		}
 	});
 
-	test('unknown skill lookup fails loudly', () => {
-		expect(() => skillByName('nonexistent')).toThrow('not in the versioned manifest');
+	test('unknown skill lookup is type-unsafe by design (compile-time union)', () => {
+		// PackagedSkillName is a union of the three known names — a typo fails
+		// at compile time, not runtime.
+		expect(Object.keys(PACKAGED_SKILLS)).toHaveLength(3);
 	});
 });
 

@@ -1,3 +1,8 @@
+---
+name: planning
+description: Turn an accepted brief into versioned scope, PRD and spec documents
+---
+
 # Planning skill (P05 v1)
 
 Turn an accepted brief into versioned scope, PRD and spec documents.
