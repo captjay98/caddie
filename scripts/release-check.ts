@@ -8,10 +8,22 @@
  * and is never performed by this script.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const REPO = import.meta.dir === undefined ? process.cwd() : join(import.meta.dir, '..');
+
+// Load .dev.vars into the environment so credential-gated checks reflect the
+// actual provisioning state (gitignored; values never printed).
+const devVarsPath = join(REPO, '.dev.vars');
+if (existsSync(devVarsPath)) {
+	for (const line of readFileSync(devVarsPath, 'utf8').split('\n')) {
+		const match = /^([A-Z_a-z][A-Z0-9_a-z]*)=(.*)$/.exec(line);
+		if (match && process.env[match[1]] === undefined && match[2].trim() !== '') {
+			process.env[match[1]] = match[2];
+		}
+	}
+}
 
 interface Check {
 	name: string;
@@ -53,9 +65,9 @@ for (const packet of PACKETS) {
 
 // 4. Live gates: BLOCKED, never PASS without explicit authorization
 const liveGates: { name: string; env: string; configured: boolean }[] = [
-	{ name: 'OAuth live callbacks (P01)', env: 'GOOGLE_CLIENT_ID + GITHUB_CLIENT_ID', configured: false },
+	{ name: 'OAuth live callbacks (P01)', env: 'GOOGLE_CLIENT_ID + GITHUB_CLIENT_ID', configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GITHUB_CLIENT_ID) },
 	{ name: 'Model round-trips (P05)', env: 'NEBIUS_API_KEY', configured: Boolean(process.env.NEBIUS_API_KEY) },
-	{ name: 'Sandbox live probes (P04)', env: 'CONTREE_BASE_URL + CONTREE_API_TOKEN', configured: Boolean(process.env.CONTREE_BASE_URL) },
+	{ name: 'Sandbox live probes (P04)', env: 'CONTREE_BASE_URL + CONTREE_API_TOKEN', configured: Boolean(process.env.CONTREE_BASE_URL && process.env.CONTREE_API_TOKEN) },
 	{ name: 'Live external retrieval (P10)', env: 'CADDIE_LIVE_AUTHORIZED=1', configured: process.env.CADDIE_LIVE_AUTHORIZED === '1' },
 ];
 for (const gate of liveGates) {
