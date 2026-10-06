@@ -197,10 +197,14 @@ export function createAuth(env: AuthEnv, overrides: CreateAuthOverrides = {}) {
 		},
 		account: {
 			accountLinking: {
-				// explicit linking only: sign-in never merges accounts by email;
-				// users must link the second provider while signed in (link-social)
+				// The owner signs in with either provider against the same
+				// allowlisted email; Google and GitHub both verify the address
+				// before release, so a provider-verified email match IS the
+				// identity. There is no link-provider UI, so implicit linking is
+				// the only path a second provider attaches — the invite gate in
+				// databaseHooks still denies every non-allowlisted email.
 				enabled: true,
-				disableImplicitLinking: true,
+				trustedProviders: ['google', 'github'],
 				allowDifferentEmails: false,
 			},
 		},

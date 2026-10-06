@@ -613,9 +613,12 @@ describe('P01 slice 2: invite allowlist, provider-subject identity, sessions', (
 		expect(await d1Count(WORKER_BASE, 'account', "accountId = 'subject-alpha'")).toBe(1);
 	});
 
-	test('same email from a different provider subject is NOT merged (no implicit linking)', async () => {
-		// subject-alpha's user exists with INVITED_EMAIL. A different subject
-		// claiming the same email must never silently join that account.
+	test('same email from a different provider subject merges into one user', async () => {
+		// subject-alpha's user exists with INVITED_EMAIL (google). The same
+		// verified email arriving from a second trusted provider (github,
+		// different subject) links into that user — the owner signs in with
+		// either provider. The invite gate above still denies every
+		// non-allowlisted email, so this merge is allowlist-scoped.
 		const usersBefore = await d1Count(WORKER_BASE, 'user', `email = '${INVITED_EMAIL}'`);
 		expect(usersBefore).toBe(1);
 
@@ -626,15 +629,20 @@ describe('P01 slice 2: invite allowlist, provider-subject identity, sessions', (
 			name: 'Beta Impostor',
 			email_verified: true,
 		});
-		const callbackStatus = result.callback?.status ?? 0;
-		const location = result.callback?.headers.get('location') ?? '';
-		expect(callbackStatus >= 400 || location.includes('error')).toBe(true);
-		// no session was issued to the unlinked subject
-		expect(jar.has(SESSION_COOKIE)).toBe(false);
-		// the github identity was not attached to the existing user
-		expect(await d1Count(WORKER_BASE, 'account', "providerId = 'github' and accountId = 'subject-beta'")).toBe(0);
-		// and no second user row exists for that email
+		expect(result.callback?.status).toBe(302);
+		// the github identity attached to the existing user
+		expect(await d1Count(WORKER_BASE, 'account', "providerId = 'github' and accountId = 'subject-beta'")).toBe(1);
+		// and still exactly one user row for that email — no duplicate account
 		expect(await d1Count(WORKER_BASE, 'user', `email = '${INVITED_EMAIL}'`)).toBe(1);
+		const session = (await (await worker(jar, '/api/auth/get-session')).json()) as {
+			user: { id: string };
+		};
+		const original = await d1Exec(
+			WORKER_BASE,
+			`select userId from account where providerId = 'google' and accountId = 'subject-alpha'`,
+		);
+		const originalUserId = (original.results as { userId: string }[])[0]!.userId;
+		expect(session.user.id).toBe(originalUserId);
 	});
 
 	test('explicit linking while signed in preserves identity and requests no repo scopes', async () => {
