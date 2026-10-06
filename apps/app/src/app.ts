@@ -14,6 +14,7 @@ import { createRunsRouter, conversationGuard } from './server/routes/runs.ts';
 import { createTasksRouter } from './server/routes/tasks.ts';
 import { createGithubRouter } from './server/routes/github.ts';
 import { createDiscoveryRouter } from './server/routes/discovery.ts';
+import { createJudgeRouter } from './server/routes/judge.ts';
 import { createProfileRouter } from './server/routes/profile.ts';
 import { createArtifactsRouter } from './server/routes/artifacts.ts';
 import { createPreviewsRouter } from './server/routes/previews.ts';
