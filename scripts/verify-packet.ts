@@ -17,9 +17,24 @@
  *   - Default verification never deploys and never spends.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Load .dev.vars (gitignored; values never printed) so live verification
+// reflects the owner's standing authorization instead of failing on bun's
+// empty process.env. Real env wins over the file.
+{
+	const devVarsPath = join(fileURLToPath(new URL('..', import.meta.url)), '.dev.vars');
+	if (existsSync(devVarsPath)) {
+		for (const line of readFileSync(devVarsPath, 'utf8').split('\n')) {
+			const match = /^([A-Z_a-z][A-Z0-9_a-z]*)=(.*)$/.exec(line);
+			if (match && process.env[match[1]] === undefined && match[2].trim() !== '') {
+				process.env[match[1]] = match[2];
+			}
+		}
+	}
+}
 
 type Category = 'tests' | 'browser' | 'live';
 

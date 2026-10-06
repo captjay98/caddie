@@ -74,7 +74,9 @@ for (const gate of liveGates) {
 	checks.push({
 		name: gate.name,
 		status: gate.configured ? 'PASS' : 'BLOCKED',
-		detail: gate.configured ? 'credentials present (live run still needs authorization)' : `BLOCKED — provision ${gate.env} (owner input)`,
+		detail: gate.configured
+			? 'credentials present — live suite runs authorized under `bun run test:live`'
+			: `BLOCKED — provision ${gate.env} (owner input)`,
 	});
 }
 

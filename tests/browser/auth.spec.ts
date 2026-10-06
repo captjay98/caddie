@@ -113,22 +113,31 @@ test.describe('P01 sign-in panel (composed build)', () => {
 	});
 
 	test('failed sign-in shows a visible error state with retry', async ({ page }) => {
+		// Force the failure deterministically: a deployment WITH provisioned
+		// provider credentials would redirect to the real provider on success,
+		// so the error path is exercised by rejecting the sign-in POST at the
+		// network layer (503 auth_not_configured) — the exact honest failure
+		// the panel must surface visibly (never a dead button or silent no-op).
+		await page.route('**/api/auth/sign-in/social', async (route) => {
+			await route.fulfill({
+				status: 503,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					error: 'auth_not_configured',
+					message: 'Sign-in is not configured on this deployment yet.',
+				}),
+			});
+		});
 		await page.goto(`${BASE}/app/`);
-		// The local composed build has no provider credentials provisioned, so
-		// the sign-in POST fails on the server — exactly the error path the
-		// panel must surface visibly (never a dead button or silent no-op).
 		await page.getByTestId('sign-in-google').click();
 		const error = page.getByTestId('sign-in-error');
 		await expect(error).toBeVisible({ timeout: 10_000 });
-		// The exact message depends on deployment state (unmounted auth router
-		// 404s; mounted-but-unconfigured 503s as auth_not_configured), so the
-		// assertion covers the honest error family with its retry affordance.
 		await expect(error).toContainText('Sign-in with Google');
 		await expect(error).toContainText(/failed|unavailable/);
 		const retry = page.getByTestId('sign-in-retry');
 		await expect(retry).toBeVisible();
 		// retry is functional: clicking it re-runs the attempt (still failing
-		// locally, but the error state must remain visible and honest)
+		// under the interception, but the error state must remain visible and honest)
 		await retry.click();
 		await expect(error).toBeVisible({ timeout: 10_000 });
 		// buttons stay usable for a manual retry too
