@@ -16,7 +16,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P09 | PARTIAL — local scaffolding done; live journey BLOCKED on owner credentials | Integration lead | PENDING | PENDING | see evidence records |
 | P10 | LOCAL VERIFIED (live external retrieval BLOCKED without owner authorization) | Evidence engineer (subagent); integrated by lead | PASS | PASS (2 P2s fixed on main) | see evidence records |
 | P11 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P12 | IN PROGRESS (implementer dispatched; schedules/sentinel) | Scheduling engineer (subagent) | Pending | Pending | — |
+| P12 | LOCAL VERIFIED (real cron dispatch + real email BLOCKED: cron timer = P09/P17, SMTP = P17) | Scheduling engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records |
 | P13 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P14 | LOCAL VERIFIED | Full-stack product engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records |
 | P15a | LOCAL VERIFIED (template/recipe/skill scaffolding; live acceptance BLOCKED on P09 window) | Integration lead | PENDING | PENDING | see evidence records |
@@ -27,6 +27,30 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | PARTIAL — local harness LOCAL VERIFIED; hosted acceptance BLOCKED (needs all packets + live credentials + deployment authorization) | Integration lead | PENDING | PENDING | see evidence records |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P12", "status": "LOCAL VERIFIED (real cron dispatch + real email BLOCKED on P09/P17 wiring)", "sha": "p12-impl merged + integration",
+  "commands": [
+    {"command": "bun run verify:packet P12", "exitCode": 0, "receipt": "2 checks PASS: schedules 44 + sentinel 15"},
+    {"command": "bun test tests/schedules.integration.test.ts tests/sentinel.test.ts", "exitCode": 0, "receipt": "59 passed — DST cron math (fall-back/spring-forward through real workerd ICU), occurrence key idempotency, 75-min outage coalescing, cosmetic suppression, authority-severity, dedupe, failed mail leaves domain success intact, retry visible"},
+    {"command": "bun test tests/auth+isolation+controls", "exitCode": 0, "receipt": "65 passed unchanged"},
+    {"command": "bun run typecheck", "exitCode": 0},
+    {"command": "bun run build", "exitCode": 0}
+  ],
+  "artifacts": [{"path": "apps/app/migrations/0007_schedules.sql", "note": "tasks, schedules, schedule_occurrences (unique key = idempotency core), sentinel_results, notifications (unique dedupeKey), notification_deliveries; additive; all per-project indexes lead with projectId"}],
+  "environment": "local workerd + local D1 (miniflare); real Better Auth sessions",
+  "providerCalls": "none",
+  "specReview": "PENDING (queued)", "qualityReview": "PENDING (queued)",
+  "limitations": [
+    "real cron timer = P09/P17 (fixture /__test/tick is the stand-in; dispatchDueSchedules exported for the P09/P17 timer)",
+    "SMTP driver = P17 (NoopMailer default; failed-mail retry-row tested)",
+    "sentinel re-fetch/capture on a tick = P09/P17 (checks compare existing snapshots)",
+    "weekly digest composition + HTML email template = P17"
+  ]
+}
+```
+
 
 ```json
 {
