@@ -9,7 +9,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P02 | LOCAL VERIFIED | Backend product engineer (subagent; slice 3 completed by lead after dispatch loss) | PASS | PASS (fixes applied + re-verified) | see evidence records (4a0eda2/66c2cf2/0ea748a + integration 801f97e + fixes 196ac63) |
 | P03 | LOCAL VERIFIED (gate for ALL paid/effectful work — now open for local, closed for live until P04/P05 credentials) | Backend governance engineer (subagent); integrated by lead | PASS | PASS (P2 currency fence applied + re-verified) | see evidence records (164eace/0de2638/71f0a66 + integration ee5fca4 + fence fix) |
 | P04 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P05 | LOCAL VERIFIED (live model round-trips BLOCKED on NEBIUS_API_KEY) | Integration lead (quota window); specialist wiring from subagent scripts | FAIL→fixes applied→PASS (re-verify queued) | PENDING | see evidence records + 70131bf fix commit |
+| P05 | LIVE VERIFIED (model route: real Nebius completion 200 with usage) + LOCAL VERIFIED for everything else | Integration lead (quota window); specialist wiring from subagent scripts | FAIL→fixes applied→PASS | PENDING (quality re-dispatch after network outage) | see evidence records + 70131bf + live probe |
 | P06 | NOT STARTED | Unassigned | Pending | Pending | — (tokens port pulled forward to P16, see P16 record) |
 | P07 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P08 | NOT STARTED | Unassigned | Pending | Pending | — |
@@ -27,6 +27,42 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | PARTIAL — local harness LOCAL VERIFIED; hosted acceptance BLOCKED (needs all packets + live credentials + deployment authorization) | Integration lead | PENDING | PENDING | see evidence records |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P04-live", "status": "LIVE VERIFIED (sandbox session + remote exec via contree CLI)", "sha": "main at live-probe time",
+  "commands": [
+    {"command": "contree -S p04-live-probe use tag:tt-base:1", "exitCode": 0},
+    {"command": "contree -S p04-live-probe -o json run -- echo live-sandbox-ok", "exitCode": 0,
+     "receipt": "uuid 01a111cb…, status SUCCESS, stdout 'live-sandbox-ok', exit_code 0, duration 6.9s — real remote execution in the TF sandbox"}
+  ],
+  "artifacts": [],
+  "environment": "contree CLI 3.14 (owner-installed) against https://api.tokenfactory.nebius.com/sandboxes/ with CONTREE_* credentials from .dev.vars",
+  "providerCalls": "contree sandbox session + one remote command",
+  "limitations": [
+    "P04 REST adapter endpoint spellings were ASSUMPTIONS — POST /v1/sessions returned 404; the real REST surface must be corrected from the CLI's wire traffic (the CLI itself talks REST to the same base)",
+    "the CLI works from Bun locally; under deployed Workers the REST port is required (same API base, corrected spellings)",
+    "the reference adjudication client used the CLI too (contree-async.ts) — no REST client existed in the evaluation either"
+  ]
+}
+```
+
+```json
+{
+  "packet": "P05-live", "status": "LIVE VERIFIED (model route round-trip)", "sha": "main at live-probe time",
+  "commands": [
+    {"command": "POST https://api.tokenfactory.nebius.com/v1/chat/completions (nvidia/nemotron-3-super-120b-a12b)", "exitCode": 0,
+     "receipt": "status 200; content '4' (reasoning model, visible after reasoning); usage total_tokens recorded; NEBIUS_API_KEY from .dev.vars via aside provisioning"}
+  ],
+  "artifacts": [],
+  "environment": "direct fetch to Nebius TF with owner credentials",
+  "providerCalls": "two small completions (probe + probe with 512 tokens)",
+  "limitations": [
+    "this proves the MODEL ROUTE (provider, key, model id, pricing surface) — full agent round-trips through the Flue DO still need the dev server run (P09 live window)"
+  ]
+}
+```
+
 
 ```json
 {
