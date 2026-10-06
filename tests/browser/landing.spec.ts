@@ -160,9 +160,9 @@ test.describe('P16 landing — pit-board shell', () => {
 	}) => {
 		const res = await request.get('/');
 		const html = await res.text();
-		expect(html).toContain('href="mailto:hello@example.com');
+		expect(html).toContain('href="mailto:contact@livestockai.app');
 		// The placeholder must be marked in the shipped HTML, not just the source.
-		expect(html).toMatch(/PLACEHOLDER CONTACT/i);
+		expect(html).not.toContain('hello@example.com'); // placeholder fully retired
 	});
 });
 
