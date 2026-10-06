@@ -19,14 +19,34 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P12 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P13 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P14 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P15a | NOT STARTED | Unassigned | Pending | Pending | — |
-| P15b | NOT STARTED | Unassigned | Pending | Pending | — |
-| P15c | NOT STARTED | Unassigned | Pending | Pending | — |
-| P15d | NOT STARTED | Unassigned | Pending | Pending | — |
+| P15a | LOCAL VERIFIED (template/recipe/skill scaffolding; live acceptance BLOCKED on P09 window) | Integration lead | PENDING | PENDING | see evidence records |
+| P15b | LOCAL VERIFIED (scaffolding only; live acceptance BLOCKED on P09 window + PHP toolchain) | Integration lead | PENDING | PENDING | see evidence records |
+| P15c | LOCAL VERIFIED (scaffolding only; live acceptance BLOCKED on P09 window + Python toolchain) | Integration lead | PENDING | PENDING | see evidence records |
+| P15d | LOCAL VERIFIED (scaffolding only; live acceptance BLOCKED on P09 window + Android SDK/emulator) | Integration lead | PENDING | PENDING | see evidence records |
 | P16 | LOCAL VERIFIED | Integration lead (rework; initial slices by subagent) | PENDING (quota — re-review when subagent dispatch returns) | PENDING (quota) | see evidence records (pit-board port per amendment 3054ee2) |
 | P17 | NOT STARTED | Unassigned | Pending | Pending | — |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P15a-d", "status": "LOCAL VERIFIED — scaffolding only; live acceptance BLOCKED on P09 window + toolchains (PHP/Python/Flutter+Android SDK)", "sha": "5374d88 + merge 188755f",
+  "commands": [
+    {"command": "bun test tests/p15a-local.test.ts tests/p15bcd-local.test.ts", "exitCode": 0, "receipt": "14 passed — all 4 recipes validate against frozen StackRecipeSchema (availability=unverified), templates complete, skills carry their disciplines (disposable test DB for Laravel, uv sync --frozen + no wildcard CORS for FastAPI, real device evidence for Flutter), flutter defaults to Hono backend with android-emulator preview"},
+    {"command": "bun run typecheck", "exitCode": 0}
+  ],
+  "artifacts": [{"path": "stacks/", "note": "react-hono (P09), tanstack-start (P15a), laravel-inertia/fastapi-react/flutter (P15b/c/d) recipes + template manifests + agent skills"}],
+  "environment": "local bun; templates NOT executed (toolchains not provisioned)",
+  "providerCalls": "none",
+  "specReview": "PENDING", "qualityReview": "PENDING",
+  "limitations": [
+    "LIVE acceptance BLOCKED for all stacks: needs the P09 live window (sandbox + model credentials) AND per-stack toolchains in the sandbox (PHP/Composer+npm for 15b, uv/Python for 15c, Flutter SDK+Android emulator for 15d)",
+    "templates are structural manifests, not executed apps — first live install/build/start happens in the sandbox",
+    "flutter Android evidence additionally needs an emulator (available locally via tooling; not yet wired to the journey)"
+  ]
+}
+```
+
 
 ```json
 {
