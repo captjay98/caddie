@@ -35,9 +35,10 @@ import { listSentinelResults } from '../sentinel.ts';
  * comes from the verified session and the row must belong to that user —
  * ownership is the scope.
  *
- * The /__test/tick executor stand-in (the P09/P17 cron timer) is deliberately
- * NOT here: it is a fixture-only route (tests/fixtures/schedules.ts) that
- * calls the same system-level dispatchDueSchedules the real timer will call.
+ * The /__test/tick executor stand-in is deliberately NOT here: it is a
+ * fixture-only route (tests/fixtures/schedules.ts) that calls the same
+ * system-level dispatchDueSchedules the REAL `scheduled` handler in
+ * src/cloudflare.ts calls on its wrangler.jsonc 5-minute cron trigger.
  */
 
 type Env = AuthEnv;

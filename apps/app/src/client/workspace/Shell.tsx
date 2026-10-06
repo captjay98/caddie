@@ -258,6 +258,16 @@ function AuthedShell(props: { actorId: string | null }): ReactElement {
 					>
 						Submission
 					</Link>
+					{/* P12 schedules: the same surface pattern (surface.tsx); the
+					    selected project rides along in the search param. */}
+					<Link
+						to="/schedules"
+						className="btn-ghost topbar-nav-link"
+						data-testid="nav-schedules"
+						search={{ project: search.project }}
+					>
+						Schedules
+					</Link>
 					<button
 						type="button"
 						className="btn-ghost"

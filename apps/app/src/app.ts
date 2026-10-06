@@ -61,6 +61,10 @@ type Env = {
 	GITHUB_APP_PRIVATE_KEY?: string;
 	GITHUB_WEBHOOK_SECRET?: string;
 	GITHUB_API_BASE_URL?: string;
+	/** Outbound email (Resend; LIVE VERIFIED for the owner's address). Both
+	 *  absent → the noop mailer's honest BLOCKED receipt, never a faked send. */
+	RESEND_API_KEY?: string;
+	RESEND_FROM?: string;
 };
 
 registerNebiusProvider();

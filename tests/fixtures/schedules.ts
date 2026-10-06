@@ -9,9 +9,10 @@ import type { AuthEnv, D1Database } from '../../apps/app/src/server/auth.ts';
  * It mounts the production task/schedule composition (createTasksApp — auth
  * router + projects router + P12 tasks/schedules/notifications router, the
  * mount shape app.ts uses) and adds /__test control routes used only by
- * tests/schedules.integration.test.ts. The /__test/tick route is the stand-in
- * for the P09/P17 cron/alarm executor: it calls the same system-level
- * dispatchDueSchedules the real executor will call — no session, no scope, the
+ * tests/schedules.integration.test.ts. The /__test/tick route is a fixture-only
+ * stand-in for the REAL cron timer — the `scheduled` handler exported from
+ * apps/app/src/cloudflare.ts on the wrangler.jsonc 5-minute trigger — calling
+ * the same system-level dispatchDueSchedules: no session, no scope, the
  * schedule's STORED ids are the only targeting information. These control
  * routes are NOT part of the app Worker.
  */

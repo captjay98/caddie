@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
 import { Start } from './onboarding/Start.tsx';
-import { DiscoveryPage, JudgePage, SubmissionPage } from './surface.tsx';
+import { DiscoveryPage, JudgePage, SubmissionPage, SchedulesPage } from './surface.tsx';
 
 /**
  * TanStack Router setup (SPA mode, decision "Product UI: React SPA +
@@ -93,6 +93,14 @@ const submissionRoute = createRoute({
 	component: SubmissionPage,
 });
 
+// P12 schedules — the same fail-closed gate, over the real P12 REST surface.
+const schedulesRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/schedules',
+	validateSearch,
+	component: SchedulesPage,
+});
+
 export const routeTree = rootRoute.addChildren([
 	workspaceRoute,
 	settingsRoute,
@@ -100,6 +108,7 @@ export const routeTree = rootRoute.addChildren([
 	discoveryRoute,
 	judgeRoute,
 	submissionRoute,
+	schedulesRoute,
 ]);
 
 function detectBasepath(): string {

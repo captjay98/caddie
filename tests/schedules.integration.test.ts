@@ -19,14 +19,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:tes
  *      provider is a stub inside this test process, so session establishment
  *      is SIMULATED at the provider boundary (P01/P02 classification).
  *
- * No external calls exist anywhere in these paths: the real cron timer that
- * calls dispatchDueSchedules is P09/P17 wiring (DOCUMENTATION ONLY here), and
+ * No external calls exist anywhere in these paths: the real cron timer (the
+ * `scheduled` handler in apps/app/src/cloudflare.ts, exercised in section 4
+ * below) runs the SAME local dispatch service with no external effect, and
  * email delivery runs through the Mailer port whose default NoopMailer
  * honestly reports "not configured" — the absent-provider posture is BLOCKED,
- * never a faked pass.
+ * never a faked pass. The real-provider send is a separately-gated LIVE test
+ * (tests/live/notifications.spec.ts).
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
 	catchScopeError,
@@ -1105,10 +1107,89 @@ describe('P12 slice 3: routes, tick dispatch and notifications over real workerd
 
 describe('P12 mailer selection (live email via Resend)', () => {
 	test('mailerFromEnv returns resend when key+from are set, noop otherwise', async () => {
-		const { mailerFromEnv, noopMailer } = await import('../apps/app/src/server/notifications');
-		const without = mailerFromEnv({});
-		expect(without.name).toBe('noop');
+		const { mailerFromEnv } = await import('../apps/app/src/server/notifications');
+		// mailerFromEnv falls back to AMBIENT process.env when its argument does
+		// not carry a string value — and verify-packet loads .dev.vars (the
+		// owner's real credentials) into process.env for live runs. The selection
+		// test pins the ambient names so it stays hermetic in BOTH environments,
+		// then restores them exactly.
+		const prevKey = process.env.RESEND_API_KEY;
+		const prevFrom = process.env.RESEND_FROM;
+		try {
+			delete process.env.RESEND_API_KEY;
+			delete process.env.RESEND_FROM;
+			expect(mailerFromEnv({}).name).toBe('noop');
+		} finally {
+			if (prevKey !== undefined) process.env.RESEND_API_KEY = prevKey;
+			if (prevFrom !== undefined) process.env.RESEND_FROM = prevFrom;
+		}
 		const withEnv = mailerFromEnv({ RESEND_API_KEY: 're_test', RESEND_FROM: 'caddie@jamalibrahim.dev' });
+		// an EXPLICIT env object wins over the ambient process.env
 		expect(withEnv.name).toBe('resend');
+	});
+});
+
+// --- 4. the REAL cron timer: the Worker-level scheduled export ---------------------------
+
+describe('P12: the real cron timer — src/cloudflare.ts scheduled handler', () => {
+	// A fixed "creation" instant so nextRunAt is deterministic.
+	const CREATED_AT = Date.parse('2026-10-06T10:00:00Z');
+	let world: UnitWorld;
+
+	beforeEach(() => {
+		world = makeSchedulesUnitWorld();
+	});
+
+	test('the Worker-level default export carries scheduled and never fetch (flue composition contract)', async () => {
+		const handlers = (await import('../apps/app/src/cloudflare.ts')).default;
+		expect(typeof handlers.scheduled).toBe('function');
+		// flue forbids fetch on the cloudflare.ts default export — HTTP routing
+		// belongs to app.ts; @flue/vite's generated entry spreads this object
+		// into the Worker's top-level exports ahead of its own composed fetch.
+		expect('fetch' in handlers).toBe(false);
+	});
+
+	test('wrangler.jsonc declares the cron trigger that drives the handler', () => {
+		const raw = readFileSync(join(import.meta.dir, '..', 'apps', 'app', 'wrangler.jsonc'), 'utf8');
+		// jsonc: full-line // comments only — strip and parse as plain JSON.
+		const config = JSON.parse(raw.replace(/^[ \t]*\/\/.*$/gm, '')) as { triggers?: { crons?: string[] } };
+		expect(config.triggers?.crons).toContain('*/5 * * * *');
+	});
+
+	test('a tick through the HANDLER dispatches a due schedule into a real occurrence + notification', async () => {
+		const schedule = await createSchedule(
+			world.db,
+			world.aliceScope,
+			{ name: 'cron-fired', cron: '*/15 * * * *', timezone: 'UTC' },
+			CREATED_AT,
+		);
+		const slotMs = Date.parse(schedule.nextRunAt);
+
+		const handlers = (await import('../apps/app/src/cloudflare.ts')).default;
+		const waited: Promise<unknown>[] = [];
+		handlers.scheduled(
+			{ cron: '*/5 * * * *', scheduledTime: slotMs + 30_000 },
+			{ DB: world.db },
+			{ waitUntil: (p: Promise<unknown>) => void waited.push(p) },
+		);
+		await Promise.all(waited);
+
+		// real dispatch effect: a scheduled occurrence recorded through the
+		// production path (dispatchedBy system:cron), the owner notified, and
+		// the schedule advanced to a strictly FUTURE slot
+		const occurrences = await listOccurrences(world.db, world.aliceScope, schedule.id);
+		expect(occurrences).toHaveLength(1);
+		expect(occurrences[0]).toMatchObject({
+			kind: 'scheduled',
+			occurrenceKey: schedule.nextRunAt,
+			dispatchedBy: 'system:cron',
+			result: 'notified',
+		});
+		expect(await notificationCount(world.db, 'unit-alice')).toBe(1);
+		const rows = await world.db
+			.prepare('select "nextRunAt" from "schedules" where "id" = ?')
+			.bind(schedule.id)
+			.all();
+		expect(Date.parse(String((rows.results[0] as Record<string, unknown>)['nextRunAt']))).toBeGreaterThan(slotMs);
 	});
 });

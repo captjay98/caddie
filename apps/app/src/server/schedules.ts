@@ -9,8 +9,11 @@ import { createNotification } from './notifications.ts';
  * P12 slice 1 — schedules: a D1 record whose due slots are executed by
  * calling the EXISTING run/operation machinery, never a parallel scheduler
  * runtime (packets.md P12: "unique occurrence keys trigger Flue work"). The
- * D1 alarm/cron timer that calls {@link dispatchDueSchedules} on a cadence is
- * P09/P17 wiring — everything here is the honest, testable core it will call.
+ * cron timer is REAL: wrangler.jsonc declares a 5-minute trigger and
+ * src/cloudflare.ts exports the Worker-level `scheduled` handler that calls
+ * {@link dispatchDueSchedules} on that cadence; the tick path is pinned by
+ * tests/schedules.integration.test.ts (direct service dispatch and the
+ * handler itself over the D1-shaped fixture).
  *
  * ## Cron support
  *

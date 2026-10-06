@@ -6,13 +6,14 @@ import { failureKind, StatePanel } from './states.tsx';
 import { DiscoveryResults } from './discovery/Results.tsx';
 import { JudgeScorecard } from './judge/Scorecard.tsx';
 import { SubmissionPackage } from './submission/Package.tsx';
+import { Schedules } from './tasks/Schedules.tsx';
 import { useAuthStatus, useProjects, useSessionActor } from './queries.ts';
 
 /**
  * P11/P13 standalone surfaces — the workspace-shell integration pattern for
  * the unmounted slice-3 components (discovery results, judge scorecard,
- * submission package), following the /settings page grammar: a `<main>` page
- * route wrapping the real component.
+ * submission package) plus the P12 schedules panel, following the /settings
+ * page grammar: a `<main>` page route wrapping the real component.
  *
  * The gate is the SAME fail-closed contract as the Shell (feature-ledger
  * C5/P06): the real /api/auth/status probe decides sign-in vs. surface, the
@@ -138,6 +139,14 @@ export function SubmissionPage(): ReactElement {
 	return (
 		<main className="shell-loading" id="main">
 			<ProjectSurface>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectSurface>
+		</main>
+	);
+}
+
+export function SchedulesPage(): ReactElement {
+	return (
+		<main className="shell-loading" id="main">
+			<ProjectSurface>{(projectId) => <Schedules projectId={projectId} />}</ProjectSurface>
 		</main>
 	);
 }

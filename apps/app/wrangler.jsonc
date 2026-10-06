@@ -3,6 +3,9 @@
 	"name": "caddie-app",
 	"compatibility_date": "2026-06-01",
 	"compatibility_flags": ["nodejs_compat"],
+	// P12 schedule dispatch: fires the `scheduled` handler exported from
+	// src/cloudflare.ts (default export), which runs dispatchDueSchedules.
+	"triggers": { "crons": ["*/5 * * * *"] },
 	// Workers Traces shows each agent response as a trace with agent-level
 	// spans: https://flueframework.com/docs/guide/observability/#cloudflare
 	"observability": { "traces": { "enabled": true } },
