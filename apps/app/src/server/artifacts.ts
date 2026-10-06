@@ -190,7 +190,8 @@ export function sandboxHeaders(contentType: string, bytes: Uint8Array): Record<s
 	};
 }
 
-function artifactFromRow(row: Record<string, unknown>): ArtifactRecord {
+/** Strict boundary parse: DB row -> ArtifactRecord (throws typed on bad rows). */
+export function artifactFromRow(row: Record<string, unknown>): ArtifactRecord {
 	const kind = row['kind'];
 	if (typeof kind !== 'string' || !ARTIFACT_KINDS.includes(kind as ArtifactKind)) {
 		fail(500, 'invalid_row', `artifact row carries an unknown kind: ${String(kind)}`);

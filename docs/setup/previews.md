@@ -124,6 +124,28 @@ Resolution surface (PUBLIC, no session, no cookie):
   - expired or revoked -> `410 {"error":"preview_gone","reason":"expired" |
     "revoked"}`.
 
+## Client surfaces (slice 3)
+
+- `apps/app/src/client/artifacts/Viewer.tsx` — revisions list (kind, plan
+  revision, short sha256, size, status incl. the stale marker), a compare
+  control that fetches the real diff URL and renders add/del/context lines,
+  and a sandboxed download link per revision. Presentational: the shell
+  (P06/P11 integration) supplies query data; failures render the shared state
+  grammar.
+- `apps/app/src/client/planning/DesignReview.tsx` — latest plan revisions
+  with the revision hash visible, Approve/Reject posting the REAL intent
+  (`action: 'design'`, `resourceId` = plan revision id, `revisionHash` =
+  bodyHash) to `/api/approvals`. decidedBy is always server-derived; a
+  server-side refusal (e.g. the revision changed after an approval, a
+  re-decision conflict) renders as an explicit state, never silent success.
+
+Browser-level proofs live in `tests/browser/artifacts.spec.ts` (network-
+stubbed UI-state proofs + the CSP-sandbox cookie-isolation frame check); the
+real-data proofs are the integration suite. `tests/live/preview.spec.ts`
+(additional live checks against a deployed isolated origin) is a later
+packet's live harness and intentionally absent — its absence FAILS
+`bun run test:live -- P07` loudly instead of passing vacuously.
+
 ## Proposed isolated preview origin (NOT WIRED)
 
 The production intent (packets.md P07 slice 3) is a managed preview gateway
