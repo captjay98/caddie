@@ -31,7 +31,29 @@ Files:
 No value may be printed or committed. Local tests never read these: they use
 an obviously fake token against the 127.0.0.1 stub.
 
-## REST endpoint contract (implemented in contree.ts)
+## Real REST endpoints (falsified the assumed spellings)
+
+The P04 live probe (contree CLI with real credentials) proved that `POST /v1/sessions`
+returns 404. The contree client library is OpenAPI-generated — the real REST surface
+(relative to `{base}/v1/`):
+
+```
+POST   /instances                       spawn instance (create session)
+GET    /operations/{id}                 operation status
+DELETE /operations/{id}                 cancel operation
+GET    /operations                      list operations
+GET    /operations/{id}/events          operation event stream
+POST   /files                           upload file
+GET    /files/{id}                      get file
+GET    /inspect/{uuid}/download         download/export
+POST   /images/import                   import image
+```
+
+The P04 adapter correction (contree.ts + stub) is a P2 follow-up: the contract
+tests prove the adapter logic (abort/quotas/path hardening) against the stub —
+the wire spellings need aligning for the production Workers deployment.
+
+## REST endpoint contract (implemented in contree.ts — assumed spellings, see correction above)
 
 Evidence split — every item is one of:
 
