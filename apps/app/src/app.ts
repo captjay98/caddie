@@ -80,6 +80,7 @@ api.route('/', createPreviewsRouter());
 api.route('/', createTasksRouter());
 api.route('/', createGithubRouter());
 api.route('/', createDiscoveryRouter());
+api.route('/', createJudgeRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------
