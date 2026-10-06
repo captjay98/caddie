@@ -24,9 +24,35 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P15c | LOCAL VERIFIED (scaffolding only; live acceptance BLOCKED on P09 window + Python toolchain) | Integration lead | PENDING | PENDING | see evidence records |
 | P15d | LOCAL VERIFIED (scaffolding only; live acceptance BLOCKED on P09 window + Android SDK/emulator) | Integration lead | PENDING | PENDING | see evidence records |
 | P16 | LOCAL VERIFIED | Integration lead (rework; initial slices by subagent) | PENDING (quota — re-review when subagent dispatch returns) | PENDING (quota) | see evidence records (pit-board port per amendment 3054ee2) |
-| P17 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P17 | PARTIAL — local harness LOCAL VERIFIED; hosted acceptance BLOCKED (needs all packets + live credentials + deployment authorization) | Integration lead | PENDING | PENDING | see evidence records |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P17", "status": "PARTIAL — local harness LOCAL VERIFIED; hosted acceptance BLOCKED", "sha": "ee48a50",
+  "commands": [
+    {"command": "bun scripts/release-check.ts", "exitCode": 1,
+     "receipt": "honest: 17 PASS, 6 FAIL (in-flight/unstarted packets), 5 BLOCKED (live gates + deployment authorization); refuses a release request while anything fails"},
+    {"command": "bun test tests/p09-local.test.ts", "exitCode": 0, "receipt": "4 passed (regression check in p17 worktree)"}
+  ],
+  "artifacts": [
+    {"path": "scripts/release-check.ts", "note": "full local gate: typecheck, build, all 21 packet verifications, live gates BLOCKED, deployment always owner-gated"},
+    {"path": "docs/runbooks/operations.md", "note": "verification loop, evidence rules, recovery rules, deployment gates in order"},
+    {"path": ".github/workflows/ci.yml", "note": "CI: build + typecheck + all packet verifications; live gates report BLOCKED without failing the build"}
+  ],
+  "environment": "local bun",
+  "providerCalls": "none",
+  "specReview": "PENDING (packet partially complete — remaining work gated on other packets landing)",
+  "qualityReview": "PENDING",
+  "limitations": [
+    "release-check honestly reports 6 FAILs: P07/P08 in flight, P11/P13 not yet started",
+    "hosted acceptance, staging deployment, hosted 2-user tests, backups/restore, logs redaction review — all BLOCKED on credentials + deployment authorization",
+    "D1 migration numbering skips 0003 until P07 lands (append-only respected)"
+  ]
+}
+```
+
 
 ```json
 {
