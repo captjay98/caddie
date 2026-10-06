@@ -23,7 +23,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P11 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P12 | LOCAL VERIFIED (real cron dispatch + real email BLOCKED: cron timer = P09/P17, SMTP = P17) | Scheduling engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records |
 | P13 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P14 | LOCAL VERIFIED | Full-stack product engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records |
+| P14 | LOCAL VERIFIED | Full-stack product engineer (subagent); integrated by lead | PASS (spec found mount gap — fixed) | PASS (P2 SPA route wiring — fixed; P3s noted) | see evidence records |
 | P15a | LOCAL VERIFIED (template/recipe/skill scaffolding; live acceptance BLOCKED on P09 window) | Integration lead | PENDING | PENDING | see evidence records |
 | P15b | LOCAL VERIFIED (scaffolding only; live acceptance BLOCKED on P09 window + PHP toolchain) | Integration lead | PENDING | PENDING | see evidence records |
 | P15c | LOCAL VERIFIED (scaffolding only; live acceptance BLOCKED on P09 window + Python toolchain) | Integration lead | PENDING | PENDING | see evidence records |
