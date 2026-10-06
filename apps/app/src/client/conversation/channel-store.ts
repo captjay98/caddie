@@ -108,10 +108,14 @@ export function useChannelStore(options: {
 		}
 	}, [key, drafts]);
 
-	const addDraft = useCallback((text: string) => {
+	/** Creates the optimistic draft and returns it (null for empty input) —
+	 *  the caller sends it through the transport with the draft's own key. */
+	const addDraft = useCallback((text: string): ChannelDraft | null => {
 		const trimmed = text.trim();
-		if (!trimmed) return;
-		setDrafts((existing) => [...existing, newDraft(trimmed)]);
+		if (!trimmed) return null;
+		const draft = newDraft(trimmed);
+		setDrafts((existing) => [...existing, draft]);
+		return draft;
 	}, []);
 
 	const retryDraft = useCallback((id: string) => {

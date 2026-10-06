@@ -162,6 +162,8 @@ export function Channel(props: {
 	source: ChannelSource;
 	drafts: readonly ChannelDraft[];
 	projectId: string | null;
+	/** True once the coordinator run transport is wired for this project. */
+	transportLive?: boolean;
 	onSend: (text: string) => void;
 	onRetryDraft: (id: string) => void;
 	onDiscardDraft: (id: string) => void;
@@ -207,7 +209,11 @@ export function Channel(props: {
 					<StatePanel
 						kind="empty"
 						title="Channel standby"
-						detail="Messages you send are held as drafts with an idempotency key until the run transport is wired (P05). Nothing is streamed in this build."
+						detail={
+							props.transportLive
+								? 'Connected to the coordinator run — your first message starts it. Sends are idempotency-keyed and answered at most once.'
+								: 'Messages you send are held as drafts with an idempotency key until the run transport is wired (P05). Nothing is streamed in this build.'
+						}
 					/>
 				) : (
 					source.messages.map((message) => <MessageRow key={message.id} message={message} />)

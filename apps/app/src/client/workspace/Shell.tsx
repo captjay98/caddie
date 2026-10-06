@@ -18,7 +18,8 @@ import {
 import { BriefLane } from '../brief/DecisionCard.tsx';
 import { RunInspector } from '../runs/RunInspector.tsx';
 import { Channel } from '../conversation/Channel.tsx';
-import { standbySource, useChannelStore } from '../conversation/channel-store.ts';
+import { standbySource as STANDBY, useChannelStore, type ChannelDraft } from '../conversation/channel-store.ts';
+import { useCoordinatorTransport } from '../coordinator.ts';
 
 /**
  * Workspace shell — feature-ledger rows C5/H9 (Card/Tasks/Channel continuity
@@ -135,6 +136,9 @@ function AuthedShell(props: { actorId: string | null }): ReactElement {
 	const projectMissing =
 		Boolean(paramProject) && projectList.length > 0 && !selectedProject;
 	const effectiveProjectId = projectMissing ? null : (selectedProject?.id ?? null);
+	// The coordinator run transport: live agent snapshot + sends for the
+	// selected project's active run (null → the channel keeps its standby).
+	const transport = useCoordinatorTransport(actor, effectiveProjectId);
 
 	const runBindings = useRunBindings(actor, effectiveProjectId);
 	const artifacts = useArtifacts(actor, effectiveProjectId);
@@ -398,11 +402,32 @@ function AuthedShell(props: { actorId: string | null }): ReactElement {
 				</aside>
 
 				<Channel
-					source={standbySource}
+					source={transport?.source ?? STANDBY}
+					transportLive={transport !== null}
 					drafts={channel.drafts}
 					projectId={effectiveProjectId}
-					onSend={channel.addDraft}
-					onRetryDraft={channel.retryDraft}
+					onSend={(text) => {
+						const draft = channel.addDraft(text);
+						if (draft && transport) {
+							// admitted → the draft is superseded by the transport's own
+							// message; rejected → it stays with its attempt counted
+							transport.send(draft.text, draft.idempotencyKey).then(
+								() => channel.discardDraft(draft.id),
+								() => channel.retryDraft(draft.id),
+							);
+						}
+					}}
+					onRetryDraft={(id) => {
+						channel.retryDraft(id);
+						const draft: ChannelDraft | undefined = channel.drafts.find((d) => d.id === id);
+						if (draft && transport) {
+							// same idempotency key — the transport deduplicates anyway
+							transport.send(draft.text, draft.idempotencyKey).then(
+								() => channel.discardDraft(id),
+								() => {},
+							);
+						}
+					}}
 					onDiscardDraft={channel.discardDraft}
 				/>
 				</div>
