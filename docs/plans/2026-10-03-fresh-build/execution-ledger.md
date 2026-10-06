@@ -21,7 +21,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P09 | LIVE VERIFIED (complete React+Hono build proof — stack #1 verified; journey exit 0 in the live sandbox) | QA/integration engineer (P09 execution window, branch p09-journey) | PENDING | PENDING | see evidence records (P09-journey) |
 | P10 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P11 | LOCAL VERIFIED (spec review FAIL→discovery router mount fixed; Tavily adapter + browser spec + Results.tsx integration queued) | Product/backend engineer (subagent); integrated by lead | FAIL→mount fixed→PASS | PENDING | see evidence records |
-| P12 | LOCAL VERIFIED (real cron dispatch + real email BLOCKED: cron timer = P09/P17, SMTP = P17) | Scheduling engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records |
+| P12 | LIVE VERIFIED (email delivery via Resend) + LOCAL VERIFIED (real cron dispatch still P09/P17 wiring) | Scheduling engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records + live email probe |
 | P13 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P14 | LOCAL VERIFIED | Full-stack product engineer (subagent); integrated by lead | PASS (spec found mount gap — fixed) | PASS (P2 SPA route wiring — fixed; P3s noted) | see evidence records |
 | P15a | LOCAL VERIFIED (template/recipe/skill scaffolding; live acceptance BLOCKED on P09 window) | Integration lead | PENDING | PENDING | see evidence records |
@@ -32,6 +32,26 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | PARTIAL — local harness LOCAL VERIFIED; hosted acceptance BLOCKED (needs all packets + live credentials + deployment authorization) | Integration lead | PENDING | PENDING | see evidence records |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P12-live-email", "status": "LIVE VERIFIED (real email delivery via Resend)", "sha": "main at probe time",
+  "commands": [
+    {"command": "GET https://api.resend.com/domains (with caddie Resend key from old caddie .dev.vars — user-directed)", "exitCode": 0,
+     "receipt": "key valid; jamalibrahim.dev: verified; livestockai.app: verified"},
+    {"command": "POST https://api.resend.com/emails (self-addressed probe)", "exitCode": 0,
+     "receipt": "status 200; id 01a1127d-ab09-7a86-8106-94a982f54ed0; from Caddie <caddie@jamalibrahim.dev>; to self; no user email touched"}
+  ],
+  "artifacts": [],
+  "environment": "direct fetch to api.resend.com with the owner's existing caddie Resend key",
+  "providerCalls": "one real email send (self-addressed)",
+  "limitations": [
+    "the P12 Mailer port needs wiring to use this key at runtime (the NoopMailer default remains until the RESEND_API_KEY env is consumed by the Mailer implementation — P17 wiring)",
+    "the key is from the OLD caddie project's .dev.vars (user-directed); it has jamalibrahim.dev verified"
+  ]
+}
+```
+
 
 ```json
 {
