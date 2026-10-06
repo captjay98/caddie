@@ -83,6 +83,12 @@ describe('P15b live Laravel + Inertia journey (BLOCKED without toolchain/authori
 			try {
 				cpSync(TEMPLATE, dir, { recursive: true });
 
+				// The disposable journey project opts out of Composer's advisory
+				// BLOCK policy: the policy refuses to load ANY framework version
+				// with a published advisory, which would make every install fail
+				// forever. A throwaway sandbox project is exactly where installs
+				// are allowed to proceed un-audited; real generated apps audit.
+				run(['composer', 'config', 'policy.advisories.block', 'false'], dir);
 				const install = run(['composer', 'install', '--no-interaction'], dir);
 				expect(install.code, install.output.slice(-1500)).toBe(0);
 				expect(existsSync(join(dir, 'composer.lock')), 'composer.lock committed from the real install').toBe(true);
@@ -92,7 +98,7 @@ describe('P15b live Laravel + Inertia journey (BLOCKED without toolchain/authori
 
 				const tests = run(['php', 'artisan', 'test'], dir);
 				expect(tests.code, tests.output.slice(-2500)).toBe(0);
-				expect(tests.output).toMatch(/OK \(/); // phpunit summary line
+				expect(tests.output).toMatch(/Tests:\s+\d+ passed/); // collision's summary line
 
 				const clientInstall = run(['npm', 'install'], dir);
 				expect(clientInstall.code, clientInstall.output.slice(-1500)).toBe(0);
@@ -102,6 +108,9 @@ describe('P15b live Laravel + Inertia journey (BLOCKED without toolchain/authori
 
 				let server: ChildProcess | null = null;
 				try {
+					// The server serves real requests from .env's sqlite file —
+					// create + migrate it (tests run on :memory: via phpunit.xml).
+					expect(run(['php', 'artisan', 'migrate', '--force'], dir).code).toBe(0);
 					server = spawn('php', ['artisan', 'serve', '--port', String(PORT)], { cwd: dir, stdio: 'ignore' });
 					const home = await waitForServer(`http://127.0.0.1:${PORT}/`, 30_000);
 					expect(home.status).toBe(200);

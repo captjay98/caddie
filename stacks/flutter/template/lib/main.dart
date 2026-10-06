@@ -30,9 +30,14 @@ class ForgeApp extends StatelessWidget {
 }
 
 class TaskListScreen extends StatefulWidget {
-  const TaskListScreen({super.key, required this.apiBase});
+  const TaskListScreen({super.key, required this.apiBase, this.client});
 
   final String apiBase;
+
+  /// Transport override for tests: flutter_test intercepts every
+  /// HttpClient request (all return 400), so widget tests inject an
+  /// [http.Client] instead of expecting real sockets.
+  final http.Client? client;
 
   @override
   State<TaskListScreen> createState() => _TaskListScreenState();
@@ -42,16 +47,21 @@ class _TaskListScreenState extends State<TaskListScreen> {
   late Future<List<Task>> _tasks;
 
   Future<List<Task>> _fetchTasks() async {
-    final response = await http
-        .get(Uri.parse('${widget.apiBase}/api/tasks'))
-        .timeout(const Duration(seconds: 10));
-    if (response.statusCode != 200) {
-      throw HttpException('API answered ${response.statusCode}');
+    final client = widget.client ?? http.Client();
+    try {
+      final response = await client
+          .get(Uri.parse('${widget.apiBase}/api/tasks'))
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) {
+        throw HttpException('API answered ${response.statusCode}');
+      }
+      final decoded = jsonDecode(response.body) as List<dynamic>;
+      return decoded
+          .map((entry) => Task.fromJson(entry as Map<String, dynamic>))
+          .toList(growable: false);
+    } finally {
+      if (widget.client == null) client.close();
     }
-    final decoded = jsonDecode(response.body) as List<dynamic>;
-    return decoded
-        .map((entry) => Task.fromJson(entry as Map<String, dynamic>))
-        .toList(growable: false);
   }
 
   @override
