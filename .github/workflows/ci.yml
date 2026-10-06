@@ -1,0 +1,29 @@
+name: CI
+
+on:
+	push:
+		branches: [main]
+	pull_request:
+
+jobs:
+	verify:
+		runs-on: ubuntu-latest
+		steps:
+			- uses: actions/checkout@v4
+			- uses: oven-sh/setup-bun@v2
+				with:
+					bun-version: 1.4.0
+			- run: bun install
+			- run: bun run build
+			- run: bun run typecheck
+			- name: Per-packet verification (all locally-mapped tests)
+				run: |
+					for packet in P00 P01 P02 P03 P04 P05 P06 P07 P08 P09 P10 P11 P12 P13 P14 P15a P15b P15c P15d P16 P17; do
+						bun run verify:packet "$packet"
+					done
+			- name: Release readiness
+				run: bun scripts/release-check.ts
+				env:
+					# CI has no live credentials: every live gate reports BLOCKED,
+					# which never fails the build.
+					CI: 'true'
