@@ -21,7 +21,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P09 | LIVE VERIFIED (complete React+Hono build proof — stack #1 verified; journey exit 0 in the live sandbox) | QA/integration engineer (P09 execution window, branch p09-journey) | PENDING | PENDING | see evidence records (P09-journey) |
 | P10 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P11 | LOCAL VERIFIED (spec review FAIL→discovery router mount fixed; Tavily adapter + browser spec + Results.tsx integration queued) | Product/backend engineer (subagent); integrated by lead | FAIL→mount fixed→PASS | PENDING | see evidence records |
-| P12 | LIVE VERIFIED (email delivery via Resend) + LOCAL VERIFIED (real cron dispatch still P09/P17 wiring) | Scheduling engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records + live email probe |
+| P12 | LIVE VERIFIED (email delivery via Resend, wired into the Mailer port) + LOCAL VERIFIED (real cron dispatch still P09/P17 wiring) | Scheduling engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records + live email probe |
 | P13 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P14 | LOCAL VERIFIED | Full-stack product engineer (subagent); integrated by lead | PASS (spec found mount gap — fixed) | PASS (P2 SPA route wiring — fixed; P3s noted) | see evidence records |
 | P15a | LOCAL VERIFIED (template/recipe/skill scaffolding; live acceptance BLOCKED on P09 window) | Integration lead | PENDING | PENDING | see evidence records |
