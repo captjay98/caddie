@@ -8,9 +8,13 @@
 		"start": "bun run src/server.ts"
 	},
 	"dependencies": {
-		"hono": "^4.12.32"
+		"hono": "^4.12.32",
+		"react": "^19",
+		"react-dom": "^19"
 	},
 	"devDependencies": {
-		"@types/bun": "^1.2.0"
+		"@types/bun": "^1.2.0",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0"
 	}
 }
