@@ -30,6 +30,29 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 
 ```json
 {
+  "packet": "P07+P08+P14 integration", "status": "ALL LOCAL VERIFIED", "sha": "see git log after 'fix: mount ALL missing routers'",
+  "commands": [
+    {"command": "bun run build", "exitCode": 0},
+    {"command": "bun test tests/preview-access.integration.test.ts tests/github.integration.test.ts tests/memory.integration.test.ts tests/search-isolation.test.ts tests/schedules.integration.test.ts tests/sentinel.test.ts", "exitCode": 0, "receipt": "146 passed — P07 previews 19, P08 github 32, P14 memory+search 36, P12 schedules+sentinel 59"},
+    {"command": "bun test tests/routing.test.ts", "exitCode": 0, "receipt": "13 passed (composed worker with all routers)"},
+    {"command": "bun run verify:packet P07", "exitCode": 0}, {"command": "bun run verify:packet P08", "exitCode": 0}, {"command": "bun run verify:packet P14", "exitCode": 0},
+    {"command": "bun run typecheck", "exitCode": 0}
+  ],
+  "environment": "local workerd + D1",
+  "providerCalls": "none",
+  "specReview": "P14 SPEC REVIEW: FAIL (found profile router not mounted — integration gap); FIXED. P07/P08 spec reviews PENDING",
+  "qualityReview": "P14 QUALITY REVIEW: PENDING. P07/P08 quality reviews PENDING",
+  "limitations": [
+    "P14 spec review noted: search scope (projects/planDocs/tasks/memory only — no messages/files/links/images tables exist yet), stacks panel hardcodes react-hono as 'enabled' (P09 PARTIAL), no payer/usage HTTP surface yet, Memory UI personal-only",
+    "P08 noted: local D1 emulator INSERT ON CONFLICT bug → select-then-write guards; PR resume via provider lookup + already-exists 422; merge resume walks first-parent history",
+    "P07 noted: markStaleForPlan is a system hook (P11 wires it); R2/preview origin are proposals"
+  ]
+}
+```
+
+
+```json
+{
   "packet": "P12", "status": "LOCAL VERIFIED (real cron dispatch + real email BLOCKED on P09/P17 wiring)", "sha": "p12-impl merged + integration",
   "commands": [
     {"command": "bun run verify:packet P12", "exitCode": 0, "receipt": "2 checks PASS: schedules 44 + sentinel 15"},
