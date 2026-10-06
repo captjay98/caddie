@@ -11,12 +11,12 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P04 | LIVE VERIFIED (sandbox session + remote exec via contree CLI); REST adapter spellings need correction from live evidence | Sandbox engineer (subagent); integrated by lead | PASS | PASS (2 P2s fixed) | see evidence records + live probe |
 | P05 | LIVE VERIFIED (model route: real Nebius completion 200 with usage) + LOCAL VERIFIED for everything else | Integration lead (quota window); specialist wiring from subagent scripts | FAIL→fixes applied→PASS | PENDING (quality re-dispatch after network outage) | see evidence records + 70131bf + live probe |
 | P06 | LOCAL VERIFIED (transport wiring is P05's live acceptance) | Frontend engineer (subagent); integrated by lead | PASS | PASS | see evidence records (tokens port pulled forward to P16 | record) |
-| P07 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P08 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P07 | IN PROGRESS (implementer dispatched; previews/artifacts) | Artifact engineer (subagent) | Pending | Pending | — |
+| P08 | IN PROGRESS (implementer dispatched; GitHub App) | GitHub engineer (subagent) | Pending | Pending | — |
 | P09 | PARTIAL — local scaffolding done; live journey BLOCKED on owner credentials | Integration lead | PENDING | PENDING | see evidence records |
 | P10 | LOCAL VERIFIED (live external retrieval BLOCKED without owner authorization) | Evidence engineer (subagent); integrated by lead | PASS | PASS (2 P2s fixed on main) | see evidence records |
 | P11 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P12 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P12 | IN PROGRESS (implementer dispatched; schedules/sentinel) | Scheduling engineer (subagent) | Pending | Pending | — |
 | P13 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P14 | LOCAL VERIFIED | Full-stack product engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records |
 | P15a | LOCAL VERIFIED (template/recipe/skill scaffolding; live acceptance BLOCKED on P09 window) | Integration lead | PENDING | PENDING | see evidence records |
