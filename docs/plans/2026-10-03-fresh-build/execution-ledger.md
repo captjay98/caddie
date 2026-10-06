@@ -22,7 +22,7 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P10 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P11 | LOCAL VERIFIED (spec review FAIL→discovery router mount fixed; Tavily adapter + browser spec + Results.tsx integration queued) | Product/backend engineer (subagent); integrated by lead | FAIL→mount fixed→PASS | PENDING | see evidence records |
 | P12 | LIVE VERIFIED (email delivery via Resend, wired into the Mailer port) + LOCAL VERIFIED (real cron dispatch still P09/P17 wiring) | Scheduling engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records + live email probe |
-| P13 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P13 | LOCAL VERIFIED (external submission BLOCKED by design — stays human) | Product/QA engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records |
 | P14 | LOCAL VERIFIED | Full-stack product engineer (subagent); integrated by lead | PASS (spec found mount gap — fixed) | PASS (P2 SPA route wiring — fixed; P3s noted) | see evidence records |
 | P15a | LOCAL VERIFIED (template/recipe/skill scaffolding; live acceptance BLOCKED on P09 window) | Integration lead | PENDING | PENDING | see evidence records |
 | P15b | LOCAL VERIFIED (scaffolding only; live acceptance BLOCKED on P09 window + PHP toolchain) | Integration lead | PENDING | PENDING | see evidence records |
@@ -32,6 +32,28 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P17 | PARTIAL — local harness LOCAL VERIFIED; hosted acceptance BLOCKED (needs all packets + live credentials + deployment authorization) | Integration lead | PENDING | PENDING | see evidence records |
 
 ## Evidence records
+
+```json
+{
+  "packet": "P13", "status": "LOCAL VERIFIED (external submission BLOCKED by design)", "sha": "80954f5/1ae4de7/1c5e15d/4afe172 + integration mount",
+  "commands": [
+    {"command": "bun run verify:packet P13", "exitCode": 0, "receipt": "2 checks PASS: judge 16 + submission 19"},
+    {"command": "bun test tests/judge.test.ts tests/submission.test.ts", "exitCode": 0, "receipt": "35 passed — rubric from real claims (never generic), strict scoring validation, declared vs verified separated, no invented win probability, missing fields stay missing, checklist cites real requirements, submission ≠ prepared, cross-project 404, unauthenticated 401"},
+    {"command": "bun run typecheck", "exitCode": 0}
+  ],
+  "artifacts": [{"path": "apps/app/migrations/0010_judge.sql", "note": "judge_scorecards (rubric snapshot for audit), submission_packages, checklist items (citation FK), exports (hash+requirements version), confirmations (separate table)"}],
+  "environment": "local workerd + D1; pure functions for judge",
+  "providerCalls": "none",
+  "specReview": "PENDING (queued)", "qualityReview": "PENDING (queued)",
+  "limitations": [
+    "rubric restatement detection merges criteria by significant-token overlap (two genuinely distinct criteria sharing a token would cluster — heuristic limit)",
+    "checklist item verified/declared statuses derive from deterministic token-overlap matching (no model call)",
+    "UI components mounted nowhere (workspace-shell integration is P06's)",
+    "tests/browser/submission.spec.ts + agents/skills/submission/SKILL.md not authored (outside implementer's allowed writes)"
+  ]
+}
+```
+
 
 ```json
 {
