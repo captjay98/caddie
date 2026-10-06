@@ -1,0 +1,6 @@
+/vendor
+/node_modules
+/public/build
+/.env
+/storage/*.key
+/database/database.sqlite
