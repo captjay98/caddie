@@ -1,6 +1,8 @@
 import { createRootRoute, createRoute, createRouter, Outlet, createBrowserHistory } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
 import { Shell } from './workspace/Shell.tsx';
+import { Settings } from './settings/Settings.tsx';
+import { Start } from './onboarding/Start.tsx';
 
 /**
  * TanStack Router setup (SPA mode, decision "Product UI: React SPA +
@@ -42,7 +44,31 @@ const workspaceRoute = createRoute({
 	component: Shell,
 });
 
-export const routeTree = rootRoute.addChildren([workspaceRoute]);
+const settingsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/settings',
+	component: function SettingsPage() {
+		return (
+			<main className="shell-loading">
+				<Settings />
+			</main>
+		);
+	},
+});
+
+const onboardingRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/onboarding',
+	component: function OnboardingPage() {
+		return (
+			<main className="shell-loading">
+				<Start />
+			</main>
+		);
+	},
+});
+
+export const routeTree = rootRoute.addChildren([workspaceRoute, settingsRoute, onboardingRoute]);
 
 function detectBasepath(): string {
 	return typeof window !== 'undefined' && window.location.pathname.startsWith('/app') ? '/app' : '/';
