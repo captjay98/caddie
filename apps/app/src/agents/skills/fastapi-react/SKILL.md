@@ -4,7 +4,8 @@ Build and verify FastAPI backends with React clients in the sandbox.
 
 ## Discipline
 
-- uv-managed Python environment: `uv sync --frozen` before anything; never
+- uv-managed Python environment: `uv sync` bootstraps and generates uv.lock
+  (commit it; subsequent sandbox runs then use `uv sync --frozen`) — never
   pip-install ad hoc.
 - pytest green + client tests green before claiming anything; both suites
   count — one green suite is not verification.

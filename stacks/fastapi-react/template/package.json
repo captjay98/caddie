@@ -1,0 +1,10 @@
+{
+	"name": "forge-fastapi-template",
+	"private": true,
+	"type": "module",
+	"workspaces": ["client"],
+	"scripts": {
+		"build": "bun --cwd=client run build",
+		"test:client": "bun test client/src/"
+	}
+}
