@@ -27,6 +27,8 @@ const COORDINATOR_MODEL_ROUTE = 'nemotron-3-super';
 export interface CoordinatorTransport {
 	/** Live agent snapshot; `standbySource` until the project has a run. */
 	source: ChannelSource;
+	/** True once the project has an active run (a real conversation key). */
+	hasRun: boolean;
 	/**
 	 * Admit one message under an explicit idempotency key. Resolves when the
 	 * send is admitted (the run/answer streams separately through `source`);
@@ -76,5 +78,5 @@ export function useCoordinatorTransport(
 	);
 
 	const source: ChannelSource = run ? agent : standbySource;
-	return { source, send };
+	return { source, hasRun: run !== null, send };
 }

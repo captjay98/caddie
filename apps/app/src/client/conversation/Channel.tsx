@@ -132,6 +132,7 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 
 function DraftRow(props: {
 	draft: ChannelDraft;
+	transportLive: boolean;
 	onRetry: (id: string) => void;
 	onDiscard: (id: string) => void;
 }): ReactElement {
@@ -139,9 +140,18 @@ function DraftRow(props: {
 	return (
 		<div className="draft-row" data-state={draft.state} data-testid="draft-row">
 			<span className="mono-id">
-				{draft.state === 'cancelled' ? 'cancelled — kept for reference' : 'unsent · waiting for the run transport'}{' '}
+				{draft.state === 'cancelled'
+					? 'cancelled — kept for reference'
+					: props.transportLive
+						? 'unsent · the run transport refused it'
+						: 'unsent · waiting for the run transport'}{' '}
 				· key {draft.idempotencyKey.slice(5, 13)}
-				{draft.attempts > 0 ? ` · ${draft.attempts + 1} attempts` : ''}
+				{/* attempts counts FAILED TRANSPORT ATTEMPTS (the rejection handler
+				    increments it) — display the true count, no +1: the original
+				    send IS attempt one now that a transport exists. */}
+				{draft.attempts > 0
+					? ` · ${draft.attempts} ${draft.attempts === 1 ? 'attempt' : 'attempts'}`
+					: ''}
 			</span>
 			<span className="draft-text">{draft.text}</span>
 			{draft.state === 'unsent' ? (
@@ -244,7 +254,13 @@ export function Channel(props: {
 				) : null}
 
 				{props.drafts.map((draft) => (
-					<DraftRow key={draft.id} draft={draft} onRetry={props.onRetryDraft} onDiscard={props.onDiscardDraft} />
+					<DraftRow
+						key={draft.id}
+						draft={draft}
+						transportLive={props.transportLive === true}
+						onRetry={props.onRetryDraft}
+						onDiscard={props.onDiscardDraft}
+					/>
 				))}
 			</div>
 			<Composer

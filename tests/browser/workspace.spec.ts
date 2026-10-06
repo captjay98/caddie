@@ -375,6 +375,13 @@ test.describe('P06 workspace shell (composed build)', () => {
 			current: { status: 500, body: { error: 'internal_error' } },
 		};
 		await stubProjectList(context, config);
+		// The coordinator transport IS wired now: pin it to a deterministic
+		// failure for this draft-focused test (no run exists, run creation
+		// refused), so the attempt counter moves exactly once per send/retry.
+		await context.route('**/run-bindings', (route) => json(route, 200, { runBindings: [] }));
+		await context.route('**/api/projects/*/runs', (route) =>
+			json(route, 503, { error: 'run_transport_unavailable', message: 'run creation refused in this spec' }),
+		);
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/`);
 		// The list starts broken: the aside must show the explicit error panel.
@@ -403,6 +410,8 @@ test.describe('P06 workspace shell (composed build)', () => {
 		await page.getByTestId('state-retry-error').click();
 
 		// Retry bumps the attempt counter without duplicating the draft.
+		// The transport was refused once on send (attempt 1 shown), the retry
+		// makes attempt 2 — the row shows the true failed-attempt count.
 		await page.getByTestId('draft-retry').click();
 		await expect(page.getByTestId('draft-row')).toContainText('2 attempts');
 		await expect(page.getByTestId('draft-row')).toHaveCount(1);

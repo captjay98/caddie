@@ -403,7 +403,7 @@ function AuthedShell(props: { actorId: string | null }): ReactElement {
 
 				<Channel
 					source={transport?.source ?? STANDBY}
-					transportLive={transport !== null}
+					transportLive={transport?.hasRun === true}
 					drafts={channel.drafts}
 					projectId={effectiveProjectId}
 					onSend={(text) => {
