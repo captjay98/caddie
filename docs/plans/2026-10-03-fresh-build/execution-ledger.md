@@ -35,6 +35,32 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 
 ```json
 {
+  "packet": "A-Z-AUDIT", "status": "FULL AUDIT 2026-10-06 — 21 packets verified against packets.md", "sha": "44f0a08a",
+  "commands": [
+    {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "27 PASS, 0 FAIL, 1 BLOCKED (deployment authorization only)"},
+    {"command": "bun run test:live -- P05", "exitCode": 0, "receipt": "LIVE VERIFIED — flue-lifecycle 1/1 (real Nebius model round-trip); verify-packet now loads .dev.vars so test:live honors standing CADDIE_LIVE_AUTHORIZED"},
+    {"command": "bun run test:live -- P09", "exitCode": 0, "receipt": "LIVE VERIFIED — forge-react-hono 2/2 (real sandbox + model journey, stack #1)"},
+    {"command": "bun run test:browser -- P01|P06|P07|P09|P14|P16", "exitCode": 0, "receipt": "auth 2, workspace 17 + conversation 3, artifacts 4, forge-journey 3, settings 5, landing 13 — all against the composed build"},
+    {"command": "grep stubs/TODO sweep", "exitCode": 0, "receipt": "no fake implementations; only honest 'for now' = InMemorySandboxPersistence (D1-backed port is P09/P17 wiring)"}
+  ],
+  "liveUserEvidence": [
+    "P01 Google OAuth end-to-end on localhost:5176 (redirect URI registered for 5176; /app/ dev fallback fixed 73b25f06)",
+    "P01 GitHub sign-in merges into the same account (trusted-provider linking, 17cc494a)",
+    "P14 onboarding wired for zero-project users (d728f024) — was mounted but unreachable",
+    "P05/P09 coordinator run transport wired in the SPA (650f87da) — channel sends now create the run and stream from the real agent; P06 draft semantics made honest (44f0a08a)"
+  ],
+  "gapsFound": [
+    "PHANTOM SPECS (mapped in verify-packet.ts, never written): live — P04 sandbox, P07 preview, P08 github, P12 notifications, P15a-d stacks/*, P17 release; browser — P11 discovery, P13 submission, P17 release",
+    "P05 CONFIRMED quality P1s: app.ts:150 fabricates sessionId (driver.create never called → agent tool use fails SESSION_LOST); app.ts:164 cat -- '${path}' shell injection (same pattern in stat/mkdir/rm/readdir adapters); currentRevisionCache unbounded (app.ts:276); adapter stat hardcodes isFile, mkdir drops recursive, exec drops cwd/env/signal; runs.ts recordRepairRound/recordVerification lack runId→projectId ownership check",
+    "P11 PARTIAL: DiscoveryResults component + server mounted, but NO SPA route renders it; P12 PARTIAL: Schedules.tsx unmounted, RESEND_API_KEY/RESEND_FROM not declared in Env type, no real timer dispatches dispatchDueSchedules (API trigger only); P13 PARTIAL: Scorecard + Package components unmounted, skills/submission/SKILL.md missing (delivery-checklist stands in)",
+    "P15b/c/d templates are single-file stubs (composer.json / pyproject.toml / pubspec.yaml); P15d scripts/capture-android.ts missing; P17 docs/release-evidence.md + docs/setup/provider-checklist.md missing",
+    "P01 deviation (owner-approved 2026-10-06): trusted-provider implicit linking replaces explicit-link-only — no link-provider UI exists; session.ts folded into scope.ts"
+  ]
+}
+```
+
+```json
+{
   "packet": "P13-integration", "status": "ALL 21 PACKETS IMPLEMENTED", "sha": "50ba37a",
   "releaseCheck": "bun scripts/release-check.ts → 23 PASS, 0 FAIL, 5 BLOCKED (live gates + deployment authorization)",
   "fullRegression": "466 tests, 2054 expects: 459 pass, 7 honest BLOCKED-fails (live specs without credentials), 2 unhandled errors (Playwright .spec.ts files under bun test — pre-existing invocation artifact, per-category verify:packet is the supported path)",
