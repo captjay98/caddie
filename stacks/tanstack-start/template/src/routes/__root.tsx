@@ -1,4 +1,4 @@
-import { createRootRoute, Outlet } from "@tanstack/react-router";
+import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 
 export function Root() {
 	return (
@@ -7,11 +7,13 @@ export function Root() {
 				<meta charSet="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
 				<title>Forge App (TanStack Start)</title>
+				<HeadContent />
 			</head>
 			<body>
 				<main>
 					<Outlet />
 				</main>
+				<Scripts />
 			</body>
 		</html>
 	);

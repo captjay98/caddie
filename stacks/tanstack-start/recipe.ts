@@ -5,9 +5,10 @@ import type { StackRecipe } from "@caddie/contracts";
  * though Caddie itself uses SPA — full-stack server behavior (server
  * functions, SSR) is what this template proves.
  *
- * Live verification (install/build/start in the sandbox, server state
- * persisting across requests, private preview auth) is BLOCKED on the P09
- * live window; the recipe and template are the locally-verifiable contract.
+ * Toolchain is Bun end to end (install/test/build/serve: the built
+ * dist/server/server.js default-exports a fetch handler that Bun serves).
+ * The production-start gate (build serves SSR HTML) is proven by the live
+ * spec; availability stays unverified until that run.
  */
 export const recipe: StackRecipe = {
 	id: "tanstack-start",
@@ -17,8 +18,8 @@ export const recipe: StackRecipe = {
 	test: ["bun test src/"],
 	build: ["bun run build"],
 	start: ["bun run start"],
-	requiredCapabilities: ["node"],
-	artifacts: [".output/"],
+	requiredCapabilities: ["bun"],
+	artifacts: ["dist/"],
 	preview: "server",
 	availability: "unverified",
 };

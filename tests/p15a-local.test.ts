@@ -13,8 +13,7 @@ describe('P15a local scaffolding', () => {
 			'src/routes/__root.tsx',
 			'src/routes/index.tsx',
 			'src/router.tsx',
-			'src/entry-client.tsx',
-			'src/entry-server.tsx',
+			'src/server.test.tsx',
 		]) {
 			expect(existsSync(join(template, file)), file).toBe(true);
 		}
