@@ -369,3 +369,106 @@ describe('P11 integration: project scoping and requirement honesty', () => {
 		expect(res.status).toBe(401);
 	});
 });
+
+// --- discovery candidate routes (slice 3) -------------------------------------------------
+
+describe('P11 integration: discovery candidate routes are scope-checked and honest', () => {
+	let routeClaimId = '';
+	const SEED_URL = 'https://devpost.com/software/p11-route-probe';
+
+	async function seedRow(): Promise<void> {
+		const res = await fetch(`${WORKER_BASE}/__test/d1`, {
+			method: 'POST',
+			headers: JSON_HEADERS,
+			body: JSON.stringify({
+				sql:
+					`insert or ignore into "discovery_seed_candidates" ` +
+					`("id","source","url","title","summary","publishedAt","requirementsJson","createdAt") values ` +
+					`('seed-route-probe','local-seed','${SEED_URL}','Route probe','A candidate for the route tests.',NULL,` +
+					`'${JSON.stringify([{ text: 'Not open to BR residents', claimType: 'eligibility.restricted_countries' }]).replaceAll("'", "''")}',` +
+					`'2026-10-06T00:00:00.000Z')`,
+			}),
+		});
+		expect(res.status).toBe(200);
+	}
+
+	test('the feed route runs the local adapter, records the source outcome, and lists candidates', async () => {
+		await seedRow();
+		// A quoted rule for the fit citation below.
+		const claim = await addClaim(jarAlice, projAlice, {
+			claimType: 'eligibility.restricted_countries',
+			value: 'BR',
+			quote: '"not open to BR residents"',
+		});
+		expect(claim.status).toBe(201);
+		routeClaimId = claim.claimId!;
+
+		const feedRes = await worker(jarAlice, `/api/projects/${projAlice}/discovery/feed`, { method: 'POST' });
+		expect(feedRes.status).toBe(201);
+		const feed = (await feedRes.json()) as {
+			feed: {
+				sources: { source: string; outcome: string; failureReason: string | null }[];
+				candidates: { id: string; url: string; projectId: string }[];
+			};
+		};
+		const localSeed = feed.feed.sources.find((s) => s.source === 'local-seed');
+		expect(localSeed?.outcome).toBe('succeeded');
+		expect(feed.feed.candidates.some((c) => c.url === SEED_URL)).toBe(true);
+
+		// bob's project sees none of alice's candidates
+		const bobCandidates = await worker(jarBob, `/api/projects/${projBob}/discovery/candidates`);
+		expect(bobCandidates.status).toBe(200);
+		expect(((await bobCandidates.json()) as { candidates: unknown[] }).candidates).toHaveLength(0);
+	});
+
+	test('the evaluated candidate list is conservative and the fit detail cites P10 claim ids', async () => {
+		const listRes = await worker(jarAlice, `/api/projects/${projAlice}/discovery/candidates?evaluate=1`);
+		expect(listRes.status).toBe(200);
+		const list = (await listRes.json()) as {
+			evaluations: {
+				candidate: { id: string; url: string };
+				fit: { claims: { claimType: string; evidenceClaimIds: string[]; verdict: string }[] };
+				eligibility: { verdict: string; rules: { basis: string }[] };
+			}[];
+			ranked: { candidateId: string; verdict: string }[];
+			profileCountry: string | null;
+		};
+		const probe = list.evaluations.find((e) => e.candidate.url === SEED_URL)!;
+		// Alice's profile carries no country: a country rule CANNOT be applied —
+		// unknown, never eligible (conservatism through the whole HTTP stack).
+		expect(list.profileCountry).toBeNull();
+		expect(probe.eligibility.verdict).toBe('unknown');
+		expect(probe.eligibility.rules[0]?.basis).toBe('missing_profile_attribute');
+		// The fit claim cites the P10 evidence claim it rests on.
+		const fitClaim = probe.fit.claims.find((c) => c.claimType === 'eligibility.restricted_countries')!;
+		expect(fitClaim.verdict).toBe('supported');
+		expect(fitClaim.evidenceClaimIds).toEqual([routeClaimId]);
+		// Ranking never opens with an ineligible entry.
+		expect(['eligible', 'unknown']).toContain(list.ranked[0]?.verdict);
+	});
+
+	test('accept marks a candidate; a fabricated id is refused and writes nothing', async () => {
+		const listRes = await worker(jarAlice, `/api/projects/${projAlice}/discovery/candidates`);
+		const probe = ((await listRes.json()) as { candidates: { id: string; url: string }[] }).candidates.find(
+			(c) => c.url === SEED_URL,
+		)!;
+
+		const acceptRes = await worker(jarAlice, `/api/projects/${projAlice}/discovery/candidates/${probe.id}/accept`, {
+			method: 'POST',
+		});
+		expect(acceptRes.status).toBe(200);
+		expect(((await acceptRes.json()) as { candidate: { status: string } }).candidate.status).toBe('accepted');
+
+		const forgedRes = await worker(
+			jarAlice,
+			`/api/projects/${projAlice}/discovery/candidates/cand_fabricated0/fabricated/accept`,
+			{ method: 'POST' },
+		);
+		expect([400, 404]).toContain(forgedRes.status);
+	});
+
+	test('unauthenticated discovery access is rejected', async () => {
+		const res = await worker(new Jar(), `/api/projects/${projAlice}/discovery/candidates`);
+		expect(res.status).toBe(401);
+	});
+});

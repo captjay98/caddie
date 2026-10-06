@@ -644,6 +644,43 @@ export async function evaluateCandidate(
 	return { candidate, fit, eligibility };
 }
 
+export interface CandidateListEvaluation {
+	readonly evaluations: readonly CandidateEvaluation[];
+	/** Conservative ranking: eligible first, unknown, ineligible last (rankCandidateSummaries). */
+	readonly ranked: readonly CandidateSummary[];
+	/** The profile country the eligibility read used (honesty about the input). */
+	readonly profileCountry: string | null;
+}
+
+/**
+ * Evaluate every project candidate (fit + eligibility) and rank them
+ * conservatively. Used by the evaluated list endpoint; the profile is the
+ * ACTOR's P14 profile — the route layer resolves it from the verified session.
+ */
+export async function listCandidateEvaluations(
+	db: D1Database,
+	scope: Scope,
+	profile: EligibilityProfile,
+): Promise<CandidateListEvaluation> {
+	const candidates = await listCandidates(db, scope);
+	const evaluations: CandidateEvaluation[] = [];
+	for (const candidate of candidates) {
+		const [fit, eligibility] = [
+			await computeFit(db, scope, candidate),
+			await evaluateCandidateEligibility(db, scope, candidate, profile),
+		];
+		evaluations.push({ candidate, fit, eligibility });
+	}
+	const ranked = rankCandidateSummaries(
+		evaluations.map((e) => ({
+			candidateId: e.candidate.id,
+			matchedRequirements: e.fit.matchedRequirements,
+			verdict: e.eligibility.verdict,
+		})),
+	);
+	return { evaluations, ranked, profileCountry: profile.country };
+}
+
 // --- conservative ranking --------------------------------------------------------------------
 
 export interface CandidateSummary {

@@ -3,8 +3,18 @@ import type { AuthEnv } from '../auth.ts';
 import { createAuthRouter } from './auth.ts';
 import { createProjectsRouter } from './projects.ts';
 import { createEvidenceRouter } from './evidence.ts';
-import { ScopeError, requireProjectScope } from '../scope.ts';
+import { ScopeError, requireProjectScope, sessionUserId } from '../scope.ts';
 import { generatePlan, getPlanOverview, recordUserPlanRevision } from '../planning.ts';
+import {
+	acceptCandidate,
+	createLocalSeedAdapter,
+	evaluateCandidate,
+	listCandidateEvaluations,
+	listCandidates,
+	listFeedRuns,
+	runDiscoveryFeed,
+} from '../discovery.ts';
+import { getProfile } from '../profiles.ts';
 
 /**
  * P11 discovery/planning router — per-project planning endpoints (slice 2)
@@ -82,6 +92,84 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 		);
 		const revision = await recordUserPlanRevision(c.env.DB, scope, (await readJson(c.req.raw)) as never);
 		return c.json({ revision }, 201);
+	});
+
+	// --- discovery candidates (slice 3) ---------------------------------------------
+	//
+	// The feed runs the LOCAL seed adapter (the pluggable local implementation;
+	// a real Devpost adapter is P17 live wiring). Personal eligibility reads the
+	// ACTOR'S OWN P14 profile — resolved from the verified session, never from
+	// a body field — and stays honest about what it used (profileCountry).
+
+	async function actorEligibilityProfile(
+		env: Env,
+		headers: Headers,
+	): Promise<{ country: string | null }> {
+		const userId = await sessionUserId(env, headers);
+		if (!userId) throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
+		const profile = await getProfile(env.DB, userId);
+		return { country: profile?.country ?? null };
+	}
+
+	router.post('/projects/:projectId/discovery/feed', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		const feed = await runDiscoveryFeed(c.env.DB, scope, {
+			adapters: [createLocalSeedAdapter(c.env.DB)],
+		});
+		return c.json({ feed }, 201);
+	});
+
+	router.get('/projects/:projectId/discovery/feed', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		return c.json({ runs: await listFeedRuns(c.env.DB, scope) });
+	});
+
+	router.get('/projects/:projectId/discovery/candidates', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		if (c.req.query('evaluate') === '1') {
+			const profile = await actorEligibilityProfile(c.env, c.req.raw.headers);
+			return c.json(await listCandidateEvaluations(c.env.DB, scope, profile));
+		}
+		return c.json({ candidates: await listCandidates(c.env.DB, scope) });
+	});
+
+	router.get('/projects/:projectId/discovery/candidates/:candidateId', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		const profile = await actorEligibilityProfile(c.env, c.req.raw.headers);
+		return c.json(
+			await evaluateCandidate(c.env.DB, scope, c.req.param('candidateId') ?? '', profile),
+		);
+	});
+
+	router.post('/projects/:projectId/discovery/candidates/:candidateId/accept', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		const candidate = await acceptCandidate(c.env.DB, scope, c.req.param('candidateId') ?? '');
+		return c.json({ candidate });
 	});
 
 	return router;
