@@ -7,7 +7,6 @@
  * never ride through a contract.
  */
 
-import { createHash } from 'node:crypto';
 import * as v from 'valibot';
 
 // --- scope, authorization and run identity ---------------------------------
@@ -105,10 +104,11 @@ export type ApprovalRecord = v.InferOutput<typeof ApprovalRecordSchema>;
 /**
  * Canonical intent hash: deep key-sorted JSON of the exact
  * action/resource/revision with policy version (contracts.md — approval and
- * effect). Stale approvals fail against this hash at execution time. Hashed
- * with node:crypto so the same helper runs in bun, workerd, and Node.
+ * effect). Stale approvals fail against this hash at execution time. Web
+ * Crypto so the same helper runs in bun, workerd, Node, AND the browser —
+ * node:crypto externalizes in the client bundle and would kill the SPA.
  */
-export function approvalIntentHash(intent: ApprovalIntent): string {
+export async function approvalIntentHash(intent: ApprovalIntent): Promise<string> {
 	const canonical = JSON.stringify(intent, (_, value) => {
 		if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
 			return Object.fromEntries(
@@ -119,7 +119,9 @@ export function approvalIntentHash(intent: ApprovalIntent): string {
 		}
 		return value;
 	});
-	return `sha256-${createHash('sha256').update(canonical).digest('hex')}`;
+	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
+	const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+	return `sha256-${hex}`;
 }
 
 export const ExternalOperationSchema = v.pipe(

@@ -96,15 +96,15 @@ describe('P00 approval contract', () => {
 		policyVersion: '1',
 	};
 
-	test('intent hash is deterministic and revision-sensitive', () => {
-		const a = approvalIntentHash(intent);
-		const b = approvalIntentHash({ ...intent });
+	test('intent hash is deterministic and revision-sensitive', async () => {
+		const a = await approvalIntentHash(intent);
+		const b = await approvalIntentHash({ ...intent });
 		expect(a).toBe(b);
-		expect(a).not.toBe(approvalIntentHash({ ...intent, revisionHash: 'sha-b' }));
-		expect(a).not.toBe(approvalIntentHash({ ...intent, policyVersion: '2' }));
+		expect(a).not.toBe(await approvalIntentHash({ ...intent, revisionHash: 'sha-b' }));
+		expect(a).not.toBe(await approvalIntentHash({ ...intent, policyVersion: '2' }));
 		// canonical serialization: key order must not change the hash
 		expect(a).toBe(
-			approvalIntentHash({
+			await approvalIntentHash({
 				policyVersion: '1',
 				revisionHash: 'sha-a',
 				resourceId: 'res_1',
@@ -114,14 +114,14 @@ describe('P00 approval contract', () => {
 		);
 	});
 
-	test('bare intent parses; record covers the full status vocabulary', () => {
+	test('bare intent parses; record covers the full status vocabulary', async () => {
 		expect(parse(ApprovalIntentSchema, intent).action).toBe(
 			'deploy-production',
 		);
 		const record = {
 			...intent,
 			id: 'apr_1',
-			intentHash: approvalIntentHash(intent),
+			intentHash: await approvalIntentHash(intent),
 			decidedBy: null,
 			status: 'pending',
 			expiresAt: '2026-10-04T00:00:00.000Z',

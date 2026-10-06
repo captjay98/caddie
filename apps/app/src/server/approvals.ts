@@ -150,7 +150,7 @@ async function insertPending(
 	intent: ApprovalIntent,
 	opts: { ttlSeconds?: number; now?: string },
 ): Promise<Record<string, unknown>> {
-	const intentHash = approvalIntentHash(intent);
+	const intentHash = await approvalIntentHash(intent);
 	const createdAt = opts.now ?? nowIso();
 	const expiresAt = ttlToExpiresAt(createdAt, opts.ttlSeconds ?? DEFAULT_TTL_SECONDS);
 	const id = newId('apr');
@@ -227,7 +227,7 @@ export async function recordDecision(
 	// membership authority for the deciding actor (project must exist, actor a member)
 	const scope = await projectScopeForUser(db, verifiedActor, intent.projectId);
 
-	let row = await latestByIntentHash(db, approvalIntentHash(intent));
+	let row = await latestByIntentHash(db, await approvalIntentHash(intent));
 	if (!row) {
 		row = await insertPending(db, intent, { ttlSeconds: parsed.ttlSeconds });
 	}
@@ -391,7 +391,7 @@ export async function checkApprovalForEffect(
 		},
 		'invalid_request',
 	);
-	const intentHash = approvalIntentHash(intent);
+	const intentHash = await approvalIntentHash(intent);
 	const now = check.now ?? nowIso();
 
 	const rows = await queryAll(
