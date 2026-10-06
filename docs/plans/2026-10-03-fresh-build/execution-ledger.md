@@ -8,17 +8,17 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 | P01 | LOCAL VERIFIED (real OAuth callbacks BLOCKED on owner credentials) | Backend identity engineer (subagent); integrated by lead | PASS | PASS (fixes applied: AUTH_TEST_MODE fence, dead helper removal, DDL-drift guard, log cleanup) | see evidence records (c41dc19 + integration b1b4d4e + review fixes) |
 | P02 | LOCAL VERIFIED | Backend product engineer (subagent; slice 3 completed by lead after dispatch loss) | PASS | PASS (fixes applied + re-verified) | see evidence records (4a0eda2/66c2cf2/0ea748a + integration 801f97e + fixes 196ac63) |
 | P03 | LOCAL VERIFIED (gate for ALL paid/effectful work — now open for local, closed for live until P04/P05 credentials) | Backend governance engineer (subagent); integrated by lead | PASS | PASS (P2 currency fence applied + re-verified) | see evidence records (164eace/0de2638/71f0a66 + integration ee5fca4 + fence fix) |
-| P04 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P04 | LIVE VERIFIED (sandbox session + remote exec via contree CLI); REST adapter spellings need correction from live evidence | Sandbox engineer (subagent); integrated by lead | PASS | PASS (2 P2s fixed) | see evidence records + live probe |
 | P05 | LIVE VERIFIED (model route: real Nebius completion 200 with usage) + LOCAL VERIFIED for everything else | Integration lead (quota window); specialist wiring from subagent scripts | FAIL→fixes applied→PASS | PENDING (quality re-dispatch after network outage) | see evidence records + 70131bf + live probe |
-| P06 | NOT STARTED | Unassigned | Pending | Pending | — (tokens port pulled forward to P16, see P16 record) |
+| P06 | LOCAL VERIFIED (transport wiring is P05's live acceptance) | Frontend engineer (subagent); integrated by lead | PASS | PASS | see evidence records (tokens port pulled forward to P16 | record) |
 | P07 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P08 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P09 | PARTIAL — local scaffolding done; live journey BLOCKED on owner credentials | Integration lead | PENDING | PENDING | see evidence records |
-| P10 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P10 | LOCAL VERIFIED (live external retrieval BLOCKED without owner authorization) | Evidence engineer (subagent); integrated by lead | PASS | PASS (2 P2s fixed on main) | see evidence records |
 | P11 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P12 | NOT STARTED | Unassigned | Pending | Pending | — |
 | P13 | NOT STARTED | Unassigned | Pending | Pending | — |
-| P14 | NOT STARTED | Unassigned | Pending | Pending | — |
+| P14 | LOCAL VERIFIED | Full-stack product engineer (subagent); integrated by lead | PENDING | PENDING | see evidence records |
 | P15a | LOCAL VERIFIED (template/recipe/skill scaffolding; live acceptance BLOCKED on P09 window) | Integration lead | PENDING | PENDING | see evidence records |
 | P15b | LOCAL VERIFIED (scaffolding only; live acceptance BLOCKED on P09 window + PHP toolchain) | Integration lead | PENDING | PENDING | see evidence records |
 | P15c | LOCAL VERIFIED (scaffolding only; live acceptance BLOCKED on P09 window + Python toolchain) | Integration lead | PENDING | PENDING | see evidence records |
