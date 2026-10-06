@@ -2,6 +2,8 @@ import type { D1Database } from './auth.ts';
 import type { Scope } from '@caddie/contracts';
 import { ScopeError, assertProjectScope } from './scope.ts';
 import { recordRepairRound } from './runs.ts';
+import { runSentinelCheckForSchedule } from './sentinel.ts';
+import { createNotification } from './notifications.ts';
 
 /**
  * P12 slice 1 — schedules: a D1 record whose due slots are executed by
@@ -599,15 +601,15 @@ export interface FireOutcome {
  * second run dispatch, no second notification, ever.
  *
  * Dispatch targets, in order:
- *   1. payload.sourceId — a Sentinel-style evidence check against the stored
- *      project+source ids (wired to the sentinel service in this packet; the
- *      fetching/capture pass itself is P09/P17 wiring).
+ *   1. payload.sourceId — a Sentinel check against the stored project+source
+ *      ids (existing snapshots only; the re-fetch pass is P09/P17 wiring),
+ *      with a material-change notification to the owner.
  *   2. payload.runId AND a run binding with that id under the schedule's own
  *      project — the dispatch is recorded through the EXISTING runs
  *      machinery (a run_rounds ledger entry naming the schedule), never a
  *      parallel executor.
  *   3. otherwise — the occurrence row itself plus an owner notification
- *      (notifications module, slice 3 wiring).
+ *      deduped on the occurrence key.
  */
 async function fireOccurrence(
 	db: D1Database,
@@ -644,12 +646,38 @@ async function fireOccurrence(
 		return { elected: false, result: 'duplicate_occurrence', occurrence: null };
 	}
 
-	let result = 'occurred';
+	let result = 'notified';
 	if (schedule.payload.sourceId !== undefined) {
-		// Sentinel check against the STORED project/source ids. The wiring to
-		// sentinel.runSentinelCheckForSchedule lands with the sentinel slice —
-		// the occurrence is already the durable, deduplicated trigger.
-		result = `source_check_queued:${schedule.payload.sourceId}`;
+		// A Sentinel check against the STORED project/source ids (never an
+		// "active" project). The re-fetch/capture pass that produces NEW
+		// snapshots is P09/P17 wiring — this compares the snapshots that exist.
+		try {
+			const check = await runSentinelCheckForSchedule(db, {
+				projectId: schedule.projectId,
+				sourceId: schedule.payload.sourceId,
+				scheduleId: schedule.id,
+			});
+			result = `sentinel:${check.result.severity}:${check.result.changedCount}`;
+			if (check.result.severity === 'material') {
+				// Rules-tier change: notify the schedule's owner. The dedupe key is
+				// the SOURCE+SNAPSHOT state, so repeated ticks on the same pair do
+				// not duplicate the alert — only a genuinely new snapshot re-alerts.
+				await createNotification(db, {
+					userId: schedule.createdBy,
+					projectId: schedule.projectId,
+					kind: 'sentinel_material_change',
+					title: `Binding rule change on a watched source`,
+					body:
+						`${check.result.changedCount} claim change(s) on source ${schedule.payload.sourceId}: ` +
+						`snapshot ${check.result.previousSnapshotId} -> ${check.result.currentSnapshotId}.`,
+					dedupeKey: `sentinel:${schedule.payload.sourceId}:${check.result.currentSnapshotId}`,
+				});
+			}
+		} catch (error) {
+			// A failed check is recorded on the occurrence; the slot stays
+			// consumed (coalescing policy) and the timer moves on.
+			result = `failed:${String(error).slice(0, 160)}`;
+		}
 	} else if (schedule.payload.runId !== undefined) {
 		const binding = await queryAll(
 			db,
@@ -682,8 +710,22 @@ async function fireOccurrence(
 		} else {
 			// The binding is gone — fall through to the plain occurrence +
 			// notification path rather than failing the slot.
-			result = 'binding_missing:occurred';
+			result = 'notified';
 		}
+	}
+	if (result === 'notified') {
+		// No dispatch target resolved (empty payload, or the bound run is gone):
+		// the occurrence row itself is the durable trigger and the owner gets an
+		// in-app notification, deduped per occurrence key — a retried or
+		// overlapping fire can never notify twice for one slot.
+		await createNotification(db, {
+			userId: schedule.createdBy,
+			projectId: schedule.projectId,
+			kind: 'schedule_fired',
+			title: `Schedule fired: ${schedule.name}`,
+			body: `Occurrence ${input.occurrenceKey} of "${schedule.name}" (${schedule.cron} ${schedule.timezone}).`,
+			dedupeKey: `schedule:${schedule.id}:${input.occurrenceKey}`,
+		});
 	}
 
 	await db
