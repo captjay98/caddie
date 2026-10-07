@@ -35,6 +35,23 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
 
 ```json
 {
+  "packet": "AGENT-WAVES", "status": "ALL PARTIALS CLOSED — 4 worktree agents integrated + dev dispatch LIVE VERIFIED", "sha": "2eeb54ec",
+  "integration": [
+    "p11-p13-surfaces e3669dc5: discovery/judge/submission routes + topbar/onboarding entries, submission SKILL.md, 12 browser tests; judge router mounted by integrator b986e614",
+    "p12-completion 743d5902: /schedules surface, RESEND keys in Env, REAL cron dispatch (cloudflare.ts scheduled export, build-proven), live email receipt 01a11346-68df-7538-8dc7-ee1b593ad5ef",
+    "p05-hardening: sessions as driver-side bookkeeping over the real contree API (the old client spoke fictional endpoints), endpoint-backed file ops (injection fired at real sandbox: no effect), runId ownership 404s, LRU cache, adapter fidelity; tests/live/sandbox.spec.ts LIVE PASS",
+    "p15-p17-completion: real laravel/fastapi/flutter templates, capture-android.ts, ALL remaining phantom specs written (P15a live is LIVE PASS; P15b/c/d journeys LIVE PASS after integrator fixes: gitignore-swallowed template files, collision+mockery deps, advisory-policy opt-out, withoutVite, migrate-before-serve, flutter injectable client), P17 docs + release specs"
+  ],
+  "devDispatchFixes": [
+    "2eeb54ec: bun patch agents@0.20.1 (tracing probe — module-runner polyfill lacks startActiveSpan), createRun derives planRevision (rev-0 before first plan), nanoid declared",
+    "LIVE VERIFIED with the owner's real session: run creation 201 (planRevision rev-0), dispatch 202 (submissionId sub_01M49W8YCXE…, instance uid minted), Nebius round-trip streamed reasoning + reply, traces enabled"
+  ],
+  "regression": "release-check 27 PASS / 0 FAIL / 1 BLOCKED (deployment); every mapped spec file exists; browser suites P01 2, P06 20, P07 4, P09 3, P11 6, P13 6, P14 5, P16 13, P17 5 all green"
+}
+```
+
+```json
+{
   "packet": "A-Z-AUDIT", "status": "FULL AUDIT 2026-10-06 — 21 packets verified against packets.md", "sha": "44f0a08a",
   "commands": [
     {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "27 PASS, 0 FAIL, 1 BLOCKED (deployment authorization only)"},
