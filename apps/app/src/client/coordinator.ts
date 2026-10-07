@@ -59,7 +59,9 @@ export function useCoordinatorTransport(
 				}
 				const created = await postJson<{ run: RunBindingRecord }>(
 					`/api/projects/${encodeURIComponent(projectId)}/runs`,
-					{ modelRouteId: COORDINATOR_MODEL_ROUTE, payerId: actor.actorId, planRevision: '' },
+					// planRevision is server-derived: the project's current plan
+					// revision, or rev-0 before the coordinator writes the first one.
+					{ modelRouteId: COORDINATOR_MODEL_ROUTE, payerId: actor.actorId },
 				);
 				setSessionRun(created.run);
 				active = created.run;

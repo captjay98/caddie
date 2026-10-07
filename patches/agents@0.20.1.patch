@@ -1,0 +1,18 @@
+diff --git a/dist/cloudflare-BduZwmYK.js b/dist/cloudflare-BduZwmYK.js
+index 82c6ba0048f7bfe549d1eb478eac4675a27512b9..dff59f25b9bc4ddaae4c2323a8fbd4c507e078d3 100644
+--- a/dist/cloudflare-BduZwmYK.js
++++ b/dist/cloudflare-BduZwmYK.js
+@@ -195,7 +195,12 @@ const noopSpan = {
+ 	setAttribute() {},
+ 	end() {}
+ };
+-const tracer = createTracer(cloudflareWorkers.tracing ?? { startActiveSpan(_name, run) {
++// Forge patch: probe per-method like @flue/runtime's bindPlatformTracing —
++// the vite module-runner's cloudflare:workers polyfill exposes a `tracing`
++// object WITHOUT startActiveSpan, which would otherwise crash every DO
++// invocation in dev (`this.runtime.startActiveSpan is not a function`).
++const forgeTracing = cloudflareWorkers.tracing;
++const tracer = createTracer(forgeTracing && typeof forgeTracing.startActiveSpan === "function" ? forgeTracing : { startActiveSpan(_name, run) {
+ 	return run(noopSpan);
+ } });
+ //#endregion

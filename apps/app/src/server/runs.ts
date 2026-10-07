@@ -51,7 +51,8 @@ async function queryAll(db: D1Database, sql: string, ...params: unknown[]): Prom
 
 export interface CreateRunInput {
 	modelRouteId: string;
-	planRevision: string;
+	/** Omitted/empty → the project's current plan revision, or 'rev-0' before any plan exists. */
+	planRevision?: string;
 	conversationId?: string;
 	submissionId?: string;
 	payerId: string;
@@ -73,10 +74,22 @@ export async function createRun(db: D1Database, scope: Scope, input: CreateRunIn
 	if (!input.payerId) {
 		throw new ScopeError(400, 'invalid_request', 'payerId is required — runs are payer-bound');
 	}
+	// A conversation may start before any plan exists (the coordinator writes
+	// the first plan revision as part of the run). Bind it to the project's
+	// current plan revision, or rev-0 when the project has none yet.
+	let planRevision = input.planRevision?.trim() ?? '';
+	if (!planRevision) {
+		const rows = await queryAll(
+			db,
+			'select coalesce(max("revision"), 0) as "rev" from "plan_doc_revisions" where "projectId" = ?',
+			verified.projectId,
+		);
+		planRevision = `rev-${Number(rows[0]?.['rev'] ?? 0)}`;
+	}
 	const binding = await createRunBinding(db, scope, {
 		conversationId: input.conversationId ?? newId('conv'),
 		submissionId: input.submissionId ?? newId('sub'),
-		planRevision: input.planRevision,
+		planRevision,
 		stackId: 'react-hono',
 		payerId: input.payerId,
 		modelRouteId: route.id,

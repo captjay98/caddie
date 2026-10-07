@@ -22,5 +22,8 @@
 		"typescript": "^7.0.2",
 		"valibot": "^1.1.0",
 		"@playwright/test": "^1.55.0"
+	},
+	"patchedDependencies": {
+		"agents@0.20.1": "patches/agents@0.20.1.patch"
 	}
 }
