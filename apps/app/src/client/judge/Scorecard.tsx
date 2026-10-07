@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import type { ReactElement } from 'react';
+import { StatePanel } from '../states.tsx';
 
 /**
  * P13 judge scorecard (slice 3) — coaching UI over the REAL P13 routes.
@@ -73,11 +75,16 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 	return (await response.json()) as T;
 }
 
-const ACCESS_BADGE: Record<CriterionEvidence['access'], { label: string; background: string }> = {
-	verified_deployed: { label: 'VERIFIED (deployed)', background: '#e6f6e6' },
-	verified_local: { label: 'VERIFIED (local)', background: '#eef6e6' },
-	declared: { label: 'DECLARED ONLY', background: '#fff4d6' },
-	unknown: { label: 'UNKNOWN', background: '#f2f2f2' },
+/**
+ * Access is label + mark, never tint alone (board screen 18): the badge owns
+ * its text colour through the .badge primitive, so the level reads on both
+ * themes — the shipped chip inherited near-white body text onto a pale wash.
+ */
+const ACCESS_BADGE: Record<CriterionEvidence['access'], { label: string; tone: 'ok' | 'warn' | 'neutral' }> = {
+	verified_deployed: { label: 'VERIFIED (deployed)', tone: 'ok' },
+	verified_local: { label: 'VERIFIED (local)', tone: 'ok' },
+	declared: { label: 'DECLARED ONLY', tone: 'warn' },
+	unknown: { label: 'UNKNOWN', tone: 'neutral' },
 };
 
 interface DraftScore {
@@ -85,7 +92,7 @@ interface DraftScore {
 	notes: string;
 }
 
-export function JudgeScorecard(props: { projectId: string; apiBase?: string }) {
+export function JudgeScorecard(props: { projectId: string; apiBase?: string }): ReactElement {
 	const { projectId, apiBase = '' } = props;
 	const [rubric, setRubric] = useState<Rubric | null>(null);
 	const [assessment, setAssessment] = useState<readonly CriterionEvidence[]>([]);
@@ -155,27 +162,35 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }) {
 	const assessmentByCriterion = new Map(assessment.map((entry) => [entry.criterionText, entry]));
 
 	return (
-		<section aria-label="Judge scorecard" style={{ maxWidth: 760, fontFamily: 'system-ui, sans-serif' }}>
-			<header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-				<h2 style={{ margin: 0, fontSize: '1.1rem' }}>Judge coaching</h2>
-				<button type="button" onClick={() => void load()} disabled={busy}>
+		<section aria-label="Judge scorecard" className="judge-panel" data-testid="judge-scorecard">
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						judge coaching — never a prediction
+					</p>
+					<h2 className="ev-title">Judge coaching</h2>
+				</div>
+				<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
 					{busy ? 'Loading…' : 'Refresh'}
 				</button>
-			</header>
+			</div>
 
 			{error ? (
-				<p role="alert" style={{ color: '#a00' }}>
-					{error}
-				</p>
+				<div role="alert" className="sign-in-error disc-error" data-testid="judge-error">
+					<b>The scorecard could not be read.</b>
+					<span> {error}</span>
+				</div>
 			) : null}
 
-			{rubric === null ? null : rubric.criteria.length === 0 ? (
+			{rubric === null ? (
+				<StatePanel kind="loading" title="Reading the rubric…" />
+			) : rubric.criteria.length === 0 ? (
 				<>
-					<p style={{ color: '#556' }}>
+					<p className="state-detail">
 						No judging criteria are on record in this project's evidence — the rubric stays empty instead of
 						assuming a generic criterion set.
 					</p>
-					<ul style={{ color: '#860', fontSize: '0.85rem' }}>
+					<ul className="disc-assumption">
 						{rubric.warnings.map((warning) => (
 							<li key={warning}>{warning}</li>
 						))}
@@ -183,14 +198,14 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }) {
 				</>
 			) : (
 				<>
-					<p style={{ color: '#556', fontSize: '0.85rem' }}>
+					<p className="state-detail">
 						Rubric extracted from this project's evidence claims (hash <code>{rubric.hash.slice(0, 19)}…</code>,
 						version {rubric.extractionVersion}). Access badges come from run receipts, not from anyone's claim.
 					</p>
 					{rubric.warnings.length > 0 ? (
-						<div role="status" style={{ border: '1px solid #d90', borderRadius: 6, padding: '0.5rem 0.75rem', margin: '0.5rem 0' }}>
+						<div role="status" className="disc-gaps">
 							<strong>Rubric warnings</strong>
-							<ul style={{ margin: '0.25rem 0 0' }}>
+							<ul>
 								{rubric.warnings.map((warning) => (
 									<li key={warning}>{warning}</li>
 								))}
@@ -198,9 +213,9 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }) {
 						</div>
 					) : null}
 					{rubric.conflicts.length > 0 ? (
-						<div role="status" style={{ border: '1px solid #a0a', borderRadius: 6, padding: '0.5rem 0.75rem', margin: '0.5rem 0' }}>
+						<div role="status" className="disc-gaps judge-conflicts">
 							<strong>Retained conflicts</strong> — equal-authority sources disagree; nothing was auto-resolved.
-							<ul style={{ margin: '0.25rem 0 0' }}>
+							<ul>
 								{rubric.conflicts.map((conflict) => (
 									<li key={conflict.criterionKey}>
 										<code>{conflict.criterionKey}</code>: {conflict.claimIds.join(', ')}
@@ -210,39 +225,38 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }) {
 						</div>
 					) : null}
 
-					<ul style={{ listStyle: 'none', padding: 0 }}>
+					<ul className="disc-list">
 						{rubric.criteria.map((criterion) => {
 							const evidence = assessmentByCriterion.get(criterion.text);
 							const badge = ACCESS_BADGE[evidence?.access ?? 'unknown'];
 							const open = expanded === criterion.text;
 							const draft = drafts[criterion.text] ?? { score: '', notes: '' };
 							return (
-								<li key={criterion.text} style={{ borderTop: '1px solid #eee', padding: '0.5rem 0' }}>
-									<div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+								<li key={criterion.text} className="disc-item">
+									<div className="disc-head">
 										<strong>{criterion.text}</strong>
-										<span style={{ background: badge.background, borderRadius: 4, padding: '0 0.35rem', fontSize: '0.8rem' }}>
+										<span className="badge" data-tone={badge.tone}>
 											{badge.label}
 										</span>
-										<span style={{ fontSize: '0.8rem', color: '#556' }}>
+										<span className="judge-weight">
 											weight: {criterion.weight === null ? 'not claimed (never guessed)' : `${criterion.weight}%`}
 										</span>
 									</div>
-									<div style={{ fontSize: '0.8rem', color: '#556' }}>
+									<div className="disc-meta">
 										evidence: {criterion.claimIds.map((id) => (
-											<code key={id} style={{ marginRight: 6 }}>
-												{id}
-											</code>
+											<code key={id}>{id}</code>
 										))}
 									</div>
-									<div style={{ marginTop: 4, display: 'flex', gap: 8, alignItems: 'center' }}>
-										<label style={{ fontSize: '0.85rem' }}>
+									<div className="row-actions">
+										<label className="judge-score-label">
 											score (0–10){' '}
 											<input
 												type="number"
+												className="input"
 												min={0}
 												max={10}
 												value={draft.score}
-												style={{ width: 60 }}
+												data-testid={`judge-score-${criterion.text}`}
 												onChange={(event) =>
 													setDrafts((prev) => ({ ...prev, [criterion.text]: { ...draft, score: event.target.value } }))
 												}
@@ -250,35 +264,36 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }) {
 										</label>
 										<input
 											type="text"
+											className="input"
 											placeholder="notes (required)"
 											value={draft.notes}
-											style={{ flex: 1 }}
+											data-testid={`judge-notes-${criterion.text}`}
 											onChange={(event) =>
 												setDrafts((prev) => ({ ...prev, [criterion.text]: { ...draft, notes: event.target.value } }))
 											}
 										/>
-										<button type="button" onClick={() => setExpanded(open ? null : criterion.text)}>
+										<button type="button" className="btn-ghost" onClick={() => setExpanded(open ? null : criterion.text)}>
 											{open ? 'Hide evidence' : 'Show evidence'}
 										</button>
 									</div>
 									{open ? (
-										<div style={{ margin: '0.5rem 0', paddingLeft: 12, borderLeft: '3px solid #dde', fontSize: '0.85rem' }}>
+										<div className="disc-detail">
 											<strong>Verified (receipts)</strong>
 											{(evidence?.verified ?? []).length === 0 ? (
-												<div style={{ color: '#556' }}>none — nothing verified for this criterion</div>
+												<div className="disc-meta">none — nothing verified for this criterion</div>
 											) : (
 												(evidence?.verified ?? []).map((ref) => (
-													<div key={ref.ref.id} style={{ fontSize: '0.8rem', color: '#556' }}>
+													<div key={ref.ref.id} className="disc-meta">
 														<code>{ref.ref.id}</code> [{ref.level}] {ref.ref.text}
 													</div>
 												))
 											)}
-											<strong style={{ display: 'block', marginTop: 6 }}>Declared (claims only)</strong>
+											<strong className="judge-declared-head">Declared (claims only)</strong>
 											{(evidence?.declared ?? []).length === 0 ? (
-												<div style={{ color: '#556' }}>none</div>
+												<div className="disc-meta">none</div>
 											) : (
 												(evidence?.declared ?? []).map((ref) => (
-													<div key={ref.ref.id} style={{ fontSize: '0.8rem', color: '#556' }}>
+													<div key={ref.ref.id} className="disc-meta">
 														<code>{ref.ref.id}</code> {ref.ref.text}
 													</div>
 												))
@@ -290,38 +305,43 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }) {
 						})}
 					</ul>
 
-					<div style={{ margin: '0.75rem 0' }}>
-						<label style={{ display: 'block', fontSize: '0.85rem' }}>
+					<div className="judge-submit">
+						<label className="judge-risks-label">
 							top risks (one per line — must reference the recorded evidence)
 							<textarea
+								className="input"
 								value={topRisksText}
 								rows={3}
-								style={{ width: '100%' }}
+								data-testid="judge-top-risks"
 								onChange={(event) => setTopRisksText(event.target.value)}
 							/>
 						</label>
-						<button type="button" onClick={() => void submitScorecard()} disabled={busy}>
-							Validate and record scorecard
-						</button>
-						<span style={{ fontSize: '0.8rem', color: '#556', marginLeft: 8 }}>
-							Malformed results are rejected server-side; access levels are recomputed from receipts.
-						</span>
+						<div className="row-actions">
+							<button type="button" className="btn-key" onClick={() => void submitScorecard()} disabled={busy}>
+								{busy ? 'Recording…' : 'Validate and record scorecard'}
+							</button>
+							<span className="mono-id">
+								Malformed results are rejected server-side; access levels are recomputed from receipts.
+							</span>
+						</div>
 					</div>
 				</>
 			)}
 
 			{scorecards.length > 0 ? (
-				<div style={{ marginTop: 12 }}>
-					<h3 style={{ fontSize: '1rem' }}>Recorded scorecards</h3>
-					<ul style={{ listStyle: 'none', padding: 0 }}>
+				<div className="judge-recorded">
+					<h3 className="ev-head">Recorded scorecards</h3>
+					<ul className="disc-list">
 						{scorecards.map((record) => (
-							<li key={record.id} style={{ borderTop: '1px solid #eee', padding: '0.5rem 0', fontSize: '0.85rem' }}>
-								<code>{record.id}</code> · rubric {record.rubricHash.slice(0, 19)}… · {record.scoringVersion}
+							<li key={record.id} className="disc-item">
+								<div className="disc-meta">
+									<code>{record.id}</code> · rubric {record.rubricHash.slice(0, 19)}… · {record.scoringVersion}
+								</div>
 								<div>
 									<strong>{record.result.coachingAverage}</strong> — {record.result.averageLabel}
 								</div>
 								{record.result.topRisks.length > 0 ? (
-									<ul style={{ margin: '0.25rem 0 0' }}>
+									<ul className="judge-risks">
 										{record.result.topRisks.map((risk) => (
 											<li key={risk}>{risk}</li>
 										))}
@@ -333,7 +353,7 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }) {
 				</div>
 			) : null}
 
-			<p style={{ color: '#556', fontSize: '0.8rem' }}>
+			<p className="judge-coaching-note" data-testid="judge-coaching-note">
 				Coaching only. Scores describe the recorded evidence; they are not a prediction of how judges will
 				score this project, and this UI has no win-probability feature.
 			</p>

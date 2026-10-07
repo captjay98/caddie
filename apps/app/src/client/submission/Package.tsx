@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ReactElement } from 'react';
 
 /**
  * P13 submission package (slice 3) — preparation/export UI over the REAL P13
@@ -86,12 +87,21 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 	return (await response.json()) as T;
 }
 
-const STATUS_BADGE: Record<ChecklistItemRecord['status'], { label: string; background: string }> = {
-	missing: { label: 'MISSING', background: '#fde5e5' },
-	declared: { label: 'DECLARED', background: '#fff4d6' },
-	verified: { label: 'VERIFIED', background: '#e6f6e6' },
-	conflict: { label: 'CONFLICT', background: '#f2d6f5' },
+/** The badge owns tint AND text colour (board screen 19: five meanings rode
+ * five pale washes whose labels inherited near-white text at 1.01–1.11:1). */
+const STATUS_BADGE: Record<ChecklistItemRecord['status'], { label: string; tone: 'danger' | 'warn' | 'ok' | 'action' }> = {
+	missing: { label: 'MISSING', tone: 'danger' },
+	declared: { label: 'DECLARED', tone: 'warn' },
+	verified: { label: 'VERIFIED', tone: 'ok' },
+	conflict: { label: 'CONFLICT', tone: 'action' },
 };
+
+function readinessTone(status: ReadinessRecord['status']): 'neutral' | 'warn' | 'danger' | 'ok' {
+	if (status === 'ready') return 'ok';
+	if (status === 'stale') return 'warn';
+	if (status === 'blocked') return 'danger';
+	return 'neutral';
+}
 
 const READINESS_LABEL: Record<ReadinessRecord['status'], string> = {
 	no_export: 'NOT EXPORTED',
@@ -100,7 +110,7 @@ const READINESS_LABEL: Record<ReadinessRecord['status'], string> = {
 	ready: 'PREPARED (not submitted)',
 };
 
-export function SubmissionPackage(props: { projectId: string; apiBase?: string }) {
+export function SubmissionPackage(props: { projectId: string; apiBase?: string }): ReactElement {
 	const { projectId, apiBase = '' } = props;
 	const [detail, setDetail] = useState<PackageDetail | null>(null);
 	const [reuseRequired, setReuseRequired] = useState(false);
@@ -244,54 +254,63 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 	const record = detail?.package ?? null;
 
 	return (
-		<section aria-label="Submission package" style={{ maxWidth: 760, fontFamily: 'system-ui, sans-serif' }}>
-			<header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-				<h2 style={{ margin: 0, fontSize: '1.1rem' }}>Submission package</h2>
-				<button type="button" onClick={() => void load()} disabled={busy}>
+		<section aria-label="Submission package" className="submission-panel" data-testid="submission-package">
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						prepare here, submit elsewhere — this tool never submits anywhere
+					</p>
+					<h2 className="ev-title">Submission package</h2>
+				</div>
+				<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
 					{busy ? 'Loading…' : 'Refresh'}
 				</button>
-			</header>
+			</div>
 
 			{error ? (
-				<p role="alert" style={{ color: '#a00' }}>
-					{error}
-				</p>
+				<div role="alert" className="sign-in-error disc-error" data-testid="submission-error">
+					<b>The package could not be read.</b>
+					<span> {error}</span>
+				</div>
 			) : null}
 
 			{record === null ? (
-				<div style={{ margin: '0.75rem 0' }}>
-					<p style={{ color: '#556', fontSize: '0.85rem' }}>
+				<div className="submission-empty">
+					<p className="state-detail">
 						No package yet. The title comes from THIS project; the checklist derives only from cited
 						requirement claims — with none on record it stays empty.
 					</p>
-					<label style={{ fontSize: '0.85rem', marginRight: 8 }}>
+					<label className="stack-toggle">
 						<input
 							type="checkbox"
+							data-testid="reuse-required"
 							checked={reuseRequired}
 							onChange={(event) => setReuseRequired(event.target.checked)}
 						/>{' '}
 						submitting requires a reuse disclosure
 					</label>
-					<button type="button" onClick={() => void createPackage()} disabled={busy}>
-						Create package
-					</button>
+					<div>
+						<button type="button" className="btn-key" onClick={() => void createPackage()} disabled={busy}>
+							Create package
+						</button>
+					</div>
 				</div>
 			) : (
 				<>
-					<div style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginTop: 8 }}>
+					<div className="disc-head">
 						<strong>{record.title}</strong>
-						<span style={{ background: '#f2f2f2', borderRadius: 4, padding: '0 0.35rem', fontSize: '0.8rem' }}>
+						<span className="badge" data-tone={readinessTone(detail!.readiness.status)} data-testid="readiness-badge">
 							{READINESS_LABEL[detail!.readiness.status]}
 						</span>
-						<span style={{ fontSize: '0.8rem', color: '#556' }}>
+						<span className="disc-meta">
 							rules version <code>{record.requirementsVersion.slice(0, 14)}…</code>
 						</span>
 					</div>
 
 					{detail!.readiness.reasons.length > 0 ? (
-						<div role="status" style={{ border: '1px solid #d90', borderRadius: 6, padding: '0.5rem 0.75rem', margin: '0.5rem 0', fontSize: '0.85rem' }}>
+						<div role="status" className="disc-gaps" data-testid="readiness-reasons">
 							<strong>Readiness gaps</strong>
-							<ul style={{ margin: '0.25rem 0 0' }}>
+							<ul>
 								{detail!.readiness.reasons.map((reason) => (
 									<li key={reason}>{reason}</li>
 								))}
@@ -299,56 +318,56 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 						</div>
 					) : null}
 
-					<div style={{ margin: '0.5rem 0', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-						<button type="button" onClick={() => void deriveChecklist()} disabled={busy}>
+					<div className="row-actions submission-actions">
+						<button type="button" className="btn-ghost" onClick={() => void deriveChecklist()} disabled={busy}>
 							Re-derive checklist
 						</button>
 						{record.reuseState === 'unconfirmed' ? (
-							<button type="button" onClick={() => void confirmReuse()} disabled={busy}>
+							<button type="button" className="btn-ghost" onClick={() => void confirmReuse()} disabled={busy}>
 								Confirm reuse disclosure (human)
 							</button>
 						) : (
-							<span style={{ fontSize: '0.85rem', color: '#556' }}>
+							<span className="mono-id">
 								reuse disclosure confirmed{record.reuseConfirmedBy ? ` by ${record.reuseConfirmedBy}` : ''}
 							</span>
 						)}
-						<button type="button" onClick={() => void exportNow()} disabled={busy}>
+						<button type="button" className="btn-key" onClick={() => void exportNow()} disabled={busy}>
 							Export snapshot
 						</button>
-						<button type="button" onClick={() => void copyLatestExport()} disabled={busy || detail!.exports.length === 0}>
+						<button type="button" className="btn-ghost" onClick={() => void copyLatestExport()} disabled={busy || detail!.exports.length === 0}>
 							Copy latest export
 						</button>
 					</div>
 
-					<h3 style={{ fontSize: '1rem' }}>Checklist ({detail!.checklist.length})</h3>
+					<h3 className="ev-head">Checklist ({detail!.checklist.length})</h3>
 					{detail!.checklist.length === 0 ? (
-						<p style={{ color: '#556', fontSize: '0.85rem' }}>
+						<p className="state-detail">
 							No submission rules are on record for this project — the checklist stays empty. Nothing is
 							assumed about videos, repositories, licenses or hosting.
 						</p>
 					) : (
-						<ul style={{ listStyle: 'none', padding: 0 }}>
+						<ul className="disc-list">
 							{detail!.checklist.map((item) => {
 								const badge = STATUS_BADGE[item.status];
 								return (
-									<li key={item.id} style={{ borderTop: '1px solid #eee', padding: '0.5rem 0' }}>
-										<div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+									<li key={item.id} className="disc-item">
+										<div className="disc-head">
 											<code>{item.kind}</code>
-											<span style={{ background: badge.background, borderRadius: 4, padding: '0 0.35rem', fontSize: '0.8rem' }}>
+											<span className="badge" data-tone={badge.tone}>
 												{badge.label}
 											</span>
-											<span style={{ fontSize: '0.85rem' }}>{item.requirementText}</span>
+											<span className="disc-claim-line">{item.requirementText}</span>
 										</div>
-										<div style={{ fontSize: '0.8rem', color: '#556' }}>
+										<div className="disc-meta">
 											cited: <code>{item.citation.claimId}</code> — “{item.citation.quote}” ·{' '}
 											<a href={item.citation.url} rel="noreferrer noopener" target="_blank">
 												{item.citation.url}
 											</a>
 										</div>
 										{item.evidence.length > 0 ? (
-											<div style={{ fontSize: '0.8rem', color: '#556' }}>
+											<div className="disc-meta">
 												backed by: {item.evidence.map((ref) => (
-													<code key={ref.refId} style={{ marginRight: 6 }}>
+													<code key={ref.refId}>
 														{ref.refId} ({ref.basis})
 													</code>
 												))}
@@ -360,56 +379,75 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 						</ul>
 					)}
 
-					<h3 style={{ fontSize: '1rem' }}>Exports ({detail!.exports.length})</h3>
-					<ul style={{ listStyle: 'none', padding: 0, fontSize: '0.85rem' }}>
+					<h3 className="ev-head">Exports ({detail!.exports.length})</h3>
+					<ul className="disc-list">
 						{detail!.exports.map((export_) => (
-							<li key={export_.id} style={{ borderTop: '1px solid #eee', padding: '0.35rem 0' }}>
-								<code>{export_.exportHash.slice(0, 19)}…</code> · rules version{' '}
-								<code>{export_.requirementsVersion.slice(0, 14)}…</code> · {export_.createdAt}
-								{export_.requirementsVersion !== detail!.readiness.currentRequirementsVersion ? (
-									<span style={{ color: '#a00' }}> — STALE (rules changed after this export)</span>
-								) : null}
+							<li key={export_.id} className="disc-item">
+								<div className="disc-meta">
+									<code>{export_.exportHash.slice(0, 19)}…</code> · rules version{' '}
+									<code>{export_.requirementsVersion.slice(0, 14)}…</code> · {export_.createdAt}
+									{export_.requirementsVersion !== detail!.readiness.currentRequirementsVersion ? (
+										<span className="badge" data-tone="warn"> — STALE (rules changed after this export)</span>
+									) : null}
+								</div>
 							</li>
 						))}
 					</ul>
 
-					<h3 style={{ fontSize: '1rem' }}>Record the submission (after YOU submit)</h3>
-					<p style={{ color: '#556', fontSize: '0.85rem' }}>
-						This tool never submits anywhere. After you submit on the contest portal yourself, record
-						that fact — it is stored separately from the prepared package.
-					</p>
-					<label style={{ display: 'block', fontSize: '0.85rem' }}>
-						your attestations (one per line, required)
-						<textarea
-							value={attestationsText}
-							rows={2}
-							style={{ width: '100%' }}
-							onChange={(event) => setAttestationsText(event.target.value)}
-						/>
-					</label>
-					<label style={{ display: 'block', fontSize: '0.85rem', margin: '0.25rem 0' }}>
-						note (optional){' '}
-						<input type="text" value={confirmationNote} onChange={(event) => setConfirmationNote(event.target.value)} />
-					</label>
-					<button
-						type="button"
-						onClick={() => void recordSubmitted()}
-						disabled={busy || detail!.exports.length === 0}
-					>
-						Record submitted
-					</button>
+					<div className="submission-attest">
+						<h3 className="ev-head">Record the submission (after YOU submit)</h3>
+						<p className="state-detail">
+							This tool never submits anywhere. After you submit on the contest portal yourself, record
+							that fact — it is stored separately from the prepared package.
+						</p>
+						<label className="judge-risks-label">
+							your attestations (one per line, required)
+							<textarea
+								className="input"
+								value={attestationsText}
+								rows={2}
+								data-testid="attestations"
+								onChange={(event) => setAttestationsText(event.target.value)}
+							/>
+						</label>
+						<label className="judge-score-label">
+							note (optional){' '}
+							<input
+								type="text"
+								className="input"
+								value={confirmationNote}
+								data-testid="confirmation-note"
+								onChange={(event) => setConfirmationNote(event.target.value)}
+							/>
+						</label>
+						<div className="row-actions">
+							<button
+								type="button"
+								className="btn-key"
+								onClick={() => void recordSubmitted()}
+								disabled={busy || detail!.exports.length === 0}
+							>
+								Record submitted
+							</button>
+							<span className="mono-id">
+								records YOUR attestation only — nothing is submitted anywhere by this tool
+							</span>
+						</div>
 
-					{detail!.confirmations.length > 0 ? (
-						<ul style={{ listStyle: 'none', padding: 0, fontSize: '0.85rem' }}>
-							{detail!.confirmations.map((confirmation) => (
-								<li key={confirmation.id} style={{ borderTop: '1px solid #eee', padding: '0.35rem 0' }}>
-									CONFIRMED SUBMITTED · export <code>{confirmation.exportHash.slice(0, 19)}…</code> ·{' '}
-									{confirmation.attestations.join(' / ')}
-									{confirmation.note ? ` — ${confirmation.note}` : ''}
-								</li>
-							))}
-						</ul>
-					) : null}
+						{detail!.confirmations.length > 0 ? (
+							<ul className="disc-list">
+								{detail!.confirmations.map((confirmation) => (
+									<li key={confirmation.id} className="disc-item">
+										<div className="disc-meta">
+											CONFIRMED SUBMITTED · export <code>{confirmation.exportHash.slice(0, 19)}…</code> ·{' '}
+											{confirmation.attestations.join(' / ')}
+											{confirmation.note ? ` — ${confirmation.note}` : ''}
+										</div>
+									</li>
+								))}
+							</ul>
+						) : null}
+					</div>
 				</>
 			)}
 		</section>

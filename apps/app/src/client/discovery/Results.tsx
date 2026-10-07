@@ -1,20 +1,26 @@
 import { useEffect, useState } from 'react';
+import type { ReactElement } from 'react';
+import { StatePanel } from '../states.tsx';
 
 /**
  * P11 discovery results (slice 3) — candidate list reading the REAL P11
- * routes. Workspace-shell integration is P06's; like the P10 evidence drawer
- * this component is deliberately mounted NOWHERE yet (it is exercisable
- * through the fixture routes and can be embedded under a project route later).
+ * routes, rebuilt on the shared class system (UI review board screen 13: the
+ * shipped file carried 17 hex literals and 25 inline style attributes with
+ * zero className references, so the eligibility verdict — the word the whole
+ * product exists to state honestly — was unreadable at 1.01–1.11:1 on the
+ * dark theme).
  *
- * Honesty rules rendered into the UI (feature-ledger C10, packets P11):
+ * Honesty rules rendered into the UI (feature-ledger F10, packets P11):
  *   - PARTIAL FEED FAILURE IS VISIBLE: failed sources appear as named gaps
  *     with their failure reason — never silently dropped.
  *   - Every fit claim shows the P10 evidence claim ids it rests on, or its
  *     recorded assumption — nothing invented.
  *   - Eligibility verdicts are conservative: unknown is shown as UNKNOWN
  *     (never as "probably fine"), and a hard-ineligible candidate is labeled
- *     ineligible — ranking demotes it but never relabels it.
+ *     ineligible — ranking demotes it but never relabels it. The badge owns
+ *     BOTH its tint and its text colour, so the verdict reads on any theme.
  *   - matchedRequirements is a crude heuristic count, never a win probability.
+ *   - the first fetch renders a loading state, never a blank page.
  */
 
 export interface DiscoveryCandidateRecord {
@@ -88,13 +94,20 @@ function verdictLabel(verdict: string): string {
 	return 'UNKNOWN';
 }
 
+/** UNKNOWN reads as an absence of evidence — never a weak negative. */
+function verdictTone(verdict: string): 'ok' | 'danger' | 'neutral' {
+	if (verdict === 'eligible') return 'ok';
+	if (verdict === 'ineligible') return 'danger';
+	return 'neutral';
+}
+
 function when(iso: string | null): string {
 	if (!iso) return 'never';
 	const date = new Date(iso);
 	return Number.isFinite(date.getTime()) ? date.toISOString() : 'unknown';
 }
 
-export function DiscoveryResults(props: { projectId: string; apiBase?: string }) {
+export function DiscoveryResults(props: { projectId: string; apiBase?: string }): ReactElement {
 	const { projectId, apiBase = '' } = props;
 	const [list, setList] = useState<DiscoveryEvaluatedList | null>(null);
 	const [latestFeed, setLatestFeed] = useState<DiscoveryFeedRecord | null>(null);
@@ -146,6 +159,8 @@ export function DiscoveryResults(props: { projectId: string; apiBase?: string })
 	}
 
 	useEffect(() => {
+		setList(null);
+		setLatestFeed(null);
 		void load();
 	}, [projectId]);
 
@@ -154,30 +169,39 @@ export function DiscoveryResults(props: { projectId: string; apiBase?: string })
 	const failedSources = (latestFeed?.sources ?? []).filter((s) => s.outcome === 'failed');
 
 	return (
-		<section aria-label="Discovery results" style={{ maxWidth: 760, fontFamily: 'system-ui, sans-serif' }}>
-			<header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-				<h2 style={{ margin: 0, fontSize: '1.1rem' }}>Discovery</h2>
-				<span>
-					<button type="button" onClick={() => void runFeed()} disabled={busy}>
+		<section aria-label="Discovery results" className="discovery-panel" data-testid="discovery-results">
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						ranked on what could be read
+					</p>
+					<h2 className="ev-title">Discovery</h2>
+				</div>
+				<span className="disc-actions">
+					<button type="button" className="btn-key" onClick={() => void runFeed()} disabled={busy}>
 						Run feed
 					</button>{' '}
-					<button type="button" onClick={() => void load()} disabled={busy}>
+					<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
 						{busy ? 'Loading…' : 'Refresh'}
 					</button>
 				</span>
-			</header>
+			</div>
 
 			{error ? (
-				<p role="alert" style={{ color: '#a00' }}>
-					{error}
-				</p>
+				<div role="alert" className="sign-in-error disc-error" data-testid="discovery-error">
+					<b>The sweep could not be read.</b>
+					<span> {error}</span>
+					<button type="button" className="btn-ghost" onClick={() => void load()}>
+						Retry
+					</button>
+				</div>
 			) : null}
 
 			{/* Partial feed failure is a visible, named gap — never silently dropped. */}
 			{failedSources.length > 0 ? (
-				<div role="status" style={{ border: '1px solid #d90', borderRadius: 6, padding: '0.5rem 0.75rem', margin: '0.5rem 0' }}>
+				<div role="status" className="disc-gaps" data-testid="feed-gaps">
 					<strong>Feed gaps</strong> (last run {when(latestFeed?.requestedAt ?? null)}):
-					<ul style={{ margin: '0.25rem 0 0' }}>
+					<ul>
 						{failedSources.map((s) => (
 							<li key={s.source}>
 								<code>{s.source}</code> failed — {s.failureReason ?? 'unknown reason'}; its candidates are
@@ -188,87 +212,79 @@ export function DiscoveryResults(props: { projectId: string; apiBase?: string })
 				</div>
 			) : null}
 
-			<p style={{ color: '#556', fontSize: '0.85rem' }}>
+			<p className="state-detail">
 				Eligibility uses your profile country: {list?.profileCountry ?? 'none recorded — country rules stay UNKNOWN'}.
 				Ranking never presents a hard-ineligible candidate as eligible.
 			</p>
 
 			{ranked.length === 0 ? (
-				<p style={{ color: '#556' }}>{list ? 'No candidates yet — run the feed.' : ''}</p>
+				list ? (
+					<StatePanel
+						kind="empty"
+						title="Nothing has been read, so nothing is ranked"
+						detail="No candidates yet — run the feed. A sweep reads the sources this project watches and ranks only what it could actually read; until one runs this pane stays empty on purpose rather than guessing."
+					/>
+				) : (
+					<StatePanel kind="loading" title="Reading the feeds…" />
+				)
 			) : (
-				<ul style={{ listStyle: 'none', padding: 0 }}>
+				<ul className="disc-list">
 					{ranked.map((entry) => {
 						const evaluation = byId.get(entry.candidateId);
 						if (!evaluation) return null;
 						const { candidate, fit, eligibility } = evaluation;
 						const open = expanded === candidate.id;
 						return (
-							<li key={candidate.id} style={{ borderTop: '1px solid #eee', padding: '0.5rem 0' }}>
-								<div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+							<li key={candidate.id} className="disc-item">
+								<div className="disc-head">
 									<strong>{candidate.title}</strong>
-									<span
-										style={{
-											background:
-												eligibility.verdict === 'eligible'
-													? '#e6f6e6'
-													: eligibility.verdict === 'ineligible'
-														? '#fde5e5'
-														: '#f2f2f2',
-											borderRadius: 4,
-											padding: '0 0.35rem',
-											fontSize: '0.8rem',
-										}}
-									>
+									<span className="badge" data-tone={verdictTone(eligibility.verdict)} data-testid={`eligibility-${candidate.id}`}>
 										{verdictLabel(eligibility.verdict)}
 									</span>
-									<span style={{ fontSize: '0.8rem', color: '#556' }}>
-										fit: {fit.matchedRequirements} requirement(s) evidenced
-									</span>
+									<span className="disc-fit">fit: {fit.matchedRequirements} requirement(s) evidenced</span>
 								</div>
-								<div style={{ color: '#556', fontSize: '0.85rem' }}>
-									{candidate.summary}
-								</div>
-								<div style={{ color: '#556', fontSize: '0.8rem' }}>
+								<div className="disc-summary">{candidate.summary}</div>
+								<div className="disc-meta">
 									<a href={candidate.url} rel="noreferrer noopener" target="_blank">
 										{candidate.url}
 									</a>{' '}
 									· source {candidate.source} · first seen {when(candidate.firstSeenAt)} · status{' '}
 									{candidate.status}
 								</div>
-								<div style={{ marginTop: 4 }}>
-									<button type="button" onClick={() => setExpanded(open ? null : candidate.id)}>
+								<div className="row-actions">
+									<button
+										type="button"
+										className="btn-ghost"
+										onClick={() => setExpanded(open ? null : candidate.id)}
+									>
 										{open ? 'Hide fit detail' : 'Explain fit'}
 									</button>{' '}
 									{candidate.status === 'new' ? (
-										<button type="button" onClick={() => void accept(candidate.id)} disabled={busy}>
+										<button type="button" className="btn-key" onClick={() => void accept(candidate.id)} disabled={busy}>
 											Accept
 										</button>
 									) : null}
 								</div>
 								{open ? (
-									<div style={{ margin: '0.5rem 0', paddingLeft: 12, borderLeft: '3px solid #dde' }}>
+									<div className="disc-detail">
 										{fit.claims.length === 0 ? (
-											<p style={{ color: '#556', fontSize: '0.85rem' }}>
-												No evidence-mapped requirements for this candidate.
-											</p>
+											<p className="state-detail">No evidence-mapped requirements for this candidate.</p>
 										) : (
 											fit.claims.map((claim) => (
-												<div key={`${claim.claimType}:${claim.requirement}`} style={{ marginBottom: 6 }}>
-													<div style={{ fontSize: '0.85rem' }}>
+												<div key={`${claim.claimType}:${claim.requirement}`} className="disc-claim">
+													<div className="disc-claim-line">
 														<strong>{claim.verdict.toUpperCase()}</strong> — {claim.statement}
 													</div>
 													{claim.evidenceClaimIds.length > 0 ? (
-														<div style={{ fontSize: '0.8rem', color: '#556' }}>
+														<div className="disc-claim-evidence">
 															evidence:{' '}
 															{claim.evidenceClaimIds.map((id) => (
-																<code key={id} style={{ marginRight: 6 }}>
-																	{id}
-																</code>
+																<code key={id}>{id}</code>
 															))}
 														</div>
 													) : null}
 													{claim.assumptions.map((assumption) => (
-														<div key={assumption} style={{ fontSize: '0.8rem', color: '#860' }}>
+														<div key={assumption} className="disc-assumption">
 															assumption: {assumption}
 														</div>
 													))}
@@ -276,13 +292,13 @@ export function DiscoveryResults(props: { projectId: string; apiBase?: string })
 											))
 										)}
 										{eligibility.rules.length === 0 ? (
-											<p style={{ color: '#556', fontSize: '0.8rem' }}>
+											<p className="disc-rules">
 												No quoted eligibility rules on record — verdict stays UNKNOWN, never assumed
 												eligible.
 											</p>
 										) : (
 											eligibility.rules.map((rule) => (
-												<div key={`${rule.claimType}:${rule.reason}`} style={{ fontSize: '0.8rem', color: '#556' }}>
+												<div key={`${rule.claimType}:${rule.reason}`} className="disc-rules">
 													<code>{rule.claimType}</code> → {rule.verdict} ({rule.basis}): {rule.reason}
 												</div>
 											))
