@@ -49,7 +49,7 @@ a {
 .kicker {
 	margin: 0;
 	font-family: var(--font-mono);
-	font-size: 10.5px;
+	font-size: var(--r-label);
 	font-weight: 700;
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
@@ -66,6 +66,9 @@ a {
 .kicker[data-tone='limit'],
 .kicker[data-tone='stale'] {
 	color: var(--color-warn);
+}
+.kicker[data-tone='planned'] {
+	color: var(--color-muted);
 }
 .kicker[data-tone='offline'] {
 	color: var(--color-muted);
@@ -85,7 +88,7 @@ a {
 	border-radius: 9999px;
 	padding: 1px 8px;
 	font-family: var(--font-mono);
-	font-size: 10.5px;
+	font-size: var(--r-meta);
 	letter-spacing: 0.04em;
 }
 
@@ -156,17 +159,56 @@ a.btn-ghost.topbar-nav-link {
 
 .sign-in-btn:disabled {
 	opacity: 0.45;
-	cursor: wait;
+	cursor: not-allowed;
 }
 
+/* One row per provider: the button with its availability stated beside it
+   (UI review board screen 02 — presence read before the first click). */
+.sign-in-provider {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.sign-in-provider .sign-in-btn {
+	margin: 0.4rem 0;
+}
+
+.sign-in-provider .status-pill {
+	flex: none;
+}
+
+.sign-in-presence {
+	margin: 0.4rem 0 0;
+}
+
+/* Failure separated into reason, consequence and action — a rejected attempt
+   keeps Try again; a 503 offers the other provider (screen 02). */
 .sign-in-error {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 0.5rem;
 	color: var(--color-danger);
+	border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
+	border-radius: 8px;
+	padding: 0.7rem 0.9rem;
 	margin-top: 0.75rem;
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.sign-in-error b {
+	font-weight: 700;
+}
+
+.sign-in-error .btn-key {
+	font-size: 13px;
 }
 
 .mono-id {
 	font-family: var(--font-mono);
-	font-size: 10.5px;
+	font-size: var(--r-meta);
 	color: var(--color-muted);
 	overflow-wrap: anywhere;
 }
@@ -237,6 +279,154 @@ a.btn-ghost.topbar-nav-link {
 	flex-wrap: wrap;
 }
 
+/* --- shared chrome: one header + one nav row on every route ---------------
+   UI review board screen 16/04: the topbar carries the wordmark, project
+   selector, New project and the icon actions; the route links live in the
+   quiet .app-nav row below it (3-zone header grammar). */
+
+.app-shell {
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
+	min-height: 100dvh;
+}
+
+.shell-main {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+.app-nav {
+	display: flex;
+	align-items: center;
+	gap: 0.2rem;
+	padding: 0.2rem 1rem;
+	border-bottom: 1px solid var(--color-line-soft);
+	flex-wrap: wrap;
+}
+
+.app-nav a {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	padding: 0.35rem 0.7rem;
+	border-radius: 8px;
+	color: var(--color-muted);
+	font-size: 13px;
+	font-weight: 600;
+	text-decoration: none;
+	white-space: nowrap;
+}
+
+.app-nav a:hover {
+	color: var(--color-bright);
+	background: color-mix(in srgb, var(--color-bright) 5%, transparent);
+}
+
+.app-nav a[aria-current='page'] {
+	color: var(--color-action);
+}
+
+.app-nav .nav-group {
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--color-muted);
+	opacity: 0.7;
+	padding: 0.35rem 0.5rem 0.35rem 0;
+	white-space: nowrap;
+}
+
+.app-nav .spacer {
+	flex: 1;
+}
+
+.crumbs {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.35rem 1rem;
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.04em;
+	color: var(--color-muted);
+	border-bottom: 1px solid var(--color-line-soft);
+	flex-wrap: wrap;
+}
+
+.crumbs b {
+	color: var(--color-bright);
+	font-weight: 600;
+}
+
+.r-link {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	color: var(--color-muted);
+	font-size: 13px;
+	font-weight: 600;
+	text-decoration: none;
+	white-space: nowrap;
+}
+
+.r-link:hover {
+	color: var(--color-action);
+}
+
+.account-menu {
+	position: relative;
+	display: inline-flex;
+}
+
+.account-menu-pop {
+	position: absolute;
+	top: calc(100% + 0.4rem);
+	right: 0;
+	z-index: 50;
+	min-width: 180px;
+	background: var(--color-panel);
+	border: 1px solid var(--color-line);
+	border-radius: 8px;
+	box-shadow: var(--lift-shadow);
+	padding: 0.3rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+}
+
+.account-menu-pop a,
+.account-menu-pop button {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	padding: 0.45rem 0.6rem;
+	border: none;
+	background: none;
+	border-radius: 6px;
+	color: var(--color-bright);
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+	text-align: left;
+	text-decoration: none;
+}
+
+.account-menu-pop a:hover,
+.account-menu-pop button:hover {
+	background: color-mix(in srgb, var(--color-bright) 6%, transparent);
+}
+
+.topbar .icon-btn svg,
+.app-nav a svg,
+.account-menu-pop a svg,
+.r-link svg {
+	vertical-align: -3px;
+}
+
 .icon-btn {
 	display: grid;
 	place-items: center;
@@ -248,7 +438,7 @@ a.btn-ghost.topbar-nav-link {
 	color: var(--color-muted);
 	cursor: pointer;
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: var(--r-label);
 }
 
 .icon-btn:hover {
@@ -355,7 +545,7 @@ a.btn-ghost.topbar-nav-link {
 		text-align: center;
 		padding: 0.6rem 0;
 		font-family: var(--font-mono);
-		font-size: 10px;
+		font-size: var(--r-label);
 		text-transform: uppercase;
 		letter-spacing: 0.14em;
 	}
@@ -445,7 +635,7 @@ a.btn-ghost.topbar-nav-link {
 
 .stale-chip {
 	font-family: var(--font-mono);
-	font-size: 10px;
+	font-size: var(--r-meta);
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
 	color: var(--color-warn);
@@ -479,7 +669,7 @@ a.btn-ghost.topbar-nav-link {
 	align-items: center;
 	gap: 0.4rem;
 	font-family: var(--font-mono);
-	font-size: 10.5px;
+	font-size: var(--r-label);
 	font-weight: 700;
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
@@ -516,6 +706,55 @@ a.btn-ghost.topbar-nav-link {
 	background: color-mix(in srgb, var(--color-danger) 12%, transparent);
 	color: var(--color-danger);
 }
+/* Capability that has never existed — outlined, muted, never the danger tint
+   (UI review board screens 03/15: planned and not-configured must not read as
+   failures). */
+.status-pill[data-status='planned'] {
+	background: transparent;
+	border: 1px dashed var(--color-line);
+	color: var(--color-muted);
+}
+
+/* Badge primitive — owns BOTH halves of the pair (tint and text colour),
+   derived from the same token, so a call site cannot paint a background
+   without painting its label (UI review board screen 16: five sites shipped
+   at 1.01–1.11:1 because they set a background and inherited the body text). */
+.badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	border-radius: 9999px;
+	padding: 1px 8px;
+	font-family: var(--font-mono);
+	font-size: var(--r-meta);
+	letter-spacing: 0.04em;
+	font-weight: 600;
+}
+.badge[data-tone='ok'] {
+	background: color-mix(in srgb, var(--color-ok) 12%, transparent);
+	color: var(--color-ok);
+}
+.badge[data-tone='warn'] {
+	background: color-mix(in srgb, var(--color-warn) 12%, transparent);
+	color: var(--color-warn);
+}
+.badge[data-tone='danger'] {
+	background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+	color: var(--color-danger);
+}
+.badge[data-tone='action'] {
+	background: color-mix(in srgb, var(--color-action) 12%, transparent);
+	color: var(--color-action);
+}
+.badge[data-tone='neutral'] {
+	background: color-mix(in srgb, var(--color-bright) 8%, transparent);
+	color: var(--color-muted);
+}
+.badge[data-tone='roadmap'] {
+	background: transparent;
+	border: 1px dashed var(--color-line);
+	color: var(--color-muted);
+}
 
 .decision-card .actions {
 	margin-top: 0.7rem;
@@ -530,7 +769,7 @@ a.btn-ghost.topbar-nav-link {
 	border: none;
 	color: var(--color-muted);
 	font-family: var(--font-mono);
-	font-size: 10.5px;
+	font-size: var(--r-label);
 	letter-spacing: 0.06em;
 	cursor: pointer;
 	padding: 0.15rem 0;
@@ -602,7 +841,7 @@ a.btn-ghost.topbar-nav-link {
 
 .row-status {
 	font-family: var(--font-mono);
-	font-size: 10px;
+	font-size: var(--r-meta);
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
 	color: var(--color-muted);
@@ -667,7 +906,7 @@ a.btn-ghost.topbar-nav-link {
 
 .tool-banner {
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: var(--r-meta);
 	color: var(--color-muted);
 	border: 1px solid var(--color-line-soft);
 	border-left: 2px solid var(--color-action);
@@ -688,19 +927,24 @@ a.btn-ghost.topbar-nav-link {
 
 .thinking-line {
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: var(--r-meta);
 	color: var(--color-muted);
 }
 
 .thinking-line::after {
-	content: '▌';
-	color: var(--color-action);
+	content: '';
+	display: inline-block;
+	width: 6px;
+	height: 11px;
+	margin-left: 0.35rem;
+	background: var(--color-action);
+	vertical-align: -1px;
 	animation: pulse 1.2s ease-in-out infinite;
 }
 
 .settlement-banner {
 	font-family: var(--font-mono);
-	font-size: 11px;
+	font-size: var(--r-meta);
 	letter-spacing: 0.06em;
 	border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
 	border-radius: 8px;
@@ -747,7 +991,7 @@ a.btn-ghost.topbar-nav-link {
 
 .draft-actions .btn-ghost {
 	padding: 0.15rem 0.55rem;
-	font-size: 11px;
+	font-size: var(--r-label);
 }
 
 /* --- composer ----------------------------------------------------------------- */
@@ -793,6 +1037,68 @@ a.btn-ghost.topbar-nav-link {
 	display: flex;
 	gap: 0.45rem;
 	min-width: 0;
+}
+
+/* General two-up row — the shared layout rule six call sites expected
+   (Settings 178/196/222/256, Memory, Search): two-up grid, min-width 0 so
+   inputs shrink instead of overflowing (UI review board screen 15). */
+.row {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	gap: 0.6rem;
+	align-items: center;
+	min-width: 0;
+}
+
+/* Settings stack: the five panels get real breathing room and a parent gap
+   instead of merging into one long surface with hairlines through it. */
+.settings-stack {
+	display: grid;
+	gap: 1rem;
+	width: 100%;
+	max-width: 760px;
+	padding: 1.2rem;
+}
+
+.settings-panel {
+	padding: 1rem 1.1rem;
+}
+
+.settings-subnav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+}
+
+.settings-subnav a {
+	padding: 0.35rem 0.7rem;
+	border-radius: 8px;
+	color: var(--color-muted);
+	font-size: 13px;
+	font-weight: 600;
+	text-decoration: none;
+	white-space: nowrap;
+}
+
+.settings-subnav a:hover {
+	color: var(--color-bright);
+	background: color-mix(in srgb, var(--color-bright) 5%, transparent);
+}
+
+/* Stack interest toggles: a real checkbox with a visible checked state, not
+   the read-only status pill reused as a control (screen 15). */
+.stack-toggle {
+	cursor: pointer;
+}
+
+.stack-toggle input {
+	accent-color: var(--color-action);
+	cursor: pointer;
+}
+
+.stack-toggle:has(input:checked) {
+	background: color-mix(in srgb, var(--color-action) 12%, transparent);
+	color: var(--color-action);
 }
 
 .new-project-form input {

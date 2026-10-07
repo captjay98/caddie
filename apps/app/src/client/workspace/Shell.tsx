@@ -1,17 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { useSearch } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Project } from '@caddie/contracts';
-import { SignInPanel, authClient } from '../auth.ts';
+import { SignInPanel } from '../auth.ts';
 import { failureKind, StatePanel } from '../states.tsx';
 import { Start } from '../onboarding/Start.tsx';
 import {
 	useArtifacts,
 	useAuthStatus,
 	useCreateProject,
-	useHomeProject,
-	useProjects,
 	useRunBindings,
 	useSessionActor,
 	watchAuthTransitions,
@@ -21,62 +18,47 @@ import { RunInspector } from '../runs/RunInspector.tsx';
 import { Channel } from '../conversation/Channel.tsx';
 import { standbySource as STANDBY, useChannelStore, type ChannelDraft } from '../conversation/channel-store.ts';
 import { useCoordinatorTransport } from '../coordinator.ts';
+import { WorkspaceChrome, useWorkspaceChrome } from './Chrome.tsx';
 
 /**
  * Workspace shell — feature-ledger rows C5/H9 (Card/Tasks/Channel continuity
  * and the two-pane shell, adapted to typed payloads + TanStack Router/Query).
  *
- * Layout: topbar (wordmark, project selector, refresh, theme, sign-out) over a
- * two-pane split at >=768px (Brief/Runs aside + Channel) and a single pane
- * with a bottom tab bar below (Channel is the mobile home surface). The aside
- * is collapsible ("collapsible detail" in the design direction). All colors
- * come from the halo tokens; the theme switch is the data-theme attribute.
+ * The topbar, project selector, theme control, refresh and sign-out live in the
+ * shared WorkspaceChrome (one header + one nav row on every route); this
+ * component owns the workspace body: a two-pane split at >=768px (Brief/Runs
+ * aside + Channel) and a single pane with a bottom tab bar below (Channel is
+ * the mobile home surface). All colors come from the halo tokens; the theme
+ * switch is the data-theme attribute.
  *
- * Session hygiene (reference lesson, P00 audit): the authenticated shell is
+ * Session hygiene (reference lesson, P00 audit): the authenticated body is
  * KEYED by actor id, so an account switch remounts every per-user state fresh;
  * query keys carry the actor id and non-auth caches are wiped on transitions.
  */
 
-function useMediaQuery(query: string): boolean {
-	const [matches, setMatches] = useState(
-		() => typeof window !== 'undefined' && window.matchMedia(query).matches,
-	);
-	useEffect(() => {
-		const mq = window.matchMedia(query);
-		const onChange = () => setMatches(mq.matches);
-		mq.addEventListener('change', onChange);
-		window.addEventListener('resize', onChange);
-		return () => {
-			mq.removeEventListener('change', onChange);
-			window.removeEventListener('resize', onChange);
-		};
-	}, [query]);
-	return matches;
-}
-
-type Tab = 'brief' | 'runs' | 'channel';
-
-const THEME_KEY = 'caddie-theme';
-
-function currentTheme(): 'light' | 'dark' {
-	return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-}
-
 export function Shell(): ReactElement {
+	return <WorkspaceBody />;
+}
+
+function WorkspaceBody(): ReactElement {
 	const auth = useAuthStatus();
+	// The New project action lives in the chrome (above this body), so the
+	// inline form's open state is owned here and passed down.
+	const [formOpen, setFormOpen] = useState(false);
+	const openForm = () => setFormOpen(true);
 
 	if (auth.isPending) {
 		return (
-			<div className="shell" data-testid="shell">
+			<WorkspaceChrome active="brief">
 				<div className="shell-loading">
 					<StatePanel kind="loading" title="Checking your session…" />
 				</div>
-			</div>
+			</WorkspaceChrome>
 		);
 	}
 	if (auth.error) {
 		return (
-			<div className="shell" data-testid="shell">
+			<WorkspaceChrome active="brief">
 				<div className="shell-loading">
 					<StatePanel
 						kind={failureKind(auth.error)}
@@ -85,15 +67,17 @@ export function Shell(): ReactElement {
 						retryLabel="Check again"
 					/>
 				</div>
-			</div>
+			</WorkspaceChrome>
 		);
 	}
 	if (!auth.data.authenticated) {
 		// Unauthenticated /app shows the P01 sign-in state (composed build has
-		// auth enabled; this is the real fail-closed probe, not a mock).
+		// auth enabled; this is the real fail-closed probe, not a mock). The
+		// chrome crosses the auth boundary: wordmark, theme and the route back
+		// to the landing stay visible at the sign-in wall.
 		return (
-			<div className="shell" data-testid="shell">
-				<main id="main" className="shell-loading">
+			<WorkspaceChrome active="brief">
+				<div className="shell-loading">
 					<section className="sign-in-card card-surface">
 						<p className="kicker" data-tone="action">
 							CADDIE · WORKSPACE
@@ -101,63 +85,57 @@ export function Shell(): ReactElement {
 						<h1 className="sign-in-title">Sign in to your workspace</h1>
 						<SignInPanel callbackURL="/app/" />
 					</section>
-				</main>
-			</div>
+				</div>
+			</WorkspaceChrome>
 		);
 	}
-	return <AuthedShellGate />;
+	return (
+		<WorkspaceChrome active="brief" onNewProject={openForm}>
+			<AuthedWorkspaceGate formOpen={formOpen} onOpenForm={openForm} onCloseForm={() => setFormOpen(false)} />
+		</WorkspaceChrome>
+	);
 }
 
-function AuthedShellGate(): ReactElement {
+function AuthedWorkspaceGate(props: {
+	formOpen: boolean;
+	onOpenForm: () => void;
+	onCloseForm: () => void;
+}): ReactElement {
 	const auth = useAuthStatus();
 	const actor = useSessionActor(Boolean(auth.data?.authenticated));
 	// Key by actor: an account switch remounts every per-user state fresh, so
 	// neither channel drafts nor tab state can leak across accounts.
-	return <AuthedShell key={actor.data ?? 'pending'} actorId={actor.data ?? null} />;
+	return (
+		<AuthedWorkspace
+			key={actor.data ?? 'pending'}
+			actorId={actor.data ?? null}
+			formOpen={props.formOpen}
+			onOpenForm={props.onOpenForm}
+			onCloseForm={props.onCloseForm}
+		/>
+	);
 }
 
-function AuthedShell(props: { actorId: string | null }): ReactElement {
+function AuthedWorkspace(props: {
+	actorId: string | null;
+	formOpen: boolean;
+	onOpenForm: () => void;
+	onCloseForm: () => void;
+}): ReactElement {
 	const actor = useMemo(() => ({ actorId: props.actorId }), [props.actorId]);
-	const auth = useAuthStatus();
 	const queryClient = useQueryClient();
-	const navigate = useNavigate();
 	const search = useSearch({ strict: false }) as { project?: string };
+	const chrome = useWorkspaceChrome();
 
-	const projects = useProjects(actor);
-	const isDesktop = useMediaQuery('(min-width: 768px)');
-	const [tab, setTab] = useState<Tab>(isDesktop ? 'brief' : 'channel');
+	const isDesktop = useIsDesktop();
+	const [tab, setTab] = useState<'brief' | 'runs' | 'channel'>(isDesktop ? 'brief' : 'channel');
 	const [detailOpen, setDetailOpen] = useState(true);
-	const [formOpen, setFormOpen] = useState(false);
-	const [theme, setTheme] = useState<'light' | 'dark'>(currentTheme);
 
-	const projectList: Project[] = projects.data?.projects ?? [];
 	const paramProject = search.project;
-	// The Home project (kind='home') is the default landing when the URL
-	// names no project — the direct line to Caddie. An explicit ?project=
-	// always wins; a stale param falls through to Home too.
-	const home = useHomeProject(actor, projectList.length > 0);
-	const homeProject =
-		projectList.find((project) => project.kind === 'home') ?? home.data?.project ?? null;
-	const selectedProject =
-		(paramProject ? projectList.find((project) => project.id === paramProject) : undefined) ??
-		homeProject ??
-		projectList[0] ??
-		null;
 	const projectMissing =
-		Boolean(paramProject) && projectList.length > 0 && !projectList.some((p) => p.id === paramProject);
-	const effectiveProjectId = projectMissing ? null : (selectedProject?.id ?? null);
-	// Home is created server-side on first fetch; refresh the list once so
-	// the selector shows it without a manual reload.
-	const queryClientRef = queryClient;
-	useEffect(() => {
-		if (
-			home.data?.project &&
-			projectList.length > 0 &&
-			!projectList.some((p) => p.id === home.data!.project.id)
-		) {
-			void queryClientRef.invalidateQueries({ queryKey: ['projects', props.actorId] });
-		}
-	}, [home.data, projectList, queryClientRef, props.actorId]);
+		Boolean(paramProject) && chrome.projectList.length > 0 && !chrome.projectList.some((p) => p.id === paramProject);
+	const effectiveProjectId = chrome.effectiveProjectId;
+
 	// The coordinator run transport: live agent snapshot + sends for the
 	// selected project's active run (null → the channel keeps its standby).
 	const transport = useCoordinatorTransport(actor, effectiveProjectId);
@@ -168,326 +146,172 @@ function AuthedShell(props: { actorId: string | null }): ReactElement {
 	const channel = useChannelStore({ sessionKey: props.actorId ?? 'anon', projectId: effectiveProjectId });
 
 	// Cross-account cache hygiene: on any auth/actor transition, wipe every
-	// non-auth query so another account's rows can never be served or prefetched.
+	// non-auth query so another account's rows can never be served or
+	// prefetched. This body mounts only after auth+actor have settled, so the
+	// guard initializes on a known identity and never wipes during load.
+	const guardAuth = useAuthStatus();
 	const guard = useMemo(() => watchAuthTransitions(queryClient), [queryClient]);
 	useEffect(() => {
-		guard.maybe(auth.data?.authenticated, props.actorId);
-	}, [guard, props.actorId, auth.data?.authenticated, queryClient]);
+		guard.maybe(guardAuth.data?.authenticated, props.actorId);
+	}, [guard, guardAuth.data?.authenticated, props.actorId, queryClient]);
 
-	function selectProject(projectId: string) {
-		void navigate({
-			to: '/',
-			search: (prev: Record<string, unknown>) => ({
-				...prev,
-				project: projectId === '' ? undefined : projectId,
-			}),
-		});
-	}
-
-	function clearProjectParam() {
-		void navigate({ to: '/', search: {} });
-	}
-
-	function refreshAll() {
-		void queryClient.invalidateQueries({ queryKey: ['projects', props.actorId] });
-		void queryClient.invalidateQueries({ queryKey: ['run-bindings', props.actorId] });
-		void queryClient.invalidateQueries({ queryKey: ['artifacts', props.actorId] });
-		void queryClient.invalidateQueries({ queryKey: ['plan-docs', props.actorId] });
-	}
-
-	function toggleTheme() {
-		const next = currentTheme() === 'dark' ? 'light' : 'dark';
-		document.documentElement.setAttribute('data-theme', next);
-		try {
-			localStorage.setItem(THEME_KEY, next);
-		} catch {
-			// private mode: theme stays session-only
-		}
-		setTheme(next);
-	}
-
-	async function signOut() {
-		try {
-			await authClient.signOut();
-		} finally {
-			void queryClient.invalidateQueries({ queryKey: ['auth'] });
-		}
-	}
-
-	const projectsState = projects.isPending
+	const projectsState = chrome.projectsPending
 		? 'loading'
-		: projects.error
-			? failureKind(projects.error)
+		: chrome.projectsError
+			? failureKind(chrome.projectsError)
 			: 'empty';
-	const briefStale = projects.isFetching && !projects.isPending;
+	const briefStale = chrome.projectsFetching;
 	const asideHidden = tab === 'channel' || !detailOpen;
 
 	return (
-		<div className="shell" data-testid="shell" data-theme-name={theme}>
-			<a className="skip-link" href="#main">
-				Skip to content
-			</a>
-			<header className="topbar">
-				<span className="wordmark">
-					CADDIE<b>▸</b>
-				</span>
-				{projects.isPending ? (
-					<span className="mono-id">loading projects…</span>
-				) : (
-					<label className="project-select-wrap">
-						<span className="kicker">Project</span>
-						<select
-							className="input project-select"
-							aria-label="Project"
-							data-testid="project-selector"
-							value={selectedProject?.id ?? ''}
-							onChange={(event) => selectProject(event.target.value)}
-						>
-							{projectList.length === 0 ? <option value="">No projects yet</option> : null}
-							{projectList.map((project) => (
-								<option key={project.id} value={project.id}>
-									{project.name}
-									{project.status === 'archived' ? ' (archived)' : ''}
-								</option>
-							))}
-						</select>
-					</label>
-				)}
-				<div className="topbar-actions">
-					{/* P11/P13 surfaces: real client routes (surface.tsx); the
-					    selected project rides along in the search param. */}
-					<Link
-						to="/discovery"
-						className="btn-ghost topbar-nav-link"
-						data-testid="nav-discovery"
-						search={{ project: search.project }}
-					>
-						Discovery
-					</Link>
-					<Link
-						to="/judge"
-						className="btn-ghost topbar-nav-link"
-						data-testid="nav-judge"
-						search={{ project: search.project }}
-					>
-						Judge
-					</Link>
-					<Link
-						to="/submission"
-						className="btn-ghost topbar-nav-link"
-						data-testid="nav-submission"
-						search={{ project: search.project }}
-					>
-						Submission
-					</Link>
-					{/* P12 schedules: the same surface pattern (surface.tsx); the
-					    selected project rides along in the search param. */}
-					<Link
-						to="/schedules"
-						className="btn-ghost topbar-nav-link"
-						data-testid="nav-schedules"
-						search={{ project: search.project }}
-					>
-						Schedules
-					</Link>
-					<button
-						type="button"
-						className="btn-ghost"
-						data-testid="new-project"
-						onClick={() => setFormOpen((open) => !open)}
-						aria-expanded={formOpen}
-					>
-						+ New project
-					</button>
-					<button
-						type="button"
-						className="icon-btn"
-						title="Refresh data"
-						aria-label="Refresh data"
-						data-testid="refresh-data"
-						onClick={refreshAll}
-					>
-						⟳
-					</button>
-					<button
-						type="button"
-						className="icon-btn"
-						title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-						aria-label="Toggle theme"
-						data-testid="theme-toggle"
-						onClick={toggleTheme}
-					>
-						{theme === 'dark' ? '☀' : '☾'}
-					</button>
-					<button
-						type="button"
-						className="icon-btn"
-						title={detailOpen ? 'Collapse detail pane' : 'Expand detail pane'}
-						aria-expanded={detailOpen}
-						aria-label="Toggle detail pane"
-						data-testid="detail-toggle"
-						onClick={() => setDetailOpen((open) => !open)}
-					>
-						{detailOpen ? '⇤' : '⇥'}
-					</button>
-					<button
-						type="button"
-						className="btn-ghost"
-						data-testid="sign-out"
-						onClick={() => void signOut()}
-					>
-						Sign out
-					</button>
-				</div>
-			</header>
-
-			{formOpen ? (
+		<>
+			{props.formOpen ? (
 				<NewProjectForm
-					onCancel={() => setFormOpen(false)}
+					onCancel={props.onCloseForm}
 					onSubmit={(input) =>
 						createProject.mutateAsync(input).then((result) => {
-							setFormOpen(false);
-							selectProject(result.project.id);
+							props.onCloseForm();
+							chrome.selectProject(result.project.id);
 						})
 					}
 					error={createProject.error}
 					busy={createProject.isPending}
-					hasProjects={projectList.length > 0}
-					lastWorkspaceId={projectList[0]?.workspaceId}
+					hasProjects={chrome.projectList.length > 0}
+					lastWorkspaceId={chrome.projectList[0]?.workspaceId}
 				/>
 			) : null}
 
 			{/* Zero projects + a clean load = the onboarding IS the workspace.
 			    Any doubt (pending, offline, error, a stale ?project= param) keeps
 			    the honest state panels below — onboarding never masks a failure. */}
-			{!projects.isPending &&
-			projects.fetchStatus !== 'paused' &&
-			!projects.error &&
+			{!chrome.projectsPending &&
+			!chrome.projectsPaused &&
+			!chrome.projectsError &&
 			!projectMissing &&
-			projectList.length === 0 ? (
-				<Start onStartIdea={() => setFormOpen(true)} />
+			chrome.projectList.length === 0 ? (
+				<Start onStartIdea={props.onOpenForm} />
 			) : (
 				<div className="shell-body">
-				<aside className="aside" data-collapsed={asideHidden} data-testid="aside">
-					{isDesktop ? (
-						<div className="aside-tabs" role="tablist" aria-label="Workspace panes">
-							<button
-								type="button"
-								role="tab"
-								className="tab-btn"
-								aria-selected={tab === 'brief'}
-								data-testid="tab-brief"
-								onClick={() => setTab('brief')}
-							>
-								Brief
-							</button>
-							<button
-								type="button"
-								role="tab"
-								className="tab-btn"
-								aria-selected={tab === 'runs'}
-								data-testid="tab-runs"
-								onClick={() => setTab('runs')}
-							>
-								Runs
-							</button>
+					<aside className="aside" data-collapsed={asideHidden} data-testid="aside">
+						{isDesktop ? (
+							<div className="aside-tabs" role="tablist" aria-label="Workspace panes">
+								<button
+									type="button"
+									role="tab"
+									className="tab-btn"
+									aria-selected={tab === 'brief'}
+									data-testid="tab-brief"
+									onClick={() => setTab('brief')}
+								>
+									Brief
+								</button>
+								<button
+									type="button"
+									role="tab"
+									className="tab-btn"
+									aria-selected={tab === 'runs'}
+									data-testid="tab-runs"
+									onClick={() => setTab('runs')}
+								>
+									Runs
+								</button>
+							</div>
+						) : null}
+
+						<div className="aside-scroll">
+							{projectMissing ? (
+								<StatePanel
+									kind="error"
+									title="That project is not in your list"
+									detail="The link points at a project your account cannot see (or that no longer exists)."
+									onRetry={chrome.clearProjectParam}
+									retryLabel="Back to your projects"
+								/>
+							) : chrome.projectsPending ? (
+								<StatePanel kind="loading" title="Fetching your projects…" />
+							) : chrome.projectsPaused ? (
+								// TanStack pauses refetches while the browser reports
+								// offline — that pause IS the offline state: last loaded
+								// data stays visible, and the refetch resumes on reconnect.
+								<StatePanel
+									kind="offline"
+									title="You are offline"
+									detail="Showing the last loaded data. Refetching resumes automatically when you reconnect."
+								/>
+							) : chrome.projectsError ? (
+								<StatePanel
+									kind={failureKind(chrome.projectsError)}
+									detail={chrome.projectsError instanceof Error ? chrome.projectsError.message : undefined}
+									onRetry={
+										failureKind(chrome.projectsError) === 'denied' ? undefined : () => void queryClient.refetchQueries({ queryKey: ['projects', props.actorId] })
+									}
+								/>
+							) : !effectiveProjectId ? (
+								<StatePanel
+									kind="empty"
+									title="No project selected"
+									detail="Select or create a project — its brief, runs and artifacts open here."
+								/>
+							) : tab === 'brief' ? (
+								<BriefLane
+									state={{
+										kind: projectsState === 'empty' ? 'empty' : projectsState,
+										error: chrome.projectsError,
+										stale: briefStale,
+										retry: () => void queryClient.refetchQueries({ queryKey: ['projects', props.actorId] }),
+									}}
+									cards={[]}
+								/>
+							) : (
+								<RunInspector
+									runs={{
+										isPending: runBindings.isPending,
+										isFetching: runBindings.isFetching,
+										error: runBindings.error,
+										items: runBindings.data?.runBindings ?? [],
+										retry: () => void runBindings.refetch(),
+									}}
+									artifacts={{
+										isPending: artifacts.isPending,
+										isFetching: artifacts.isFetching,
+										error: artifacts.error,
+										items: artifacts.data?.artifacts ?? [],
+										retry: () => void artifacts.refetch(),
+									}}
+								/>
+							)}
 						</div>
-					) : null}
+					</aside>
 
-					<div className="aside-scroll" id="main">
-						{projectMissing ? (
-							<StatePanel
-								kind="error"
-								title="That project is not in your list"
-								detail="The link points at a project your account cannot see (or that no longer exists)."
-								onRetry={clearProjectParam}
-								retryLabel="Back to your projects"
-							/>
-						) : projects.isPending ? (
-							<StatePanel kind="loading" title="Fetching your projects…" />
-						) : projects.fetchStatus === 'paused' ? (
-							// TanStack pauses refetches while the browser reports
-							// offline — that pause IS the offline state: last loaded
-							// data stays visible, and the refetch resumes on reconnect.
-							<StatePanel
-								kind="offline"
-								title="You are offline"
-								detail="Showing the last loaded data. Refetching resumes automatically when you reconnect."
-							/>
-						) : projects.error ? (
-							<StatePanel
-								kind={failureKind(projects.error)}
-								detail={projects.error instanceof Error ? projects.error.message : undefined}
-								onRetry={
-									failureKind(projects.error) === 'denied' ? undefined : () => void projects.refetch()
-								}
-							/>
-						) : !effectiveProjectId ? (
-							<StatePanel
-								kind="empty"
-								title="No project selected"
-								detail="Select or create a project — its brief, runs and artifacts open here."
-							/>
-						) : tab === 'brief' ? (
-							<BriefLane
-								state={{
-									kind: projectsState === 'empty' ? 'empty' : projectsState,
-									error: projects.error,
-									stale: briefStale,
-									retry: () => void projects.refetch(),
-								}}
-								cards={[]}
-							/>
-						) : (
-							<RunInspector
-								runs={{
-									isPending: runBindings.isPending,
-									isFetching: runBindings.isFetching,
-									error: runBindings.error,
-									items: runBindings.data?.runBindings ?? [],
-									retry: () => void runBindings.refetch(),
-								}}
-								artifacts={{
-									isPending: artifacts.isPending,
-									isFetching: artifacts.isFetching,
-									error: artifacts.error,
-									items: artifacts.data?.artifacts ?? [],
-									retry: () => void artifacts.refetch(),
-								}}
-							/>
-						)}
-					</div>
-				</aside>
-
-				<Channel
-					source={transport?.source ?? STANDBY}
-					transportLive={transport?.hasRun === true}
-					drafts={channel.drafts}
-					projectId={effectiveProjectId}
-					onSend={(text) => {
-						const draft = channel.addDraft(text);
-						if (draft && transport) {
-							// admitted → the draft is superseded by the transport's own
-							// message; rejected → it stays with its attempt counted
-							transport.send(draft.text, draft.idempotencyKey).then(
-								() => channel.discardDraft(draft.id),
-								() => channel.retryDraft(draft.id),
-							);
-						}
-					}}
-					onRetryDraft={(id) => {
-						channel.retryDraft(id);
-						const draft: ChannelDraft | undefined = channel.drafts.find((d) => d.id === id);
-						if (draft && transport) {
-							// same idempotency key — the transport deduplicates anyway
-							transport.send(draft.text, draft.idempotencyKey).then(
-								() => channel.discardDraft(id),
-								() => {},
-							);
-						}
-					}}
-					onDiscardDraft={channel.discardDraft}
-				/>
+					<Channel
+						source={transport?.source ?? STANDBY}
+						transportLive={transport?.hasRun === true}
+						drafts={channel.drafts}
+						projectId={effectiveProjectId}
+						onSend={(text) => {
+							const draft = channel.addDraft(text);
+							if (draft && transport) {
+								// admitted → the draft is superseded by the transport's own
+								// message; rejected → it stays with its attempt counted
+								transport.send(draft.text, draft.idempotencyKey).then(
+									() => channel.discardDraft(draft.id),
+									() => channel.retryDraft(draft.id),
+								);
+							}
+						}}
+						onRetryDraft={(id) => {
+							channel.retryDraft(id);
+							const draft: ChannelDraft | undefined = channel.drafts.find((d) => d.id === id);
+							if (draft && transport) {
+								// same idempotency key — the transport deduplicates anyway
+								transport.send(draft.text, draft.idempotencyKey).then(
+									() => channel.discardDraft(id),
+									() => {},
+								);
+							}
+						}}
+						onDiscardDraft={channel.discardDraft}
+					/>
 				</div>
 			)}
 
@@ -520,8 +344,29 @@ function AuthedShell(props: { actorId: string | null }): ReactElement {
 					Channel
 				</button>
 			</nav>
-		</div>
+		</>
 	);
+}
+
+function useIsDesktop(): boolean {
+	const [matches, setMatches] = useState(
+		() => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches,
+	);
+	useMediaQueryEffect('(min-width: 768px)', setMatches);
+	return matches;
+}
+
+function useMediaQueryEffect(query: string, onChange: (matches: boolean) => void): void {
+	const [mq] = useState(() => window.matchMedia(query));
+	useEffect(() => {
+		const handler = () => onChange(mq.matches);
+		mq.addEventListener('change', handler);
+		window.addEventListener('resize', handler);
+		return () => {
+			mq.removeEventListener('change', handler);
+			window.removeEventListener('resize', handler);
+		};
+	}, [mq, onChange]);
 }
 
 function NewProjectForm(props: {

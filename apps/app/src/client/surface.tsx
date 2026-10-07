@@ -8,6 +8,7 @@ import { JudgeScorecard } from './judge/Scorecard.tsx';
 import { SubmissionPackage } from './submission/Package.tsx';
 import { Schedules } from './tasks/Schedules.tsx';
 import { useAuthStatus, useProjects, useSessionActor } from './queries.ts';
+import { WorkspaceChrome } from './workspace/Chrome.tsx';
 
 /**
  * P11/P13 standalone surfaces — the workspace-shell integration pattern for
@@ -121,32 +122,40 @@ function ProjectSurface(props: { children: (projectId: string) => ReactElement }
 
 export function DiscoveryPage(): ReactElement {
 	return (
-		<main className="shell-loading" id="main">
-			<ProjectSurface>{(projectId) => <DiscoveryResults projectId={projectId} />}</ProjectSurface>
-		</main>
+		<WorkspaceChrome active="discovery">
+			<div className="shell-loading">
+				<ProjectSurface>{(projectId) => <DiscoveryResults projectId={projectId} />}</ProjectSurface>
+			</div>
+		</WorkspaceChrome>
 	);
 }
 
 export function JudgePage(): ReactElement {
 	return (
-		<main className="shell-loading" id="main">
-			<ProjectSurface>{(projectId) => <JudgeScorecard projectId={projectId} />}</ProjectSurface>
-		</main>
+		<WorkspaceChrome active="judge">
+			<div className="shell-loading">
+				<ProjectSurface>{(projectId) => <JudgeScorecard projectId={projectId} />}</ProjectSurface>
+			</div>
+		</WorkspaceChrome>
 	);
 }
 
 export function SubmissionPage(): ReactElement {
 	return (
-		<main className="shell-loading" id="main">
-			<ProjectSurface>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectSurface>
-		</main>
+		<WorkspaceChrome active="submission">
+			<div className="shell-loading">
+				<ProjectSurface>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectSurface>
+			</div>
+		</WorkspaceChrome>
 	);
 }
 
 export function SchedulesPage(): ReactElement {
 	return (
-		<main className="shell-loading" id="main">
-			<ProjectSurface>{(projectId) => <Schedules projectId={projectId} />}</ProjectSurface>
-		</main>
+		<WorkspaceChrome active="schedules">
+			<div className="shell-loading">
+				<ProjectSurface>{(projectId) => <Schedules projectId={projectId} />}</ProjectSurface>
+			</div>
+		</WorkspaceChrome>
 	);
 }

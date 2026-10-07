@@ -173,6 +173,12 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
     "P14 spec review noted: search scope (projects/planDocs/tasks/memory only — no messages/files/links/images tables exist yet), stacks panel hardcodes react-hono as 'enabled' (P09 PARTIAL), no payer/usage HTTP surface yet, Memory UI personal-only",
     "P08 noted: local D1 emulator INSERT ON CONFLICT bug → select-then-write guards; PR resume via provider lookup + already-exists 422; merge resume walks first-parent history",
     "P07 noted: markStaleForPlan is a system hook (P11 wires it); R2/preview origin are proposals"
+  ]
+}
+```
+
+```json
+{
   "packet": "P09-journey", "status": "LIVE VERIFIED (complete React+Hono build proof — stack #1 labeled verified)", "sha": "branch p09-journey at journey time",
   "commands": [
     {"command": "CADDIE_LIVE_AUTHORIZED=1 bun scripts/run-journey.ts", "exitCode": 0,
@@ -512,6 +518,40 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
     "reveal-on-scroll/scroll-spy from the reference intentionally NOT ported (client JS) — static readability without scripts is an acceptance invariant",
     "mailto contact uses placeholder hello@example.com — OWNER INPUT needed before public deployment (marked in shipped HTML)",
     "hero art is illustrative composition (plan amendment) — real captures require a real accepted build (P09)"
+  ]
+}
+```
+
+```json
+{
+  "packet": "UI-OVERHAUL-P0+P1 (docs/reviews/caddie-ui-review-board.html execution — phases 0-1 of the approved plan; board screens 16, 02-05, 15, 17)", "status": "LOCAL VERIFIED", "sha": "see git log feat(ui): shared chrome + type/icon/badge foundations (board phases 0-1)",
+  "commands": [
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "root tsc + apps/app check:types clean"},
+    {"command": "bun run build", "exitCode": 0, "receipt": "vite + astro + compose-assets green; 0 collisions"},
+    {"command": "bun run test:browser -- P01", "exitCode": 0, "receipt": "auth.spec 3 passed — provider availability stated before click (configured/not-configured pills from /api/integrations/health), unconfigured provider visibly disabled, terminal 503 offers the other provider instead of retry"},
+    {"command": "bun run test:browser -- P06", "exitCode": 0, "receipt": "workspace.spec 16 passed + conversation.spec 3 passed — WorkspaceChrome header (6 controls: wordmark, project select, New project, refresh, theme, Account menu with sign-out) + quiet nav row on every route; project switching keeps ?project="},
+    {"command": "bun run test:browser -- P11", "exitCode": 0, "receipt": "discovery.spec 6 passed under shared chrome"},
+    {"command": "bun run test:browser -- P13", "exitCode": 0, "receipt": "submission.spec 6 passed; 'Pit wall' assertions scoped to the region (chrome selector option now also carries the project title)"},
+    {"command": "bun run test:browser -- P14", "exitCode": 0, "receipt": "settings.spec 5 passed — section subnav, real panel padding/gap, planned/retracted vocabulary (roadmap never danger-tinted), n/12 interests counter"},
+    {"command": "bunx playwright test tests/browser/artifacts.spec.ts tests/browser/forge-journey.spec.ts tests/browser/landing.spec.ts tests/browser/release.spec.ts", "exitCode": 0, "receipt": "25 passed — untouched surfaces unaffected by the chrome/token changes"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/workspace/Chrome.tsx", "note": "WorkspaceChrome: one header + one nav row on every route; auth-boundary crossing (wordmark/theme/landing link at the sign-in wall); useWorkspaceChrome context owns auth/projects/theme/sign-out"},
+    {"path": "apps/app/src/client/icons.tsx", "note": "16px inline SVG icon set at token stroke, accessible names, replaces ▸ ⟳ ☀ ☾ ⇤ ⇥ and the CSS ▌ caret"},
+    {"path": "packages/ui/src/tokens.css", "note": "seed layer (--seed-* single-source) + derived --color-*; light action deepened #1a72e8→#155fbe (4.28:1→5.79:1); type floor --r-label 11px / --r-meta 12px"},
+    {"path": "apps/app/src/client/workspace.css + apps/site/src/styles/site.css", "note": "10/10.5px tiers retired (13 app sizes, 19 site rem steps ≤11px); .badge primitive owning tint AND text; .row two-up rule; settings-stack padding/gap; planned status-pill tone"},
+    {"path": "apps/app/src/client/main.tsx + apps/site/src/pages/index.astro", "note": "@fontsource/ibm-plex-mono 600/700 imported — the ten 600/700 selectors stop synthesizing bold from the 500 cut"}
+  ],
+  "environment": "local workerd via vite preview (playwright webServer), chromium_headless_shell v1243; composed build",
+  "providerCalls": "none",
+  "specReview": "deferred to phase batch review (board itself is the spec; specs updated in-change: auth.spec 503 semantic, workspace.spec repo-card planned state, submission.spec region scoping)",
+  "qualityReview": "owner visual acceptance pending on http://localhost:5176 (board frames are the reference)",
+  "limitations": [
+    "the board (docs/reviews/caddie-ui-review-board.html) is committed as the review artifact; all claims were verified against code before the plan was approved",
+    "auth-transition guard moved OUT of WorkspaceChrome into the workspace body: the chrome mounts before auth/actor settle, and the guard's removeQueries wipe was killing the in-flight projects query on every fresh load (zombie-pending select) — surfaced and fixed during P06 verification",
+    "Settings route and onboarding route now render inside chrome; Memory/Search remain embedded panels (deferred per plan)",
+    "sign-in panel fetches /api/integrations/health for presence; a failed presence read leaves all providers enabled (unknown availability must not block sign-in)",
+    "phases 2-4 (brief feed, four unwired components, surface rebuilds) are NOT started — this entry covers board phases 0-1 only"
   ]
 }
 ```

@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, createRouter, Outlet, createBrowserHistory } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
+import { WorkspaceChrome } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
 import { Start } from './onboarding/Start.tsx';
@@ -13,21 +14,33 @@ import { DiscoveryPage, JudgePage, SubmissionPage, SchedulesPage } from './surfa
  * (tests/routing.test.ts), so the browser history basepath is /app in the
  * composed build; `bun run dev` serves at the root. The selected project
  * lives in the ?project= search param — refresh (and deep links) retain it.
+ *
+ * Shared chrome (UI review board screen 16): the workspace, settings,
+ * onboarding, the four gate surfaces and the not-found all render inside
+ * WorkspaceChrome, so no destination is a chrome-less `<main>` dead end.
  */
 
 const rootRoute = createRootRoute({
 	component: () => <Outlet />,
 	notFoundComponent: function WorkspaceNotFound() {
 		return (
-			<main className="shell-loading">
-				<section className="state-panel card-surface">
-					<p className="kicker">NOT FOUND</p>
-					<h3 className="state-title">This workspace path does not exist</h3>
-					<p className="state-detail">
-						Everything lives under the workspace root: <a href="./">open the workspace</a>.
-					</p>
-				</section>
-			</main>
+			<WorkspaceChrome active="none">
+				<div className="shell-loading">
+					<section className="state-panel card-surface">
+						<p className="kicker" data-tone="error">
+							NOT FOUND
+						</p>
+						<h3 className="state-title">This workspace path does not exist</h3>
+						<p className="state-detail">
+							Everything lives under the workspace root: <a href="./">open the workspace</a>.
+						</p>
+						<p className="state-detail">
+							Paths under <code>/app</code> are the SPA; anything else returns the landing page — two halves, one
+							product.
+						</p>
+					</section>
+				</div>
+			</WorkspaceChrome>
 		);
 	},
 });
@@ -48,11 +61,12 @@ const workspaceRoute = createRoute({
 const settingsRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: '/settings',
+	validateSearch,
 	component: function SettingsPage() {
 		return (
-			<main className="shell-loading">
+			<WorkspaceChrome active="settings" crumbs={<span>Settings</span>}>
 				<Settings />
-			</main>
+			</WorkspaceChrome>
 		);
 	},
 });
@@ -60,11 +74,15 @@ const settingsRoute = createRoute({
 const onboardingRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: '/onboarding',
+	validateSearch,
 	component: function OnboardingPage() {
 		return (
-			<main className="shell-loading">
+			<WorkspaceChrome
+				active="none"
+				crumbs={<span>Start a project · step 1 of 4 · start → connect → brief → first run</span>}
+			>
 				<Start />
-			</main>
+			</WorkspaceChrome>
 		);
 	},
 });

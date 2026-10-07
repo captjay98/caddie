@@ -90,7 +90,7 @@ export function Memory(): ReactElement {
 	const history = facts.filter((fact) => fact.status === 'retracted');
 
 	return (
-		<section className="card-surface" data-testid="memory-panel">
+		<section className="card-surface settings-panel" data-testid="memory-panel">
 			<p className="kicker" data-tone="action">
 				MEMORY
 			</p>
@@ -131,7 +131,7 @@ export function Memory(): ReactElement {
 							<div className="inspector-row" key={fact.id} data-testid="memory-retracted">
 								<div className="row-main">
 									<span className="row-title">{fact.content}</span>
-									<span className="status-pill" data-status="handled">
+									<span className="status-pill" data-status="planned">
 										retracted
 									</span>
 								</div>

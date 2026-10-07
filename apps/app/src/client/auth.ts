@@ -1,5 +1,5 @@
 import { createAuthClient } from 'better-auth/client';
-import { createElement, useCallback, useState, type ReactElement } from 'react';
+import { createElement, useCallback, useEffect, useState, type ReactElement } from 'react';
 
 /**
  * P01 client identity: sign-in panel for the Caddie SPA.
@@ -66,6 +66,8 @@ function providerIcon(id: SocialProvider): ReactElement {
 interface SignInErrorView {
 	title: string;
 	detail: string;
+	/** Whether retrying the same provider can ever succeed. */
+	retryable: boolean;
 }
 
 function toErrorView(provider: SocialProvider, status: number | undefined, message: string | undefined): SignInErrorView {
@@ -75,24 +77,57 @@ function toErrorView(provider: SocialProvider, status: number | undefined, messa
 			title: `Sign-in with ${label} is unavailable`,
 			detail:
 				message ??
-				'Authentication is not configured on this deployment yet. Once the owner sets the sign-in credentials, try again.',
+				'Authentication is not configured on this deployment yet, so retrying the same provider cannot succeed until its credentials exist.',
+			retryable: false,
 		};
 	}
 	return {
 		title: `Sign-in with ${label} failed`,
 		detail: message ? 'The sign-in attempt was rejected — you can retry below.' : 'Something went wrong — you can retry below.',
+		retryable: true,
 	};
+}
+
+interface IntegrationsHealth {
+	auth: { providers: { google: boolean; github: boolean } };
 }
 
 export interface SignInPanelProps {
 	callbackURL?: string;
 }
 
-/** Sign-in panel: one button per provider, visible error + retry states. */
+/**
+ * Sign-in panel: one button per provider, provider availability stated BEFORE
+ * the first click (the server's configured/not-configured presence, read from
+ * /api/integrations/health — the same source Settings renders), and a failure
+ * that separates reason, consequence and action: a rejected attempt keeps
+ * Try again; a 503 "not configured on this deployment" is terminal and offers
+ * the other provider instead (UI review board screen 02).
+ */
 export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 	const callbackURL = props.callbackURL ?? DEFAULT_CALLBACK_URL;
 	const [pending, setPending] = useState<SocialProvider | null>(null);
 	const [error, setError] = useState<{ provider: SocialProvider; view: SignInErrorView } | null>(null);
+	const [availability, setAvailability] = useState<{ google: boolean; github: boolean } | null>(null);
+
+	// Presence check — name and pair only, never the values. Failure to read it
+	// keeps every provider enabled: unknown availability must not block a sign-in.
+	useEffect(() => {
+		let cancelled = false;
+		void fetch('/api/integrations/health')
+			.then((res) => (res.ok ? (res.json() as Promise<IntegrationsHealth>) : null))
+			.then((health) => {
+				if (!cancelled && health) {
+					setAvailability(health.auth.providers);
+				}
+			})
+			.catch(() => {
+				// availability unknown — leave buttons enabled
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	const signIn = useCallback(
 		async (provider: SocialProvider) => {
@@ -124,45 +159,86 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 		[callbackURL],
 	);
 
+	const otherProvider: SocialProvider | null =
+		error && availability
+			? (error.provider === 'google' ? 'github' : 'google')
+			: null;
+	const otherAvailable = otherProvider !== null && availability ? availability[otherProvider] : false;
+
 	return createElement(
 		'section',
 		{ 'data-testid': 'sign-in-panel', 'aria-label': 'Sign in' },
-		PROVIDERS.map(({ id, label }) =>
-			createElement(
-				'button',
-				{
-					key: id,
-					type: 'button',
-					className: 'btn-ghost sign-in-btn',
-					'data-testid': `sign-in-${id}`,
-					'data-provider': id,
-					disabled: pending !== null,
-					onClick: () => void signIn(id),
-				},
-				providerIcon(id),
-				createElement('span', { key: 'label' }, pending === id ? 'Signing in…' : label),
-			),
-		),
-		error
+		PROVIDERS.map(({ id, label }) => {
+			const configured = availability === null ? true : availability[id];
+			return createElement(
+				'div',
+				{ key: id, className: 'sign-in-provider' },
+				createElement(
+					'button',
+					{
+						type: 'button',
+						className: 'btn-ghost sign-in-btn',
+						'data-testid': `sign-in-${id}`,
+						'data-provider': id,
+						disabled: pending !== null || !configured,
+						onClick: () => void signIn(id),
+					},
+					providerIcon(id),
+					createElement('span', { key: 'label' }, pending === id ? 'Signing in…' : label),
+				),
+				createElement(
+					'span',
+					{
+						key: 'state',
+						className: 'status-pill',
+						'data-status': configured ? 'handled' : 'planned',
+						'data-testid': `sign-in-${id}-state`,
+					},
+					availability === null ? 'checking…' : configured ? 'configured' : 'not configured',
+				),
+			);
+		}),
+		availability !== null
 			? createElement(
 					'p',
+					{ key: 'presence', className: 'mono-id sign-in-presence', 'data-testid': 'sign-in-presence' },
+					'presence read from /api/integrations/health · names and pairs only, never the values',
+				)
+			: null,
+		error
+			? createElement(
+					'div',
 					{
 						key: 'error',
 						role: 'alert',
 						className: 'sign-in-error',
 						'data-testid': 'sign-in-error',
 					},
-					`${error.view.title}: ${error.view.detail} `,
-					createElement(
-						'button',
-						{
-							type: 'button',
-							className: 'btn-ghost',
-							'data-testid': 'sign-in-retry',
-							onClick: () => void signIn(error.provider),
-						},
-						'Try again',
-					),
+					createElement('b', null, `${error.view.title}.`),
+					createElement('span', null, ` ${error.view.detail}`),
+					error.view.retryable
+						? createElement(
+								'button',
+								{
+									type: 'button',
+									className: 'btn-ghost',
+									'data-testid': 'sign-in-retry',
+									onClick: () => void signIn(error.provider),
+								},
+								'Try again',
+							)
+						: otherProvider && otherAvailable
+							? createElement(
+									'button',
+									{
+										type: 'button',
+										className: 'btn-key',
+										'data-testid': 'sign-in-other',
+										onClick: () => void signIn(otherProvider),
+									},
+									`Continue with ${otherProvider === 'google' ? 'Google' : 'GitHub'} instead`,
+								)
+							: null,
 				)
 			: null,
 	);

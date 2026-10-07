@@ -87,17 +87,35 @@ export function Settings(): ReactElement {
 	}
 
 	return (
-		<main className="shell-loading" id="main" data-testid="settings-screen">
-			<p className="kicker" data-tone="action">
-				CADDIE · SETTINGS
-			</p>
-			<h1 className="state-title">Settings</h1>
-			<ProfileEditor initial={profile.data?.profile ?? null} />
-			<IntegrationHealthPanel health={health.data!} />
-			<StacksPanel stacks={stacks.data!.stacks} />
-			<Memory />
-			<Search />
-		</main>
+		<div className="shell-loading" data-testid="settings-screen">
+			<div className="settings-stack">
+				<SettingsSubnav />
+				<ProfileEditor initial={profile.data?.profile ?? null} />
+				<IntegrationHealthPanel health={health.data!} />
+				<StacksPanel stacks={stacks.data!.stacks} />
+				<Memory />
+				<Search />
+			</div>
+		</div>
+	);
+}
+
+function SettingsSubnav(): ReactElement {
+	const sections = [
+		['profile-editor', 'Profile'],
+		['integrations-health', 'Integrations'],
+		['stacks-panel', 'Stacks'],
+		['memory-panel', 'Memory'],
+		['search-panel', 'Search'],
+	] as const;
+	return (
+		<nav className="settings-subnav" aria-label="Settings sections">
+			{sections.map(([id, label]) => (
+				<a key={id} href={`#${id}`} data-testid={`settings-nav-${id}`}>
+					{label}
+				</a>
+			))}
+		</nav>
 	);
 }
 
@@ -169,12 +187,15 @@ function ProfileEditor({ initial }: { initial: ProfileRecord | null }): ReactEle
 	const interestCount = draft.interests.split(',').filter((p) => p.trim() !== '').length;
 
 	return (
-		<section className="card-surface" data-testid="profile-editor">
+		<section className="card-surface settings-panel" data-testid="profile-editor">
 			<p className="kicker" data-tone="action">
 				PROFILE
 			</p>
 			<h3 className="state-title">Your profile</h3>
-			<p className="state-detail">All fields are optional — Caddie works without them.</p>
+			<p className="state-detail">
+				All fields are optional — Caddie works without them. These four fields feed every fit verdict on
+				every other page.
+			</p>
 			<div className="row">
 				<input
 					className="input"
@@ -221,7 +242,7 @@ function ProfileEditor({ initial }: { initial: ProfileRecord | null }): ReactEle
 			<p className="kicker">STACK INTERESTS (SUPPORTED STACKS)</p>
 			<div className="row" data-testid="profile-stacks">
 				{CLIENT_STACK_IDS.map((id) => (
-					<label key={id} className="pill">
+					<label key={id} className="pill stack-toggle">
 						<input
 							type="checkbox"
 							data-testid={`profile-stack-${id}`}
@@ -248,6 +269,10 @@ function ProfileEditor({ initial }: { initial: ProfileRecord | null }): ReactEle
 				value={draft.interests}
 				onChange={(event) => setDraft((d) => ({ ...d, interests: event.target.value }))}
 			/>
+			<p className="mono-id" data-testid="profile-interests-count">
+				{interestCount} / {MAX_INTERESTS} · each entry capped at {MAX_INTEREST_LENGTH} characters · Save stays
+				live and says which one is over
+			</p>
 			{interestCount > MAX_INTERESTS ? (
 				<p className="form-error" role="alert" data-testid="profile-interests-limit">
 					At most {MAX_INTERESTS} interests ({MAX_INTEREST_LENGTH} characters each).
@@ -279,42 +304,41 @@ function ProfileEditor({ initial }: { initial: ProfileRecord | null }): ReactEle
 }
 
 function IntegrationHealthPanel({ health }: { health: IntegrationsHealth }): ReactElement {
+	const row = (testId: string, title: string, configured: boolean, check: string) => (
+		<div className="inspector-row" data-testid={testId}>
+			<div className="row-main">
+				<span className="row-title">{title}</span>
+				<span className="status-pill" data-status={configured ? 'handled' : 'planned'}>
+					{configured ? 'configured' : 'not configured'}
+				</span>
+			</div>
+			<div className="row-details">
+				{configured ? 'both variables present · callback not exercised — a presence check, not a working sign-in' : check}
+			</div>
+		</div>
+	);
 	return (
-		<section className="card-surface" data-testid="integrations-health">
+		<section className="card-surface settings-panel" data-testid="integrations-health">
 			<p className="kicker" data-tone="action">
 				INTEGRATIONS
 			</p>
 			<h3 className="state-title">Integration health</h3>
-			<p className="state-detail">Reported directly from this deployment's configuration.</p>
+			<p className="state-detail">Reported directly from this deployment's configuration — names and pairs, never values.</p>
 			<div className="row-list">
-				<div className="inspector-row" data-testid="integration-auth-google">
-					<div className="row-main">
-						<span className="row-title">Google sign-in</span>
-						<span className="status-pill" data-status={health.auth.providers.google ? 'handled' : 'blocked'}>
-							{health.auth.providers.google ? 'configured' : 'not configured'}
-						</span>
-					</div>
-				</div>
-				<div className="inspector-row" data-testid="integration-auth-github">
-					<div className="row-main">
-						<span className="row-title">GitHub sign-in</span>
-						<span className="status-pill" data-status={health.auth.providers.github ? 'handled' : 'blocked'}>
-							{health.auth.providers.github ? 'configured' : 'not configured'}
-						</span>
-					</div>
-				</div>
+				{row('integration-auth-google', 'Google sign-in', health.auth.providers.google, 'missing GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET')}
+				{row('integration-auth-github', 'GitHub sign-in', health.auth.providers.github, 'missing GITHUB_CLIENT_ID + GITHUB_CLIENT_SECRET')}
 				<div className="inspector-row" data-testid="integration-sandbox">
 					<div className="row-main">
 						<span className="row-title">Build sandbox (agent runs)</span>
-						<span className="status-pill" data-status={health.sandbox.configured ? 'handled' : 'blocked'}>
+						<span className="status-pill" data-status={health.sandbox.configured ? 'handled' : 'planned'}>
 							{health.sandbox.configured ? 'configured' : 'not configured'}
 						</span>
 					</div>
-					{!health.sandbox.configured ? (
-						<div className="row-details">
-							Agent runs fail honestly until these variables are set: {health.sandbox.missing.join(', ')}
-						</div>
-					) : null}
+					<div className="row-details">
+						{health.sandbox.configured
+							? 'both variables present · callback not exercised — a presence check, not a working run'
+							: `missing ${health.sandbox.missing.join(', ') || 'variables'} — agent runs fail honestly until these are set`}
+					</div>
 				</div>
 			</div>
 		</section>
@@ -323,18 +347,18 @@ function IntegrationHealthPanel({ health }: { health: IntegrationsHealth }): Rea
 
 function StacksPanel({ stacks }: { stacks: StacksResponse['stacks'] }): ReactElement {
 	return (
-		<section className="card-surface" data-testid="stacks-panel">
+		<section className="card-surface settings-panel" data-testid="stacks-panel">
 			<p className="kicker" data-tone="action">
 				OUTPUT STACKS
 			</p>
-			<h3 className="state-title">Enabled stacks</h3>
-			<p className="state-detail">Only stacks that really work today are listed as enabled.</p>
+			<h3 className="state-title">Stack availability</h3>
+			<p className="state-detail">The heading names what the list contains: enabled stacks work today; planned stacks are roadmap, not failure.</p>
 			<div className="row-list" data-testid="stacks-list">
 				{stacks.map((stack) => (
 					<div className="inspector-row" key={stack.id} data-testid={`stack-${stack.id}`}>
 						<div className="row-main">
 							<span className="row-title">{stack.id}</span>
-							<span className="status-pill" data-status={stack.status === 'enabled' ? 'handled' : 'blocked'}>
+							<span className="status-pill" data-status={stack.status === 'enabled' ? 'handled' : 'planned'}>
 								{stack.status}
 								{stack.note ? ` · ${stack.note}` : ''}
 							</span>

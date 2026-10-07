@@ -461,7 +461,7 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		expect(state.created!.body).toEqual({ reuseRequired: true });
 
 		// The package title is the PROJECT title — never an invented contest.
-		await expect(page.getByText('Pit wall')).toBeVisible();
+		await expect(page.getByRole('region', { name: 'Submission package' }).getByText('Pit wall')).toBeVisible();
 		await expect(page.getByText('BLOCKED (gaps on record)', { exact: true })).toBeVisible();
 		const gaps = page.getByRole('status').filter({ hasText: 'Readiness gaps' });
 		await expect(gaps).toBeVisible();
@@ -501,7 +501,7 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/submission?project=proj-a`);
 
-		await expect(page.getByText('Pit wall')).toBeVisible();
+		await expect(page.getByRole('region', { name: 'Submission package' }).getByText('Pit wall')).toBeVisible();
 		// Stale readiness is named — never silently recomputed away.
 		await expect(page.getByText('STALE — RULES CHANGED', { exact: true })).toBeVisible();
 		await expect(page.getByText('STALE (rules changed after this export)')).toBeVisible();

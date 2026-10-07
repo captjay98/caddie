@@ -100,6 +100,15 @@ test.afterAll(async () => {
 
 test.describe('P01 sign-in panel (composed build)', () => {
 	test('renders both provider sign-in buttons', async ({ page }) => {
+		// Deterministic availability: both providers configured, so both
+		// buttons are enabled and the presence pills read "configured".
+		await page.route('**/api/integrations/health', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ auth: { providers: { google: true, github: true } } }),
+			}),
+		);
 		await page.goto(`${BASE}/app/`);
 		const google = page.getByTestId('sign-in-google');
 		const github = page.getByTestId('sign-in-github');
@@ -108,16 +117,42 @@ test.describe('P01 sign-in panel (composed build)', () => {
 		await expect(google).toHaveText('Continue with Google');
 		await expect(github).toHaveText('Continue with GitHub');
 		await expect(page.getByTestId('sign-in-panel')).toBeVisible();
+		// availability stated before the click, never after it
+		await expect(page.getByTestId('sign-in-google-state')).toHaveText('configured');
+		await expect(page.getByTestId('sign-in-github-state')).toHaveText('configured');
 		// no stale error state on a fresh page
 		await expect(page.getByTestId('sign-in-error')).toHaveCount(0);
 	});
 
-	test('failed sign-in shows a visible error state with retry', async ({ page }) => {
+	test('unconfigured providers are labelled before the click, never a guaranteed-failure button', async ({ page }) => {
+		// Deterministic availability: Google unconfigured, GitHub configured.
+		await page.route('**/api/integrations/health', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ auth: { providers: { google: false, github: true } } }),
+			}),
+		);
+		await page.goto(`${BASE}/app/`);
+		await expect(page.getByTestId('sign-in-google-state')).toHaveText('not configured');
+		await expect(page.getByTestId('sign-in-google')).toBeDisabled();
+		await expect(page.getByTestId('sign-in-github-state')).toHaveText('configured');
+		await expect(page.getByTestId('sign-in-github')).toBeEnabled();
+	});
+
+	test('terminal 503 offers the other provider instead of a retry that cannot work', async ({ page }) => {
 		// Force the failure deterministically: a deployment WITH provisioned
 		// provider credentials would redirect to the real provider on success,
 		// so the error path is exercised by rejecting the sign-in POST at the
 		// network layer (503 auth_not_configured) — the exact honest failure
 		// the panel must surface visibly (never a dead button or silent no-op).
+		await page.route('**/api/integrations/health', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ auth: { providers: { google: true, github: true } } }),
+			}),
+		);
 		await page.route('**/api/auth/sign-in/social', async (route) => {
 			await route.fulfill({
 				status: 503,
@@ -134,13 +169,12 @@ test.describe('P01 sign-in panel (composed build)', () => {
 		await expect(error).toBeVisible({ timeout: 10_000 });
 		await expect(error).toContainText('Sign-in with Google');
 		await expect(error).toContainText(/failed|unavailable/);
-		const retry = page.getByTestId('sign-in-retry');
-		await expect(retry).toBeVisible();
-		// retry is functional: clicking it re-runs the attempt (still failing
-		// under the interception, but the error state must remain visible and honest)
-		await retry.click();
-		await expect(error).toBeVisible({ timeout: 10_000 });
-		// buttons stay usable for a manual retry too
+		// 503 is terminal: no retry, the action is the other provider.
+		await expect(page.getByTestId('sign-in-retry')).toHaveCount(0);
+		const other = page.getByTestId('sign-in-other');
+		await expect(other).toBeVisible();
+		await expect(other).toContainText('Continue with GitHub instead');
+		// buttons stay usable for a manual attempt too
 		await expect(page.getByTestId('sign-in-github')).toBeEnabled({ timeout: 10_000 });
 	});
 });

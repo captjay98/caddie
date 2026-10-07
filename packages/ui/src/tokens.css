@@ -5,47 +5,96 @@
 
    Dual theme, ported from HackSteward's :root[data-theme] pattern. :root
    defaults to dark; [data-theme="light"] swaps every token. Font families
-   match the reference stack (Inter 400-700 + IBM Plex Mono 400/500); the
-   woff2 files are self-hosted via @fontsource/* packages and bundled at
+   match the reference stack (Inter 400-700 + IBM Plex Mono 400/500/600/700);
+   the woff2 files are self-hosted via @fontsource/* packages and bundled at
    build time by the importing app (see apps/site/src/pages/index.astro) —
-   no @font-face declarations here and nothing is fetched at runtime. */
+   no @font-face declarations here and nothing is fetched at runtime.
+
+   UI review board screen 16: the seed layer owns the palette, so a theme or
+   radius change propagates without touching component rules. Every derived
+   token reads back from a seed; no component rule may restate a colour. */
 
 :root {
-	--color-ink: #090b10;
-	--color-panel: #101319;
-	--color-raised: #151922;
-	--color-lift: #1b2029;
-	--color-line: rgba(255, 255, 255, 0.13);
-	--color-line-soft: rgba(255, 255, 255, 0.07);
-	--color-action: #4d9fff;
-	--color-action-deep: #2f7ddd;
-	--color-ok: #3ecf8e;
-	--color-warn: #f0a83c;
-	--color-danger: #ff7a83;
-	--color-bright: #e6e9ef;
-	--color-muted: #8b93a3;
-	--horizon: radial-gradient(1200px 500px at 50% -10%, rgba(77, 159, 255, 0.13), transparent 60%);
-	--card-gradient: linear-gradient(180deg, #141821, #101319);
-	--lift-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+	/* --- seed layer: the single source of truth -------------------------- */
+	--seed-bg: #090b10;
+	--seed-surface: #101319;
+	--seed-raised: #151922;
+	--seed-lift: #1b2029;
+	--seed-fg: #e6e9ef;
+	--seed-muted: #8b93a3;
+	--seed-primary: #4d9fff;
+	--seed-primary-deep: #2f7ddd;
+	--seed-accent: #f0a83c;
+	--seed-ok: #3ecf8e;
+	--seed-danger: #ff7a83;
+	--seed-line-strength: 0.13;
+	--seed-line-soft-strength: 0.07;
+	--seed-horizon-strength: 0.13;
+	--seed-radius: 10px;
+
+	/* --- type floor (UI review board screen 16) --------------------------
+	   A label may sit at --r-label; anything that carries an identifier, a
+	   state or a verdict must clear --r-meta. The 10/10.5px tiers are
+	   retired. */
+	--r-label: 11px;
+	--r-meta: 12px;
+
+	/* --- derived tokens: read from seeds only ---------------------------- */
+	--color-ink: var(--seed-bg);
+	--color-panel: var(--seed-surface);
+	--color-raised: var(--seed-raised);
+	--color-lift: var(--seed-lift);
+	--color-line: color-mix(in srgb, var(--seed-fg) calc(var(--seed-line-strength) * 100%), transparent);
+	--color-line-soft: color-mix(in srgb, var(--seed-fg) calc(var(--seed-line-soft-strength) * 100%), transparent);
+	--color-action: var(--seed-primary);
+	--color-action-deep: var(--seed-primary-deep);
+	--color-ok: var(--seed-ok);
+	--color-warn: var(--seed-accent);
+	--color-danger: var(--seed-danger);
+	--color-bright: var(--seed-fg);
+	--color-muted: var(--seed-muted);
+	--horizon: radial-gradient(1200px 500px at 50% -10%, color-mix(in srgb, var(--seed-primary) calc(var(--seed-horizon-strength) * 100%), transparent), transparent 60%);
+	--card-gradient: linear-gradient(180deg, #141821, var(--seed-surface));
+	--lift-shadow: inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 4%, transparent);
 	--font-ui: "Inter", ui-sans-serif, system-ui, sans-serif;
 	--font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 :root[data-theme="light"] {
-	--color-ink: #f6f8fc;
-	--color-panel: #ffffff;
-	--color-raised: #f1f4fa;
-	--color-lift: #e7ecf5;
-	--color-line: rgba(11, 16, 26, 0.16);
-	--color-line-soft: rgba(11, 16, 26, 0.08);
-	--color-action: #1a72e8;
-	--color-action-deep: #155fbe;
-	--color-ok: #007b44;
-	--color-warn: #9c5a05;
-	--color-danger: #c13846;
-	--color-bright: #0b101a;
-	--color-muted: #4c5768;
-	--horizon: radial-gradient(1200px 500px at 50% -10%, rgba(26, 114, 232, 0.07), transparent 60%);
-	--card-gradient: #ffffff;
+	/* --- seed layer ------------------------------------------------------ */
+	--seed-bg: #f6f8fc;
+	--seed-surface: #ffffff;
+	--seed-raised: #f1f4fa;
+	--seed-lift: #e7ecf5;
+	--seed-fg: #0b101a;
+	--seed-muted: #4c5768;
+	/* One deliberate step away from the shipped light pairing (screen 16):
+	   the shipped action #1a72e8 clears only 4.28:1; #155fbe clears 5.79:1
+	   both as a filled-button label and as small text on the light canvas. */
+	--seed-primary: #155fbe;
+	--seed-primary-deep: #0f4a99;
+	--seed-accent: #9c5a05;
+	--seed-ok: #007b44;
+	--seed-danger: #c13846;
+	--seed-line-strength: 0.16;
+	--seed-line-soft-strength: 0.08;
+	--seed-horizon-strength: 0.07;
+
+	/* --- derived tokens --------------------------------------------------- */
+	--color-ink: var(--seed-bg);
+	--color-panel: var(--seed-surface);
+	--color-raised: var(--seed-raised);
+	--color-lift: var(--seed-lift);
+	--color-line: color-mix(in srgb, var(--seed-fg) calc(var(--seed-line-strength) * 100%), transparent);
+	--color-line-soft: color-mix(in srgb, var(--seed-fg) calc(var(--seed-line-soft-strength) * 100%), transparent);
+	--color-action: var(--seed-primary);
+	--color-action-deep: var(--seed-primary-deep);
+	--color-ok: var(--seed-ok);
+	--color-warn: var(--seed-accent);
+	--color-danger: var(--seed-danger);
+	--color-bright: var(--seed-fg);
+	--color-muted: var(--seed-muted);
+	--horizon: radial-gradient(1200px 500px at 50% -10%, color-mix(in srgb, var(--seed-primary) calc(var(--seed-horizon-strength) * 100%), transparent), transparent 60%);
+	--card-gradient: var(--seed-surface);
 	--lift-shadow: 0 1px 2px rgba(13, 25, 50, 0.05);
 }

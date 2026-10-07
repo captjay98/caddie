@@ -61,7 +61,7 @@ export function Search(): ReactElement {
 	}
 
 	return (
-		<section className="card-surface" data-testid="search-panel">
+		<section className="card-surface settings-panel" data-testid="search-panel">
 			<p className="kicker" data-tone="action">
 				SEARCH
 			</p>
