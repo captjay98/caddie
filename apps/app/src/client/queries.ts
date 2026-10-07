@@ -92,6 +92,19 @@ export function useRunBindings(actor: ActorScope, projectId: string | null) {
 	});
 }
 
+/**
+ * The actor's Home project — the project-less conversation with Caddie.
+ * Created server-side on first fetch; only queried once the actor has at
+ * least one project, so a brand-new user still meets the onboarding first.
+ */
+export function useHomeProject(actor: ActorScope, hasProjects: boolean) {
+	return useQuery({
+		queryKey: ['home-project', actor.actorId ?? 'pending'],
+		queryFn: () => fetchJson<{ project: Project }>('/api/home-project'),
+		enabled: actor.actorId !== null && hasProjects,
+	});
+}
+
 export function useArtifacts(actor: ActorScope, projectId: string | null) {
 	return useQuery({
 		queryKey: ['artifacts', actor.actorId ?? 'pending', projectId ?? 'none'],

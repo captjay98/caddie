@@ -58,6 +58,10 @@ let hostContext:
 			sandboxDriver: SandboxDriver | null;
 			/** cwd of the flue sandbox: the session workspace root. */
 			sandboxCwd?: string;
+			/** false for kind='home' runs: casual chat has no gate, no plan. */
+			completionGateEnabled?: boolean;
+			/** Home runs only: the actor's project overview for the instruction. */
+			homeOverview?: string | null;
 	  })
 	| null = null;
 
@@ -66,6 +70,8 @@ export function provideCoordinatorContext(
 		currentPlanRevision: () => string;
 		sandboxDriver: SandboxDriver | null;
 		sandboxCwd?: string;
+		completionGateEnabled?: boolean;
+		homeOverview?: string | null;
 	},
 ): void {
 	hostContext = context;
@@ -111,6 +117,9 @@ export function Coordinator() {
 	useTool(makeRecordAcceptance());
 
 	useAgentFinish(async (ctx) => {
+		// Home conversations have no plan of record and no acceptance ledger:
+		// the gate is a build-run discipline, not a chat discipline.
+		if (requireHostContext().completionGateEnabled === false) return;
 		let content: string | null = null;
 		try {
 			content = await ctx.harness.sandbox.readFile(gatePathFor(currentRevision()));
@@ -135,8 +144,15 @@ export function Coordinator() {
 		}
 	});
 
+	const homeInstruction = requireHostContext().homeOverview
+		? `HOME CONVERSATION CONTEXT (inject once, never read aloud verbatim):\n${requireHostContext().homeOverview}\n` +
+			'Talk naturally; there is no build plan here, so delegation and the completion gate do not apply. ' +
+			'If the user wants to build or repair one of the listed projects, tell them to open that project in the workspace so a run can be created for it.\n\n'
+		: '';
+
 	useInstruction(
-		`You are Caddie's coordinator for this run. Model route ${ROUTE.id} is fixed for the whole run. ` +
+		homeInstruction +
+			`You are Caddie's coordinator for this run. Model route ${ROUTE.id} is fixed for the whole run. ` +
 			'Work through the specialists; never claim success without machine-checked evidence recorded via record_acceptance. ' +
 			`Tool results from older plan revisions are stale and must be re-run. ` +
 			SPECIALIST_INSTRUCTIONS['tech-lead'],

@@ -3,7 +3,8 @@ import { Database } from 'bun:sqlite';
 import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import net from 'node:net';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { splitSqlStatements } from './fixtures/controls-harness.ts';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { safeParse } from 'valibot';
@@ -194,11 +195,17 @@ function stopFixtureWorker(port: number) {
 
 /** Apply the full production migration (identity + product) to the fixture D1. */
 async function applyMigration(port: number): Promise<void> {
-	const ddl = readFileSync(MIGRATION_PATH, 'utf8');
-	const statements = ddl
-		.split(/;\s*(?:\n|$)/)
-		.map((s) => s.trim())
-		.filter((s) => s.length > 0);
+	// Every production migration, in name order — the fixture DB must match
+	// the real schema (0011 adds projects.kind, which the router inserts).
+	// splitSqlStatements is trigger-aware (0002 has BEGIN...END bodies).
+	const migrationsDir = join(REPO_ROOT, 'apps', 'app', 'migrations');
+	const files = readdirSync(migrationsDir)
+		.filter((f) => f.endsWith('.sql'))
+		.sort();
+	const statements: string[] = [];
+	for (const file of files) {
+		statements.push(...splitSqlStatements(readFileSync(join(migrationsDir, file), 'utf8')));
+	}
 	const res = await fetch(`http://127.0.0.1:${port}/__test/ddl`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
@@ -813,7 +820,14 @@ describe('P02 slice 2: scope enforcement and project services (unit)', () => {
 	beforeAll(() => {
 		sqlite = new Database(':memory:');
 		sqlite.exec('PRAGMA foreign_keys = ON;');
-		sqlite.exec(readFileSync(MIGRATION_PATH, 'utf8'));
+		// Full schema, trigger-aware (0011 adds projects.kind which
+		// createProject inserts).
+		const migrationsDir = join(REPO_ROOT, 'apps', 'app', 'migrations');
+		for (const file of readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()) {
+			for (const statement of splitSqlStatements(readFileSync(join(migrationsDir, file), 'utf8'))) {
+				sqlite.exec(statement);
+			}
+		}
 		db = wrapSqliteAsD1(sqlite);
 		unitEnv.DB = db;
 		sqlite.exec(
@@ -1425,5 +1439,45 @@ describe('P02 slice 3: project isolation over real workerd HTTP sessions', () =>
 		// membership of another workspace is 403, not 404 — and leaks no rows
 		const bobOnAProject = await worker(jarB, `/api/projects/${projA}`);
 		expect(bobOnAProject.status).toBe(403);
+	});
+});
+
+describe('P02 home project (project-less conversation surface)', () => {
+	let homeJar: Jar;
+
+	test('unauthenticated /api/home-project is 401 and writes nothing', async () => {
+		const res = await worker(new Jar(), '/api/home-project');
+		expect(res.status).toBe(401);
+		expect(await d1Count(WORKER_BASE, 'projects', "kind = 'home'")).toBe(0);
+	});
+
+	test('ensure is idempotent: one home project per actor, kind home', async () => {
+		// The fixture allowlist covers only the seeded identities — reuse Alice
+		// (same provider subject = a fresh session for the existing user).
+		homeJar = await signIn(ALICE_EMAIL, 'alice-sub', 'Alice');
+		const first = await worker(homeJar, '/api/home-project');
+		expect(first.status).toBe(200);
+		const body = (await first.json()) as { project: { id: string; kind: string; name: string } };
+		expect(body.project.kind).toBe('home');
+		expect(body.project.name).toBe('Home');
+
+		const second = await worker(homeJar, '/api/home-project');
+		const secondBody = (await second.json()) as { project: { id: string } };
+		expect(secondBody.project.id).toBe(body.project.id);
+		expect(await d1Count(WORKER_BASE, 'projects', "kind = 'home'")).toBe(1);
+
+		// A different actor gets their own home: per-actor through memberships
+		const bobJar = await signIn(BOB_EMAIL, 'bob-sub', 'Bob');
+		const bobHome = await worker(bobJar, '/api/home-project');
+		const bobBody = (await bobHome.json()) as { project: { id: string } };
+		expect(bobBody.project.id).not.toBe(body.project.id);
+	});
+
+	test('the actor is a member of their home project workspace (scope works)', async () => {
+		const home = (await (await worker(homeJar, '/api/home-project')).json()) as {
+			project: { id: string };
+		};
+		const read = await worker(homeJar, `/api/projects/${home.project.id}`);
+		expect(read.status).toBe(200);
 	});
 });

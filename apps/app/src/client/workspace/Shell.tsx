@@ -10,6 +10,7 @@ import {
 	useArtifacts,
 	useAuthStatus,
 	useCreateProject,
+	useHomeProject,
 	useProjects,
 	useRunBindings,
 	useSessionActor,
@@ -131,11 +132,32 @@ function AuthedShell(props: { actorId: string | null }): ReactElement {
 
 	const projectList: Project[] = projects.data?.projects ?? [];
 	const paramProject = search.project;
+	// The Home project (kind='home') is the default landing when the URL
+	// names no project — the direct line to Caddie. An explicit ?project=
+	// always wins; a stale param falls through to Home too.
+	const home = useHomeProject(actor, projectList.length > 0);
+	const homeProject =
+		projectList.find((project) => project.kind === 'home') ?? home.data?.project ?? null;
 	const selectedProject =
-		projectList.find((project) => project.id === paramProject) ?? projectList[0] ?? null;
+		(paramProject ? projectList.find((project) => project.id === paramProject) : undefined) ??
+		homeProject ??
+		projectList[0] ??
+		null;
 	const projectMissing =
-		Boolean(paramProject) && projectList.length > 0 && !selectedProject;
+		Boolean(paramProject) && projectList.length > 0 && !projectList.some((p) => p.id === paramProject);
 	const effectiveProjectId = projectMissing ? null : (selectedProject?.id ?? null);
+	// Home is created server-side on first fetch; refresh the list once so
+	// the selector shows it without a manual reload.
+	const queryClientRef = queryClient;
+	useEffect(() => {
+		if (
+			home.data?.project &&
+			projectList.length > 0 &&
+			!projectList.some((p) => p.id === home.data!.project.id)
+		) {
+			void queryClientRef.invalidateQueries({ queryKey: ['projects', props.actorId] });
+		}
+	}, [home.data, projectList, queryClientRef, props.actorId]);
 	// The coordinator run transport: live agent snapshot + sends for the
 	// selected project's active run (null → the channel keeps its standby).
 	const transport = useCoordinatorTransport(actor, effectiveProjectId);

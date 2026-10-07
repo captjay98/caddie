@@ -20,7 +20,7 @@ import { createArtifactsRouter } from './server/routes/artifacts.ts';
 import { createPreviewsRouter } from './server/routes/previews.ts';
 import { lookupRunByConversation, recordRepairRound, recordVerification } from './server/runs.ts';
 import type { RunBindingRecord } from '@caddie/contracts';
-import { createPlanDocRevision } from './server/projects.ts';
+import { createPlanDocRevision, listProjectsForActor } from './server/projects.ts';
 import { LruCache } from './server/lru-cache.ts';
 import {
 	SandboxDriver,
@@ -114,7 +114,7 @@ app.use('/agents/coordinator/*', async (c, next) => {
 		// The binding's plan revision is the run's current revision until a
 		// plan update changes it (P07 wires revision-bump invalidation).
 		currentRevisionCache.set(run.runId, run.planRevision);
-		provideCoordinatorContext(coordinatorContext(c.env, scope, run.runId, run));
+		provideCoordinatorContext(await coordinatorContext(c.env, scope, run.runId, run));
 	await next();
 });
 app.route('/agents/coordinator', createAgentRouter(Coordinator));
@@ -138,17 +138,72 @@ app.route('/agents/hello', createAgentRouter(Hello));
  * real endpoint operations; only model-issued `exec` commands are free-form,
  * by design.
  */
-function coordinatorContext(
+async function coordinatorContext(
 	env: Env,
 	scope: { actorId: string; workspaceId: string; projectId: string },
 	runId: string,
 	run: RunBindingRecord,
-): SpecialistBuildContext & {
+): Promise<SpecialistBuildContext & {
 	currentPlanRevision: () => string;
 	sandboxDriver: import('@flue/runtime').SandboxDriver | null;
 	/** cwd for the flue sandbox: the session workspace root. */
-	sandboxCwd: string;
-} {
+	sandboxCwd?: string;
+	/** Set for kind='home' runs: the gate does not apply to casual chat. */
+	completionGateEnabled: boolean;
+	/** Home runs only: the actor's project overview for cross-project discussion. */
+	homeOverview: string | null;
+}> {
+	// The Home project is the project-less chat surface: no sandbox, no
+	// completion gate, and a projects overview so Caddie can discuss
+	// everything the actor owns. Sandbox credentials are not required here.
+	const kindRows = await env.DB.prepare('select "kind" from "projects" where "id" = ?')
+		.bind(scope.projectId)
+		.all();
+	const isHome = ((kindRows.results ?? [])[0] as { kind?: string } | undefined)?.kind === 'home';
+	let homeOverview: string | null = null;
+	if (isHome) {
+		const projects = await listProjectsForActor(env.DB, scope.actorId);
+		const lines = projects
+			.filter((p) => p.id !== scope.projectId)
+			.map((p) => {
+				const description = p.description ? ` — ${p.description}` : '';
+				return `- ${p.name} (${p.status})${description} [id: ${p.id}]`;
+			});
+		homeOverview =
+			'This is the user\'s HOME conversation — not a build project. There is no plan of record and ' +
+			'the completion gate does not apply: just talk. The user\'s projects:\n' +
+			(lines.length > 0 ? lines.join('\n') : '(no build projects yet)') +
+			'\nDiscuss any of them by name; when the user wants to BUILD one, say so and ask to open that project.';
+	}
+
+	if (isHome) {
+		// Casual home chat: specialists exist only as declarations; every
+		// build capability fails honestly if the model somehow reaches for it.
+		const homeRefusal = (what: string) => async () => {
+			throw new SandboxError(409, 'HOME_NO_SANDBOX', `the home conversation has no ${what}`);
+		};
+		const homeSandboxDeps: SandboxToolDeps = {
+			execute: async () => {
+				throw new SandboxError(409, 'HOME_NO_SANDBOX', 'the home conversation has no build sandbox');
+			},
+			readFile: homeRefusal('build sandbox'),
+			writeFile: homeRefusal('build sandbox'),
+		};
+		return {
+			driver: homeSandboxDeps,
+			sessionId: `home:${scope.actorId}`,
+			runId,
+			readPlanNote: async () => null,
+			writePlanNote: homeRefusal('plan of record'),
+			delegateRepair: homeRefusal('repair ledger'),
+			recordVerification: homeRefusal('verification ledger'),
+			currentPlanRevision: () => currentRevisionCache.get(runId) ?? run.planRevision,
+			sandboxDriver: null,
+			completionGateEnabled: false,
+			homeOverview,
+		};
+	}
+
 	if (!env.CONTREE_BASE_URL || !env.CONTREE_API_TOKEN || !env.CONTREE_PROJECT_ID) {
 		throw new SandboxError(
 			503,
@@ -307,6 +362,8 @@ function coordinatorContext(
 			await recordVerification(env.DB, scope, runId, input);
 		},
 		currentPlanRevision: () => currentRevisionCache.get(runId) ?? '',
+		completionGateEnabled: true,
+		homeOverview: null,
 	};
 }
 

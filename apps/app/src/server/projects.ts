@@ -138,6 +138,7 @@ function projectFromRow(row: Record<string, unknown>): Project {
 		contestId: row['contestId'] ?? null,
 		contestUrl: row['contestUrl'] ?? null,
 		status: row['status'],
+		kind: row['kind'] ?? 'standard',
 		createdAt: row['createdAt'],
 		updatedAt: row['updatedAt'],
 	});
@@ -244,12 +245,13 @@ export async function createProject(
 		contestId: parsed.contestId ?? null,
 		contestUrl: parsed.contestUrl ?? null,
 		status: 'active',
+		kind: 'standard',
 		createdAt: nowIso(),
 		updatedAt: nowIso(),
 	};
 	await db
 		.prepare(
-			'insert into "projects" ("id","workspaceId","name","description","contestId","contestUrl","status","createdAt","updatedAt") values (?,?,?,?,?,?,?,?,?)',
+			'insert into "projects" ("id","workspaceId","name","description","contestId","contestUrl","status","kind","createdAt","updatedAt") values (?,?,?,?,?,?,?,?,?,?)',
 		)
 		.bind(
 			project.id,
@@ -259,9 +261,109 @@ export async function createProject(
 			project.contestId,
 			project.contestUrl,
 			project.status,
+			project.kind,
 			project.createdAt,
 			project.updatedAt,
 		)
+		.run();
+	return project;
+}
+
+/**
+ * The actor's Home project — the direct conversation with Caddie that exists
+ * outside any build project (kind='home', one per workspace, partial unique
+ * index in migration 0011). Created lazily on first use; a concurrent
+ * creator loses the unique insert and re-selects. Membership mirrors
+ * createProject: the actor joins the workspace if not already a member.
+ */
+export async function ensureHomeProject(db: D1Database, actorId: string): Promise<Project> {
+	const verifiedActor = requireActorId(actorId);
+	const existing = await queryAll(
+		db,
+		`select p.* from "projects" p
+		 join "workspace_memberships" m on m."workspaceId" = p."workspaceId"
+		 where m."userId" = ? and p."kind" = 'home'
+		 order by p."createdAt" asc limit 1`,
+		verifiedActor,
+	);
+	if (existing[0]) return projectFromRow(existing[0]);
+
+	// Oldest membership's workspace is the actor's personal one; a brand-new
+	// actor has none, so create it.
+	let rows = await queryAll(
+		db,
+		'select "workspaceId" from "workspace_memberships" where "userId" = ? order by "createdAt" asc limit 1',
+		verifiedActor,
+	);
+	let workspaceId = rows[0]?.['workspaceId'] as string | undefined;
+	if (!workspaceId) {
+		workspaceId = newId('ws');
+		await db
+			.prepare('insert into "workspaces" ("id","name","createdAt") values (?,?,?)')
+			.bind(workspaceId, 'Home', nowIso())
+			.run();
+		await db
+			.prepare('insert into "workspace_memberships" ("id","workspaceId","userId","role","createdAt") values (?,?,?,?,?)')
+			.bind(newId('mem'), workspaceId, verifiedActor, 'owner', nowIso())
+			.run();
+	}
+
+	const project: Project = {
+		id: newId('proj'),
+		workspaceId,
+		name: 'Home',
+		description: 'Your direct line to Caddie — talk without picking a project.',
+		contestId: null,
+		contestUrl: null,
+		status: 'active',
+		kind: 'home',
+		createdAt: nowIso(),
+		updatedAt: nowIso(),
+	};
+	try {
+		await db
+			.prepare(
+				'insert into "projects" ("id","workspaceId","name","description","contestId","contestUrl","status","kind","createdAt","updatedAt") values (?,?,?,?,?,?,?,?,?,?)',
+			)
+			.bind(
+				project.id,
+				project.workspaceId,
+				project.name,
+				project.description,
+				project.contestId,
+				project.contestUrl,
+				project.status,
+				project.kind,
+				project.createdAt,
+				project.updatedAt,
+			)
+			.run();
+	} catch (error) {
+		// The partial unique index allows exactly one home per workspace: a
+		// concurrent ensure lost the race — return the winner.
+		const message = String(error);
+		if (message.includes('projects_home_per_workspace_idx')) {
+			const winner = await queryAll(
+				db,
+				`select p.* from "projects" p
+				 join "workspace_memberships" m on m."workspaceId" = p."workspaceId"
+				 where m."userId" = ? and p."kind" = 'home'
+				 order by p."createdAt" asc limit 1`,
+				verifiedActor,
+			);
+			if (winner[0]) return projectFromRow(winner[0]);
+		}
+		throw error;
+	}
+	// The workspace membership was ensured above (or pre-existed with the
+	// actor already a member — inserting again would violate the unique
+	// (workspaceId, userId) index, so only insert when we created the space).
+	if (!rows[0]) return project;
+	await db
+		.prepare(
+			'insert or ignore into "workspace_memberships" ("id","workspaceId","userId","role","createdAt") values (?,?,?,?,?)',
+		)
+		.bind(newId('mem'), workspaceId, verifiedActor, 'owner', nowIso())
 		.run();
 	return project;
 }

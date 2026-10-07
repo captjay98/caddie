@@ -49,6 +49,14 @@ export const ProjectStatusSchema = v.picklist(['active', 'archived']);
 export type ProjectStatus = v.InferOutput<typeof ProjectStatusSchema>;
 
 /**
+ * `home` marks the actor's direct conversation project — the project-less
+ * chat surface backed by the same run machinery. Exactly one per workspace
+ * (partial unique index, migration 0011).
+ */
+export const ProjectKindSchema = v.picklist(['standard', 'home']);
+export type ProjectKind = v.InferOutput<typeof ProjectKindSchema>;
+
+/**
  * A project is workspace-owned; the contest link is OPTIONAL (nullable) — a
  * project never requires a contest (feature-ledger C9). Archived projects keep
  * their rows: archive is a status, never a deletion.
@@ -62,6 +70,7 @@ export const ProjectSchema = v.pipe(
 		contestId: v.nullable(v.string()),
 		contestUrl: v.nullable(v.string()),
 		status: ProjectStatusSchema,
+		kind: v.optional(ProjectKindSchema, 'standard'),
 		createdAt: isoTimestamp(),
 		updatedAt: isoTimestamp(),
 	}),

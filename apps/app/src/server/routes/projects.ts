@@ -9,6 +9,7 @@ import {
 	createProject,
 	createRunBinding,
 	createWorkspace,
+	ensureHomeProject,
 	getProject,
 	getRunBinding,
 	listArtifactRevisions,
@@ -77,6 +78,12 @@ export function createProjectsRouter(): Hono<{ Bindings: Env }> {
 	});
 
 	// --- workspaces -----------------------------------------------------------
+	router.get('/home-project', async (c) => {
+		const userId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const project = await ensureHomeProject(c.env.DB, userId);
+		return c.json({ project }, 200);
+	});
+
 	router.post('/workspaces', async (c) => {
 		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
 		const workspace = await createWorkspace(c.env.DB, actorId, await readJson(c.req.raw));
