@@ -24,6 +24,7 @@
 		"@playwright/test": "^1.55.0"
 	},
 	"patchedDependencies": {
-		"agents@0.20.1": "patches/agents@0.20.1.patch"
+		"agents@0.20.1": "patches/agents@0.20.1.patch",
+		"@flue/sdk@2.2.2": "patches/@flue%2Fsdk@2.2.2.patch"
 	}
 }

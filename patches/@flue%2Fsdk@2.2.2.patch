@@ -1,0 +1,19 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 7c702ab2ce1232b0ffaabd3b10fa0b1b67e15106..3e866408d9797d764cf5731e744467243e49bf33 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1351,9 +1351,13 @@ function createFlueClient(options) {
+ 				},
+ 				signal
+ 			}), http),
+-			updates: ({ onActivity, window, ...updateOptions }) => createFlueEventStream(updateOptions, {
++			updates: ({ onActivity, window, offset, ...updateOptions }) => createFlueEventStream(updateOptions, {
+ 				url: http.url("", {
+ 					view: "updates",
++					// Forge patch: the router's updates handler requires exactly one
++					// `offset` param; flue 2.2.2's SDK omitted it, so live
++					// observation 400'd on every conversation.
++					offset,
+ 					from: window?.from,
+ 					limit: window?.limit
+ 				}),
