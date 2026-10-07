@@ -297,23 +297,24 @@ function AuthedWorkspace(props: {
 								onAction={onCardAction}
 							/>
 						) : (
-								<RunInspector
-									runs={{
-										isPending: runBindings.isPending,
-										isFetching: runBindings.isFetching,
-										error: runBindings.error,
-										items: runBindings.data?.runBindings ?? [],
-										retry: () => void runBindings.refetch(),
-									}}
-									artifacts={{
-										isPending: artifacts.isPending,
-										isFetching: artifacts.isFetching,
-										error: artifacts.error,
-										items: artifacts.data?.artifacts ?? [],
-										retry: () => void artifacts.refetch(),
-									}}
-								/>
-							)}
+							<RunInspector
+								runs={{
+									isPending: runBindings.isPending,
+									isFetching: runBindings.isFetching,
+									error: runBindings.error,
+									items: runBindings.data?.runBindings ?? [],
+									retry: () => void runBindings.refetch(),
+								}}
+								artifacts={{
+									isPending: artifacts.isPending,
+									isFetching: artifacts.isFetching,
+									error: artifacts.error,
+									items: artifacts.data?.artifacts ?? [],
+									retry: () => void artifacts.refetch(),
+								}}
+								projectId={effectiveProjectId}
+							/>
+						)}
 						</div>
 					</aside>
 

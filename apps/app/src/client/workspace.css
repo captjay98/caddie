@@ -868,6 +868,21 @@ a.btn-ghost.topbar-nav-link {
 .row-status[data-status='running'] {
 	color: var(--color-action);
 }
+/* Board screen 14: the two states the schedules markup already asks for —
+   armed and paused become distinct labelled states, never the same grey. */
+.row-status[data-status='active'] {
+	color: var(--color-ok);
+}
+.row-status[data-status='paused'] {
+	color: var(--color-warn);
+}
+.row-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin-top: 0.4rem;
+	flex-wrap: wrap;
+}
 
 .row-details {
 	margin-top: 0.45rem;
@@ -1340,14 +1355,6 @@ a.btn-ghost.topbar-nav-link {
 	background: color-mix(in srgb, var(--color-danger) 10%, transparent);
 	text-decoration: line-through;
 	text-decoration-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
-}
-
-.row-actions {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	margin-top: 0.4rem;
-	flex-wrap: wrap;
 }
 
 .artifact-panel {

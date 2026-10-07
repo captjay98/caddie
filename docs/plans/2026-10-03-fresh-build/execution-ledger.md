@@ -617,3 +617,33 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-OVERHAUL-P4 (board execution — surface rebuilds + schedules/runs states, screens 07/13/14/18/19)", "status": "LOCAL VERIFIED", "sha": "see git log feat(ui): discovery/judge/submission rebuilds + schedules + runs links (board phase 4)",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bun test tests/brief.test.ts", "exitCode": 0, "receipt": "3 pass"},
+    {"command": "bun run test:browser -- P01 P06 P11 P13 P14", "exitCode": 0, "receipt": "all five packets PASS — discovery.spec asserts the eligibility copy verbatim (ELIGIBLE/HARD-INELIGIBLE exact, fit line, feed gaps, role=alert denied text) against the rebuilt surfaces; submission.spec asserts the judge access labels (VERIFIED (local)/DECLARED ONLY exact, weight line) and the submission honesty copy (PREPARED (not submitted), STALE lines, readiness reasons)"},
+    {"command": "bunx playwright test tests/browser/artifacts.spec.ts tests/browser/forge-journey.spec.ts tests/browser/landing.spec.ts tests/browser/release.spec.ts", "exitCode": 0, "receipt": "25 passed"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/discovery/Results.tsx", "note": "REBUILT on the class system (was 17 hex literals, 25 inline styles): eligibility badges own tint AND text via .badge; loading state replaces the blank first-fetch; typed retry keeps role=alert"},
+    {"path": "apps/app/src/client/judge/Scorecard.tsx", "note": "REBUILT (was 21 hex, 38 inline styles): access levels are badge tones with their words; not-a-prediction is the page header kicker; rubric loading state; classed controls; the shipped honesty copy verbatim"},
+    {"path": "apps/app/src/client/submission/Package.tsx", "note": "REBUILT (was 18 hex, 35 inline styles): readiness as a status band with its reasons; five checklist meanings carry badge tones; 'this tool never submits anywhere' promoted to the page header; STALE marks use the warn tone"},
+    {"path": "apps/app/src/client/tasks/Schedules.tsx + workspace.css", "note": "board screen 14: armed/paused styled as distinct labelled states (the markup already asked for them — data-status active/paused now have tone rules; data-paused remains read by tests); next run renders human-relative beside the exact ISO; Run now weighted above Pause with its consequence stated"},
+    {"path": "apps/app/src/client/runs/RunInspector.tsx + Shell", "note": "board screen 07: run rows link into /evidence and artifact rows into /artifacts (projectId passed from the workspace); the lane's identifiers are openable, not inert text"}
+  ],
+  "environment": "local workerd via vite preview (playwright webServer), chromium_headless_shell v1243",
+  "providerCalls": "none",
+  "specReview": "deferred to owner batch review — the specs' verbatim-copy assertions were the acceptance bar for every rebuild and all pass",
+  "qualityReview": "owner visual acceptance pending on http://localhost:5176 (board frames 01-19 are the reference)",
+  "limitations": [
+    "client components now carry zero hex literals and zero inline styles (verified by grep across Drawer/Results/Scorecard/Package/Viewer/DesignReview/RepositoryPicker); workspace.css/tokens.css remain the only colour sources",
+    "run rows link to the project's evidence/artifacts pages generally, not per-run filtered views — the endpoints carry no per-run join yet",
+    "schedule failures still reload the row (catch → reload): surfacing the error in-row remains open (board screen 14 fix 3 partially adopted)",
+    "landing light-mode theme remains DEFERRED per the approved plan; the landing's type floor landed in phase 0",
+    "Memory/Search remain embedded in Settings (deferred per plan); Board Keep-list items untouched by design"
+  ]
+}
+```

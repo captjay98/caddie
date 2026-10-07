@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
+import { formatTimeAgo } from '@caddie/ui/time';
 import { fetchJson } from '../api.ts';
 
 /**
@@ -133,7 +134,9 @@ export function Schedules(props: { projectId: string | null }): ReactElement {
 								<span className="mono-id">
 									{schedule.cron} · {schedule.timezone}
 								</span>
-								<span className="mono-id">next {schedule.nextRunAt}</span>
+								<span className="mono-id" data-testid={`schedule-next-${schedule.id}`}>
+									next {formatTimeAgo(schedule.nextRunAt)} · {schedule.nextRunAt}
+								</span>
 							</div>
 							<div className="row-main">
 								<span className="mono-id">
@@ -150,7 +153,7 @@ export function Schedules(props: { projectId: string | null }): ReactElement {
 							<div className="row-actions">
 								<button
 									type="button"
-									className="detail-toggle"
+									className="btn-ghost"
 									disabled={busyId === schedule.id}
 									data-testid={`schedule-run-now-${schedule.id}`}
 									onClick={() => void act(schedule.id, 'run-now')}
@@ -166,6 +169,9 @@ export function Schedules(props: { projectId: string | null }): ReactElement {
 								>
 									{schedule.paused ? 'Resume' : 'Pause'}
 								</button>
+								<span className="mono-id">
+									run now dispatches one run — it appears in Runs with its own id and receipts
+								</span>
 							</div>
 						</div>
 					))}

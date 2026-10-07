@@ -36,6 +36,7 @@ function RunRow(props: {
 	createdAt: string;
 	status: RunStatus;
 	now: Date;
+	projectId?: string | null;
 }): ReactElement {
 	const [open, setOpen] = useState(false);
 	return (
@@ -69,6 +70,13 @@ function RunRow(props: {
 					<span className="mono-id">recorded {formatTimeAgo(props.createdAt, props.now)}</span>
 				</div>
 			) : null}
+			{props.projectId ? (
+				<div className="row-actions">
+					<a className="r-link" href={`./evidence?project=${encodeURIComponent(props.projectId)}`}>
+						Open evidence
+					</a>
+				</div>
+			) : null}
 		</div>
 	);
 }
@@ -80,6 +88,7 @@ function ArtifactRow(props: {
 	metadataHash: string;
 	createdAt: string;
 	now: Date;
+	projectId?: string | null;
 }): ReactElement {
 	const [open, setOpen] = useState(false);
 	return (
@@ -106,6 +115,13 @@ function ArtifactRow(props: {
 					<span className="mono-id">recorded {formatTimeAgo(props.createdAt, props.now)}</span>
 				</div>
 			) : null}
+			{props.projectId ? (
+				<div className="row-actions">
+					<a className="r-link" href={`./artifacts?project=${encodeURIComponent(props.projectId)}`}>
+						Open artifacts
+					</a>
+				</div>
+			) : null}
 		</div>
 	);
 }
@@ -114,6 +130,9 @@ export function RunInspector(props: {
 	/** Typed transport outcomes per run (P05); absent = honest 'recorded'. */
 	statusByRunId?: Readonly<Record<string, RunStatus>>;
 	now?: Date;
+	/** Present when the lane can link rows into the screens that hold their
+	 *  evidence and artifacts (board screens 07/09/10). */
+	projectId?: string | null;
 	runs: {
 		isPending: boolean;
 		isFetching: boolean;
@@ -179,6 +198,7 @@ export function RunInspector(props: {
 								createdAt={run.createdAt}
 								status={props.statusByRunId?.[run.runId] ?? 'recorded'}
 								now={now}
+								projectId={props.projectId}
 							/>
 						))}
 					</div>
@@ -214,6 +234,7 @@ export function RunInspector(props: {
 								revision={artifact.revision}
 								metadataHash={artifact.metadataHash}
 								createdAt={artifact.createdAt}
+								projectId={props.projectId}
 								now={now}
 							/>
 						))}
