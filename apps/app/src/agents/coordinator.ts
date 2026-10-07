@@ -114,7 +114,7 @@ export function Coordinator() {
 	for (const declaration of buildSpecialistDeclarations(context)) {
 		useSubagent(declaration);
 	}
-	useTool(makeRecordAcceptance());
+	useTool(makeRecordAcceptance(currentRevision));
 
 	useAgentFinish(async (ctx) => {
 		// Home conversations have no plan of record and no acceptance ledger:

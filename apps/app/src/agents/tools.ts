@@ -283,7 +283,7 @@ export const GATE_DIR = '.caddie/gates';
  * can create it. Requires a harness with a declared sandbox; the pure
  * evaluator in coordinator.ts decides completion from the file's contents.
  */
-export function makeRecordAcceptance() {
+export function makeRecordAcceptance(currentRevision?: () => string) {
 	return defineTool({
 		name: 'record_acceptance',
 		description:
@@ -293,6 +293,16 @@ export function makeRecordAcceptance() {
 		run: async (ctx) => {
 			if (ctx.data.exitCode !== 0 && ctx.data.exitCode !== 1) {
 				return { output: 'record refused: exitCode must be 0 (pass) or 1 (fail) from the actual command' };
+			}
+			// The gate reads ONLY the run's current revision file; a record
+			// written under any other revision is invisible to it (the model
+			// invented revisions like "1" and the gate refused completion
+			// forever). Refuse mismatches loudly instead of writing a ledger
+			// the gate can never see.
+			if (currentRevision && ctx.data.planRevision !== currentRevision()) {
+				return {
+					output: `record refused: planRevision must be the run's current revision ("${currentRevision()}") — received "${ctx.data.planRevision}". Re-run the command and record with the current revision.`,
+				};
 			}
 			const record: GateRecord = {
 				check: ctx.data.check,

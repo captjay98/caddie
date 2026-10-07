@@ -14,6 +14,7 @@ import {
 } from '../apps/app/src/agents/permissions';
 import { SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
 import {
+	makeRecordAcceptance,
 	makeRecordVerification,
 	makeSandboxExec,
 	makeWriteSandboxFile,
@@ -192,6 +193,36 @@ describe('P05 protected acceptance surfaces', () => {
 			data: { command: 'bun test src/', sessionId: 's1', timeoutMs: 1000 },
 		});
 		expect(calls).toEqual(['bun test src/']);
+	});
+
+	test('record_acceptance refuses a planRevision that is not the run\'s current one', async () => {
+		const writes: string[] = [];
+		const tool = makeRecordAcceptance(() => 'rev-0');
+		const run = async (planRevision: string) =>
+			(tool as unknown as { run: (ctx: { data: Record<string, unknown>; harness: { sandbox: { readFile: (p: string) => Promise<string>; writeFile: (p: string, c: string) => Promise<void> } } }) => Promise<{ output: string }> }).run({
+				data: { check: 'tests', command: 'bun test', exitCode: 0, outputDigest: 'd', operationKey: 'exec:r1:aaaaaaaaaaaaaaaaaaaaaaaa', planRevision },
+				harness: {
+					sandbox: {
+						readFile: async () => '',
+						writeFile: async (_p: string, content: string) => {
+							writes.push(content);
+						},
+					},
+				},
+			});
+
+		// the model invented a revision ("1") while the run is on rev-0 —
+		// the write must be REFUSED so no invisible ledger is created
+		const refused = await run('1');
+		expect(refused.output).toContain('record refused');
+		expect(refused.output).toContain('rev-0');
+		expect(writes).toEqual([]);
+
+		// with the run's actual revision the record lands in the ledger
+		const accepted = await run('rev-0');
+		expect(accepted.output).toContain('acceptance recorded');
+		expect(writes).toHaveLength(1);
+		expect(writes[0]).toContain('"planRevision":"rev-0"');
 	});
 
 	test('mentionsProtectedPath catches paths embedded mid-command', () => {
