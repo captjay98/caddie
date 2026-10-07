@@ -8,6 +8,7 @@ import { Start } from '../onboarding/Start.tsx';
 import {
 	useArtifacts,
 	useAuthStatus,
+	useBriefCards,
 	useCreateProject,
 	useRunBindings,
 	useSessionActor,
@@ -142,6 +143,7 @@ function AuthedWorkspace(props: {
 
 	const runBindings = useRunBindings(actor, effectiveProjectId);
 	const artifacts = useArtifacts(actor, effectiveProjectId);
+	const brief = useBriefCards(actor, effectiveProjectId);
 	const createProject = useCreateProject(actor);
 	const channel = useChannelStore({ sessionKey: props.actorId ?? 'anon', projectId: effectiveProjectId });
 
@@ -252,17 +254,19 @@ function AuthedWorkspace(props: {
 									title="No project selected"
 									detail="Select or create a project — its brief, runs and artifacts open here."
 								/>
-							) : tab === 'brief' ? (
-								<BriefLane
-									state={{
-										kind: projectsState === 'empty' ? 'empty' : projectsState,
-										error: chrome.projectsError,
-										stale: briefStale,
-										retry: () => void queryClient.refetchQueries({ queryKey: ['projects', props.actorId] }),
-									}}
-									cards={[]}
-								/>
-							) : (
+						) : tab === 'brief' ? (
+							<BriefLane
+								state={{
+									kind: projectsState === 'empty' ? 'empty' : projectsState,
+									error: chrome.projectsError,
+									stale: briefStale,
+									retry: () => void queryClient.refetchQueries({ queryKey: ['projects', props.actorId] }),
+								}}
+								cards={brief.data?.cards ?? []}
+								feedPending={brief.isPending}
+								feedError={brief.error}
+							/>
+						) : (
 								<RunInspector
 									runs={{
 										isPending: runBindings.isPending,

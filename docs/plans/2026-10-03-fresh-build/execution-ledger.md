@@ -555,3 +555,33 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-OVERHAUL-P2 (board execution — the brief feed + channel grammar, screens 05/06/08)", "status": "LOCAL VERIFIED", "sha": "see git log feat(ui): brief feed + channel turn grammar (board phase 2)",
+  "commands": [
+    {"command": "bun test tests/brief.test.ts", "exitCode": 0, "receipt": "3 pass, 33 expects — pending approvals -> exactly one needs-you card (expired + decided stay out); conflict card cites both claim ids with newest capturedAt; stale artifact card; newest failed round per run; armed schedules only (paused stays out); ranking needs-you -> changed -> blocked -> handled asserted pairwise; every card parses against the frozen DecisionCardSchema; empty project -> zero cards; foreign actor's scope refused at the boundary"},
+    {"command": "bun run typecheck", "exitCode": 0},
+    {"command": "bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bun run test:browser -- P01 P06 P11 P13 P14", "exitCode": 0, "receipt": "all five packets PASS — the workspace brief lane now renders the real feed; existing specs unaffected (none assert brief-lane copy; the specs' /api/projects/** catch-all stub returns {} -> honest empty feed -> teaching cards)"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/brief.ts", "note": "projectBrief(db, scope): reads approvals + evidence surveys + artifacts + run_rounds + schedules and projects them onto DecisionCard; each source fails independently (a broken layer never blanks the rest); no card is invented"},
+    {"path": "apps/app/src/server/routes/brief.ts + app.ts mount", "note": "GET /api/projects/:projectId/brief — session + membership scoped (requireProjectScope), service re-verifies against D1"},
+    {"path": "apps/app/src/client/queries.ts", "note": "useBriefCards(actor, projectId), actor-keyed like every product query; chrome refreshAll invalidates ['brief', actorId]"},
+    {"path": "apps/app/src/client/workspace/Shell.tsx", "note": "cards={[]} RETIRED — BriefLane is fed brief.data.cards; feed pending/error render as explicit states"},
+    {"path": "apps/app/src/client/brief/DecisionCard.tsx", "note": "board screen 06: live count (N decisions · M waiting on you), run + evidence ids promoted into the card body, toggle holds the audit trail only, empty lane teaches the loop (Start with the Channel / Arm a weekly sweep)"},
+    {"path": "apps/app/src/client/conversation/Channel.tsx", "note": "board screen 08: author · time turn labels from the SDK's server capture timestamp; tool rows carry a state glyph; settlement states what changed and did not ('nothing was written to the plan'); draft names the idempotency key as the duplicate-send guard; the P05 packet id never reaches users; standby copy teaches 'your first message starts one'"}
+  ],
+  "environment": "local workerd via vite preview (playwright webServer), chromium_headless_shell v1243; in-memory SQLite (same DDL) for the unit suite",
+  "providerCalls": "none",
+  "specReview": "deferred to phase batch review (unit suite asserts the contract + ranking + isolation directly)",
+  "qualityReview": "owner visual acceptance pending on http://localhost:5176",
+  "limitations": [
+    "conflict cards derive updatedAt from the newest conflicting claim's snapshotCapturedAt — honest when claims carry timestamps, falls back to the conflict id otherwise",
+    "card primary actions currently have no navigation target (the /evidence, /artifacts, /design-review routes land in board phase 3); the button renders and the targetId is carried for that wiring",
+    "the brief endpoint is new surface not owned by a numbered packet; it runs via `bun test tests/brief.test.ts` (documented here) because PACKET_MAP is owner-amended",
+    "schedule clock cards describe the cron + next run; lastResult prose is never parsed for status (contracts forbids prose-as-data)"
+  ]
+}
+```

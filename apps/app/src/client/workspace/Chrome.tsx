@@ -147,6 +147,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		void queryClient.invalidateQueries({ queryKey: ['run-bindings', actorId] });
 		void queryClient.invalidateQueries({ queryKey: ['artifacts', actorId] });
 		void queryClient.invalidateQueries({ queryKey: ['plan-docs', actorId] });
+		void queryClient.invalidateQueries({ queryKey: ['brief', actorId] });
 	}
 
 	function toggleTheme() {

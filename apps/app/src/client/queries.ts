@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-query';
 import type {
 	ArtifactRevision,
+	DecisionCard,
 	PlanDocRevision,
 	Project,
 	RunBindingRecord,
@@ -87,6 +88,22 @@ export function useRunBindings(actor: ActorScope, projectId: string | null) {
 		queryFn: () =>
 			fetchJson<{ runBindings: RunBindingRecord[] }>(
 				`/api/projects/${encodeURIComponent(projectId ?? '')}/run-bindings`,
+			),
+		enabled: actor.actorId !== null && projectId !== null,
+	});
+}
+
+/**
+ * UI review board phase 2 — the brief feed: the project's real decisions
+ * (pending approvals, retained conflicts, stale artifacts, failed rounds,
+ * armed schedules) projected onto the DecisionCard contract.
+ */
+export function useBriefCards(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['brief', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () =>
+			fetchJson<{ cards: DecisionCard[] }>(
+				`/api/projects/${encodeURIComponent(projectId ?? '')}/brief`,
 			),
 		enabled: actor.actorId !== null && projectId !== null,
 	});

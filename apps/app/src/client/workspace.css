@@ -764,6 +764,16 @@ a.btn-ghost.topbar-nav-link {
 	gap: 0.5rem;
 }
 
+/* Board screen 06: the audit trail's run + evidence ids promoted into the
+   card body, so a card's citation is readable without a click. */
+.card-meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.55rem;
+	margin-top: 0.55rem;
+	color: var(--color-muted);
+}
+
 .detail-toggle {
 	background: none;
 	border: none;
@@ -882,6 +892,30 @@ a.btn-ghost.topbar-nav-link {
 .msg {
 	max-width: 78ch;
 	min-width: 0;
+	display: grid;
+	gap: 0.25rem;
+}
+
+/* Board screen 08: authorship + time on every turn — a claim can be traced
+   to the run that made it, not inferred from alignment. */
+.turn-label {
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.04em;
+	color: var(--color-muted);
+}
+
+.msg.user .turn-label {
+	justify-self: end;
+}
+
+.msg .bubble {
+	min-width: 0;
+}
+
+.msg.user .bubble {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
 .msg.user {

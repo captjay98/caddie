@@ -10,6 +10,7 @@ import { createAuthRouter } from './server/routes/auth.ts';
 import { createProjectsRouter } from './server/routes/projects.ts';
 import { createApprovalsRouter } from './server/routes/approvals.ts';
 import { createEvidenceRouter } from './server/routes/evidence.ts';
+import { createBriefRouter } from './server/routes/brief.ts';
 import { createRunsRouter, conversationGuard } from './server/routes/runs.ts';
 import { createTasksRouter } from './server/routes/tasks.ts';
 import { createGithubRouter } from './server/routes/github.ts';
@@ -94,6 +95,7 @@ api.route('/', createTasksRouter());
 api.route('/', createGithubRouter());
 api.route('/', createDiscoveryRouter());
 api.route('/', createJudgeRouter());
+api.route('/', createBriefRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------

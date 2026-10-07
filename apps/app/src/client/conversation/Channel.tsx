@@ -5,6 +5,7 @@ import { safeParse } from 'valibot';
 import { DecisionCardSchema, type DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { Markdown } from '@caddie/ui/Markdown';
 import { StatePanel } from '../states.tsx';
+import { Icon } from '../icons.tsx';
 import { DecisionCardView } from '../brief/DecisionCard.tsx';
 import { Composer } from './Composer.tsx';
 import type { ChannelDraft, ChannelSource } from './channel-store.ts';
@@ -17,16 +18,26 @@ import type { ChannelDraft, ChannelSource } from './channel-store.ts';
  *   reasoning     -> a one-line working marker while streaming; DONE REASONING
  *                    IS NEVER RENDERED. No human-facing raw chain-of-thought,
  *                    ever (hard constraint + design direction).
- *   dynamic-tool  -> mono tool banner: queued/working/done/error + duration
+ *   dynamic-tool  -> mono tool row: state glyph + queued/working/done/error + duration
  *   data-decision-card -> schema-validated DecisionCardView (unparsable
  *                    payloads render an honest fault, never a guess)
  *   data-*        -> collapsed specialist-data disclosure (display only)
  *   file          -> attachment chip with a real URL when one exists
  *
- * Settlements keep stop states honest: a failed/aborted settlement renders a
- * "run stopped" banner — never a success. Transport status is rendered as
- * transport status; only settlements/types speak about business outcomes.
+ * UI review board screen 08: turns carry author · time labels so a claim can
+ * be traced to the run that made it; a tool call, an attachment and a data
+ * disclosure are distinct row types; settlement states what changed and what
+ * did not; the draft names the idempotency key as the duplicate-send guard.
  */
+
+function turnClock(timestamp: string | undefined): string {
+	if (!timestamp) return '';
+	const date = new Date(timestamp);
+	if (Number.isNaN(date.getTime())) return '';
+	const hh = String(date.getHours()).padStart(2, '0');
+	const mm = String(date.getMinutes()).padStart(2, '0');
+	return `${hh}:${mm}`;
+}
 
 function ToolBanner({ part }: { part: Extract<FlueConversationPart, { type: 'dynamic-tool' }> }): ReactElement {
 	const stateWord =
@@ -36,7 +47,11 @@ function ToolBanner({ part }: { part: Extract<FlueConversationPart, { type: 'dyn
 				? `done${typeof part.durationMs === 'number' ? ` · ${Math.round(part.durationMs / 100) / 10}s` : ''}`
 				: 'error';
 	return (
-		<p className="tool-banner" data-state={part.state} data-testid="tool-banner">
+		<p className="tool-banner tool-row" data-state={part.state} data-part-kind="call" data-testid="tool-banner">
+			<Icon
+				name={part.state === 'output-available' ? 'check' : part.state === 'output-error' ? 'alert' : 'play'}
+				title={part.state === 'output-available' ? 'done' : part.state === 'output-error' ? 'failed' : 'working'}
+			/>{' '}
 			[{part.toolName}] {stateWord}
 			{part.state === 'output-error' && part.errorText ? ` — ${part.errorText}` : ''}
 		</p>
@@ -95,6 +110,7 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 
 function MessageRow({ message }: { message: FlueConversationMessage }): ReactElement | null {
 	if (message.display === 'hidden') return null;
+	const clock = turnClock(message.timestamp);
 	if (message.role === 'user') {
 		const text = message.parts
 			.filter((part): part is Extract<FlueConversationPart, { type: 'text' }> => part.type === 'text')
@@ -102,7 +118,10 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 			.join('\n');
 		return (
 			<div className="msg user" data-testid="msg-user">
-				{text}
+				<span className="turn-label" data-testid="turn-label">
+					You{clock ? ` · ${clock}` : ''}
+				</span>
+				<div className="bubble">{text}</div>
 			</div>
 		);
 	}
@@ -118,14 +137,17 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 	if (diagnostic) {
 		return (
 			<details className="msg assistant" data-testid="msg-diagnostic">
-				<summary className="msg-meta kicker">specialist diagnostic</summary>
+				<summary className="msg-meta kicker">Caddie · specialist diagnostic{clock ? ` · ${clock}` : ''}</summary>
 				{body}
 			</details>
 		);
 	}
 	return (
 		<div className="msg assistant" data-testid="msg-assistant">
-			{body}
+			<span className="turn-label" data-testid="turn-label">
+				Caddie{clock ? ` · ${clock}` : ''}
+			</span>
+			<div className="bubble">{body}</div>
 		</div>
 	);
 }
@@ -144,8 +166,8 @@ function DraftRow(props: {
 					? 'cancelled — kept for reference'
 					: props.transportLive
 						? 'unsent · the run transport refused it'
-						: 'unsent · waiting for the run transport'}{' '}
-				· key {draft.idempotencyKey.slice(5, 13)}
+						: 'unsent · held until you send'}{' '}
+				· idempotency key {draft.idempotencyKey.slice(5, 13)} — the guard against a duplicate send
 				{/* attempts counts FAILED TRANSPORT ATTEMPTS (the rejection handler
 				    increments it) — display the true count, no +1: the original
 				    send IS attempt one now that a transport exists. */}
@@ -221,8 +243,8 @@ export function Channel(props: {
 						title="Channel standby"
 						detail={
 							props.transportLive
-								? 'Connected to the coordinator run — your first message starts it. Sends are idempotency-keyed and answered at most once.'
-								: 'Messages you send are held as drafts with an idempotency key until the run transport is wired (P05). Nothing is streamed in this build.'
+								? 'No run yet — your first message starts one. Caddie drafts a plan revision, pins every claim to a source, and stops at the design gate before anything gets built. Sends are idempotency-keyed and answered at most once.'
+								: 'No run yet — your first message starts one. Caddie drafts a plan revision, pins every claim to a source, and stops at the design gate before anything gets built.'
 						}
 					/>
 				) : (
@@ -236,7 +258,8 @@ export function Channel(props: {
 						data-outcome={settlement.outcome}
 						data-testid="settlement-banner"
 					>
-						run stopped — submission {settlement.submissionId} {settlement.outcome}; no result was produced
+						run stopped — submission {settlement.submissionId} {settlement.outcome}. Nothing was written to
+						the plan after the stop; the failure is retained as evidence.
 					</p>
 				))}
 
