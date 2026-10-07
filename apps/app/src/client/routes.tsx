@@ -4,7 +4,16 @@ import { WorkspaceChrome } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
 import { Start } from './onboarding/Start.tsx';
-import { DiscoveryPage, JudgePage, SubmissionPage, SchedulesPage } from './surface.tsx';
+import {
+	DiscoveryPage,
+	JudgePage,
+	SubmissionPage,
+	SchedulesPage,
+	EvidencePage,
+	ArtifactsPage,
+	DesignReviewPage,
+	RepositoriesPage,
+} from './surface.tsx';
 
 /**
  * TanStack Router setup (SPA mode, decision "Product UI: React SPA +
@@ -119,6 +128,52 @@ const schedulesRoute = createRoute({
 	component: SchedulesPage,
 });
 
+/** ?project=<id> + ?claim=<type> for the evidence inspector's focus mode. */
+function validateEvidenceSearch(search: Record<string, unknown>): { project?: string; claim?: string } {
+	const project = search.project;
+	const claim = search.claim;
+	return {
+		...(typeof project === 'string' && project.trim() !== '' ? { project } : {}),
+		...(typeof claim === 'string' && claim.trim() !== '' ? { claim } : {}),
+	};
+}
+
+// Board phase 3: the P10 evidence inspector — reachable from decision-card
+// evidence ids and run rows, behind the same fail-closed gate.
+const evidenceRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/evidence',
+	validateSearch: validateEvidenceSearch,
+	component: EvidencePage,
+});
+
+// Board phase 3: the P07 artifact viewer — reachable from run rows and the
+// brief's stale-artifact cards, behind the same fail-closed gate.
+const artifactsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/artifacts',
+	validateSearch,
+	component: ArtifactsPage,
+});
+
+// Board phase 3: the design gate — reachable from the brief's approval cards,
+// behind the same fail-closed gate.
+const designReviewRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/design-review',
+	validateSearch,
+	component: DesignReviewPage,
+});
+
+// Board phase 3: the P08 GitHub App surface — reachable from onboarding's
+// "start from a repository" card, behind the same fail-closed gate.
+const repositoriesRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/repositories',
+	validateSearch,
+	component: RepositoriesPage,
+});
+
 export const routeTree = rootRoute.addChildren([
 	workspaceRoute,
 	settingsRoute,
@@ -127,6 +182,10 @@ export const routeTree = rootRoute.addChildren([
 	judgeRoute,
 	submissionRoute,
 	schedulesRoute,
+	evidenceRoute,
+	artifactsRoute,
+	designReviewRoute,
+	repositoriesRoute,
 ]);
 
 function detectBasepath(): string {

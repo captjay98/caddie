@@ -1183,6 +1183,356 @@ a.btn-ghost.topbar-nav-link {
 	white-space: nowrap;
 }
 
+/* --- evidence inspector (board screen 09) ----------------------------------
+   Rebuilt on the class system: no inline styles, no hex, both themes correct
+   by construction. Identifiers render in full with a copy affordance — a
+   hash you cannot copy cannot be verified. */
+
+.evidence-panel {
+	max-width: 860px;
+	margin: 0 auto;
+}
+
+.evidence-panel .ev-title {
+	margin: 0.3rem 0 0;
+	font-size: 17px;
+	font-weight: 600;
+	letter-spacing: -0.015em;
+}
+
+.evidence-panel .ev-head {
+	margin: 0 0 0.6rem;
+	font-size: 14px;
+	font-weight: 600;
+}
+
+.ev-conflict {
+	border: 1px solid color-mix(in srgb, var(--color-warn) 40%, transparent);
+	background: color-mix(in srgb, var(--color-warn) 8%, transparent);
+	border-radius: 8px;
+	padding: 0.7rem 0.9rem;
+	font-size: 13px;
+	line-height: 1.55;
+	margin-bottom: 0.7rem;
+}
+
+.ev-conflict b {
+	font-weight: 700;
+}
+
+.ev-sides {
+	margin-top: 0.6rem;
+	display: grid;
+	gap: 0.5rem;
+}
+
+.ev-quote {
+	margin: 0.35rem 0;
+	border-left: 3px solid var(--color-line);
+	padding-left: 8px;
+	color: var(--color-bright);
+	overflow-wrap: anywhere;
+}
+
+.ev-field {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	min-width: 0;
+}
+
+.ev-field .fk {
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--color-muted);
+	flex: none;
+}
+
+.ev-field .fv {
+	font-size: 12.5px;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.ev-ident {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	min-width: 0;
+}
+
+.ev-ident .mono-id {
+	overflow-wrap: anywhere;
+}
+
+.copy-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	border: 1px solid var(--color-line-soft);
+	background: transparent;
+	color: var(--color-muted);
+	border-radius: 6px;
+	padding: 0.1rem 0.4rem;
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	cursor: pointer;
+	flex: none;
+}
+
+.copy-btn:hover {
+	border-color: var(--color-action);
+	color: var(--color-action);
+}
+
+.copy-btn svg {
+	vertical-align: -3px;
+}
+
+.badge-unknown {
+	border-style: dashed;
+}
+
+/* --- artifact diff grammar (board screen 10) --------------------------------
+   Add/delete get token tints, lines are numbered, spacing is pre-wrap — the
+   two-space context indent survives instead of collapsing. */
+
+.diff-view {
+	margin-top: 0.6rem;
+}
+
+.diff-body {
+	border: 1px solid var(--color-line-soft);
+	border-radius: 8px;
+	padding: 0.5rem;
+	overflow-x: auto;
+	background: var(--color-panel);
+}
+
+.diff-line {
+	display: flex;
+	gap: 0.6rem;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-family: var(--font-mono);
+	font-size: var(--r-meta);
+	line-height: 1.6;
+}
+
+.diff-line .ln {
+	flex: none;
+	min-width: 2.2em;
+	text-align: right;
+	color: var(--color-muted);
+	opacity: 0.65;
+	user-select: none;
+}
+
+.diff-line[data-diff-type='add'] .tx {
+	color: var(--color-ok);
+	background: color-mix(in srgb, var(--color-ok) 10%, transparent);
+}
+
+.diff-line[data-diff-type='del'] .tx {
+	color: var(--color-danger);
+	background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+	text-decoration: line-through;
+	text-decoration-color: color-mix(in srgb, var(--color-danger) 45%, transparent);
+}
+
+.row-actions {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin-top: 0.4rem;
+	flex-wrap: wrap;
+}
+
+.artifact-panel {
+	max-width: 860px;
+	margin: 0 auto;
+}
+
+.design-review-panel {
+	max-width: 820px;
+	margin: 0 auto;
+}
+
+/* Board screen 11: the stop-the-lane action carries the danger tone —
+   it is never the same weight as continuing. */
+.btn-danger {
+	color: var(--color-danger);
+	border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+}
+
+.btn-danger:hover {
+	border-color: var(--color-danger);
+	background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+}
+
+/* --- repository picker (board screen 12) ------------------------------------
+   The component's class names finally meet their stylesheet: 10 className
+   references, zero inline styles, zero hex — the shared grammar does the
+   work. */
+
+.repository-picker {
+	max-width: 820px;
+	margin: 0 auto;
+	width: 100%;
+	display: grid;
+	gap: 1rem;
+}
+
+.repository-picker__installations {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: 0.7rem;
+}
+
+.repository-picker__installation {
+	display: flex;
+	align-items: center;
+	gap: 0.55rem;
+	flex-wrap: wrap;
+	padding: 0.6rem 0.8rem;
+	border: 1px solid var(--color-line-soft);
+	border-radius: 10px;
+	background: var(--color-panel);
+}
+
+.repository-picker__account {
+	font-size: 14px;
+	font-weight: 700;
+}
+
+.repository-picker__meta {
+	font-family: var(--font-mono);
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+	overflow-wrap: anywhere;
+}
+
+.repository-picker__denied {
+	font-size: 12.5px;
+	color: var(--color-danger);
+	flex: 1 1 100%;
+}
+
+.repository-picker__perms {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	flex-wrap: wrap;
+	padding: 0 0.8rem 0.6rem;
+}
+
+.repository-picker__perms .fk {
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--color-muted);
+}
+
+.badge-optional {
+	opacity: 0.75;
+}
+
+.repository-picker__repos {
+	padding: 0.6rem 0.8rem;
+	border: 1px solid var(--color-line-soft);
+	border-radius: 0 0 10px 10px;
+	border-top: 0;
+}
+
+.repository-picker__repos ul {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: 0.4rem;
+}
+
+.repository-picker__repos li {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	flex-wrap: wrap;
+}
+
+.repository-picker__bind {
+	display: grid;
+	gap: 0.55rem;
+	padding: 0.9rem 1rem;
+	border: 1px solid var(--color-line-soft);
+	border-radius: 10px;
+	background: var(--color-panel);
+	max-width: 560px;
+}
+
+.repository-picker__bind label {
+	display: grid;
+	gap: 0.3rem;
+	font-size: 13px;
+	font-weight: 600;
+}
+
+.repository-picker__bind p[data-testid='bind-message'] {
+	margin: 0;
+	font-size: 12.5px;
+	color: var(--color-warn);
+	overflow-wrap: anywhere;
+}
+
+/* --- shared table primitive (board screen 16) ------------------------------
+   Status-dense views stop improvising lists. */
+
+.r-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 12.5px;
+}
+
+.r-table th {
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--color-muted);
+	text-align: left;
+	font-weight: 500;
+	padding: 0.35rem 0.5rem;
+	border-bottom: 1px solid var(--color-line-soft);
+}
+
+.r-table td {
+	padding: 0.45rem 0.5rem;
+	border-bottom: 1px solid var(--color-line-soft);
+	vertical-align: top;
+	overflow-wrap: anywhere;
+}
+
+.r-section-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 0.8rem;
+	flex-wrap: wrap;
+	margin-bottom: 0.8rem;
+}
+
+.r-section-head .count {
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.04em;
+	color: var(--color-muted);
+	white-space: nowrap;
+}
+
 /* Reduced motion: the shell must be still (P06 acceptance, mirrors the
    landing invariant). No animation or transition survives this query. */
 @media (prefers-reduced-motion: reduce) {

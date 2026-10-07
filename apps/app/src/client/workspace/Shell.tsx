@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { useSearch } from '@tanstack/react-router';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
+import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { SignInPanel } from '../auth.ts';
 import { failureKind, StatePanel } from '../states.tsx';
 import { Start } from '../onboarding/Start.tsx';
@@ -125,6 +126,7 @@ function AuthedWorkspace(props: {
 }): ReactElement {
 	const actor = useMemo(() => ({ actorId: props.actorId }), [props.actorId]);
 	const queryClient = useQueryClient();
+	const navigate = useNavigate();
 	const search = useSearch({ strict: false }) as { project?: string };
 	const chrome = useWorkspaceChrome();
 
@@ -164,6 +166,33 @@ function AuthedWorkspace(props: {
 			: 'empty';
 	const briefStale = chrome.projectsFetching;
 	const asideHidden = tab === 'channel' || !detailOpen;
+
+	// Board screen 06: every card carries a link into the screen it refers to.
+	// The action's targetId is server-authored data — the mapping here is by
+	// card kind + the evidenceIds the card itself cites, never parsed prose.
+	function onCardAction(card: DecisionCardType) {
+		const search = { project: effectiveProjectId ?? undefined };
+		switch (card.kind) {
+			case 'approval':
+				void navigate({ to: '/design-review', search });
+				break;
+			case 'change':
+				// a conflict cites claim ids; a stale artifact cites none
+				if (card.evidenceIds.length > 0) {
+					void navigate({ to: '/evidence', search: { ...search, claim: card.primaryAction.targetId } });
+				} else {
+					void navigate({ to: '/artifacts', search });
+				}
+				break;
+			case 'deadline':
+				void navigate({ to: '/schedules', search });
+				break;
+			case 'result':
+				// the honest destination for a failed run today is the Runs lane
+				void navigate({ to: '/', search });
+				break;
+		}
+	}
 
 	return (
 		<>
@@ -265,6 +294,7 @@ function AuthedWorkspace(props: {
 								cards={brief.data?.cards ?? []}
 								feedPending={brief.isPending}
 								feedError={brief.error}
+								onAction={onCardAction}
 							/>
 						) : (
 								<RunInspector

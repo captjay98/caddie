@@ -3,12 +3,25 @@ import type { ReactElement } from 'react';
 import { formatTimeAgo } from '@caddie/ui/time';
 import { postJson } from '../api.ts';
 import { StatePanel, failureKind } from '../states.tsx';
+import { CopyableId } from '../copyable.tsx';
 
 /**
  * DesignReview — approve/reject the LATEST plan revision through the REAL
  * approvals route (feature-ledger C13: the approval is bound to the exact
  * revision hash; a changed plan needs a new decision — the server, not this
  * UI, is that authority and surfaces STALE_APPROVAL-class failures here).
+ *
+ * UI review board screen 11 — the most consequential decision in the product
+ * gets the presentation it deserves:
+ *   - the scope is WRITTEN ON THE CONTROL: what approving authorises and what
+ *     it never does (each of those stays a separate gate);
+ *   - the pair is weighted honestly: Approve is the page's only primary
+ *     action; Reject carries the danger tone and a stated consequence;
+ *   - the full revision hash sits beside a copy action;
+ *   - decisions are kept as a dated RECORD (newest first), not a line the
+ *     next click overwrites;
+ *   - re-deciding is the server's typed 409 to surface, never hidden client
+ *     state.
  *
  * The decision posts to the authenticated user surface:
  *
@@ -17,8 +30,7 @@ import { StatePanel, failureKind } from '../states.tsx';
  *          policyVersion }, decision: 'approved' | 'rejected' }
  *
  * decidedBy is always the session-derived actor server-side; no input here
- * can name one. Buttons stay available after a decision: re-deciding is the
- * server's typed 409 to surface, never hidden client state.
+ * can name one.
  */
 
 export interface DesignReviewRevision {
@@ -28,11 +40,11 @@ export interface DesignReviewRevision {
 	readonly createdAt: string;
 }
 
-type Decision = 'approved' | 'rejected';
-
-function shortHash(hash: string): string {
-	const hex = hash.startsWith('sha256-') ? hash.slice(7) : hash;
-	return hex.slice(0, 12);
+interface DecisionRecord {
+	decision: 'approved' | 'rejected';
+	revisionId: string;
+	status: string;
+	at: string;
 }
 
 export function DesignReview(props: {
@@ -45,13 +57,12 @@ export function DesignReview(props: {
 	error?: unknown;
 	retry?: () => void;
 }): ReactElement {
-	const [busy, setBusy] = useState<Decision | null>(null);
-	const [outcome, setOutcome] = useState<{ decision: Decision; revisionId: string; status: string } | null>(
-		null,
-	);
+	const policyVersion = props.policyVersion ?? 'v1';
+	const [busy, setBusy] = useState<'approved' | 'rejected' | null>(null);
+	const [records, setRecords] = useState<DecisionRecord[]>([]);
 	const [decisionError, setDecisionError] = useState<string | null>(null);
 
-	const decide = async (decision: Decision, revision: DesignReviewRevision) => {
+	const decide = async (decision: 'approved' | 'rejected', revision: DesignReviewRevision) => {
 		setBusy(decision);
 		setDecisionError(null);
 		try {
@@ -61,13 +72,17 @@ export function DesignReview(props: {
 					action: 'design',
 					resourceId: revision.id,
 					revisionHash: revision.bodyHash,
-					policyVersion: props.policyVersion ?? 'v1',
+					policyVersion,
 				},
 				decision,
 			});
-			setOutcome({ decision, revisionId: revision.id, status: payload.approval.status });
+			// A dated decision record — the newest is the live outcome; older
+			// ones stay on screen instead of being overwritten.
+			setRecords((prev) => [
+				{ decision, revisionId: revision.id, status: payload.approval.status, at: new Date().toISOString() },
+				...prev,
+			]);
 		} catch (error) {
-			setOutcome(null);
 			setDecisionError(error instanceof Error ? error.message : 'The decision could not be recorded.');
 		} finally {
 			setBusy(null);
@@ -105,72 +120,142 @@ export function DesignReview(props: {
 	}
 
 	const latest = props.planRevisions[0]!;
+	const latestRecord = records[0] ?? null;
+
 	return (
-		<div data-testid="design-review">
-			<div className="section-head">
-				<h3>Design review</h3>
-				<span className="mono-id">approval bound to revision</span>
-			</div>
-			{outcome ? (
-				<p
-					className="state-detail"
-					data-testid="design-review-outcome"
-					data-decision={outcome.decision}
-				>
-					{outcome.decision === 'approved' ? 'Approved' : 'Rejected'} ({outcome.status}) · revision{' '}
-					{shortHash(outcome.revisionId)}
-				</p>
-			) : null}
-			{decisionError ? (
-				<StatePanel kind={failureKind(decisionError)} title="Decision refused" detail={decisionError} />
-			) : null}
-			<div className="row-list">
-				{props.planRevisions.map((revision, index) => (
-					<div
-						className="inspector-row"
-						data-testid="design-review-row"
-						data-latest={index === 0 ? 'true' : undefined}
-						key={revision.id}
+		<div data-testid="design-review" className="design-review-panel settings-stack">
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						gate · design · policy {policyVersion}
+					</p>
+					<h2 className="ev-title">
+						Approving lets specialists build against plan r{latest.revision}
+					</h2>
+				</div>
+				{latestRecord ? (
+					<span
+						className="badge"
+						data-tone={latestRecord.decision === 'approved' ? 'ok' : 'danger'}
+						data-testid="design-review-outcome"
+						data-decision={latestRecord.decision}
 					>
-						<div className="row-main">
-							<span className="row-title">
-								plan <span className="mono-id">r{revision.revision}</span>
-								{index === 0 ? (
-									<span className="row-status" data-status="current">
-										latest
-									</span>
-								) : null}
-							</span>
-							<span className="mono-id">{formatTimeAgo(revision.createdAt)}</span>
-						</div>
-						<div className="row-main">
-							<span className="mono-id">revision {shortHash(revision.bodyHash)}</span>
-						</div>
-						{index === 0 ? (
-							<div className="row-main">
-								<button
-									type="button"
-									className="btn-ghost"
-									disabled={busy !== null}
-									onClick={() => void decide('approved', revision)}
-									data-testid="design-review-approve"
-								>
-									{busy === 'approved' ? 'Approving…' : 'Approve design'}
-								</button>
-								<button
-									type="button"
-									className="btn-ghost"
-									disabled={busy !== null}
-									onClick={() => void decide('rejected', revision)}
-									data-testid="design-review-reject"
-								>
-									{busy === 'rejected' ? 'Rejecting…' : 'Reject design'}
-								</button>
-							</div>
-						) : null}
-					</div>
-				))}
+						{latestRecord.decision} · r{latestRecord.revisionId}
+					</span>
+				) : (
+					<span className="badge" data-tone="warn">
+						waiting on you
+					</span>
+				)}
 			</div>
+
+			<section className="card-surface settings-panel" data-testid="design-review-scope">
+				<h3 className="ev-head">What this decision binds</h3>
+				<div className="ev-field">
+					<span className="fk">authorises</span>
+					<span className="fv">
+						building against this plan revision inside the sandbox. The approval is bound to the exact
+						revision hash below — if the plan changes, this decision stops applying and the change
+						returns to the brief as a Change decision.
+					</span>
+				</div>
+				<div className="ev-field">
+					<span className="fk">does not authorise</span>
+					<span className="fv">deploy to production · a destructive database change · merge to the default
+						branch. Each stays behind its own separate gate.</span>
+				</div>
+				<div className="ev-field">
+					<span className="fk">revision hash</span>
+					<CopyableId value={latest.bodyHash} label="revision hash" />
+				</div>
+			</section>
+
+			{decisionError ? (
+				<StatePanel
+					kind={failureKind(decisionError)}
+					title="Decision refused"
+					detail={`${decisionError} — re-deciding a settled revision is the server's typed refusal to surface, never hidden client state.`}
+				/>
+			) : null}
+
+			<section className="card-surface settings-panel">
+				<div className="row-list">
+					{props.planRevisions.map((revision, index) => (
+						<div
+							className="inspector-row"
+							data-testid="design-review-row"
+							data-latest={index === 0 ? 'true' : undefined}
+							key={revision.id}
+						>
+							<div className="row-main">
+								<span className="row-title">
+									plan <span className="mono-id">r{revision.revision}</span>
+									{index === 0 ? (
+										<span className="badge" data-tone="action">
+											latest
+										</span>
+									) : (
+										<span className="mono-id">superseded by r{props.planRevisions[0]!.revision}</span>
+									)}
+								</span>
+								<span className="mono-id">{formatTimeAgo(revision.createdAt)}</span>
+							</div>
+							<div className="row-details">
+								<span className="ev-field">
+									<span className="fk">revision hash</span>
+									<CopyableId value={revision.bodyHash} label="revision hash" />
+								</span>
+							</div>
+							{index === 0 ? (
+								<div className="row-actions">
+									<button
+										type="button"
+										className="btn-key"
+										disabled={busy !== null}
+										onClick={() => void decide('approved', revision)}
+										data-testid="design-review-approve"
+									>
+										{busy === 'approved' ? 'Approving…' : `Approve plan r${revision.revision}`}
+									</button>
+									<button
+										type="button"
+										className="btn-ghost btn-danger"
+										disabled={busy !== null}
+										onClick={() => void decide('rejected', revision)}
+										data-testid="design-review-reject"
+									>
+										{busy === 'rejected' ? 'Rejecting…' : 'Reject and replan'}
+									</button>
+									<span className="mono-id">
+										rejecting stops the lane and returns the plan to the author
+									</span>
+								</div>
+							) : null}
+						</div>
+					))}
+				</div>
+			</section>
+
+			{records.length > 0 ? (
+				<section className="card-surface settings-panel" data-testid="design-review-record">
+					<h3 className="ev-head">Decision record — append-only</h3>
+					<div className="row-list">
+						{records.map((record) => (
+							<div className="inspector-row" key={`${record.revisionId}:${record.at}`}>
+								<div className="row-main">
+									<span className="row-title">
+										<span className="badge" data-tone={record.decision === 'approved' ? 'ok' : 'danger'}>
+											{record.decision}
+										</span>{' '}
+										plan r{record.revisionId} · server status {record.status}
+									</span>
+									<span className="mono-id">{formatTimeAgo(record.at)}</span>
+								</div>
+							</div>
+						))}
+					</div>
+				</section>
+			) : null}
 		</div>
 	);
 }

@@ -585,3 +585,35 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-OVERHAUL-P3 (board execution — the four unwired components routed + rebuilt, screens 09/10/11/12)", "status": "LOCAL VERIFIED", "sha": "see git log feat(ui): route the four unwired components (board phase 3)",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bunx playwright test tests/browser/artifacts.spec.ts", "exitCode": 0, "receipt": "4 passed — the P07 harness still asserts artifact-viewer/revision rows/download href (now an anchor that ALSO routes clicks through the authenticated client)/diff data-diff-type/design-review rows+approve+reject+outcome data-decision"},
+    {"command": "bun run test:browser -- P01 P06 P11 P13 P14", "exitCode": 0, "receipt": "all five packets PASS after the last change"},
+    {"command": "bunx playwright test tests/browser/forge-journey.spec.ts tests/browser/landing.spec.ts tests/browser/release.spec.ts", "exitCode": 0, "receipt": "21 passed"},
+    {"command": "bun test tests/brief.test.ts", "exitCode": 0, "receipt": "3 pass — the feed's card actions now have real destinations"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/evidence/Drawer.tsx + /evidence route", "note": "REBUILT on the class system (was 15 hex literals, 22 inline styles, zero classes): three independent react-query sections each with loading/empty/typed-error+retry (one refused fetch never blanks the others); authority as label+rank chips with unknown dashed; conflicts name both sides with full claim ids; full snapshot/hash ids with copy (shared CopyableId); human timestamps with exact ISO beside"},
+    {"path": "apps/app/src/client/artifacts/Viewer.tsx + /artifacts route", "note": "diff grammar (numbered lines, token tints, pre-wrap, compared-pair header with +/− counts); status as state (current/stale badges); full sha-256 + copy; download anchor keeps its real href AND routes clicks through the authenticated client with a typed failure + consequence copy; new useArtifactRevisions hook over the P07 /artifact-revisions list"},
+    {"path": "apps/app/src/client/planning/DesignReview.tsx + /design-review route", "note": "scope WRITTEN ON THE CONTROL (authorises / never authorises, revision-bound explanation); Approve = only primary, Reject = danger tone + stated consequence; decisions kept as a dated append-only record; full revision hashes + copy; the 'Approved (approved)' duplication retired"},
+    {"path": "apps/app/src/client/repositories/RepositoryPicker.tsx + /repositories route", "note": "the 8 class names finally meet a stylesheet section; permissions rendered beside each installation with the two required marked; revoked/suspended/deselected are THREE named states (suspended is never reported as revoked; removed repos stay in the list as removed); actions weighted (btn-ghost/btn-key); picking a repository has a visible result (picked-repo panel)"},
+    {"path": "apps/app/src/client/workspace/Shell.tsx", "note": "brief card actions navigate by card kind + cited evidence ids (never parsed prose): approval -> /design-review, conflict -> /evidence?claim=, stale artifact -> /artifacts, schedule -> /schedules, failed run -> the Runs lane"},
+    {"path": "tests/brief.test.ts", "note": "unaffected (server layer untouched); cards now land somewhere"}
+  ],
+  "environment": "local workerd via vite preview (playwright webServer), chromium_headless_shell v1243",
+  "providerCalls": "none",
+  "specReview": "deferred to phase batch review; the P07 spec's download-href and design-review assertions were preserved as-is — the rebuild had to satisfy them, not relax them",
+  "qualityReview": "owner visual acceptance pending on http://localhost:5176",
+  "limitations": [
+    "run-row -> drawer/viewer links land in board phase 4 with the Runs lane rebuild; the brief's card actions are wired today",
+    "DesignReview policyVersion still defaults to 'v1' — no server endpoint publishes the current policy version yet (displayed beside the hash it binds; a policy endpoint is future server work)",
+    "viewer lineage (run id/specialist/checks per artifact row) is NOT shown: the project_artifacts schema carries no run linkage — a schema/server change would be needed and none was invented",
+    "conflict focus (?claim=) scrolls intent only; the drawer renders the same sections either way",
+    "the evidence drawer still imports authority helpers from the server module (pre-existing boundary, unchanged in this phase)"
+  ]
+}
+```

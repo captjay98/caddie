@@ -110,6 +110,21 @@ export function useBriefCards(actor: ActorScope, projectId: string | null) {
 }
 
 /**
+ * P07 content-addressed artifact revisions (the viewer's surface — distinct
+ * from the P02 metadata-revision list behind useArtifacts).
+ */
+export function useArtifactRevisions<Revision>(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['artifact-revisions', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () =>
+			fetchJson<{ artifacts: Revision[]; latest: Revision | null }>(
+				`/api/projects/${encodeURIComponent(projectId ?? '')}/artifact-revisions`,
+			),
+		enabled: actor.actorId !== null && projectId !== null,
+	});
+}
+
+/**
  * The actor's Home project — the project-less conversation with Caddie.
  * Created server-side on first fetch; only queried once the actor has at
  * least one project, so a brand-new user still meets the onboarding first.

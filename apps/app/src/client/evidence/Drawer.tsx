@@ -1,22 +1,36 @@
-import { useEffect, useState } from 'react';
-import { authorityLabel, isSourceAuthority } from '../../server/evidence/authority.ts';
+import type { ReactElement } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
+import { formatTimeAgo } from '@caddie/ui/time';
+import { authorityLabel, authorityRank, isSourceAuthority } from '../../server/evidence/authority.ts';
+import { StatePanel } from '../states.tsx';
+import { CopyableId } from '../copyable.tsx';
 
 /**
- * P10 evidence inspector (feature-ledger H7) — a standalone drawer component
- * reading the REAL evidence routes. Workspace-shell integration is P06/P11;
- * this component is deliberately mounted NOWHERE (it is exercised through the
- * P10 fixtures/tests and can be embedded under a project details route later).
+ * P10 evidence inspector (feature-ledger H7) — rebuilt on the shared token
+ * system and mounted at /evidence behind the project gate (UI review board
+ * screen 09: this component had never been rendered by the product).
  *
  * Honesty rules rendered into the UI (contracts "UI and evidence"):
  *   - authority is shown from the ONE shared vocabulary (authority.ts) — the
- *     same module storage and reconciliation use (defect #6);
- *   - every claim shows its EXACT snapshot id + content hash + quote +
- *     locator + provenance (original/processed) + extraction version — what
- *     the reading rests on (defect #1);
- *   - freshness is the source's lastOutcome/observedAt, never implied;
+ *     same module storage and reconciliation use — as RANK, not just a word:
+ *     a chip carries label · rank, and UNKNOWN renders dashed with
+ *     "never wins reconciliation";
+ *   - every claim shows its EXACT snapshot id + content hash (full length,
+ *     copyable — a hash you cannot copy cannot be verified) + quote +
+ *     locator + provenance + extraction version;
+ *   - freshness is the source's lastOutcome/observedAt rendered as a labelled
+ *     status with a human timestamp and the exact ISO on demand — never the
+ *     storage column name;
  *   - confidence numbers are NEVER displayed: a confidence number is not
  *     truth, authority + provenance are the weighing signals;
- *   - retained conflicts are shown as conflicts — never silently resolved.
+ *   - retained conflicts name BOTH sides (claim ids, values, sources,
+ *     authority + rank) and the rule that kept them; they are never silently
+ *     resolved.
+ *
+ * Each section loads and fails independently (board screen 09: one refused
+ * fetch must never blank the other two), with its own skeleton, empty state
+ * and typed retry.
  */
 
 export interface EvidenceSource {
@@ -56,180 +70,285 @@ export interface EvidenceSurvey {
 	conflict: { conflictId: string; claimIds: readonly string[] } | null;
 }
 
-function shortHash(hash: string): string {
-	return hash.length > 16 ? `${hash.slice(0, 12)}…` : hash;
-}
-
-function authority(value: string): string {
-	return isSourceAuthority(value) ? authorityLabel(value) : 'Unknown';
-}
-
-function when(iso: string | null): string {
-	if (!iso) return 'never';
-	const date = new Date(iso);
-	return Number.isFinite(date.getTime()) ? date.toISOString() : 'unknown';
-}
-
 async function fetchJson<T>(url: string): Promise<T> {
 	const response = await fetch(url, { credentials: 'same-origin' });
 	if (!response.ok) {
-		const body = (await response.json().catch(() => ({}))) as { error?: string };
-		throw new Error(body.error ?? `request failed (${response.status})`);
+		const body = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+		throw new Error(body.message ?? body.error ?? `request failed (${response.status})`);
 	}
 	return (await response.json()) as T;
 }
 
-export function EvidenceDrawer(props: { projectId: string; apiBase?: string }) {
-	const { projectId, apiBase = '' } = props;
-	const [sources, setSources] = useState<readonly EvidenceSource[] | null>(null);
-	const [claims, setClaims] = useState<readonly EvidenceClaim[] | null>(null);
-	const [surveys, setSurveys] = useState<readonly EvidenceSurvey[] | null>(null);
-	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
+function AuthorityChip({ value }: { value: string }): ReactElement {
+	const known = isSourceAuthority(value);
+	const rank = known ? authorityRank(value) : null;
+	return (
+		<span className={`badge${known ? '' : ' badge-unknown'}`} data-tone={known ? 'neutral' : 'roadmap'} title={known ? undefined : 'unknown authority never wins reconciliation'}>
+			{known ? authorityLabel(value) : 'unknown'} · rank {rank ?? 'null'}
+		</span>
+	);
+}
 
-	const base = `${apiBase}/api/projects/${encodeURIComponent(projectId)}/evidence`;
+/** Full identifier + a copy affordance — truncation destroys checkability. */
+function Ident({ value, label }: { value: string; label: string }): ReactElement {
+	return <CopyableId value={value} label={label} />;
+}
 
-	async function load() {
-		setLoading(true);
-		setError(null);
-		try {
-			const [sourcesBody, claimsBody, surveysBody] = await Promise.all([
-				fetchJson<{ sources: EvidenceSource[] }>(`${base}/sources`),
-				fetchJson<{ claims: EvidenceClaim[] }>(`${base}/claims`),
-				fetchJson<{ surveys: EvidenceSurvey[] }>(`${base}/conflicts`),
-			]);
-			setSources(sourcesBody.sources);
-			setClaims(claimsBody.claims);
-			setSurveys(surveysBody.surveys);
-		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
-		} finally {
-			setLoading(false);
-		}
+function SectionStates(props: {
+	pending: boolean;
+	empty: boolean;
+	emptyTitle: string;
+	emptyDetail: string;
+	error: unknown;
+	onRetry: () => void;
+	children: ReactElement;
+}): ReactElement | null {
+	if (props.error) {
+		return (
+			<StatePanel
+				kind="error"
+				title="This section failed to load"
+				detail={props.error instanceof Error ? props.error.message : undefined}
+				onRetry={props.onRetry}
+				retryLabel="Retry this section"
+			/>
+		);
+	}
+	if (props.pending) {
+		return <StatePanel kind="loading" title="Reading this section…" />;
+	}
+	if (props.empty) {
+		return <StatePanel kind="empty" title={props.emptyTitle} detail={props.emptyDetail} />;
+	}
+	return props.children;
+}
+
+export function EvidenceDrawer(props: { projectId: string; focusClaimType?: string }): ReactElement {
+	const { projectId } = props;
+	const queryClient = useQueryClient();
+	const base = `/api/projects/${encodeURIComponent(projectId)}/evidence`;
+
+	const sources = useQuery({
+		queryKey: ['evidence-sources', projectId],
+		queryFn: () => fetchJson<{ sources: EvidenceSource[] }>(`${base}/sources`),
+	});
+	const claims = useQuery({
+		queryKey: ['evidence-claims', projectId],
+		queryFn: () => fetchJson<{ claims: EvidenceClaim[] }>(`${base}/claims`),
+	});
+	const surveys = useQuery({
+		queryKey: ['evidence-surveys', projectId],
+		queryFn: () => fetchJson<{ surveys: EvidenceSurvey[] }>(`${base}/conflicts`),
+	});
+
+	const sourceList = sources.data?.sources ?? [];
+	const claimList = claims.data?.claims ?? [];
+	const surveyList = surveys.data?.surveys ?? [];
+	const conflicts = surveyList.filter((survey) => survey.conflict);
+	const winners = surveyList.filter((survey) => survey.winner);
+	const claimsById = new Map(claimList.map((claim) => [claim.id, claim]));
+	const activeClaims = claimList.filter((claim) => claim.status !== 'superseded');
+	const historyClaims = claimList.filter((claim) => claim.status === 'superseded');
+
+	function retry(section: 'sources' | 'claims' | 'surveys') {
+		const key =
+			section === 'sources' ? ['evidence-sources', projectId] : section === 'claims' ? ['evidence-claims', projectId] : ['evidence-surveys', projectId];
+		void queryClient.refetchQueries({ queryKey: key });
 	}
 
-	useEffect(() => {
-		void load();
-	}, [projectId]);
-
 	return (
-		<aside
-			aria-label="Evidence inspector"
-			style={{
-				border: '1px solid #ccc',
-				borderRadius: 8,
-				padding: '1rem',
-				maxWidth: 720,
-				fontFamily: 'system-ui, sans-serif',
-			}}
-		>
-			<header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-				<h2 style={{ margin: 0, fontSize: '1.1rem' }}>Evidence</h2>
-				<button type="button" onClick={() => void load()} disabled={loading}>
-					{loading ? 'Loading…' : 'Refresh'}
-				</button>
-			</header>
-
-			{error ? (
-				<p role="alert" style={{ color: '#a00' }}>
-					{error}
-				</p>
-			) : null}
-
-			<section>
-				<h3 style={{ fontSize: '0.95rem' }}>Sources</h3>
-				{sources?.length ? (
-					<ul style={{ listStyle: 'none', padding: 0 }}>
-						{sources.map((source) => (
-							<li key={source.id} style={{ borderTop: '1px solid #eee', padding: '0.5rem 0' }}>
-								<div>
-									<strong>{source.displayName ?? source.canonicalUrl}</strong>{' '}
-									<span
-										style={{
-											background: '#eef',
-											borderRadius: 4,
-											padding: '0 0.35rem',
-											fontSize: '0.8rem',
-										}}
-									>
-										{authority(source.authority)}
-									</span>
-								</div>
-								<div style={{ color: '#556', fontSize: '0.85rem' }}>
-									freshness: lastOutcome={source.lastOutcome}, observed {when(source.observedAt)}
-									{source.lastFailureReason ? ` — last failure: ${source.lastFailureReason}` : ''}
-								</div>
-								{source.latestSnapshotId ? (
-									<div style={{ color: '#556', fontSize: '0.85rem' }}>
-										latest snapshot {source.latestSnapshotId.slice(0, 18)}… hash{' '}
-										{shortHash(source.latestContentHash ?? '')}
-									</div>
-								) : (
-									<div style={{ color: '#556', fontSize: '0.85rem' }}>no snapshot yet</div>
-								)}
-							</li>
-						))}
-					</ul>
-				) : (
-					<p style={{ color: '#556' }}>{sources ? 'No sources registered.' : ''}</p>
-				)}
-			</section>
-
-			<section>
-				<h3 style={{ fontSize: '0.95rem' }}>Retained conflicts</h3>
-				{surveys?.some((s) => s.conflict) ? (
-					<ul>
-						{surveys
-							.filter((s) => s.conflict)
-							.map((s) => (
-								<li key={s.conflict!.conflictId}>
-									<strong>{s.claimType}</strong>: equal-authority sources disagree — retained, not
-									auto-resolved ({s.conflict!.claimIds.length} readings).
-								</li>
-							))}
-					</ul>
-				) : (
-					<p style={{ color: '#556' }}>{surveys ? 'No unresolved conflicts.' : ''}</p>
-				)}
-				{surveys?.some((s) => s.winner) ? (
-					<p style={{ color: '#556', fontSize: '0.85rem' }}>
-						Current readings:{' '}
-						{surveys
-							.filter((s) => s.winner)
-							.map((s) => `${s.claimType}=${s.winner!.value}`)
-							.join('; ')}
+		<section className="evidence-panel settings-stack" aria-label="Evidence inspector" data-testid="evidence-drawer">
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						evidence
 					</p>
-				) : null}
+					<h2 className="ev-title">Nothing here is asserted without a snapshot behind it</h2>
+					<p className="state-detail">
+						Every reading the plan rests on became a claim pointing at an immutable snapshot with its
+						SHA-256. A refused fetch is listed with its stored reason, never as an absent source.
+					</p>
+				</div>
+				<span className="count">
+					{sourceList.length} sources · {activeClaims.length} claims · {conflicts.length} retained conflicts
+				</span>
+			</div>
+
+			<section className="card-surface settings-panel" data-testid="evidence-conflicts-section">
+				<h3 className="ev-head">Retained conflicts — both sides, never silently resolved</h3>
+				<SectionStates
+					pending={surveys.isPending}
+					empty={conflicts.length === 0 && winners.length === 0}
+					emptyTitle="No readings on record"
+					emptyDetail="A reading appears when a run reads a source: the fetch is stored as a snapshot and the reading becomes a claim pointing at it."
+					error={surveys.error}
+					onRetry={() => retry('surveys')}
+				>
+					<>
+						{conflicts.map((survey) => {
+							const sides = survey.conflict!.claimIds
+								.map((claimId) => claimsById.get(claimId))
+								.filter((claim): claim is EvidenceClaim => claim != null);
+							const historyAvailable = claims.isPending || claims.error != null;
+							return (
+								<div key={survey.conflict!.conflictId} className="ev-conflict" data-testid="evidence-conflict">
+									<b>Retained — winner is null.</b> Sources of equal authority state different
+									{' '}
+									{survey.claimType} values, so neither outranks the other and the disagreement is
+									kept instead of being resolved. Nothing has been built on either reading.
+									{sides.length === 0 && !historyAvailable ? (
+										<p className="state-detail">
+											The conflicting claim rows are not loaded — retry the claims section below.
+										</p>
+									) : (
+										<div className="ev-sides">
+											{sides.map((claim) => (
+												<ClaimRow key={claim.id} claim={claim} />
+											))}
+										</div>
+									)}
+								</div>
+							);
+						})}
+						{winners.length > 0 ? (
+							<p className="mono-id" data-testid="evidence-winners">
+								Current readings with a winner:{' '}
+								{winners.map((survey) => `${survey.claimType} = ${survey.winner!.value}`).join(' · ')}
+								. Unknown authority has no rank: it can never win a reconciliation.
+							</p>
+						) : null}
+					</>
+				</SectionStates>
 			</section>
 
-			<section>
-				<h3 style={{ fontSize: '0.95rem' }}>Claims</h3>
-				{claims?.length ? (
-					<ul style={{ listStyle: 'none', padding: 0 }}>
-						{claims.map((claim) => (
-							<li key={claim.id} style={{ borderTop: '1px solid #eee', padding: '0.5rem 0' }}>
-								<div>
-									<code>{claim.claimType}</code> = {claim.value}
-									{claim.status === 'superseded' ? (
-										<span style={{ color: '#a60' }}> (superseded — history)</span>
-									) : null}
+			<section className="card-surface settings-panel" data-testid="evidence-claims-section">
+				<h3 className="ev-head">Claims — the ids the store uses, in full</h3>
+				<SectionStates
+					pending={claims.isPending}
+					empty={claimList.length === 0}
+					emptyTitle="No claims extracted yet"
+					emptyDetail="A claim appears when a run reads a registered source. Nothing is guessed."
+					error={claims.error}
+					onRetry={() => retry('claims')}
+				>
+					<>
+						{activeClaims.length > 0 ? (
+							<div className="row-list">
+								{activeClaims.map((claim) => (
+									<ClaimRow key={claim.id} claim={claim} />
+								))}
+							</div>
+						) : (
+							<p className="state-detail">No active claims — every extracted reading has been superseded.</p>
+						)}
+						{historyClaims.length > 0 ? (
+							<details className="ev-history" data-testid="evidence-history">
+								<summary className="kicker">
+									SUPERSEDED HISTORY ({historyClaims.length}) — kept, never deleted
+								</summary>
+								<div className="row-list">
+									{historyClaims.map((claim) => (
+										<ClaimRow key={claim.id} claim={claim} />
+									))}
 								</div>
-								<blockquote style={{ margin: '0.25rem 0', borderLeft: '3px solid #ccd', paddingLeft: 8 }}>
-									“{claim.quote}”
-									{claim.locator ? <em> — {claim.locator}</em> : null}
-								</blockquote>
-								<div style={{ color: '#556', fontSize: '0.8rem' }}>
-									snapshot {claim.snapshotId.slice(0, 18)}… ({claim.snapshotProvenance}) hash{' '}
-									{shortHash(claim.snapshotContentHash)} · {authority(claim.sourceAuthority)} ·{' '}
-									extraction {claim.extractionVersion} · captured {when(claim.snapshotCapturedAt)}
-								</div>
-							</li>
-						))}
-					</ul>
-				) : (
-					<p style={{ color: '#556' }}>{claims ? 'No claims extracted.' : ''}</p>
-				)}
+							</details>
+						) : null}
+					</>
+				</SectionStates>
 			</section>
-		</aside>
+
+			<section className="card-surface settings-panel" data-testid="evidence-sources-section">
+				<h3 className="ev-head">Sources — freshness stated, never implied</h3>
+				<SectionStates
+					pending={sources.isPending}
+					empty={sourceList.length === 0}
+					emptyTitle="No sources registered"
+					emptyDetail="A source can be registered before any run needs it — including one that will be refused (the refusal is listed with its reason)."
+					error={sources.error}
+					onRetry={() => retry('sources')}
+				>
+					<div className="row-list">
+						{sourceList.map((source) => (
+							<div key={source.id} className="inspector-row" data-testid="evidence-source">
+								<div className="row-main">
+									<span className="row-title">{source.displayName ?? source.canonicalUrl}</span>
+									<AuthorityChip value={source.authority} />
+								</div>
+								<div className="row-details">
+									<span className="mono-id">{source.canonicalUrl}</span>
+									<span className="mono-id" data-testid="evidence-source-freshness">
+										{source.lastOutcome === 'succeeded' ? 'read ok' : source.lastOutcome === 'blocked' ? 'blocked' : source.lastOutcome === 'failed' ? 'failed' : source.lastOutcome === 'unchanged' ? 'unchanged' : 'never attempted a successful fetch'}
+										{source.observedAt ? ` · observed ${formatTimeAgo(source.observedAt)}` : ''}
+										{source.lastFailureReason ? ` · ${source.lastFailureReason}` : ''}
+									</span>
+									{source.latestSnapshotId ? (
+										<span className="ev-field">
+											<span className="fk">latest snapshot</span>
+											<Ident value={source.latestSnapshotId} label="snapshot id" />
+											<Ident value={source.latestContentHash ?? ''} label="content hash" />
+										</span>
+									) : (
+										<span className="mono-id">no snapshot yet</span>
+									)}
+								</div>
+							</div>
+						))}
+					</div>
+				</SectionStates>
+			</section>
+		</section>
+	);
+}
+
+function ClaimRow({ claim }: { claim: EvidenceClaim }): ReactElement {
+	return (
+		<div className="inspector-row ev-claim" data-testid="evidence-claim" data-status={claim.status}>
+			<div className="row-main">
+				<span className="row-title">
+					<code>{claim.claimType}</code> = {claim.value}
+					{claim.status === 'superseded' ? <span className="mono-id"> · superseded — history</span> : null}
+				</span>
+				<AuthorityChip value={claim.sourceAuthority} />
+			</div>
+			<blockquote className="ev-quote">
+				“{claim.quote}”
+				{claim.locator ? <em> — {claim.locator}</em> : null}
+			</blockquote>
+			<div className="row-details">
+				<span className="ev-field">
+					<span className="fk">claim id</span>
+					<Ident value={claim.id} label="claim id" />
+				</span>
+				<span className="ev-field">
+					<span className="fk">snapshot</span>
+					<Ident value={claim.snapshotId} label="snapshot id" />
+				</span>
+				<span className="ev-field">
+					<span className="fk">content hash</span>
+					<Ident value={claim.snapshotContentHash} label="content hash" />
+				</span>
+				<span className="ev-field">
+					<span className="fk">provenance</span>
+					<span className="fv mono">{claim.snapshotProvenance}</span>
+				</span>
+				<span className="ev-field">
+					<span className="fk">extraction</span>
+					<span className="fv mono">{claim.extractionVersion}</span>
+				</span>
+				<span className="ev-field">
+					<span className="fk">captured</span>
+					<span className="fv">
+						{formatTimeAgo(claim.snapshotCapturedAt)} · <span className="mono-id">{claim.snapshotCapturedAt}</span>
+					</span>
+				</span>
+				{claim.status === 'superseded' && claim.supersededBy ? (
+					<span className="ev-field">
+						<span className="fk">superseded by</span>
+						<Ident value={claim.supersededBy} label="superseding claim id" />
+					</span>
+				) : null}
+				<span className="mono-id">{claim.canonicalUrl}</span>
+			</div>
+		</div>
 	);
 }

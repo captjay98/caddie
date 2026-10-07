@@ -82,7 +82,9 @@ export function RepositoryPicker(props: {
 			const body = await fetchJson<{ repositories: RepoSelectionView[] }>(
 				`/api/github/installations/${encodeURIComponent(installationId)}/repos`,
 			);
-			setRepos(body.repositories.filter((repo) => repo.status === 'selected'));
+			// Board screen 12: deselected repositories stay visible as removed —
+			// a deliberate removal is never indistinguishable from never offered.
+			setRepos(body.repositories);
 		} catch (error) {
 			setRepos(null);
 			setReposError(error instanceof Error ? error : new Error(String(error)));
@@ -147,7 +149,17 @@ export function RepositoryPicker(props: {
 
 	return (
 		<div className="repository-picker" data-testid="repository-picker">
-			<h3>GitHub repositories</h3>
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						github app
+					</p>
+					<h3 className="ev-title">What Caddie may read, and what it may not do with it</h3>
+				</div>
+				<button type="button" className="btn-ghost" onClick={() => setReloadKey((key) => key + 1)}>
+					Reload installations
+				</button>
+			</div>
 
 			{installations.length === 0 ? (
 				<StatePanel
@@ -161,21 +173,53 @@ export function RepositoryPicker(props: {
 						<li key={installation.installationId} data-status={installation.status}>
 							<div className="repository-picker__installation">
 								<span className="repository-picker__account">{installation.accountLogin}</span>
-								<span className="repository-picker__meta">
-									installation {installation.installationId} · {installation.appSlug || 'github app'} ·{' '}
+								<span
+									className="badge"
+									data-tone={installation.status === 'active' ? 'ok' : installation.status === 'suspended' ? 'warn' : 'danger'}
+									data-testid={`installation-status-${installation.installationId}`}
+								>
 									{installation.status}
+								</span>
+								<span className="repository-picker__meta">
+									installation {installation.installationId} · {installation.appSlug || 'github app'}
 								</span>
 								{installation.status === 'active' ? (
 									<button
 										type="button"
+										className="btn-ghost"
 										onClick={() => void openRepos(installation.installationId)}
 										aria-expanded={openInstallation === installation.installationId}
 									>
 										{openInstallation === installation.installationId ? 'Hide repositories' : 'Show repositories'}
 									</button>
+								) : installation.status === 'suspended' ? (
+									<span className="repository-picker__denied" data-testid="installation-suspended">
+										Suspended at GitHub — the installation still exists and can be resumed; nothing
+										new is read while it is suspended.
+									</span>
 								) : (
 									<span className="repository-picker__denied" data-testid="installation-revoked">
-										Revoked — no further imports or deliveries are possible.
+										Revoked — no further imports or deliveries are possible. Plans already drafted
+										keep the evidence they captured.
+									</span>
+								)}
+							</div>
+							<div className="repository-picker__perms">
+								<span className="fk">permissions</span>
+								{Object.entries(installation.permissions).length > 0 ? (
+									Object.entries(installation.permissions).map(([name, level]) => (
+										<span
+											key={name}
+											className={`badge${name === 'contents' && level === 'read' ? '' : name === 'pull_requests' && level === 'write' ? '' : ' badge-optional'}`}
+											data-tone={name === 'contents' || name === 'pull_requests' ? 'action' : 'neutral'}
+											title={name === 'contents' || name === 'pull_requests' ? 'required for binding' : 'granted, not required for binding'}
+										>
+											{name}:{level}
+										</span>
+									))
+								) : (
+									<span className="badge badge-unknown" data-tone="roadmap">
+										none recorded
 									</span>
 								)}
 							</div>
@@ -199,9 +243,10 @@ export function RepositoryPicker(props: {
 									) : (
 										<ul>
 											{repos.map((repo) => (
-												<li key={repo.repoFullName}>
+												<li key={repo.repoFullName} data-status={repo.status}>
 													<button
 														type="button"
+														className="btn-ghost"
 														data-testid={`pick-repo-${repo.repoFullName}`}
 														onClick={() =>
 															props.onSelected?.({
@@ -212,6 +257,11 @@ export function RepositoryPicker(props: {
 													>
 														{repo.repoFullName}
 													</button>
+													{repo.status === 'deselected' ? (
+														<span className="badge" data-tone="roadmap">
+															removed — kept in the list, never silently deleted
+														</span>
+													) : null}
 												</li>
 											))}
 										</ul>
@@ -230,9 +280,11 @@ export function RepositoryPicker(props: {
 					void bind();
 				}}
 			>
+				<p className="kicker">bind an installation · explicit human action · typed conflicts, never a silent success</p>
 				<label>
 					<span>Bind an installation by id</span>
 					<input
+						className="input"
 						value={bindId}
 						onChange={(event) => setBindId(event.target.value)}
 						placeholder="GitHub App installation id"
@@ -240,7 +292,7 @@ export function RepositoryPicker(props: {
 						disabled={bindBusy}
 					/>
 				</label>
-				<button type="submit" disabled={bindBusy || bindId.trim() === ''}>
+				<button type="submit" className="btn-key" disabled={bindBusy || bindId.trim() === ''}>
 					{bindBusy ? 'Binding…' : 'Bind installation'}
 				</button>
 				{bindMessage ? <p data-testid="bind-message">{bindMessage}</p> : null}
