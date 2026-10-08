@@ -646,6 +646,11 @@ a.btn-ghost.topbar-nav-link {
 	min-height: 0;
 }
 
+/* The floating conversation head overlays the top of the transcript. */
+.shell-right .transcript {
+	padding-top: 3.2rem;
+}
+
 /* mobile: one pane + a floating bottom bar (today.ai grammar — the composer
    sits directly above the five nav items, everything flush inside one
    rounded container). The bar is fixed so it rides every mobile route; the
@@ -2471,39 +2476,102 @@ a.btn-ghost.topbar-nav-link {
 	filter: brightness(1.08);
 }
 
-/* --- right-panel conversation context label --------------------------------- */
+/* --- right-panel conversation head (Today.ai grammar) ------------------------
+   No header bar: the agent avatar + name/scope pill float over the
+   transcript; on mobile the Search and Account chips float top-right.
+   Content scrolls underneath — the head is pointer-transparent except for
+   its own controls. */
+.shell-right {
+	position: relative;
+}
 
-.conv-context {
+.conv-head-float {
+	position: absolute;
+	top: 0.55rem;
+	left: 0.7rem;
+	right: 0.7rem;
+	z-index: 6;
 	display: flex;
 	align-items: center;
+	justify-content: space-between;
 	gap: 0.5rem;
-	padding: 0.7rem 1rem;
-	border-bottom: 1px solid var(--color-line-soft);
+	pointer-events: none;
+}
+
+/* The Caddie mark: chip-sized (same as the actions to its right) — a
+   placeholder until the real logo lands. */
+.conv-avatar {
+	width: 2.1rem;
+	height: 2.1rem;
+	border-radius: 50%;
+	background: linear-gradient(180deg, var(--color-action), var(--color-action-deep));
+	color: var(--color-ink);
+	display: grid;
+	place-items: center;
+	font-size: 14px;
+	font-weight: 700;
+	box-shadow:
+		0 0 0 3px var(--color-panel),
+		0 6px 16px rgb(0 0 0 / 0.3);
+}
+
+.conv-head-left {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	pointer-events: auto;
+	min-width: 0;
+}
+
+/* The scope pill: which conversation you are in — "General" (account-level)
+   or the project's name. */
+.conv-name-pill {
 	font-family: var(--font-mono);
 	font-size: var(--r-label);
 	letter-spacing: 0.04em;
-	color: var(--color-muted);
-}
-
-.conv-context-dot {
-	width: 8px;
-	height: 8px;
-	border-radius: 999px;
-	background: var(--color-action);
-	flex: none;
-}
-
-.conv-context[data-scope='general'] .conv-context-dot {
-	background: var(--color-muted);
-}
-
-.conv-context-label {
-	color: var(--color-bright);
 	font-weight: 600;
+	color: var(--color-bright);
+	background: var(--color-panel);
+	border: 1px solid var(--color-line-soft);
+	border-radius: 999px;
+	padding: 0.28rem 0.6rem;
+	box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
-.conv-close {
-	margin-left: auto;
+.conv-head-chips {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	pointer-events: auto;
+}
+
+.conv-chip {
+	width: 2.1rem;
+	height: 2.1rem;
+	border-radius: 50%;
+	display: grid;
+	place-items: center;
+	background: var(--color-panel);
+	border: 1px solid var(--color-line-soft);
+	color: var(--color-muted);
+	text-decoration: none;
+	box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
+}
+
+.conv-chip:hover {
+	color: var(--color-action);
+}
+
+.conv-head-chips .account-menu .avatar-btn {
+	width: 2.1rem;
+	height: 2.1rem;
+	border-radius: 50%;
+	background: var(--color-panel);
+	border: 1px solid var(--color-line-soft);
+	box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
 }
 
 /* --- project-local destination tabs ----------------------------------------- */

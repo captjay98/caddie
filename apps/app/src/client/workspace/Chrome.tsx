@@ -418,20 +418,27 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 						data-open={mobileConversation && !isDesktop ? 'true' : 'false'}
 						aria-label="Caddie conversation"
 					>
-							<div className="conv-context" data-testid="conv-context" data-scope={conversationKind}>
-								<span className="conv-context-dot" aria-hidden="true" />
-								<span className="conv-context-label" data-testid="conv-context-label">
-									Caddie · {conversationLabel}
+							{/* Floating conversation head — Today-inspired but our own: a slim
+						    left-aligned row over the transcript. The Caddie mark sits
+						    top-left at chip size; the pill beside it is the conversation
+						    scope (General = the account-level chat; a project name inside
+						    a project). Mobile gets the Search/Account chips on the right. */}
+							<div className="conv-head-float" data-testid="conv-context" data-scope={conversationKind}>
+								<span className="conv-head-left">
+									<span className="conv-avatar" aria-hidden="true">
+										C
+									</span>
+									<span className="conv-name-pill" data-testid="conv-context-label" title="The conversation you are in — General is your account-level chat with Caddie">
+										{conversationLabel}
+									</span>
 								</span>
 								{!isDesktop ? (
-									<button
-										type="button"
-										className="conv-close btn-ghost"
-										data-testid="conversation-close"
-										onClick={() => setMobileConversation(false)}
-									>
-										Back
-									</button>
+									<span className="conv-head-chips">
+										<Link to="/search" className="conv-chip" data-testid="conv-search" title="Search" search={keepSearch}>
+											<Icon name="search" title="Search" />
+										</Link>
+										<AccountMenu accountOpen={accountOpen} setAccountOpen={setAccountOpen} displayName={displayName.data ?? null} />
+									</span>
 								) : null}
 							</div>
 							<Channel

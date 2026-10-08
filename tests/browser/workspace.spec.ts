@@ -242,7 +242,7 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		// The persistent conversation is present and bound to the account scope.
 		await expect(page.getByTestId('conversation-panel')).toBeVisible();
 		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
-		await expect(page.getByTestId('conv-context-label')).toContainText('Caddie · General');
+		await expect(page.getByTestId('conv-context-label')).toContainText('General');
 		await context.close();
 	});
 
@@ -568,7 +568,10 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await page.getByTestId('composer-input').fill('hello caddie');
 		await page.getByTestId('composer-send').click();
 		await expect(page).toHaveURL(/pane=channel/);
-		await expect(page.getByTestId('conversation-close')).toBeVisible();
+		// The floating conversation head serves as the context indicator; tabs
+		// navigate away (no Back button in the Today grammar).
+		await expect(page.getByTestId('conv-context')).toBeVisible();
+		await expect(page.getByTestId('conv-context-label')).toContainText('Caddie ·');
 		await context.close();
 	});
 

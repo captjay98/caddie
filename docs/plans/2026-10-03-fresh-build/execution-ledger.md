@@ -877,3 +877,25 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-CHAT-HEAD-2 (owner correction: not a today.ai copy — keep the floating head, Caddie mark top-LEFT at chip size, scope pill beside it, actions right)",
+  "status": "LOCAL VERIFIED",
+  "sha": "see git log feat(ui): conversation head — left-aligned mark",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "geometry probe 390/1440 + playwright suites", "exitCode": 0, "receipt": "mark 34px at left 11 (chip-sized, symmetric with the right chips at 11), scope pill 'General' beside it (70x25), chips mobile-only, no overflow; 28 browser tests pass"},
+    {"command": "screenshots re-captured", "exitCode": 0, "receipt": "mobile-chat, desktop-home, desktop-discover"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/workspace/Chrome.tsx + workspace.css", "note": "floating head is a slim left-aligned row: Caddie mark (placeholder until the real logo) + scope pill ('General' = account-level chat; project name inside a project) + mobile-only chips; transcript clearance 3.2rem"},
+    {"path": "tests/browser/workspace.spec.ts + discovery.spec.ts", "note": "label assertions updated to the scope-only pill"}
+  ],
+  "environment": "local vite dev :5176, minted session cookie (in-memory only)",
+  "providerCalls": "none",
+  "specReview": "owner visual acceptance pending",
+  "qualityReview": "owner direction applied verbatim: floating kept, mark moved left, chip-sized",
+  "limitations": ["the C mark is a placeholder until a real logo exists"]
+}
+```

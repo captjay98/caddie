@@ -378,7 +378,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		// No profile country on record → honest UNKNOWN, never a guess.
 		await expect(page.getByText('none recorded — country rules stay UNKNOWN')).toBeVisible();
 		// The persistent conversation stays on the GENERAL (account) scope here.
-		await expect(page.getByTestId('conv-context-label')).toContainText('Caddie · General');
+		await expect(page.getByTestId('conv-context-label')).toContainText('General');
 		await context.close();
 	});
 
