@@ -53,7 +53,10 @@ const PROJECT = {
 };
 
 async function openProjectPage(page: Page) {
-	await page.goto('/app/?project=proj_conversation');
+	// A PROJECT route binds the conversation to the selected project id; Home ("/")
+	// binds it to the account/general scope, so the project-scoped draft tests use
+	// the project surface here.
+	await page.goto('/app/project?project=proj_conversation');
 	await expect(page.getByTestId('channel')).toBeVisible();
 }
 

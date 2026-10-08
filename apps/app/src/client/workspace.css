@@ -677,7 +677,7 @@ a.btn-ghost.topbar-nav-link {
 	/* Clearance under the floating bar so the transcript and panels never sit
 	   behind it (the bar is out of flow). */
 	.shell-main {
-		padding-bottom: calc(150px + env(safe-area-inset-bottom));
+		padding-bottom: calc(172px + env(safe-area-inset-bottom));
 	}
 	.bottom-nav {
 		display: grid;
@@ -729,7 +729,7 @@ a.btn-ghost.topbar-nav-link {
 	}
 	.bottom-nav-row {
 		display: grid;
-		grid-template-columns: repeat(5, 1fr);
+		grid-template-columns: repeat(4, 1fr);
 		gap: 2px;
 		padding-top: 5px;
 	}
@@ -892,6 +892,7 @@ a.btn-ghost.topbar-nav-link {
 .decision-card {
 	position: relative;
 	padding: 0.85rem 1rem;
+	min-width: 0;
 }
 
 .decision-card .card-head {
@@ -1000,6 +1001,14 @@ a.btn-ghost.topbar-nav-link {
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 0.5rem;
+}
+
+/* Long action labels must wrap inside the card — a nowrap link forces the
+   card past the viewport on mobile (observed 413px at a 390px viewport). */
+.decision-card .actions .r-link {
+	white-space: normal;
+	min-width: 0;
+	overflow-wrap: anywhere;
 }
 
 /* Board screen 06: the audit trail's run + evidence ids promoted into the
@@ -1147,6 +1156,10 @@ a.btn-ghost.topbar-nav-link {
 	min-width: 0;
 	display: grid;
 	gap: 0.3rem;
+	/* Positioned context for the sr-only spans inside: without it the
+	   absolute labels land against the document and inflate the page height
+	   (the desktop shell lost its independent-scroll behaviour). */
+	position: relative;
 }
 
 /* The transcript reads by alignment alone: user bubbles right, assistant
@@ -1549,6 +1562,9 @@ a.btn-ghost.topbar-nav-link {
 .shell-loading.shell-page {
 	place-items: start center;
 	align-content: start;
+	/* The page column owns vertical padding; sides come from shell-main, so
+	   every surface shares one geometry with Home. */
+	padding: 0;
 }
 
 /* --- product identity layer (docs/reviews/2026-10-08-product-charter.md) ----
@@ -1561,6 +1577,7 @@ a.btn-ghost.topbar-nav-link {
 	max-width: 860px;
 	display: grid;
 	gap: 0.9rem;
+	padding: 0.6rem 0 1.2rem;
 }
 
 .page-col > * {
@@ -2230,5 +2247,478 @@ a.btn-ghost.topbar-nav-link {
 	*::after {
 		animation: none !important;
 		transition: none !important;
+	}
+}
+
+/* ==========================================================================
+   Discovery-first shell (2026-10-08 redesign) — two independent panels with a
+   floating navigation capsule, replacing the old full-width header + nav row.
+   These rules override the legacy `.app-shell` / `.shell-main` frame above.
+   ========================================================================== */
+
+/* The split frame: the shell never scrolls as a whole; each panel scrolls
+   independently. */
+.app-shell {
+	height: 100dvh;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+.app-split {
+	flex: 1;
+	display: flex;
+	min-height: 0;
+	min-width: 0;
+}
+
+.shell-left {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	overflow-y: auto;
+	position: relative;
+	background: var(--color-ink);
+}
+
+.shell-right {
+	flex: 0 0 clamp(340px, 40%, 560px);
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+	border-left: 1px solid var(--color-line-soft);
+	background: var(--color-panel);
+}
+
+/* Left-panel content column: crumbs + main stack below the sticky capsule. */
+.shell-main {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	padding: 0.2rem 1rem 1.4rem;
+}
+
+/* --- floating navigation capsule (left panel, sticky) ----------------------- */
+
+.nav-capsule,
+.capsule-nav-unauth {
+	position: sticky;
+	top: 0;
+	z-index: 15;
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+	margin: 0.7rem 0.9rem 0.35rem;
+	padding: 0.35rem 0.45rem;
+	background: var(--color-raised);
+	border: 1px solid var(--color-line-soft);
+	border-radius: 999px;
+	box-shadow:
+		0 6px 18px rgb(0 0 0 / 0.28),
+		inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 6%, transparent);
+}
+
+.capsule-wordmark {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.15rem;
+	font-family: var(--font-mono);
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: 0.22em;
+	color: var(--color-bright);
+	white-space: nowrap;
+	text-decoration: none;
+	padding: 0.2rem 0.5rem;
+}
+
+.capsule-wordmark b {
+	color: var(--color-action);
+	font-weight: 600;
+}
+
+.capsule-divider {
+	width: 1px;
+	height: 1.1rem;
+	background: var(--color-line);
+	margin: 0 0.15rem;
+}
+
+.capsule-spacer {
+	flex: 1;
+}
+
+.capsule-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	padding: 0.32rem 0.7rem;
+	border-radius: 999px;
+	color: var(--color-muted);
+	font-size: 13px;
+	font-weight: 600;
+	text-decoration: none;
+	white-space: nowrap;
+}
+
+.capsule-tab:hover {
+	color: var(--color-bright);
+	background: color-mix(in srgb, var(--color-bright) 6%, transparent);
+}
+
+.capsule-tab[aria-current='page'] {
+	color: var(--color-action);
+	background: color-mix(in srgb, var(--color-action) 12%, transparent);
+}
+
+.capsule-icon {
+	display: grid;
+	place-items: center;
+	width: 1.9rem;
+	height: 1.9rem;
+	border-radius: 999px;
+	border: none;
+	background: transparent;
+	color: var(--color-muted);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.capsule-icon:hover {
+	color: var(--color-action);
+	background: color-mix(in srgb, var(--color-bright) 6%, transparent);
+}
+
+/* --- mobile page-aware header (owner direction) ---------------------------
+   Identity on the left ("Caddie" on Home, the page name elsewhere); Search
+   and Account on the right. Navigation stays in the bottom bar — the header
+   never repeats it. */
+.mobile-header {
+	position: sticky;
+	top: 0;
+	z-index: 15;
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	padding: 0.55rem 0.85rem;
+	background: color-mix(in srgb, var(--color-ink) 84%, transparent);
+	backdrop-filter: blur(10px);
+	border-bottom: 1px solid var(--color-line-soft);
+}
+
+.mobile-header-brand {
+	font-size: 17px;
+	font-weight: 650;
+	letter-spacing: -0.01em;
+	color: var(--color-bright);
+	text-decoration: none;
+	white-space: nowrap;
+}
+
+.mobile-header-brand b {
+	color: var(--color-action);
+	font-weight: 600;
+}
+
+.mobile-header-title {
+	font-size: 18px;
+	font-weight: 650;
+	letter-spacing: -0.01em;
+	color: var(--color-bright);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.mobile-header-spacer {
+	flex: 1;
+	min-width: 0;
+}
+
+.mobile-header-action {
+	display: grid;
+	place-items: center;
+	width: 2rem;
+	height: 2rem;
+	flex: none;
+	border-radius: 999px;
+	border: none;
+	background: transparent;
+	color: var(--color-muted);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.mobile-header-action:hover {
+	color: var(--color-action);
+	background: color-mix(in srgb, var(--color-bright) 6%, transparent);
+}
+
+.mobile-header .avatar-btn {
+	width: 2rem;
+	height: 2rem;
+}
+
+.mobile-header .mobile-action-new {
+	background: linear-gradient(180deg, var(--color-action), var(--color-action-deep));
+	color: var(--color-ink);
+}
+.mobile-header .mobile-action-new:hover {
+	color: var(--color-ink);
+	background: linear-gradient(180deg, var(--color-action), var(--color-action-deep));
+	filter: brightness(1.08);
+}
+
+/* --- right-panel conversation context label --------------------------------- */
+
+.conv-context {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.7rem 1rem;
+	border-bottom: 1px solid var(--color-line-soft);
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.04em;
+	color: var(--color-muted);
+}
+
+.conv-context-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 999px;
+	background: var(--color-action);
+	flex: none;
+}
+
+.conv-context[data-scope='general'] .conv-context-dot {
+	background: var(--color-muted);
+}
+
+.conv-context-label {
+	color: var(--color-bright);
+	font-weight: 600;
+}
+
+.conv-close {
+	margin-left: auto;
+}
+
+/* --- project-local destination tabs ----------------------------------------- */
+
+.project-tabs,
+.project-subtabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	width: 100%;
+}
+
+.project-subtabs {
+	padding-left: 0.5rem;
+	border-left: 2px solid var(--color-line-soft);
+}
+
+.project-tab,
+.project-subtab {
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--color-muted);
+	text-decoration: none;
+	padding: 0.3rem 0.65rem;
+	border: 1px solid transparent;
+	border-radius: 999px;
+}
+
+.project-tab:hover,
+.project-subtab:hover {
+	color: var(--color-bright);
+	background: color-mix(in srgb, var(--color-bright) 6%, transparent);
+}
+
+.project-tab[aria-current='page'] {
+	color: var(--color-action);
+	border-color: color-mix(in srgb, var(--color-action) 35%, transparent);
+}
+
+.project-subtab[aria-current='page'] {
+	color: var(--color-action);
+	font-weight: 700;
+}
+
+/* --- page identity ---------------------------------------------------------- */
+
+.page-title {
+	margin: 0.35rem 0 0;
+	font-size: 20px;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	color: var(--color-bright);
+}
+
+.muted {
+	color: var(--color-muted);
+}
+
+.stale-note {
+	color: var(--color-muted);
+	font-size: var(--r-label);
+}
+
+/* --- Home brief ------------------------------------------------------------- */
+
+.home-brief {
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	width: 100%;
+	max-width: 860px;
+	margin: 0 auto;
+	padding: 0.6rem 0 1.2rem;
+}
+
+.home-head,
+.home-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+}
+
+/* .card-surface carries no padding — the home panels must add their own
+   (they previously ran content to the card edges). */
+.home-panel {
+	padding: 1rem 1.1rem;
+}
+
+.profile-setup .row,
+.profile-complete {
+	gap: 0.5rem;
+}
+
+.rec-list {
+	list-style: none;
+	margin: 0.3rem 0 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+}
+
+.rec-item {
+	display: flex;
+	justify-content: space-between;
+	gap: 0.6rem;
+	padding: 0.5rem 0.6rem;
+	border: 1px solid var(--color-line-soft);
+	border-radius: 8px;
+}
+
+.rec-title {
+	font-weight: 600;
+	color: var(--color-bright);
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+/* --- project list + overview header ---------------------------------------- */
+
+.project-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+
+.project-row {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+	padding: 0.7rem 0.85rem;
+}
+
+.project-row-main {
+	display: flex;
+	align-items: baseline;
+	gap: 0.7rem;
+	flex-wrap: wrap;
+}
+
+.project-row .row-title {
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--color-bright);
+}
+
+.project-row .row-title:hover {
+	color: var(--color-action);
+}
+
+.project-contest {
+	font-size: 12.5px;
+	color: var(--color-muted);
+	text-decoration: none;
+}
+
+.project-contest:hover {
+	color: var(--color-action);
+}
+
+.project-facts {
+	margin: 0.15rem 0 0;
+	color: var(--color-muted);
+}
+
+/* --- mobile: the conversation is a full-height pane, not a side column ------ */
+
+@media (max-width: 767px) {
+	.shell-left {
+		flex: 1 1 auto;
+	}
+	/* The right conversation panel is normally hidden on mobile; the bottom-nav
+	   composer + `?pane=channel` reveal it full-height over the left panel. */
+	.shell-right {
+		display: none;
+	}
+	.app-split {
+		position: relative;
+	}
+	.app-split:has(.shell-right[data-open='true']) .shell-left {
+		display: none;
+	}
+	.shell-right[data-open='true'] {
+		display: flex;
+		flex: 1;
+		width: 100%;
+		border-left: none;
+	}
+	/* Clearance so content and transcript never sit behind the floating bar. */
+	.shell-main {
+		padding-bottom: calc(172px + env(safe-area-inset-bottom));
+	}
+	/* The unauth header keeps its capsule margins on mobile; the authed
+	   capsule is desktop-only (mobile uses the page-aware MobileHeader +
+	   bottom bar). */
+	.capsule-nav-unauth {
+		margin-inline: 0.6rem;
+	}
+	.main[data-hidden='true'],
+	.shell-main[data-hidden='true'] {
+		display: none;
+	}
+}
+
+@media (min-width: 768px) {
+	.shell-right[data-open='true'] {
+		display: flex;
 	}
 }

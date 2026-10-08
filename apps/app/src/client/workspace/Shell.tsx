@@ -1,503 +1,341 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { useQueryClient } from '@tanstack/react-query';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { SignInPanel } from '../auth.ts';
 import { failureKind, StatePanel } from '../states.tsx';
-import { Icon } from '../icons.tsx';
-import { Start } from '../onboarding/Start.tsx';
-import {
-	useArtifacts,
-	useAuthStatus,
-	useBriefCards,
-	useCreateProject,
-	useRunBindings,
-	useSessionActor,
-	watchAuthTransitions,
-} from '../queries.ts';
 import { BriefLane } from '../brief/DecisionCard.tsx';
-import { RunInspector } from '../runs/RunInspector.tsx';
-import { Channel } from '../conversation/Channel.tsx';
-import { standbySource as STANDBY, type ChannelDraft } from '../conversation/channel-store.ts';
+import { useBriefCards, useDiscoveryCandidates, useProfile, type ProfileRecord } from '../queries.ts';
 import { WorkspaceChrome, useWorkspaceChrome } from './Chrome.tsx';
 
 /**
- * Workspace shell — feature-ledger rows C5/H9 (Card/Tasks/Channel continuity
- * and the two-pane shell, adapted to typed payloads + TanStack Router/Query).
+ * Home — the personalised, actionable brief (discovery-first redesign).
  *
- * The topbar, project selector, theme control, refresh and sign-out live in the
- * shared WorkspaceChrome (one header + one nav row on every route); this
- * component owns the workspace body: a two-pane split at >=768px (Brief/Runs
- * aside + Channel) and a single pane with a bottom tab bar below (Channel is
- * the mobile home surface). All colors come from the halo tokens; the theme
- * switch is the data-theme attribute.
+ * Home is where the loop is steered from, so it leads with ONE thing the person
+ * can do, backed only by real data:
+ *   - A new account (no projects) sees a one-sentence explainer, a short
+ *     progressive profile setup, a primary "Find a hackathon that fits you",
+ *     a browse-anyway path, and secondary start paths — never an empty data pane.
+ *   - A returning account sees what needs them (the brief), top
+ *     recommendations, and project progress — one primary action per card.
  *
- * Session hygiene (reference lesson, P00 audit): the authenticated body is
- * KEYED by actor id, so an account switch remounts every per-user state fresh;
- * query keys carry the actor id and non-auth caches are wiped on transitions.
+ * Honest states are distinct and never conflated: incomplete profile, loading,
+ * no matches, failed, and stale are each their own message. There is no
+ * account-wide brief-aggregation endpoint, so the needs-you lane reads the
+ * actor's Home scope (the account project) — a known backend gap, surfaced as
+ * such rather than faked with a merge across projects. No match score is ever
+ * invented: recommendations are exactly what the server evaluated.
  */
 
 export function Shell(): ReactElement {
-	return <WorkspaceBody />;
-}
-
-function WorkspaceBody(): ReactElement {
-	const auth = useAuthStatus();
-	// The New project action lives in the chrome (above this body), so the
-	// inline form's open state is owned here and passed down.
-	const [formOpen, setFormOpen] = useState(false);
-	const openForm = () => setFormOpen(true);
-
-	if (auth.isPending) {
-		return (
-			<WorkspaceChrome active="home">
-				<div className="shell-loading">
-					<StatePanel kind="loading" title="Checking your session…" />
-				</div>
-			</WorkspaceChrome>
-		);
-	}
-	if (auth.error) {
-		return (
-			<WorkspaceChrome active="home">
-				<div className="shell-loading">
-					<StatePanel
-						kind={failureKind(auth.error)}
-						detail={auth.error instanceof Error ? auth.error.message : undefined}
-						onRetry={() => void auth.refetch()}
-						retryLabel="Check again"
-					/>
-				</div>
-			</WorkspaceChrome>
-		);
-	}
-	if (!auth.data.authenticated) {
-		// Unauthenticated /app shows the P01 sign-in state (composed build has
-		// auth enabled; this is the real fail-closed probe, not a mock). The
-		// chrome crosses the auth boundary; the hero says what Caddie is in
-		// one plain sentence BEFORE asking who you are.
-		return (
-			<WorkspaceChrome active="home">
-				<div className="auth-hero">
-					<p className="auth-hero-kicker">CADDIE · your build assistant</p>
-					<h1 className="auth-hero-title">
-						It reads the rules, drafts the plan, and builds it.
-						<span className="auth-hero-sub">You approve every step.</span>
-					</h1>
-				</div>
-				<div className="shell-loading">
-					<section className="sign-in-card card-surface">
-						<p className="kicker" data-tone="action">
-							CADDIE · WORKSPACE
-						</p>
-						<h2 className="sign-in-title">Sign in to your workspace</h2>
-						<SignInPanel callbackURL="/app/" />
-					</section>
-				</div>
-			</WorkspaceChrome>
-		);
-	}
 	return (
-		<WorkspaceChrome active="home" onNewProject={openForm}>
-			<AuthedWorkspaceGate formOpen={formOpen} onOpenForm={openForm} onCloseForm={() => setFormOpen(false)} />
+		<WorkspaceChrome nav="home">
+			<HomeBody />
 		</WorkspaceChrome>
 	);
 }
 
-function AuthedWorkspaceGate(props: {
-	formOpen: boolean;
-	onOpenForm: () => void;
-	onCloseForm: () => void;
-}): ReactElement {
-	const auth = useAuthStatus();
-	const actor = useSessionActor(Boolean(auth.data?.authenticated));
-	// Key by actor: an account switch remounts every per-user state fresh, so
-	// neither channel drafts nor tab state can leak across accounts.
+function HomeBody(): ReactElement {
+	const chrome = useWorkspaceChrome();
+	if (!chrome.authenticated) return <SignInWall />;
+
 	return (
-		<AuthedWorkspace
-			key={actor.data ?? 'pending'}
-			actorId={actor.data ?? null}
-			formOpen={props.formOpen}
-			onOpenForm={props.onOpenForm}
-			onCloseForm={props.onCloseForm}
-		/>
+		<div className="home-brief" data-testid="home-screen">
+			<header className="home-head">
+				<p className="kicker" data-tone="action">
+					HOME
+				</p>
+				<h1 className="page-title">Caddie — your build assistant</h1>
+				<p className="page-lede">
+					You talk, Caddie reads the rules, drafts a plan and builds it. You approve every step. Here is what
+					it needs from you and what it found.
+				</p>
+			</header>
+
+			<ProfileSetup />
+
+			<section className="card-surface home-panel" data-testid="home-primary">
+				<h3 className="state-title">Ready when you are</h3>
+				<p className="state-detail">
+					Discovery works before you have any project — start by finding something that fits.
+				</p>
+				<div className="row">
+					<button type="button" className="btn-key" data-testid="home-find-hackathon" onClick={() => chrome.goProjectTab('/discover', {})}>
+						Find a hackathon that fits you
+					</button>
+					<button type="button" className="btn-ghost" data-testid="home-start-idea" onClick={chrome.newProject}>
+						Start from an idea instead
+					</button>
+				</div>
+			</section>
+
+			<Recommendations />
+			<NeedsYou />
+			<ProjectProgress />
+		</div>
 	);
 }
 
-function AuthedWorkspace(props: {
-	actorId: string | null;
-	formOpen: boolean;
-	onOpenForm: () => void;
-	onCloseForm: () => void;
-}): ReactElement {
-	const actor = useMemo(() => ({ actorId: props.actorId }), [props.actorId]);
-	const queryClient = useQueryClient();
-	const navigate = useNavigate();
-	const search = useSearch({ strict: false }) as { project?: string; pane?: 'brief' | 'runs' | 'channel' };
-	const chrome = useWorkspaceChrome();
-
-	const isDesktop = useIsDesktop();
-	// The mobile bottom nav (in the chrome) carries the pane in the URL
-	// (?pane=), so Decisions/Chat land on the right pane from any route; the
-	// desktop aside tabs stay local state.
-	const [tab, setTab] = useState<'brief' | 'runs' | 'channel'>(
-		isDesktop ? (search.pane ?? 'brief') : (search.pane ?? 'channel'),
+function SignInWall(): ReactElement {
+	return (
+		<div className="auth-hero">
+			<p className="auth-hero-kicker">CADDIE · your build assistant</p>
+			<h1 className="auth-hero-title">
+				It reads the rules, drafts the plan, and builds it.
+				<span className="auth-hero-sub">You approve every step.</span>
+			</h1>
+			<section className="sign-in-card card-surface">
+				<p className="kicker" data-tone="action">
+					CADDIE · WORKSPACE
+				</p>
+				<h2 className="sign-in-title">Sign in to your workspace</h2>
+				<SignInPanel callbackURL="/app/" />
+			</section>
+		</div>
 	);
-	const [detailOpen, setDetailOpen] = useState(true);
+}
 
-	const paramProject = search.project;
-	const projectMissing =
-		Boolean(paramProject) && chrome.projectList.length > 0 && !chrome.projectList.some((p) => p.id === paramProject);
-	const effectiveProjectId = chrome.effectiveProjectId;
+// --- progressive profile setup ---------------------------------------------------
 
-	// Follow the chrome's ?pane= param (the mobile bottom nav's payload).
-	useEffect(() => {
-		if (search.pane === 'brief' || search.pane === 'runs' || search.pane === 'channel') {
-			setTab(search.pane);
-		}
-	}, [search.pane]);
+function profileComplete(profile: ProfileRecord | null): boolean {
+	if (!profile) return false;
+	return Boolean(profile.country && profile.timezone && profile.weeklyHours != null && profile.experienceLevel);
+}
 
-	// The channel store + run transport are owned by the chrome (so the
-	// mobile bar's composer works on every route); the workspace reads the
-	// same instances and feeds the panes.
-	const { channel, transport } = chrome;
-	const sendText = (text: string) => {
-		const draft = channel.addDraft(text);
-		if (draft && transport) {
-			// admitted → the draft is removed (the message lives in the
-			// transcript); rejected → it stays with its attempt counted
-			transport.send(draft.text, draft.idempotencyKey).then(
-				() => channel.resolveDraft(draft.id),
-				() => channel.retryDraft(draft.id),
-			);
-		}
-	};
+function ProfileSetup(): ReactElement {
+	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const profile = useProfile(actor);
+	const p = profile.data?.profile ?? null;
+	const complete = profileComplete(p);
 
-	const runBindings = useRunBindings(actor, effectiveProjectId);
-	const artifacts = useArtifacts(actor, effectiveProjectId);
-	const brief = useBriefCards(actor, effectiveProjectId);
-	const createProject = useCreateProject(actor);
+	if (!chrome.authenticated) return <></>;
+	if (profile.isPending) return <StatePanel kind="loading" title="Checking your profile…" />;
+	if (profile.error) {
+		return (
+			<StatePanel
+				kind={failureKind(profile.error)}
+				detail={profile.error instanceof Error ? profile.error.message : undefined}
+				onRetry={failureKind(profile.error) === 'denied' ? undefined : () => void profile.refetch()}
+			/>
+		);
+	}
+	if (complete) {
+		return (
+			<section className="card-surface home-panel profile-complete" data-testid="profile-complete">
+				<p className="state-detail">
+					Profile is set — it shapes what Caddie recommends.{' '}
+					<a href="/settings" data-testid="profile-edit-link">
+						Edit in Settings
+					</a>
+				</p>
+			</section>
+		);
+	}
+	return <InlineProfile profile={p} actorId={chrome.actorId} onSaved={() => void profile.refetch()} />;
+}
 
-	// Cross-account cache hygiene: on any auth/actor transition, wipe every
-	// non-auth query so another account's rows can never be served or
-	// prefetched. This body mounts only after auth+actor have settled, so the
-	// guard initializes on a known identity and never wipes during load.
-	const guardAuth = useAuthStatus();
-	const guard = useMemo(() => watchAuthTransitions(queryClient), [queryClient]);
-	useEffect(() => {
-		guard.maybe(guardAuth.data?.authenticated, props.actorId);
-	}, [guard, guardAuth.data?.authenticated, props.actorId, queryClient]);
+function InlineProfile(props: {
+	profile: ProfileRecord | null;
+	actorId: string | null;
+	onSaved: () => void;
+}): ReactElement {
+	const [country, setCountry] = useState(props.profile?.country ?? '');
+	const [timezone, setTimezone] = useState(props.profile?.timezone ?? '');
+	const [weeklyHours, setWeeklyHours] = useState(props.profile?.weeklyHours == null ? '' : String(props.profile.weeklyHours));
+	const [experience, setExperience] = useState(props.profile?.experienceLevel ?? '');
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const [saved, setSaved] = useState(false);
 
-	const projectsState = chrome.projectsPending
-		? 'loading'
-		: chrome.projectsError
-			? failureKind(chrome.projectsError)
-			: 'empty';
-	const briefStale = chrome.projectsFetching;
-	const asideHidden = tab === 'channel' || !detailOpen;
-
-	// Board screen 06: every card carries a link into the screen it refers to.
-	// The action's targetId is server-authored data — the mapping here is by
-	// card kind + the evidenceIds the card itself cites, never parsed prose.
-	function onCardAction(card: DecisionCardType) {
-		const search = { project: effectiveProjectId ?? undefined };
-		switch (card.kind) {
-			case 'approval':
-				void navigate({ to: '/design-review', search });
-				break;
-			case 'change':
-				// a conflict cites claim ids; a stale artifact cites none
-				if (card.evidenceIds.length > 0) {
-					void navigate({ to: '/evidence', search: { ...search, claim: card.primaryAction.targetId } });
-				} else {
-					void navigate({ to: '/artifacts', search });
-				}
-				break;
-			case 'deadline':
-				void navigate({ to: '/schedules', search });
-				break;
-			case 'result':
-				// the honest destination for a failed run today is the Runs lane
-				void navigate({ to: '/', search });
-				break;
+	async function save() {
+		setSaving(true);
+		setError(null);
+		setSaved(false);
+		try {
+			const res = await fetch('/api/profile', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					...(country.trim() ? { country: country.trim().toUpperCase() } : { country: null }),
+					...(timezone.trim() ? { timezone: timezone.trim() } : { timezone: null }),
+					...(weeklyHours.trim() === '' ? {} : { weeklyHours: Number(weeklyHours) }),
+					...(experience === '' ? { experienceLevel: null } : { experienceLevel: experience }),
+					stackIds: props.profile?.stackIds ?? [],
+					freeTextInterests: props.profile?.freeTextInterests ?? [],
+				}),
+			});
+			if (!res.ok) {
+				const body = (await res.json().catch(() => null)) as { message?: string } | null;
+				throw new Error(body?.message ?? 'Saving your profile failed.');
+			}
+			setSaved(true);
+			props.onSaved();
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Saving your profile failed.');
+		} finally {
+			setSaving(false);
 		}
 	}
 
 	return (
-		<>
-			{props.formOpen ? (
-				<NewProjectForm
-					onCancel={props.onCloseForm}
-					onSubmit={(input) =>
-						createProject.mutateAsync(input).then((result) => {
-							props.onCloseForm();
-							chrome.selectProject(result.project.id);
-						})
-					}
-					error={createProject.error}
-					busy={createProject.isPending}
-					hasProjects={chrome.projectList.length > 0}
-					lastWorkspaceId={chrome.projectList[0]?.workspaceId}
-				/>
-			) : null}
-
-			{/* Mobile-only context row: project switching + refresh live with the
-			    content on mobile (the topbar carries 3 controls, today.ai style),
-			    and the desktop header row is hidden. */}
-			<div className="mobile-context-row">
-				{chrome.projectsPending ? (
-					<span className="mono-id">loading projects…</span>
-				) : (
-					<select
-						className="input project-select"
-						aria-label="Project"
-						data-testid="project-selector-mobile"
-						value={chrome.selectedProject?.id ?? ''}
-						onChange={(event) => chrome.selectProject(event.target.value)}
-					>
-						{chrome.projectList.length === 0 ? <option value="">No projects yet</option> : null}
-						{chrome.projectList.map((project) => (
-							<option key={project.id} value={project.id}>
-								{project.name}
-							</option>
-						))}
-					</select>
-				)}
-				<button
-					type="button"
-					className="icon-btn"
-					title="Refresh data"
-					aria-label="Refresh data"
-					data-testid="refresh-data-mobile"
-					onClick={chrome.refreshAll}
-				>
-					<Icon name="refresh" title="Refresh data" />
-				</button>
-				<button
-					type="button"
-					className="btn-key mobile-new-project"
-					data-testid="new-project-mobile"
-					onClick={props.onOpenForm}
-				>
-					New project
-				</button>
-			</div>
-
-			{/* Zero projects + a clean load = the onboarding IS the workspace.
-			    Any doubt (pending, offline, error, a stale ?project= param) keeps
-			    the honest state panels below — onboarding never masks a failure. */}
-			{!chrome.projectsPending &&
-			!chrome.projectsPaused &&
-			!chrome.projectsError &&
-			!projectMissing &&
-			chrome.projectList.length === 0 ? (
-				<Start onStartIdea={props.onOpenForm} />
-			) : (
-				<div className="shell-body">
-					<aside className="aside" data-collapsed={asideHidden} data-testid="aside">
-						{isDesktop ? (
-							<div className="aside-tabs" role="tablist" aria-label="Workspace panes">
-								<button
-									type="button"
-									role="tab"
-									className="tab-btn"
-									aria-selected={tab === 'brief'}
-									data-testid="tab-brief"
-									onClick={() => setTab('brief')}
-								>
-									Decisions
-								</button>
-								<button
-									type="button"
-									role="tab"
-									className="tab-btn"
-									aria-selected={tab === 'runs'}
-									data-testid="tab-runs"
-									onClick={() => setTab('runs')}
-								>
-									Activity
-								</button>
-							</div>
-						) : null}
-
-						<div className="aside-scroll">
-							{projectMissing ? (
-								<StatePanel
-									kind="error"
-									title="That project is not in your list"
-									detail="The link points at a project your account cannot see (or that no longer exists)."
-									onRetry={chrome.clearProjectParam}
-									retryLabel="Back to your projects"
-								/>
-							) : chrome.projectsPending ? (
-								<StatePanel kind="loading" title="Fetching your projects…" />
-							) : chrome.projectsPaused ? (
-								// TanStack pauses refetches while the browser reports
-								// offline — that pause IS the offline state: last loaded
-								// data stays visible, and the refetch resumes on reconnect.
-								<StatePanel
-									kind="offline"
-									title="You are offline"
-									detail="Showing the last loaded data. Refetching resumes automatically when you reconnect."
-								/>
-							) : chrome.projectsError ? (
-								<StatePanel
-									kind={failureKind(chrome.projectsError)}
-									detail={chrome.projectsError instanceof Error ? chrome.projectsError.message : undefined}
-									onRetry={
-										failureKind(chrome.projectsError) === 'denied' ? undefined : () => void queryClient.refetchQueries({ queryKey: ['projects', props.actorId] })
-									}
-								/>
-							) : !effectiveProjectId ? (
-								<StatePanel
-									kind="empty"
-									title="No project selected"
-									detail="Select or create a project — its brief, runs and artifacts open here."
-								/>
-						) : tab === 'brief' ? (
-							<BriefLane
-								state={{
-									kind: projectsState === 'empty' ? 'empty' : projectsState,
-									error: chrome.projectsError,
-									stale: briefStale,
-									retry: () => void queryClient.refetchQueries({ queryKey: ['projects', props.actorId] }),
-								}}
-								cards={brief.data?.cards ?? []}
-								feedPending={brief.isPending}
-								feedError={brief.error}
-								onAction={onCardAction}
-							/>
-						) : (
-							<RunInspector
-								runs={{
-									isPending: runBindings.isPending,
-									isFetching: runBindings.isFetching,
-									error: runBindings.error,
-									items: runBindings.data?.runBindings ?? [],
-									retry: () => void runBindings.refetch(),
-								}}
-								artifacts={{
-									isPending: artifacts.isPending,
-									isFetching: artifacts.isFetching,
-									error: artifacts.error,
-									items: artifacts.data?.artifacts ?? [],
-									retry: () => void artifacts.refetch(),
-								}}
-								projectId={effectiveProjectId}
-							/>
-						)}
-						</div>
-					</aside>
-
-<Channel
-					source={transport?.source ?? STANDBY}
-					transportLive={transport?.hasRun === true}
-					drafts={channel.drafts}
-					projectId={effectiveProjectId}
-					composerHidden={!isDesktop}
-					onSend={sendText}
-					onRetryDraft={(id) => {
-						channel.retryDraft(id);
-						const draft: ChannelDraft | undefined = channel.drafts.find((d) => d.id === id);
-						if (draft && transport) {
-							// same idempotency key — the transport deduplicates anyway
-							transport.send(draft.text, draft.idempotencyKey).then(
-								() => channel.resolveDraft(id),
-								() => {},
-							);
-						}
-					}}
-					onDiscardDraft={channel.discardDraft}
-				/>
-				</div>
-			)}
-		</>
-	);
-}
-
-function useIsDesktop(): boolean {
-	const [matches, setMatches] = useState(
-		() => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches,
-	);
-	useMediaQueryEffect('(min-width: 768px)', setMatches);
-	return matches;
-}
-
-function useMediaQueryEffect(query: string, onChange: (matches: boolean) => void): void {
-	const [mq] = useState(() => window.matchMedia(query));
-	useEffect(() => {
-		const handler = () => onChange(mq.matches);
-		mq.addEventListener('change', handler);
-		window.addEventListener('resize', handler);
-		return () => {
-			mq.removeEventListener('change', handler);
-			window.removeEventListener('resize', handler);
-		};
-	}, [mq, onChange]);
-}
-
-function NewProjectForm(props: {
-	onSubmit: (input: { name: string; description?: string; workspaceId?: string }) => Promise<unknown>;
-	onCancel: () => void;
-	error: unknown;
-	busy: boolean;
-	hasProjects: boolean;
-	lastWorkspaceId?: string;
-}): ReactElement {
-	const [name, setName] = useState('');
-	const [description, setDescription] = useState('');
-
-	return (
-		<form
-			className="new-project-form"
-			data-testid="new-project-form"
-			onSubmit={(event) => {
-				event.preventDefault();
-				const trimmed = name.trim();
-				if (!trimmed || props.busy) return;
-				void props.onSubmit({
-					name: trimmed,
-					...(description.trim() ? { description: description.trim() } : {}),
-					...(props.hasProjects && props.lastWorkspaceId ? { workspaceId: props.lastWorkspaceId } : {}),
-				});
-			}}
-		>
-			<p className="kicker" data-tone="action">
-				NEW PROJECT
-			</p>
+		<section className="card-surface home-panel profile-setup" data-testid="profile-setup">
+			<h3 className="state-title">Two fields sharpen your matches</h3>
+			<p className="state-detail">Optional — Caddie works without them. These feed the eligibility verdicts.</p>
 			<div className="row">
-				<input
-					className="input"
-					placeholder="Project name"
-					aria-label="Project name"
-					data-testid="new-project-name"
-					value={name}
-					onChange={(event) => setName(event.target.value)}
-				/>
-				<button type="submit" className="btn-key" data-testid="new-project-submit" disabled={!name.trim() || props.busy}>
-					{props.busy ? 'Creating…' : 'Create'}
-				</button>
-				<button type="button" className="btn-ghost" onClick={props.onCancel}>
-					Cancel
-				</button>
+				<input className="input" placeholder="Country (2-letter, e.g. CL)" aria-label="Country" data-testid="home-profile-country" value={country} onChange={(e) => setCountry(e.target.value)} />
+				<input className="input" placeholder="Time zone (e.g. Europe/Paris)" aria-label="Time zone" data-testid="home-profile-timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} />
 			</div>
-			<input
-				className="input"
-				placeholder="One-line description (optional)"
-				aria-label="Project description"
-				data-testid="new-project-description"
-				value={description}
-				onChange={(event) => setDescription(event.target.value)}
+			<div className="row">
+				<input className="input" placeholder="Weekly hours (0–80)" aria-label="Weekly hours" type="number" min={0} max={80} data-testid="home-profile-hours" value={weeklyHours} onChange={(e) => setWeeklyHours(e.target.value)} />
+				<select className="input" aria-label="Experience level" data-testid="home-profile-experience" value={experience} onChange={(e) => setExperience(e.target.value)}>
+					<option value="">Not set</option>
+					<option value="beginner">Beginner</option>
+					<option value="intermediate">Intermediate</option>
+					<option value="senior">Senior</option>
+				</select>
+			</div>
+			<div className="row">
+				<button type="button" className="btn-key" data-testid="home-profile-save" disabled={saving} onClick={() => void save()}>
+					{saving ? 'Saving…' : 'Save & browse'}
+				</button>
+				{saved ? <span className="status-pill" data-status="handled" data-testid="home-profile-saved">saved</span> : null}
+			</div>
+			{error ? <p className="form-error" role="alert" data-testid="home-profile-error">{error}</p> : null}
+		</section>
+	);
+}
+
+// --- recommendations (what the server actually ranked) ---------------------------
+
+function Recommendations(): ReactElement {
+	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const candidates = useDiscoveryCandidates(actor, chrome.homeProject?.id ?? null);
+
+	if (chrome.projectsError) {
+		return (
+			<StatePanel
+				kind={failureKind(chrome.projectsError)}
+				detail={chrome.projectsError instanceof Error ? chrome.projectsError.message : undefined}
 			/>
-			{!props.hasProjects ? (
-				<p className="state-detail">A first project creates your Home workspace.</p>
-			) : null}
-			{props.error ? (
-				<p className="form-error" role="alert" data-testid="new-project-error">
-					{props.error instanceof Error ? props.error.message : 'Creating the project failed.'}
+		);
+	}
+	const ranked = candidates.data?.ranked ?? [];
+	return (
+		<section className="card-surface home-panel" data-testid="home-recommendations">
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						DISCOVER
+					</p>
+					<h3 className="state-title">Top matches</h3>
+					<p className="state-detail">
+						{candidates.data
+							? `Ranked only on what Caddie could actually read${candidates.data.profileCountry ? ` · eligibility uses ${candidates.data.profileCountry}` : ' · no country recorded, eligibility stays UNKNOWN'}.`
+							: 'Reading the feeds this account watches…'}
+					</p>
+				</div>
+			</div>
+			{candidates.isFetching && candidates.data ? (
+				<p className="stale-note mono-id" data-testid="home-recommendations-stale">
+					updating…
 				</p>
 			) : null}
-		</form>
+			{candidates.isPending ? (
+				<StatePanel kind="loading" title="Reading recommendations…" />
+			) : candidates.error ? (
+				<StatePanel kind={failureKind(candidates.error)} detail={candidates.error instanceof Error ? candidates.error.message : undefined} onRetry={failureKind(candidates.error) === 'denied' ? undefined : () => void candidates.refetch()} />
+			) : ranked.length === 0 ? (
+				<StatePanel kind="empty" title="No matches read yet" detail="Nothing has been swept for this account — run the feed in Discover and this fills with real, evidenced matches." />
+			) : (
+				<ul className="rec-list">
+					{ranked.slice(0, 3).map((entry) => (
+						<li key={entry.candidateId} className="rec-item">
+							<span className="rec-title">{entry.candidateId}</span>
+							<span className="rec-fit mono-id">{entry.matchedRequirements} requirement(s) evidenced · {entry.verdict}</span>
+						</li>
+					))}
+				</ul>
+			)}
+			<div className="row">
+				<button type="button" className="btn-ghost" data-testid="home-open-discover" onClick={() => chrome.goProjectTab('/discover', {})}>
+					Open Discover
+				</button>
+			</div>
+		</section>
+	);
+}
+
+// --- needs-you (the account-scope brief) -----------------------------------------
+
+function NeedsYou(): ReactElement {
+	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const brief = useBriefCards(actor, chrome.homeProject?.id ?? null);
+
+	function onCardAction(card: DecisionCardType) {
+		void card;
+		chrome.goProjectTab('/project', {});
+	}
+
+	return (
+		<section className="card-surface home-panel" data-testid="home-needs-you">
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						NEEDS YOU
+					</p>
+					<h3 className="state-title">Waiting on your OK</h3>
+					<p className="state-detail">
+						Decisions from your account scope. An account-wide brief roll-up across every project is not
+						yet exposed by the server — this shows the account (Home) scope only.
+					</p>
+				</div>
+			</div>
+			<BriefLane
+				state={{ kind: 'empty', stale: chrome.projectsFetching, retry: chrome.refreshAll }}
+				cards={brief.data?.cards ?? []}
+				feedPending={brief.isPending}
+				feedError={brief.error}
+				onAction={onCardAction}
+			/>
+		</section>
+	);
+}
+
+// --- project progress ------------------------------------------------------------
+
+function ProjectProgress(): ReactElement {
+	const chrome = useWorkspaceChrome();
+	if (chrome.buildProjects.length === 0) {
+		return (
+			<section className="card-surface home-panel" data-testid="home-progress-empty">
+				<p className="state-detail">No projects yet — find a hackathon or start from an idea to begin.</p>
+			</section>
+		);
+	}
+	return (
+		<section className="card-surface home-panel" data-testid="home-progress">
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						BUILD
+					</p>
+					<h3 className="state-title">Where your projects stand</h3>
+				</div>
+			</div>
+			<ul className="project-list">
+				{chrome.buildProjects.slice(0, 4).map((project) => (
+					<li key={project.id} className="project-row" data-testid={`home-project-${project.id}`}>
+						<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
+							{project.name}
+						</button>
+						<span className="project-row-meta mono-id" data-status={project.status}>
+							{project.status}
+						</span>
+					</li>
+				))}
+			</ul>
+		</section>
 	);
 }

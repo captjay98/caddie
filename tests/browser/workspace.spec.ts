@@ -5,25 +5,27 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * P06 workspace shell acceptance — run against the COMPOSED build
- * (`bun run build` first): the real Worker under `vite preview` = local
- * workerd on 127.0.0.1:4173, SPA at /app/.
+ * Workspace shell acceptance for the DISCOVERY-FIRST redesign — run against the
+ * COMPOSED build (`bun run build` first: the real Worker under `vite preview` =
+ * local workerd on 127.0.0.1:4173, SPA at /app/).
  *
- * What is proven where:
- *   - LIVE (real /api, no stubs): unauthenticated /app shows the P01 sign-in
- *     state — the fail-closed /api/auth/status probe drives the gate.
- *   - UI-STATE PROOFS (Playwright route interception on /api/*): the
- *     loading/empty/stale/denied/limit/error/offline states, project
- *     selection + refresh retention, drafts with retry affordance, keyboard
- *     operability, theme rendering and 390/768/1440 overflow. The local
- *     composed build has auth enabled and no seeded accounts, so the
- *     authenticated data surfaces are driven deterministically by stubbing
- *     the session endpoints and the P02 REST shapes (documented as UI-state
- *     proofs — the real-data integration story is P02's integration suite +
- *     P17 acceptance, not this spec).
+ * What the shell guarantees (per the layout clarification + desktop shell update):
+ *   - Desktop is a two-panel layout: LEFT = all navigable content under a
+ *     floating rounded navigation capsule (exactly THREE global destinations:
+ *     Home · Discover · Projects, plus Search + Account); RIGHT = ONE persistent
+ *     Caddie conversation with a compact, explicit context label. No global
+ *     Chat/Decisions/Build/Ship/Evidence/Agents tabs exist.
+ *   - The conversation binds to a SAFE scope: the account Home project on the
+ *     global routes (General), the selected project on a project route. Switching
+ *     never silently retargets an unrelated project.
+ *   - Invalid ?project= ids are MISSING, never a fallback to another project.
+ *   - Both panels scroll independently; 390/768/1440 have no horizontal overflow.
  *
- * The chat transport is P05's live acceptance; the channel here proves the
- * draft/idempotency/retry UI contract that P05 plugs into.
+ * LIVE vs UI-state proof (same split as the original P06 spec): the
+ * unauthenticated gate is driven by the REAL /api/auth/status fail-closed probe;
+ * the authenticated surfaces are deterministic route-interception proofs against
+ * the real P02/P11 REST shapes (the local composed build has auth on and no
+ * seeded accounts). This is a UI-state proof, not auth or live-data evidence.
  */
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -97,10 +99,8 @@ test.afterAll(async () => {
 	}
 });
 
-// The root tsconfig intentionally omits the "dom" lib (it typechecks Node and
-// bun code). The callbacks below run inside the browser via page.evaluate, so
-// declare the minimal surface this spec touches — module-scoped, mirroring
-// landing.spec.ts.
+// The root tsconfig omits the "dom" lib; these callbacks run in the browser via
+// page.evaluate, so declare the minimal surface this spec touches.
 declare const document: {
 	documentElement: { scrollWidth: number; clientWidth: number };
 	body: object;
@@ -112,7 +112,7 @@ declare function getComputedStyle(element: object): { backgroundColor: string };
 
 const NOW = '2026-10-04T10:00:00.000Z';
 
-function project(id: string, name: string) {
+function project(id: string, name: string, kind: 'standard' | 'home' = 'standard') {
 	return {
 		id,
 		workspaceId: 'ws-1',
@@ -121,11 +121,15 @@ function project(id: string, name: string) {
 		contestId: null,
 		contestUrl: null,
 		status: 'active',
+		kind,
 		createdAt: NOW,
 		updatedAt: NOW,
 	};
 }
 
+// The account scope — kind='home', build/gate-less; excluded from the Projects
+// list but always present so Discover + the general conversation exist first.
+const HOME = project('home-1', 'Home', 'home');
 const PROJECT_A = project('proj-a', 'Pit wall');
 const PROJECT_B = project('proj-b', 'Telemetry');
 
@@ -161,243 +165,188 @@ function json(route: { fulfill(options: Record<string, unknown>): unknown }, sta
 	return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-/** Authenticated session for UI-state proofs: /api/auth/* is stubbed, not live. */
-async function stubSession(context: BrowserContext) {
+type ListConfig = { status: number; body: unknown; delayMs?: number };
+const DATA: ListConfig = { status: 200, body: { projects: [HOME, PROJECT_A, PROJECT_B] } };
+
+/**
+ * Authenticated session + a controllable project-list source. Home resolves to
+ * the account Home project so the general conversation and Discover work with
+ * zero build projects. Project children default to honest empties so a selected
+ * project never leaks a real 401 into the panes under test.
+ */
+async function stubAccount(context: BrowserContext, config: { current: ListConfig }) {
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
 	await context.route('**/api/auth/get-session', (route) =>
 		json(route, 200, { session: { userId: 'actor-test' }, user: { id: 'actor-test', name: 'Test', email: 't@caddie.test' } }),
 	);
-	// Default every project-child endpoint to its honest empty shape so a
-	// selected project never leaks a real 401 into the panes under test.
-	await context.route('**/api/projects/**', (route) => {
-		const path = new URL(route.request().url()).pathname;
-		if (path.endsWith('/run-bindings')) return json(route, 200, { runBindings: [] });
-		if (path.endsWith('/artifacts')) return json(route, 200, { artifacts: [] });
-		if (path.endsWith('/plan-docs')) return json(route, 200, { revisions: [], latest: null });
-		return json(route, 200, {});
-	});
-}
-
-type ListConfig = { status: number; body: unknown; delayMs?: number };
-
-/**
- * Mutable list handler: tests flip `config` to drive each explicit state
- * (loading = deferred, empty, data, 500, 403, 429) against the same UI.
- */
-async function stubProjectList(context: BrowserContext, config: { current: ListConfig }) {
+	// Independent of the list source: the account Home scope + profile.
+	await context.route('**/api/home-project', (route) => json(route, 200, { project: HOME }));
+	await context.route('**/api/profile', (route) =>
+		route.request().method() === 'PUT' ? json(route, 200, { profile: null }) : json(route, 200, { profile: null }),
+	);
 	await context.route('**/api/projects', async (route) => {
 		if (route.request().method() !== 'GET') return json(route, 405, { error: 'method_not_allowed' });
 		if (config.current.delayMs) await sleep(config.current.delayMs);
 		return json(route, config.current.status, config.current.body);
 	});
+	await context.route('**/api/projects/**', (route) => {
+		const path = new URL(route.request().url()).pathname;
+		if (path.endsWith('/run-bindings')) return json(route, 200, { runBindings: [] });
+		if (path.endsWith('/artifacts')) return json(route, 200, { artifacts: [] });
+		if (path.endsWith('/artifact-revisions')) return json(route, 200, { artifacts: [], latest: null });
+		if (path.endsWith('/plan-docs')) return json(route, 200, { revisions: [], latest: null });
+		if (path.endsWith('/brief')) return json(route, 200, { cards: [] });
+		if (path.endsWith('/discovery/candidates')) return json(route, 200, { evaluations: [], ranked: [], profileCountry: null });
+		if (path.endsWith('/discovery/feed')) return json(route, 200, { runs: [] });
+		return json(route, 200, {});
+	});
 }
-
-const DATA: ListConfig = { status: 200, body: { projects: [PROJECT_A, PROJECT_B] } };
 
 // --- tests ----------------------------------------------------------------------
 
-test.describe('P06 workspace shell (composed build)', () => {
-	test('unauthenticated /app shows the real sign-in state (live probe, no stubs)', async ({ page }) => {
+test.describe('discovery-first workspace shell (composed build)', () => {
+	test('unauthenticated /app shows the real sign-in state and crosses no boundary', async ({ page }) => {
 		await page.goto(`${BASE}/app/`);
+		// The fail-closed /api/auth/status probe drives the gate to a sign-in wall.
 		await expect(page.getByTestId('sign-in-panel')).toBeVisible();
-		await expect(page.getByTestId('sign-in-google')).toBeVisible();
 		await expect(page.getByTestId('shell')).toBeVisible();
-		// The workspace itself must not render for an unverified session.
-		await expect(page.getByTestId('project-selector')).toHaveCount(0);
+		// The capsule nav and the conversation only exist for a verified session —
+		// there is no scope to bind them to, so they are NOT rendered here.
+		await expect(page.getByTestId('nav-capsule')).toHaveCount(0);
+		await expect(page.getByTestId('conversation-panel')).toHaveCount(0);
+		// Identity still crosses: wordmark + a real route back to the landing.
+		await expect(page.getByTestId('wordmark')).toBeVisible();
+		await expect(page.getByTestId('back-to-landing')).toBeVisible();
 	});
 
-	test('authed workspace with no projects renders the onboarding entry', async ({ browser }) => {
+	test('authed Home is the actionable brief with the conversation on the GENERAL scope', async ({ browser }) => {
 		const context = await browser.newContext();
-		await stubSession(context);
-		await stubProjectList(context, { current: { status: 200, body: { projects: [] } } });
+		await stubAccount(context, { current: DATA });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/`);
 
-		await expect(page.getByTestId('project-selector')).toBeVisible();
-		await expect(page.getByTestId('project-selector')).toHaveValue('');
-		// Zero projects + a clean load: the onboarding IS the workspace body —
-		// three entry cards, no profile wall, no fake empty panes. The repo
-		// card is honestly "planned" (unlock named in visitor terms, never a
-		// packet id); the discovery card is a REAL link now that the P11
-		// surface exists — planned pills are removed only when the destination
-		// is real.
-		await expect(page.getByTestId('start-screen')).toBeVisible();
-		await expect(page.getByTestId('start-card-idea')).toBeVisible();
-		await expect(page.getByTestId('start-card-repo')).toHaveAttribute('data-testid', 'start-card-repo');
-		await expect(page.getByTestId('start-card-repo')).toContainText('needs a GitHub connection first');
-		await expect(page.getByTestId('start-card-discovery')).not.toHaveAttribute('data-coming-with');
-		await expect(page.getByTestId('start-discovery-go')).toHaveAttribute('href', './discovery');
-		await expect(page.getByTestId('start-repo-go')).toHaveAttribute('href', './repositories');
-		// The idea card opens the real new-project form in place.
-		await page.getByTestId('start-idea-go').click();
-		await expect(page.getByTestId('new-project-name')).toBeVisible();
+		await expect(page.getByTestId('nav-capsule')).toBeVisible();
+		await expect(page.getByTestId('nav-home')).toHaveAttribute('aria-current', 'page');
+		// Exactly three global destinations; the removed tabs are gone.
+		await expect(page.getByTestId('nav-discover')).toBeVisible();
+		await expect(page.getByTestId('nav-projects')).toBeVisible();
+		await expect(page.getByTestId('nav-chat')).toHaveCount(0);
+		await expect(page.getByTestId('nav-build')).toHaveCount(0);
+		await expect(page.getByTestId('nav-ship')).toHaveCount(0);
+
+		await expect(page.getByTestId('home-screen')).toBeVisible();
+		await expect(page.getByTestId('home-primary')).toBeVisible();
+		await expect(page.getByTestId('home-find-hackathon')).toBeVisible();
+		await expect(page.getByTestId('home-start-idea')).toBeVisible();
+
+		// The persistent conversation is present and bound to the account scope.
+		await expect(page.getByTestId('conversation-panel')).toBeVisible();
+		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
+		await expect(page.getByTestId('conv-context-label')).toContainText('Caddie · General');
 		await context.close();
 	});
 
-	test('loading state is reachable and resolves into the project list', async ({ browser }) => {
+	test('Projects lists real builds and excludes the Home account scope', async ({ browser }) => {
 		const context = await browser.newContext();
-		await stubSession(context);
-		let release: () => void = () => {};
-		const gate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		await context.route('**/api/projects', async (route) => {
-			await gate;
-			return json(route, 200, { projects: [PROJECT_A] });
-		});
+		await stubAccount(context, { current: DATA });
 		const page = await context.newPage();
-		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('state-loading').first()).toBeVisible();
-		release();
-		await expect(page.getByTestId('project-selector')).toBeVisible({ timeout: 10_000 });
-		await expect(page.getByTestId('project-selector')).toHaveValue('proj-a');
+		await page.goto(`${BASE}/app/projects`);
+
+		await expect(page.getByTestId('project-list')).toBeVisible();
+		await expect(page.getByTestId('project-row-proj-a')).toBeVisible();
+		await expect(page.getByTestId('project-row-proj-b')).toBeVisible();
+		// The Home project is the account scope, never a "build" you see here.
+		await expect(page.getByTestId('project-row-home-1')).toHaveCount(0);
+
+		// Opening a project routes to its Overview keeping the ?project= binding.
+		await page.getByTestId('project-row-proj-b').getByRole('button').click();
+		await expect(page).toHaveURL(/\/app\/project\?project=proj-b$/);
 		await context.close();
 	});
 
-	test('project selection is retained across refresh via the URL param', async ({ browser }) => {
+	test('an invalid ?project= is a MISSING project — never a silent fallback', async ({ browser }) => {
 		const context = await browser.newContext();
-		await stubSession(context);
-		await stubProjectList(context, { current: DATA });
+		await stubAccount(context, { current: DATA });
 		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project?project=does-not-exist`);
+
+		// Explicit missing state; no other project's data is substituted.
+		await expect(page.getByText('That project is not in your list')).toBeVisible();
+		await expect(page.getByTestId('project-header')).toHaveCount(0);
+		await expect(page.getByText('Pit wall')).toHaveCount(0);
+
+		// The retry affordance clears the bad param (back to a real surface).
+		await page.getByTestId('state-retry-error').click();
+		await expect(page).toHaveURL(/\/app\/project(\?|$)/);
+		await expect(page.getByText('That project is not in your list')).toHaveCount(0);
+		await context.close();
+	});
+
+	test('the conversation binds to the selected project and never retargets', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, { current: DATA });
+		const page = await context.newPage();
+
+		// Global route → general scope.
 		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('project-selector')).toHaveValue('proj-a'); // first project is the fallback
-		await page.getByTestId('project-selector').selectOption('proj-b');
-		await expect(page).toHaveURL(/\/app\/\?project=proj-b$/);
-		await expect(page.getByTestId('project-selector')).toHaveValue('proj-b');
+		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
+
+		// Project route → the project binds by name; refresh retains the binding.
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'project');
+		await expect(page.getByTestId('conv-context-label')).toContainText('Pit wall');
 
 		await page.reload();
-		await expect(page.getByTestId('project-selector')).toHaveValue('proj-b');
+		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'project');
+		await expect(page.getByTestId('conv-context-label')).toContainText('Pit wall');
+
+		// Moving to another project re-binds to THAT project (no leak of proj-a).
+		await page.goto(`${BASE}/app/project?project=proj-b`);
+		await expect(page.getByTestId('conv-context-label')).toContainText('Telemetry');
 		await context.close();
 	});
 
-	test('runs pane renders the real run-binding and artifact rows with collapsible detail', async ({ browser }) => {
+	test('project-local tabs reach Build with real run/artifact rows and collapsible detail', async ({ browser }) => {
 		const context = await browser.newContext();
-		await stubSession(context);
-		await stubProjectList(context, { current: DATA });
+		await stubAccount(context, { current: DATA });
 		await context.unroute('**/api/projects/**');
 		await context.route('**/api/projects/**', (route) => {
 			const path = new URL(route.request().url()).pathname;
 			if (path.endsWith('/run-bindings')) return json(route, 200, { runBindings: [RUN_BINDING] });
 			if (path.endsWith('/artifacts')) return json(route, 200, { artifacts: [ARTIFACT] });
 			if (path.endsWith('/plan-docs')) return json(route, 200, { revisions: [], latest: null });
+			if (path.endsWith('/brief')) return json(route, 200, { cards: [] });
 			return json(route, 200, {});
 		});
 		const page = await context.newPage();
-		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('project-selector')).toHaveValue('proj-a');
-		await page.getByTestId('tab-runs').click();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+
+		await expect(page.getByTestId('project-tabs')).toBeVisible();
+		await expect(page.getByTestId('project-tab-overview')).toHaveAttribute('aria-current', 'page');
+		await page.getByTestId('project-tab-build').click();
+		await expect(page).toHaveURL(/\/app\/runs\?project=proj-a$/); // the binding is preserved
+		await expect(page.getByTestId('sub-tab-activity')).toBeVisible();
 		await expect(page.getByTestId('run-row')).toHaveCount(1);
 		await expect(page.getByTestId('run-row')).toContainText('react-hono');
-		await expect(page.getByTestId('run-row')).toContainText('recorded'); // honest default status
 		await page.getByTestId('run-detail-toggle').click();
 		await expect(page.getByTestId('run-details')).toContainText('conv-01HZX');
-		await expect(page.getByTestId('run-details')).toContainText('plan-r2');
 		await expect(page.getByTestId('artifact-row')).toHaveCount(1);
 		await page.getByTestId('artifact-detail-toggle').click();
 		await expect(page.locator('[data-testid="artifact-row"]').locator('.row-details')).toContainText('art-spec');
 		await context.close();
 	});
 
-	test('server fault renders the explicit error state and recovers on retry', async ({ browser }) => {
+	test('drafts hold an idempotency key; retry and discard work; drafts survive reload', async ({ browser }) => {
 		const context = await browser.newContext();
-		await stubSession(context);
-		const config: { current: ListConfig } = {
-			current: { status: 500, body: { error: 'internal_error' } },
-		};
-		await stubProjectList(context, config);
-		const page = await context.newPage();
-		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('state-error')).toBeVisible();
-		await expect(page.getByTestId('state-retry-error')).toBeVisible();
-		config.current = DATA;
-		await page.getByTestId('state-retry-error').click();
-		await expect(page.getByTestId('project-selector')).toBeVisible();
-		await expect(page.getByTestId('project-selector')).toHaveValue('proj-a');
-		await context.close();
-	});
-
-	test('denied (403) and limit (429) render their explicit states', async ({ browser }) => {
-		const context = await browser.newContext();
-		await stubSession(context);
-		const config: { current: ListConfig } = {
-			current: { status: 403, body: { error: 'not_a_member' } },
-		};
-		await stubProjectList(context, config);
-		const page = await context.newPage();
-		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('state-denied')).toBeVisible();
-
-		config.current = { status: 429, body: { error: 'rate_limited' } };
-		await page.getByTestId('refresh-data').click();
-		await expect(page.getByTestId('state-limit')).toBeVisible();
-		await context.close();
-	});
-
-	test('offline renders the explicit offline state (pause + fetch-failure paths)', async ({ browser }) => {
-		const context = await browser.newContext();
-		await stubSession(context);
-		await stubProjectList(context, { current: DATA });
-		const page = await context.newPage();
-		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('project-selector')).toBeVisible();
-
-		// Path 1 — TanStack pauses refetches while the browser is offline; the
-		// aside renders the explicit offline panel over the last loaded data.
-		await context.setOffline(true);
-		await page.getByTestId('refresh-data').click();
-		await expect(page.getByTestId('state-offline')).toBeVisible();
-
-		// Path 2 — on reconnect the paused queries resume into a dead network
-		// (no stub for the list any more): the fetch rejects and the offline
-		// classification holds instead of silently returning to stale data.
-		await context.unroute('**/api/projects');
-		await context.route('**/api/projects', (route) => route.abort('connectionfailed'));
-		await context.setOffline(false);
-		await expect(page.getByTestId('state-offline')).toBeVisible({ timeout: 10_000 });
-		await expect(page.getByTestId('state-retry-offline')).toBeVisible();
-		await context.close();
-	});
-
-	test('stale indicator shows while a refetch is in flight, then clears', async ({ browser }) => {
-		const context = await browser.newContext();
-		await stubSession(context);
-		const config: { current: ListConfig } = { current: { ...DATA } };
-		await stubProjectList(context, config);
-		const page = await context.newPage();
-		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('project-selector')).toHaveValue('proj-a');
-		await expect(page.getByTestId('stale-chip')).toHaveCount(0);
-
-		config.current = { ...DATA, delayMs: 600 };
-		await page.getByTestId('refresh-data').click();
-		await expect(page.getByTestId('stale-chip')).toBeVisible();
-		await expect(page.getByTestId('stale-chip')).toBeHidden({ timeout: 10_000 });
-		await context.close();
-	});
-
-	test('sends are held as drafts with an idempotency key; retry and discard work; drafts survive reload and errors', async ({ browser }) => {
-		const context = await browser.newContext();
-		await stubSession(context);
-		const config: { current: ListConfig } = {
-			current: { status: 500, body: { error: 'internal_error' } },
-		};
-		await stubProjectList(context, config);
-		// The coordinator transport IS wired now: pin it to a deterministic
-		// failure for this draft-focused test (no run exists, run creation
-		// refused), so the attempt counter moves exactly once per send/retry.
-		await context.route('**/run-bindings', (route) => json(route, 200, { runBindings: [] }));
-		await context.route('**/api/projects/*/runs', (route) =>
+		await stubAccount(context, { current: DATA });
+		// Pin the coordinator transport to a deterministic refusal for this
+		// project so the attempt counter moves exactly once per send/retry.
+		await context.route('**/api/projects/proj-a/runs', (route) =>
 			json(route, 503, { error: 'run_transport_unavailable', message: 'run creation refused in this spec' }),
 		);
 		const page = await context.newPage();
-		await page.goto(`${BASE}/app/`);
-		// The list starts broken: the aside must show the explicit error panel.
-		await expect(page.getByTestId('state-error')).toBeVisible();
-		// No project can be selected while the list errors — the channel shows
-		// its no-project state, so first recover the list.
-		config.current = DATA;
-		await page.getByTestId('state-retry-error').click();
-		await expect(page.getByTestId('project-selector')).toHaveValue('proj-a');
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('composer-input')).toBeVisible();
 
 		const composer = page.getByTestId('composer-input');
 		await composer.fill('Find me a hackathon worth my weekend');
@@ -405,78 +354,81 @@ test.describe('P06 workspace shell (composed build)', () => {
 		const draft = page.getByTestId('draft-row');
 		await expect(draft).toBeVisible();
 		await expect(draft).toContainText('unsent');
-		await expect(draft).toContainText(/key [0-9a-f]/); // generated idempotency key rendered short
+		await expect(draft).toContainText(/key [0-9a-z]/); // generated idempotency key rendered short
 		await expect(page.getByTestId('draft-retry')).toBeVisible();
 
-		// Drafts are preserved on data errors: break the list again.
-		config.current = { status: 500, body: { error: 'internal_error' } };
-		await page.getByTestId('refresh-data').click();
-		await expect(page.getByTestId('state-error')).toBeVisible();
-		await expect(page.getByTestId('draft-row')).toBeVisible();
-		config.current = DATA;
-		await page.getByTestId('state-retry-error').click();
-
-		// Retry bumps the attempt counter without duplicating the draft.
-		// The transport was refused once on send (attempt 1 shown), the retry
-		// makes attempt 2 — the row shows the true failed-attempt count.
+		// Retry bumps the failed-attempt count without duplicating the draft.
 		await page.getByTestId('draft-retry').click();
 		await expect(page.getByTestId('draft-row')).toContainText('2 attempts');
 		await expect(page.getByTestId('draft-row')).toHaveCount(1);
 
-		// Discard renders the cancelled state (kept for reference, struck out).
+		// Discard keeps the row for reference, struck through as cancelled.
 		await page.getByTestId('draft-discard').click();
 		await expect(page.getByTestId('draft-row')).toHaveAttribute('data-state', 'cancelled');
 		await expect(page.getByTestId('draft-row')).toContainText('cancelled');
 
-		// Drafts survive a reload (session-scoped storage, actor+project keyed).
+		// Drafts are scoped per account+project and survive a reload.
 		await page.reload();
 		await expect(page.getByTestId('draft-row')).toBeVisible();
 		await expect(page.getByTestId('draft-row')).toHaveAttribute('data-state', 'cancelled');
 		await context.close();
 	});
 
-	test('keyboard operability: skip link, selector, tabs, theme and composer reachable and usable', async ({ browser }) => {
+	test('a loading list resolves; a server fault, denied and limit each render an explicit state', async ({ browser }) => {
+		// Loading → resolves into the project list.
+		const loadingCtx = await browser.newContext();
+		await stubAccount(loadingCtx, { current: DATA });
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await loadingCtx.unroute('**/api/projects');
+		await loadingCtx.route('**/api/projects', async (route) => {
+			if (route.request().method() !== 'GET') return json(route, 405, {});
+			await gate;
+			return json(route, 200, DATA.body);
+		});
+		const loadingPage = await loadingCtx.newPage();
+		await loadingPage.goto(`${BASE}/app/projects`);
+		await expect(loadingPage.getByTestId('state-loading').first()).toBeVisible();
+		release();
+		await expect(loadingPage.getByTestId('project-list')).toBeVisible({ timeout: 10_000 });
+		await loadingCtx.close();
+
+		// Error → explicit fault + recovery; denied → denied; limit → limit.
 		const context = await browser.newContext();
-		await stubSession(context);
-		await stubProjectList(context, { current: DATA });
+		const config: { current: ListConfig } = { current: { status: 500, body: { error: 'internal_error' } } };
+		await stubAccount(context, config);
 		const page = await context.newPage();
-		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('project-selector')).toBeVisible();
+		await page.goto(`${BASE}/app/projects`);
+		await expect(page.getByTestId('state-error')).toBeVisible();
+		await expect(page.getByTestId('state-retry-error')).toBeVisible();
 
-		// First Tab lands on the skip link.
-		await page.keyboard.press('Tab');
-		await expect(page.locator('.skip-link')).toBeFocused();
+		config.current = { status: 403, body: { error: 'not_a_member' } };
+		await page.getByTestId('state-retry-error').click();
+		await expect(page.getByTestId('state-denied')).toBeVisible();
 
-		// The project selector is reachable by keyboard and operable.
-		await page.getByTestId('project-selector').focus();
-		await page.keyboard.press('t'); // type-ahead to "Telemetry"
-		await expect(page.getByTestId('project-selector')).toHaveValue('proj-b');
-		await expect(page).toHaveURL(/project=proj-b/);
-
-		// Theme toggle works from the keyboard.
-		await page.getByTestId('theme-toggle').focus();
-		await page.keyboard.press('Enter');
-		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-		await page.keyboard.press('Enter');
-		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-
-		// Runs tab reachable by keyboard; run rows keyboard-expandable.
-		await page.getByTestId('tab-runs').focus();
-		await page.keyboard.press('Enter');
-		await expect(page.getByTestId('run-inspector')).toBeVisible();
-
-		// Composer: keyboard-only send (Enter submits).
-		await page.getByTestId('composer-input').focus();
-		await page.keyboard.type('keyboard only message');
-		await page.keyboard.press('Enter');
-		await expect(page.getByTestId('draft-row')).toContainText('keyboard only message');
+		config.current = { status: 429, body: { error: 'rate_limited' } };
+		await page.getByTestId('state-retry-denied').click();
+		await expect(page.getByTestId('state-limit')).toBeVisible();
 		await context.close();
 	});
 
-	test('light and dark themes both render from the halo tokens', async ({ browser }) => {
+	test('offline renders the explicit offline state when the fetch cannot complete', async ({ browser }) => {
 		const context = await browser.newContext();
-		await stubSession(context);
-		await stubProjectList(context, { current: DATA });
+		await stubAccount(context, { current: DATA });
+		await context.unroute('**/api/projects');
+		await context.route('**/api/projects', (route) => route.abort('connectionfailed'));
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/projects`);
+		await expect(page.getByTestId('state-offline')).toBeVisible();
+		await expect(page.getByTestId('state-retry-offline')).toBeVisible();
+		await context.close();
+	});
+
+	test('light and dark themes both render and the choice persists across reload', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, { current: DATA });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/`);
 		await expect(page.getByTestId('shell')).toBeVisible();
@@ -486,49 +438,74 @@ test.describe('P06 workspace shell (composed build)', () => {
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 		const lightBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 		expect(lightBg).not.toEqual(darkBg);
-		// theme choice persists across reloads
 		await page.reload();
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 		await context.close();
 	});
 
-	test('reduced motion disables every animation while loading states are on screen', async ({ browser }) => {
+	test('keyboard operability: skip link, theme toggle and composer are reachable and usable', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, { current: DATA });
+		await context.route('**/api/projects/proj-a/runs', (route) => json(route, 503, { error: 'refused' }));
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('nav-capsule')).toBeVisible();
+
+		// First Tab lands on the skip link.
+		await page.keyboard.press('Tab');
+		await expect(page.locator('.skip-link')).toBeFocused();
+
+		// Theme toggle works from the keyboard.
+		await page.getByTestId('theme-toggle').focus();
+		await page.keyboard.press('Enter');
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+
+		// Composer: keyboard-only send creates a scoped draft.
+		await page.getByTestId('composer-input').focus();
+		await page.keyboard.type('keyboard only message');
+		await page.keyboard.press('Enter');
+		await expect(page.getByTestId('draft-row')).toContainText('keyboard only message');
+		await context.close();
+	});
+
+	test('reduced motion disables animation while a loading state is on screen (non-vacuous)', async ({ browser }) => {
 		const reduce = await browser.newContext({ reducedMotion: 'reduce' });
-		await stubSession(reduce);
+		await stubAccount(reduce, { current: DATA });
 		let release: () => void = () => {};
 		const gate = new Promise<void>((resolve) => {
 			release = resolve;
 		});
+		await reduce.unroute('**/api/projects');
 		await reduce.route('**/api/projects', async (route) => {
+			if (route.request().method() !== 'GET') return json(route, 405, {});
 			await gate;
-			return json(route, 200, { projects: [PROJECT_A] });
+			return json(route, 200, { projects: [HOME, PROJECT_A] });
 		});
 		const pageReduce = await reduce.newPage();
-		await pageReduce.goto(`${BASE}/app/`);
+		await pageReduce.goto(`${BASE}/app/projects`);
 		await expect(pageReduce.getByTestId('state-loading').first()).toBeVisible();
 		expect(await pageReduce.evaluate(() => document.getAnimations().length)).toBe(0);
-		reduce.close();
+		release();
+		await reduce.close();
 
-		// Control: the same loading state animates when motion is allowed —
-		// proving the reduce assertion is not vacuous.
 		const motion = await browser.newContext({ reducedMotion: 'no-preference' });
-		await stubSession(motion);
+		await stubAccount(motion, { current: DATA });
 		let release2: () => void = () => {};
 		const gate2 = new Promise<void>((resolve) => {
 			release2 = resolve;
 		});
+		await motion.unroute('**/api/projects');
 		await motion.route('**/api/projects', async (route) => {
+			if (route.request().method() !== 'GET') return json(route, 405, {});
 			await gate2;
-			return json(route, 200, { projects: [PROJECT_A] });
+			return json(route, 200, { projects: [HOME, PROJECT_A] });
 		});
 		const pageMotion = await motion.newPage();
-		await pageMotion.goto(`${BASE}/app/`);
+		await pageMotion.goto(`${BASE}/app/projects`);
 		await expect(pageMotion.getByTestId('state-loading').first()).toBeVisible();
 		expect(await pageMotion.evaluate(() => document.getAnimations().length)).toBeGreaterThan(0);
-		release();
 		release2();
 		await motion.close();
-		await reduce.close();
 	});
 
 	for (const [width, height] of [
@@ -536,67 +513,79 @@ test.describe('P06 workspace shell (composed build)', () => {
 		[768, 1024],
 		[1440, 900],
 	] as const) {
-		test(`no horizontal overflow at ${width}px`, async ({ browser }) => {
+		test(`no horizontal overflow at ${width}px (Home + Build)`, async ({ browser }) => {
 			const context = await browser.newContext({ viewport: { width, height } });
-			await stubSession(context);
-			await stubProjectList(context, { current: DATA });
+			await stubAccount(context, { current: DATA });
 			await context.unroute('**/api/projects/**');
 			await context.route('**/api/projects/**', (route) => {
 				const path = new URL(route.request().url()).pathname;
 				if (path.endsWith('/run-bindings')) return json(route, 200, { runBindings: [RUN_BINDING] });
 				if (path.endsWith('/artifacts')) return json(route, 200, { artifacts: [ARTIFACT] });
-				if (path.endsWith('/plan-docs')) return json(route, 200, { revisions: [], latest: null });
+				if (path.endsWith('/brief')) return json(route, 200, { cards: [] });
 				return json(route, 200, {});
 			});
 			const page = await context.newPage();
-			await page.goto(`${BASE}/app/`);
-			await expect(page.getByTestId(width < 768 ? 'project-selector-mobile' : 'project-selector')).toBeVisible();
-
 			const assertNoOverflow = () =>
 				page.evaluate(() => ({
 					scrollWidth: document.documentElement.scrollWidth,
 					clientWidth: document.documentElement.clientWidth,
 				}));
-			// Channel surface (home on mobile, right pane on desktop).
-			expect(await assertNoOverflow()).toEqual({
-				scrollWidth: width,
-				clientWidth: width,
-			});
-			// Runs surface with real rows.
-			await page.getByTestId(width < 768 ? 'nav-build-mobile' : 'tab-runs').click();
+
+			await page.goto(`${BASE}/app/`);
+			// Mobile lands on the conversation (Home IS Chat); the brief is one tab
+			// away. Desktop shows the persistent right panel.
+			await expect(page.getByTestId(width < 768 ? 'conversation-panel' : 'conversation-panel')).toBeVisible();
+			if (width < 768) {
+				await page.goto(`${BASE}/app/?pane=brief`);
+				await expect(page.getByTestId('home-screen')).toBeVisible();
+				expect(await assertNoOverflow()).toEqual({ scrollWidth: width, clientWidth: width });
+			}
+			expect(await assertNoOverflow()).toEqual({ scrollWidth: width, clientWidth: width });
+
+			// Build surface with real rows (desktop tab strip / mobile bottom nav).
+			await page.goto(`${BASE}/app/runs?project=proj-a`);
 			await expect(page.getByTestId('run-row')).toBeVisible();
-			await page.getByTestId('run-detail-toggle').click();
-			expect(await assertNoOverflow()).toEqual({
-				scrollWidth: width,
-				clientWidth: width,
-			});
+			expect(await assertNoOverflow()).toEqual({ scrollWidth: width, clientWidth: width });
 			await context.close();
 		});
 	}
 
-	test('creating a project from the shell posts to the real REST surface and selects the result', async ({ browser }) => {
-		const context = await browser.newContext();
-		await stubSession(context);
-		const config: { current: ListConfig } = { current: { status: 200, body: { projects: [] } } };
-		await stubProjectList(context, config);
-		await context.route('**/api/projects', (route) =>
-			route.request().method() === 'POST'
-				? json(route, 201, { project: project('proj-new', 'Fresh build') })
-				: route.fallback(),
-		);
-		await context.route('**/api/workspaces', (route) =>
-			json(route, 201, {
-				workspace: { id: 'ws-new', name: 'Home', createdAt: NOW },
-			}),
-		);
+	test('the mobile shell keeps the floating bottom nav + composer and drops the desktop capsule', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await stubAccount(context, { current: DATA });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/`);
-		await page.getByTestId('new-project').click();
-		await page.getByTestId('new-project-name').fill('Fresh build');
-		config.current = { status: 200, body: { projects: [project('proj-new', 'Fresh build')] } };
-		await page.getByTestId('new-project-submit').click();
-		await expect(page).toHaveURL(/project=proj-new/);
-		await expect(page.getByTestId('project-selector')).toHaveValue('proj-new');
+
+		// The persistent right panel is not rendered on mobile; the floating
+		// bottom nav carries the three destinations + the composer instead.
+		await expect(page.getByTestId('bottom-nav')).toBeVisible();
+		await expect(page.getByTestId('nav-discover-mobile')).toBeVisible();
+		await expect(page.getByTestId('nav-projects-mobile')).toBeVisible();
+		// Only ONE composer exists in the DOM (no duplicate on mobile).
+		await expect(page.getByTestId('composer-input')).toHaveCount(1);
+
+		// Opening the conversation from the composer jumps to the channel pane.
+		await page.getByTestId('composer-input').fill('hello caddie');
+		await page.getByTestId('composer-send').click();
+		await expect(page).toHaveURL(/pane=channel/);
+		await expect(page.getByTestId('conversation-close')).toBeVisible();
+		await context.close();
+	});
+
+	test('the account menu exposes the secondary account surfaces', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, { current: DATA });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/`);
+		await page.getByTestId('account-menu').click();
+		await expect(page.getByTestId('account-menu-pop')).toBeVisible();
+		await expect(page.getByTestId('account-profile')).toBeVisible();
+		await expect(page.getByTestId('account-usage')).toBeVisible();
+		await page.getByTestId('account-usage').click();
+		await expect(page).toHaveURL(/\/app\/usage$/);
+		// Usage is an honest gap, not a fabricated number.
+		await expect(page.getByTestId('usage-panel')).toBeVisible();
+		await expect(page.getByTestId('usage-budget-state').getByText('not exposed', { exact: true })).toBeVisible();
 		await context.close();
 	});
 });

@@ -1,9 +1,28 @@
 # Caddie product charter — the loop, the language, the surfaces
 
-**Date:** 2026-10-08 · **Status:** DECIDED (Wave 1 implemented same day)
-**Companion to:** `caddie-ui-review-board.html` (screen-level fixes). This
-document is the level above it: what the product *is*, how it is organised,
-and what every surface must say.
+**Date:** 2026-10-08 · **Status:** SUPERSEDED ON NAVIGATION (see revision below)
+**Companion to:** `caddie-ui-review-board.html` (screen-level fixes) and
+`2026-10-08-bottom-nav-visions.html` (the as-built shell). This document is the
+level above them: what the product *is*, how it is organised, and what every
+surface must say.
+
+> **Revision — discovery-first (2026-10-08, same day, later).** The loop-as-nav
+> model in §1–§2 was replaced the same day. The product now exposes **exactly
+> three global destinations — Home · Discover · Projects** — plus **one
+> persistent Caddie conversation**. `Find / Plan / Build / Prove / Ship` are no
+> longer nav slots: *Find* is folded into the **Discover** surface and *Plan /
+> Build / Submission* live as **project-local** tabs inside a project. §1's five
+> verbs stay the honest description of what Caddie *does*, but they are no longer
+> the navigation. The rest of this charter (the chat-is-the-interface rule §4,
+> the language rules §5, and the honesty invariants) still holds unchanged.
+>
+> **Mobile amendment (same day, even later).** The mobile bottom bar carries
+> **four** tabs — **Chat · Brief · Discover · Projects**. Home IS Chat on
+> mobile: the conversation is the default landing (`?pane=channel`), and the
+> brief (the desktop left panel's Home content) is its own tab (`?pane=brief`).
+> The desktop capsule keeps the three global destinations; the page-aware
+> mobile header shows the wordmark on Chat and the page name elsewhere, with
+> Search + Account on the right (theme moved into the Account menu).
 
 ---
 

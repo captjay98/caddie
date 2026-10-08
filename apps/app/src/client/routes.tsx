@@ -1,11 +1,16 @@
-import { Link, createRootRoute, createRoute, createRouter, Outlet, createBrowserHistory } from '@tanstack/react-router';
+import { createRootRoute, createRoute, createRouter, Outlet, redirect, createBrowserHistory } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
 import { WorkspaceChrome } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
 import { Start } from './onboarding/Start.tsx';
 import {
-	DiscoveryPage,
+	DiscoverPage,
+	ProjectsPage,
+	ProjectOverviewPage,
+	SearchPage,
+	AutomationsPage,
+	UsagePage,
 	JudgePage,
 	SubmissionPage,
 	SchedulesPage,
@@ -17,24 +22,25 @@ import {
 } from './surface.tsx';
 
 /**
- * TanStack Router setup (SPA mode, decision "Product UI: React SPA +
- * Router/Query on the Flue Hono worker").
+ * TanStack Router setup (SPA mode) for the discovery-first shell.
  *
  * The Worker serves the SPA under /app with a client-routing fallback
  * (tests/routing.test.ts), so the browser history basepath is /app in the
- * composed build; `bun run dev` serves at the root. The selected project
- * lives in the ?project= search param — refresh (and deep links) retain it.
+ * composed build; `bun run dev` serves at the root. The selected project lives
+ * in the ?project= search param — refresh and deep links retain it.
  *
- * Shared chrome (UI review board screen 16): the workspace, settings,
- * onboarding, the four gate surfaces and the not-found all render inside
- * WorkspaceChrome, so no destination is a chrome-less `<main>` dead end.
+ * THREE GLOBAL DESTINATIONS only (Home · Discover · Projects) plus account
+ * surfaces (Search/Automations/Usage/Settings) and the project-local surfaces
+ * (Overview/Plan/Build/Submission and their nested siblings). Every route renders
+ * inside WorkspaceChrome, so no destination is a chrome-less dead end and the
+ * persistent conversation is always present with an explicit context label.
  */
 
 const rootRoute = createRootRoute({
 	component: () => <Outlet />,
 	notFoundComponent: function WorkspaceNotFound() {
 		return (
-			<WorkspaceChrome active="none">
+			<WorkspaceChrome nav="none">
 				<div className="shell-loading">
 					<section className="state-panel card-surface">
 						<p className="kicker" data-tone="error">
@@ -55,23 +61,92 @@ const rootRoute = createRootRoute({
 	},
 });
 
-/** ?project=<id> — the client search params; refresh retains selection.
- *  ?pane=<brief|runs|channel> is the mobile bottom nav's payload on the
- *  workspace route (which pane the home shows). */
-function validateSearch(search: Record<string, unknown>): { project?: string; pane?: 'brief' | 'runs' | 'channel' } {
+/**
+ * Shared ?project= selection + the mobile conversation pane flag. The redesign
+ * keeps `?pane=channel` (mobile: show the conversation full-height) and still
+ * ACCEPTS the legacy `?pane=brief|runs` so old deep links resolve to a real
+ * surface (Home shows the brief; the old Runs pane is now the Build surface)
+ * rather than throwing. `section` anchors the account menu inside Settings.
+ */
+function validateSearch(search: Record<string, unknown>): {
+	project?: string;
+	pane?: 'channel' | 'brief' | 'runs';
+	section?: string;
+} {
 	const project = search.project;
 	const pane = search.pane;
+	const section = search.section;
 	return {
 		...(typeof project === 'string' && project.trim() !== '' ? { project } : {}),
-		...(pane === 'brief' || pane === 'runs' || pane === 'channel' ? { pane } : {}),
+		...(pane === 'channel' || pane === 'brief' || pane === 'runs' ? { pane } : {}),
+		...(typeof section === 'string' && section.trim() !== '' ? { section } : {}),
 	};
 }
 
-const workspaceRoute = createRoute({
+/** ?project=<id> + ?claim=<type> for the evidence inspector's focus mode. */
+function validateEvidenceSearch(search: Record<string, unknown>): { project?: string; claim?: string } {
+	const project = search.project;
+	const claim = search.claim;
+	return {
+		...(typeof project === 'string' && project.trim() !== '' ? { project } : {}),
+		...(typeof claim === 'string' && claim.trim() !== '' ? { claim } : {}),
+	};
+}
+
+// --- global destinations -------------------------------------------------------
+
+const homeRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: '/',
 	validateSearch,
 	component: Shell,
+});
+
+const discoverRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/discover',
+	validateSearch,
+	component: DiscoverPage,
+});
+
+const projectsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/projects',
+	validateSearch,
+	component: ProjectsPage,
+});
+
+// The project workspace: Overview is the landing; Plan/Build/Submission and
+// their siblings are separate routes that all render nav='project' so the
+// conversation binds to the selected project.
+const projectRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/project',
+	validateSearch,
+	component: ProjectOverviewPage,
+});
+
+// --- account surfaces ----------------------------------------------------------
+
+const searchRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/search',
+	validateSearch,
+	component: SearchPage,
+});
+
+const automationsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/automations',
+	validateSearch,
+	component: AutomationsPage,
+});
+
+const usageRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/usage',
+	validateSearch,
+	component: UsagePage,
 });
 
 const settingsRoute = createRoute({
@@ -80,7 +155,7 @@ const settingsRoute = createRoute({
 	validateSearch,
 	component: function SettingsPage() {
 		return (
-			<WorkspaceChrome active="settings" crumbs={<><Link to="/" search={(prev: Record<string, unknown>) => ({ ...prev })}>← Workspace</Link><span>Settings</span></>}>
+			<WorkspaceChrome nav="account">
 				<Settings />
 			</WorkspaceChrome>
 		);
@@ -93,24 +168,48 @@ const onboardingRoute = createRoute({
 	validateSearch,
 	component: function OnboardingPage() {
 		return (
-			<WorkspaceChrome
-				active="none"
-				crumbs={<span>Start a project · step 1 of 4 · start → connect → brief → first run</span>}
-			>
+			<WorkspaceChrome nav="account">
 				<Start />
 			</WorkspaceChrome>
 		);
 	},
 });
 
-// P11/P13 surfaces — the slice-3 components mounted behind the shared
-// fail-closed gate (surface.tsx): sign-in for unverified sessions, the
-// ?project= param resolved against the actor's own project list.
-const discoveryRoute = createRoute({
+// --- project-local surfaces (all render nav='project') --------------------------
+
+const designReviewRoute = createRoute({
 	getParentRoute: () => rootRoute,
-	path: '/discovery',
+	path: '/design-review',
 	validateSearch,
-	component: DiscoveryPage,
+	component: DesignReviewPage,
+});
+
+const runsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/runs',
+	validateSearch,
+	component: RunsPage,
+});
+
+const artifactsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/artifacts',
+	validateSearch,
+	component: ArtifactsPage,
+});
+
+const schedulesRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/schedules',
+	validateSearch,
+	component: SchedulesPage,
+});
+
+const evidenceRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/evidence',
+	validateSearch: validateEvidenceSearch,
+	component: EvidencePage,
 });
 
 const judgeRoute = createRoute({
@@ -127,62 +226,6 @@ const submissionRoute = createRoute({
 	component: SubmissionPage,
 });
 
-// P12 schedules — the same fail-closed gate, over the real P12 REST surface.
-const schedulesRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: '/schedules',
-	validateSearch,
-	component: SchedulesPage,
-});
-
-/** ?project=<id> + ?claim=<type> for the evidence inspector's focus mode. */
-function validateEvidenceSearch(search: Record<string, unknown>): { project?: string; claim?: string } {
-	const project = search.project;
-	const claim = search.claim;
-	return {
-		...(typeof project === 'string' && project.trim() !== '' ? { project } : {}),
-		...(typeof claim === 'string' && claim.trim() !== '' ? { claim } : {}),
-	};
-}
-
-// Board phase 3: the P10 evidence inspector — reachable from decision-card
-// evidence ids and run rows, behind the same fail-closed gate.
-const evidenceRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: '/evidence',
-	validateSearch: validateEvidenceSearch,
-	component: EvidencePage,
-});
-
-// Board phase 3: the P07 artifact viewer — reachable from run rows and the
-// brief's stale-artifact cards, behind the same fail-closed gate.
-const artifactsRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: '/artifacts',
-	validateSearch,
-	component: ArtifactsPage,
-});
-
-// The Build stage's Activity page — the nav's Build link finally has a real
-// route behind it (the old nav pointed at /runs with no route: NOT FOUND).
-const runsRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: '/runs',
-	validateSearch,
-	component: RunsPage,
-});
-
-// Board phase 3: the design gate — reachable from the brief's approval cards,
-// behind the same fail-closed gate.
-const designReviewRoute = createRoute({
-	getParentRoute: () => rootRoute,
-	path: '/design-review',
-	validateSearch,
-	component: DesignReviewPage,
-});
-
-// Board phase 3: the P08 GitHub App surface — reachable from onboarding's
-// "start from a repository" card, behind the same fail-closed gate.
 const repositoriesRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: '/repositories',
@@ -190,19 +233,48 @@ const repositoriesRoute = createRoute({
 	component: RepositoriesPage,
 });
 
+// --- legacy deep-link redirects --------------------------------------------------
+//
+// The old Discovery route (/discovery) is now the account-level /discover. A
+// saved bookmark or an in-flight link must land somewhere real, carrying the
+// selected project through so the user is not silently dropped into a different
+// context. /discover ignores ?project= for its own data (it reads the account
+// scope), but we keep the param so returning to a project is one click away.
+
+function carryProject(search: Record<string, unknown>): Record<string, unknown> {
+	const project = search.project;
+	return typeof project === 'string' && project.trim() !== '' ? { project } : {};
+}
+
+const legacyDiscoveryRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/discovery',
+	validateSearch,
+	beforeLoad: ({ search }) => {
+		throw redirect({ to: '/discover', search: carryProject(search as Record<string, unknown>), replace: true });
+	},
+	component: () => null,
+});
+
 export const routeTree = rootRoute.addChildren([
-	workspaceRoute,
+	homeRoute,
+	discoverRoute,
+	projectsRoute,
+	projectRoute,
+	searchRoute,
+	automationsRoute,
+	usageRoute,
 	settingsRoute,
 	onboardingRoute,
-	discoveryRoute,
-	judgeRoute,
-	submissionRoute,
+	designReviewRoute,
+	runsRoute,
+	artifactsRoute,
 	schedulesRoute,
 	evidenceRoute,
-	artifactsRoute,
-	runsRoute,
-	designReviewRoute,
+	judgeRoute,
+	submissionRoute,
 	repositoriesRoute,
+	legacyDiscoveryRoute,
 ]);
 
 function detectBasepath(): string {

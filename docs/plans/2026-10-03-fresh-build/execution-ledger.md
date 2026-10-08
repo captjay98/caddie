@@ -847,3 +847,33 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+
+```json
+{
+  "packet": "UI-REDESIGN-COMPLETION (takeover review + owner live corrections: discovery-first shell, page-aware mobile header, 4-tab bar, card/overflow/padding fixes)",
+  "status": "LOCAL VERIFIED",
+  "sha": "see git log feat(ui): discovery-first shell completion + mobile corrections",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bun run test:browser -- P01/P06/P07/P11/P13/P14", "exitCode": 0, "receipt": "all PASS (workspace 17, discovery 9, journey A-G, submission, conversation)"},
+    {"command": "bun test routing/discovery/agent-permissions/home-chat-tools/auth", "exitCode": 0, "receipt": "78 pass, 0 fail"},
+    {"command": "DOM geometry probes 360/390/768/1280/1440 dark+light + screenshots", "exitCode": 0, "receipt": "document locked at viewport height (was 8017px: sr-only spans had no positioned ancestor — .msg now position:relative); widest element 374px at 390; capsule sticky on desktop; page-aware mobile header (wordmark on Chat, page name + per-page action elsewhere); no content under the floating bar; muted-text contrast 6.37 dark / 6.88 light"}
+  ],
+  "artifacts": [
+    {"path": "docs/reviews/2026-10-08-redesign-takeover.md", "note": "findings & resolutions: sr-only document-height root cause, label dedup, mobile capsule removal, 4-tab amendment, card overflow, home-panel padding, page-geometry unification, per-page header actions"},
+    {"path": "docs/reviews/2026-10-08-surface-map.md + 2026-10-08-product-charter.md + 2026-10-08-bottom-nav-visions.html", "note": "updated to the mobile 4-tab (Chat·Brief·Discover·Projects, Home IS Chat) amendment"},
+    {"path": "apps/app/src/client/workspace/Chrome.tsx + workspace.css", "note": "page-aware MobileHeader (identity left, one page action right, search in Account menu, theme in Account menu), 4-tab bottom bar, .msg position:relative, decision-card min-width 0 + wrapping links, .home-panel padding, unified page column, 172px mobile clearance"},
+    {"path": "tests/browser/workspace.spec.ts + discovery.spec.ts", "note": "label assertion updated to 'Caddie · General'; mobile overflow test now covers the conversation landing + brief tab"}
+  ],
+  "environment": "local vite dev :5176, minted session cookie (in-memory only)",
+  "providerCalls": "none",
+  "specReview": "owner visual acceptance pending (screenshots at docs/reviews/screenshots-2026-10-08/)",
+  "qualityReview": "reviewer cannot view images: acceptance via DOM/geometry probes (computed styles, bounding boxes, scroll metrics, contrast) — recorded honestly",
+  "limitations": [
+    "real mobile keyboard/safe-area behaviour needs a device test",
+    "live agent round-trips need credentials (stubbed-proofs only)",
+    "tests/memory.integration.test.ts: 2 pre-existing fixture failures on HEAD, unrelated"
+  ]
+}
+```

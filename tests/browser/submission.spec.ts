@@ -545,16 +545,17 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		await stubSubmission(context, submissionState);
 		const page = await context.newPage();
 
-		await page.goto(`${BASE}/app/?project=proj-a`);
-		await page.getByTestId('nav-prove').click();
-		await page.getByTestId('stage-tab-judge').click();
-		await expect(page).toHaveURL(/\/app\/judge\?project=proj-a$/);
-		await expect(page.locator('section[aria-label="Judge scorecard"]')).toBeVisible();
-
-		await page.goto(`${BASE}/app/?project=proj-a`);
-		await page.getByTestId('nav-ship').click();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('project-tab-submission')).toBeVisible();
+		await page.getByTestId('project-tab-submission').click();
 		await expect(page).toHaveURL(/\/app\/submission\?project=proj-a$/);
 		await expect(page.locator('section[aria-label="Submission package"]')).toBeVisible();
+
+		// The submission sub-strip reaches the judge review surface, keeping the
+		// same ?project= so the conversation never retargets.
+		await page.getByTestId('sub-tab-judge').click();
+		await expect(page).toHaveURL(/\/app\/judge\?project=proj-a$/);
+		await expect(page.locator('section[aria-label="Judge scorecard"]')).toBeVisible();
 		await context.close();
 	});
 });

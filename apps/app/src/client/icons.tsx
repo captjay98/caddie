@@ -38,7 +38,8 @@ export type IconName =
 	| 'memory'
 	| 'plug'
 	| 'send'
-	| 'chat';
+	| 'chat'
+	| 'home';
 
 interface IconProps {
 	name: IconName;
@@ -175,6 +176,15 @@ const PATHS: Record<IconName, ReactElement> = {
 	chat: (
 		<path
 			d="M4 5.5A1.5 1.5 0 0 1 5.5 4h7A1.5 1.5 0 0 1 14 5.5v3A1.5 1.5 0 0 1 12.5 10H8.6l-2.4 2.1V10H5.5A1.5 1.5 0 0 1 4 8.5v-3z"
+			fill="none"
+			stroke="currentColor"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+		/>
+	),
+	home: (
+		<path
+			d="M2.8 7.5L8 3l5.2 4.5M4 6.8V13h8V6.8M6.8 13v-3.4h2.4V13"
 			fill="none"
 			stroke="currentColor"
 			strokeLinecap="round"

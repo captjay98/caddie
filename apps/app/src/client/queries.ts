@@ -12,6 +12,7 @@ import type {
 	RunBindingRecord,
 	Workspace,
 } from '@caddie/contracts';
+import type { DiscoveryEvaluatedList } from './discovery/Results.tsx';
 import { fetchJson, postJson } from './api.ts';
 
 /**
@@ -128,6 +129,46 @@ export function useBriefCards(actor: ActorScope, projectId: string | null) {
 }
 
 /**
+ * The actor's P14 profile — read from the real GET /api/profile. Home uses it
+ * to state personalisation honestly (incomplete vs. complete), never to invent
+ * a match score. Null means "nothing recorded" — surfaced as such, not guessed.
+ */
+export interface ProfileRecord {
+	userId: string;
+	country: string | null;
+	timezone: string | null;
+	weeklyHours: number | null;
+	experienceLevel: 'beginner' | 'intermediate' | 'senior' | null;
+	stackIds: string[];
+	freeTextInterests: string[];
+}
+
+export function useProfile(actor: ActorScope) {
+	return useQuery({
+		queryKey: ['profile', actor.actorId ?? 'pending'],
+		queryFn: () => fetchJson<{ profile: ProfileRecord | null }>('/api/profile'),
+		enabled: actor.actorId !== null,
+	});
+}
+
+/**
+ * Account-scoped discovery read (GET /api/projects/:id/discovery/candidates?
+ * evaluate=1) — the same endpoint Discover uses, exposed as a hook so Home can
+ * show the top ranked candidates for the actor's account scope (the Home
+ * project). It returns exactly what the server evaluated; no scores invented.
+ */
+export function useDiscoveryCandidates(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['discovery-candidates', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () =>
+			fetchJson<DiscoveryEvaluatedList>(
+				`/api/projects/${encodeURIComponent(projectId ?? '')}/discovery/candidates?evaluate=1`,
+			),
+		enabled: actor.actorId !== null && projectId !== null,
+	});
+}
+
+/**
  * P07 content-addressed artifact revisions (the viewer's surface — distinct
  * from the P02 metadata-revision list behind useArtifacts).
  */
@@ -143,15 +184,21 @@ export function useArtifactRevisions<Revision>(actor: ActorScope, projectId: str
 }
 
 /**
- * The actor's Home project — the project-less conversation with Caddie.
- * Created server-side on first fetch; only queried once the actor has at
- * least one project, so a brand-new user still meets the onboarding first.
+ * The actor's Home project — the project-less conversation with Caddie, and
+ * the account-scoped bucket for Discover and the general brief.
+ *
+ * Created server-side on first fetch (ensureHomeProject), so it is the account
+ * scope that exists BEFORE any build project. `enabled` gates the query on a
+ * verified session: the chrome turns it on as soon as auth settles, so the
+ * general conversation and account-level discovery resolve even when the actor
+ * has zero build projects. Home is still kind='home', which the server keeps
+ * build/gate-less — resolving it never starts paid execution.
  */
-export function useHomeProject(actor: ActorScope, hasProjects: boolean) {
+export function useHomeProject(actor: ActorScope, enabled: boolean) {
 	return useQuery({
 		queryKey: ['home-project', actor.actorId ?? 'pending'],
 		queryFn: () => fetchJson<{ project: Project }>('/api/home-project'),
-		enabled: actor.actorId !== null && hasProjects,
+		enabled: actor.actorId !== null && enabled,
 	});
 }
 
@@ -171,6 +218,9 @@ export interface CreateProjectInput {
 	description?: string;
 	/** Known workspace to create in; when absent a "Home" workspace is created. */
 	workspaceId?: string;
+	/** Optional contest link the project was explored from (Discover handoff). */
+	contestId?: string;
+	contestUrl?: string;
 }
 
 export function useCreateProject(actor: ActorScope) {
@@ -190,6 +240,8 @@ export function useCreateProject(actor: ActorScope) {
 				workspaceId,
 				name: input.name,
 				...(input.description ? { description: input.description } : {}),
+				...(input.contestId ? { contestId: input.contestId } : {}),
+				...(input.contestUrl ? { contestUrl: input.contestUrl } : {}),
 			});
 		},
 		onSuccess: () => {

@@ -107,8 +107,21 @@ function when(iso: string | null): string {
 	return Number.isFinite(date.getTime()) ? date.toISOString() : 'unknown';
 }
 
-export function DiscoveryResults(props: { projectId: string; apiBase?: string }): ReactElement {
-	const { projectId, apiBase = '' } = props;
+export function DiscoveryResults(props: {
+	projectId: string;
+	apiBase?: string;
+	/**
+	 * Account-level Discover hands off an opportunity to a real project. When
+	 * present, each new candidate's PRIMARY action is "Explore ideas for this
+	 * hackathon" (calls onExplore — create or continue a project) and the
+	 * secondary action is "Save" (the scoped accept). Without it the surface
+	 * keeps its original project-scoped "Accept" behaviour. The callback owns the
+	 * navigation + duplicate-continue logic; this component only renders it.
+	 */
+	onExplore?: (candidate: DiscoveryCandidateRecord) => void;
+	exploreBusy?: boolean;
+}): ReactElement {
+	const { projectId, apiBase = '', onExplore, exploreBusy } = props;
 	const [list, setList] = useState<DiscoveryEvaluatedList | null>(null);
 	const [latestFeed, setLatestFeed] = useState<DiscoveryFeedRecord | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -264,9 +277,32 @@ export function DiscoveryResults(props: { projectId: string; apiBase?: string })
 										{open ? 'Hide fit detail' : 'Explain fit'}
 									</button>{' '}
 									{candidate.status === 'new' ? (
-										<button type="button" className="btn-key" onClick={() => void accept(candidate.id)} disabled={busy}>
-											Accept
-										</button>
+										onExplore ? (
+											<>
+												<button
+													type="button"
+													className="btn-key"
+													data-testid={`explore-ideas-${candidate.id}`}
+													onClick={() => onExplore(candidate)}
+													disabled={exploreBusy}
+												>
+													{exploreBusy ? 'Opening…' : 'Explore ideas for this hackathon'}
+												</button>{' '}
+												<button
+													type="button"
+													className="btn-ghost"
+													data-testid={`save-candidate-${candidate.id}`}
+													onClick={() => void accept(candidate.id)}
+													disabled={busy}
+												>
+													Save
+												</button>
+											</>
+										) : (
+											<button type="button" className="btn-key" onClick={() => void accept(candidate.id)} disabled={busy}>
+												Accept
+											</button>
+										)
 									) : null}
 								</div>
 								{open ? (

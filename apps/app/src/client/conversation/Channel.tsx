@@ -343,6 +343,10 @@ export function Channel(props: {
 	/** Mobile: the composer lives in the floating bottom bar (input above the
 	 *  five nav items), so the pane renders the transcript alone. */
 	composerHidden?: boolean;
+	/** The conversation scope is still resolving (e.g. the account Home project
+	 *  is being created/fetched on a global route). Render an honest loading
+	 *  state — NOT the empty "no project" prompt, and NOT an error. */
+	resolving?: boolean;
 	onSend: (text: string) => void;
 	onRetryDraft: (id: string) => void;
 	onDiscardDraft: (id: string) => void;
@@ -356,14 +360,24 @@ export function Channel(props: {
 		if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
 	}, [source.messages, props.drafts, source.status]);
 
+	if (props.resolving && !projectId) {
+		return (
+			<div className="channel-pane" data-testid="channel" data-channel-state="resolving">
+				<div className="transcript">
+					<StatePanel kind="loading" title="Connecting your assistant…" />
+				</div>
+			</div>
+		);
+	}
+
 	if (!projectId) {
 		return (
-			<div className="channel-pane" data-testid="channel">
+			<div className="channel-pane" data-testid="channel" data-channel-state="no-project">
 				<div className="transcript">
 					<StatePanel
 						kind="empty"
-						title="No project selected"
-						detail="Select or create a project — the conversation channel belongs to its run."
+						title="No conversation here yet"
+						detail="This screen has no conversation scope. Open a project, or head to Home to talk to Caddie."
 					/>
 				</div>
 			</div>
