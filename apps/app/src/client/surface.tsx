@@ -626,7 +626,7 @@ export function SearchPage(): ReactElement {
 							</p>
 						</div>
 					</div>
-					{useSearchEnabled()}
+					<SearchEnabled />
 				</div>
 			</div>
 		</WorkspaceChrome>
@@ -634,8 +634,12 @@ export function SearchPage(): ReactElement {
 }
 
 // The Search panel gates itself on the session; render it only when signed in so
-// the wall stays a clean sign-in, matching every other surface.
-function useSearchEnabled(): ReactElement {
+// the wall stays a clean sign-in, matching every other surface. A CHILD
+// component — hooks reading the chrome must run below the provider, never in
+// the route component (same rule as ProjectsActions/AutomationsBody; calling
+// this as a hook crashed /search with "useWorkspaceChrome must be used inside
+// WorkspaceChrome").
+function SearchEnabled(): ReactElement {
 	const chrome = useWorkspaceChrome();
 	return chrome.authenticated ? <Search /> : <SignInGate />;
 }

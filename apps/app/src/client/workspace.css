@@ -690,11 +690,11 @@ a.btn-ghost.topbar-nav-link {
 		position: fixed;
 		left: 12px;
 		right: 12px;
-		bottom: calc(10px + env(safe-area-inset-bottom));
+		bottom: calc(9px + env(safe-area-inset-bottom));
 		background: var(--color-raised);
 		border: 1px solid var(--color-line-soft);
 		border-radius: 24px;
-		padding: 8px 7px 9px;
+		padding: 7px 6px 8px;
 		box-shadow:
 			0 12px 32px rgb(0 0 0 / 0.45),
 			inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 6%, transparent);
@@ -703,7 +703,7 @@ a.btn-ghost.topbar-nav-link {
 	/* The composer zone: the input the user talks through, attached inside
 	   the container above the nav row. */
 	.bottom-nav-composer {
-		padding: 0 2px 7px;
+		padding: 0 2px 6px;
 		border-bottom: 1px solid var(--color-line-soft);
 	}
 	.bottom-nav-composer .composer-wrap {
@@ -713,8 +713,8 @@ a.btn-ghost.topbar-nav-link {
 		gap: 0.4rem;
 	}
 	.bottom-nav-composer .composer textarea {
-		min-height: 2.3rem;
-		padding: 0.5rem 0.75rem;
+		min-height: 2.1rem;
+		padding: 0.42rem 0.7rem;
 		font-size: 14px;
 		background: var(--color-panel);
 		border-color: var(--color-line);
@@ -736,13 +736,13 @@ a.btn-ghost.topbar-nav-link {
 		display: grid;
 		grid-template-columns: repeat(4, 1fr);
 		gap: 2px;
-		padding-top: 5px;
+		padding-top: 4px;
 	}
 	.bottom-nav .tab-btn {
 		border: none;
 		border-radius: 12px;
 		text-align: center;
-		padding: 7px 0 6px;
+		padding: 6px 0 5px;
 		font-size: var(--r-label);
 		font-weight: 600;
 		letter-spacing: 0.01em;
@@ -756,8 +756,8 @@ a.btn-ghost.topbar-nav-link {
 	}
 	/* Icons sized for the thumb bar — the 16px drawing weight reads at 21px. */
 	.bottom-nav svg {
-		width: 21px;
-		height: 21px;
+		width: 20px;
+		height: 20px;
 		stroke-width: 1.5;
 	}
 	.bottom-nav .tab-btn[aria-current='page'] {
@@ -2485,6 +2485,23 @@ a.btn-ghost.topbar-nav-link {
 	position: relative;
 }
 
+/* Faint blur band behind the floating head so the pill and chips read over
+   scrolling content (fades out, never a hard edge). */
+.shell-right::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 4.2rem;
+	z-index: 5;
+	pointer-events: none;
+	backdrop-filter: blur(9px);
+	-webkit-backdrop-filter: blur(9px);
+	mask-image: linear-gradient(180deg, rgb(0 0 0 / 0.85) 40%, transparent);
+	-webkit-mask-image: linear-gradient(180deg, rgb(0 0 0 / 0.85) 40%, transparent);
+}
+
 .conv-head-float {
 	position: absolute;
 	top: 0.55rem;
@@ -2772,6 +2789,9 @@ a.btn-ghost.topbar-nav-link {
 	/* Clearance so content and transcript never sit behind the floating bar. */
 	.shell-main {
 		padding-bottom: calc(172px + env(safe-area-inset-bottom));
+	}
+	.shell-right .transcript {
+		padding-bottom: calc(160px + env(safe-area-inset-bottom));
 	}
 	/* The unauth header keeps its capsule margins on mobile; the authed
 	   capsule is desktop-only (mobile uses the page-aware MobileHeader +

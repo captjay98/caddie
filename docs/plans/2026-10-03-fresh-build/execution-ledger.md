@@ -899,3 +899,25 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   "limitations": ["the C mark is a placeholder until a real logo exists"]
 }
 ```
+
+```json
+{
+  "packet": "UI-SEARCH-CRASH + BAR/HEAD-POLISH (owner: /search crashed 'useWorkspaceChrome must be used inside WorkspaceChrome'; bar felt big; faint blur behind the chat head; chat overlapped by the bottom nav)",
+  "status": "LOCAL VERIFIED",
+  "sha": "see git log fix(ui): search crash + bar slimming + head blur",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "playwright suites (workspace/conversation/discovery/journey)", "exitCode": 0, "receipt": "29 pass"},
+    {"command": "probe /app/search?pane=channel at 390", "exitCode": 0, "receipt": "no error text; header 'Search'; bar height 115px (slimmed from ~130); blur band 9px behind the head with gradient fade; transcript padding-bottom 160px keeps content above the bar"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/surface.tsx", "note": "SearchPage called a chrome-reading hook inside the route component (above the provider) — converted to the SearchEnabled child component, the documented pattern (ProjectsActions/AutomationsBody)"},
+    {"path": "apps/app/src/client/workspace.css", "note": "shell-right ::before blur band with gradient mask behind the floating head; mobile transcript bottom clearance 160px; bottom bar slimmed ~15px total (textarea 2.1rem, tab padding 6/5, icons 20px, container 7/6/8) — 11px label floor kept"}
+  ],
+  "environment": "local vite dev :5176, minted session cookie (in-memory only)",
+  "providerCalls": "none",
+  "specReview": "owner visual acceptance pending",
+  "qualityReview": "bar slimmed as a judgment call (owner delegated the size); floor rules kept",
+  "limitations": []
+}
+```
