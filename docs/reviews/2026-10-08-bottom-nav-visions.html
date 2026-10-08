@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Caddie · bottom nav — the final design</title>
+<style>
+	@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+	:root {
+		--ink: #090b10;
+		--panel: #101319;
+		--raised: #151922;
+		--lift: #1b2029;
+		--fg: #e6e9ef;
+		--muted: #8b93a3;
+		--action: #4d9fff;
+		--action-deep: #2f7ddd;
+		--line-soft: rgba(230, 233, 239, 0.07);
+		--ui: 'Inter', system-ui, sans-serif;
+		--mono: 'IBM Plex Mono', ui-monospace, monospace;
+	}
+	* { box-sizing: border-box; margin: 0; }
+	body { background: #050609; color: var(--fg); font-family: var(--ui); padding: 42px 48px 56px; }
+	h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+	.sub { color: var(--muted); font-size: 13px; margin-top: 6px; max-width: 860px; line-height: 1.55; }
+	.row { display: flex; gap: 56px; margin-top: 34px; align-items: flex-start; flex-wrap: wrap; }
+
+	.frame {
+		width: 340px; height: 620px;
+		border: 7px solid #232833; border-radius: 40px;
+		background: var(--ink); overflow: hidden;
+		display: flex; flex-direction: column;
+		box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+		position: relative;
+	}
+	.statusbar { display: flex; justify-content: space-between; padding: 10px 18px 4px; font-size: 11px; color: var(--muted); font-weight: 600; }
+	.topbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px 10px; }
+	.wordmark { font-family: var(--mono); font-weight: 600; font-size: 14px; letter-spacing: 0.06em; }
+	.wordmark b { color: var(--action); }
+	.avatar { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(180deg, var(--action), var(--action-deep)); color: var(--ink); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+	.context-row { display: flex; gap: 8px; padding: 0 14px 10px; }
+	.chip { flex: 1; background: var(--raised); border: 1px solid var(--line-soft); border-radius: 10px; padding: 7px 10px; font-size: 12.5px; display: flex; justify-content: space-between; }
+	.chip span { color: var(--muted); font-size: 11px; }
+	.newbtn { background: linear-gradient(180deg, var(--action), var(--action-deep)); color: var(--ink); font-size: 12px; font-weight: 700; border-radius: 10px; padding: 8px 12px; }
+	.chat { flex: 1; padding: 6px 14px 10px; display: flex; flex-direction: column; gap: 10px; }
+	.msg-u { align-self: flex-end; max-width: 78%; background: color-mix(in srgb, var(--action) 14%, transparent); border: 1px solid color-mix(in srgb, var(--action) 22%, transparent); border-radius: 12px 12px 4px 12px; padding: 8px 11px; font-size: 12.5px; line-height: 1.45; }
+	.msg-c { align-self: flex-start; max-width: 88%; background: var(--raised); border: 1px solid var(--line-soft); border-radius: 4px 12px 12px 12px; padding: 8px 11px; font-size: 12.5px; line-height: 1.5; }
+	.msg-c .turn { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
+	.tools { align-self: flex-start; display: inline-flex; gap: 7px; border: 1px solid var(--line-soft); background: var(--panel); border-radius: 10px; padding: 6px 10px; font-size: 11px; color: var(--muted); font-family: var(--mono); }
+	.tools .arrow { color: var(--action); }
+	.composer { display: flex; gap: 8px; padding: 8px 12px 12px; border-top: 1px solid var(--line-soft); background: var(--panel); }
+	.composer .input { flex: 1; background: var(--raised); border: 1px solid rgba(230,233,239,0.13); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; color: var(--muted); }
+	.send { width: 36px; height: 36px; flex: none; border-radius: 12px; background: linear-gradient(180deg, var(--action), var(--action-deep)); display: grid; place-items: center; color: var(--ink); }
+
+	/* --- the floating nav (as built) ---------------------------------------- */
+	.bottom-nav {
+		position: absolute;
+		left: 12px; right: 12px; bottom: 10px;
+		display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px;
+		background: var(--raised);
+		border: 1px solid var(--line-soft);
+		border-radius: 22px;
+		padding: 4px 6px 7px;
+		box-shadow: 0 12px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(230,233,239,0.06);
+	}
+	.tab { display: grid; justify-items: center; align-content: center; gap: 3px; padding: 7px 0 6px; border-radius: 12px; color: var(--muted); text-decoration: none; }
+	.tab .ic { width: 21px; height: 21px; display: grid; place-items: center; }
+	.tab .ic svg { width: 21px; height: 21px; stroke-width: 1.5; }
+	.tab .lbl { font-size: 11px; font-weight: 600; letter-spacing: 0.01em; }
+	.tab.on { background: color-mix(in srgb, var(--action) 12%, transparent); color: var(--action); }
+	.chat-nav { display: grid; justify-items: center; gap: 2px; text-decoration: none; }
+	.chat-core { width: 52px; height: 52px; border-radius: 50%; background: linear-gradient(180deg, var(--action), var(--action-deep)); color: var(--ink); display: grid; place-items: center; margin-top: -27px; box-shadow: 0 10px 22px color-mix(in srgb, var(--action) 38%, transparent), 0 0 0 5px var(--raised); }
+	.chat-core svg { width: 24px; height: 24px; stroke-width: 1.8; }
+	.chat-cap { font-size: 11px; font-weight: 700; color: var(--action); letter-spacing: 0.01em; margin-top: 2px; }
+
+	.note { max-width: 340px; color: var(--muted); font-size: 12.5px; line-height: 1.6; margin-top: 18px; }
+	.note b { color: var(--fg); font-weight: 600; }
+	.note .k { font-family: var(--mono); color: var(--action); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; display: block; margin-bottom: 6px; }
+	.legend { margin-top: 44px; color: var(--muted); font-size: 13px; line-height: 1.65; max-width: 920px; }
+	.legend b { color: var(--fg); }
+	.legend li { margin-top: 6px; }
+</style>
+</head>
+<body>
+	<h1>Caddie — bottom nav, final design</h1>
+	<p class="sub">The today.ai grammar: five destinations in one floating rounded container, the Chat key raised above the row, icons sized for a thumb. Implemented in the app — this page is the spec of what was built.</p>
+
+	<div class="row">
+		<div class="frame">
+			<div class="statusbar"><span>10:27</span><span>●●●</span></div>
+			<div class="topbar"><span class="wordmark">CADDIE<b>·</b></span><span class="avatar">J</span></div>
+			<div class="context-row">
+				<div class="chip">todoer <span>active</span></div>
+				<div class="newbtn">+ New</div>
+			</div>
+			<div class="chat">
+				<div class="msg-u">create a new project called todoer and build it</div>
+				<div class="msg-c"><div class="turn">CADDIE · 10:27</div>Done — “todoer” is created and open. I drafted the plan; approve it and I’ll start building.</div>
+				<div class="tools"><span class="arrow">›</span> Caddie worked · 3 tool calls · 4s</div>
+			</div>
+			<div class="composer"><div class="input">Message Caddie…</div><div class="send">↑</div></div>
+			<div class="bottom-nav">
+				<a class="tab" style="position:relative">
+					<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3.5h6.5L13 6v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z"/><path d="M9.5 3.5V6H13"/></svg></span>
+					<span class="lbl">Decisions</span>
+				</a>
+				<a class="tab">
+					<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="1.8"/><path d="M8 2.5v2M8 11.5v2M2.5 8h2M11.5 8h2"/></svg></span>
+					<span class="lbl">Find</span>
+				</a>
+				<a class="chat-nav">
+					<span class="chat-core"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h7A1.5 1.5 0 0 1 14 5.5v3A1.5 1.5 0 0 1 12.5 10H8.6l-2.4 2.1V10H5.5A1.5 1.5 0 0 1 4 8.5v-3z"/></svg></span>
+					<span class="chat-cap">Chat</span>
+				</a>
+				<a class="tab">
+					<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5 8 3l4.5 2.5v5L8 13l-4.5-2.5v-5z"/><path d="M3.5 5.5 8 8l4.5-2.5M8 8v5"/></svg></span>
+					<span class="lbl">Build</span>
+				</a>
+				<a class="tab">
+					<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.5M3.5 8 8 3.5 12.5 8"/></svg></span>
+					<span class="lbl">Ship</span>
+				</a>
+			</div>
+		</div>
+		<div>
+			<p class="note">
+				<span class="k">The five</span>
+				<b>Decisions</b> — what needs you (approvals, deadlines, results).<br /><br />
+				<b>Find</b> — hackathons Caddie is watching.<br /><br />
+				<b>Chat</b> — the home key: raised, action-coloured, the only coloured surface on the bar.<br /><br />
+				<b>Build</b> — activity, files, automation.<br /><br />
+				<b>Ship</b> — the submission package, always one tap from the goal.
+			</p>
+			<p class="note" style="margin-top:22px">
+				<span class="k">Rules</span>
+				Plan and Prove don't have slots — they arrive as decision cards and are one tap away from the stage they belong to. The bar rides every mobile route (fixed), never a dead end. Labels clear the 11px type floor; icons draw at 21px (24px on the key) at stroke 1.5.
+			</p>
+		</div>
+	</div>
+
+	<ul class="legend">
+		<li><b>Verified in the app:</b> container fixed, 22px radius, 12px margins, 10px off the bottom; the Chat key rises 22px above the container; active item tracks the route (Chat on home, Find on /discovery, Build on /runs, Ship on /submission); no horizontal overflow at 390px on any route; all browser specs green.</li>
+	</ul>
+</body>
+</html>

@@ -765,3 +765,32 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-BOTTOM-NAV (owner-directed: today.ai grammar — five destinations in a floating container, chat raised above the row, properly sized icons)",
+  "status": "LOCAL VERIFIED",
+  "sha": "see git log feat(ui): floating bottom nav",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bun run test:browser -- P01/P06/P07/P11/P13/P14", "exitCode": 0, "receipt": "all PASS; workspace.spec mobile overflow test now routes through nav-build-mobile (the Build key navigates to /runs instead of the old home pane tab)"},
+    {"command": "bun test tests/routing.test.ts", "exitCode": 0, "receipt": "13 pass (route tree still composes with the pane search param)"},
+    {"command": "geometry probe at 390x844 (playwright evaluate)", "exitCode": 0, "receipt": "nav fixed, radius 22px, 12px margins, bottom 10px; Chat key 52px circle rising 22px above the container; labels 11px; icons 21px stroke 1.5 (24px stroke 1.8 on the key); active item tracks route (Chat on home, Find on /discovery, Build on /runs, Ship on /submission); no horizontal overflow on any route"},
+    {"command": "mobile capture sweep: home-chat, decisions pane, find, build, ship", "exitCode": 0, "receipt": "floating bar rides every mobile route"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/workspace/Chrome.tsx + Shell.tsx + routes.tsx", "note": "bottom nav moved from the workspace body into WorkspaceChrome (fixed, so it rides every mobile route); five items: Decisions/Chat carry a ?pane= search param the Shell tab state follows; Find/Build/Ship navigate to their routes; workspaceRoute search schema accepts pane"},
+    {"path": "apps/app/src/client/workspace.css", "note": "floating container (22px radius, shadow, inset highlight), .chat-core elevated 52px action circle, icon scale 21/24px with stroke 1.5/1.8, 11px labels (fixes the old 10.5px floor violation), shell-main clearance so content never sits behind the fixed bar"},
+    {"path": "apps/app/src/client/icons.tsx", "note": "new 'chat' bubble icon for the home key"},
+    {"path": "docs/reviews/2026-10-08-bottom-nav-visions.html", "note": "the final-design spec rendered as a phone frame with the five-slot rationale"}
+  ],
+  "environment": "local vite dev :5176, minted session cookie (D1 token + BETTER_AUTH_SECRET, in-memory only)",
+  "providerCalls": "none",
+  "specReview": "owner visual acceptance pending on http://localhost:5176/app/ (mobile)",
+  "qualityReview": "geometry probed programmatically (the model cannot read screenshots) — every number matches the design intent; visual beauty is the owner's call",
+  "limitations": [
+    "the mobile nav shows on gate pages without the workspace's context row (project selector/refresh) — those controls remain on the workspace route only",
+    "Plan and Prove have no slots by design: they arrive via decision cards; a ?pane= runs deep link exists but no nav item targets the home runs pane anymore"
+  ]
+}
+```

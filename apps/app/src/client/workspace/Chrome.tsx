@@ -362,7 +362,83 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 				<main id="main" className="shell-main">
 					{props.children}
 				</main>
+				{authenticated ? (
+					<MobileNav active={props.active === 'none' ? undefined : props.active} />
+				) : null}
 			</div>
 		</WorkspaceChromeContext.Provider>
+	);
+}
+
+/**
+ * The mobile bottom nav (today.ai grammar): five destinations in one floating
+ * container, with Chat raised above the row as the home key. Decisions and
+ * Chat land on the workspace with a ?pane= search param (the Shell's tab
+ * state follows it); Find/Build/Ship navigate to their routes. On the route
+ * pages the nav stays visible, so no mobile screen is ever a dead end.
+ */
+function MobileNav(props: { active: WorkspaceNavId | undefined }): ReactElement {
+	const search = useSearch({ strict: false }) as { project?: string; pane?: string };
+	const pane = search.pane;
+	const keepProject = (prev: Record<string, unknown>) => ({ ...prev });
+	const onHome = props.active === 'home';
+	const decisionsActive = onHome && (pane === 'brief' || pane === 'runs');
+	const chatActive = onHome && (pane === 'channel' || pane === undefined);
+
+	return (
+		<nav className="bottom-nav" aria-label="Workspace" data-testid="bottom-nav">
+			<Link
+				to="/"
+				className="tab-btn"
+				data-testid="tab-brief-mobile"
+				aria-current={decisionsActive ? 'page' : undefined}
+				search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'brief' as const })}
+			>
+				<Icon name="doc" title="" />
+				Decisions
+			</Link>
+			<Link
+				to="/discovery"
+				className="tab-btn"
+				data-testid="nav-discovery-mobile"
+				aria-current={props.active === 'find' ? 'page' : undefined}
+				search={keepProject}
+			>
+				<Icon name="target" title="" />
+				Find
+			</Link>
+			<Link
+				to="/"
+				className="chat-nav-btn"
+				data-testid="tab-channel-mobile"
+				aria-current={chatActive ? 'page' : undefined}
+				search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'channel' as const })}
+			>
+				<span className="chat-core">
+					<Icon name="chat" title="" />
+				</span>
+				<span className="chat-cap">Chat</span>
+			</Link>
+			<Link
+				to="/runs"
+				className="tab-btn"
+				data-testid="nav-build-mobile"
+				aria-current={props.active === 'build' ? 'page' : undefined}
+				search={keepProject}
+			>
+				<Icon name="box" title="" />
+				Build
+			</Link>
+			<Link
+				to="/submission"
+				className="tab-btn"
+				data-testid="nav-ship-mobile"
+				aria-current={props.active === 'ship' ? 'page' : undefined}
+				search={keepProject}
+			>
+				<Icon name="send" title="" />
+				Ship
+			</Link>
+		</nav>
 	);
 }

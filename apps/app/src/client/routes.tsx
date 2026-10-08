@@ -11,6 +11,7 @@ import {
 	SchedulesPage,
 	EvidencePage,
 	ArtifactsPage,
+	RunsPage,
 	DesignReviewPage,
 	RepositoriesPage,
 } from './surface.tsx';
@@ -54,10 +55,16 @@ const rootRoute = createRootRoute({
 	},
 });
 
-/** ?project=<id> — the only client search param; refresh retains selection. */
-function validateSearch(search: Record<string, unknown>): { project?: string } {
+/** ?project=<id> — the client search params; refresh retains selection.
+ *  ?pane=<brief|runs|channel> is the mobile bottom nav's payload on the
+ *  workspace route (which pane the home shows). */
+function validateSearch(search: Record<string, unknown>): { project?: string; pane?: 'brief' | 'runs' | 'channel' } {
 	const project = search.project;
-	return typeof project === 'string' && project.trim() !== '' ? { project } : {};
+	const pane = search.pane;
+	return {
+		...(typeof project === 'string' && project.trim() !== '' ? { project } : {}),
+		...(pane === 'brief' || pane === 'runs' || pane === 'channel' ? { pane } : {}),
+	};
 }
 
 const workspaceRoute = createRoute({
@@ -156,6 +163,15 @@ const artifactsRoute = createRoute({
 	component: ArtifactsPage,
 });
 
+// The Build stage's Activity page — the nav's Build link finally has a real
+// route behind it (the old nav pointed at /runs with no route: NOT FOUND).
+const runsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/runs',
+	validateSearch,
+	component: RunsPage,
+});
+
 // Board phase 3: the design gate — reachable from the brief's approval cards,
 // behind the same fail-closed gate.
 const designReviewRoute = createRoute({
@@ -184,6 +200,7 @@ export const routeTree = rootRoute.addChildren([
 	schedulesRoute,
 	evidenceRoute,
 	artifactsRoute,
+	runsRoute,
 	designReviewRoute,
 	repositoriesRoute,
 ]);

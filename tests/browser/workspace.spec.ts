@@ -563,7 +563,7 @@ test.describe('P06 workspace shell (composed build)', () => {
 				clientWidth: width,
 			});
 			// Runs surface with real rows.
-			await page.getByTestId(width < 768 ? 'tab-runs-mobile' : 'tab-runs').click();
+			await page.getByTestId(width < 768 ? 'nav-build-mobile' : 'tab-runs').click();
 			await expect(page.getByTestId('run-row')).toBeVisible();
 			await page.getByTestId('run-detail-toggle').click();
 			expect(await assertNoOverflow()).toEqual({

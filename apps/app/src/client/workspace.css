@@ -646,7 +646,10 @@ a.btn-ghost.topbar-nav-link {
 	min-height: 0;
 }
 
-/* mobile: one pane + bottom tab bar */
+/* mobile: one pane + a floating bottom tab bar (today.ai grammar — five
+   destinations in one rounded container, Chat raised above the row as the
+   home key). The bar is fixed so it rides every mobile route, not just the
+   workspace. */
 .bottom-nav {
 	display: none;
 }
@@ -671,33 +674,89 @@ a.btn-ghost.topbar-nav-link {
 	.shell-body {
 		position: relative;
 	}
+	/* Clearance under the floating bar so the composer and panels never sit
+	   behind it (the bar is out of flow). */
+	.shell-main {
+		padding-bottom: calc(102px + env(safe-area-inset-bottom));
+	}
 	.bottom-nav {
 		display: grid;
 		grid-template-columns: repeat(5, 1fr);
-		border-top: 1px solid var(--color-line-soft);
-		background: var(--color-panel);
-		padding-bottom: env(safe-area-inset-bottom);
+		gap: 2px;
+		position: fixed;
+		left: 12px;
+		right: 12px;
+		bottom: calc(10px + env(safe-area-inset-bottom));
+		background: var(--color-raised);
+		border: 1px solid var(--color-line-soft);
+		border-radius: 22px;
+		padding: 4px 6px 7px;
+		box-shadow:
+			0 12px 32px rgb(0 0 0 / 0.45),
+			inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 6%, transparent);
+		z-index: 20;
 	}
 	.bottom-nav .tab-btn {
 		border: none;
-		border-radius: 0;
+		border-radius: 12px;
 		text-align: center;
-		padding: 0.5rem 0 0.55rem;
-		font-size: 10.5px;
+		padding: 7px 0 6px;
+		font-size: var(--r-label);
 		font-weight: 600;
-		letter-spacing: 0.02em;
+		letter-spacing: 0.01em;
 		text-transform: none;
 		text-decoration: none;
 		display: grid;
 		justify-items: center;
-		gap: 0.15rem;
+		align-content: center;
+		gap: 3px;
 		color: var(--color-muted);
 	}
-	.bottom-nav .tab-btn[aria-selected='true'],
+	/* Icons sized for the thumb bar — the 16px drawing weight reads at 21px. */
+	.bottom-nav svg {
+		width: 21px;
+		height: 21px;
+		stroke-width: 1.5;
+	}
 	.bottom-nav .tab-btn[aria-current='page'] {
-		background: transparent;
+		background: color-mix(in srgb, var(--color-action) 12%, transparent);
 		color: var(--color-action);
-		box-shadow: inset 0 2px 0 var(--color-action);
+	}
+	/* The Chat home key: a raised action-colored circle that floats above the
+	   row, with the label nested inside the bar. */
+	.chat-nav-btn {
+		display: grid;
+		justify-items: center;
+		gap: 2px;
+		text-decoration: none;
+	}
+	.chat-core {
+		width: 52px;
+		height: 52px;
+		border-radius: 50%;
+		background: linear-gradient(180deg, var(--color-action), var(--color-action-deep));
+		color: var(--color-ink);
+		display: grid;
+		place-items: center;
+		margin-top: -27px;
+		box-shadow:
+			0 10px 22px color-mix(in srgb, var(--color-action) 38%, transparent),
+			0 0 0 5px var(--color-raised);
+	}
+	.chat-core svg {
+		width: 24px;
+		height: 24px;
+		stroke-width: 1.8;
+	}
+	.chat-cap {
+		font-size: var(--r-label);
+		font-weight: 700;
+		color: var(--color-action);
+		letter-spacing: 0.01em;
+		margin-top: 2px;
+	}
+	.bottom-nav .chat-nav-btn[aria-current='page'] .chat-cap {
+		color: var(--color-action);
 	}
 	/* Mobile chrome: 3 top controls (wordmark · theme · account) — the project
 	   select, New project and refresh live in the workspace's context row and

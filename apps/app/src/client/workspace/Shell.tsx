@@ -135,17 +135,29 @@ function AuthedWorkspace(props: {
 	const actor = useMemo(() => ({ actorId: props.actorId }), [props.actorId]);
 	const queryClient = useQueryClient();
 	const navigate = useNavigate();
-	const search = useSearch({ strict: false }) as { project?: string };
+	const search = useSearch({ strict: false }) as { project?: string; pane?: 'brief' | 'runs' | 'channel' };
 	const chrome = useWorkspaceChrome();
 
 	const isDesktop = useIsDesktop();
-	const [tab, setTab] = useState<'brief' | 'runs' | 'channel'>(isDesktop ? 'brief' : 'channel');
+	// The mobile bottom nav (in the chrome) carries the pane in the URL
+	// (?pane=), so Decisions/Chat land on the right pane from any route; the
+	// desktop aside tabs stay local state.
+	const [tab, setTab] = useState<'brief' | 'runs' | 'channel'>(
+		isDesktop ? (search.pane ?? 'brief') : (search.pane ?? 'channel'),
+	);
 	const [detailOpen, setDetailOpen] = useState(true);
 
 	const paramProject = search.project;
 	const projectMissing =
 		Boolean(paramProject) && chrome.projectList.length > 0 && !chrome.projectList.some((p) => p.id === paramProject);
 	const effectiveProjectId = chrome.effectiveProjectId;
+
+	// Follow the chrome's ?pane= param (the mobile bottom nav's payload).
+	useEffect(() => {
+		if (search.pane === 'brief' || search.pane === 'runs' || search.pane === 'channel') {
+			setTab(search.pane);
+		}
+	}, [search.pane]);
 
 	// The coordinator run transport: live agent snapshot + sends for the
 	// selected project's active run (null → the channel keeps its standby).
@@ -400,47 +412,6 @@ function AuthedWorkspace(props: {
 					/>
 				</div>
 			)}
-
-			<nav className="bottom-nav" aria-label="Workspace panes">
-				<button
-					type="button"
-					className="tab-btn"
-					aria-selected={tab === 'brief'}
-					data-testid="tab-brief-mobile"
-					onClick={() => setTab('brief')}
-				>
-					<Icon name="doc" title="" />
-					Decisions
-				</button>
-				<button
-					type="button"
-					className="tab-btn"
-					aria-selected={tab === 'runs'}
-					data-testid="tab-runs-mobile"
-					onClick={() => setTab('runs')}
-				>
-					<Icon name="box" title="" />
-					Activity
-				</button>
-				<button
-					type="button"
-					className="tab-btn"
-					aria-selected={tab === 'channel'}
-					data-testid="tab-channel-mobile"
-					onClick={() => setTab('channel')}
-				>
-					<Icon name="sparkCheck" title="" />
-					Chat
-				</button>
-				<Link to="/discovery" className="tab-btn" data-testid="nav-discovery-mobile" search={(prev: Record<string, unknown>) => ({ ...prev })}>
-					<Icon name="target" title="" />
-					Find
-				</Link>
-				<Link to="/schedules" className="tab-btn" data-testid="nav-schedules-mobile" search={(prev: Record<string, unknown>) => ({ ...prev })}>
-					<Icon name="calendar" title="" />
-					Automation
-				</Link>
-			</nav>
 		</>
 	);
 }
