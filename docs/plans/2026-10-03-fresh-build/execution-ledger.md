@@ -794,3 +794,30 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-BOTTOM-NAV-2 (owner correction: 'the chat icon stays in the nav, it's the INPUT that is above the 5 nav items' — composer above the five tabs, flush in one container)",
+  "status": "LOCAL VERIFIED",
+  "sha": "see git log feat(ui): composer above the five tabs",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bunx playwright test tests/browser/conversation.spec.ts tests/browser/workspace.spec.ts && bun run test:browser -- P07/P11/P13/P14", "exitCode": 0, "receipt": "16 + 4 packets all PASS (pane composer, draft lifecycle, nav build key, keyboard operability intact)"},
+    {"command": "geometry probe at 390x844 across /, /?pane=brief, /discovery, /runs, /submission", "exitCode": 0, "receipt": "on EVERY route: composer above nav row (composerAboveNav), composer+input fully inside the 24px-radius container, 5 tabs (Decisions/Find/Chat/Build/Ship) with chat a regular tab, pane composer hidden, active item tracks route, no horizontal overflow"},
+    {"command": "first probe run (pre-lift)", "exitCode": 1, "receipt": "caught the gap the owner's requirement implied: the composer only registered on the workspace route — /discovery, /runs, /submission rendered a bare nav. Fixed by lifting the channel store + run transport into WorkspaceChrome so the input is present on all five tabs"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/workspace/Chrome.tsx + coordinator.ts + Shell.tsx", "note": "the channel store + coordinator transport now live in the chrome (one instance, exposed via context) so the bar composer sends from any route; useCoordinatorTransport resets its session run on actor/project scope change (the transport outlives one workspace mount now); Shell reads the chrome's instances and hides the pane composer on mobile"},
+    {"path": "apps/app/src/client/workspace.css", "note": "bar container 24px radius holds .bottom-nav-composer (textarea + send, divider) directly above .bottom-nav-row (5 equal tabs); chat is a regular tab; shell-main clearance raised for the taller bar"},
+    {"path": "docs/reviews/2026-10-08-bottom-nav-visions.html", "note": "spec page rewritten to the input-above-five design"}
+  ],
+  "environment": "local vite dev :5176, minted session cookie (D1 token + BETTER_AUTH_SECRET, in-memory only)",
+  "providerCalls": "none",
+  "specReview": "owner visual acceptance pending on http://localhost:5176/app/ (mobile)",
+  "qualityReview": "geometry probed programmatically on all five routes — composer above tabs inside the container everywhere, chat a regular tab; the desktop pane composer is untouched (conversation.spec passes)",
+  "limitations": [
+    "the bar composer sends to the selected project's conversation even from non-chat routes; drafts created there surface in the home transcript",
+    "composer disabled state tracks the run's streaming status only (parity with the pane composer)"
+  ]
+}
+```

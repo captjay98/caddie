@@ -289,6 +289,9 @@ export function Channel(props: {
 	projectId: string | null;
 	/** True once the coordinator run transport is wired for this project. */
 	transportLive?: boolean;
+	/** Mobile: the composer lives in the floating bottom bar (input above the
+	 *  five nav items), so the pane renders the transcript alone. */
+	composerHidden?: boolean;
 	onSend: (text: string) => void;
 	onRetryDraft: (id: string) => void;
 	onDiscardDraft: (id: string) => void;
@@ -394,11 +397,13 @@ export function Channel(props: {
 					/>
 				))}
 			</div>
-			<Composer
-				onSend={props.onSend}
-				disabled={live}
-				disabledReason={live ? 'A run is working — wait for it to settle.' : undefined}
-			/>
+			{!props.composerHidden ? (
+				<Composer
+					onSend={props.onSend}
+					disabled={live}
+					disabledReason={live ? 'A run is working — wait for it to settle.' : undefined}
+				/>
+			) : null}
 		</div>
 	);
 }

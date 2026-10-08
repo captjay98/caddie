@@ -19,8 +19,7 @@ import {
 import { BriefLane } from '../brief/DecisionCard.tsx';
 import { RunInspector } from '../runs/RunInspector.tsx';
 import { Channel } from '../conversation/Channel.tsx';
-import { standbySource as STANDBY, useChannelStore, type ChannelDraft } from '../conversation/channel-store.ts';
-import { useCoordinatorTransport } from '../coordinator.ts';
+import { standbySource as STANDBY, type ChannelDraft } from '../conversation/channel-store.ts';
 import { WorkspaceChrome, useWorkspaceChrome } from './Chrome.tsx';
 
 /**
@@ -159,15 +158,26 @@ function AuthedWorkspace(props: {
 		}
 	}, [search.pane]);
 
-	// The coordinator run transport: live agent snapshot + sends for the
-	// selected project's active run (null → the channel keeps its standby).
-	const transport = useCoordinatorTransport(actor, effectiveProjectId);
+	// The channel store + run transport are owned by the chrome (so the
+	// mobile bar's composer works on every route); the workspace reads the
+	// same instances and feeds the panes.
+	const { channel, transport } = chrome;
+	const sendText = (text: string) => {
+		const draft = channel.addDraft(text);
+		if (draft && transport) {
+			// admitted → the draft is removed (the message lives in the
+			// transcript); rejected → it stays with its attempt counted
+			transport.send(draft.text, draft.idempotencyKey).then(
+				() => channel.resolveDraft(draft.id),
+				() => channel.retryDraft(draft.id),
+			);
+		}
+	};
 
 	const runBindings = useRunBindings(actor, effectiveProjectId);
 	const artifacts = useArtifacts(actor, effectiveProjectId);
 	const brief = useBriefCards(actor, effectiveProjectId);
 	const createProject = useCreateProject(actor);
-	const channel = useChannelStore({ sessionKey: props.actorId ?? 'anon', projectId: effectiveProjectId });
 
 	// Cross-account cache hygiene: on any auth/actor transition, wipe every
 	// non-auth query so another account's rows can never be served or
@@ -380,36 +390,26 @@ function AuthedWorkspace(props: {
 						</div>
 					</aside>
 
-					<Channel
-						source={transport?.source ?? STANDBY}
-						transportLive={transport?.hasRun === true}
-						drafts={channel.drafts}
-						projectId={effectiveProjectId}
-						onSend={(text) => {
-							const draft = channel.addDraft(text);
-							if (draft && transport) {
-								// admitted → the draft is removed: the message lives in the
-								// transcript now, and no cancelled row lingers under it;
-								// rejected → it stays with its attempt counted
-								transport.send(draft.text, draft.idempotencyKey).then(
-									() => channel.resolveDraft(draft.id),
-									() => channel.retryDraft(draft.id),
-								);
-							}
-						}}
-						onRetryDraft={(id) => {
-							channel.retryDraft(id);
-							const draft: ChannelDraft | undefined = channel.drafts.find((d) => d.id === id);
-							if (draft && transport) {
-								// same idempotency key — the transport deduplicates anyway
-								transport.send(draft.text, draft.idempotencyKey).then(
-									() => channel.resolveDraft(id),
-									() => {},
-								);
-							}
-						}}
-						onDiscardDraft={channel.discardDraft}
-					/>
+<Channel
+					source={transport?.source ?? STANDBY}
+					transportLive={transport?.hasRun === true}
+					drafts={channel.drafts}
+					projectId={effectiveProjectId}
+					composerHidden={!isDesktop}
+					onSend={sendText}
+					onRetryDraft={(id) => {
+						channel.retryDraft(id);
+						const draft: ChannelDraft | undefined = channel.drafts.find((d) => d.id === id);
+						if (draft && transport) {
+							// same idempotency key — the transport deduplicates anyway
+							transport.send(draft.text, draft.idempotencyKey).then(
+								() => channel.resolveDraft(id),
+								() => {},
+							);
+						}
+					}}
+					onDiscardDraft={channel.discardDraft}
+				/>
 				</div>
 			)}
 		</>

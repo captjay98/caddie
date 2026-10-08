@@ -19,6 +19,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { Project } from '@caddie/contracts';
 import { authClient } from '../auth.ts';
 import { Icon } from '../icons.tsx';
+import { Composer } from '../conversation/Composer.tsx';
+import { useChannelStore, type ChannelDraft } from '../conversation/channel-store.ts';
+import { useCoordinatorTransport, type CoordinatorTransport } from '../coordinator.ts';
 import {
 	useAuthStatus,
 	useHomeProject,
@@ -80,6 +83,17 @@ interface WorkspaceChromeContextValue {
 	toggleTheme: () => void;
 	theme: 'light' | 'dark';
 	signOut: () => Promise<void>;
+	/** The channel store + run transport, owned by the chrome so the mobile
+	 *  bar's composer works on every route ("the input is present on all five
+	 *  tabs"). The workspace reads them from here instead of owning copies. */
+	channel: {
+		drafts: readonly ChannelDraft[];
+		addDraft: (text: string) => ChannelDraft | null;
+		retryDraft: (id: string) => void;
+		discardDraft: (id: string) => void;
+		resolveDraft: (id: string) => void;
+	};
+	transport: CoordinatorTransport | null;
 }
 
 const WorkspaceChromeContext = createContext<WorkspaceChromeContextValue | null>(null);
@@ -128,6 +142,31 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	const projectMissing =
 		Boolean(paramProject) && projectList.length > 0 && !projectList.some((p) => p.id === paramProject);
 	const effectiveProjectId = projectMissing ? null : (selectedProject?.id ?? null);
+
+	// The channel store and run transport live here — the mobile bottom bar's
+	// composer (input above the five tabs) is present on every route, and the
+	// workspace's panes read the same instances instead of owning copies.
+	const channel = useChannelStore({
+		sessionKey: actorId ?? 'anon',
+		projectId: effectiveProjectId,
+	});
+	const transport = useCoordinatorTransport(actorMemo, effectiveProjectId);
+	const live =
+		transport?.source.status === 'connecting' ||
+		transport?.source.status === 'submitted' ||
+		transport?.source.status === 'streaming';
+	const sendText = (text: string) => {
+		const draft = channel.addDraft(text);
+		if (draft && transport) {
+			// admitted → the draft is removed: the message lives in the
+			// transcript now, and no cancelled row lingers under it;
+			// rejected → it stays with its attempt counted
+			transport.send(draft.text, draft.idempotencyKey).then(
+				() => channel.resolveDraft(draft.id),
+				() => channel.retryDraft(draft.id),
+			);
+		}
+	};
 
 	// Home is created server-side on first fetch; refresh the list once so the
 	// selector shows it without a manual reload.
@@ -200,6 +239,8 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		toggleTheme,
 		theme,
 		signOut,
+		channel,
+		transport,
 	};
 
 	const onNewProject = props.onNewProject ?? (() => void navigate({ to: '/' }));
@@ -363,7 +404,16 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 					{props.children}
 				</main>
 				{authenticated ? (
-					<MobileNav active={props.active === 'none' ? undefined : props.active} />
+					<MobileNav
+						active={props.active === 'none' ? undefined : props.active}
+						composer={
+							<Composer
+								onSend={sendText}
+								disabled={live}
+								disabledReason={live ? 'A run is working — wait for it to settle.' : undefined}
+							/>
+						}
+					/>
 				) : null}
 			</div>
 		</WorkspaceChromeContext.Provider>
@@ -371,13 +421,18 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 }
 
 /**
- * The mobile bottom nav (today.ai grammar): five destinations in one floating
- * container, with Chat raised above the row as the home key. Decisions and
- * Chat land on the workspace with a ?pane= search param (the Shell's tab
- * state follows it); Find/Build/Ship navigate to their routes. On the route
- * pages the nav stays visible, so no mobile screen is ever a dead end.
+ * The mobile bottom nav (today.ai grammar): one floating container holding
+ * the composer directly above the row of five — Decisions · Find · Chat ·
+ * Build · Ship — everything flush inside the same container, nothing poking
+ * out. The input is present on all five tabs. Decisions and Chat land on the
+ * workspace with a ?pane= search param (the Shell's tab state follows it);
+ * Find/Build/Ship navigate to their routes. On the route pages the nav stays
+ * visible, so no mobile screen is ever a dead end.
  */
-function MobileNav(props: { active: WorkspaceNavId | undefined }): ReactElement {
+function MobileNav(props: {
+	active: WorkspaceNavId | undefined;
+	composer: ReactNode;
+}): ReactElement {
 	const search = useSearch({ strict: false }) as { project?: string; pane?: string };
 	const pane = search.pane;
 	const keepProject = (prev: Record<string, unknown>) => ({ ...prev });
@@ -387,58 +442,59 @@ function MobileNav(props: { active: WorkspaceNavId | undefined }): ReactElement 
 
 	return (
 		<nav className="bottom-nav" aria-label="Workspace" data-testid="bottom-nav">
-			<Link
-				to="/"
-				className="tab-btn"
-				data-testid="tab-brief-mobile"
-				aria-current={decisionsActive ? 'page' : undefined}
-				search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'brief' as const })}
-			>
-				<Icon name="doc" title="" />
-				Decisions
-			</Link>
-			<Link
-				to="/discovery"
-				className="tab-btn"
-				data-testid="nav-discovery-mobile"
-				aria-current={props.active === 'find' ? 'page' : undefined}
-				search={keepProject}
-			>
-				<Icon name="target" title="" />
-				Find
-			</Link>
-			<Link
-				to="/"
-				className="chat-nav-btn"
-				data-testid="tab-channel-mobile"
-				aria-current={chatActive ? 'page' : undefined}
-				search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'channel' as const })}
-			>
-				<span className="chat-core">
+			{props.composer ? <div className="bottom-nav-composer">{props.composer}</div> : null}
+			<div className="bottom-nav-row">
+				<Link
+					to="/"
+					className="tab-btn"
+					data-testid="tab-brief-mobile"
+					aria-current={decisionsActive ? 'page' : undefined}
+					search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'brief' as const })}
+				>
+					<Icon name="doc" title="" />
+					Decisions
+				</Link>
+				<Link
+					to="/discovery"
+					className="tab-btn"
+					data-testid="nav-discovery-mobile"
+					aria-current={props.active === 'find' ? 'page' : undefined}
+					search={keepProject}
+				>
+					<Icon name="target" title="" />
+					Find
+				</Link>
+				<Link
+					to="/"
+					className="tab-btn"
+					data-testid="tab-channel-mobile"
+					aria-current={chatActive ? 'page' : undefined}
+					search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'channel' as const })}
+				>
 					<Icon name="chat" title="" />
-				</span>
-				<span className="chat-cap">Chat</span>
-			</Link>
-			<Link
-				to="/runs"
-				className="tab-btn"
-				data-testid="nav-build-mobile"
-				aria-current={props.active === 'build' ? 'page' : undefined}
-				search={keepProject}
-			>
-				<Icon name="box" title="" />
-				Build
-			</Link>
-			<Link
-				to="/submission"
-				className="tab-btn"
-				data-testid="nav-ship-mobile"
-				aria-current={props.active === 'ship' ? 'page' : undefined}
-				search={keepProject}
-			>
-				<Icon name="send" title="" />
-				Ship
-			</Link>
+					Chat
+				</Link>
+				<Link
+					to="/runs"
+					className="tab-btn"
+					data-testid="nav-build-mobile"
+					aria-current={props.active === 'build' ? 'page' : undefined}
+					search={keepProject}
+				>
+					<Icon name="box" title="" />
+					Build
+				</Link>
+				<Link
+					to="/submission"
+					className="tab-btn"
+					data-testid="nav-ship-mobile"
+					aria-current={props.active === 'ship' ? 'page' : undefined}
+					search={keepProject}
+				>
+					<Icon name="send" title="" />
+					Ship
+				</Link>
+			</div>
 		</nav>
 	);
 }

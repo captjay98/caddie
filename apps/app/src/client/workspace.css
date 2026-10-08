@@ -646,10 +646,10 @@ a.btn-ghost.topbar-nav-link {
 	min-height: 0;
 }
 
-/* mobile: one pane + a floating bottom tab bar (today.ai grammar — five
-   destinations in one rounded container, Chat raised above the row as the
-   home key). The bar is fixed so it rides every mobile route, not just the
-   workspace. */
+/* mobile: one pane + a floating bottom bar (today.ai grammar — the composer
+   sits directly above the five nav items, everything flush inside one
+   rounded container). The bar is fixed so it rides every mobile route; the
+   input is present on all five tabs. */
 .bottom-nav {
 	display: none;
 }
@@ -674,14 +674,13 @@ a.btn-ghost.topbar-nav-link {
 	.shell-body {
 		position: relative;
 	}
-	/* Clearance under the floating bar so the composer and panels never sit
+	/* Clearance under the floating bar so the transcript and panels never sit
 	   behind it (the bar is out of flow). */
 	.shell-main {
-		padding-bottom: calc(102px + env(safe-area-inset-bottom));
+		padding-bottom: calc(150px + env(safe-area-inset-bottom));
 	}
 	.bottom-nav {
 		display: grid;
-		grid-template-columns: repeat(5, 1fr);
 		gap: 2px;
 		position: fixed;
 		left: 12px;
@@ -689,12 +688,50 @@ a.btn-ghost.topbar-nav-link {
 		bottom: calc(10px + env(safe-area-inset-bottom));
 		background: var(--color-raised);
 		border: 1px solid var(--color-line-soft);
-		border-radius: 22px;
-		padding: 4px 6px 7px;
+		border-radius: 24px;
+		padding: 8px 7px 9px;
 		box-shadow:
 			0 12px 32px rgb(0 0 0 / 0.45),
 			inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 6%, transparent);
 		z-index: 20;
+	}
+	/* The composer zone: the input the user talks through, attached inside
+	   the container above the nav row. */
+	.bottom-nav-composer {
+		padding: 0 2px 7px;
+		border-bottom: 1px solid var(--color-line-soft);
+	}
+	.bottom-nav-composer .composer-wrap {
+		border-top: none;
+		background: transparent;
+		padding: 0;
+		gap: 0.4rem;
+	}
+	.bottom-nav-composer .composer textarea {
+		min-height: 2.3rem;
+		padding: 0.5rem 0.75rem;
+		font-size: 14px;
+		background: var(--color-panel);
+		border-color: var(--color-line);
+		border-radius: 13px;
+	}
+	.bottom-nav-composer .composer textarea:focus {
+		border-color: var(--color-action);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-action) 16%, transparent);
+	}
+	.bottom-nav-composer .composer-send {
+		width: 2.3rem;
+		height: 2.3rem;
+		border-radius: 13px;
+	}
+	.bottom-nav-composer .composer-hint {
+		display: none;
+	}
+	.bottom-nav-row {
+		display: grid;
+		grid-template-columns: repeat(5, 1fr);
+		gap: 2px;
+		padding-top: 5px;
 	}
 	.bottom-nav .tab-btn {
 		border: none;
@@ -720,42 +757,6 @@ a.btn-ghost.topbar-nav-link {
 	}
 	.bottom-nav .tab-btn[aria-current='page'] {
 		background: color-mix(in srgb, var(--color-action) 12%, transparent);
-		color: var(--color-action);
-	}
-	/* The Chat home key: a raised action-colored circle that floats above the
-	   row, with the label nested inside the bar. */
-	.chat-nav-btn {
-		display: grid;
-		justify-items: center;
-		gap: 2px;
-		text-decoration: none;
-	}
-	.chat-core {
-		width: 52px;
-		height: 52px;
-		border-radius: 50%;
-		background: linear-gradient(180deg, var(--color-action), var(--color-action-deep));
-		color: var(--color-ink);
-		display: grid;
-		place-items: center;
-		margin-top: -27px;
-		box-shadow:
-			0 10px 22px color-mix(in srgb, var(--color-action) 38%, transparent),
-			0 0 0 5px var(--color-raised);
-	}
-	.chat-core svg {
-		width: 24px;
-		height: 24px;
-		stroke-width: 1.8;
-	}
-	.chat-cap {
-		font-size: var(--r-label);
-		font-weight: 700;
-		color: var(--color-action);
-		letter-spacing: 0.01em;
-		margin-top: 2px;
-	}
-	.bottom-nav .chat-nav-btn[aria-current='page'] .chat-cap {
 		color: var(--color-action);
 	}
 	/* Mobile chrome: 3 top controls (wordmark · theme · account) — the project

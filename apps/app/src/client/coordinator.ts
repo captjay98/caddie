@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useFlueAgent } from '@flue/react';
 import { createFlueClient } from '@flue/sdk';
 import type { RunBindingRecord } from '@caddie/contracts';
@@ -44,6 +44,12 @@ export function useCoordinatorTransport(
 	const bindings = useRunBindings(actor, projectId);
 	// A run created in this session wins until the list refetch includes it.
 	const [sessionRun, setSessionRun] = useState<RunBindingRecord | null>(null);
+	// The transport can now outlive one workspace mount (it lives in the
+	// chrome so the mobile composer works on every route): a scope switch must
+	// never carry the previous actor's or project's run forward.
+	useEffect(() => {
+		setSessionRun(null);
+	}, [actor.actorId, projectId]);
 	const run = sessionRun ?? bindings.data?.runBindings?.[0] ?? null;
 
 	const agent = useFlueAgent({
