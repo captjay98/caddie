@@ -47,6 +47,12 @@
 	.msg-c .turn { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
 	.tools { align-self: flex-start; display: inline-flex; gap: 7px; border: 1px solid var(--line-soft); background: var(--panel); border-radius: 10px; padding: 6px 10px; font-size: 11px; color: var(--muted); font-family: var(--mono); }
 	.tools .arrow { color: var(--action); }
+	.day-pill {
+		align-self: center; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em;
+		text-transform: uppercase; color: var(--muted);
+		background: color-mix(in srgb, var(--muted) 10%, transparent);
+		border-radius: 999px; padding: 3px 10px;
+	}
 	.composer { display: flex; gap: 8px; padding: 8px 12px 12px; border-top: 1px solid var(--line-soft); background: var(--panel); }
 	.composer .input { flex: 1; background: var(--raised); border: 1px solid rgba(230,233,239,0.13); border-radius: 12px; padding: 10px 12px; font-size: 12.5px; color: var(--muted); }
 	.send { width: 36px; height: 36px; flex: none; border-radius: 12px; background: linear-gradient(180deg, var(--action), var(--action-deep)); display: grid; place-items: center; color: var(--ink); }
@@ -104,8 +110,9 @@
 				<div class="newbtn">+ New</div>
 			</div>
 			<div class="chat">
-				<div class="msg-u">create a new project called todoer and build it</div>
-				<div class="msg-c"><div class="turn">CADDIE · 10:27</div>Done — “todoer” is created and open. I drafted the plan; approve it and I’ll start building.</div>
+				<div class="day-pill">Today</div>
+			<div class="msg-c">Done — “todoer” is created and open. I drafted the plan; approve it and I’ll start building.</div>
+			<div class="msg-u">create a new project called todoer and build it</div>
 				<div class="tools"><span class="arrow">›</span> Caddie worked · 3 tool calls · 4s</div>
 			</div>
 			
@@ -115,27 +122,26 @@
 				<div class="bar-send">↑</div>
 			</div>
 			<div class="nav-row">
-				<a class="tab">
-					<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3.5h6.5L13 6v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z"/><path d="M9.5 3.5V6H13"/></svg></span>
-					<span class="lbl">Decisions</span>
-				</a>
-				<a class="tab">
-					<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="1.8"/><path d="M8 2.5v2M8 11.5v2M2.5 8h2M11.5 8h2"/></svg></span>
-					<span class="lbl">Find</span>
-				</a>
-				<a class="tab on">
-					<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h7A1.5 1.5 0 0 1 14 5.5v3A1.5 1.5 0 0 1 12.5 10H8.6l-2.4 2.1V10H5.5A1.5 1.5 0 0 1 4 8.5v-3z"/></svg></span>
-					<span class="lbl">Chat</span>
-				</a>
-				<a class="tab">
-					<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5 8 3l4.5 2.5v5L8 13l-4.5-2.5v-5z"/><path d="M3.5 5.5 8 8l4.5-2.5M8 8v5"/></svg></span>
-					<span class="lbl">Build</span>
-				</a>
-				<a class="tab">
-					<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.5M3.5 8 8 3.5 12.5 8"/></svg></span>
-					<span class="lbl">Ship</span>
-				</a>
-			</div>
+			<a class="tab on">
+				<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h7A1.5 1.5 0 0 1 14 5.5v3A1.5 1.5 0 0 1 12.5 10H8.6l-2.4 2.1V10H5.5A1.5 1.5 0 0 1 4 8.5v-3z"/></svg></span>
+				<span class="lbl">Chat</span>
+			</a>
+			<a class="tab">
+				<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3.5h6.5L13 6v6.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1z"/><path d="M9.5 3.5V6H13"/></svg></span>
+				<span class="lbl">Decisions</span>
+			</a>
+			<a class="tab">
+				<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="1.8"/><path d="M8 2.5v2M8 11.5v2M2.5 8h2M11.5 8h2"/></svg></span>
+				<span class="lbl">Find</span>
+			</a>
+			<a class="tab">
+				<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 5.5 8 3l4.5 2.5v5L8 13l-4.5-2.5v-5z"/><path d="M3.5 5.5 8 8l4.5-2.5M8 8v5"/></svg></span>
+				<span class="lbl">Build</span>
+			</a>
+			<a class="tab">
+				<span class="ic"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.5M3.5 8 8 3.5 12.5 8"/></svg></span>
+				<span class="lbl">Ship</span>
+			</a></div>
 		</div></div>
 		</div>
 		<div>
@@ -143,7 +149,7 @@
 				<span class="k">The five</span>
 				<b>Decisions</b> — what needs you (approvals, deadlines, results).<br /><br />
 				<b>Find</b> — hackathons Caddie is watching.<br /><br />
-				<b>Chat</b> — a regular tab among the five; it takes you home to the transcript.<br /><br />
+				<b>Chat</b> — first from the left: it is the home screen, and home keys sit in slot one (messaging-app convention).<br /><br />
 				<b>Build</b> — activity, files, automation.<br /><br />
 				<b>Ship</b> — the submission package, always one tap from the goal.
 			</p>
@@ -155,7 +161,7 @@
 	</div>
 
 	<ul class="legend">
-		<li><b>Verified in the app:</b> container fixed, 24px radius, 12px margins, 10px off the bottom; the composer sits above the five-tab row, both flush inside the container, on every route (home, decisions, find, build, ship); chat is a regular tab that tracks the active pane; the pane composer is hidden on mobile; no horizontal overflow at 390px on any route; all browser specs green.</li>
+		<li><b>Verified in the app:</b> container fixed, 24px radius, 12px margins, 10px off the bottom; the composer sits above the five-tab row, both flush inside the container, on every route; chat is first from the left and tracks the active pane; turn labels removed, day dividers inserted; no horizontal overflow at 390px; all browser specs green.</li>
 	</ul>
 </body>
 </html>

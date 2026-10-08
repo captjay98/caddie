@@ -84,6 +84,27 @@ function turnClock(timestamp: string | undefined): string {
 	return `${hh}:${mm}`;
 }
 
+/** Full date + time for the hover/tap tooltip; the visible transcript shows
+ *  day dividers instead of per-message clocks. */
+function fullTime(timestamp: string | undefined): string | undefined {
+	if (!timestamp) return undefined;
+	const date = new Date(timestamp);
+	if (Number.isNaN(date.getTime())) return undefined;
+	return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
+/** Day-group label for the transcript: Today / Yesterday / short date. */
+function dayLabel(timestamp: string | undefined): string | null {
+	if (!timestamp) return null;
+	const date = new Date(timestamp);
+	if (Number.isNaN(date.getTime())) return null;
+	const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+	const diff = Math.round((day(new Date()) - day(date)) / 86_400_000);
+	if (diff === 0) return 'Today';
+	if (diff === 1) return 'Yesterday';
+	return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+}
+
 function ToolBanner({ part }: { part: ToolPart }): ReactElement {
 	const stateWord =
 		part.state === 'input-available'
@@ -127,13 +148,8 @@ function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
 function ToolGroup({ group, parts }: { group: readonly FlueConversationMessage[]; parts: ToolPart[] }): ReactElement {
 	const clock = turnClock(group[0]?.timestamp);
 	return (
-		<div className="msg assistant" data-testid="msg-tool-group">
-			<span className="turn-label" data-testid="turn-label">
-				<span className="turn-dot" aria-hidden="true">
-					C
-				</span>
-				Caddie{clock ? ` · ${clock}` : ''}
-			</span>
+		<div className="msg assistant" data-testid="msg-tool-group" title={fullTime(group[0]?.timestamp)}>
+			<span className="sr-only">Caddie{clock ? ` at ${clock}` : ''}</span>
 			<div className="bubble">
 				<ToolStrip parts={parts} />
 			</div>
@@ -191,6 +207,51 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 	);
 }
 
+/** Transcript rows with day dividers (Today / Yesterday / short date between
+ *  day groups); per-message clocks live in title tooltips only. */
+function buildTranscriptRows(groups: ReturnType<typeof groupMessages>): ReactElement[] {
+	const rows: ReactElement[] = [];
+	let lastDay: string | null = null;
+	let rowKey = 0;
+	for (const group of groups) {
+		if (group.toolsOnly) {
+			const day = dayLabel(group.messages[0]?.timestamp);
+			if (day !== null && day !== lastDay) {
+				rows.push(
+					<div className="day-divider" key={`day-${rowKey++}`}>
+						{day}
+					</div>,
+				);
+				lastDay = day;
+			}
+			rows.push(
+				<ToolGroup
+					key={`group-${rowKey++}`}
+					group={group.messages}
+					parts={group.messages.flatMap((message) =>
+						message.parts.filter((part): part is ToolPart => part.type === 'dynamic-tool'),
+					)}
+				/>,
+			);
+		} else {
+			for (const message of group.messages) {
+				if (message.display === 'hidden') continue;
+				const day = dayLabel(message.timestamp);
+				if (day !== null && day !== lastDay) {
+					rows.push(
+						<div className="day-divider" key={`day-${rowKey++}`}>
+							{day}
+						</div>,
+					);
+					lastDay = day;
+				}
+				rows.push(<MessageRow key={message.id} message={message} />);
+			}
+		}
+	}
+	return rows;
+}
+
 function MessageRow({ message }: { message: FlueConversationMessage }): ReactElement | null {
 	if (message.display === 'hidden') return null;
 	const clock = turnClock(message.timestamp);
@@ -200,13 +261,8 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 			.map((part) => part.text)
 			.join('\n');
 		return (
-			<div className="msg user" data-testid="msg-user">
-				<span className="turn-label" data-testid="turn-label">
-					<span className="turn-dot" aria-hidden="true">
-						Y
-					</span>
-					You{clock ? ` · ${clock}` : ''}
-				</span>
+			<div className="msg user" data-testid="msg-user" title={fullTime(message.timestamp)}>
+				<span className="sr-only">You{clock ? ` at ${clock}` : ''}</span>
 				<div className="bubble">{text}</div>
 			</div>
 		);
@@ -227,19 +283,14 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 	if (diagnostic) {
 		return (
 			<details className="msg assistant" data-testid="msg-diagnostic">
-				<summary className="msg-meta kicker">Caddie · specialist diagnostic{clock ? ` · ${clock}` : ''}</summary>
+				<summary className="msg-meta kicker">Caddie · specialist diagnostic</summary>
 				{body}
 			</details>
 		);
 	}
 	return (
-		<div className="msg assistant" data-testid="msg-assistant">
-			<span className="turn-label" data-testid="turn-label">
-				<span className="turn-dot" aria-hidden="true">
-					C
-				</span>
-				Caddie{clock ? ` · ${clock}` : ''}
-			</span>
+		<div className="msg assistant" data-testid="msg-assistant" title={fullTime(message.timestamp)}>
+			<span className="sr-only">Caddie{clock ? ` at ${clock}` : ''}</span>
 			<div className="bubble">{body}</div>
 		</div>
 	);
@@ -344,21 +395,7 @@ export function Channel(props: {
 						}
 					/>
 ) : (
-						groupMessages(source.messages).map((group, index) =>
-							group.toolsOnly ? (
-								<ToolGroup
-									key={index}
-									group={group.messages}
-									parts={group.messages.flatMap((message) =>
-										message.parts.filter(
-											(part): part is ToolPart => part.type === 'dynamic-tool',
-										),
-									)}
-								/>
-							) : (
-								group.messages.map((message) => <MessageRow key={message.id} message={message} />)
-							),
-						)
+						buildTranscriptRows(groupMessages(source.messages))
 					)}
 
 				{settledFailed.map((settlement) => (

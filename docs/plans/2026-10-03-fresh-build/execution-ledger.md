@@ -821,3 +821,29 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-CHAT-READS + NAV-ORDER (owner questions: chat center vs first-left; drop You/Caddie labels; day dividers instead of per-message time)",
+  "status": "LOCAL VERIFIED",
+  "sha": "see git log feat(ui): chat reads by alignment — day dividers, chat first",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bunx playwright test tests/browser/conversation.spec.ts tests/browser/workspace.spec.ts + P01/P07/P11/P13/P14", "exitCode": 0, "receipt": "16 + all packets PASS — no spec pinned turn labels or clocks"},
+    {"command": "DOM probe at 390x844", "exitCode": 0, "receipt": "tab order = Chat·Decisions·Find·Build·Ship (chat first, home-key convention); zero .turn-label elements in the transcript; day dividers render ('Yesterday', 'Today'); per-message title attributes carry full date+time; no overflow"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/conversation/Channel.tsx", "note": "turn labels removed from user/assistant bubbles and tool groups (sr-only spans keep identity for screen readers); day dividers (Today/Yesterday/short date) inserted between day groups; per-message full date+time moved to title tooltips; diagnostic summary keeps its label without the clock"},
+    {"path": "apps/app/src/client/workspace/Chrome.tsx", "note": "mobile nav order: Chat first from the left (it is the home screen), then Decisions·Find·Build·Ship"},
+    {"path": "apps/app/src/client/workspace.css", "note": ".day-divider pill + .sr-only utility; the .turn-label/.turn-dot rules retired"},
+    {"path": "docs/reviews/2026-10-08-bottom-nav-visions.html", "note": "spec page updated: chat first, label-free bubbles, day pill"}
+  ],
+  "environment": "local vite dev :5176, minted session cookie (D1 token + BETTER_AUTH_SECRET, in-memory only)",
+  "providerCalls": "none",
+  "specReview": "owner visual acceptance pending on http://localhost:5176/app/",
+  "qualityReview": "decisions: chat first-left because it is the home screen and home keys sit in slot one (messaging convention, matches the owner's today.ai listing); labels removed because alignment carries authorship; time moved to day dividers + hover tooltips",
+  "limitations": [
+    "swipe/long-press to reveal per-message time is not implemented — title tooltips cover hover (desktop) and long-press on some mobile browsers; a real touch gesture is a follow-up if wanted"
+  ]
+}
+```

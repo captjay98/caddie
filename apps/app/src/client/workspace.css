@@ -1149,46 +1149,30 @@ a.btn-ghost.topbar-nav-link {
 	gap: 0.3rem;
 }
 
-/* Board screen 08: authorship + time on every turn — a claim can be traced
-   to the run that made it, not inferred from alignment. */
-.turn-label {
+/* The transcript reads by alignment alone: user bubbles right, assistant
+   left — authorship labels are gone, and day dividers carry the date
+   (Today / Yesterday / short date) instead of per-message clocks. Message
+   times live in title tooltips; the sr-only spans keep the identity for
+   screen readers. */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+.day-divider {
+	justify-self: center;
 	font-family: var(--font-mono);
 	font-size: var(--r-label);
-	letter-spacing: 0.08em;
+	letter-spacing: 0.06em;
 	text-transform: uppercase;
 	color: var(--color-muted);
-	display: inline-flex;
-	align-items: center;
-	gap: 0.45rem;
-}
-
-.msg.user .turn-label {
-	justify-self: end;
-}
-
-/* Turn identity mark: one small rounded tile per author (Caddie blue, user
-   neutral) so a long transcript scans by author at a glance. */
-.turn-dot {
-	width: 18px;
-	height: 18px;
-	flex: none;
-	display: inline-grid;
-	place-items: center;
-	border-radius: 6px;
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0;
-	text-transform: none;
-}
-
-.msg.assistant .turn-dot {
-	background: var(--color-action);
-	color: var(--color-ink);
-}
-
-.msg.user .turn-dot {
-	background: color-mix(in srgb, var(--color-bright) 14%, transparent);
-	color: var(--color-bright);
+	background: color-mix(in srgb, var(--color-muted) 10%, transparent);
+	border-radius: 999px;
+	padding: 0.22rem 0.7rem;
 }
 
 .msg .bubble {

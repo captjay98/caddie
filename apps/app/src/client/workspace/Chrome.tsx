@@ -422,12 +422,14 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 
 /**
  * The mobile bottom nav (today.ai grammar): one floating container holding
- * the composer directly above the row of five — Decisions · Find · Chat ·
+ * the composer directly above the row of five — Chat · Decisions · Find ·
  * Build · Ship — everything flush inside the same container, nothing poking
- * out. The input is present on all five tabs. Decisions and Chat land on the
- * workspace with a ?pane= search param (the Shell's tab state follows it);
- * Find/Build/Ship navigate to their routes. On the route pages the nav stays
- * visible, so no mobile screen is ever a dead end.
+ * out. Chat is first from the left: it IS the home screen, and home keys sit
+ * in slot one (messaging-app convention). The input is present on all five
+ * tabs. Decisions and Chat land on the workspace with a ?pane= search param
+ * (the Shell's tab state follows it); Find/Build/Ship navigate to their
+ * routes. On the route pages the nav stays visible, so no mobile screen is
+ * ever a dead end.
  */
 function MobileNav(props: {
 	active: WorkspaceNavId | undefined;
@@ -447,6 +449,16 @@ function MobileNav(props: {
 				<Link
 					to="/"
 					className="tab-btn"
+					data-testid="tab-channel-mobile"
+					aria-current={chatActive ? 'page' : undefined}
+					search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'channel' as const })}
+				>
+					<Icon name="chat" title="" />
+					Chat
+				</Link>
+				<Link
+					to="/"
+					className="tab-btn"
 					data-testid="tab-brief-mobile"
 					aria-current={decisionsActive ? 'page' : undefined}
 					search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'brief' as const })}
@@ -463,16 +475,6 @@ function MobileNav(props: {
 				>
 					<Icon name="target" title="" />
 					Find
-				</Link>
-				<Link
-					to="/"
-					className="tab-btn"
-					data-testid="tab-channel-mobile"
-					aria-current={chatActive ? 'page' : undefined}
-					search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'channel' as const })}
-				>
-					<Icon name="chat" title="" />
-					Chat
 				</Link>
 				<Link
 					to="/runs"
