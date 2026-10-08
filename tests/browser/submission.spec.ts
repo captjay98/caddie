@@ -479,7 +479,7 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		// Export/record CTAs are honest before any export exists.
 		await expect(page.getByRole('button', { name: 'Copy latest export' })).toBeDisabled();
 		await expect(page.getByRole('button', { name: 'Record submitted' })).toBeDisabled();
-		await expect(page.getByText('This tool never submits anywhere.')).toBeVisible();
+		await expect(page.getByText('This tool never submits anywhere. After you submit')).toBeVisible();
 
 		// Reuse disclosure needs an explicit human confirmation; it rides the
 		// real package route.
@@ -546,12 +546,13 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		const page = await context.newPage();
 
 		await page.goto(`${BASE}/app/?project=proj-a`);
-		await page.getByTestId('nav-judge').click();
+		await page.getByTestId('nav-prove').click();
+		await page.getByTestId('stage-tab-judge').click();
 		await expect(page).toHaveURL(/\/app\/judge\?project=proj-a$/);
 		await expect(page.locator('section[aria-label="Judge scorecard"]')).toBeVisible();
 
 		await page.goto(`${BASE}/app/?project=proj-a`);
-		await page.getByTestId('nav-submission').click();
+		await page.getByTestId('nav-ship').click();
 		await expect(page).toHaveURL(/\/app\/submission\?project=proj-a$/);
 		await expect(page.locator('section[aria-label="Submission package"]')).toBeVisible();
 		await context.close();

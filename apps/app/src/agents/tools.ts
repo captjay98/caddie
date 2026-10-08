@@ -283,8 +283,7 @@ export const GATE_DIR = '.caddie/gates';
  * can create it. Requires a harness with a declared sandbox; the pure
  * evaluator in coordinator.ts decides completion from the file's contents.
  */
-export function makeRecordAcceptance(currentRevision?: () => string) {
-	return defineTool({
+export function makeRecordAcceptance(currentRevision?: () => string) {	return defineTool({
 		name: 'record_acceptance',
 		description:
 			'Record an acceptance result for the run gate. Input must be REAL command evidence (exact command and exit code); the completion gate reads these records and refuses completion without a passing one under the current plan revision.',
@@ -320,6 +319,71 @@ export function makeRecordAcceptance(currentRevision?: () => string) {
 			const existing = await ctx.harness.sandbox.readFile(path).catch(() => "");
 			await ctx.harness.sandbox.writeFile(path, `${existing}${JSON.stringify(record)}\n`);
 			return { output: `acceptance recorded for ${ctx.data.check} (exit ${ctx.data.exitCode})` };
+		},
+	});
+}
+
+// --- home-conversation capabilities (product charter: the chat is the
+// --- universal interface) ---------------------------------------------------
+
+const CreateProjectInput = v.pipe(
+	v.object({
+		name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(120)),
+		description: v.optional(v.pipe(v.string(), v.trim(), v.maxLength(500))),
+	}),
+	v.readonly(),
+);
+
+/**
+ * Home runs only: create a project in the actor's own workspace. The host
+ * closure performs the real, permission-checked creation with the same
+ * service the REST route uses — the tool never fabricates success.
+ */
+export function makeCreateProject(deps: {
+	createProject: (input: { name: string; description?: string }) => Promise<{
+		id: string;
+		name: string;
+		workspaceId: string;
+	}>;
+}) {
+	return defineTool({
+		name: 'create_project',
+		description:
+			"Create a new project in the user's workspace. Use this whenever the user asks to start a new project — never tell them to create it themselves outside the chat.",
+		input: CreateProjectInput,
+		run: async (ctx) => {
+			// Defensive trim: the schema trims when the runtime parses input, but
+			// the service deserves clean values even from a direct call.
+			const name = ctx.data.name.trim();
+			const description = ctx.data.description?.trim();
+			const project = await deps.createProject({
+				name,
+				description: description || undefined,
+			});
+			return {
+				output: `Created project "${project.name}" (id ${project.id}, workspace ${project.workspaceId}). It is in the user's project list now: opening it in the workspace and sending a message there starts its run. Tell the user it is ready and what to do next.`,
+			};
+		},
+	});
+}
+
+/**
+ * Home runs only: the honest stack catalog, straight from the shared registry
+ * (src/server/stacks.ts). Stack-availability answers come from this tool —
+ * the model must not invent a stack list.
+ */
+export function makeListStacks(deps: {
+	listStacks: () => Promise<readonly { id: string; status: string; note?: string }[]>;
+}) {
+	return defineTool({
+		name: 'list_stacks',
+		description:
+			'List the output stacks this deployment of Caddie can actually build with. Answer stack-availability questions ONLY from this tool result — never from general knowledge.',
+		input: v.pipe(v.object({}), v.readonly()),
+		run: async () => {
+			const stacks = await deps.listStacks();
+			const lines = stacks.map((stack) => `- ${stack.id} — ${stack.status}${stack.note ? ` (${stack.note})` : ''}`);
+			return { output: `Available stacks:\n${lines.join('\n')}` };
 		},
 	});
 }

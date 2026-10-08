@@ -258,9 +258,13 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">
-						prepare here, submit elsewhere — this tool never submits anywhere
+						SHIP
 					</p>
-					<h2 className="ev-title">Submission package</h2>
+					<h2 className="ev-title">Submission</h2>
+					<p className="page-lede">
+						Prepare here, submit elsewhere — this tool never submits anywhere. The package is checked
+						against the rules before you send it.
+					</p>
 				</div>
 				<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
 					{busy ? 'Loading…' : 'Refresh'}

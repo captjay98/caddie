@@ -136,5 +136,13 @@ export function useChannelStore(options: {
 		);
 	}, []);
 
-	return { drafts, addDraft, retryDraft, discardDraft };
+	/** Removes the draft entirely — the send-success path. Once the transport
+	 *  admits the message it lives in the transcript; the optimistic row must
+	 *  not linger. Only an explicitly discarded draft is kept for reference
+	 *  with its key (discardDraft). */
+	const resolveDraft = useCallback((id: string) => {
+		setDrafts((existing) => existing.filter((draft) => draft.id !== id));
+	}, []);
+
+	return { drafts, addDraft, retryDraft, discardDraft, resolveDraft };
 }

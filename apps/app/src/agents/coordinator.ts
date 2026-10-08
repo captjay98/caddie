@@ -11,7 +11,7 @@ import {
 	type SandboxDriver,
 } from '@flue/runtime';
 import { findModelRoute } from './providers.ts';
-import { makeRecordAcceptance } from './tools.ts';
+import { makeCreateProject, makeListStacks, makeRecordAcceptance } from './tools.ts';
 import { PACKAGED_SKILLS } from './skills.ts';
 import { evaluateGateLedger, gatePathFor } from './completion-gate.ts';
 import { buildSpecialistDeclarations, SPECIALIST_INSTRUCTIONS, type SpecialistBuildContext } from './specialists.ts';
@@ -62,6 +62,15 @@ let hostContext:
 			completionGateEnabled?: boolean;
 			/** Home runs only: the actor's project overview for the instruction. */
 			homeOverview?: string | null;
+			/** Home runs only: create a project in the actor's workspace — the
+			 *  chat-first capability (product charter). */
+			createProject?: (input: { name: string; description?: string }) => Promise<{
+				id: string;
+				name: string;
+				workspaceId: string;
+			}>;
+			/** Home runs only: the honest stack catalog (src/server/stacks.ts). */
+			listStacks?: () => Promise<readonly { id: string; status: string; note?: string }[]>;
 	  })
 	| null = null;
 
@@ -72,6 +81,12 @@ export function provideCoordinatorContext(
 		sandboxCwd?: string;
 		completionGateEnabled?: boolean;
 		homeOverview?: string | null;
+		createProject?: (input: { name: string; description?: string }) => Promise<{
+			id: string;
+			name: string;
+			workspaceId: string;
+		}>;
+		listStacks?: () => Promise<readonly { id: string; status: string; note?: string }[]>;
 	},
 ): void {
 	hostContext = context;
@@ -116,6 +131,13 @@ export function Coordinator() {
 	}
 	useTool(makeRecordAcceptance(currentRevision));
 
+	// Home conversation capabilities (product charter: the chat is the
+	// universal interface): the home chat creates projects and answers
+	// stack-availability questions from the real registry. Build runs live
+	// inside a project already, so they do not get these tools.
+	if (context.createProject) useTool(makeCreateProject({ createProject: context.createProject }));
+	if (context.listStacks) useTool(makeListStacks({ listStacks: context.listStacks }));
+
 	useAgentFinish(async (ctx) => {
 		// Home conversations have no plan of record and no acceptance ledger:
 		// the gate is a build-run discipline, not a chat discipline.
@@ -147,7 +169,9 @@ export function Coordinator() {
 	const homeInstruction = requireHostContext().homeOverview
 		? `HOME CONVERSATION CONTEXT (inject once, never read aloud verbatim):\n${requireHostContext().homeOverview}\n` +
 			'Talk naturally; there is no build plan here, so delegation and the completion gate do not apply. ' +
-			'If the user wants to build or repair one of the listed projects, tell them to open that project in the workspace so a run can be created for it.\n\n'
+			'You CAN create projects from this chat: when the user wants to start a new project, create it yourself with the create_project tool (asking for a name first if they have not given one) — never tell them to go create it somewhere else. After creating it, say it is ready and that opening that project in the workspace and sending a message there starts its run. ' +
+			'When the user asks which stacks are available, call list_stacks and answer only from its result. ' +
+			'If the user wants to build or repair one of the already-listed projects, tell them to open that project in the workspace so a run can be created for it.\n\n'
 		: '';
 
 	useInstruction(

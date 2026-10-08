@@ -88,7 +88,7 @@ export function Schedules(props: { projectId: string | null }): ReactElement {
 	if (state.kind === 'denied') {
 		return (
 			<section className="state-panel card-surface" data-testid="schedules-panel">
-				<p className="kicker">SCHEDULES</p>
+				<p className="kicker">BUILD</p>
 				<h3 className="state-title">Not your project</h3>
 				<p className="state-detail">Your session has no membership in this project's workspace.</p>
 			</section>
@@ -97,7 +97,7 @@ export function Schedules(props: { projectId: string | null }): ReactElement {
 	if (state.kind === 'error') {
 		return (
 			<section className="state-panel card-surface" data-testid="schedules-panel">
-				<p className="kicker">SCHEDULES</p>
+				<p className="kicker">BUILD</p>
 				<h3 className="state-title">Could not load schedules</h3>
 				<p className="state-detail">{state.message}</p>
 			</section>
@@ -105,20 +105,23 @@ export function Schedules(props: { projectId: string | null }): ReactElement {
 	}
 	if (state.kind === 'loading') {
 		return (
-			<section className="state-panel card-surface" data-testid="schedules-panel">
-				<p className="kicker">SCHEDULES</p>
-				<p className="state-detail">Loading schedules…</p>
-			</section>
+		<section className="state-panel card-surface" data-testid="schedules-panel">
+			<p className="kicker">BUILD</p>
+			<p className="state-detail">Loading schedules…</p>
+		</section>
 		);
 	}
 
 	return (
 		<section className="state-panel card-surface" data-testid="schedules-panel">
-			<p className="kicker">SCHEDULES</p>
-			<h3 className="state-title">Scheduled checks</h3>
+			<p className="kicker" data-tone="action">
+				BUILD
+			</p>
+			<h3 className="state-title">Automation</h3>
+			<p className="page-lede">Checks Caddie runs on a schedule — contest feeds watched, reminders kept — without you asking.</p>
 			{state.schedules.length === 0 ? (
 				<p className="state-detail" data-testid="schedules-empty">
-					No schedules in this project yet.
+					No schedules in this project yet. When Caddie sets up a scheduled check, it appears here.
 				</p>
 			) : (
 				<div data-testid="schedules-list">

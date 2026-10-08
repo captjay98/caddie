@@ -52,7 +52,7 @@ function WorkspaceBody(): ReactElement {
 
 	if (auth.isPending) {
 		return (
-			<WorkspaceChrome active="brief">
+			<WorkspaceChrome active="home">
 				<div className="shell-loading">
 					<StatePanel kind="loading" title="Checking your session…" />
 				</div>
@@ -61,7 +61,7 @@ function WorkspaceBody(): ReactElement {
 	}
 	if (auth.error) {
 		return (
-			<WorkspaceChrome active="brief">
+			<WorkspaceChrome active="home">
 				<div className="shell-loading">
 					<StatePanel
 						kind={failureKind(auth.error)}
@@ -79,7 +79,7 @@ function WorkspaceBody(): ReactElement {
 		// chrome crosses the auth boundary; the hero says what Caddie is in
 		// one plain sentence BEFORE asking who you are.
 		return (
-			<WorkspaceChrome active="brief">
+			<WorkspaceChrome active="home">
 				<div className="auth-hero">
 					<p className="auth-hero-kicker">CADDIE · your build assistant</p>
 					<h1 className="auth-hero-title">
@@ -100,7 +100,7 @@ function WorkspaceBody(): ReactElement {
 		);
 	}
 	return (
-		<WorkspaceChrome active="brief" onNewProject={openForm}>
+		<WorkspaceChrome active="home" onNewProject={openForm}>
 			<AuthedWorkspaceGate formOpen={formOpen} onOpenForm={openForm} onCloseForm={() => setFormOpen(false)} />
 		</WorkspaceChrome>
 	);
@@ -284,7 +284,7 @@ function AuthedWorkspace(props: {
 									data-testid="tab-brief"
 									onClick={() => setTab('brief')}
 								>
-									Brief
+									Decisions
 								</button>
 								<button
 									type="button"
@@ -294,7 +294,7 @@ function AuthedWorkspace(props: {
 									data-testid="tab-runs"
 									onClick={() => setTab('runs')}
 								>
-									Runs
+									Activity
 								</button>
 							</div>
 						) : null}
@@ -376,10 +376,11 @@ function AuthedWorkspace(props: {
 						onSend={(text) => {
 							const draft = channel.addDraft(text);
 							if (draft && transport) {
-								// admitted → the draft is superseded by the transport's own
-								// message; rejected → it stays with its attempt counted
+								// admitted → the draft is removed: the message lives in the
+								// transcript now, and no cancelled row lingers under it;
+								// rejected → it stays with its attempt counted
 								transport.send(draft.text, draft.idempotencyKey).then(
-									() => channel.discardDraft(draft.id),
+									() => channel.resolveDraft(draft.id),
 									() => channel.retryDraft(draft.id),
 								);
 							}
@@ -390,7 +391,7 @@ function AuthedWorkspace(props: {
 							if (draft && transport) {
 								// same idempotency key — the transport deduplicates anyway
 								transport.send(draft.text, draft.idempotencyKey).then(
-									() => channel.discardDraft(id),
+									() => channel.resolveDraft(id),
 									() => {},
 								);
 							}
@@ -409,7 +410,7 @@ function AuthedWorkspace(props: {
 					onClick={() => setTab('brief')}
 				>
 					<Icon name="doc" title="" />
-					Brief
+					Decisions
 				</button>
 				<button
 					type="button"
@@ -419,7 +420,7 @@ function AuthedWorkspace(props: {
 					onClick={() => setTab('runs')}
 				>
 					<Icon name="box" title="" />
-					Runs
+					Activity
 				</button>
 				<button
 					type="button"
@@ -429,15 +430,15 @@ function AuthedWorkspace(props: {
 					onClick={() => setTab('channel')}
 				>
 					<Icon name="sparkCheck" title="" />
-					Channel
+					Chat
 				</button>
 				<Link to="/discovery" className="tab-btn" data-testid="nav-discovery-mobile" search={(prev: Record<string, unknown>) => ({ ...prev })}>
 					<Icon name="target" title="" />
-					Discovery
+					Find
 				</Link>
 				<Link to="/schedules" className="tab-btn" data-testid="nav-schedules-mobile" search={(prev: Record<string, unknown>) => ({ ...prev })}>
 					<Icon name="calendar" title="" />
-					Schedules
+					Automation
 				</Link>
 			</nav>
 		</>

@@ -127,11 +127,13 @@ export function DesignReview(props: {
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">
-						gate · design · policy {policyVersion}
+						PLAN
 					</p>
-					<h2 className="ev-title">
-						Approving lets specialists build against plan r{latest.revision}
-					</h2>
+					<h2 className="ev-title">Plan review</h2>
+					<p className="page-lede">
+						Caddie drafts the plan; building starts only after you approve it. Approving lets
+						specialists build against plan r{latest.revision}, under policy {policyVersion}.
+					</p>
 				</div>
 				{latestRecord ? (
 					<span

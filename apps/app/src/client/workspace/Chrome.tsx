@@ -34,22 +34,33 @@ function currentTheme(): 'light' | 'dark' {
 }
 
 export type WorkspaceNavId =
-	| 'brief'
-	| 'runs'
-	| 'discovery'
-	| 'judge'
-	| 'submission'
-	| 'schedules'
+	| 'home'
+	| 'find'
+	| 'plan'
+	| 'build'
+	| 'prove'
+	| 'ship'
 	| 'settings';
 
-const NAV: ReadonlyArray<{ id: WorkspaceNavId; label: string; to: string; testid: string }> = [
-	{ id: 'brief', label: 'Brief', to: '/', testid: 'nav-brief' },
-	{ id: 'runs', label: 'Runs', to: '/runs', testid: 'nav-runs' },
-	{ id: 'discovery', label: 'Discovery', to: '/discovery', testid: 'nav-discovery' },
-	{ id: 'judge', label: 'Judge', to: '/judge', testid: 'nav-judge' },
-	{ id: 'submission', label: 'Submission', to: '/submission', testid: 'nav-submission' },
-	{ id: 'schedules', label: 'Schedules', to: '/schedules', testid: 'nav-schedules' },
-	{ id: 'settings', label: 'Settings', to: '/settings', testid: 'nav-settings' },
+/**
+ * Product charter §2 (docs/reviews/2026-10-08-product-charter.md): the nav
+ * row IS the loop — Find → Plan → Build → Prove → Ship, with Home (the
+ * workspace that steers the loop) first and Settings alone at the far right.
+ * Stages are verbs; each link's title states the stage in a sentence.
+ */
+const NAV: ReadonlyArray<{
+	id: WorkspaceNavId;
+	label: string;
+	to: string;
+	testid: string;
+	title: string;
+}> = [
+	{ id: 'home', label: 'Home', to: '/', testid: 'nav-home', title: 'The workspace — steer Caddie in the conversation' },
+	{ id: 'find', label: 'Find', to: '/discovery', testid: 'nav-find', title: 'Hackathons and opportunities Caddie is watching' },
+	{ id: 'plan', label: 'Plan', to: '/design-review', testid: 'nav-plan', title: 'Review and approve the plan before anything is built' },
+	{ id: 'build', label: 'Build', to: '/runs', testid: 'nav-build', title: 'Runs, files and scheduled automation' },
+	{ id: 'prove', label: 'Prove', to: '/evidence', testid: 'nav-prove', title: 'Evidence and the judge review' },
+	{ id: 'ship', label: 'Ship', to: '/submission', testid: 'nav-ship', title: 'The submission package, checked against the rules' },
 ];
 
 interface WorkspaceChromeContextValue {
@@ -323,12 +334,12 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 				</header>
 				{authenticated ? (
 					<nav className="app-nav" aria-label="Workspace" data-testid="workspace-nav">
-						<span className="nav-group">Work</span>
 						{NAV.map((item) => (
 							<Link
 								key={item.id}
 								to={item.to}
 								data-testid={item.testid}
+								title={item.title}
 								aria-current={props.active === item.id ? 'page' : undefined}
 								search={(prev: Record<string, unknown>) => ({ ...prev })}
 							>
@@ -338,10 +349,12 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 						<span className="spacer"></span>
 						<Link
 							to="/settings"
-							data-testid="nav-integrations"
+							data-testid="nav-settings"
+							title="Profile, connections, stacks, memory"
+							aria-current={props.active === 'settings' ? 'page' : undefined}
 							search={(prev: Record<string, unknown>) => ({ ...prev })}
 						>
-							<Icon name="plug" title="integrations" /> Integrations
+							Settings
 						</Link>
 					</nav>
 				) : null}

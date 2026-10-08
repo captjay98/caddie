@@ -312,7 +312,7 @@ test.describe('P11 discovery surface (composed build, stubbed /api)', () => {
 		await page.goto(`${BASE}/app/discovery?project=proj-a`);
 
 		await expect(page.locator('section[aria-label="Discovery results"]')).toBeVisible();
-		await expect(page.getByRole('heading', { name: 'Discovery' })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Hackathons' })).toBeVisible();
 		await expect(page.getByText('No candidates yet — run the feed.')).toBeVisible();
 		// No profile country on record → the honest UNKNOWN note, never a guess.
 		await expect(page.getByText('none recorded — country rules stay UNKNOWN')).toBeVisible();
@@ -409,7 +409,7 @@ test.describe('P11 discovery surface (composed build, stubbed /api)', () => {
 		// Topbar: Discovery carries the selected project through the search param.
 		await page.goto(`${BASE}/app/?project=proj-a`);
 		await expect(page.getByTestId('project-selector')).toHaveValue('proj-a');
-		await page.getByTestId('nav-discovery').click();
+		await page.getByTestId('nav-find').click();
 		await expect(page).toHaveURL(/\/app\/discovery\?project=proj-a$/);
 		await expect(page.locator('section[aria-label="Discovery results"]')).toBeVisible();
 

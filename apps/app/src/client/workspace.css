@@ -1507,6 +1507,96 @@ a.btn-ghost.topbar-nav-link {
 	align-content: start;
 }
 
+/* --- product identity layer (docs/reviews/2026-10-08-product-charter.md) ----
+   Every stage page answers "what is this and what do I do": a stage kicker, a
+   plain-noun title, and a one-line lede — then a tab strip when the stage has
+   sibling surfaces. .page-col keeps the tabs and the panel on one shared
+   column (widest panel is 860px). */
+.page-col {
+	width: 100%;
+	max-width: 860px;
+	display: grid;
+	gap: 0.9rem;
+}
+
+.page-col > * {
+	width: 100%;
+	justify-self: center;
+}
+
+.page-lede {
+	margin: 0.2rem 0 0;
+	font-size: var(--r-meta);
+	line-height: 1.5;
+	color: var(--color-muted);
+	max-width: 62ch;
+}
+
+.stage-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	justify-self: start !important;
+	width: 100%;
+}
+
+.stage-tabs a {
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--color-muted);
+	text-decoration: none;
+	padding: 0.3rem 0.65rem;
+	border: 1px solid transparent;
+	border-radius: 999px;
+}
+
+.stage-tabs a:hover {
+	color: var(--color-bright);
+	background: color-mix(in srgb, var(--color-bright) 6%, transparent);
+}
+
+.stage-tabs a[aria-current='page'] {
+	color: var(--color-action);
+	border-color: color-mix(in srgb, var(--color-action) 35%, transparent);
+	background: color-mix(in srgb, var(--color-action) 10%, transparent);
+}
+
+/* First-run loop strip (Start screen): the five-stage loop teaches the
+   product in one glance. */
+.loop-strip {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem 0.9rem;
+	list-style: none;
+	margin: 0.4rem 0 0;
+	padding: 0;
+	align-items: baseline;
+}
+
+.loop-strip li {
+	display: flex;
+	align-items: baseline;
+	gap: 0.4rem;
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+}
+
+.loop-strip li + li::before {
+	content: '→';
+	color: color-mix(in srgb, var(--color-muted) 55%, transparent);
+	margin-right: 0.5rem;
+}
+
+.loop-strip .loop-step {
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--color-action);
+}
+
 .sign-in-card {
 	max-width: 380px;
 	width: 100%;

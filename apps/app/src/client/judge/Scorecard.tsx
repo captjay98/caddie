@@ -166,9 +166,13 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">
-						judge coaching — never a prediction
+						PROVE
 					</p>
-					<h2 className="ev-title">Judge coaching</h2>
+					<h2 className="ev-title">Judge review</h2>
+					<p className="page-lede">
+						An automated judge scores the work against the contest rules — coaching to make it better,
+						never a prediction of the result.
+					</p>
 				</div>
 				<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
 					{busy ? 'Loading…' : 'Refresh'}

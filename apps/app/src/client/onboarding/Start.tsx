@@ -57,6 +57,13 @@ export function Start(props: { onStartIdea?: () => void } = {}): ReactElement {
 					Pick a starting point — you can change direction any time. Caddie shows you a plan and
 					waits for your OK before anything happens.
 				</p>
+				<ol className="loop-strip" aria-label="How Caddie works">
+					<li><span className="loop-step">Find</span> a contest</li>
+					<li><span className="loop-step">Plan</span> — you approve it</li>
+					<li><span className="loop-step">Build</span> — Caddie writes it</li>
+					<li><span className="loop-step">Prove</span> — evidence kept</li>
+					<li><span className="loop-step">Ship</span> — you submit</li>
+				</ol>
 			</header>
 			<div className="start-cards">
 				<StartCard

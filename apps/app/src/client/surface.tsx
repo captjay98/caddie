@@ -11,14 +11,18 @@ import { EvidenceDrawer } from './evidence/Drawer.tsx';
 import { ArtifactViewer, type ViewerRevision } from './artifacts/Viewer.tsx';
 import { DesignReview } from './planning/DesignReview.tsx';
 import { RepositoryPicker, type SelectedRepository } from './repositories/RepositoryPicker.tsx';
+import { RunInspector } from './runs/RunInspector.tsx';
 import {
 	useArtifactRevisions,
+	useArtifacts,
 	useAuthStatus,
 	usePlanDocRevisions,
 	useProjects,
+	useRunBindings,
 	useSessionActor,
 } from './queries.ts';
 import { WorkspaceChrome, useWorkspaceChrome } from './workspace/Chrome.tsx';
+import { StageTabs } from './workspace/StageTabs.tsx';
 import { Link } from '@tanstack/react-router';
 
 /** Mobile navigation: the gate surfaces' crumb row carries the way back,
@@ -146,9 +150,11 @@ function ProjectSurface(props: { children: (projectId: string) => ReactElement }
 
 export function DiscoveryPage(): ReactElement {
 	return (
-		<WorkspaceChrome active="discovery">
+		<WorkspaceChrome active="find">
 			<div className="shell-loading shell-page">
-				<ProjectSurface>{(projectId) => <DiscoveryResults projectId={projectId} />}</ProjectSurface>
+				<div className="page-col">
+					<ProjectSurface>{(projectId) => <DiscoveryResults projectId={projectId} />}</ProjectSurface>
+				</div>
 			</div>
 		</WorkspaceChrome>
 	);
@@ -156,9 +162,12 @@ export function DiscoveryPage(): ReactElement {
 
 export function JudgePage(): ReactElement {
 	return (
-		<WorkspaceChrome active="judge">
+		<WorkspaceChrome active="prove">
 			<div className="shell-loading shell-page">
-				<ProjectSurface>{(projectId) => <JudgeScorecard projectId={projectId} />}</ProjectSurface>
+				<div className="page-col">
+					<StageTabs stage="prove" current="judge" />
+					<ProjectSurface>{(projectId) => <JudgeScorecard projectId={projectId} />}</ProjectSurface>
+				</div>
 			</div>
 		</WorkspaceChrome>
 	);
@@ -166,9 +175,11 @@ export function JudgePage(): ReactElement {
 
 export function SubmissionPage(): ReactElement {
 	return (
-		<WorkspaceChrome active="submission">
+		<WorkspaceChrome active="ship">
 			<div className="shell-loading shell-page">
-				<ProjectSurface>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectSurface>
+				<div className="page-col">
+					<ProjectSurface>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectSurface>
+				</div>
 			</div>
 		</WorkspaceChrome>
 	);
@@ -176,36 +187,104 @@ export function SubmissionPage(): ReactElement {
 
 export function SchedulesPage(): ReactElement {
 	return (
-		<WorkspaceChrome active="schedules">
+		<WorkspaceChrome active="build">
 			<div className="shell-loading shell-page">
-				<ProjectSurface>{(projectId) => <Schedules projectId={projectId} />}</ProjectSurface>
+				<div className="page-col">
+					<StageTabs stage="build" current="schedules" />
+					<ProjectSurface>{(projectId) => <Schedules projectId={projectId} />}</ProjectSurface>
+				</div>
 			</div>
 		</WorkspaceChrome>
 	);
 }
 
-/** Board screen 09: the P10 evidence inspector, finally reachable. */
+/** Board screen 09: the P10 evidence inspector — the Prove stage's landing. */
 export function EvidencePage(): ReactElement {
 	const search = useSearch({ strict: false }) as { claim?: string };
 	return (
-		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Evidence" />}>
+		<WorkspaceChrome active="prove" crumbs={<PageCrumbs label="Evidence" />}>
 			<div className="shell-loading shell-page">
-				<ProjectSurface>
-					{(projectId) => <EvidenceDrawer projectId={projectId} focusClaimType={search.claim} />}
-				</ProjectSurface>
+				<div className="page-col">
+					<StageTabs stage="prove" current="evidence" />
+					<ProjectSurface>
+						{(projectId) => <EvidenceDrawer projectId={projectId} focusClaimType={search.claim} />}
+					</ProjectSurface>
+				</div>
 			</div>
 		</WorkspaceChrome>
 	);
 }
 
-/** Board screen 10: the P07 artifact viewer, finally reachable. */
+/** Board screen 10: the P07 artifact viewer — the Build stage's Files tab. */
 export function ArtifactsPage(): ReactElement {
 	return (
-		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Artifacts" />}>
+		<WorkspaceChrome active="build" crumbs={<PageCrumbs label="Files" />}>
 			<div className="shell-loading shell-page">
-				<ProjectSurface>{(projectId) => <ArtifactsBody projectId={projectId} />}</ProjectSurface>
+				<div className="page-col">
+					<StageTabs stage="build" current="artifacts" />
+					<ProjectSurface>{(projectId) => <ArtifactsBody projectId={projectId} />}</ProjectSurface>
+				</div>
 			</div>
 		</WorkspaceChrome>
+	);
+}
+
+/**
+ * The Build stage's Activity page (/runs) — the same RunInspector the
+ * workspace aside mounts, now a real route. The old nav pointed at /runs
+ * without a route behind it, so the link was a NOT FOUND dead end; the
+ * charter's Build stage makes it the tab strip's landing.
+ */
+export function RunsPage(): ReactElement {
+	return (
+		<WorkspaceChrome active="build" crumbs={<PageCrumbs label="Activity" />}>
+			<div className="shell-loading shell-page">
+				<div className="page-col">
+					<StageTabs stage="build" current="runs" />
+					<ProjectSurface>{(projectId) => <RunsBody projectId={projectId} />}</ProjectSurface>
+				</div>
+			</div>
+		</WorkspaceChrome>
+	);
+}
+
+function RunsBody(props: { projectId: string }): ReactElement {
+	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const runBindings = useRunBindings(actor, props.projectId);
+	const artifacts = useArtifacts(actor, props.projectId);
+	return (
+		<div className="settings-stack" style={undefined}>
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						BUILD
+					</p>
+					<h2 className="ev-title">Activity</h2>
+					<p className="page-lede">
+						What Caddie is doing and what it produced — every run with its state and specialist, and
+						the files each one wrote.
+					</p>
+				</div>
+			</div>
+			<RunInspector
+				runs={{
+					isPending: runBindings.isPending,
+					isFetching: runBindings.isFetching,
+					error: runBindings.error,
+					items: runBindings.data?.runBindings ?? [],
+					retry: () => void runBindings.refetch(),
+				}}
+				artifacts={{
+					isPending: artifacts.isPending,
+					isFetching: artifacts.isFetching,
+					error: artifacts.error,
+					items: artifacts.data?.artifacts ?? [],
+					retry: () => void artifacts.refetch(),
+				}}
+				projectId={props.projectId}
+			/>
+		</div>
 	);
 }
 
@@ -227,9 +306,11 @@ function ArtifactsBody(props: { projectId: string }): ReactElement {
 /** Board screen 11: the design gate — the decision that unblocks all building. */
 export function DesignReviewPage(): ReactElement {
 	return (
-		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Design gate" />}>
+		<WorkspaceChrome active="plan" crumbs={<PageCrumbs label="Plan review" />}>
 			<div className="shell-loading shell-page">
-				<ProjectSurface>{(projectId) => <DesignReviewBody projectId={projectId} />}</ProjectSurface>
+				<div className="page-col">
+					<ProjectSurface>{(projectId) => <DesignReviewBody projectId={projectId} />}</ProjectSurface>
+				</div>
 			</div>
 		</WorkspaceChrome>
 	);
@@ -251,12 +332,14 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
 	);
 }
 
-/** Board screen 12: the P08 repository picker — reachable from onboarding. */
+/** Board screen 12: the P08 repository picker — setup, reachable from onboarding. */
 export function RepositoriesPage(): ReactElement {
 	return (
 		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Repositories" />}>
 			<div className="shell-loading shell-page">
-				<ProjectSurface>{(projectId) => <RepositoriesBody projectId={projectId} />}</ProjectSurface>
+				<div className="page-col">
+					<ProjectSurface>{(projectId) => <RepositoriesBody projectId={projectId} />}</ProjectSurface>
+				</div>
 			</div>
 		</WorkspaceChrome>
 	);
@@ -277,6 +360,18 @@ function RepositoriesBody(props: { projectId: string }): ReactElement {
 	}
 	return (
 		<div className="settings-stack" style={undefined}>
+			<div className="r-section-head">
+				<div>
+					<p className="kicker" data-tone="action">
+						SETUP
+					</p>
+					<h2 className="ev-title">Repositories</h2>
+					<p className="page-lede">
+						The GitHub connection Caddie builds through. Reading lets Caddie plan and gather evidence
+						from a repository — writing, merging and deploying stay behind their own separate approvals.
+					</p>
+				</div>
+			</div>
 			{picked ? (
 				<section className="card-surface settings-panel" data-testid="picked-repo">
 					<h3 className="ev-head">Picked {picked.repoFullName}</h3>

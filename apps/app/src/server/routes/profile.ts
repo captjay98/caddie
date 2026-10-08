@@ -14,6 +14,7 @@ import {
 	proposeMemoryFact,
 	retractMemoryFact,
 } from '../memory.ts';
+import { STACK_CATALOG } from '../stacks.ts';
 
 /**
  * P14 profile/memory/search router — every route derives its user id
@@ -184,17 +185,7 @@ export function createProfileRouter(): Hono<{ Bindings: Env }> {
 
 	// --- enabled stacks (honest, no inherited pricing or fake availability) -----
 
-	router.get('/stacks', (c) =>
-		c.json({
-			stacks: [
-				{ id: 'react-hono', status: 'enabled', note: 'proving in the forge' },
-				{ id: 'tanstack-start', status: 'planned' },
-				{ id: 'laravel-inertia', status: 'planned' },
-				{ id: 'fastapi-react', status: 'planned' },
-				{ id: 'flutter', status: 'planned' },
-			],
-		}),
-	);
+	router.get('/stacks', (c) => c.json({ stacks: STACK_CATALOG }));
 
 	return router;
 }

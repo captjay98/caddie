@@ -161,12 +161,13 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">
-						evidence
+						PROVE
 					</p>
-					<h2 className="ev-title">Nothing here is asserted without a snapshot behind it</h2>
-					<p className="state-detail">
-						Every reading the plan rests on became a claim pointing at an immutable snapshot with its
-						SHA-256. A refused fetch is listed with its stored reason, never as an absent source.
+					<h2 className="ev-title">Evidence</h2>
+					<p className="page-lede">
+						Nothing here is asserted without a snapshot behind it — every claim points at an immutable
+						source with its SHA-256, and a refused fetch is listed with its stored reason, never as an
+						absent source.
 					</p>
 				</div>
 				<span className="count">

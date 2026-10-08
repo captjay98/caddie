@@ -173,9 +173,13 @@ export function DiscoveryResults(props: { projectId: string; apiBase?: string })
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">
-						ranked on what could be read
+						FIND
 					</p>
-					<h2 className="ev-title">Discovery</h2>
+					<h2 className="ev-title">Hackathons</h2>
+					<p className="page-lede">
+						Contests Caddie is watching for you — deadlines, rules, and why each one fits. Ranked only
+						on what could actually be read.
+					</p>
 				</div>
 				<span className="disc-actions">
 					<button type="button" className="btn-key" onClick={() => void runFeed()} disabled={busy}>

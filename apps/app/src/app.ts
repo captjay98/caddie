@@ -21,7 +21,12 @@ import { createArtifactsRouter } from './server/routes/artifacts.ts';
 import { createPreviewsRouter } from './server/routes/previews.ts';
 import { lookupRunByConversation, recordRepairRound, recordVerification } from './server/runs.ts';
 import type { RunBindingRecord } from '@caddie/contracts';
-import { createPlanDocRevision, listProjectsForActor } from './server/projects.ts';
+import {
+	createPlanDocRevision,
+	createProject as createProjectService,
+	listProjectsForActor,
+} from './server/projects.ts';
+import { STACK_CATALOG } from './server/stacks.ts';
 import { LruCache } from './server/lru-cache.ts';
 import {
 	SandboxDriver,
@@ -154,6 +159,14 @@ async function coordinatorContext(
 	completionGateEnabled: boolean;
 	/** Home runs only: the actor's project overview for cross-project discussion. */
 	homeOverview: string | null;
+	/** Home runs only: create a project in the actor's workspace (chat-first). */
+	createProject?: (input: { name: string; description?: string }) => Promise<{
+		id: string;
+		name: string;
+		workspaceId: string;
+	}>;
+	/** Home runs only: the honest stack catalog. */
+	listStacks?: () => Promise<readonly { id: string; status: string; note?: string }[]>;
 }> {
 	// The Home project is the project-less chat surface: no sandbox, no
 	// completion gate, and a projects overview so Caddie can discuss
@@ -203,6 +216,22 @@ async function coordinatorContext(
 			sandboxDriver: null,
 			completionGateEnabled: false,
 			homeOverview,
+			// The chat-first capability: the home conversation can create real
+			// projects in the actor's workspace, through the same permission-
+			// checked service the REST route uses (the actor is already
+			// authenticated by the conversation guard; scope.workspaceId is
+			// the home project's own workspace).
+			createProject: (input) =>
+				createProjectService(
+					env.DB,
+					{ actorId: scope.actorId, workspaceId: scope.workspaceId },
+					{
+						workspaceId: scope.workspaceId,
+						name: input.name,
+						...(input.description ? { description: input.description } : {}),
+					},
+				),
+			listStacks: async () => STACK_CATALOG,
 		};
 	}
 

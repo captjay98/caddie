@@ -734,3 +734,34 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-PRODUCT-CHARTER (owner-directed: 'decide how everything should look/feel, where everything should go' + 'we should be able to do everything from the chat' + draft-row-after-every-message complaint)",
+  "status": "LOCAL VERIFIED",
+  "sha": "see git log feat(ui): product charter wave 1",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bun run test:browser -- P01/P06/P07/P11/P13/P14", "exitCode": 0, "receipt": "all PASS (P05/P08/P10/P12 have no browser mapping — named, not faked)"},
+    {"command": "bun test tests/routing.test.ts tests/agent-permissions.test.ts tests/home-chat-tools.test.ts tests/p15a-local.test.ts tests/discovery.test.ts", "exitCode": 0, "receipt": "13 + 34 + 3 + 3 + 3 pass, 0 fail"},
+    {"command": "signed-in re-capture: 9 screenshots (7 desktop + 2 mobile) of the restyled surfaces", "exitCode": 0, "receipt": "nav reads Home·Find·Plan·Build·Prove·Ship+Settings; loop strip renders on the start screen; stage tabs render on Build and Prove pages; capture exposed that /runs had NO route behind the nav link (NOT FOUND) — fixed by adding RunsPage"},
+    {"command": "bun test tests/memory.integration.test.ts with changes stashed (clean HEAD)", "exitCode": 1, "receipt": "same 13 pass / 2 fail as with changes — the fixture 500 on project creation is PRE-EXISTING, not from this work"}
+  ],
+  "artifacts": [
+    {"path": "docs/reviews/2026-10-08-product-charter.md", "note": "the decision: the product IS the loop (Find-Plan-Build-Prove-Ship); stage=nav item; every page answers 'what is this and what do I do'; the chat is the universal interface (an agent reply telling you to go do it elsewhere is a bug); language rules (user nouns in nav/titles, internal nouns stay in evidence views)"},
+    {"path": "apps/app/src/client/workspace/Chrome.tsx + StageTabs.tsx + surface.tsx + routes.tsx", "note": "stage nav (6 stages + Settings, dead 'Runs' link replaced by a real /runs route wrapping RunInspector); stage tab strips on Build (Activity/Files/Automation) and Prove (Evidence/Judge review); page identity headers on every routed surface; Repositories gets a page head"},
+    {"path": "apps/app/src/client/workspace/Shell.tsx", "note": "aside tabs renamed Decisions/Activity, mobile tabs Decisions/Activity/Chat/Find/Automation (testids unchanged); send-success now calls channel.resolveDraft (row removed) instead of discardDraft (row lingered as 'cancelled — kept for reference' after EVERY message)"},
+    {"path": "apps/app/src/agents/tools.ts + coordinator.ts + app.ts + server/stacks.ts", "note": "chat-first tools for home runs: create_project (same permission-checked service as POST /api/projects, scoped to the actor's own workspace via the conversation guard's scope) and list_stacks (shared STACK_CATALOG registry, previously hardcoded in the profile route); home instruction rewritten — creating a project in chat is the default, 'go create it elsewhere' is forbidden"},
+    {"path": "apps/app/src/client/onboarding/Start.tsx + workspace.css", "note": "five-step loop strip (Find-Plan-Build-Prove-Ship) on the start screen; .page-col/.page-lede/.stage-tabs/.loop-strip in the identity layer CSS"}
+  ],
+  "environment": "local vite dev :5176, minted session cookie (D1 token + BETTER_AUTH_SECRET, in-memory only)",
+  "providerCalls": "none",
+  "specReview": "owner visual acceptance pending on http://localhost:5176/app/",
+  "qualityReview": "nav row, loop strip, stage tabs, page headers and mobile tabs verified in captures; submission honesty line now appears in both lede and body (spec locator updated for strict mode)",
+  "limitations": [
+    "create_project/list_stacks are verified at tool level (unit) and by typecheck — the live model round-trip (agent actually invoking the tool in a real conversation) needs credentials and is NOT claimed",
+    "the draft success-path removal has no automated browser test (browser specs run without a transport); covered by code review + existing draft-lifecycle specs",
+    "tests/memory.integration.test.ts has 2 pre-existing failures on HEAD (fixture project creation 500) — unrelated, flagged for a separate look"
+  ]
+}
+```

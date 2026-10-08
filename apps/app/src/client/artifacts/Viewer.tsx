@@ -180,9 +180,13 @@ export function ArtifactViewer(props: {
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">
-						content-addressed
+						BUILD
 					</p>
-					<h2 className="ev-title">Artifact revisions</h2>
+					<h2 className="ev-title">Files</h2>
+					<p className="page-lede">
+						Everything Caddie wrote, every revision kept — content-addressed, so nothing is ever
+						silently overwritten.
+					</p>
 				</div>
 				<span className="count">{props.revisions.length} immutable</span>
 			</div>
