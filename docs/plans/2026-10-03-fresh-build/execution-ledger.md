@@ -647,3 +647,34 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-VOICE-PASS (owner-directed: 'the current UI/UX is atrocious, especially for a first user/non-technical person' — first-run voice + mobile chrome, reference: today.ai/hacksteward/caddie)", "status": "LOCAL VERIFIED", "sha": "see git log feat(ui): first-run voice + mobile chrome (today.ai pattern)",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bunx playwright test tests/browser/workspace.spec.ts tests/browser/conversation.spec.ts tests/browser/auth.spec.ts tests/browser/settings.spec.ts tests/browser/discovery.spec.ts", "exitCode": 0, "receipt": "workspace 17 + conversation 3 + auth 3 + settings 5 + discovery 6 pass (34) — spec assertions updated to the new human copy (sign-in 'ready'/'not set up yet', repo card 'needs a GitHub connection first', standby 'your first message starts a run', mobile project-selector-mobile in the overflow test)"},
+    {"command": "bun run test:browser -- P01 P06 P11 P13 P14 + artifacts/forge-journey/landing/release", "exitCode": 0, "receipt": "all packets PASS; misc 25 passed"},
+    {"command": "reference capture: aside-browser mobile study of the owner's today.ai session + local mobile captures of hacksteward (5173) and caddie (3000) at 390x844", "exitCode": 0, "receipt": "today.ai mobile: 3 top controls (assistant chip left, search+settings right) + 5-tab bottom bar; hacksteward mobile: 4-element header + bottom tab bar (TODAY/HACKATHONS/WORK/MORE); caddie mobile: wordmark+theme+one primary — direction: 3 top controls + 5 bottom content tabs"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/workspace/Shell.tsx + Chrome.tsx", "note": "sign-in gains a hero ('It reads the rules, drafts the plan, and builds it. You approve every step.') before the card; account control is now an initial-based AVATAR chip (name from the session, user glyph fallback); topbar-context (project select/New project/refresh) hidden on mobile"},
+    {"path": "apps/app/src/client/onboarding/Start.tsx", "note": "REWRITTEN for a non-technical reader: constrained 880px three-card layout (was full-bleed), plain-language copy ('nothing gets built until you approve it'), the reviewer-speak sentence ('it is not a button that pretends to work') removed, planned card says 'Coming soon — needs a GitHub connection first'"},
+    {"path": "apps/app/src/client/brief/DecisionCard.tsx + conversation/Channel.tsx", "note": "empty states humanized: 'You're all set — nothing needs you right now' + 'Say hello — your first message starts a run'; the transport-honesty strings that named infrastructure are gone from user copy"},
+    {"path": "apps/app/src/client/auth.ts", "note": "provider chips say 'ready'/'not set up yet' (were configured/not configured); the /api/integrations/health presence line became a human sentence in a title attribute"},
+    {"path": "apps/app/src/client/workspace.css + Shell.tsx bottom nav", "note": "MOBILE CHROME (today.ai pattern): topbar = 3 controls (wordmark · theme · avatar); 5-tab bottom bar with icons (Brief · Runs · Channel · Discovery · Schedules); project switching/refresh live in a mobile-only context row; gate surfaces' crumbs carry a back-to-workspace link"},
+    {"path": "apps/app/vite.config.ts", "note": "dev server pinned to localhost:5176 with strictPort (5173-5175 belong to other local projects; OAuth registered for 5176) — committed 1cb04490"}
+  ],
+  "environment": "local vite dev :5176 (owner's in-app browser), playwright chromium_headless_shell v1243, aside-browser for the owner's today.ai session",
+  "providerCalls": "none",
+  "specReview": "deferred to owner visual acceptance (the owner is the reviewer for this pass — the critique was theirs)",
+  "qualityReview": "owner visual acceptance on http://localhost:5176/app/ (mobile + desktop); reference frames: today.ai mobile capture in ~/.aside/u/0/artifacts/today_mobile_*.png",
+  "limitations": [
+    "the gate surfaces get a back link in crumbs but no bottom tab bar yet — full bottom-bar unification across routes is the next slice if the owner wants it",
+    "landing light theme remains deferred; the composed landing at '/' only shows in the build (dev '/' serves the SPA sign-in, which now carries its own hero)",
+    "the avatar initial comes from the session user name; accounts without a name show the user glyph, never a guessed initial",
+    "New project is reachable on mobile via the context row and the account menu; the topbar no longer carries it",
+    "unverified surface text (brief/schedules discovery tabs) still links with ?project= carried by search params"
+  ]
+}
+```

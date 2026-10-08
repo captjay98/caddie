@@ -24,6 +24,7 @@ import {
 	useHomeProject,
 	useProjects,
 	useSessionActor,
+	useSessionDisplayName,
 } from '../queries.ts';
 
 export const THEME_KEY = 'caddie-theme';
@@ -100,6 +101,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	const actorMemo = useMemo(() => ({ actorId }), [actorId]);
 
 	const projects = useProjects(actorMemo);
+	const displayName = useSessionDisplayName();
 	const [theme, setTheme] = useState<'light' | 'dark'>(currentTheme);
 	const [accountOpen, setAccountOpen] = useState(false);
 
@@ -204,9 +206,9 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 					{authenticated ? (
 						<>
 							{projects.isPending ? (
-								<span className="mono-id">loading projects…</span>
+								<span className="mono-id topbar-context">loading projects…</span>
 							) : (
-								<label className="project-select-wrap">
+								<label className="project-select-wrap topbar-context">
 									<span className="kicker">Project</span>
 									<select
 										className="input project-select"
@@ -225,7 +227,12 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 									</select>
 								</label>
 							)}
-							<button type="button" className="btn-ghost" data-testid="new-project" onClick={onNewProject}>
+							<button
+								type="button"
+								className="btn-ghost topbar-context"
+								data-testid="new-project"
+								onClick={onNewProject}
+							>
 								<Icon name="plus" title="New project" /> New project
 							</button>
 						</>
@@ -240,7 +247,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 						{authenticated ? (
 							<button
 								type="button"
-								className="icon-btn"
+								className="icon-btn topbar-context"
 								title="Refresh data"
 								aria-label="Refresh data"
 								data-testid="refresh-data"
@@ -269,18 +276,34 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 									}
 								}}
 							>
-								<button
-									type="button"
-									className="btn-ghost"
-									aria-expanded={accountOpen}
-									aria-label="Account"
-									data-testid="account-menu"
-									onClick={() => setAccountOpen((open) => !open)}
-								>
-									<Icon name="user" title="Account" /> Account
-								</button>
+<button
+								type="button"
+								className="avatar-btn"
+								aria-label="Account"
+								aria-expanded={accountOpen}
+								data-testid="account-menu"
+								title={displayName.data ?? 'Account'}
+								onClick={() => setAccountOpen((open) => !open)}
+							>
+								{displayName.data ? (
+									<span className="avatar-initial">{displayName.data.trim()[0]!.toUpperCase()}</span>
+								) : (
+									<Icon name="user" title="Account" />
+								)}
+							</button>
 								{accountOpen ? (
 									<div className="account-menu-pop" role="menu" data-testid="account-menu-pop">
+										<button
+											type="button"
+											role="menuitem"
+											data-testid="account-new-project"
+											onClick={() => {
+												setAccountOpen(false);
+												onNewProject();
+											}}
+										>
+											<Icon name="plus" title="New project" /> New project
+										</button>
 										<Link
 											to="/settings"
 											role="menuitem"

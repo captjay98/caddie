@@ -193,8 +193,10 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 						className: 'status-pill',
 						'data-status': configured ? 'handled' : 'planned',
 						'data-testid': `sign-in-${id}-state`,
+						title:
+							'availability is read from this deployment before you click — so a sign-in button is never offered when it cannot work',
 					},
-					availability === null ? 'checking…' : configured ? 'configured' : 'not configured',
+					availability === null ? 'checking…' : configured ? 'ready' : 'not set up yet',
 				),
 			);
 		}),
@@ -202,7 +204,7 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 			? createElement(
 					'p',
 					{ key: 'presence', className: 'mono-id sign-in-presence', 'data-testid': 'sign-in-presence' },
-					'presence read from /api/integrations/health · names and pairs only, never the values',
+					'Both options are checked before you click — a sign-in button is never offered when it cannot work.',
 				)
 			: null,
 		error

@@ -240,11 +240,11 @@ export function Channel(props: {
 				{source.messages.length === 0 ? (
 					<StatePanel
 						kind="empty"
-						title="Channel standby"
+						title="Say hello — your first message starts a run"
 						detail={
 							props.transportLive
-								? 'No run yet — your first message starts one. Caddie drafts a plan revision, pins every claim to a source, and stops at the design gate before anything gets built. Sends are idempotency-keyed and answered at most once.'
-								: 'No run yet — your first message starts one. Caddie drafts a plan revision, pins every claim to a source, and stops at the design gate before anything gets built.'
+								? 'Tell Caddie what you want in plain words. It drafts a plan, shows you where every fact came from, and waits for your OK before building anything. Every message is answered at most once.'
+								: 'Tell Caddie what you want in plain words. It drafts a plan, shows you where every fact came from, and waits for your OK before building anything.'
 						}
 					/>
 				) : (

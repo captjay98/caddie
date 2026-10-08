@@ -118,8 +118,8 @@ test.describe('P01 sign-in panel (composed build)', () => {
 		await expect(github).toHaveText('Continue with GitHub');
 		await expect(page.getByTestId('sign-in-panel')).toBeVisible();
 		// availability stated before the click, never after it
-		await expect(page.getByTestId('sign-in-google-state')).toHaveText('configured');
-		await expect(page.getByTestId('sign-in-github-state')).toHaveText('configured');
+		await expect(page.getByTestId('sign-in-google-state')).toHaveText('ready');
+		await expect(page.getByTestId('sign-in-github-state')).toHaveText('ready');
 		// no stale error state on a fresh page
 		await expect(page.getByTestId('sign-in-error')).toHaveCount(0);
 	});
@@ -134,9 +134,9 @@ test.describe('P01 sign-in panel (composed build)', () => {
 			}),
 		);
 		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('sign-in-google-state')).toHaveText('not configured');
+		await expect(page.getByTestId('sign-in-google-state')).toHaveText('not set up yet');
 		await expect(page.getByTestId('sign-in-google')).toBeDisabled();
-		await expect(page.getByTestId('sign-in-github-state')).toHaveText('configured');
+		await expect(page.getByTestId('sign-in-github-state')).toHaveText('ready');
 		await expect(page.getByTestId('sign-in-github')).toBeEnabled();
 	});
 

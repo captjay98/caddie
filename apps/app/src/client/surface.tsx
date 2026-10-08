@@ -19,6 +19,20 @@ import {
 	useSessionActor,
 } from './queries.ts';
 import { WorkspaceChrome, useWorkspaceChrome } from './workspace/Chrome.tsx';
+import { Link } from '@tanstack/react-router';
+
+/** Mobile navigation: the gate surfaces' crumb row carries the way back,
+ *  since the workspace's bottom tabs do not render on these routes. */
+function PageCrumbs(props: { label: string }): ReactElement {
+	return (
+		<>
+			<Link to="/" search={(prev: Record<string, unknown>) => ({ ...prev })}>
+				← Workspace
+			</Link>
+			<span>{props.label}</span>
+		</>
+	);
+}
 
 /**
  * P11/P13 standalone surfaces — the workspace-shell integration pattern for
@@ -174,7 +188,7 @@ export function SchedulesPage(): ReactElement {
 export function EvidencePage(): ReactElement {
 	const search = useSearch({ strict: false }) as { claim?: string };
 	return (
-		<WorkspaceChrome active="none" crumbs={<span>Evidence · readings and their snapshots</span>}>
+		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Evidence" />}>
 			<div className="shell-loading">
 				<ProjectSurface>
 					{(projectId) => <EvidenceDrawer projectId={projectId} focusClaimType={search.claim} />}
@@ -187,7 +201,7 @@ export function EvidencePage(): ReactElement {
 /** Board screen 10: the P07 artifact viewer, finally reachable. */
 export function ArtifactsPage(): ReactElement {
 	return (
-		<WorkspaceChrome active="none" crumbs={<span>Artifacts · content-addressed revisions</span>}>
+		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Artifacts" />}>
 			<div className="shell-loading">
 				<ProjectSurface>{(projectId) => <ArtifactsBody projectId={projectId} />}</ProjectSurface>
 			</div>
@@ -213,7 +227,7 @@ function ArtifactsBody(props: { projectId: string }): ReactElement {
 /** Board screen 11: the design gate — the decision that unblocks all building. */
 export function DesignReviewPage(): ReactElement {
 	return (
-		<WorkspaceChrome active="none" crumbs={<span>Design gate · the plan revision approval</span>}>
+		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Design gate" />}>
 			<div className="shell-loading">
 				<ProjectSurface>{(projectId) => <DesignReviewBody projectId={projectId} />}</ProjectSurface>
 			</div>
@@ -240,7 +254,7 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
 /** Board screen 12: the P08 repository picker — reachable from onboarding. */
 export function RepositoriesPage(): ReactElement {
 	return (
-		<WorkspaceChrome active="none" crumbs={<span>Repositories · the GitHub App connection</span>}>
+		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Repositories" />}>
 			<div className="shell-loading">
 				<ProjectSurface>{(projectId) => <RepositoriesBody projectId={projectId} />}</ProjectSurface>
 			</div>

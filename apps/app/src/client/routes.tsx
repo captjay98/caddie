@@ -1,4 +1,4 @@
-import { createRootRoute, createRoute, createRouter, Outlet, createBrowserHistory } from '@tanstack/react-router';
+import { Link, createRootRoute, createRoute, createRouter, Outlet, createBrowserHistory } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
 import { WorkspaceChrome } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
@@ -73,7 +73,7 @@ const settingsRoute = createRoute({
 	validateSearch,
 	component: function SettingsPage() {
 		return (
-			<WorkspaceChrome active="settings" crumbs={<span>Settings</span>}>
+			<WorkspaceChrome active="settings" crumbs={<><Link to="/" search={(prev: Record<string, unknown>) => ({ ...prev })}>← Workspace</Link><span>Settings</span></>}>
 				<Settings />
 			</WorkspaceChrome>
 		);

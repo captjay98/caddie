@@ -124,16 +124,16 @@ export function BriefLane(props: {
 			<div className="card-stack" data-testid="brief-empty-teaching">
 				<section className="decision-card card-surface" data-kind="approval">
 					<div className="card-head">
-						<p className="kind-kicker">BRIEF · HOW IT FILLS</p>
+						<p className="kind-kicker">BRIEF · WHAT GOES HERE</p>
 						<span className="pill status-pill" data-status="handled">
-							empty
+							all clear
 						</span>
 					</div>
-					<h3>No decisions yet — and this lane says why</h3>
+					<h3>You're all set — nothing needs you right now</h3>
 					<p className="summary">
-						A card appears when a run finishes, a rule re-read changes an answer, something
-						waits on you, or a schedule reports. Nothing has produced a decision for this
-						project yet.
+						This is where Caddie asks for your OK before it builds, and where it reports what it
+						finished. Nothing here yet? Say hello in the Channel — your first message gets a plan
+						drafted for you.
 					</p>
 					<div className="actions">
 						<a className="r-link" href="./" data-testid="brief-teach-channel">
@@ -142,7 +142,7 @@ export function BriefLane(props: {
 					</div>
 					<div className="actions">
 						<a className="r-link" href="./schedules" data-testid="brief-teach-schedules">
-							<Icon name="calendar" title="arm" /> Arm a weekly sweep in Schedules
+							<Icon name="calendar" title="arm" /> Or let Caddie watch a hackathon for you
 						</a>
 					</div>
 				</section>

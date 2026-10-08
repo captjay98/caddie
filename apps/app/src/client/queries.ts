@@ -39,7 +39,7 @@ export function useAuthStatus() {
 }
 
 interface SessionPayload {
-	user?: { id?: unknown } | null;
+	user?: { id?: unknown; name?: unknown } | null;
 }
 
 /**
@@ -62,6 +62,24 @@ export function useSessionActor(enabled: boolean) {
 
 /** Cache-scope token: 'pending' keeps keys stable-shaped until the actor lands. */
 export type ActorScope = { actorId: string | null };
+
+/**
+ * The actor's display name from the verified session — for the avatar chip.
+ * Shares the ['auth','session'] cache with useSessionActor; falls back to
+ * null when the session carries no name (the avatar then shows the user
+ * glyph, never a guessed initial).
+ */
+export function useSessionDisplayName() {
+	return useQuery({
+		queryKey: ['auth', 'session'],
+		queryFn: () => fetchJson<SessionPayload>('/api/auth/get-session'),
+		select: (payload) => {
+			const name = payload?.user?.name;
+			return typeof name === 'string' && name.trim() !== '' ? name : null;
+		},
+		staleTime: 60_000,
+	});
+}
 
 export function useProjects(actor: ActorScope) {
 	return useQuery({

@@ -224,7 +224,7 @@ test.describe('P06 workspace shell (composed build)', () => {
 		await expect(page.getByTestId('start-screen')).toBeVisible();
 		await expect(page.getByTestId('start-card-idea')).toBeVisible();
 		await expect(page.getByTestId('start-card-repo')).toHaveAttribute('data-testid', 'start-card-repo');
-		await expect(page.getByTestId('start-card-repo')).toContainText('needs a repository connection');
+		await expect(page.getByTestId('start-card-repo')).toContainText('needs a GitHub connection first');
 		await expect(page.getByTestId('start-card-discovery')).not.toHaveAttribute('data-coming-with');
 		await expect(page.getByTestId('start-discovery-go')).toHaveAttribute('href', './discovery');
 		await expect(page.getByTestId('start-repo-go')).toHaveAttribute('href', './repositories');
@@ -550,7 +550,7 @@ test.describe('P06 workspace shell (composed build)', () => {
 			});
 			const page = await context.newPage();
 			await page.goto(`${BASE}/app/`);
-			await expect(page.getByTestId('project-selector')).toBeVisible();
+			await expect(page.getByTestId(width < 768 ? 'project-selector-mobile' : 'project-selector')).toBeVisible();
 
 			const assertNoOverflow = () =>
 				page.evaluate(() => ({

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { SignInPanel } from '../auth.ts';
 import { failureKind, StatePanel } from '../states.tsx';
+import { Icon } from '../icons.tsx';
 import { Start } from '../onboarding/Start.tsx';
 import {
 	useArtifacts,
@@ -75,16 +76,23 @@ function WorkspaceBody(): ReactElement {
 	if (!auth.data.authenticated) {
 		// Unauthenticated /app shows the P01 sign-in state (composed build has
 		// auth enabled; this is the real fail-closed probe, not a mock). The
-		// chrome crosses the auth boundary: wordmark, theme and the route back
-		// to the landing stay visible at the sign-in wall.
+		// chrome crosses the auth boundary; the hero says what Caddie is in
+		// one plain sentence BEFORE asking who you are.
 		return (
 			<WorkspaceChrome active="brief">
+				<div className="auth-hero">
+					<p className="auth-hero-kicker">CADDIE · your build assistant</p>
+					<h1 className="auth-hero-title">
+						It reads the rules, drafts the plan, and builds it.
+						<span className="auth-hero-sub">You approve every step.</span>
+					</h1>
+				</div>
 				<div className="shell-loading">
 					<section className="sign-in-card card-surface">
 						<p className="kicker" data-tone="action">
 							CADDIE · WORKSPACE
 						</p>
-						<h1 className="sign-in-title">Sign in to your workspace</h1>
+						<h2 className="sign-in-title">Sign in to your workspace</h2>
 						<SignInPanel callbackURL="/app/" />
 					</section>
 				</div>
@@ -211,6 +219,48 @@ function AuthedWorkspace(props: {
 					lastWorkspaceId={chrome.projectList[0]?.workspaceId}
 				/>
 			) : null}
+
+			{/* Mobile-only context row: project switching + refresh live with the
+			    content on mobile (the topbar carries 3 controls, today.ai style),
+			    and the desktop header row is hidden. */}
+			<div className="mobile-context-row">
+				{chrome.projectsPending ? (
+					<span className="mono-id">loading projects…</span>
+				) : (
+					<select
+						className="input project-select"
+						aria-label="Project"
+						data-testid="project-selector-mobile"
+						value={chrome.selectedProject?.id ?? ''}
+						onChange={(event) => chrome.selectProject(event.target.value)}
+					>
+						{chrome.projectList.length === 0 ? <option value="">No projects yet</option> : null}
+						{chrome.projectList.map((project) => (
+							<option key={project.id} value={project.id}>
+								{project.name}
+							</option>
+						))}
+					</select>
+				)}
+				<button
+					type="button"
+					className="icon-btn"
+					title="Refresh data"
+					aria-label="Refresh data"
+					data-testid="refresh-data-mobile"
+					onClick={chrome.refreshAll}
+				>
+					<Icon name="refresh" title="Refresh data" />
+				</button>
+				<button
+					type="button"
+					className="btn-key mobile-new-project"
+					data-testid="new-project-mobile"
+					onClick={props.onOpenForm}
+				>
+					New project
+				</button>
+			</div>
 
 			{/* Zero projects + a clean load = the onboarding IS the workspace.
 			    Any doubt (pending, offline, error, a stale ?project= param) keeps
@@ -358,6 +408,7 @@ function AuthedWorkspace(props: {
 					data-testid="tab-brief-mobile"
 					onClick={() => setTab('brief')}
 				>
+					<Icon name="doc" title="" />
 					Brief
 				</button>
 				<button
@@ -367,6 +418,7 @@ function AuthedWorkspace(props: {
 					data-testid="tab-runs-mobile"
 					onClick={() => setTab('runs')}
 				>
+					<Icon name="box" title="" />
 					Runs
 				</button>
 				<button
@@ -376,8 +428,17 @@ function AuthedWorkspace(props: {
 					data-testid="tab-channel-mobile"
 					onClick={() => setTab('channel')}
 				>
+					<Icon name="sparkCheck" title="" />
 					Channel
 				</button>
+				<Link to="/discovery" className="tab-btn" data-testid="nav-discovery-mobile" search={(prev: Record<string, unknown>) => ({ ...prev })}>
+					<Icon name="target" title="" />
+					Discovery
+				</Link>
+				<Link to="/schedules" className="tab-btn" data-testid="nav-schedules-mobile" search={(prev: Record<string, unknown>) => ({ ...prev })}>
+					<Icon name="calendar" title="" />
+					Schedules
+				</Link>
 			</nav>
 		</>
 	);
