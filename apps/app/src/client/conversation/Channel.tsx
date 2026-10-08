@@ -52,6 +52,29 @@ function clusterParts(parts: FlueConversationPart[]): PartCluster[] {
 	return items;
 }
 
+/**
+ * Consecutive assistant messages that carry ONLY tool calls merge into one
+ * strip at the transcript level. A run emits a tool-per-message sequence
+ * (1 call, 2 calls, …) that would otherwise render as a wall of one-line
+ * strips with nothing readable between them.
+ */
+type MessageGroup = { messages: FlueConversationMessage[]; toolsOnly: boolean };
+
+function groupMessages(messages: readonly FlueConversationMessage[]): MessageGroup[] {
+	const groups: MessageGroup[] = [];
+	for (const message of messages) {
+		if (message.display === 'hidden') continue;
+		const toolsOnly =
+			message.role === 'assistant' &&
+			message.parts.length > 0 &&
+			message.parts.every((part) => part.type === 'dynamic-tool');
+		const last = groups[groups.length - 1];
+		if (toolsOnly && last && last.toolsOnly) last.messages.push(message);
+		else groups.push({ messages: [message], toolsOnly });
+	}
+	return groups;
+}
+
 function turnClock(timestamp: string | undefined): string {
 	if (!timestamp) return '';
 	const date = new Date(timestamp);
@@ -97,6 +120,24 @@ function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
 				<ToolBanner key={index} part={part} />
 			))}
 		</details>
+	);
+}
+
+/** A run of tool-only assistant messages rendered as ONE quiet strip. */
+function ToolGroup({ group, parts }: { group: readonly FlueConversationMessage[]; parts: ToolPart[] }): ReactElement {
+	const clock = turnClock(group[0]?.timestamp);
+	return (
+		<div className="msg assistant" data-testid="msg-tool-group">
+			<span className="turn-label" data-testid="turn-label">
+				<span className="turn-dot" aria-hidden="true">
+					C
+				</span>
+				Caddie{clock ? ` · ${clock}` : ''}
+			</span>
+			<div className="bubble">
+				<ToolStrip parts={parts} />
+			</div>
+		</div>
 	);
 }
 
@@ -299,9 +340,23 @@ export function Channel(props: {
 								: 'Tell Caddie what you want in plain words. It drafts a plan, shows you where every fact came from, and waits for your OK before building anything.'
 						}
 					/>
-				) : (
-					source.messages.map((message) => <MessageRow key={message.id} message={message} />)
-				)}
+) : (
+						groupMessages(source.messages).map((group, index) =>
+							group.toolsOnly ? (
+								<ToolGroup
+									key={index}
+									group={group.messages}
+									parts={group.messages.flatMap((message) =>
+										message.parts.filter(
+											(part): part is ToolPart => part.type === 'dynamic-tool',
+										),
+									)}
+								/>
+							) : (
+								group.messages.map((message) => <MessageRow key={message.id} message={message} />)
+							),
+						)
+					)}
 
 				{settledFailed.map((settlement) => (
 					<p
@@ -309,9 +364,10 @@ export function Channel(props: {
 						className="settlement-banner"
 						data-outcome={settlement.outcome}
 						data-testid="settlement-banner"
+						title={`submission ${settlement.submissionId} · ${settlement.outcome}`}
 					>
-						run stopped — submission {settlement.submissionId} {settlement.outcome}. Nothing was written to
-						the plan after the stop; the failure is retained as evidence.
+						The run stopped before it finished. Nothing was written to the plan, and the failure is
+						kept as evidence.
 					</p>
 				))}
 

@@ -708,3 +708,29 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-SURFACE-AUDIT (owner-directed: 'every surface that needs work should be worked on' — full signed-in sweep of all 14 routes at 1440x900 and 390x844)",
+  "status": "LOCAL VERIFIED",
+  "sha": "see git log feat(ui): surface audit pass — transcript tool groups, top-aligned gate pages",
+  "commands": [
+    {"command": "signed-in capture sweep: 28 screenshots (14 routes x desktop/mobile) via minted session cookie + Playwright", "exitCode": 0, "receipt": "defects found: (1) tool-per-message transcript rendered as a wall of one-line strips; (2) settlement banner leaked a raw submission id; (3) gate surfaces floated vertically centered mid-viewport when content was short. Everything else passed at the current standard"},
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bunx playwright test tests/browser/conversation.spec.ts tests/browser/workspace.spec.ts", "exitCode": 0, "receipt": "20 passed"},
+    {"command": "re-capture of fixed surfaces (workspace-brief, discovery, judge, evidence, repositories)", "exitCode": 0, "receipt": "channel now shows one grouped strip ('Caddie worked · 5 tool calls · 5.7s') instead of a wall; gate pages top-aligned under the nav row"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/conversation/Channel.tsx", "note": "transcript-level grouping: consecutive assistant messages carrying ONLY dynamic-tool parts merge into ONE strip (turn label from the first message, all calls inside); settlement banner copy is human ('The run stopped before it finished…'), the raw submission id moved to a title attribute"},
+    {"path": "apps/app/src/client/surface.tsx + workspace.css", "note": "gate surfaces (discovery/judge/submission/evidence/artifacts/design-review/repositories/schedules) get .shell-page on the shell-loading wrapper: top-aligned, horizontally centered — the sign-in card keeps its centered treatment"}
+  ],
+  "environment": "local vite dev :5176, minted session cookie (D1 token + BETTER_AUTH_SECRET, in-memory only)",
+  "providerCalls": "none",
+  "specReview": "owner visual acceptance pending on http://localhost:5176/app/",
+  "qualityReview": "all 28 captures reviewed against the chat-pass standard; two real defects fixed, no regressions in the rest",
+  "limitations": [
+    "tool grouping merges only tool-ONLY assistant messages; a message mixing text and tools still renders its tools as an in-card strip",
+    "judge scorecard and submission package have no live data in the local database — their populated states were verified in the earlier phase captures, not re-populated here"
+  ]
+}
+```

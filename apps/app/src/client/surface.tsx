@@ -147,7 +147,7 @@ function ProjectSurface(props: { children: (projectId: string) => ReactElement }
 export function DiscoveryPage(): ReactElement {
 	return (
 		<WorkspaceChrome active="discovery">
-			<div className="shell-loading">
+			<div className="shell-loading shell-page">
 				<ProjectSurface>{(projectId) => <DiscoveryResults projectId={projectId} />}</ProjectSurface>
 			</div>
 		</WorkspaceChrome>
@@ -157,7 +157,7 @@ export function DiscoveryPage(): ReactElement {
 export function JudgePage(): ReactElement {
 	return (
 		<WorkspaceChrome active="judge">
-			<div className="shell-loading">
+			<div className="shell-loading shell-page">
 				<ProjectSurface>{(projectId) => <JudgeScorecard projectId={projectId} />}</ProjectSurface>
 			</div>
 		</WorkspaceChrome>
@@ -167,7 +167,7 @@ export function JudgePage(): ReactElement {
 export function SubmissionPage(): ReactElement {
 	return (
 		<WorkspaceChrome active="submission">
-			<div className="shell-loading">
+			<div className="shell-loading shell-page">
 				<ProjectSurface>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectSurface>
 			</div>
 		</WorkspaceChrome>
@@ -177,7 +177,7 @@ export function SubmissionPage(): ReactElement {
 export function SchedulesPage(): ReactElement {
 	return (
 		<WorkspaceChrome active="schedules">
-			<div className="shell-loading">
+			<div className="shell-loading shell-page">
 				<ProjectSurface>{(projectId) => <Schedules projectId={projectId} />}</ProjectSurface>
 			</div>
 		</WorkspaceChrome>
@@ -189,7 +189,7 @@ export function EvidencePage(): ReactElement {
 	const search = useSearch({ strict: false }) as { claim?: string };
 	return (
 		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Evidence" />}>
-			<div className="shell-loading">
+			<div className="shell-loading shell-page">
 				<ProjectSurface>
 					{(projectId) => <EvidenceDrawer projectId={projectId} focusClaimType={search.claim} />}
 				</ProjectSurface>
@@ -202,7 +202,7 @@ export function EvidencePage(): ReactElement {
 export function ArtifactsPage(): ReactElement {
 	return (
 		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Artifacts" />}>
-			<div className="shell-loading">
+			<div className="shell-loading shell-page">
 				<ProjectSurface>{(projectId) => <ArtifactsBody projectId={projectId} />}</ProjectSurface>
 			</div>
 		</WorkspaceChrome>
@@ -228,7 +228,7 @@ function ArtifactsBody(props: { projectId: string }): ReactElement {
 export function DesignReviewPage(): ReactElement {
 	return (
 		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Design gate" />}>
-			<div className="shell-loading">
+			<div className="shell-loading shell-page">
 				<ProjectSurface>{(projectId) => <DesignReviewBody projectId={projectId} />}</ProjectSurface>
 			</div>
 		</WorkspaceChrome>
@@ -255,7 +255,7 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
 export function RepositoriesPage(): ReactElement {
 	return (
 		<WorkspaceChrome active="none" crumbs={<PageCrumbs label="Repositories" />}>
-			<div className="shell-loading">
+			<div className="shell-loading shell-page">
 				<ProjectSurface>{(projectId) => <RepositoriesBody projectId={projectId} />}</ProjectSurface>
 			</div>
 		</WorkspaceChrome>

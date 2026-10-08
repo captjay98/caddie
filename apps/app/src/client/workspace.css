@@ -1500,6 +1500,13 @@ a.btn-ghost.topbar-nav-link {
 	min-width: 0;
 }
 
+/* Content pages (gate surfaces) top-align instead of floating mid-viewport;
+   the sign-in card keeps the centered treatment. */
+.shell-loading.shell-page {
+	place-items: start center;
+	align-content: start;
+}
+
 .sign-in-card {
 	max-width: 380px;
 	width: 100%;
