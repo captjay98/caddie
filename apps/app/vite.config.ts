@@ -5,4 +5,9 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
 	plugins: [flue(), react(), cloudflare({ config: flueWorkerConfig() })],
+	// The dev server is PINNED to 5176: 5173-5175 belong to other local
+	// projects, and the OAuth redirect URIs are registered for 5176
+	// (docs/setup/auth.md). strictPort fails loudly instead of drifting
+	// onto an unregistered port.
+	server: { port: 5176, host: 'localhost', strictPort: true },
 });
