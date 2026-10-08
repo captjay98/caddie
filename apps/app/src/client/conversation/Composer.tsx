@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import type { ReactElement, KeyboardEvent } from 'react';
+import { Icon } from '../icons.tsx';
 
 /**
- * Composer skeleton — the shared input grammar ported from the reference
- * ChatComposer (Enter sends, Shift+Enter breaks a line, visible pending
- * state). P06 has no transport: `onSend` retains the text as an unsent draft
- * with a generated idempotency key (channel-store.ts). P05 swaps the store
- * call for `useFlueAgent().sendMessage(text, { idempotencyKey })`; the
- * component contract does not change.
+ * Composer — Enter sends, Shift+Enter breaks a line, visible pending state.
+ * The transport owns delivery: `onSend` goes to the channel store, which
+ * hands the text to the run transport with an idempotency key (duplicate-send
+ * protection). While a run is working the composer is held with the reason
+ * shown on the send key.
  */
 
 export function Composer(props: {
@@ -35,34 +35,38 @@ export function Composer(props: {
 	}
 
 	return (
-		<form
-			className="composer"
-			data-testid="composer"
-			onSubmit={(event) => {
-				event.preventDefault();
-				submit();
-			}}
-		>
-			<textarea
-				value={value}
-				onChange={(event) => setValue(event.target.value)}
-				onKeyDown={onKeyDown}
-				disabled={disabled}
-				enterKeyHint="send"
-				rows={1}
-				aria-label="Message the channel"
-				placeholder={props.disabledReason ? undefined : (props.placeholder ?? 'Ask the caddie…')}
-				data-testid="composer-input"
-			/>
-			<button
-				type="submit"
-				className="btn-key"
-				disabled={disabled || value.trim() === ''}
-				data-testid="composer-send"
-				title={props.disabledReason}
+		<div className="composer-wrap">
+			<form
+				className="composer"
+				data-testid="composer"
+				onSubmit={(event) => {
+					event.preventDefault();
+					submit();
+				}}
 			>
-				{disabled ? 'Held' : 'Send'}
-			</button>
-		</form>
+				<textarea
+					value={value}
+					onChange={(event) => setValue(event.target.value)}
+					onKeyDown={onKeyDown}
+					disabled={disabled}
+					enterKeyHint="send"
+					rows={1}
+					aria-label="Message the channel"
+					placeholder={props.disabledReason ? undefined : (props.placeholder ?? 'Message Caddie…')}
+					data-testid="composer-input"
+				/>
+				<button
+					type="submit"
+					className="composer-send"
+					disabled={disabled || value.trim() === ''}
+					data-testid="composer-send"
+					aria-label={disabled ? 'Send — held' : 'Send message'}
+					title={props.disabledReason ?? 'Send message'}
+				>
+					<Icon name="send" title="" />
+				</button>
+			</form>
+			<p className="composer-hint">Enter to send · Shift + Enter for a new line</p>
+		</div>
 	);
 }

@@ -36,7 +36,8 @@ export type IconName =
 	| 'info'
 	| 'repo'
 	| 'memory'
-	| 'plug';
+	| 'plug'
+	| 'send';
 
 interface IconProps {
 	name: IconName;
@@ -169,6 +170,7 @@ const PATHS: Record<IconName, ReactElement> = {
 		</>
 	),
 	plug: <path d="M9 2.5v3M7 2.5v3M5.5 5.5h5V8l1 3H5.5l1-3V5.5z" fill="none" stroke="currentColor" strokeLinejoin="round" />,
+	send: <path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
 };
 
 export function Icon({ name, title, className }: IconProps): ReactElement {

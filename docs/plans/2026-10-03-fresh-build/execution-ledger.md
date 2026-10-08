@@ -678,3 +678,33 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   ]
 }
 ```
+
+```json
+{
+  "packet": "UI-CHAT-PASS (owner-directed: 'the chat itself is poor, very very underwhelming' — chat surface redesign; reference: the owner's own Chat-First System Redesign prototype frames in Aside + live-channel before/after captures)",
+  "status": "LOCAL VERIFIED",
+  "sha": "see git log feat(ui): chat redesign — turn cards, quiet tool strips, icon composer",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"},
+    {"command": "bunx playwright test tests/browser/conversation.spec.ts tests/browser/workspace.spec.ts", "exitCode": 0, "receipt": "20 passed — draft idempotency, reload persistence, overflow at 390/768/1440 all green"},
+    {"command": "bun run verify:packet P05", "exitCode": 0, "receipt": "agent-permissions 34 tests PASS; P06 has no mapped tests (NOT APPLICABLE, named not faked)"},
+    {"command": "visual capture: signed-in live channel via D1 session token signed with BETTER_AUTH_SECRET (desktop 1440 + mobile 390, Playwright; before/after)", "exitCode": 0, "receipt": "before: transcript rendered as one text wall (inline turn labels, '///' heading decorations, no turn surfaces); after: assistant turns are raised cards with C-dot kicker labels, user turns right-aligned tinted bubbles, composer has a round icon send key + keyboard hint"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/conversation/Channel.tsx", "note": "consecutive dynamic-tool parts cluster into ONE quiet details strip ('Caddie worked · N tool calls · Xs' summary; individual calls keep data-testid=tool-banner inside); assistant turns get a 'C' identity dot on the kicker; streaming markers say 'Caddie is working'"},
+    {"path": "apps/app/src/client/conversation/Composer.tsx", "note": "composer wrapper grid: textarea + round icon send key (send glyph, ink-on-action gradient like btn-key) + 'Enter to send · Shift + Enter for a new line' hint (hidden <768px); placeholder 'Message Caddie…'"},
+    {"path": "apps/app/src/client/workspace.css", "note": "channel section rebuilt: assistant turns are raised cards (14px radius with 4px tail corner, panel surface, shadow), user bubbles right-aligned 14% action tint with mirrored tail corner, turn-label uppercase mono kicker with turn-dot, tool-strip flat rows over dashed separators, thinking-line pulsing dot (prefers-reduced-motion honored), transcript gap 1.1rem, msgs capped 46rem (user 34rem)"},
+    {"path": "packages/ui/src/markdown.css", "note": "chat markdown voice: '///' heading decorations retired (headings plain 650 weight), list/number markers muted (were action-blue), tables 0.88em top-aligned, paragraph line-height 1.6"},
+    {"path": "apps/app/src/client/icons.tsx", "note": "added 'send' (arrow-up monoline 16px currentColor) to the icon set"}
+  ],
+  "environment": "local vite dev :5176; signed-in capture minted from the local D1 session table + .dev.vars secret (in-memory only, never printed or committed); aside-browser for the owner's prototype frames",
+  "providerCalls": "none",
+  "specReview": "owner visual acceptance pending on http://localhost:5176/app/",
+  "qualityReview": "matched against the owner's own 'Caddie — Chat-First System Redesign' prototype (Aside tab; rationale: chat is the spine, tool calls are quiet) and the today.ai/hacksteward mobile pattern",
+  "limitations": [
+    "chat remains the right pane of the two-pane desktop layout — making chat the primary surface with Brief alongside (prototype desktop split) is a structural change not attempted here",
+    "long legacy assistant messages are contained by the card but not restructured — output length is a model-side concern, not UI",
+    "tool strip grouping merges only CONSECUTIVE dynamic-tool parts; text/tool interleaving still alternates card and strip by design"
+  ]
+}
+```

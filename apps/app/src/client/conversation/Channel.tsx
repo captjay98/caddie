@@ -18,7 +18,10 @@ import type { ChannelDraft, ChannelSource } from './channel-store.ts';
  *   reasoning     -> a one-line working marker while streaming; DONE REASONING
  *                    IS NEVER RENDERED. No human-facing raw chain-of-thought,
  *                    ever (hard constraint + design direction).
- *   dynamic-tool  -> mono tool row: state glyph + queued/working/done/error + duration
+ *   dynamic-tool  -> consecutive calls cluster into ONE quiet strip behind a
+ *                    "Caddie is working · N tool calls" summary (design
+ *                    prototype, chat context: tool calls are quiet — a thin
+ *                    strip, not banners competing with the assistant's words)
  *   data-decision-card -> schema-validated DecisionCardView (unparsable
  *                    payloads render an honest fault, never a guess)
  *   data-*        -> collapsed specialist-data disclosure (display only)
@@ -30,6 +33,25 @@ import type { ChannelDraft, ChannelSource } from './channel-store.ts';
  * did not; the draft names the idempotency key as the duplicate-send guard.
  */
 
+type ToolPart = Extract<FlueConversationPart, { type: 'dynamic-tool' }>;
+
+/** Render item after clustering: a single part, or a run of tool calls. */
+type PartCluster = { kind: 'single'; part: FlueConversationPart } | { kind: 'tools'; parts: ToolPart[] };
+
+function clusterParts(parts: FlueConversationPart[]): PartCluster[] {
+	const items: PartCluster[] = [];
+	for (const part of parts) {
+		if (part.type === 'dynamic-tool') {
+			const last = items[items.length - 1];
+			if (last && last.kind === 'tools') last.parts.push(part);
+			else items.push({ kind: 'tools', parts: [part] });
+		} else {
+			items.push({ kind: 'single', part });
+		}
+	}
+	return items;
+}
+
 function turnClock(timestamp: string | undefined): string {
 	if (!timestamp) return '';
 	const date = new Date(timestamp);
@@ -39,7 +61,7 @@ function turnClock(timestamp: string | undefined): string {
 	return `${hh}:${mm}`;
 }
 
-function ToolBanner({ part }: { part: Extract<FlueConversationPart, { type: 'dynamic-tool' }> }): ReactElement {
+function ToolBanner({ part }: { part: ToolPart }): ReactElement {
 	const stateWord =
 		part.state === 'input-available'
 			? 'working'
@@ -58,18 +80,38 @@ function ToolBanner({ part }: { part: Extract<FlueConversationPart, { type: 'dyn
 	);
 }
 
+function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
+	const running = parts.some((part) => part.state === 'input-available');
+	const failed = parts.filter((part) => part.state === 'output-error').length;
+	const totalMs = parts.reduce((sum, part) => sum + (typeof part.durationMs === 'number' ? part.durationMs : 0), 0);
+	const calls = `${parts.length} tool call${parts.length === 1 ? '' : 's'}`;
+	const summary = failed > 0
+		? `Caddie worked · ${calls} · ${failed} failed`
+		: running
+			? `Caddie is working · ${calls}`
+			: `Caddie worked · ${calls}${totalMs > 0 ? ` · ${Math.round(totalMs / 100) / 10}s` : ''}`;
+	return (
+		<details className="tool-strip" data-testid="tool-strip">
+			<summary>{summary}</summary>
+			{parts.map((part, index) => (
+				<ToolBanner key={index} part={part} />
+			))}
+		</details>
+	);
+}
+
 function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement | null {
 	if (part.type === 'text') {
 		return part.text.trim() ? <Markdown text={part.text} /> : null;
 	}
-	if (part.type === 'reasoning') {
-		// Raw chain-of-thought never renders. Only a live progress marker.
-		return part.state === 'streaming' ? (
-			<p className="thinking-line" role="status" data-testid="thinking-line">
-				specialist working{' '}
-			</p>
-		) : null;
-	}
+		if (part.type === 'reasoning') {
+			// Raw chain-of-thought never renders. Only a live progress marker.
+			return part.state === 'streaming' ? (
+				<p className="thinking-line" role="status" data-testid="thinking-line">
+					Caddie is working
+				</p>
+			) : null;
+		}
 	if (part.type === 'dynamic-tool') {
 		return <ToolBanner part={part} />;
 	}
@@ -119,6 +161,9 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 		return (
 			<div className="msg user" data-testid="msg-user">
 				<span className="turn-label" data-testid="turn-label">
+					<span className="turn-dot" aria-hidden="true">
+						Y
+					</span>
 					You{clock ? ` · ${clock}` : ''}
 				</span>
 				<div className="bubble">{text}</div>
@@ -129,9 +174,13 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 	const diagnostic = message.display === 'diagnostic';
 	const body = (
 		<>
-			{message.parts.map((part, index) => (
-				<AssistantPart key={index} part={part} />
-			))}
+			{clusterParts(message.parts).map((item, index) =>
+				item.kind === 'tools' ? (
+					<ToolStrip key={index} parts={item.parts} />
+				) : (
+					<AssistantPart key={index} part={item.part} />
+				),
+			)}
 		</>
 	);
 	if (diagnostic) {
@@ -145,6 +194,9 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 	return (
 		<div className="msg assistant" data-testid="msg-assistant">
 			<span className="turn-label" data-testid="turn-label">
+				<span className="turn-dot" aria-hidden="true">
+					C
+				</span>
 				Caddie{clock ? ` · ${clock}` : ''}
 			</span>
 			<div className="bubble">{body}</div>
@@ -265,7 +317,7 @@ export function Channel(props: {
 
 				{live ? (
 					<p className="thinking-line" role="status" data-testid="channel-status">
-						working…{' '}
+						Caddie is working
 					</p>
 				) : null}
 				{source.status === 'error' ? (
