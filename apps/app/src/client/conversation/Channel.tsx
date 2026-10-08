@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { ReactElement } from 'react';
 import type { FlueConversationMessage, FlueConversationPart } from '@flue/react';
 import { safeParse } from 'valibot';
@@ -360,6 +360,16 @@ export function Channel(props: {
 		if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
 	}, [source.messages, props.drafts, source.status]);
 
+	// THE navigation performance fix: the rows (and every Markdown block in
+	// them) are built only when the messages or drafts actually change. Without
+	// this, every chrome re-render — i.e. every route change — re-parsed the
+	// whole conversation transcript in react-markdown (~8.5s blocking on long
+	// histories, measured).
+	const transcriptRows = useMemo(
+		() => buildTranscriptRows(groupMessages(source.messages)),
+		[source.messages],
+	);
+
 	if (props.resolving && !projectId) {
 		return (
 			<div className="channel-pane" data-testid="channel" data-channel-state="resolving">
@@ -409,7 +419,7 @@ export function Channel(props: {
 						}
 					/>
 ) : (
-						buildTranscriptRows(groupMessages(source.messages))
+						transcriptRows
 					)}
 
 				{settledFailed.map((settlement) => (

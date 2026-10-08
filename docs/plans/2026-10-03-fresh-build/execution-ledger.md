@@ -921,3 +921,25 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   "limitations": []
 }
 ```
+
+```json
+{
+  "packet": "PERF-NAV (owner: 'why is navigation slow and jerky??')",
+  "status": "LOCAL VERIFIED",
+  "sha": "see git log perf(ui): memoize the transcript — navigation 8.5s freeze to ~0.4s",
+  "commands": [
+    {"command": "longtask probe across 5 navigations (dev + production preview)", "exitCode": 0, "receipt": "BEFORE: every navigation after the first blocked the main thread ~8.5s (single task). CPU profile: 100% in react-markdown (fromMarkdown/subtokenize/remark-gfm) — the whole transcript re-parsed on every route change. AFTER: dev 1.2-1.4s worst, production 0-420ms, most navigations clean"},
+    {"command": "bunx playwright workspace/conversation/discovery/journey", "exitCode": 0, "receipt": "28 pass"},
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "composed 0 collisions"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/conversation/Channel.tsx", "note": "transcriptRows useMemo([source.messages]) — rows and their Markdown elements are referentially stable, so React bails out of the markdown subtrees on shell re-renders"},
+    {"path": "packages/ui/src/Markdown.tsx", "note": "Markdown memo() — unchanged text never re-parses even if a parent rebuilds"}
+  ],
+  "environment": "local vite dev :5176 + composed preview :4173, minted session cookie (in-memory only)",
+  "providerCalls": "none",
+  "specReview": "owner re-test on http://localhost:5176/app/",
+  "qualityReview": "the persistent right panel made the transcript re-render on every navigation; memoization was the missing piece since the redesign",
+  "limitations": ["entering Home still costs one moderate (~0.4s production) task to diff the large transcript — acceptable; splitting virtualization is the next lever if the history grows much larger"]
+}
+```

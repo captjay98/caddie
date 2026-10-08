@@ -1,5 +1,6 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { memo } from 'react';
 import type { ReactElement } from 'react';
 
 /**
@@ -14,10 +15,12 @@ import type { ReactElement } from 'react';
  * never parsed back into data, IDs or authorization (contracts.md — actions
  * resolve server-side IDs).
  */
-export function Markdown({ text }: { text: string }): ReactElement {
+// Memoized: the transcript re-renders on every shell update; re-parsing
+// unchanged markdown blocks dominated route-change CPU (see execution ledger).
+export const Markdown = memo(function Markdown({ text }: { text: string }): ReactElement {
 	return (
 		<div className="md-body">
 			<ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
 		</div>
 	);
-}
+});
