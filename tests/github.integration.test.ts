@@ -165,6 +165,10 @@ beforeAll(async () => {
 		join(REPO_ROOT, 'apps/app/migrations/0001_product.sql'),
 		join(REPO_ROOT, 'apps/app/migrations/0002_controls.sql'),
 		join(REPO_ROOT, 'apps/app/migrations/0006_github.sql'),
+		// The projects table carries the Home `kind` column since 0011 —
+		// POST /api/projects fails without it (fixture schema drift, fixed
+		// with the production numbering order).
+		join(REPO_ROOT, 'apps/app/migrations/0011_home_project.sql'),
 	]);
 
 	ALICE = await signIn(worker, idp, ALICE_EMAIL, 'alice-p08', 'Alice');

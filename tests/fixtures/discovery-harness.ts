@@ -32,6 +32,7 @@ export function discoveryMigrationPaths(): string[] {
 		// P11 discovery reads the actor's P14 profile for personal eligibility.
 		join(root, 'apps', 'app', 'migrations', '0008_profile.sql'),
 		join(root, 'apps', 'app', 'migrations', '0009_discovery.sql'),
+		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
 	];
 }
 

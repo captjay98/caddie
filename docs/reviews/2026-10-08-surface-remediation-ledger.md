@@ -233,6 +233,18 @@ packets P01/P06-implied/P07/P11/P13/P14 all PASS on the refactored tree.
   across all 11 spec files (workspace, discovery, discovery-journey,
   submission, conversation, landing, auth, artifacts, settings, release,
   forge-journey).
+- **Pre-existing fixture repair (this session):** migration 0011_home_project.sql
+  added the projects `kind` column; every workerd fixture harness applied only a
+  partial migration list, so POST /api/projects 500'd (`no such column: kind`)
+  and ALL fixture integration suites failed on every commit since the Home
+  commit (53c188fc) — reproduced identically on the pre-session takeover
+  commit 89dc5d41. Fixed by appending 0011 to every harness migration list
+  (controls/discovery/evidence/github/previews/profile/schedules/submission
+  + the inline list in github.integration.test.ts). Result:
+  `verify:packet` P07 (19) / P08 (32) / P10 (17+2) / P11 (11+2) / P12 (15+2) /
+  P13 (19+2) ALL PASS; full `bun test ./tests/` → 496 pass with only the
+  19 by-design BLOCKED live suites failing (hosted release, Flutter toolchain,
+  live Resend, hosted preview).
 - Honest BLOCKED prerequisites recorded in the table: F06/S11 (live discovery
   sources + profile ranking need an approved source + credentials), S31
   (standalone project concept), S21 (approvals list endpoint), S23 live
