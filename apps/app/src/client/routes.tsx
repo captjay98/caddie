@@ -1,9 +1,9 @@
-import { createRootRoute, createRoute, createRouter, Outlet, redirect, createBrowserHistory, useMatches } from '@tanstack/react-router';
+import { Link, Outlet, createBrowserHistory, createRootRoute, createRoute, createRouter, redirect, useMatches } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
 import { WorkspaceChrome, type WorkspaceNavId } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
-import { Start } from './onboarding/Start.tsx';
+import { Start, IdeaForm } from './onboarding/Start.tsx';
 import {
 	DiscoverPage,
 	ProjectsPage,
@@ -48,7 +48,7 @@ const rootRoute = createRootRoute({
 						</p>
 						<h3 className="state-title">This workspace path does not exist</h3>
 						<p className="state-detail">
-							Everything lives under the workspace root: <a href="./">open the workspace</a>.
+							Everything lives under the workspace root: <Link to="/">open the workspace</Link>.
 						</p>
 						<p className="state-detail">
 							Paths under <code>/app</code> are the SPA; anything else returns the landing page — two halves, one
@@ -196,7 +196,15 @@ const onboardingRoute = createRoute({
 	validateSearch,
 	staticData: { nav: 'account' },
 	component: function OnboardingPage() {
-		return <Start />;
+		// The idea capture (audit S17) is the real primary path here: name +
+		// plain-words idea -> one project -> straight into it.
+		return (
+			<div className="shell-loading shell-page">
+				<div className="page-col">
+					<Start ideaForm={<IdeaForm />} />
+				</div>
+			</div>
+		);
 	},
 });
 

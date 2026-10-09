@@ -4,6 +4,7 @@ import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { SignInPanel } from '../auth.ts';
 import { failureKind, StatePanel } from '../states.tsx';
 import { BriefLane } from '../brief/DecisionCard.tsx';
+import { Link } from '@tanstack/react-router';
 import { useBriefCards, useDiscoveryCandidates, useProfile, type ProfileRecord } from '../queries.ts';
 import { useWorkspaceChrome } from './Chrome.tsx';
 
@@ -123,9 +124,9 @@ function ProfileSetup(): ReactElement {
 			<section className="card-surface home-panel profile-complete" data-testid="profile-complete">
 				<p className="state-detail">
 					Profile is set — it shapes what Caddie recommends.{' '}
-					<a href="/settings" data-testid="profile-edit-link">
+					<Link to="/settings" data-testid="profile-edit-link">
 						Edit in Settings
-					</a>
+					</Link>
 				</p>
 			</section>
 		);

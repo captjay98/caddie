@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { useNavigate, useSearch } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import type { DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
 import { SignInPanel } from './auth.ts';
 import { failureKind, StatePanel } from './states.tsx';
@@ -217,9 +217,9 @@ function ProjectsActions(): ReactElement {
 			<button type="button" className="btn-key" data-testid="new-idea-project" onClick={() => void chrome.newProject()}>
 				Start from an idea
 			</button>{' '}
-			<a className="btn-ghost" href="/onboarding" data-testid="import-repo-project">
+			<Link className="btn-ghost" to="/onboarding" data-testid="import-repo-project">
 				Continue existing code
-			</a>
+			</Link>
 		</span>
 	);
 }

@@ -132,3 +132,22 @@ navigation: zero (the node identity is the proof). LOCAL VERIFIED.
 
 **Regression:** 28 browser tests (workspace/conversation/discovery/journey) +
 packets P01/P06-implied/P07/P11/P13/P14 all PASS on the refactored tree.
+
+### Wave 3 — F05 + S17 + F14 (IMPLEMENTED)
+
+- **All internal anchors are router Links now** (F05): Shell's profile edit,
+  the Projects "import repo" card, the brief's teach links (Channel/Schedules),
+  the 404 recovery link, and all three onboarding cards. Verified on the
+  composed `/app` build — the idea journey ran at `localhost:4173/app/…` and
+  the SPA routed without a document reload (URL went
+  `/app/onboarding → /app/project?project=<new>`).
+- **Idea capture is real (S17):** `/app/onboarding` card one is a form —
+  project name + plain-words idea → creates exactly one project (busy lock,
+  visible error) with the idea persisted as the project description → lands
+  in `/app/project?project=<new>` with the conversation scope following.
+  Verified end-to-end on dev AND the composed build (two probe projects
+  created during the test were archived afterwards — the owner's project
+  list is clean).
+- **F14 verified fixed:** the audit's two stale-label failures were already
+  corrected in `65df59f5` + the scope-pill change; the audit's exact 8-file
+  browser set now passes **56/56** (`--workers=1`, same invocation).

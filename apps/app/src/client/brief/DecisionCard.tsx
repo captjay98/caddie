@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
@@ -136,14 +137,14 @@ export function BriefLane(props: {
 						drafted for you.
 					</p>
 					<div className="actions">
-						<a className="r-link" href="./" data-testid="brief-teach-channel">
+						<Link className="r-link" to="/" search={(prev: Record<string, unknown>) => ({ ...prev })} data-testid="brief-teach-channel">
 							<Icon name="sparkCheck" title="start" /> Start with the Channel — your first message begins a run
-						</a>
+						</Link>
 					</div>
 					<div className="actions">
-						<a className="r-link" href="./schedules" data-testid="brief-teach-schedules">
+						<Link className="r-link" to="/schedules" search={(prev: Record<string, unknown>) => ({ ...prev })} data-testid="brief-teach-schedules">
 							<Icon name="calendar" title="arm" /> Or let Caddie watch a hackathon for you
-						</a>
+						</Link>
 					</div>
 				</section>
 			</div>
