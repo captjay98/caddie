@@ -183,6 +183,54 @@ export function createProfileRouter(): Hono<{ Bindings: Env }> {
 		});
 	});
 
+	// --- usage & budget (audit F11/S40): the account's real spend position -----
+	// Read-only: the payer limit and reservation totals the budget system
+	// already enforces per run. No spending happens here; absence is honest
+	// ("no budget configured"), never a fabricated number.
+	router.get('/usage', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		let payer: { payerId: string; limitMinorUnits: number; currency: string } | null = null;
+		let totals = { reservedMinorUnits: 0, settledMinorUnits: 0, reservations: 0 };
+		let unavailable: string | undefined;
+		try {
+			const payerRows = await c.env.DB.prepare(
+				'select "payerId", "limitMinorUnits", "currency" from "budget_payers" where "payerId" = ?',
+			)
+				.bind(actorId)
+				.all<{ payerId: string; limitMinorUnits: number; currency: string }>();
+			const payerRow = payerRows.results?.[0];
+			if (payerRow) {
+				payer = {
+					payerId: String(payerRow['payerId']),
+					limitMinorUnits: Number(payerRow['limitMinorUnits']),
+					currency: String(payerRow['currency']),
+				};
+			}
+			const totalsRows = await c.env.DB.prepare(
+				`select
+					coalesce(sum(case when "status" = 'reserved' then "amountMinorUnits" else 0 end), 0) as reservedMinorUnits,
+					coalesce(sum(case when "status" = 'settled' then coalesce("settledAmountMinorUnits", "amountMinorUnits") else 0 end), 0) as settledMinorUnits,
+					count(*) as reservations
+				from "budget_reservations" where "payerId" = ?`,
+			)
+				.bind(actorId)
+				.all<{ reservedMinorUnits: number; settledMinorUnits: number; reservations: number }>();
+			const totalsRow = totalsRows.results?.[0];
+			if (totalsRow) {
+				totals = {
+					reservedMinorUnits: Number(totalsRow['reservedMinorUnits'] ?? 0),
+					settledMinorUnits: Number(totalsRow['settledMinorUnits'] ?? 0),
+					reservations: Number(totalsRow['reservations'] ?? 0),
+				};
+			}
+		} catch {
+			// Budget tables not initialised in this deployment — report honestly
+			// instead of a 500 (the capability genuinely is not configured).
+			unavailable = 'budget tracking is not configured in this deployment';
+		}
+		return c.json({ payer, totals, ...(unavailable ? { unavailable } : {}) });
+	});
+
 	// --- enabled stacks (honest, no inherited pricing or fake availability) -----
 
 	router.get('/stacks', (c) => c.json({ stacks: STACK_CATALOG }));

@@ -24,6 +24,8 @@ import {
 	usePlanDocRevisions,
 	useRunBindings,
 } from './queries.ts';
+import { useQuery } from '@tanstack/react-query';
+import { fetchJson } from './api.ts';
 import { useWorkspaceChrome } from './workspace/Chrome.tsx';
 import { ProjectTabs, ProjectSubTabs } from './workspace/ProjectTabs.tsx';
 
@@ -698,6 +700,9 @@ function AutomationsBody(): ReactElement {
 }
 
 export function UsagePage(): ReactElement {
+	// The usage page is an ACCOUNT surface (it reads /api/usage, which is
+	// session-scoped), so it may read the chrome directly: the provider is
+	// above every route now (F01 layout).
 	return (
 		<>
 			<div className="shell-loading shell-page">
@@ -709,32 +714,114 @@ export function UsagePage(): ReactElement {
 							</p>
 							<h1 className="page-title">Usage &amp; budget</h1>
 							<p className="page-lede">
-								Caddie spends model credits through a per-run budget the server enforces. A read-only
-								usage summary over that budget is not exposed by the API yet.
+								What Caddie reserved and spent against your budget — read straight from the same
+								numbers the server enforces before every run.
 							</p>
 						</div>
 					</div>
-					<section className="card-surface settings-panel" data-testid="usage-panel">
-						<div className="inspector-row" data-testid="usage-budget-state">
-							<div className="row-main">
-								<span className="row-title">Budget reporting</span>
-								<span className="status-pill" data-status="planned">
-									not exposed
-								</span>
-							</div>
-							<div className="row-details">
-								Budgets are enforced at run time on the server, but there is no account usage/budget
-							 endpoint to read yet — so no numbers are shown here rather than guessed. Tracking runs:
-							 open a project's Build → Activity.
-							</div>
-						</div>
-						<p className="state-detail">
-							<Icon name="info" title="note" /> This is an honest gap, not a loading failure. See the
-							backend gap list in the redesign handoff.
-						</p>
-					</section>
+					<UsageBody />
 				</div>
 			</div>
 		</>
 	);
 }
+
+interface UsageResponse {
+	payer: { payerId: string; limitMinorUnits: number; currency: string } | null;
+	totals: { reservedMinorUnits: number; settledMinorUnits: number; reservations: number };
+	unavailable?: string;
+}
+
+function UsageBody(): ReactElement {
+	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const usage = useQuery({
+		queryKey: ['usage', chrome.actorId ?? 'pending'],
+		queryFn: () => fetchJson<UsageResponse>('/api/usage'),
+		enabled: chrome.authenticated && chrome.actorId !== null,
+	});
+
+	if (!chrome.authenticated) return <SignInGate />;
+	if (usage.isPending) {
+		return (
+			<section className="card-surface settings-panel" data-testid="usage-panel">
+				<StatePanel kind="loading" title="Reading your budget…" />
+			</section>
+		);
+	}
+	if (usage.error) {
+		return (
+			<section className="card-surface settings-panel" data-testid="usage-panel">
+				<StatePanel
+					kind={failureKind(usage.error)}
+					detail={usage.error instanceof Error ? usage.error.message : undefined}
+					onRetry={() => void usage.refetch()}
+				/>
+			</section>
+		);
+	}
+
+	const data = usage.data;
+	const fmt = (n: number, currency?: string) => `${n.toLocaleString()}${currency ? ` ${currency}` : ''}`;
+
+	return (
+		<section className="card-surface settings-panel" data-testid="usage-panel">
+			<div className="inspector-row" data-testid="usage-budget-state">
+				<div className="row-main">
+					<span className="row-title">Budget</span>
+					{data?.unavailable ? (
+						<span className="status-pill" data-status="planned">
+							not configured
+						</span>
+					) : data?.payer ? (
+						<span className="status-pill" data-status="handled">
+							configured
+						</span>
+					) : (
+						<span className="status-pill" data-status="planned">
+							no budget yet
+						</span>
+					)}
+				</div>
+				<div className="row-details">
+					{data?.unavailable ? (
+						<>This deployment has no budget tracking configured — nothing is spent or tracked here yet.</>
+					) : data?.payer ? (
+						<>
+							Run budget limit: <b>{fmt(data.payer.limitMinorUnits, data.payer.currency)}</b> (minor
+							units, enforced by the server before every run).
+						</>
+					) : (
+						<>No budget is configured for your account yet. One is set up the first time a run needs one.</>
+					)}
+				</div>
+			</div>
+			{data && !data.unavailable ? (
+				<div className="row-list">
+					<div className="inspector-row" data-testid="usage-reserved">
+						<div className="row-main">
+							<span className="row-title">Currently reserved</span>
+							<span className="row-status">{fmt(data.totals.reservedMinorUnits, data.payer?.currency)}</span>
+						</div>
+						<div className="row-details">Held by runs in progress; released or settled when they finish.</div>
+					</div>
+					<div className="inspector-row" data-testid="usage-settled">
+						<div className="row-main">
+							<span className="row-title">Settled so far</span>
+							<span className="row-status">{fmt(data.totals.settledMinorUnits, data.payer?.currency)}</span>
+						</div>
+						<div className="row-details">
+							Actual billed usage across {data.totals.reservations.toLocaleString()} reservation
+							{data.totals.reservations === 1 ? '' : 's'}.
+						</div>
+					</div>
+				</div>
+			) : null}
+			<p className="state-detail">
+				<Icon name="info" title="note" /> Numbers come straight from the budget ledger the server enforces —
+				nothing here is estimated. Per-run detail lives in a project's Build → Activity.
+			</p>
+		</section>
+	);
+}
+

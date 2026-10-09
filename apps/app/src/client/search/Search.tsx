@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { fetchJson } from '../api.ts';
 import { failureKind, StatePanel } from '../states.tsx';
 import { useSessionActor } from '../queries.ts';
@@ -11,6 +12,11 @@ import { useSessionActor } from '../queries.ts';
  * it never merges, guesses or supplements results, so anything the user
  * cannot access simply does not exist in the response (isolation is
  * enforced server-side and proven by tests/search-isolation.test.ts).
+ *
+ * Audit F11/S39: every hit is a Link to its destination (project → overview,
+ * plan document → plan review, task/memory → their surfaces), and the page
+ * offset is real paging driven by the server's totals — not a fixed first
+ * ten.
  */
 
 interface SearchHit {
@@ -39,17 +45,38 @@ const SECTION_LABELS: Record<string, string> = {
 	memory: 'Memory',
 };
 
+const PAGE_SIZE = 10;
+
+/** Where a hit opens — every result is an exit into the product (audit S39). */
+function hitDestination(hit: SearchHit): {
+	to: string;
+	search: Record<string, string | undefined>;
+} {
+	const project = hit.projectId ?? (hit.type === 'project' ? hit.id : undefined) ?? undefined;
+	switch (hit.type) {
+		case 'project':
+			return { to: '/project', search: { project: hit.id } };
+		case 'planDoc':
+			return { to: '/design-review', search: { project: project ?? undefined } };
+		case 'task':
+			return { to: '/project', search: { project: project ?? undefined } };
+		case 'memory':
+			return { to: '/settings', search: { section: 'memory' } };
+	}
+}
+
 export function Search(): ReactElement {
 	const actor = useSessionActor(true);
 	const [input, setInput] = useState('');
 	// The query fires on submit (or Enter), not on every keystroke.
 	const [submitted, setSubmitted] = useState<string | null>(null);
+	const [offset, setOffset] = useState(0);
 
 	const results = useQuery({
-		queryKey: ['search', actor.data ?? 'pending', submitted ?? 'none'],
+		queryKey: ['search', actor.data ?? 'pending', submitted ?? 'none', offset],
 		queryFn: () =>
 			fetchJson<SearchResults>(
-				`/api/search?q=${encodeURIComponent(submitted ?? '')}&limit=10&offset=0`,
+				`/api/search?q=${encodeURIComponent(submitted ?? '')}&limit=${PAGE_SIZE}&offset=${offset}`,
 			),
 		enabled: actor.data != null && submitted !== null && submitted.trim() !== '',
 	});
@@ -57,11 +84,15 @@ export function Search(): ReactElement {
 	function runSearch() {
 		const trimmed = input.trim();
 		if (trimmed === '') return;
+		setOffset(0);
 		setSubmitted(trimmed);
 	}
 
+	const total = results.data?.total ?? 0;
+	const shown = Math.min(offset + PAGE_SIZE, total);
+
 	return (
-		<section className="card-surface settings-panel" data-testid="search-panel">
+		<section className="card-surface settings-panel" data-testid="search-panel" id="search-panel">
 			<p className="kicker" data-tone="action">
 				SEARCH
 			</p>
@@ -99,7 +130,7 @@ export function Search(): ReactElement {
 					detail={results.error instanceof Error ? results.error.message : undefined}
 					onRetry={() => results.refetch()}
 				/>
-			) : (results.data?.total ?? 0) === 0 ? (
+			) : total === 0 ? (
 				<p className="state-detail" data-testid="search-empty">
 					No matches for “{submitted}” in content you can access.
 				</p>
@@ -112,19 +143,53 @@ export function Search(): ReactElement {
 									{SECTION_LABELS[name] ?? name} ({section.total})
 								</p>
 								<div className="row-list">
-									{section.items.map((hit) => (
-										<div className="inspector-row" key={hit.id} data-testid="search-hit">
-											<div className="row-main">
-												<span className="row-title">{hit.title}</span>
-												<span className="row-status">{hit.type}</span>
-											</div>
-											{hit.snippet ? <div className="row-details">{hit.snippet}</div> : null}
-										</div>
-									))}
+									{section.items.map((hit) => {
+										const dest = hitDestination(hit);
+										return (
+											<Link
+												className="inspector-row"
+												key={hit.id}
+												data-testid="search-hit"
+												to={dest.to}
+												search={dest.search as never}
+											>
+												<div className="row-main">
+													<span className="row-title">{hit.title}</span>
+													<span className="row-status">{SECTION_LABELS[hit.type] ?? hit.type}</span>
+												</div>
+												{hit.snippet ? <div className="row-details">{hit.snippet}</div> : null}
+											</Link>
+										);
+									})}
 								</div>
 							</div>
 						),
 					)}
+					{total > PAGE_SIZE ? (
+						<div className="row" data-testid="search-paging">
+							<button
+								type="button"
+								className="btn-ghost"
+								data-testid="search-prev"
+								disabled={offset === 0}
+								onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+							>
+								← Newer
+							</button>
+							<span className="state-detail">
+								{offset + 1}–{shown} of {total}
+							</span>
+							<button
+								type="button"
+								className="btn-ghost"
+								data-testid="search-next"
+								disabled={shown >= total}
+								onClick={() => setOffset(offset + PAGE_SIZE)}
+							>
+								Older →
+							</button>
+						</div>
+					) : null}
 				</div>
 			)}
 		</section>

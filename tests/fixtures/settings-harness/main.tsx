@@ -1,7 +1,20 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { RouterProvider, createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
 import { Settings } from '../../../apps/app/src/client/settings/Settings.tsx';
+
+// Settings now legitimately uses router context (useSearch for ?section=,
+// Link in search results — audit F11), so the harness mounts it under a
+// minimal router, exactly like the real shell does.
+const rootRoute = createRootRoute({ component: () => <Outlet /> });
+const settingsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: '/',
+	component: () => <Settings />,
+});
+const routeTree = rootRoute.addChildren([settingsRoute]);
+const router = createRouter({ routeTree, basepath: '/' });
 
 /**
  * Test-only harness page for tests/browser/settings.spec.ts: mounts the REAL
@@ -25,7 +38,7 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
 	<StrictMode>
 		<QueryClientProvider client={queryClient}>
-			<Settings />
+			<RouterProvider router={router} />
 		</QueryClientProvider>
 	</StrictMode>,
 );

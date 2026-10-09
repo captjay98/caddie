@@ -1,6 +1,7 @@
+import { useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchJson } from '../api.ts';
 import { failureKind, StatePanel } from '../states.tsx';
 import { useSessionActor } from '../queries.ts';
@@ -55,6 +56,7 @@ const CLIENT_STACK_IDS = [
 ] as const;
 
 export function Settings(): ReactElement {
+	const section = useSearch({ strict: false }) as { section?: string };
 	const actor = useSessionActor(true);
 	const profile = useQuery({
 		queryKey: ['profile', actor.data ?? 'pending'],
@@ -75,6 +77,8 @@ export function Settings(): ReactElement {
 	if (actor.isPending || profile.isPending || health.isPending || stacks.isPending) {
 		return <StatePanel kind="loading" title="Loading your settings…" />;
 	}
+	const panelsReady = !actor.isPending;
+	const sectionRef = section.section;
 	const error = actor.error ?? profile.error ?? health.error ?? stacks.error;
 	if (error) {
 		return (
@@ -88,6 +92,7 @@ export function Settings(): ReactElement {
 
 	return (
 		<div className="shell-loading" data-testid="settings-screen">
+			<SectionFocus section={panelsReady ? sectionRef : undefined} />
 			<div className="settings-stack">
 				<SettingsSubnav />
 				<ProfileEditor initial={profile.data?.profile ?? null} />
@@ -98,6 +103,23 @@ export function Settings(): ReactElement {
 			</div>
 		</div>
 	);
+}
+
+/** Audit S33: the account menu lands here with ?section=… — the requested
+ *  panel is scrolled into view and focused, not silently ignored. */
+function SectionFocus({ section }: { section?: string }): null {
+	useEffect(() => {
+		if (!section) return;
+		const timer = window.setTimeout(() => {
+			const el = document.getElementById(section);
+			if (!el) return;
+			el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			el.setAttribute('tabindex', '-1');
+			(el as HTMLElement).focus({ preventScroll: true });
+		}, 150);
+		return () => window.clearTimeout(timer);
+	}, [section]);
+	return null;
 }
 
 function SettingsSubnav(): ReactElement {
@@ -120,6 +142,7 @@ function SettingsSubnav(): ReactElement {
 }
 
 function ProfileEditor({ initial }: { initial: ProfileRecord | null }): ReactElement {
+	const queryClient = useQueryClient();
 	// Draft state: seeded from the server profile once, then owned locally so
 	// a failed save never wipes the user's input.
 	const [draft, setDraft] = useState(() => ({
@@ -164,7 +187,7 @@ function ProfileEditor({ initial }: { initial: ProfileRecord | null }): ReactEle
 				body: JSON.stringify({
 					...(draft.country.trim() ? { country: draft.country.trim().toUpperCase() } : { country: null }),
 					...(draft.timezone.trim() ? { timezone: draft.timezone.trim() } : { timezone: null }),
-					...(draft.weeklyHours.trim() === '' ? {} : { weeklyHours: Number(draft.weeklyHours) }),
+					weeklyHours: draft.weeklyHours.trim() === '' ? null : Number(draft.weeklyHours),
 					...(draft.experienceLevel === '' ? { experienceLevel: null } : { experienceLevel: draft.experienceLevel }),
 					stackIds: [...draft.stackIds],
 					freeTextInterests: interests,
@@ -175,6 +198,11 @@ function ProfileEditor({ initial }: { initial: ProfileRecord | null }): ReactEle
 					throw new Error(body?.message ?? 'Saving the profile failed.');
 				}
 			});
+			// The profile feeds eligibility and discovery — stale verdicts must
+			// not outlive a saved change (audit F11).
+			void queryClient.invalidateQueries({ queryKey: ['profile'] });
+			void queryClient.invalidateQueries({ queryKey: ['brief'] });
+			void queryClient.invalidateQueries({ queryKey: ['discovery-candidates'] });
 			setSavedNote(true);
 		} catch (err) {
 			// The draft is preserved: fields above are NOT reset on failure.
@@ -187,7 +215,7 @@ function ProfileEditor({ initial }: { initial: ProfileRecord | null }): ReactEle
 	const interestCount = draft.interests.split(',').filter((p) => p.trim() !== '').length;
 
 	return (
-		<section className="card-surface settings-panel" data-testid="profile-editor">
+		<section className="card-surface settings-panel" data-testid="profile-editor" id="profile-editor">
 			<p className="kicker" data-tone="action">
 				PROFILE
 			</p>
@@ -318,7 +346,7 @@ function IntegrationHealthPanel({ health }: { health: IntegrationsHealth }): Rea
 		</div>
 	);
 	return (
-		<section className="card-surface settings-panel" data-testid="integrations-health">
+		<section className="card-surface settings-panel" data-testid="integrations-health" id="integrations-health">
 			<p className="kicker" data-tone="action">
 				INTEGRATIONS
 			</p>
@@ -347,7 +375,7 @@ function IntegrationHealthPanel({ health }: { health: IntegrationsHealth }): Rea
 
 function StacksPanel({ stacks }: { stacks: StacksResponse['stacks'] }): ReactElement {
 	return (
-		<section className="card-surface settings-panel" data-testid="stacks-panel">
+		<section className="card-surface settings-panel" data-testid="stacks-panel" id="stacks-panel">
 			<p className="kicker" data-tone="action">
 				OUTPUT STACKS
 			</p>

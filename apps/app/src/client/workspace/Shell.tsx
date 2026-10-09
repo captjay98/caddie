@@ -273,9 +273,29 @@ function NeedsYou(): ReactElement {
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const brief = useBriefCards(actor, chrome.homeProject?.id ?? null);
 
+	// Audit F08: every card routes by its OWN identity — kind decides the
+	// surface, projectId scopes it, primaryAction.targetId carries the claim
+	// when the card cites evidence. The card is never discarded.
 	function onCardAction(card: DecisionCardType) {
-		void card;
-		chrome.goProjectTab('/project', {});
+		const search = { project: card.projectId };
+		switch (card.kind) {
+			case 'approval':
+				chrome.goProjectTab('/design-review', search);
+				break;
+			case 'change':
+				if (card.evidenceIds.length > 0) {
+					chrome.goProjectTab('/evidence', { ...search, claim: card.primaryAction.targetId });
+				} else {
+					chrome.goProjectTab('/artifacts', search);
+				}
+				break;
+			case 'deadline':
+				chrome.goProjectTab('/schedules', search);
+				break;
+			case 'result':
+				chrome.goProjectTab('/project', search);
+				break;
+		}
 	}
 
 	return (

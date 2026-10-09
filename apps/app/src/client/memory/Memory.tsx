@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchJson, postJson } from '../api.ts';
 import { failureKind, StatePanel } from '../states.tsx';
-import { useSessionActor } from '../queries.ts';
+import { useProjects, useSessionActor } from '../queries.ts';
 
 /**
  * P14 memory management UI (feature-ledger H10): inspect, confirm, correct
@@ -41,6 +41,7 @@ export function Memory(): ReactElement {
 	const actor = useSessionActor(true);
 	const queryClient = useQueryClient();
 	const [projectId, setProjectId] = useState<string>('');
+	const projects = useProjects(useMemo(() => ({ actorId: actor.data ?? null }), [actor.data]));
 
 	const list = useQuery({
 		queryKey: ['memory', actor.data ?? 'pending', projectId || 'personal', 'management'],
@@ -90,11 +91,31 @@ export function Memory(): ReactElement {
 	const history = facts.filter((fact) => fact.status === 'retracted');
 
 	return (
-		<section className="card-surface settings-panel" data-testid="memory-panel">
+		<section className="card-surface settings-panel" data-testid="memory-panel" id="memory-panel">
 			<p className="kicker" data-tone="action">
 				MEMORY
 			</p>
 			<h3 className="state-title">What Caddie remembers</h3>
+			<label className="row" htmlFor="memory-scope">
+				<span className="kicker">SCOPE</span>
+				<select
+					className="input"
+					id="memory-scope"
+					data-testid="memory-scope"
+					aria-label="Memory scope"
+					value={projectId}
+					onChange={(event) => setProjectId(event.target.value)}
+				>
+					<option value="">Personal — your account</option>
+					{(projects.data?.projects ?? [])
+						.filter((p) => p.kind !== 'home')
+						.map((p) => (
+							<option key={p.id} value={p.id}>
+								{p.name}
+							</option>
+						))}
+				</select>
+			</label>
 			<p className="state-detail">
 				Personal facts belong to you alone. Retracting removes a fact from
 				every future use — it is never silently deleted, the retracted entry

@@ -151,3 +151,26 @@ packets P01/P06-implied/P07/P11/P13/P14 all PASS on the refactored tree.
 - **F14 verified fixed:** the audit's two stale-label failures were already
   corrected in `65df59f5` + the scope-pill change; the audit's exact 8-file
   browser set now passes **56/56** (`--workers=1`, same invocation).
+
+### Wave 4 — F08 + F11 (IMPLEMENTED)
+
+- **F08:** Home decision cards route by their own identity — kind picks the
+  surface (approval → Plan review, change → Evidence with the cited claim or
+  Files, deadline → Automation, result → Overview), `projectId` scopes every
+  jump, `primaryAction.targetId` rides along as `?claim=`. The account-wide
+  brief roll-up remains a server prerequisite; whatever the brief API emits is
+  now targeted exactly.
+- **F11 (all five):** Search hits are Links with typed destinations (project →
+  Overview, plan doc → Plan review, task → Overview, memory → Settings ·
+  Memory) and real paging driven by the server's totals (offset state, Older/
+  Newer, "x–y of z"); Settings honours `?section=` (panels carry real DOM ids,
+  the requested panel scrolls into view and focuses — harness fix included:
+  the fixture now mounts a router because Settings legitimately needs router
+  context); profile weeklyHours sends explicit `null` so clearing clears, and
+  a save invalidates profile + brief + discovery (stale eligibility cannot
+  outlive a saved change); Memory has a working project-scope selector over
+  the API's existing `projectId` filter; **Usage reads the real budget
+  ledger** via a new read-only session-scoped `GET /api/usage` (payer limit,
+  reserved, settled, reservation count; honest "not configured" when the
+  deployment has no budget tables). Verified: endpoint 200 + page renders the
+  real state; settings.spec 5/5 on the fixed harness.
