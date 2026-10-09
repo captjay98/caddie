@@ -1490,12 +1490,13 @@ a.btn-ghost.topbar-nav-link {
 
 /* Settings stack: the five panels get real breathing room and a parent gap
    instead of merging into one long surface with hairlines through it. */
+/* Audit F03: neutral stack — gaps only. Width belongs to the page column
+   (.page-col), outer gutters to the shell, card interiors to the cards. */
 .settings-stack {
 	display: grid;
 	gap: 1rem;
 	width: 100%;
-	max-width: 760px;
-	padding: 1.2rem;
+	min-width: 0;
 }
 
 .settings-panel {
@@ -1992,8 +1993,6 @@ a.btn-ghost.topbar-nav-link {
 
 .discovery-panel {
 	width: 100%;
-	max-width: 760px;
-	margin: 0 auto;
 	display: grid;
 	gap: 0.8rem;
 }
@@ -2099,8 +2098,6 @@ a.btn-ghost.topbar-nav-link {
 
 .judge-panel {
 	width: 100%;
-	max-width: 760px;
-	margin: 0 auto;
 	display: grid;
 	gap: 0.8rem;
 }
@@ -2176,8 +2173,6 @@ a.btn-ghost.topbar-nav-link {
 
 .submission-panel {
 	width: 100%;
-	max-width: 760px;
-	margin: 0 auto;
 	display: grid;
 	gap: 0.8rem;
 }

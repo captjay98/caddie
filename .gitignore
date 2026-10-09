@@ -12,3 +12,6 @@ dist/
 test-results/
 playwright-report/
 .worktrees/
+
+# local tool state
+.zcode/

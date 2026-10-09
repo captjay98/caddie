@@ -91,8 +91,9 @@ export function Settings(): ReactElement {
 	}
 
 	return (
-		<div className="shell-loading" data-testid="settings-screen">
+		<div className="shell-loading shell-page" data-testid="settings-screen">
 			<SectionFocus section={panelsReady ? sectionRef : undefined} />
+			<div className="page-col">
 			<div className="settings-stack">
 				<SettingsSubnav />
 				<ProfileEditor initial={profile.data?.profile ?? null} />
@@ -100,6 +101,7 @@ export function Settings(): ReactElement {
 				<StacksPanel stacks={stacks.data!.stacks} />
 				<Memory />
 				<Search />
+			</div>
 			</div>
 		</div>
 	);
