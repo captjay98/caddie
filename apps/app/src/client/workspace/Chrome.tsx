@@ -117,6 +117,9 @@ interface WorkspaceChromeContextValue {
 		retryDraft: (id: string) => void;
 		discardDraft: (id: string) => void;
 		resolveDraft: (id: string) => void;
+		/** Unsent typing, scoped actor+conversation, survives navigation (F01). */
+		composerText: string;
+		setComposerText: (text: string) => void;
 	};
 	transport: CoordinatorTransport | null;
 	sendText: (text: string) => void;
@@ -434,7 +437,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								</span>
 								{!isDesktop ? (
 									<span className="conv-head-chips">
-										<Link to="/search" className="conv-chip" data-testid="conv-search" title="Search" search={keepSearch}>
+										<Link to="/search" className="conv-chip" data-testid="conv-search" title="Search" search={withoutPane}>
 											<Icon name="search" title="Search" />
 										</Link>
 										<AccountMenu accountOpen={accountOpen} setAccountOpen={setAccountOpen} displayName={displayName.data ?? null} />
@@ -447,6 +450,8 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								drafts={channel.drafts}
 								projectId={conversationProjectId}
 								composerHidden={!isDesktop}
+								composerText={channel.composerText}
+								onComposerTextChange={channel.setComposerText}
 								resolving={conversationResolving}
 								onSend={sendText}
 								onRetryDraft={(id) => {
@@ -486,6 +491,14 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 
 const keepSearch = (prev: Record<string, unknown>) => ({ ...prev });
 
+/** Destination navigation strips the mobile pane flag (audit F04): a chat
+ *  pane open on one surface must never conceal the destination the user
+ *  explicitly navigated to. Project selection is preserved. */
+const withoutPane = (prev: Record<string, unknown>) => {
+	const { pane: _pane, ...rest } = prev;
+	return rest;
+};
+
 /** The desktop floating navigation capsule: wordmark + the three global
  *  destinations + Search, theme and Account, all in one rounded container
  *  that sticks inside the left panel. */
@@ -498,7 +511,7 @@ function NavCapsule(props: {
 	const { theme, toggleTheme } = useWorkspaceChrome();
 	return (
 		<nav className="nav-capsule" aria-label="Primary" data-testid="nav-capsule">
-			<Link to="/" className="capsule-wordmark" data-testid="wordmark" search={keepSearch}>
+			<Link to="/" className="capsule-wordmark" data-testid="wordmark" search={withoutPane}>
 				CADDIE<b>·</b>
 			</Link>
 			<span className="capsule-divider" aria-hidden="true" />
@@ -510,7 +523,7 @@ function NavCapsule(props: {
 					data-testid={item.testid}
 					title={item.title}
 					aria-current={props.nav === item.id ? 'page' : undefined}
-					search={keepSearch}
+					search={withoutPane}
 				>
 					{item.label}
 				</Link>
@@ -697,6 +710,7 @@ function MobileNav(props: {
 	conversationKind: ConversationKind;
 	resolving: boolean;
 }): ReactElement {
+	const { channel } = useWorkspaceChrome();
 	const onDiscover = props.nav === 'discover';
 	const onProjects = props.nav === 'projects';
 	// The conversation IS the mobile home: the Chat tab is current whenever
@@ -719,6 +733,8 @@ function MobileNav(props: {
 					onSend={props.sendText}
 					disabled={disabled}
 					disabledReason={disabledReason}
+					value={channel.composerText}
+					onValueChange={channel.setComposerText}
 					placeholder={onDiscover ? 'Ask Caddie about these hackathons…' : 'Message Caddie…'}
 				/>
 			</div>
@@ -748,7 +764,7 @@ function MobileNav(props: {
 					className="tab-btn"
 					data-testid="nav-discover-mobile"
 					aria-current={onDiscover ? 'page' : undefined}
-					search={keepSearch}
+					search={withoutPane}
 				>
 					<Icon name="target" title="" />
 					Discover
@@ -758,7 +774,7 @@ function MobileNav(props: {
 					className="tab-btn"
 					data-testid="nav-projects-mobile"
 					aria-current={onProjects ? 'page' : undefined}
-					search={keepSearch}
+					search={withoutPane}
 				>
 					<Icon name="box" title="" />
 					Projects

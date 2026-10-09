@@ -60,9 +60,22 @@ function newDraft(text: string): ChannelDraft {
 }
 
 const DRAFTS_KEY = 'caddie-channel-drafts';
+const COMPOSER_KEY = 'caddie-composer-draft';
 
 function storageKey(sessionKey: string, projectId: string | null): string {
 	return `${DRAFTS_KEY}:${sessionKey}:${projectId ?? 'none'}`;
+}
+
+function composerKey(sessionKey: string, projectId: string | null): string {
+	return `${COMPOSER_KEY}:${sessionKey}:${projectId ?? 'none'}`;
+}
+
+function loadComposerDraft(key: string): string {
+	try {
+		return sessionStorage.getItem(key) ?? '';
+	} catch {
+		return '';
+	}
 }
 
 function loadDrafts(key: string): ChannelDraft[] {
@@ -92,13 +105,18 @@ export function useChannelStore(options: {
 }) {
 	const { sessionKey, projectId } = options;
 	const key = storageKey(sessionKey, projectId);
+	const composerKey_ = composerKey(sessionKey, projectId);
 	const [drafts, setDrafts] = useState<ChannelDraft[]>(() => loadDrafts(key));
+	// Unsent typing (audit F01): survives navigation and reloads, scoped to
+	// actor + conversation exactly like the sent-draft records.
+	const [composerText, setComposerTextState] = useState(() => loadComposerDraft(composerKey_));
 
 	// Reload when the scope changes (project switch / account switch) —
 	// sessionStorage keeps unsent work across reloads, scoped per account+project.
 	useEffect(() => {
 		setDrafts(loadDrafts(key));
-	}, [key]);
+		setComposerTextState(loadComposerDraft(composerKey_));
+	}, [key, composerKey_]);
 
 	useEffect(() => {
 		try {
@@ -107,6 +125,19 @@ export function useChannelStore(options: {
 			// storage full/blocked: drafts stay in memory for the session
 		}
 	}, [key, drafts]);
+
+	const setComposerText = useCallback(
+		(text: string) => {
+			setComposerTextState(text);
+			try {
+				if (text) sessionStorage.setItem(composerKey_, text);
+				else sessionStorage.removeItem(composerKey_);
+			} catch {
+				// storage blocked: text stays in memory for the session
+			}
+		},
+		[composerKey_],
+	);
 
 	/** Creates the optimistic draft and returns it (null for empty input) —
 	 *  the caller sends it through the transport with the draft's own key. */
@@ -144,5 +175,5 @@ export function useChannelStore(options: {
 		setDrafts((existing) => existing.filter((draft) => draft.id !== id));
 	}, []);
 
-	return { drafts, addDraft, retryDraft, discardDraft, resolveDraft };
+	return { drafts, addDraft, retryDraft, discardDraft, resolveDraft, composerText, setComposerText };
 }

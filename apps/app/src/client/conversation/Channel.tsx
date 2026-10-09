@@ -343,6 +343,10 @@ export function Channel(props: {
 	/** Mobile: the composer lives in the floating bottom bar (input above the
 	 *  five nav items), so the pane renders the transcript alone. */
 	composerHidden?: boolean;
+	/** Controlled unsent typing (audit F01) — owned by the scoped channel
+	 *  store so it survives navigation and reloads. */
+	composerText?: string;
+	onComposerTextChange?: (text: string) => void;
 	/** The conversation scope is still resolving (e.g. the account Home project
 	 *  is being created/fetched on a global route). Render an honest loading
 	 *  state — NOT the empty "no project" prompt, and NOT an error. */
@@ -463,6 +467,8 @@ export function Channel(props: {
 					onSend={props.onSend}
 					disabled={live}
 					disabledReason={live ? 'A run is working — wait for it to settle.' : undefined}
+					value={props.composerText}
+					onValueChange={props.onComposerTextChange}
 				/>
 			) : null}
 		</div>

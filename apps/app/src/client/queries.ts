@@ -44,21 +44,40 @@ interface SessionPayload {
 }
 
 /**
+ * Canonical verified-session cache entry. This is the ONLY queryFn allowed to
+ * write ['auth','session'] — it stores the raw Better Auth payload. Actor and
+ * display-name observers project their view with `select` (stable module-level
+ * functions, so TanStack can memoize the projection), meaning the cached shape
+ * can never depend on which consumer mounted first (audit F02: two competing
+ * queryFn under one key cached an actor string or a payload depending on mount
+ * order, and the display name could vanish).
+ */
+function sessionQueryOptions(enabled: boolean) {
+	return {
+		queryKey: ['auth', 'session'] as const,
+		queryFn: () => fetchJson<SessionPayload>('/api/auth/get-session'),
+		enabled,
+		staleTime: 60_000,
+	};
+}
+
+function sessionActorId(payload: SessionPayload | null | undefined): string | null {
+	const id = payload?.user?.id;
+	return typeof id === 'string' && id.trim() ? id : null;
+}
+
+function sessionDisplayName(payload: SessionPayload | null | undefined): string | null {
+	const name = payload?.user?.name;
+	return typeof name === 'string' && name.trim() !== '' ? name : null;
+}
+
+/**
  * Actor identity, known only once a verified session exists. Better Auth's
  * /api/auth/get-session returns { session, user } — only `user.id` is read.
  * The id is the cache-scope boundary; keys use 'pending' until it arrives.
  */
 export function useSessionActor(enabled: boolean) {
-	return useQuery({
-		queryKey: ['auth', 'session'],
-		queryFn: async () => {
-			const payload = await fetchJson<SessionPayload>('/api/auth/get-session');
-			const id = payload?.user?.id;
-			return typeof id === 'string' && id.trim() ? id : null;
-		},
-		enabled,
-		staleTime: 60_000,
-	});
+	return useQuery({ ...sessionQueryOptions(enabled), select: sessionActorId });
 }
 
 /** Cache-scope token: 'pending' keeps keys stable-shaped until the actor lands. */
@@ -71,15 +90,7 @@ export type ActorScope = { actorId: string | null };
  * glyph, never a guessed initial).
  */
 export function useSessionDisplayName() {
-	return useQuery({
-		queryKey: ['auth', 'session'],
-		queryFn: () => fetchJson<SessionPayload>('/api/auth/get-session'),
-		select: (payload) => {
-			const name = payload?.user?.name;
-			return typeof name === 'string' && name.trim() !== '' ? name : null;
-		},
-		staleTime: 60_000,
-	});
+	return useQuery({ ...sessionQueryOptions(true), select: sessionDisplayName });
 }
 
 export function useProjects(actor: ActorScope) {

@@ -16,8 +16,15 @@ export function Composer(props: {
 	disabled?: boolean;
 	disabledReason?: string;
 	placeholder?: string;
+	/** Controlled text (audit F01): when provided, unsent typing is owned by
+	 *  the scoped channel store and survives navigation/reload. Uncontrolled
+	 *  (local state) remains the fallback for standalone use. */
+	value?: string;
+	onValueChange?: (text: string) => void;
 }): ReactElement {
-	const [value, setValue] = useState('');
+	const [localValue, setLocalValue] = useState('');
+	const value = props.value ?? localValue;
+	const setValue = props.onValueChange ?? setLocalValue;
 	const disabled = Boolean(props.disabled);
 
 	function submit() {
