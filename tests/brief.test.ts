@@ -230,8 +230,9 @@ describe('brief feed (projectBrief)', () => {
 });
 // --- ACCOUNT BRIEF (approved navigation 2026-10-09) ------------------------------
 
-import { accountBrief, markBriefRead } from '../apps/app/src/server/brief.ts';
+import { accountBrief, groupCards, markBriefRead } from '../apps/app/src/server/brief.ts';
 import type { AccountBriefPayload, DecisionCard as AccountCard } from '@caddie/contracts';
+type DecisionCard = AccountCard;
 
 /** Alice's second build project + a Home project (account scope) with a
  *  saved discovery candidate, plus previews and a submission package. */
@@ -362,4 +363,19 @@ describe('account brief (accountBrief)', () => {
 		const aliceAgain = await accountBrief(world.db, 'unit-alice');
 		expect(aliceAgain.cards.find((card) => card.key === approvalCard.key)!.seen).toBe(true);
 	});
+});
+
+test('groupCards dedupes on (projectId, kind, targetId) — newest wins, nothing lost across projects', () => {
+	const base = { summary: 's', evidenceIds: [], status: 'changed' as const };
+	const older: DecisionCard = { ...base, id: 'c1', projectId: 'p1', kind: 'change', headline: 'older', updatedAt: '2026-10-01T00:00:00.000Z', primaryAction: { label: 'Inspect', kind: 'inspect', targetId: 'x-1' } };
+	const newer: DecisionCard = { ...base, id: 'c2', projectId: 'p1', kind: 'change', headline: 'newer', updatedAt: '2026-10-02T00:00:00.000Z', primaryAction: { label: 'Inspect', kind: 'inspect', targetId: 'x-1' } };
+	const otherProject: DecisionCard = { ...base, id: 'c3', projectId: 'p2', kind: 'change', headline: 'same target, other project', updatedAt: '2026-10-01T00:00:00.000Z', primaryAction: { label: 'Inspect', kind: 'inspect', targetId: 'x-1' } };
+	const distinct: DecisionCard = { ...base, id: 'c4', projectId: 'p1', kind: 'change', headline: 'distinct target', updatedAt: '2026-10-01T00:00:00.000Z', primaryAction: { label: 'Inspect', kind: 'inspect', targetId: 'x-2' } };
+
+	const grouped = groupCards([older, newer, otherProject, distinct]);
+	expect(grouped.length).toBe(3);
+	const p1 = grouped.find((c) => c.projectId === 'p1' && c.primaryAction.targetId === 'x-1');
+	expect(p1!.headline).toBe('newer');
+	expect(grouped.some((c) => c.projectId === 'p2')).toBe(true);
+	expect(grouped.some((c) => c.primaryAction.targetId === 'x-2')).toBe(true);
 });

@@ -5,7 +5,7 @@ import type { ReactElement } from 'react';
  * ProjectTabs — the four project-LOCAL destinations that answer "where am I in
  * this build" (discovery-first redesign): Overview · Plan · Build · Submission.
  *
- * These live one level below the global capsule (Home · Discover · Projects):
+ * These live one level below the global capsule (Brief · Discover · Projects):
  * they never appear on a global route, only inside a project, and they keep the
  * same ?project= in the URL so the persistent conversation stays bound to THIS
  * project. The nested siblings (Files/Automation under Build, Evidence/Judge

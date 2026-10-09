@@ -843,12 +843,10 @@ function AccountMenu(props: {
 
 /**
  * The mobile bottom nav (today.ai grammar, preserved): one floating rounded
- * container with the composer directly above a row of THREE destinations —
- * Home · Discover · Projects. The input rides every route (the current
- * clarification supersedes the older five-tab / chat-slot design). The
- * conversation on mobile is reached from the composer (which opens the channel
- * pane) or by tapping the current destination's context; nothing here creates a
- * global Chat/Build tab.
+ * container with the composer directly above a row of FOUR destinations —
+ * Chat · Brief · Discover · Projects (approved navigation 2026-10-09; Chat is
+ * the initial default tab). The input rides every route. Destination links
+ * strip stale ?pane params so a destination is never concealed.
  */
 function MobileNav(props: {
 	nav: WorkspaceNavId;

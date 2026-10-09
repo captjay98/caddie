@@ -303,8 +303,8 @@ export async function markBriefRead(
 }
 
 /** Dedupe on (projectId, kind, targetId) — one card per unresolved issue,
- *  newest update wins. */
-function groupCards(cards: readonly DecisionCard[]): DecisionCard[] {
+ *  newest update wins. Exported for the unit suite (tests/brief.test.ts). */
+export function groupCards(cards: readonly DecisionCard[]): DecisionCard[] {
 	const byKey = new Map<string, DecisionCard>();
 	for (const card of cards) {
 		const key = cardKey(card);

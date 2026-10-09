@@ -190,6 +190,10 @@ async function stubAccount(
 	const actorId = opts.actorId ?? 'actor-test';
 	const projects = opts.projects ?? [HOME, PROJ_A, PROJ_B];
 	const cards = opts.cards ?? [APPROVAL_A, DEADLINE_B];
+	// Read state is DYNAMIC: the /brief/read handler records keys and the next
+	// GET recomputes unseenCount from them — so the badge clearing after
+	// mark-all-read is proven end-to-end against the stub.
+	const seenKeys = new Set<string>();
 	const unseenCount = opts.unseenCount ?? cards.filter((c) => !c.seen).length;
 	const reads: string[] = [];
 	const runPosts = { n: 0 };
@@ -206,6 +210,7 @@ async function stubAccount(
 	});
 	await context.route('**/api/brief/read', (route) => {
 		const body = (route.request().postDataJSON() ?? {}) as { keys?: string[] };
+		for (const key of body.keys ?? []) seenKeys.add(key);
 		reads.push(...(body.keys ?? []));
 		return json(route, 200, { marked: body.keys?.length ?? 0 });
 	});
@@ -213,9 +218,10 @@ async function stubAccount(
 		if (opts.briefStatus && opts.briefStatus !== 200) {
 			return json(route, opts.briefStatus, { error: 'brief_unavailable', message: 'The brief could not be read.' });
 		}
+		const liveUnseen = seenKeys.size > 0 ? cards.filter((c) => c.key && !seenKeys.has(c.key)).length : unseenCount;
 		return json(route, 200, {
-			cards,
-			unseenCount,
+			cards: seenKeys.size > 0 ? cards.map((c) => ({ ...c, seen: c.key ? seenKeys.has(c.key) : (c.seen ?? false) })) : cards,
+			unseenCount: liveUnseen,
 			projects: projects.map((p) => ({ id: p.id, name: p.name, kind: p.kind })),
 			asOf: NOW,
 		});
@@ -351,10 +357,12 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 
 		await page.getByTestId('brief-mark-all-read').click();
 		expect(reads.sort()).toEqual(['proj-a:approval:ap-1', 'proj-b:deadline:sch-1']);
-		// Read state is separate from resolution: no approval/schedule POSTs.
-		// (The stub records no such calls by construction — the badge reflects
-		// the next brief payload, asserted by the badge disappearing in the
-		// follow-up render.)
+		// The refetched payload reflects the reads: the badge disappears and the
+		// unseen count drops to zero. Read state is separate from resolution —
+		// no approval/schedule POSTs happen (the stub records none).
+		await expect(page.getByTestId('nav-brief-badge')).toHaveCount(0);
+		await expect(page.getByTestId('brief-count')).toContainText('2 updates');
+		await expect(page.getByTestId('brief-count')).not.toContainText('unseen');
 		await context.close();
 	});
 

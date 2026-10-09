@@ -126,3 +126,27 @@ Remaining honest limitations: discovery sources are still the local seed
 (opportunity cards say so); live OAuth round-trip and real-device keyboard
 acceptance stay device/credential-gated (viewport resizing is not a
 device-keyboard proof).
+
+## Independent acceptance review (2026-10-09, read-only agent)
+
+20/20 acceptance checks PASS against the owner brief. Issues found and fixed
+in the same change: the AccountBriefLane error state lacked its Retry action
+(the fix had landed only in the project lane); stale "Home" copy/comments
+(Channel no-project state, MobileNav/routes/ProjectTabs doc comments);
+`groupCards` had no direct test (now exported + proven: dedupe on
+(projectId, kind, targetId), newest wins, nothing lost across projects);
+mark-all-read badge clearing is now proven END-TO-END (the stub's read state
+is dynamic — the badge disappears and the unseen count drops after the
+refetch).
+
+Accepted, documented limitations (follow-up packets, separately owned):
+- Brief actions open the exact project + surface; per-TARGET deep focus
+  (e.g. highlight the specific revision/schedule/package) needs per-surface
+  focus params — the opportunity action opens Discover, which has no
+  per-candidate route yet.
+- Welcome-hide-after-send is implemented via the transcript gate
+  (`source.messages.length === 0`) but not end-to-end tested (would require
+  stubbing the flue agent snapshot).
+- Automated judge run, repository import persistence, persistent approval
+  history, idea exploration before commitment, standalone delivery — recorded
+  as PARTIAL/OPEN follow-up packets in the remediation ledger.

@@ -30,7 +30,7 @@ import {
  * composed build; `bun run dev` serves at the root. The selected project lives
  * in the ?project= search param — refresh and deep links retain it.
  *
- * THREE GLOBAL DESTINATIONS only (Home · Discover · Projects) plus account
+ * THREE GLOBAL DESTINATIONS only (Brief · Discover · Projects) plus account
  * surfaces (Search/Automations/Usage/Settings) and the project-local surfaces
  * (Overview/Plan/Build/Submission and their nested siblings). Every route renders
  * inside WorkspaceChrome, so no destination is a chrome-less dead end and the
