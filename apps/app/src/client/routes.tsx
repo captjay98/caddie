@@ -1,6 +1,6 @@
-import { createRootRoute, createRoute, createRouter, Outlet, redirect, createBrowserHistory } from '@tanstack/react-router';
+import { createRootRoute, createRoute, createRouter, Outlet, redirect, createBrowserHistory, useMatches } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
-import { WorkspaceChrome } from './workspace/Chrome.tsx';
+import { WorkspaceChrome, type WorkspaceNavId } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
 import { Start } from './onboarding/Start.tsx';
@@ -93,26 +93,53 @@ function validateEvidenceSearch(search: Record<string, unknown>): { project?: st
 	};
 }
 
+/**
+ * The stable shell layout (audit F01): WorkspaceChrome — and with it the
+ * persistent conversation, the run transport and the channel store — mounts
+ * ONCE here, above every page Outlet. Sibling navigation unmounts only the
+ * page content, so drafts, transcript position and the live connection
+ * survive same-context navigation. Each child declares its destination via
+ * staticData.nav; the layout reads the deepest match.
+ */
+const shellLayoutRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	id: '_shell',
+	component: function ShellLayout() {
+		const matches = useMatches();
+		const meta = (matches[matches.length - 1]?.staticData ?? {}) as {
+			nav?: WorkspaceNavId;
+		};
+		return (
+			<WorkspaceChrome nav={meta.nav ?? 'none'}>
+				<Outlet />
+			</WorkspaceChrome>
+		);
+	},
+});
+
 // --- global destinations -------------------------------------------------------
 
 const homeRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/',
 	validateSearch,
+	staticData: { nav: 'home' },
 	component: Shell,
 });
 
 const discoverRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/discover',
 	validateSearch,
+	staticData: { nav: 'discover' },
 	component: DiscoverPage,
 });
 
 const projectsRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/projects',
 	validateSearch,
+	staticData: { nav: 'projects' },
 	component: ProjectsPage,
 });
 
@@ -120,116 +147,122 @@ const projectsRoute = createRoute({
 // their siblings are separate routes that all render nav='project' so the
 // conversation binds to the selected project.
 const projectRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/project',
 	validateSearch,
+	staticData: { nav: 'project' },
 	component: ProjectOverviewPage,
 });
 
 // --- account surfaces ----------------------------------------------------------
 
 const searchRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/search',
 	validateSearch,
+	staticData: { nav: 'account' },
 	component: SearchPage,
 });
 
 const automationsRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/automations',
 	validateSearch,
+	staticData: { nav: 'account' },
 	component: AutomationsPage,
 });
 
 const usageRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/usage',
 	validateSearch,
+	staticData: { nav: 'account' },
 	component: UsagePage,
 });
 
 const settingsRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/settings',
 	validateSearch,
+	staticData: { nav: 'account' },
 	component: function SettingsPage() {
-		return (
-			<WorkspaceChrome nav="account">
-				<Settings />
-			</WorkspaceChrome>
-		);
+		return <Settings />;
 	},
 });
 
 const onboardingRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/onboarding',
 	validateSearch,
+	staticData: { nav: 'account' },
 	component: function OnboardingPage() {
-		return (
-			<WorkspaceChrome nav="account">
-				<Start />
-			</WorkspaceChrome>
-		);
+		return <Start />;
 	},
 });
 
 // --- project-local surfaces (all render nav='project') --------------------------
 
 const designReviewRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/design-review',
 	validateSearch,
+	staticData: { nav: 'project' },
 	component: DesignReviewPage,
 });
 
 const runsRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/runs',
 	validateSearch,
+	staticData: { nav: 'project' },
 	component: RunsPage,
 });
 
 const artifactsRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/artifacts',
 	validateSearch,
+	staticData: { nav: 'project' },
 	component: ArtifactsPage,
 });
 
 const schedulesRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/schedules',
 	validateSearch,
+	staticData: { nav: 'project' },
 	component: SchedulesPage,
 });
 
 const evidenceRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/evidence',
 	validateSearch: validateEvidenceSearch,
+	staticData: { nav: 'project' },
 	component: EvidencePage,
 });
 
 const judgeRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/judge',
 	validateSearch,
+	staticData: { nav: 'project' },
 	component: JudgePage,
 });
 
 const submissionRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/submission',
 	validateSearch,
+	staticData: { nav: 'project' },
 	component: SubmissionPage,
 });
 
 const repositoriesRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/repositories',
 	validateSearch,
+	staticData: { nav: 'project' },
 	component: RepositoriesPage,
 });
 
@@ -247,9 +280,10 @@ function carryProject(search: Record<string, unknown>): Record<string, unknown> 
 }
 
 const legacyDiscoveryRoute = createRoute({
-	getParentRoute: () => rootRoute,
+	getParentRoute: () => shellLayoutRoute,
 	path: '/discovery',
 	validateSearch,
+	staticData: { nav: 'discover' },
 	beforeLoad: ({ search }) => {
 		throw redirect({ to: '/discover', search: carryProject(search as Record<string, unknown>), replace: true });
 	},
@@ -257,7 +291,8 @@ const legacyDiscoveryRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
-	homeRoute,
+	shellLayoutRoute.addChildren([
+		homeRoute,
 	discoverRoute,
 	projectsRoute,
 	projectRoute,
@@ -274,7 +309,8 @@ export const routeTree = rootRoute.addChildren([
 	judgeRoute,
 	submissionRoute,
 	repositoriesRoute,
-	legacyDiscoveryRoute,
+		legacyDiscoveryRoute,
+	]),
 ]);
 
 function detectBasepath(): string {

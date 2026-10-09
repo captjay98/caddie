@@ -24,7 +24,7 @@ import {
 	usePlanDocRevisions,
 	useRunBindings,
 } from './queries.ts';
-import { WorkspaceChrome, useWorkspaceChrome } from './workspace/Chrome.tsx';
+import { useWorkspaceChrome } from './workspace/Chrome.tsx';
 import { ProjectTabs, ProjectSubTabs } from './workspace/ProjectTabs.tsx';
 
 /**
@@ -107,7 +107,7 @@ export function DiscoverPage(): ReactElement {
 	// must not read the chrome context itself, because WorkspaceChrome's provider
 	// mounts below this component. All chrome-consuming logic lives in DiscoverBody.
 	return (
-		<WorkspaceChrome nav="discover">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<div className="r-section-head">
@@ -126,7 +126,7 @@ export function DiscoverPage(): ReactElement {
 					<DiscoverBody />
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -187,7 +187,7 @@ export function ProjectsPage(): ReactElement {
 	// start-path buttons read the chrome from a child (ProjectsActions) so nothing
 	// above the provider calls useWorkspaceChrome.
 	return (
-		<WorkspaceChrome nav="projects">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<div className="r-section-head">
@@ -206,7 +206,7 @@ export function ProjectsPage(): ReactElement {
 					<ProjectList />
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -280,14 +280,14 @@ function whenIso(iso: string): string {
 
 export function ProjectOverviewPage(): ReactElement {
 	return (
-		<WorkspaceChrome nav="project">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="overview" />
 					<ProjectGate>{(projectId) => <ProjectOverviewBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -379,14 +379,14 @@ function ProjectHeader(props: { projectId: string; project: Project | null }): R
 
 export function DesignReviewPage(): ReactElement {
 	return (
-		<WorkspaceChrome nav="project">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="plan" />
 					<ProjectGate>{(projectId) => <DesignReviewBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -410,7 +410,7 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
 
 export function RunsPage(): ReactElement {
 	return (
-		<WorkspaceChrome nav="project">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="build" />
@@ -418,7 +418,7 @@ export function RunsPage(): ReactElement {
 					<ProjectGate>{(projectId) => <RunsBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -464,7 +464,7 @@ function RunsBody(props: { projectId: string }): ReactElement {
 
 export function ArtifactsPage(): ReactElement {
 	return (
-		<WorkspaceChrome nav="project">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="build" />
@@ -472,7 +472,7 @@ export function ArtifactsPage(): ReactElement {
 					<ProjectGate>{(projectId) => <ArtifactsBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -493,7 +493,7 @@ function ArtifactsBody(props: { projectId: string }): ReactElement {
 
 export function SchedulesPage(): ReactElement {
 	return (
-		<WorkspaceChrome nav="project">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="build" />
@@ -501,7 +501,7 @@ export function SchedulesPage(): ReactElement {
 					<ProjectGate>{(projectId) => <Schedules projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -509,7 +509,7 @@ export function SchedulesPage(): ReactElement {
 
 export function SubmissionPage(): ReactElement {
 	return (
-		<WorkspaceChrome nav="project">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="submission" />
@@ -517,14 +517,14 @@ export function SubmissionPage(): ReactElement {
 					<ProjectGate>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
 export function EvidencePage(): ReactElement {
 	const search = useSearch({ strict: false }) as { claim?: string };
 	return (
-		<WorkspaceChrome nav="project">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="submission" />
@@ -534,13 +534,13 @@ export function EvidencePage(): ReactElement {
 					</ProjectGate>
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
 export function JudgePage(): ReactElement {
 	return (
-		<WorkspaceChrome nav="project">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="submission" />
@@ -548,7 +548,7 @@ export function JudgePage(): ReactElement {
 					<ProjectGate>{(projectId) => <JudgeScorecard projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -556,13 +556,13 @@ export function JudgePage(): ReactElement {
 
 export function RepositoriesPage(): ReactElement {
 	return (
-		<WorkspaceChrome nav="account">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectGate>{(projectId) => <RepositoriesBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -611,7 +611,7 @@ function RepositoriesBody(props: { projectId: string }): ReactElement {
 
 export function SearchPage(): ReactElement {
 	return (
-		<WorkspaceChrome nav="account">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<div className="r-section-head">
@@ -629,7 +629,7 @@ export function SearchPage(): ReactElement {
 					<SearchEnabled />
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -649,7 +649,7 @@ export function AutomationsPage(): ReactElement {
 	// list (which reads the chrome) lives in the AutomationsBody child so nothing
 	// above the provider calls useWorkspaceChrome.
 	return (
-		<WorkspaceChrome nav="account">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<div className="r-section-head">
@@ -666,7 +666,7 @@ export function AutomationsPage(): ReactElement {
 					<AutomationsBody />
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }
 
@@ -699,7 +699,7 @@ function AutomationsBody(): ReactElement {
 
 export function UsagePage(): ReactElement {
 	return (
-		<WorkspaceChrome nav="account">
+		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<div className="r-section-head">
@@ -735,6 +735,6 @@ export function UsagePage(): ReactElement {
 					</section>
 				</div>
 			</div>
-		</WorkspaceChrome>
+		</>
 	);
 }

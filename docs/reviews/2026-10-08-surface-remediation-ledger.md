@@ -109,3 +109,26 @@ NOT APPLICABLE WITH EVIDENCE
   tabled above; F06/S11/S25 live-source/server prerequisites BLOCKED with the
   prerequisite named in the table; F15 NOT APPLICABLE WITH EVIDENCE (owner set
   four tabs in-session).
+
+### Wave 2 — F01 part 2: the stable shell layout route (IMPLEMENTED)
+
+`routes.tsx` now declares a pathless layout route `id: '_shell'` whose component
+renders WorkspaceChrome once with `<Outlet />` inside; every page route hangs
+under it (`getParentRoute: () => shellLayoutRoute` — required, see below) and
+declares its destination via `staticData.nav`, which the layout reads from
+`useMatches()`. Home (`Shell`), Settings and Onboarding dropped their own
+WorkspaceChrome wrappers; surface pages render fragments only.
+
+**Gotcha recorded for the next integrator:** nesting routes under a layout
+while leaving `getParentRoute: () => rootRoute` silently excludes the layout
+from the match chain — every page then renders with no provider ("must be used
+inside WorkspaceChrome"). The parent pointer must be the layout.
+
+**Acceptance (probe, desktop 1440x900, real session):** type unsent text,
+scroll the transcript to 120px, mark the panel DOM node, then navigate
+Home → Discover → Projects → Home: same DOM node (`__f01persist` survives),
+draft text intact, `transcript.scrollTop` still 120. Mounts/connections during
+navigation: zero (the node identity is the proof). LOCAL VERIFIED.
+
+**Regression:** 28 browser tests (workspace/conversation/discovery/journey) +
+packets P01/P06-implied/P07/P11/P13/P14 all PASS on the refactored tree.

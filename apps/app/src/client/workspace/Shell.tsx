@@ -5,7 +5,7 @@ import { SignInPanel } from '../auth.ts';
 import { failureKind, StatePanel } from '../states.tsx';
 import { BriefLane } from '../brief/DecisionCard.tsx';
 import { useBriefCards, useDiscoveryCandidates, useProfile, type ProfileRecord } from '../queries.ts';
-import { WorkspaceChrome, useWorkspaceChrome } from './Chrome.tsx';
+import { useWorkspaceChrome } from './Chrome.tsx';
 
 /**
  * Home — the personalised, actionable brief (discovery-first redesign).
@@ -27,11 +27,10 @@ import { WorkspaceChrome, useWorkspaceChrome } from './Chrome.tsx';
  */
 
 export function Shell(): ReactElement {
-	return (
-		<WorkspaceChrome nav="home">
-			<HomeBody />
-		</WorkspaceChrome>
-	);
+	// The chrome comes from the shell layout route once, above every page —
+	// Home renders only its content so navigating never remounts the
+	// conversation (audit F01).
+	return <HomeBody />;
 }
 
 function HomeBody(): ReactElement {
