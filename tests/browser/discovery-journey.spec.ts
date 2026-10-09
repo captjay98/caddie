@@ -225,7 +225,7 @@ test.describe('discovery-first acceptance journey (composed build, one account, 
 		await expect(page.getByTestId('home-find-hackathon')).toBeVisible();
 		await expect(page.getByTestId('home-start-idea')).toBeVisible();
 		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
-		await expect(page.getByTestId('conv-context-label')).toContainText('General · Caddie');
+		await expect(page.getByTestId('conv-context-label')).toContainText('General');
 		// Exactly three global destinations; no global chat/build/ship tab.
 		await expect(page.getByTestId('nav-home')).toHaveAttribute('aria-current', 'page');
 		await expect(page.getByTestId('nav-discover')).toBeVisible();
@@ -249,6 +249,8 @@ test.describe('discovery-first acceptance journey (composed build, one account, 
 
 		// ---- D. Explore commits exactly one project + retargets the conversation --
 		await page.getByTestId('explore-ideas-cand-1').click();
+		await expect(page.getByTestId('explore-commit')).toBeVisible();
+		await page.getByTestId('explore-commit-create').click();
 		await expect(page).toHaveURL(/\/app\/project\?project=proj-committed$/);
 		expect(created).toHaveLength(1);
 		expect(created[0]).toMatchObject({ name: 'Solar Hackweek', contestUrl: CAND_1_URL });

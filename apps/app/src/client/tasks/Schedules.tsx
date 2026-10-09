@@ -37,6 +37,7 @@ type LoadState =
 export function Schedules(props: { projectId: string | null }): ReactElement {
 	const [state, setState] = useState<LoadState>({ kind: 'loading' });
 	const [busyId, setBusyId] = useState<string | null>(null);
+	const [actionError, setActionError] = useState<{ scheduleId: string; message: string } | null>(null);
 
 	const load = useCallback(async (projectId: string) => {
 		setState({ kind: 'loading' });
@@ -64,6 +65,7 @@ export function Schedules(props: { projectId: string | null }): ReactElement {
 	const act = async (scheduleId: string, action: 'run-now' | 'pause' | 'resume'): Promise<void> => {
 		if (!props.projectId) return;
 		setBusyId(scheduleId);
+		setActionError(null);
 		try {
 			if (action === 'run-now') {
 				await fetchJson(`/api/projects/${encodeURIComponent(props.projectId)}/schedules/${encodeURIComponent(scheduleId)}/run-now`, {
@@ -77,8 +79,13 @@ export function Schedules(props: { projectId: string | null }): ReactElement {
 				});
 			}
 			await load(props.projectId);
-		} catch {
-			// The row keeps its previous state; the panel reloads to server truth.
+		} catch (error) {
+			// The row keeps its previous state; the panel reloads to server truth
+			// AND the failure is named in-row — a refused action is never silent.
+			setActionError({
+				scheduleId,
+				message: (error as Error).message || `The ${action.replace('-', ' ')} action failed.`,
+			});
 			if (props.projectId) await load(props.projectId);
 		} finally {
 			setBusyId(null);
@@ -153,29 +160,34 @@ export function Schedules(props: { projectId: string | null }): ReactElement {
 									<span className="mono-id">last: {schedule.lastResult}</span>
 								) : null}
 							</div>
-							<div className="row-actions">
-								<button
-									type="button"
-									className="btn-ghost"
-									disabled={busyId === schedule.id}
-									data-testid={`schedule-run-now-${schedule.id}`}
-									onClick={() => void act(schedule.id, 'run-now')}
-								>
-									Run now
-								</button>
-								<button
-									type="button"
-									className="detail-toggle"
-									disabled={busyId === schedule.id}
-									data-testid={`schedule-toggle-${schedule.id}`}
-									onClick={() => void act(schedule.id, schedule.paused ? 'resume' : 'pause')}
-								>
-									{schedule.paused ? 'Resume' : 'Pause'}
-								</button>
-								<span className="mono-id">
-									run now dispatches one run — it appears in Runs with its own id and receipts
-								</span>
-							</div>
+<div className="row-actions">
+									<button
+										type="button"
+										className="btn-ghost"
+										disabled={busyId === schedule.id}
+										data-testid={`schedule-run-now-${schedule.id}`}
+										onClick={() => void act(schedule.id, 'run-now')}
+									>
+										Run now
+									</button>
+									<button
+										type="button"
+										className="detail-toggle"
+										disabled={busyId === schedule.id}
+										data-testid={`schedule-toggle-${schedule.id}`}
+										onClick={() => void act(schedule.id, schedule.paused ? 'resume' : 'pause')}
+									>
+										{schedule.paused ? 'Resume' : 'Pause'}
+									</button>
+									<span className="mono-id">
+										run now dispatches one run — it appears in Runs with its own id and receipts
+									</span>
+								</div>
+								{actionError && actionError.scheduleId === schedule.id ? (
+									<div role="alert" className="row-error" data-testid={`schedule-error-${schedule.id}`}>
+										<b>The action was refused.</b> {actionError.message}
+									</div>
+								) : null}
 						</div>
 					))}
 				</div>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import type { DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
@@ -8,7 +8,8 @@ import { Icon } from './icons.tsx';
 import { DiscoveryResults, type DiscoveryCandidateRecord } from './discovery/Results.tsx';
 import { JudgeScorecard } from './judge/Scorecard.tsx';
 import { SubmissionPackage } from './submission/Package.tsx';
-import { Schedules } from './tasks/Schedules.tsx';
+import { Schedules, type ScheduleRow } from './tasks/Schedules.tsx';
+import { Tasks } from './tasks/Tasks.tsx';
 import { EvidenceDrawer } from './evidence/Drawer.tsx';
 import { ArtifactViewer, type ViewerRevision } from './artifacts/Viewer.tsx';
 import { DesignReview } from './planning/DesignReview.tsx';
@@ -137,11 +138,15 @@ function DiscoverBody(): ReactElement {
 	const createProject = useCreateProject(useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]));
 	const navigate = useNavigate();
 	const [exploreBusy, setExploreBusy] = useState(false);
+	const [commitFor, setCommitFor] = useState<DiscoveryCandidateRecord | null>(null);
+	const [commitName, setCommitName] = useState('');
+	const [exploreError, setExploreError] = useState<string | null>(null);
 
 	// Explore handoff: continue an existing project already linked to this
-	// contest, otherwise create one carrying the contest link. The guard
-	// (continue-first + a busy lock) prevents a duplicate project on retries; a
-	// save/accept never creates a build project.
+	// contest; otherwise open an explicit commit step (name + consequence +
+	// visible errors) instead of creating a project on the first click. The
+	// continue-first guard + the busy lock prevent a duplicate project on
+	// retries; a save/accept never creates a build project.
 	function onExplore(candidate: DiscoveryCandidateRecord) {
 		if (exploreBusy) return;
 		const existing = chrome.buildProjects.find((p) => p.contestUrl === candidate.url);
@@ -149,26 +154,106 @@ function DiscoverBody(): ReactElement {
 			chrome.openProject(existing.id);
 			return;
 		}
+		setCommitName(candidate.title);
+		setExploreError(null);
+		setCommitFor(candidate);
+	}
+
+	function closeCommit() {
+		if (exploreBusy) return;
+		setCommitFor(null);
+		setExploreError(null);
+	}
+
+	function submitCommit() {
+		if (!commitFor || exploreBusy) return;
 		setExploreBusy(true);
+		setExploreError(null);
 		void createProject
 			.mutateAsync({
-				name: candidate.title,
-				...(candidate.summary ? { description: candidate.summary } : {}),
-				contestUrl: candidate.url,
+				name: commitName.trim() || commitFor.title,
+				...(commitFor.summary ? { description: commitFor.summary } : {}),
+				contestUrl: commitFor.url,
 				workspaceId: chrome.buildProjects[0]?.workspaceId,
 			})
 			.then(
 				(result) => {
 					setExploreBusy(false);
+					setCommitFor(null);
 					void navigate({ to: '/project', search: { project: result.project.id } });
 				},
-				() => setExploreBusy(false),
+				(cause) => {
+					setExploreBusy(false);
+					setExploreError(cause instanceof Error ? cause.message : String(cause));
+				},
 			);
 	}
 
 	if (!chrome.authenticated) return <SignInGate />;
 	if (chrome.homeProject) {
-		return <DiscoveryResults projectId={chrome.homeProject.id} onExplore={onExplore} exploreBusy={exploreBusy} />;
+		return (
+			<>
+				<DiscoveryResults projectId={chrome.homeProject.id} onExplore={onExplore} exploreBusy={exploreBusy} />
+				{commitFor ? (
+					<div className="modal-backdrop" data-testid="explore-commit-backdrop" onMouseDown={() => closeCommit()}>
+						<form
+							className="commit-panel card-surface"
+							data-testid="explore-commit"
+							onMouseDown={(e) => e.stopPropagation()}
+							onSubmit={(e) => {
+								e.preventDefault();
+								submitCommit();
+							}}
+						>
+							<p className="kicker" data-tone="action">
+								EXPLORE IDEAS
+							</p>
+							<h3 className="state-title">Start a project for this contest</h3>
+							<p className="state-detail">
+								Opens a project for “{commitFor.title}”, linked to the contest. No build starts until you send
+								your first message — nothing is submitted anywhere.
+							</p>
+							<label className="kicker" htmlFor="explore-commit-name">
+								Project name
+							</label>
+							<input
+								id="explore-commit-name"
+								className="input"
+								data-testid="explore-commit-name"
+								value={commitName}
+								onChange={(e) => setCommitName(e.target.value)}
+								autoFocus
+							/>
+							{exploreError ? (
+								<div role="alert" className="sign-in-error" data-testid="explore-commit-error">
+									<b>Could not create the project.</b>
+									<span> {exploreError}</span>
+								</div>
+							) : null}
+							<div className="row-actions">
+								<button
+									type="submit"
+									className="btn-key"
+									data-testid="explore-commit-create"
+									disabled={exploreBusy || commitName.trim() === ''}
+								>
+									{exploreBusy ? 'Creating…' : 'Create project'}
+								</button>{' '}
+								<button
+									type="button"
+									className="btn-ghost"
+									data-testid="explore-commit-cancel"
+									onClick={() => closeCommit()}
+									disabled={exploreBusy}
+								>
+									Cancel
+								</button>
+							</div>
+						</form>
+					</div>
+				) : null}
+			</>
+		);
 	}
 	if (chrome.projectsError) {
 		return (
@@ -299,6 +384,21 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 	const brief = useBriefCards(actor, props.projectId);
 	const project: Project | null = chrome.selectedProject;
 
+	// The project contract has no deadline field — the real deadlines live in
+	// plan milestones and schedules. Derive the nearest one from the brief's
+	// deadline cards so the header states a fact, never a placeholder.
+	const nextDeadline = useMemo(() => {
+		const nexts = (brief.data?.cards ?? [])
+			.filter((c) => c.kind === 'deadline')
+			.map((c) => {
+				const m = /Next run ([^ (]+)/.exec(c.summary);
+				return m ? m[1].slice(0, 10) : null;
+			})
+			.filter((v): v is string => v !== null)
+			.sort();
+		return nexts[0] ?? null;
+	}, [brief.data]);
+
 	function onCardAction(card: DecisionCardType) {
 		const search = { project: props.projectId };
 		switch (card.kind) {
@@ -322,7 +422,7 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 
 	return (
 		<div className="settings-stack">
-			<ProjectHeader projectId={props.projectId} project={project} />
+			<ProjectHeader projectId={props.projectId} project={project} nextDeadline={nextDeadline} />
 			<section className="card-surface settings-panel" data-testid="overview-brief">
 				<div className="r-section-head">
 					<div>
@@ -335,6 +435,16 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 							brief.
 						</p>
 					</div>
+					<span className="disc-actions">
+						<Link
+							to="/tasks"
+							className="btn-ghost"
+							data-testid="overview-tasks-entry"
+							search={{ project: props.projectId }}
+						>
+							Tasks
+						</Link>
+					</span>
 				</div>
 				<BriefLane
 					state={{
@@ -352,7 +462,11 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 	);
 }
 
-function ProjectHeader(props: { projectId: string; project: Project | null }): ReactElement {
+function ProjectHeader(props: {
+	projectId: string;
+	project: Project | null;
+	nextDeadline?: string | null;
+}): ReactElement {
 	const project = props.project;
 	if (!project) return <></>;
 	return (
@@ -368,10 +482,12 @@ function ProjectHeader(props: { projectId: string; project: Project | null }): R
 			) : (
 				<p className="page-lede muted">No linked hackathon yet.</p>
 			)}
-			{/* Honesty: deadlines and progress are NOT on the project contract — we
-			    never fabricate them. State their absence rather than guessing. */}
+			{/* Honesty: the project contract has no deadline — milestone deadlines
+			    live in the plan and schedules. State the nearest real one when the
+			    brief knows it; otherwise say so plainly. */}
 			<p className="project-facts mono-id" data-testid="project-facts">
-				status: {project.status} · deadline: none recorded · progress: see Build
+				status: {project.status} ·{' '}
+				{props.nextDeadline ? `next deadline: ${props.nextDeadline} (in Schedules)` : 'next deadline: none scheduled yet'} · progress: see Build
 			</p>
 		</header>
 	);
@@ -501,6 +617,22 @@ export function SchedulesPage(): ReactElement {
 					<ProjectTabs current="build" />
 					<ProjectSubTabs group="build" current="schedules" />
 					<ProjectGate>{(projectId) => <Schedules projectId={projectId} />}</ProjectGate>
+				</div>
+			</div>
+		</>
+	);
+}
+
+// --- TASKS (Build sub-strip; real P12 server surface, audit S25) -----------------
+
+export function TasksPage(): ReactElement {
+	return (
+		<>
+			<div className="shell-loading shell-page">
+				<div className="page-col">
+					<ProjectTabs current="build" />
+					<ProjectSubTabs group="build" current="tasks" />
+					<ProjectGate>{(projectId) => <Tasks projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
 		</>
@@ -661,7 +793,8 @@ export function AutomationsPage(): ReactElement {
 							</p>
 							<h1 className="page-title">Automations</h1>
 							<p className="page-lede">
-								Scheduled runs live inside a project — pick one to see and manage its automations.
+								Every scheduled check Caddie runs for you, across all your projects — read from each
+								project's real schedule table. Open a project to manage its automations.
 							</p>
 						</div>
 					</div>
@@ -674,27 +807,104 @@ export function AutomationsPage(): ReactElement {
 
 function AutomationsBody(): ReactElement {
 	const chrome = useWorkspaceChrome();
+	// Audit F12: Automations aggregates the REAL schedules of every project
+	// instead of being a bare project picker. Each project's read is
+	// independent — a failure names the project instead of blanking the page.
+	const [perProject, setPerProject] = useState<
+		Record<string, { state: 'loading' } | { state: 'ready'; schedules: ScheduleRow[] } | { state: 'error'; message: string }>
+	>({});
+	const [readDone, setReadDone] = useState(false);
+
+	useEffect(() => {
+		if (!chrome.authenticated) return;
+		const projects = chrome.buildProjects;
+		setPerProject(Object.fromEntries(projects.map((p) => [p.id, { state: 'loading' }])));
+		setReadDone(false);
+		let cancelled = false;
+		void Promise.all(
+			projects.map(async (project) => {
+				try {
+					const payload = await fetchJson<{ schedules: ScheduleRow[] }>(
+						`/api/projects/${encodeURIComponent(project.id)}/schedules`,
+					);
+					if (!cancelled)
+						setPerProject((prev) => ({ ...prev, [project.id]: { state: 'ready', schedules: payload.schedules } }));
+				} catch (error) {
+					if (!cancelled)
+						setPerProject((prev) => ({
+							...prev,
+							[project.id]: {
+								state: 'error',
+								message: (error as Error).message || 'The schedules could not be read.',
+							},
+						}));
+				}
+			}),
+		).then(() => {
+			if (!cancelled) setReadDone(true);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [chrome.authenticated, chrome.buildProjects]);
+
 	if (!chrome.authenticated) return <SignInGate />;
 	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
 	if (chrome.buildProjects.length === 0) {
 		return <StatePanel kind="empty" title="No projects to automate yet" detail="Start a project first — automations are scheduled runs within a project." />;
 	}
+	if (!readDone) return <StatePanel kind="loading" title="Reading your automations…" />;
 	return (
-		<ul className="project-list" data-testid="automations-project-list">
-			{chrome.buildProjects.map((project) => (
-				<li key={project.id} className="project-row card-surface">
-					<div className="project-row-main">
-						<button
-							type="button"
-							className="row-title r-link"
-							data-testid={`automations-open-${project.id}`}
-							onClick={() => chrome.goProjectTab('/schedules', { project: project.id })}
-						>
-							{project.name}
-						</button>
-					</div>
-				</li>
-			))}
+		<ul className="project-list" data-testid="automations-list">
+			{chrome.buildProjects.map((project) => {
+				const row = perProject[project.id];
+				if (row?.state === 'error') {
+					return (
+						<li key={project.id} className="project-row card-surface" data-testid={`automations-error-${project.id}`}>
+							<div className="row-main">
+								<span className="row-title">{project.name}</span>
+								<div role="alert" className="row-error">
+									<b>Could not read its schedules.</b> {row.message}
+								</div>
+							</div>
+						</li>
+					);
+				}
+				const schedules = row?.state === 'ready' ? row.schedules : [];
+				return (
+					<li key={project.id} className="project-row card-surface" data-testid={`automations-project-${project.id}`}>
+						<div className="row-main">
+							<button
+								type="button"
+								className="row-title r-link"
+								data-testid={`automations-open-${project.id}`}
+								onClick={() => chrome.goProjectTab('/schedules', { project: project.id })}
+							>
+								{project.name}
+							</button>
+							{schedules.length === 0 ? (
+								<span className="mono-id muted">no schedules yet</span>
+							) : (
+								<span className="mono-id" data-testid={`automations-count-${project.id}`}>
+									{schedules.length} scheduled check{schedules.length === 1 ? '' : 's'}
+								</span>
+							)}
+						</div>
+						{schedules.map((schedule) => (
+							<div className="row-main" key={schedule.id} data-testid={`automations-schedule-${schedule.id}`}>
+								<span className="row-title">{schedule.name}</span>
+								<span className="row-status" data-status={schedule.paused ? 'paused' : 'active'}>
+									{schedule.paused ? 'paused' : 'active'}
+								</span>
+								<span className="mono-id">
+									{schedule.cron} · {schedule.timezone}
+								</span>
+								<span className="mono-id">next {schedule.nextRunAt}</span>
+							</div>
+						))}
+					</li>
+				);
+			})}
 		</ul>
 	);
 }

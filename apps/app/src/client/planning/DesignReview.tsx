@@ -38,6 +38,8 @@ export interface DesignReviewRevision {
 	readonly revision: number;
 	readonly bodyHash: string;
 	readonly createdAt: string;
+	/** The plan body as drafted — rendered readably below (audit F09). */
+	readonly body: string;
 }
 
 interface DecisionRecord {
@@ -180,6 +182,17 @@ export function DesignReview(props: {
 				/>
 			) : null}
 
+			<section className="card-surface settings-panel" data-testid="design-review-plan-body">
+				<h3 className="ev-head">The plan as drafted — r{latest.revision}</h3>
+				{latest.body.trim() === '' ? (
+					<p className="state-detail">This revision carries no plan text.</p>
+				) : (
+					<pre className="plan-body" data-testid="plan-body-content">
+						{latest.body}
+					</pre>
+				)}
+			</section>
+
 			<section className="card-surface settings-panel">
 				<div className="row-list">
 					{props.planRevisions.map((revision, index) => (
@@ -238,10 +251,10 @@ export function DesignReview(props: {
 				</div>
 			</section>
 
-			{records.length > 0 ? (
-				<section className="card-surface settings-panel" data-testid="design-review-record">
-					<h3 className="ev-head">Decision record — append-only</h3>
-					<div className="row-list">
+{records.length > 0 ? (
+					<section className="card-surface settings-panel" data-testid="design-review-record">
+						<h3 className="ev-head">Your decisions this session</h3>
+						<div className="row-list">
 						{records.map((record) => (
 							<div className="inspector-row" key={`${record.revisionId}:${record.at}`}>
 								<div className="row-main">

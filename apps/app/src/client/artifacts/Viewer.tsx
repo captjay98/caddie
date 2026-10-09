@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { MouseEvent, ReactElement } from 'react';
 import { formatTimeAgo } from '@caddie/ui/time';
 import { fetchJson } from '../api.ts';
@@ -55,6 +55,18 @@ interface DiffPayload {
 	readonly lines: readonly DiffLine[];
 }
 
+/** P07 preview metadata (the list route carries no secrets — tokens are
+ * returned once at mint and never again). */
+interface PreviewRecord {
+	readonly id: string;
+	readonly projectId: string;
+	readonly revisionId: string;
+	readonly expiresAt: string;
+	readonly revoked: boolean;
+	readonly createdBy: string;
+	readonly createdAt: string;
+}
+
 function shortHash(sha256: string): string {
 	const hex = sha256.startsWith('sha256-') ? sha256.slice(7) : sha256;
 	return hex.slice(0, 12);
@@ -85,6 +97,67 @@ export function ArtifactViewer(props: {
 	const [diffError, setDiffError] = useState<string | null>(null);
 	const [downloadError, setDownloadError] = useState<string | null>(null);
 	const [downloading, setDownloading] = useState<string | null>(null);
+
+	// Audit F10: preview entry over the REAL P07 previews surface. The list
+	// route carries metadata only — a token is returned ONCE at mint, so the
+	// minted URL is revealed in place and never re-issued.
+	const [previews, setPreviews] = useState<PreviewRecord[]>([]);
+	const [previewsError, setPreviewsError] = useState<string | null>(null);
+	const [minted, setMinted] = useState<Record<string, { preview: PreviewRecord; token: string }>>({});
+	const [previewBusy, setPreviewBusy] = useState<string | null>(null);
+	const [expandedPreview, setExpandedPreview] = useState<string | null>(null);
+
+	const loadPreviews = async () => {
+		try {
+			const payload = await fetchJson<{ previews: PreviewRecord[] }>(
+				`/api/projects/${encodeURIComponent(props.projectId)}/previews`,
+			);
+			setPreviews(payload.previews);
+			setPreviewsError(null);
+		} catch (error) {
+			setPreviewsError(error instanceof Error ? error.message : 'Previews could not be read.');
+		}
+	};
+
+	const mintPreview = async (revision: ViewerRevision) => {
+		if (previewBusy) return;
+		setPreviewBusy(revision.id);
+		setPreviewsError(null);
+		try {
+			const payload = await fetchJson<{ preview: PreviewRecord; token: string }>(
+				`/api/projects/${encodeURIComponent(props.projectId)}/previews`,
+				{ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ revisionId: revision.id }) },
+			);
+			setMinted((prev) => ({ ...prev, [revision.id]: payload }));
+			setPreviews((prev) => [payload.preview, ...prev.filter((p) => p.id !== payload.preview.id)]);
+		} catch (error) {
+			setPreviewsError(error instanceof Error ? error.message : 'The preview could not be created.');
+		} finally {
+			setPreviewBusy(null);
+		}
+	};
+
+	const previewAction = async (preview: PreviewRecord, action: 'revoke' | 'extend') => {
+		if (previewBusy) return;
+		setPreviewBusy(preview.id);
+		setPreviewsError(null);
+		try {
+			await fetchJson(
+				`/api/projects/${encodeURIComponent(props.projectId)}/previews/${encodeURIComponent(preview.id)}/${action}`,
+				{ method: 'POST' },
+			);
+			await loadPreviews();
+		} catch (error) {
+			setPreviewsError(error instanceof Error ? error.message : `The preview could not be ${action}d.`);
+		} finally {
+			setPreviewBusy(null);
+		}
+	};
+
+	useEffect(() => {
+		void loadPreviews();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [props.projectId]);
 
 	const loadDiff = async () => {
 		if (!fromId || !toId || fromId === toId) return;
@@ -228,8 +301,93 @@ export function ArtifactViewer(props: {
 								<Icon name="download" title="download verified copy" />
 								{downloading === revision.id ? 'Exporting…' : `Download ${revision.filename}`}
 							</a>
+							<button
+								type="button"
+								className="detail-toggle"
+								data-testid="artifact-preview-toggle"
+								data-revision={revision.id}
+								onClick={() => setExpandedPreview(expandedPreview === revision.id ? null : revision.id)}
+							>
+								{expandedPreview === revision.id ? 'Hide previews' : 'Preview'}
+							</button>
 							<span className="mono-id">produces a verifiable local file · nothing is published</span>
 						</div>
+						{expandedPreview === revision.id ? (
+							<div className="disc-detail" data-testid="artifact-preview-section">
+								<strong className="judge-declared-head">Shareable previews — this revision</strong>
+								{previewsError ? (
+									<div role="alert" className="row-error" data-testid="artifact-preview-error">
+										<b>Previews could not be updated.</b> {previewsError}
+									</div>
+								) : null}
+								{minted[revision.id] ? (
+									<div className="row-main" data-testid="artifact-preview-minted">
+										<span className="mono-id">
+											Token shown once — save the link; the token is never returned again.
+										</span>
+										<CopyableId
+											value={`${window.location.origin}/api/previews/resolve/${minted[revision.id]!.token}`}
+											label="preview link"
+										/>
+										<span className="mono-id">
+											expires {formatTimeAgo(minted[revision.id]!.preview.expiresAt)} · anyone with the link
+											can view this file in an isolated origin — it never carries your session
+										</span>
+									</div>
+								) : null}
+								{previews.filter((p) => p.revisionId === revision.id).length === 0 ? (
+									<span className="mono-id">no preview shares yet</span>
+								) : (
+									previews
+										.filter((p) => p.revisionId === revision.id)
+										.map((preview) => (
+											<div className="row-main" key={preview.id} data-testid="artifact-preview-row">
+												<span className="mono-id">
+													<code>{preview.id}</code> · expires {formatTimeAgo(preview.expiresAt)} ·{' '}
+													{preview.revoked ? 'revoked' : 'live'}
+												</span>
+												{!preview.revoked ? (
+													<span className="row-actions">
+														<button
+															type="button"
+															className="detail-toggle"
+															disabled={previewBusy === preview.id}
+															data-testid={`preview-revoke-${preview.id}`}
+															onClick={() => void previewAction(preview, 'revoke')}
+														>
+															Revoke
+														</button>
+														<button
+															type="button"
+															className="detail-toggle"
+															disabled={previewBusy === preview.id}
+															data-testid={`preview-extend-${preview.id}`}
+															onClick={() => void previewAction(preview, 'extend')}
+														>
+															Extend
+														</button>
+													</span>
+												) : null}
+											</div>
+										))
+								)}
+								<div className="row-actions">
+									<button
+										type="button"
+										className="btn-ghost"
+										disabled={previewBusy !== null}
+										data-testid="artifact-preview-mint"
+										data-revision={revision.id}
+										onClick={() => void mintPreview(revision)}
+									>
+										{previewBusy === revision.id ? 'Creating…' : 'Create shareable preview'}
+									</button>
+									<span className="mono-id">
+										minting returns the token once; revoking kills the link server-side
+									</span>
+								</div>
+							</div>
+						) : null}
 					</div>
 				))}
 			</div>

@@ -376,7 +376,7 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		await expect(page.getByText('No judging criteria are on record in this project')).toBeVisible();
 		await expect(page.getByText('no rubric-bearing claims are on record for this project')).toBeVisible();
 		// No scoring controls can exist against a rubric that does not exist.
-		await expect(page.getByText('score (0–10)')).toHaveCount(0);
+		await expect(page.getByText('your score (0–10)')).toHaveCount(0);
 		await context.close();
 	});
 
@@ -412,11 +412,18 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		await expect(page.getByText('none — nothing verified for this criterion')).toBeVisible();
 		await expect(page.getByText('we plan to record a demo video')).toBeVisible();
 
-		// Scoring posts the real structured payload to the real route. The
-		// unscored criterion posts score 0 — server-side validation is the
-		// real gate for that, not this UI-state proof.
+		// Scoring posts the real structured payload to the real route. A blank
+		// score is refused client-side with a named error — 0 is never posted
+		// silently for an unscored criterion.
 		await page.locator('input[type="number"]').first().fill('7');
 		await page.getByPlaceholder('notes (required)').first().fill('matches the recorded receipts');
+		await page.getByRole('button', { name: 'Validate and record scorecard' }).click();
+		await expect(page.getByTestId('judge-error')).toContainText('still blank: Working public repository link');
+		expect(state.recorded).toHaveLength(0); // refused, nothing posted
+
+		// Score every criterion, then the payload carries them all.
+		await page.locator('input[type="number"]').nth(1).fill('5');
+		await page.getByPlaceholder('notes (required)').nth(1).fill('repository receipts are local only');
 		await page.getByRole('button', { name: 'Validate and record scorecard' }).click();
 		await expect(page.getByRole('heading', { name: 'Recorded scorecards' })).toBeVisible();
 		expect(state.recorded).toHaveLength(1);
@@ -427,7 +434,7 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		};
 		expect(body.criteria).toEqual([
 			{ criterion: 'Demo video link is provided', score: 7, notes: 'matches the recorded receipts' },
-			{ criterion: 'Working public repository link', score: 0, notes: '' },
+			{ criterion: 'Working public repository link', score: 5, notes: 'repository receipts are local only' },
 		]);
 		expect(body.topRisks).toEqual([]);
 

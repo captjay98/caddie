@@ -328,6 +328,7 @@ async function stubCreateProject(
 	context: BrowserContext,
 	log: { calls: Record<string, unknown>[] },
 	returnedId = 'proj-new',
+	status = 201,
 ) {
 	await context.route('**/api/workspaces', (route) =>
 		json(route, 201, { workspace: { id: 'ws-1', name: 'Home', createdAt: NOW } }),
@@ -340,6 +341,9 @@ async function stubCreateProject(
 			return route.fallback();
 		}
 		log.calls.push(request.postDataJSON() as Record<string, unknown>);
+		if (status !== 201) {
+			return json(route, status, { error: 'create_failed', message: 'The project could not be created.' });
+		}
 		return json(
 			route,
 			201,
@@ -455,12 +459,70 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		);
 		expect(created.calls).toHaveLength(0); // no project created by Save
 
-		// Exploring the other candidate creates one project carrying the contest
-		// link, then routes into it (the commit handoff).
+		// Exploring the other candidate opens an explicit commit step (name +
+		// consequence + errors) and only then creates one project carrying the
+		// contest link and routes into it (the commit handoff).
 		await page.getByTestId('explore-ideas-cand-2').click();
+		await expect(page.getByTestId('explore-commit')).toBeVisible();
+		await expect(page.getByTestId('explore-commit')).toContainText('Start a project for this contest');
+		await page.getByTestId('explore-commit-create').click();
 		await expect(page).toHaveURL(/\/app\/project\?project=proj-new$/);
 		expect(created.calls).toHaveLength(1);
 		expect(created.calls[0]).toMatchObject({ name: 'Employees-only sprint', contestUrl: 'https://contest.example/employees-only' });
+		await context.close();
+	});
+
+	test('Explore commit shows a visible error and stays open when creation fails', async ({ browser }) => {
+		const context = await browser.newContext();
+		const state = initialState();
+		state.evaluated = WITH_CANDIDATES;
+		const created: { calls: Record<string, unknown>[] } = { calls: [] };
+		await stubAccount(context, [PROJECT_A]);
+		await stubDiscovery(context, state);
+		await stubCreateProject(context, created, 'proj-new', 500);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/discover`);
+
+		await page.getByTestId('explore-ideas-cand-1').click();
+		await expect(page.getByTestId('explore-commit')).toBeVisible();
+		await page.getByTestId('explore-commit-create').click();
+		await expect(page.getByTestId('explore-commit-error')).toBeVisible();
+		await expect(page.getByTestId('explore-commit')).toBeVisible(); // still open, nothing created
+		await expect(page).toHaveURL(/\/app\/discover$/);
+		expect(created.calls).toHaveLength(1); // one attempt, failed, no navigation
+		await context.close();
+	});
+
+	test('browse filters work over the loaded feed — Saved isolates saved candidates (audit S12)', async ({ browser }) => {
+		const context = await browser.newContext();
+		const state = initialState();
+		state.evaluated = WITH_CANDIDATES;
+		await stubAccount(context, [PROJECT_A]);
+		await stubDiscovery(context, state);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/discover`);
+
+		// Save cand-1; cand-2 stays new.
+		await page.getByTestId('save-candidate-cand-1').click();
+		await expect(page.getByText('status accepted')).toBeVisible();
+
+		// The Saved filter isolates the accepted candidate; New shows the rest.
+		await page.getByTestId('discovery-filter-saved').click();
+		await expect(page.getByTestId('eligibility-cand-1')).toBeVisible();
+		await expect(page.getByTestId('eligibility-cand-2')).toHaveCount(0);
+		await page.getByTestId('discovery-filter-new').click();
+		await expect(page.getByTestId('eligibility-cand-2')).toBeVisible();
+		await expect(page.getByTestId('eligibility-cand-1')).toHaveCount(0);
+
+		// Text filter narrows by title/summary/source.
+		await page.getByTestId('discovery-filter-all').click();
+		await page.getByTestId('discovery-filter-text').fill('employees');
+		await expect(page.getByTestId('eligibility-cand-2')).toBeVisible();
+		await expect(page.getByTestId('eligibility-cand-1')).toHaveCount(0);
+
+		// A filter with no matches is an explicit empty state, never a silent blank.
+		await page.getByTestId('discovery-filter-text').fill('zzz-nonexistent');
+		await expect(page.getByTestId('discovery-filter-empty')).toBeVisible();
 		await context.close();
 	});
 

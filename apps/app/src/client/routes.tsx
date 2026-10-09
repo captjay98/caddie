@@ -14,6 +14,7 @@ import {
 	JudgePage,
 	SubmissionPage,
 	SchedulesPage,
+	TasksPage,
 	EvidencePage,
 	ArtifactsPage,
 	RunsPage,
@@ -242,6 +243,14 @@ const schedulesRoute = createRoute({
 	component: SchedulesPage,
 });
 
+const tasksRoute = createRoute({
+	getParentRoute: () => shellLayoutRoute,
+	path: '/tasks',
+	validateSearch,
+	staticData: { nav: 'project' },
+	component: TasksPage,
+});
+
 const evidenceRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/evidence',
@@ -311,9 +320,10 @@ export const routeTree = rootRoute.addChildren([
 	onboardingRoute,
 	designReviewRoute,
 	runsRoute,
-	artifactsRoute,
-	schedulesRoute,
-	evidenceRoute,
+artifactsRoute,
+		schedulesRoute,
+		tasksRoute,
+		evidenceRoute,
 	judgeRoute,
 	submissionRoute,
 	repositoriesRoute,

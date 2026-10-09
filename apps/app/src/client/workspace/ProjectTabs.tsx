@@ -41,13 +41,14 @@ export function ProjectTabs(props: { current: ProjectTabId }): ReactElement {
 }
 
 /** Secondary strip nested under a primary destination (Build, Submission). */
-export type ProjectSubId = 'runs' | 'artifacts' | 'schedules' | 'submission' | 'evidence' | 'judge';
+export type ProjectSubId = 'runs' | 'artifacts' | 'schedules' | 'tasks' | 'submission' | 'evidence' | 'judge';
 
 const SECONDARY: Record<'build' | 'submission', ReadonlyArray<{ id: ProjectSubId; label: string; to: string; testid: string }>> = {
 	build: [
 		{ id: 'runs', label: 'Activity', to: '/runs', testid: 'sub-tab-activity' },
 		{ id: 'artifacts', label: 'Files', to: '/artifacts', testid: 'sub-tab-files' },
 		{ id: 'schedules', label: 'Automation', to: '/schedules', testid: 'sub-tab-automation' },
+		{ id: 'tasks', label: 'Tasks', to: '/tasks', testid: 'sub-tab-tasks' },
 	],
 	submission: [
 		{ id: 'submission', label: 'Package', to: '/submission', testid: 'sub-tab-package' },

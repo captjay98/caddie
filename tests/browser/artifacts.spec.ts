@@ -243,6 +243,10 @@ test.describe('P07 artifacts viewer + design review (composed build, stubbed /ap
 		await expect(page.getByTestId('design-review-row')).toHaveCount(2);
 		await expect(page.getByTestId('design-review-row').first()).toHaveAttribute('data-latest', 'true');
 
+		// The plan body renders readably for the revision under review (F09).
+		await expect(page.getByTestId('design-review-plan-body')).toContainText('The plan as drafted — r2');
+		await expect(page.getByTestId('plan-body-content')).toContainText('render a live chart');
+
 		await page.getByTestId('design-review-approve').click();
 		await expect(page.getByTestId('design-review-outcome')).toHaveAttribute('data-decision', 'approved');
 

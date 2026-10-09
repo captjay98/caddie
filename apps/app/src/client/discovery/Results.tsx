@@ -181,6 +181,28 @@ export function DiscoveryResults(props: {
 	const byId = new Map((list?.evaluations ?? []).map((e) => [e.candidate.id, e]));
 	const failedSources = (latestFeed?.sources ?? []).filter((s) => s.outcome === 'failed');
 
+	// Audit S12: browse/filter over the LOADED account feed — status chips +
+	// a text filter, honest empty state. Server-side search of opportunity
+	// sources stays with the live-source prerequisite (F06).
+	const [statusFilter, setStatusFilter] = useState<'all' | 'new' | 'accepted'>('all');
+	const [textFilter, setTextFilter] = useState('');
+	const filtered = ranked.filter((entry) => {
+		const evaluation = byId.get(entry.candidateId);
+		if (!evaluation) return true;
+		if (statusFilter !== 'all' && evaluation.candidate.status !== statusFilter) return false;
+		const needle = textFilter.trim().toLowerCase();
+		if (needle !== '') {
+			const hay = `${evaluation.candidate.title} ${evaluation.candidate.summary} ${evaluation.candidate.source}`.toLowerCase();
+			if (!hay.includes(needle)) return false;
+		}
+		return true;
+	});
+	const filterChips: ReadonlyArray<{ id: 'all' | 'new' | 'accepted'; label: string; testid: string }> = [
+		{ id: 'all', label: 'All', testid: 'discovery-filter-all' },
+		{ id: 'new', label: 'New', testid: 'discovery-filter-new' },
+		{ id: 'accepted', label: 'Saved', testid: 'discovery-filter-saved' },
+	];
+
 	return (
 		<section aria-label="Discovery results" className="discovery-panel" data-testid="discovery-results">
 			<div className="r-section-head">
@@ -188,15 +210,14 @@ export function DiscoveryResults(props: {
 					<p className="kicker" data-tone="action">
 						FIND
 					</p>
-					<h2 className="ev-title">Hackathons</h2>
+					<h2 className="ev-title">Matches for you</h2>
 					<p className="page-lede">
-						Contests Caddie is watching for you — deadlines, rules, and why each one fits. Ranked only
-						on what could actually be read.
+						Deadlines, rules, and why each one fits. Ranked only on what could actually be read.
 					</p>
 				</div>
 				<span className="disc-actions">
 					<button type="button" className="btn-key" onClick={() => void runFeed()} disabled={busy}>
-						Run feed
+						{busy ? 'Checking…' : 'Check for new contests'}
 					</button>{' '}
 					<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
 						{busy ? 'Loading…' : 'Refresh'}
@@ -234,6 +255,34 @@ export function DiscoveryResults(props: {
 				Ranking never presents a hard-ineligible candidate as eligible.
 			</p>
 
+			{ranked.length > 0 ? (
+				<div className="disc-filters" data-testid="discovery-filters">
+					<span className="disc-filter-chips">
+						{filterChips.map((chip) => (
+							<button
+								type="button"
+								key={chip.id}
+								className="detail-toggle"
+								data-testid={chip.testid}
+								aria-pressed={statusFilter === chip.id}
+								onClick={() => setStatusFilter(chip.id)}
+							>
+								{chip.label}
+							</button>
+						))}
+					</span>
+					<input
+						type="search"
+						className="input"
+						placeholder="Filter by title, summary, source…"
+						aria-label="Filter the loaded feed"
+						data-testid="discovery-filter-text"
+						value={textFilter}
+						onChange={(event) => setTextFilter(event.target.value)}
+					/>
+				</div>
+			) : null}
+
 			{ranked.length === 0 ? (
 				list ? (
 					<StatePanel
@@ -244,9 +293,21 @@ export function DiscoveryResults(props: {
 				) : (
 					<StatePanel kind="loading" title="Reading the feeds…" />
 				)
+			) : filtered.length === 0 ? (
+				<div data-testid="discovery-filter-empty">
+					<StatePanel
+						kind="empty"
+						title="No matches in the loaded feed"
+						detail={
+							statusFilter === 'accepted'
+								? 'Nothing is saved yet — Save keeps a candidate here until you explore it.'
+								: 'Nothing in the loaded feed matches that filter. Clear it or run a new sweep.'
+						}
+					/>
+				</div>
 			) : (
 				<ul className="disc-list">
-					{ranked.map((entry) => {
+					{filtered.map((entry) => {
 						const evaluation = byId.get(entry.candidateId);
 						if (!evaluation) return null;
 						const { candidate, fit, eligibility } = evaluation;
@@ -276,18 +337,19 @@ export function DiscoveryResults(props: {
 									>
 										{open ? 'Hide fit detail' : 'Explain fit'}
 									</button>{' '}
-									{candidate.status === 'new' ? (
-										onExplore ? (
-											<>
-												<button
-													type="button"
-													className="btn-key"
-													data-testid={`explore-ideas-${candidate.id}`}
-													onClick={() => onExplore(candidate)}
-													disabled={exploreBusy}
-												>
-													{exploreBusy ? 'Opening…' : 'Explore ideas for this hackathon'}
-												</button>{' '}
+{candidate.status === 'new' || candidate.status === 'accepted' ? (
+									onExplore ? (
+										<>
+											<button
+												type="button"
+												className="btn-key"
+												data-testid={`explore-ideas-${candidate.id}`}
+												onClick={() => onExplore(candidate)}
+												disabled={exploreBusy}
+											>
+												{exploreBusy ? 'Opening…' : 'Explore ideas for this hackathon'}
+											</button>{' '}
+											{candidate.status === 'new' ? (
 												<button
 													type="button"
 													className="btn-ghost"
@@ -297,13 +359,18 @@ export function DiscoveryResults(props: {
 												>
 													Save
 												</button>
-											</>
-										) : (
-											<button type="button" className="btn-key" onClick={() => void accept(candidate.id)} disabled={busy}>
-												Accept
-											</button>
-										)
-									) : null}
+											) : (
+												<span className="state-chip" data-testid={`saved-candidate-${candidate.id}`}>
+													Saved
+												</span>
+											)}
+										</>
+									) : (
+										<button type="button" className="btn-key" onClick={() => void accept(candidate.id)} disabled={busy}>
+											Accept
+										</button>
+									)
+								) : null}
 								</div>
 								{open ? (
 									<div className="disc-detail">

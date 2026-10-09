@@ -60,8 +60,20 @@ const REVISIONS = [
 ];
 
 const PLAN_REVISIONS = [
-	{ id: 'pdr-latest', revision: 2, bodyHash: 'sha256-abc123def456abc123def456abc12345', createdAt: NOW },
-	{ id: 'pdr-older', revision: 1, bodyHash: 'sha256-00011122233300011122233300011122', createdAt: NOW },
+	{
+		id: 'pdr-latest',
+		revision: 2,
+		bodyHash: 'sha256-abc123def456abc123def456abc12345',
+		createdAt: NOW,
+		body: 'Build a solar dashboard.\n\n- read the telemetry endpoint\n- render a live chart\n- keep a local cache\n\nEvidence: cl-team-1, cl-solar-1.',
+	},
+	{
+		id: 'pdr-older',
+		revision: 1,
+		bodyHash: 'sha256-00011122233300011122233300011122',
+		createdAt: NOW,
+		body: 'Draft: solar dashboard, first cut.',
+	},
 ];
 
 const viewerRoot = createRoot(document.getElementById('viewer-root')!);

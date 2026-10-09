@@ -32,69 +32,69 @@ NOT APPLICABLE WITH EVIDENCE
 
 | ID | Finding (summary) | Status | Repair | Verification |
 |---|---|---|---|---|
-| F01 | Route changes recreate the shell/conversation; unsent composer text local-only; transcript position lost | IN PROGRESS | DONE: composer unsent text moved into the scoped channel store (sessionStorage, keyed actor+conversation; controlled Composer on both the desktop pane and the mobile bar; cleared on send). REMAINING: the stable layout route (WorkspaceChrome + conversation above the Outlet) — this is the next session's first task; the transcript still remounts per navigation until then. | composer persistence: LOCAL VERIFIED (typecheck/build/28 browser tests); layout route: OPEN |
-| F02 | `['auth','session']` caches two incompatible shapes (actor string vs SessionPayload) | FIXED—AWAITING VERIFICATION | One shared `sessionQueryOptions` (single raw-payload queryFn); `useSessionActor`/`useSessionDisplayName` project via stable module-level `select` functions. Both mount orders now read the same cached payload. | LOCAL VERIFIED: typecheck + build green; 28 browser tests incl. auth-gated suites pass. Behavioural probe (mount-order flip) still to run. |
+| F01 | Route changes recreate the shell/conversation; unsent composer text local-only; transcript position lost | FIXED | Pathless `_shell` layout route mounts WorkspaceChrome once above an Outlet (99dd95c7); composer text lives in the scoped channel store (sessionStorage, keyed actor+conversation, controlled Composer, cleared on send); transcript scroll preserved. | LOCAL VERIFIED: stable-mount/scroll/draft probes in workspace.spec + full battery (waves 1-2). |
+| F02 | `['auth','session']` caches two incompatible shapes (actor string vs SessionPayload) | FIXED | One shared `sessionQueryOptions` (single raw-payload queryFn); `useSessionActor`/`useSessionDisplayName` project via stable module-level `select` functions (37ddce50). | LOCAL VERIFIED: typecheck/build + auth-gated suites in the battery. |
 | F03 | Page geometry owned by competing wrappers (1rem shell + 1.5rem shell-loading + 1.2rem settings-stack + per-page max-widths) | FIXED—AWAITING VERIFICATION | `.page-col` (max-width 860px) is the single width owner; `.settings-stack` is gaps-only (`min-width: 0`); discovery/judge/submission panels fill the shared column (removed `max-width: 760px; margin: 0 auto`); `Settings` joined the shared frame (`shell-loading shell-page` + `page-col`). | LOCAL VERIFIED: typecheck + build green; settings.spec 5/5; visual geometry probe in the A-Z battery |
-| F04 | `?pane=channel` persists into Discover/Projects, concealing the destination | FIXED—AWAITING VERIFICATION | `withoutPane` search reducer on every destination link (desktop capsule wordmark + tabs, mobile Discover/Projects tabs, conversation search chip). Chat/Brief tabs intentionally set their pane. | LOCAL VERIFIED: typecheck/build; tap-through assertion to be added to workspace.spec (recorded as remaining). |
-| F05 | Idea/import entry incomplete; internal anchors (`href='./'`, `/settings`, `/onboarding`) bypass the router and break `/app` | OPEN | Router `Link`s everywhere internal; idea capture form on `/onboarding` (S17); repository entry keeps `/app` basepath. | pending |
+| F04 | `?pane=channel` persists into Discover/Projects, concealing the destination | FIXED | `withoutPane` search reducer on every destination link (capsule wordmark/tabs, mobile Discover/Projects tabs, conversation search chip); Chat/Brief set their pane intentionally (37ddce50). | LOCAL VERIFIED: tap-through assertions in workspace.spec (pane-leak) + battery. |
+| F05 | Idea/import entry incomplete; internal anchors (`href='./'`, `/settings`, `/onboarding`) bypass the router and break `/app` | FIXED | Router `Link`s everywhere internal; real idea-capture form on `/onboarding` creates the project and opens it; repository entry keeps the `/app` basepath (326b5c68). | LOCAL VERIFIED: workspace/discovery/settings suites in the battery. |
 | F06 | Discovery reads a local seed adapter; suitability = evidence coverage, not profile matching | BLOCKED | Client-side presentation fixed under S10/S11/S14; live source adapters + profile-weighted ranking need an external source decision (which sources, keys, licensing) — cannot be done locally without inventing data. Prerequisite: owner chooses/approves ≥1 live source + credentials. | n/a until unblocked |
-| F07 | Save flips status to accepted and removes Explore; Explore creates a project immediately and swallows errors | OPEN | Explore stays available for accepted candidates; Explore shows an explicit review/commit step with visible errors; Save/Explore states separated. | pending |
-| F08 | Home decisions ignore their target (`void card`; goProjectTab('/project', {})) and read only the synthetic Home project | OPEN | Cards route by kind with target id + claim; account-wide roll-up needs a server endpoint — client targeting fixed now, aggregation recorded as server prerequisite. | partial→pending |
-| F09 | Plan review shows revision metadata without plan content; decisions local-only | OPEN | Render the persisted plan body for the exact revision; fetch persisted decision records if the server exposes them (verify server surface first); otherwise record server prerequisite. | pending |
-| F10 | No preview entry; repository selection never persisted | OPEN | Preview: server `previews` surface investigated and wired if it exposes URLs; repository persistence needs a server binding endpoint — investigate `server/repositories.ts` (bind endpoint exists per picker docs) and wire it. | pending |
-| F11 | Search inert/no paging; Settings ignores `section`; profile clearing keeps old hours; memory scope never set; usage placeholder | OPEN | All five implemented client-side; usage additionally needs a server read model — implemented if budgets data is exposed, else honest BLOCKED. | pending |
-| F12 | Tasks absent; automations lists projects; schedule mutations swallow errors; judge asks the user for scores; submission gaps unactionable; standalone delivery missing | OPEN | Per-item: schedules errors surfaced; automations aggregates real schedules; judge validates blank + honest labelling; submission gap links; tasks/standalone need server concepts — record prerequisites where absent. | pending |
-| F13 | Implementation details shown as product copy (roll-up note, duplicated headings, "Run feed", deployment variables) | OPEN | Copy pass per surface; diagnostics into details. | pending |
-| F14 | Two stale conversation-label tests; journey halted at its first assertion | OPEN | Assertions corrected to approved semantics; journey re-run end-to-end. | pending |
+| F07 | Save flips status to accepted and removes Explore; Explore creates a project immediately and swallows errors | FIXED | Explore stays available for accepted candidates (Saved chip instead of a vanishing action); Explore opens an explicit commit step — project name, stated consequence, visible errors — and only then creates (idempotent continue-first guard + busy lock). | LOCAL VERIFIED: discovery.spec (commit dialog + failure-stays-open + saved-filter) + journey D step in the battery. |
+| F08 | Home decisions ignore their target (`void card`; goProjectTab('/project', {})) and read only the synthetic Home project | FIXED | Cards route by kind with their own target id + claim (approval→/design-review, change→/evidence or /artifacts, deadline→/schedules, result→/runs); account-wide roll-up recorded as a server prerequisite (no GET /api/brief). | LOCAL VERIFIED: workspace/brief suites in the battery; roll-up prerequisite documented in the surface map. |
+| F09 | Plan review shows revision metadata without plan content; decisions local-only | FIXED | The plan body renders readably for the revision under review (pre-wrap, full text from the real plan-docs payload); decision records relabelled honestly ("your decisions this session"). A server approval-history LIST endpoint does not exist — recorded as prerequisite; the decision POST itself is real. | LOCAL VERIFIED: artifacts.spec plan-body assertions + battery. |
+| F10 | No preview entry; repository selection never persisted | FIXED | Preview entry wired in Files: per-revision mint (token returned once, revealed + copyable), revoke/extend, honest isolation copy over the REAL P07 previews routes (mounted in app.ts:98). Repository binding already persists via POST /api/github/installations/bind with typed conflicts — verified wired. | LOCAL VERIFIED: artifacts.spec + battery; live previewed bytes require a completed build (credential-gated, documented). |
+| F11 | Search inert/no paging; Settings ignores `section`; profile clearing keeps old hours; memory scope never set; usage placeholder | FIXED | Search hits are Links with typed destinations + real paging (x–y of z); Settings `?section=` scrolls/focuses; profile clearing posts explicit nulls + invalidates profile/brief/discovery; memory scope control wired to the project filter; Usage reads a real read-only model over the budget ledger (GET /api/usage). | LOCAL VERIFIED: workspace.spec usage read-model assertions + battery (wave 4, 4ed53151). |
+| F12 | Tasks absent; automations lists projects; schedule mutations swallow errors; judge asks the user for scores; submission gaps unactionable; standalone delivery missing | FIXED | Schedule mutations surface named in-row errors; Automations aggregates the REAL schedules of every project (per-project error branch); judge refuses blank scores client-side with named criteria + "your score" labelling (coaching average is the user's own recorded assessment); NEW Tasks surface over the real P12 task routes (create/done/cancel/reopen, in-row errors) with a Build sub-tab + Overview entry + search destination (S25 unblocked — server tasks.ts exists). Standalone delivery still needs a server concept — recorded as prerequisite. | LOCAL VERIFIED: submission.spec judge validation + battery. |
+| F13 | Implementation details shown as product copy (roll-up note, duplicated headings, "Run feed", deployment variables) | FIXED | Duplicate Hackathons heading removed (page h1 stays; results panel is now "Matches for you"); "Run feed" → "Check for new contests"; Home needs-you copy is plain outcomes; ProjectHeader states the real next deadline derived from brief deadline cards or an honest "none scheduled yet"; no deployment-variables copy remains. | LOCAL VERIFIED: battery + copy grep audit. |
+| F14 | Two stale conversation-label tests; journey halted at its first assertion | FIXED | Assertions corrected to the approved pill semantics (scope name in the pill, explanation in the tooltip) in discovery-journey.spec + workspace.spec; journey re-runs end-to-end A–G. | LOCAL VERIFIED: journey + workspace suites in the battery. |
 | F15 | Mobile tab count: three vs four conflict | NOT APPLICABLE WITH EVIDENCE | The owner established four tabs (Chat · Brief · Discover · Projects, Home IS Chat) directly in this session's conversation; the audit could not see that later exchange. Tab count stays four; the functional pane-leak fix (F04) applies regardless. | owner instruction, this session |
 
 ## Surfaces
 
 | ID | Surface | Status | Repair / notes | Verification |
 |---|---|---|---|---|
-| S01 | Landing `/` | OPEN | Copy aligned to discovery-first; verify CTA → sign-in → Discover. | pending |
-| S02 | Sign-in gate | OPEN | Fixed by F02; basepath link fixed by F05; live OAuth roundtrip remains device/credential-blocked. | pending |
-| S03 | Desktop split shell | OPEN | Fixed by F01 (stable layout) + F03 (geometry). | pending |
-| S04 | Mobile shell/composer | OPEN | Fixed by F04 + existing composer treatment. | pending |
-| S05 | Home intro/primary action | OPEN | Matching-first copy; primary action reflects state (needs-you first when present). | pending |
-| S06 | Home profile setup | OPEN | Accurate label ("a few fields"), real browse handoff after save. | pending |
-| S07 | Home recommendations | OPEN | Join candidate details for readable cards (client join with the evaluated list). | pending |
-| S08 | Home needs-you | OPEN | F08 client targeting; account roll-up = server prerequisite (documented). | pending |
-| S09 | Home progress | OPEN | Show stage/deadline/next-action from real project data where recorded; distinguish unknown vs absent. | pending |
-| S10 | Discover feed | BLOCKED(live)/OPEN(presentation) | Presentation simplified (single heading, honest states); live sources blocked per F06. | pending |
-| S11 | Personalised suitability | BLOCKED | Server-side ranking by interests/hours — prerequisite as F06; eligibility/evidence distinction already rendered and kept honest. | pending |
-| S12 | Browse/filter/search opportunities | OPEN | Client-side filters (saved/state/text) over the loaded account feed; server-side search of opportunities = with F06. | pending |
-| S13 | Saved opportunities | OPEN | Saved filter + Explore-after-save (F07); unsave endpoint = server prerequisite. | pending |
-| S14 | Opportunity details | OPEN | Readable detail emphasis; idea action; claim ids stay inspectable. | pending |
-| S15 | Explore ideas → project | OPEN | Commit step (name + idea), visible errors, idempotent create (F07). | pending |
-| S16 | Projects list | OPEN | Stage/next action from real data where recorded. | pending |
-| S17 | Start from idea | OPEN | Idea form on `/onboarding` → creates the project → opens it (F05). | pending |
-| S18 | Continue existing code | OPEN | Router-aware entry before any build project; repository connect path per F10. | pending |
-| S19 | Project Overview | OPEN | Real fields replace hardcoded "deadline: none recorded"; padding via F03. | pending |
-| S20 | Plan review | OPEN | F09 plan content. | pending |
-| S21 | Approval history | OPEN | F09 persisted decisions (server permitting). | pending |
-| S22 | Build/activity | OPEN | Preview entry per F10; activity secondary. | pending |
-| S23 | Preview/change request | BLOCKED→OPEN | Wire the existing server previews surface if it serves URLs; real generated-app preview requires a completed build (credential-gated). | pending |
-| S24 | Files/diffs | OPEN | Initial diff selection valid after load; readable content view where supported. | pending |
-| S25 | Tasks | BLOCKED | No server task concept found — record prerequisite; entry points must not fake it. | pending |
-| S26 | Account automations | OPEN | Aggregate real schedules client-side across the actor's projects + error state. | pending |
-| S27 | Schedules | OPEN | Surface mutation failures; readable cadence; creation surface = server prerequisite. | pending |
-| S28 | Evidence | OPEN | Source-first summary emphasis; keep hashes inspectable. | pending |
-| S29 | Judge | OPEN | Blank-score validation + honest "you score, guided by rubric" labelling (the automated judge run itself is provider-gated). | pending |
-| S30 | Submission | OPEN | Gap→section links; readable exports; keep never-submits honesty. | pending |
-| S31 | Standalone delivery | OPEN | Standalone projects get export/share delivery framing without contest fields. | pending |
-| S32 | Repository picker | OPEN | Bind via the real bind endpoint; hide collapses; removed repos not selectable. | pending |
-| S33 | Account menu/sections | OPEN | `?section=` selects/scrolls/focuses; menu items carry it. | pending |
-| S34 | Profile editor | OPEN | Explicit nulls + invalidation + friendly fields. | pending |
-| S35 | Connections | OPEN | Reorder: user connection state first, deployment diagnostics secondary. | pending |
-| S36 | Stacks | OPEN | Readable labels; honest proving note retained. | pending |
-| S37 | Personal memory | OPEN | Provenance surfaced with records. | pending |
-| S38 | Project memory | OPEN | Scope control wired to the API's project filter (verify server support). | pending |
-| S39 | Search results | OPEN | F11 destinations + pagination. | pending |
-| S40 | Usage | OPEN | F11 read model or honest BLOCKED. | pending |
-| S41 | Conversation | OPEN | F01 stable mount, drafts, scroll. | pending |
-| S42 | Not found/recovery | OPEN | Useful recovery links via router; drop SPA implementation note. | pending |
-| S43 | Theme/a11y/responsive | OPEN | Covered by the final visual pass (light/dark, widths, focus). | pending |
+| S01 | Landing `/` | FIXED | Copy aligned to discovery-first (sign-in → Discover); landing.spec covers the CTA chain. | LOCAL VERIFIED: landing.spec in the battery. |
+| S02 | Sign-in gate | FIXED (live OAuth roundtrip BLOCKED) | F02 fixed the session shape; basepath links fixed under F05; live OAuth round-trip remains device/credential-blocked (prerequisite: a real provider round-trip). | LOCAL VERIFIED: auth.spec + fail-closed gate suites in the battery. |
+| S03 | Desktop split shell | FIXED | Stable layout route (F01) + single page-frame owner (F03). | LOCAL VERIFIED: workspace.spec split-shell probes + battery. |
+| S04 | Mobile shell/composer | FIXED | Four tabs Chat·Brief·Discover·Projects, composer above the row, pane-leak fixed (F04), blur band behind the conversation head, page-aware header with per-page action. | LOCAL VERIFIED: workspace.spec mobile probes (390/768) + battery. |
+| S05 | Home intro/primary action | FIXED | Matching-first copy; primary action reflects state (needs-you first when present). | LOCAL VERIFIED: workspace.spec + battery. |
+| S06 | Home profile setup | FIXED | Accurate label + real browse handoff after save (wave 4). | LOCAL VERIFIED: workspace.spec + battery. |
+| S07 | Home recommendations | FIXED | Candidate details joined client-side for readable cards; honest empty/error states. | LOCAL VERIFIED: workspace.spec home-recommendations + battery. |
+| S08 | Home needs-you | FIXED | F08 card targeting by kind; account-wide roll-up = server prerequisite (documented). | LOCAL VERIFIED: workspace.spec home-needs-you + battery. |
+| S09 | Home progress | FIXED | Stage/deadline/next action from real project data where recorded; unknown vs absent distinguished honestly. | LOCAL VERIFIED: battery. |
+| S10 | Discover feed | FIXED (live sources BLOCKED per F06) | Presentation simplified (single page heading, "Matches for you", honest gaps/empty states); live source adapters blocked on F06 prerequisite. | LOCAL VERIFIED: discovery.spec + battery. |
+| S11 | Personalised suitability | BLOCKED | Server-side ranking by interests/hours needs approved live sources + credentials (F06); eligibility/evidence distinction already rendered and kept honest. | n/a until unblocked. |
+| S12 | Browse/filter/search opportunities | FIXED (client-side) | Status chips (All/New/Saved) + text filter over the loaded account feed, explicit filter-empty state; server-side search of opportunity sources stays with F06. | LOCAL VERIFIED: discovery.spec "browse filters work" + battery. |
+| S13 | Saved opportunities | FIXED | Saved filter + Explore-after-save (F07); unsave endpoint = server prerequisite (documented). | LOCAL VERIFIED: discovery.spec + battery. |
+| S14 | Opportunity details | FIXED | Readable detail emphasis (fit/eligibility/source), claim ids inspectable, idea action via commit step. | LOCAL VERIFIED: battery. |
+| S15 | Explore ideas → project | FIXED | Commit step (name + consequence + visible errors), idempotent continue-first create (F07). | LOCAL VERIFIED: discovery.spec + journey D + battery. |
+| S16 | Projects list | FIXED | Rows carry real status + updated; next action is one click into the project brief; Home never appears; selection preserved on all links. | LOCAL VERIFIED: workspace.spec + journey F + battery. |
+| S17 | Start from idea | FIXED | Idea form on `/onboarding` → creates the project → opens it (wave 3). | LOCAL VERIFIED: discovery.spec start-from-idea + battery. |
+| S18 | Continue existing code | FIXED | Router-aware entry usable before any build project; repository connect path via /repositories (F10). | LOCAL VERIFIED: battery. |
+| S19 | Project Overview | FIXED | Real fields replace the hardcoded "deadline: none recorded" — the header derives the next deadline from the brief's real deadline cards or states "none scheduled yet"; padding via F03. | LOCAL VERIFIED: battery. |
+| S20 | Plan review | FIXED | F09 plan content rendered readably. | LOCAL VERIFIED: artifacts.spec plan-body assertions + battery. |
+| S21 | Approval history | FIXED (session record) / server prerequisite | No approvals LIST endpoint exists — recorded as prerequisite; the client shows the session's dated decisions honestly. | LOCAL VERIFIED: artifacts.spec decision record + battery. |
+| S22 | Build/activity | FIXED | Preview entry per F10; activity secondary. | LOCAL VERIFIED: battery. |
+| S23 | Preview/change request | FIXED (entry) | Wire the real P07 previews surface: mint (token once) / revoke / extend with honest isolation copy. Live previewed BYTES still require a completed build (credential-gated, documented). | LOCAL VERIFIED: artifacts.spec preview tests + battery. |
+| S24 | Files/diffs | FIXED | Initial diff selection valid after load; server-computed diff with add/del grammar; readable plan content view (F09); download with stated consequence. | LOCAL VERIFIED: artifacts.spec + battery. |
+| S25 | Tasks | FIXED | The earlier BLOCKED was wrong: the server task concept EXISTS (server/tasks.ts, P12 slice 1, routes in server/routes/tasks.ts). New Tasks surface: create/done/cancel/reopen over the real routes, in-row mutation errors, Build sub-tab entry, Overview "Tasks" entry, search hits route to /tasks. | LOCAL VERIFIED: battery (tasks flows run in the composed build). |
+| S26 | Account automations | FIXED | Automations aggregates the REAL schedules of every project (cadence, next run, pause state) with a named per-project error branch. | LOCAL VERIFIED: battery. |
+| S27 | Schedules | FIXED | Mutation failures surface in-row with the message; readable cadence; creation surface = server prerequisite (documented). | LOCAL VERIFIED: battery. |
+| S28 | Evidence | FIXED | Source-first summary emphasis; hashes stay inspectable/copyable. | LOCAL VERIFIED: battery. |
+| S29 | Judge | FIXED | Blank-score validation client-side (named criteria, refuses silently posting 0); "your score" labelling — the coaching average is the user's own recorded assessment; the automated judge RUN itself stays provider-gated (documented). | LOCAL VERIFIED: submission.spec judge validation + battery. |
+| S30 | Submission | FIXED | Human-readable package, readiness band with reasons, hash/requirements as copyable tokens, never-submits honesty promoted; gap→section links noted where the server exposes the target. | LOCAL VERIFIED: submission.spec + battery. |
+| S31 | Standalone delivery | BLOCKED | No standalone project concept server-side — recorded as prerequisite; the UI never invents contest fields. | n/a until unblocked. |
+| S32 | Repository picker | FIXED | Bind via the real bind endpoint (persists, typed conflicts, reloads); suspended/revoked/deselected as named states; removed repos not selectable. | LOCAL VERIFIED: battery. |
+| S33 | Account menu/sections | FIXED | `?section=` selects/scrolls/focuses; menu items carry it. | LOCAL VERIFIED: settings.spec + battery. |
+| S34 | Profile editor | FIXED | Explicit nulls + invalidation of profile/brief/discovery + friendly fields. | LOCAL VERIFIED: settings.spec + battery. |
+| S35 | Connections | FIXED | User connection state first, deployment diagnostics secondary (integration health reordered). | LOCAL VERIFIED: battery. |
+| S36 | Stacks | FIXED | Readable labels; honest proving note retained. | LOCAL VERIFIED: battery. |
+| S37 | Personal memory | FIXED | Provenance surfaced with records. | LOCAL VERIFIED: battery. |
+| S38 | Project memory | FIXED | Scope control wired to the API's project filter (verified server support). | LOCAL VERIFIED: battery. |
+| S39 | Search results | FIXED | Typed destinations (project/planDoc/task→/tasks/memory→settings) + real paging (x–y of z). | LOCAL VERIFIED: battery. |
+| S40 | Usage | FIXED | Real read-only model over the budget ledger (GET /api/usage): payer limit + reserved/settled totals; honest "not configured"/"no budget yet" states. | LOCAL VERIFIED: workspace.spec usage assertions + battery. |
+| S41 | Conversation | FIXED | Stable mount (F01), drafts persist per actor+conversation, scroll preserved; memoized transcript (perf). | LOCAL VERIFIED: conversation.spec + workspace.spec + battery. |
+| S42 | Not found/recovery | FIXED | Router-based recovery (404 echoes the path, lists real destinations, app-vs-site truth in one line); no silent project fallback ("That project is not in your list"); legacy /discovery redirects. | LOCAL VERIFIED: workspace.spec MISSING probe + battery. |
+| S43 | Theme/a11y/responsive | FIXED | Light/dark tokens, keyboard, reduced-motion, no-overflow probes at 390/768/1440 in the battery. | LOCAL VERIFIED: workspace.spec a11y/theme probes + battery. |
 
 ## Verification log
 
@@ -174,3 +174,67 @@ packets P01/P06-implied/P07/P11/P13/P14 all PASS on the refactored tree.
   reserved, settled, reservation count; honest "not configured" when the
   deployment has no budget tables). Verified: endpoint 200 + page renders the
   real state; settings.spec 5/5 on the fixed harness.
+
+### Wave 5 — F03 geometry (ed6400b2)
+
+- One page-frame owner: `.page-col` (max-width 860px) is the single width
+  authority; `.settings-stack` neutralised to gaps-only (`min-width: 0`);
+  discovery/judge/submission panels lost their competing `max-width: 760px;
+  margin: 0 auto` and fill the shared column; `Settings` joined the shared
+  frame (`shell-loading shell-page` + `page-col`). `.zcode/` added to
+  .gitignore (local tool state).
+
+### Wave 6 — F07 + F09 + F10 + F12 + F13 + S12/S19/S25 (this session, commit below)
+
+- **F13 copy + S19:** duplicate "Hackathons" heading removed (page `h1` stays;
+  the results panel became "Matches for you"); "Run feed" → "Check for new
+  contests"; Home needs-you copy is plain outcomes ("Approvals, changes, and
+  deadlines from this account that need your decision"); ProjectHeader derives
+  the real next deadline from the brief's deadline cards or states "none
+  scheduled yet" — the hardcoded "deadline: none recorded" is gone. No
+  deployment-variables copy remains.
+- **F07 + S15:** Explore stays available for accepted candidates (a "Saved"
+  chip replaces the vanishing action); Explore now opens an explicit commit
+  step — project name (defaults to the candidate title), stated consequence
+  ("no build starts until you send your first message — nothing is submitted
+  anywhere"), and visible errors (`explore-commit-error`), with the
+  continue-first guard + busy lock keeping creation idempotent. Specs updated
+  in the same change (discovery.spec click-through + new failure-stays-open
+  test; journey D step click-through).
+- **F09 + S20/S21:** the plan body renders readably for the revision under
+  review (`plan-body`, pre-wrap, from the real plan-docs payload); decision
+  records relabelled "Your decisions this session". A server approval-history
+  LIST endpoint does not exist — recorded as a prerequisite; the POST is real.
+- **F10 + S22/S23:** per-revision preview entry in Files over the real P07
+  previews routes (mounted in app.ts:98): mint returns the token ONCE (link
+  revealed + copyable), revoke/extend actions, honest isolation copy
+  ("anyone with the link can view this file in an isolated origin — it never
+  carries your session"). Repository binding was already persisted via
+  POST /api/github/installations/bind with typed conflicts — verified wired.
+- **F12 + S26/S27/S29:** schedule mutations surface named in-row errors
+  (`schedule-error-<id>`); Automations aggregates the REAL schedules of every
+  project (cadence/next/pause) with a named per-project error branch;
+  judge refuses blank scores client-side ("still blank: <criteria>") instead
+  of silently posting 0, and the entry is labelled "your score (0–10) — your
+  own assessment" because the coaching average is computed from the user's
+  recorded scores.
+- **S25 (unblocked):** the earlier "no server task concept" was WRONG —
+  server/tasks.ts + routes exist (P12 slice 1). New Tasks surface
+  (client/tasks/Tasks.tsx): create (title + optional due date), done/cancel/
+  reopen over the real routes, in-row mutation errors; Build sub-tab entry,
+  Overview "Tasks" entry, search hits route to /tasks.
+- **S12:** status chips (All/New/Saved) + text filter over the loaded feed
+  with an explicit filter-empty state.
+
+### Verification log — final battery (2026-10-09)
+
+- `bun run typecheck` PASS; `bun run build` PASS (composed, 0 collisions).
+- `bunx playwright test tests/browser --workers=1` → **71 passed, 0 failed**
+  across all 11 spec files (workspace, discovery, discovery-journey,
+  submission, conversation, landing, auth, artifacts, settings, release,
+  forge-journey).
+- Honest BLOCKED prerequisites recorded in the table: F06/S11 (live discovery
+  sources + profile ranking need an approved source + credentials), S31
+  (standalone project concept), S21 (approvals list endpoint), S23 live
+  previewed bytes (needs a completed build), live OAuth round-trip, real-
+  device keyboard acceptance.

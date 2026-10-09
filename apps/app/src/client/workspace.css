@@ -2002,6 +2002,88 @@ a.btn-ghost.topbar-nav-link {
 	gap: 0.4rem;
 }
 
+/* Audit F07: the explicit Explore commit step — one modal over the discover
+   panel; the user names the project and sees the consequence + any error
+   before anything is created. */
+.modal-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 40;
+	display: grid;
+	place-items: center;
+	padding: 1rem;
+	background: rgb(0 0 0 / 0.55);
+}
+
+.commit-panel {
+	width: min(480px, 100%);
+	display: grid;
+	gap: 0.8rem;
+	padding: 1.2rem;
+}
+
+.state-chip {
+	display: inline-flex;
+	align-items: center;
+	border: 1px solid color-mix(in srgb, var(--color-ok) 45%, transparent);
+	background: color-mix(in srgb, var(--color-ok) 8%, transparent);
+	color: var(--color-ok);
+	border-radius: 9999px;
+	padding: 2px 10px;
+	font-family: var(--font-mono);
+	font-size: var(--r-meta);
+	letter-spacing: 0.04em;
+}
+
+/* Audit F12: an in-row action failure — named, never swallowed. */
+.row-error {
+	border: 1px solid color-mix(in srgb, var(--color-danger) 45%, transparent);
+	background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+	border-radius: 8px;
+	padding: 0.45rem 0.7rem;
+	font-size: 12.5px;
+}
+
+/* Audit S12: browse/filter over the loaded feed — status chips + text. */
+.disc-filters {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	flex-wrap: wrap;
+}
+
+.disc-filter-chips {
+	display: inline-flex;
+	gap: 0.3rem;
+}
+
+.disc-filters .input {
+	max-width: 22rem;
+	min-width: 12rem;
+}
+
+.disc-filter-chips .detail-toggle[aria-pressed='true'] {
+	color: var(--color-action);
+	border-color: color-mix(in srgb, var(--color-action) 55%, transparent);
+}
+
+/* Audit F09: the plan body rendered readably — the draft you are approving,
+   not a hash with no content. */
+.plan-body {
+	white-space: pre-wrap;
+	word-break: break-word;
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	line-height: 1.55;
+	background: color-mix(in srgb, var(--color-raised) 65%, transparent);
+	border: 1px solid var(--color-line-soft);
+	border-radius: 8px;
+	padding: 0.7rem 0.85rem;
+	margin: 0;
+	max-height: 28rem;
+	overflow: auto;
+}
+
 .disc-gaps {
 	border: 1px solid color-mix(in srgb, var(--color-warn) 45%, transparent);
 	background: color-mix(in srgb, var(--color-warn) 8%, transparent);

@@ -307,8 +307,7 @@ function NeedsYou(): ReactElement {
 					</p>
 					<h3 className="state-title">Waiting on your OK</h3>
 					<p className="state-detail">
-						Decisions from your account scope. An account-wide brief roll-up across every project is not
-						yet exposed by the server — this shows the account (Home) scope only.
+						Approvals, changes, and deadlines from this account that need your decision.
 					</p>
 				</div>
 			</div>

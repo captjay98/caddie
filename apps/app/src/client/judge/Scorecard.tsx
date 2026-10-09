@@ -124,6 +124,18 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 	}
 
 	async function submitScorecard() {
+		// Audit F12: a blank score must never be silently recorded as 0 — the
+		// user's assessment is the whole point of this surface. Refuse with a
+		// visible, named error and let the user finish scoring or cancel.
+		const blank = (rubric?.criteria ?? []).filter(
+			(criterion) => (drafts[criterion.text]?.score ?? '').trim() === '',
+		);
+		if (blank.length > 0) {
+			setError(
+				`Score every criterion before recording — still blank: ${blank.map((c) => c.text).join('; ')}.`,
+			);
+			return;
+		}
 		setBusy(true);
 		setError(null);
 		try {
@@ -169,10 +181,10 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 						PROVE
 					</p>
 					<h2 className="ev-title">Judge review</h2>
-					<p className="page-lede">
-						An automated judge scores the work against the contest rules — coaching to make it better,
-						never a prediction of the result.
-					</p>
+<p className="page-lede">
+							Caddie extracts the contest rubric from your evidence and shows what is verified; you record
+							your own assessment against it — coaching to make it better, never a prediction of the result.
+						</p>
 				</div>
 				<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
 					{busy ? 'Loading…' : 'Refresh'}
@@ -181,7 +193,7 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 
 			{error ? (
 				<div role="alert" className="sign-in-error disc-error" data-testid="judge-error">
-					<b>The scorecard could not be read.</b>
+					<b>Judge review could not continue.</b>
 					<span> {error}</span>
 				</div>
 			) : null}
@@ -252,9 +264,9 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 										))}
 									</div>
 									<div className="row-actions">
-										<label className="judge-score-label">
-											score (0–10){' '}
-											<input
+<label className="judge-score-label">
+												your score (0–10) — your own assessment, not Caddie's{' '}
+												<input
 												type="number"
 												className="input"
 												min={0}

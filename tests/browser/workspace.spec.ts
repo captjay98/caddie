@@ -569,9 +569,14 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await page.getByTestId('composer-send').click();
 		await expect(page).toHaveURL(/pane=channel/);
 		// The floating conversation head serves as the context indicator; tabs
-		// navigate away (no Back button in the Today grammar).
+		// navigate away (no Back button in the Today grammar). The pill carries
+		// the scope name; the tooltip carries the explanation.
 		await expect(page.getByTestId('conv-context')).toBeVisible();
-		await expect(page.getByTestId('conv-context-label')).toContainText('Caddie ·');
+		await expect(page.getByTestId('conv-context-label')).toContainText('General');
+		await expect(page.getByTestId('conv-context-label')).toHaveAttribute(
+			'title',
+			'The conversation you are in — General is your account-level chat with Caddie',
+		);
 		await context.close();
 	});
 
@@ -584,11 +589,20 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await expect(page.getByTestId('account-menu-pop')).toBeVisible();
 		await expect(page.getByTestId('account-profile')).toBeVisible();
 		await expect(page.getByTestId('account-usage')).toBeVisible();
+		// Register BEFORE the click so the usage fetch (fired on mount) is stubbed.
+		await context.route('**/api/usage', (route) =>
+			json(route, 200, {
+				payer: { payerId: 'actor-test', limitMinorUnits: 100000, currency: 'USD' },
+				totals: { reservedMinorUnits: 0, settledMinorUnits: 2500, reservations: 1 },
+			}),
+		);
 		await page.getByTestId('account-usage').click();
 		await expect(page).toHaveURL(/\/app\/usage$/);
-		// Usage is an honest gap, not a fabricated number.
+		// Usage reads the real budget read model (audit F11/S40): the payer
+		// limit plus reserved/settled totals — no fabricated numbers.
 		await expect(page.getByTestId('usage-panel')).toBeVisible();
-		await expect(page.getByTestId('usage-budget-state').getByText('not exposed', { exact: true })).toBeVisible();
+		await expect(page.getByTestId('usage-budget-state')).toContainText('configured');
+		await expect(page.getByTestId('usage-settled')).toContainText('2,500 USD');
 		await context.close();
 	});
 });

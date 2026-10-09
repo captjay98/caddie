@@ -59,7 +59,7 @@ function hitDestination(hit: SearchHit): {
 		case 'planDoc':
 			return { to: '/design-review', search: { project: project ?? undefined } };
 		case 'task':
-			return { to: '/project', search: { project: project ?? undefined } };
+			return { to: '/tasks', search: { project: project ?? undefined } };
 		case 'memory':
 			return { to: '/settings', search: { section: 'memory' } };
 	}
