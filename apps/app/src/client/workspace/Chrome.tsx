@@ -1,51 +1,62 @@
 /**
- * WorkspaceChrome — the discovery-first two-panel shell.
+ * WorkspaceChrome — the brief-first two-panel shell (approved navigation,
+ * 2026-10-09).
  *
- * This replaces the old full-width header + nav-row chrome. The product
- * direction (2026-10-08 discovery-first redesign) exposes exactly three global
- * destinations — Home · Discover · Projects — and keeps ONE persistent Caddie
- * conversation on the right across Home, Discover, Projects and every project
- * surface. There are no global tabs for Chat/Decisions/Build/Ship/Evidence.
+ * This replaces the old full-width header + nav-row chrome. Exactly three
+ * global destinations — Brief · Discover · Projects — and ONE persistent
+ * Caddie conversation on the right. The same root `/` renders Chat on mobile
+ * (the default tab) and Brief beside the persistent conversation on desktop.
+ * There are no global tabs for Chat/Build/Ship/Evidence.
  *
- * Layout (per the layout clarification + desktop shell update):
+ * Layout:
  *   - Desktop (>=768px): two panels, independent scroll. Left = all navigable
- *     content with a floating rounded navigation capsule (Home · Discover ·
- *     Projects) plus compact Search and Account controls; page titles/identity
- *     render in the left content below the capsule. Right = the persistent
- *     conversation with a compact, explicit context label.
+ *     content with a floating rounded navigation capsule (Brief · Discover ·
+ *     Projects) plus compact Search and Account controls. Right = the
+ *     persistent conversation with a compact, explicit context label.
  *   - Mobile (<768px): the floating rounded bottom-nav (preserved aesthetics),
- *     three destinations, composer directly above it. The conversation is the
- *     "channel" pane (?pane=channel) shown full-height; otherwise the route
- *     content shows. The composer always targets the active scope.
+ *     four destinations Chat · Brief · Discover · Projects, composer directly
+ *     above it. Chat is the initial default (the conversation full-height);
+ *     Brief is the second tab.
+ *
+ * Read/badge semantics: the account brief (`GET /api/brief`, every authorised
+ * project) feeds the unseen badge on the Brief entries and the compact urgent
+ * notice in Chat. Read state is per-actor and NEVER resolves work: opening
+ * Brief does not mark anything read; a card is marked read by its explicit
+ * action or "mark all read".
+ *
+ * Restoration precedence: explicit deep link / current URL > restored
+ * destination for this actor (sessionStorage, global destinations only,
+ * project params validated) > platform default (mobile Chat, desktop Brief +
+ * Chat). Account switching clears restored state because the key carries the
+ * actor id.
  *
  * Conversation scoping (the safety-critical part): the conversation binds to
- * a project run. On the GLOBAL routes (Home/Discover/Projects/account surfaces)
- * it binds to the actor's Home project — the account-level, project-less scope
- * that already exists server-side (kind='home', build/gate-less) — so browsing
- * or asking a discovery question can NEVER retarget an unrelated build project.
- * On a PROJECT route it binds to the resolved selected project. Drafts and the
- * run transport key off the conversation scope id, so switching scope cannot
- * leak a draft or a run across contexts.
- *
- * Unauthenticated: the shell still crosses the boundary — the wordmark, a theme
- * control and a route back to the landing remain visible at the sign-in wall,
- * and the conversation/capsule are not rendered (no scope to bind).
+ * a project run. On the GLOBAL routes (Brief/Discover/Projects/account
+ * surfaces) it binds to the actor's Home project — the account-level,
+ * project-less scope that already exists server-side (kind='home',
+ * build/gate-less). On a PROJECT route it binds to the resolved selected
+ * project. Drafts and the run transport key off the conversation scope id,
+ * and the run is created lazily on the FIRST send — opening a tab never
+ * starts a paid run.
  */
 
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Project } from '@caddie/contracts';
+import type { DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
 import { authClient } from '../auth.ts';
 import { Icon } from '../icons.tsx';
 import { Composer } from '../conversation/Composer.tsx';
 import { Channel } from '../conversation/Channel.tsx';
 import { useChannelStore, standbySource as STANDBY, type ChannelDraft } from '../conversation/channel-store.ts';
 import { useCoordinatorTransport, type CoordinatorTransport } from '../coordinator.ts';
+import { briefActionRoute } from '../brief/navigate.ts';
 import {
+	useAccountBrief,
 	useAuthStatus,
 	useHomeProject,
+	useMarkBriefRead,
 	useProjects,
 	useSessionActor,
 	useSessionDisplayName,
@@ -58,18 +69,19 @@ function currentTheme(): 'light' | 'dark' {
 }
 
 /**
- * The three global destinations (Home · Discover · Projects) plus the two
+ * The three global destinations (Brief · Discover · Projects) plus the two
  * secondary controls that live in the capsule (Search, Account). There is
- * deliberately NO nav entry for Chat/Decisions/Plan/Build/Ship/Evidence —
- * those are reached from within a project. `project` marks a project-scoped
- * route (its content renders in the left panel while the conversation binds to
- * the selected project); `account` marks account surfaces (Settings/Search/
- * Onboarding) that keep the general conversation.
+ * deliberately NO nav entry for Chat/Plan/Build/Ship/Evidence — Chat IS the
+ * persistent conversation (mobile default tab, desktop right panel) and the
+ * project-local surfaces are reached from within a project. `project` marks a
+ * project-scoped route (its content renders in the left panel while the
+ * conversation binds to the selected project); `account` marks account
+ * surfaces (Settings/Search/Onboarding) that keep the general conversation.
  */
-export type WorkspaceNavId = 'home' | 'discover' | 'projects' | 'project' | 'account' | 'none';
+export type WorkspaceNavId = 'brief' | 'discover' | 'projects' | 'project' | 'account' | 'none';
 
 const NAV: ReadonlyArray<{ id: WorkspaceNavId; label: string; to: string; testid: string; title: string }> = [
-	{ id: 'home', label: 'Home', to: '/', testid: 'nav-home', title: 'Your brief — what Caddie needs from you and what it found' },
+	{ id: 'brief', label: 'Brief', to: '/', testid: 'nav-brief', title: 'Updates and decisions across your projects' },
 	{ id: 'discover', label: 'Discover', to: '/discover', testid: 'nav-discover', title: 'Hackathons and opportunities that fit you' },
 	{ id: 'projects', label: 'Projects', to: '/projects', testid: 'nav-projects', title: 'Your projects and where to start a new one' },
 ];
@@ -167,6 +179,13 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	const [accountOpen, setAccountOpen] = useState(false);
 	const isDesktop = useIsDesktop();
 
+	// The account brief (approved navigation 2026-10-09): ONE shared cache
+	// entry feeds the unseen badge on the Brief entries, the compact urgent
+	// notice in Chat, and the Brief surface itself.
+	const accountBrief = useAccountBrief(actorMemo);
+	const markBriefRead = useMarkBriefRead(actorMemo);
+	const unseenCount = accountBrief.data?.unseenCount ?? 0;
+
 	const projectList: Project[] = projects.data?.projects ?? [];
 	const buildProjects = useMemo(() => projectList.filter((p) => p.kind !== 'home'), [projectList]);
 	const paramProject = search.project;
@@ -212,13 +231,13 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	const conversationResolving =
 		conversationKind === 'general' && homeProject === null && !projects.error;
 
-	// Mobile: the conversation is the home — the channel pane shows full-height
-	// by default (owner direction: Home IS Chat), and the brief is the second
-	// tab. On other routes the conversation opens on demand (?pane=channel).
+	// Mobile: Chat is the default tab — the conversation shows full-height on
+	// `/` by default; the Brief tab is the second destination (?pane=brief).
+	// On other routes the conversation opens on demand (?pane=channel).
 	const mobileConversation =
-		search.pane === 'channel' || (!isDesktop && props.nav === 'home' && search.pane === undefined);
+		search.pane === 'channel' || (!isDesktop && props.nav === 'brief' && search.pane === undefined);
 	const setMobileConversation = (open: boolean) => {
-		const nextPane: 'channel' | 'brief' | undefined = open ? 'channel' : props.nav === 'home' ? 'brief' : undefined;
+		const nextPane: 'channel' | 'brief' | undefined = open ? 'channel' : props.nav === 'brief' ? 'brief' : undefined;
 		void navigate({
 			to: '.',
 			search: (prev: Record<string, unknown>) => ({
@@ -265,6 +284,93 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 
 	const authenticated = Boolean(auth.data?.authenticated);
 
+	// --- Chat starting point + urgent decisions (approved navigation) ----------
+	// The welcome panel is a DETERMINISTIC first-run teaching surface: real
+	// action buttons, no fabricated assistant message, no model call. It shows
+	// only while the general conversation has no transcript and the actor has
+	// not engaged it; sending a message hides it permanently (transcript
+	// non-empty) and the seen flag is account-isolated in sessionStorage.
+	const [welcomeSeen, setWelcomeSeen] = useState(() => {
+		try {
+			return sessionStorage.getItem(`caddie:welcome-seen:${actorId ?? 'anon'}`) === '1';
+		} catch {
+			return false;
+		}
+	});
+	const markWelcomeSeen = () => {
+		setWelcomeSeen(true);
+		try {
+			sessionStorage.setItem(`caddie:welcome-seen:${actorId ?? 'anon'}`, '1');
+		} catch {
+			// private mode: the transcript gate still hides the panel after first use
+		}
+	};
+	const source = transport?.source ?? STANDBY;
+	const showWelcome =
+		authenticated &&
+		conversationKind === 'general' &&
+		!conversationResolving &&
+		source.messages.length === 0 &&
+		!welcomeSeen;
+	// The urgent notice: the top UNSEEN actionable card (needs-you first —
+	// the account brief is already ranked). Reading it never resolves the
+	// decision; opening it navigates to the exact work and marks it read.
+	const urgentCard =
+		accountBrief.data?.cards.find(
+			(card) => !card.seen && (card.status === 'needs-you' || card.status === 'blocked'),
+		) ?? null;
+	const openUrgentCard = () => {
+		if (!urgentCard) return;
+		if (urgentCard.key) void markBriefRead.mutate([urgentCard.key]);
+		const route = briefActionRoute(urgentCard, homeProject?.id ?? null);
+		void navigate({ to: route.to as never, search: route.search as never });
+	};
+
+	// --- Restoration precedence (approved navigation) --------------------------
+	// 1. Explicit deep link / current URL wins (any path, pane or project param).
+	// 2. A valid restored global destination for this actor (sessionStorage,
+	//    keyed by actor id — account switching clears it).
+	// 3. Platform default: mobile Chat (`/`), desktop Brief + Chat (`/`).
+	// Restore is one-shot per SPA session so it never fights a deliberate
+	// return to the default; a deleted/unauthorised project is never restored.
+	const location = useLocation();
+	const didRestore = useRef(false);
+	useEffect(() => {
+		if (!authenticated || !actorId) return;
+		const path = location.pathname.replace(/^\/app/, '') || '/';
+		const globalPaths = ['/', '/discover', '/projects'];
+		if (!globalPaths.includes(path) || search.project) return;
+		// Record non-default destinations only — the bare default ('/' with no
+		// pane) is the platform default, never a deliberate choice, and must
+		// not clobber the stored destination before restoration reads it.
+		if (!(path === '/' && search.pane === undefined)) {
+			try {
+				const stored = sessionStorage.getItem(`caddie:last-dest:${actorId}`);
+				const current = JSON.stringify({ to: path, pane: search.pane ?? null });
+				if (stored !== current) sessionStorage.setItem(`caddie:last-dest:${actorId}`, current);
+			} catch {
+				// private mode: no restoration memory
+			}
+		}
+		if (didRestore.current || path !== '/' || search.pane !== undefined) return;
+		let last: { to?: string; pane?: string | null } | null = null;
+		try {
+			last = JSON.parse(sessionStorage.getItem(`caddie:last-dest:${actorId}`) ?? 'null') as { to?: string; pane?: string | null } | null;
+		} catch {
+			last = null;
+		}
+		const to = last?.to ?? null;
+		const pane = last?.pane ?? null;
+		if (to && to !== '/') {
+			didRestore.current = true;
+			const restoreSearch: Record<string, unknown> = pane ? { pane } : {};
+			void navigate({ to: to as never, search: restoreSearch as never, replace: true });
+		} else if (pane === 'brief') {
+			didRestore.current = true;
+			void navigate({ to: '/', search: { pane: 'brief' } as Record<string, unknown> as never, replace: true });
+		}
+	}, [authenticated, actorId, location.pathname, search.pane, search.project, navigate]);
+
 	function selectProject(projectId: string) {
 		void navigate({
 			to: '.',
@@ -297,6 +403,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		void queryClient.invalidateQueries({ queryKey: ['artifacts', actorId] });
 		void queryClient.invalidateQueries({ queryKey: ['plan-docs', actorId] });
 		void queryClient.invalidateQueries({ queryKey: ['brief', actorId] });
+		void queryClient.invalidateQueries({ queryKey: ['brief', 'account', actorId] });
 		void queryClient.invalidateQueries({ queryKey: ['home-project', actorId] });
 		void queryClient.invalidateQueries({ queryKey: ['discovery-candidates', actorId] });
 	}
@@ -373,6 +480,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 										accountOpen={accountOpen}
 										setAccountOpen={setAccountOpen}
 										displayName={displayName.data ?? null}
+										unseenCount={unseenCount}
 									/>
 								) : (
 									<MobileHeader
@@ -444,6 +552,40 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 									</span>
 								) : null}
 							</div>
+							{/* The urgent decision notice: real state, one compact line, never
+							    covers the transcript or the composer; opening it navigates to
+							    the exact work and marks the card read (never resolves it). */}
+							{authenticated && conversationKind === 'general' && !conversationResolving && urgentCard ? (
+								<div className="urgent-notice" data-testid="urgent-notice" data-kind={urgentCard.kind}>
+									<span className="urgent-notice-text">
+										<Icon name="alert" title="Needs your decision" /> {urgentCard.headline}
+									</span>
+									<button
+										type="button"
+										className="btn-ghost urgent-notice-action"
+										data-testid="urgent-notice-open"
+										onClick={openUrgentCard}
+									>
+										{urgentCard.primaryAction.label}
+									</button>
+								</div>
+							) : null}
+							{showWelcome ? (
+								<WelcomePanel
+									onFind={() => {
+										markWelcomeSeen();
+										void navigate({ to: '/discover', search: {} });
+									}}
+									onIdea={() => {
+										markWelcomeSeen();
+										void navigate({ to: '/onboarding' });
+									}}
+									onImport={() => {
+										markWelcomeSeen();
+										void navigate({ to: '/repositories' });
+									}}
+								/>
+							) : null}
 							<Channel
 								source={transport?.source ?? STANDBY}
 								transportLive={transport?.hasRun === true}
@@ -474,16 +616,17 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 				    Desktop renders its composer inside the persistent right-panel
 				    Channel, so the bottom nav (with its own composer) is mobile-only —
 				    rendering both would duplicate composer-input in the desktop DOM. */}
-				{authenticated && !isDesktop ? (
-					<MobileNav
-						nav={props.nav}
-						sendText={sendText}
-						live={live}
-						conversationOpen={mobileConversation}
-						conversationKind={conversationKind}
-						resolving={conversationResolving}
-					/>
-				) : null}
+{authenticated && !isDesktop ? (
+						<MobileNav
+							nav={props.nav}
+							sendText={sendText}
+							live={live}
+							conversationOpen={mobileConversation}
+							conversationKind={conversationKind}
+							resolving={conversationResolving}
+							unseenCount={unseenCount}
+						/>
+					) : null}
 			</div>
 		</WorkspaceChromeContext.Provider>
 	);
@@ -501,12 +644,14 @@ const withoutPane = (prev: Record<string, unknown>) => {
 
 /** The desktop floating navigation capsule: wordmark + the three global
  *  destinations + Search, theme and Account, all in one rounded container
- *  that sticks inside the left panel. */
+ *  that sticks inside the left panel. The unseen brief badge sits on the
+ *  Brief tab — absolutely positioned so it never shifts tab alignment. */
 function NavCapsule(props: {
 	nav: WorkspaceNavId;
 	accountOpen: boolean;
 	setAccountOpen: (open: boolean) => void;
 	displayName: string | null;
+	unseenCount: number;
 }): ReactElement {
 	const { theme, toggleTheme } = useWorkspaceChrome();
 	return (
@@ -526,6 +671,9 @@ function NavCapsule(props: {
 					search={withoutPane}
 				>
 					{item.label}
+					{item.id === 'brief' && props.unseenCount > 0 ? (
+						<BriefBadge count={props.unseenCount} testid="nav-brief-badge" />
+					) : null}
 				</Link>
 			))}
 			<span className="capsule-spacer" />
@@ -568,8 +716,8 @@ function MobileHeader(props: {
 	const location = useLocation();
 	const chrome = useWorkspaceChrome();
 	let identity = 'Caddie';
-	if (props.nav === 'home') {
-		// Home IS the conversation on mobile; the brief is its own tab.
+	if (props.nav === 'brief') {
+		// Chat is the mobile default; the Brief tab is the second destination.
 		identity = chrome.mobileConversation ? 'Caddie' : 'Brief';
 	} else if (props.nav === 'discover') identity = 'Discover';
 	else if (props.nav === 'projects') identity = 'Projects';
@@ -588,7 +736,7 @@ function MobileHeader(props: {
 	// and Discover, "New project" on Projects. Search lives in the Account
 	// menu now (stable fallback), and the avatar itself stays.
 	let action: ReactElement | null = null;
-	if (props.nav === 'home' && !chrome.mobileConversation) {
+	if (props.nav === 'brief' && !chrome.mobileConversation) {
 		action = (
 			<button type="button" className="mobile-header-action" data-testid="mobile-action-refresh" title="Refresh the brief" onClick={chrome.refreshAll}>
 				<Icon name="refresh" title="Refresh the brief" />
@@ -709,14 +857,15 @@ function MobileNav(props: {
 	conversationOpen: boolean;
 	conversationKind: ConversationKind;
 	resolving: boolean;
+	unseenCount: number;
 }): ReactElement {
 	const { channel } = useWorkspaceChrome();
 	const onDiscover = props.nav === 'discover';
 	const onProjects = props.nav === 'projects';
-	// The conversation IS the mobile home: the Chat tab is current whenever
-	// the channel pane is open; the Brief tab owns the home's left content.
+	// The conversation IS the mobile Chat tab: it is current whenever the
+	// channel pane is open; the Brief tab owns the default's left content.
 	const chatOpen = props.conversationOpen && props.conversationKind !== 'none';
-	const briefActive = props.nav === 'home' && !chatOpen;
+	const briefActive = props.nav === 'brief' && !chatOpen;
 	const disabled = props.live || props.conversationKind === 'none' || props.resolving;
 	const disabledReason = props.live
 		? 'A run is working — wait for it to settle.'
@@ -758,6 +907,7 @@ function MobileNav(props: {
 				>
 					<Icon name="doc" title="" />
 					Brief
+					{props.unseenCount > 0 ? <BriefBadge count={props.unseenCount} testid="tab-brief-badge" /> : null}
 				</Link>
 				<Link
 					to="/discover"
@@ -803,4 +953,52 @@ function useMediaQueryEffect(query: string, onChange: (matches: boolean) => void
 			window.removeEventListener('resize', handler);
 		};
 	}, [mq, onChange]);
+}
+
+/** The unseen-brief badge: absolutely positioned so it never shifts tab
+ *  alignment. Count = unseen important updates from the account brief. */
+function BriefBadge(props: { count: number; testid: string }): ReactElement {
+	return (
+		<span className="nav-badge" data-testid={props.testid} aria-label={`${props.count} unseen update${props.count === 1 ? '' : 's'}`}>
+			{props.count > 99 ? '99+' : props.count}
+		</span>
+	);
+}
+
+/**
+ * The deterministic first-run welcome (approved navigation): real actions,
+ * never a fabricated assistant message and never a paid model call. Priority
+ * order is fixed: find a hackathon (discovery/profile-guided matching),
+ * start from an idea (idea capture/scoping), continue existing code
+ * (repository import). Visible only while the general conversation has no
+ * transcript and the actor has not engaged it.
+ */
+function WelcomePanel(props: {
+	onFind: () => void;
+	onIdea: () => void;
+	onImport: () => void;
+}): ReactElement {
+	return (
+		<section className="welcome-panel card-surface" data-testid="welcome-panel" aria-label="Start here">
+			<p className="kicker" data-tone="action">
+				START HERE
+			</p>
+			<h3 className="state-title">Let's find a hackathon that fits you</h3>
+			<p className="state-detail">
+				What kinds of things would you enjoy building? Caddie reads the rules, drafts a plan and builds
+				it — you approve every step. Nothing builds until you say so.
+			</p>
+			<div className="welcome-actions">
+				<button type="button" className="btn-key" data-testid="welcome-find" onClick={props.onFind}>
+					Find my first hackathon
+				</button>
+				<button type="button" className="btn-ghost" data-testid="welcome-idea" onClick={props.onIdea}>
+					Start from an idea
+				</button>
+				<button type="button" className="btn-ghost" data-testid="welcome-import" onClick={props.onImport}>
+					Continue existing code
+				</button>
+			</div>
+		</section>
+	);
 }

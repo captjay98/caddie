@@ -693,11 +693,61 @@ export function RepositoriesPage(): ReactElement {
 		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
-					<ProjectGate>{(projectId) => <RepositoriesBody projectId={projectId} />}</ProjectGate>
+					<RepositoriesGate />
 				</div>
 			</div>
 		</>
 	);
+}
+
+/**
+ * The repository surface needs a project (the connection belongs to a
+ * workspace). A brand-new account with zero projects gets a targeted start
+ * path instead of the generic "no project selected" — the Chat welcome
+ * panel's "Continue existing code" action must land somewhere useful
+ * (approved navigation).
+ */
+function RepositoriesGate(): ReactElement {
+	const chrome = useWorkspaceChrome();
+	if (!chrome.authenticated) return <SignInGate />;
+	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
+	if (chrome.projectsError) {
+		return (
+			<StatePanel
+				kind={failureKind(chrome.projectsError)}
+				detail={chrome.projectsError instanceof Error ? chrome.projectsError.message : undefined}
+				onRetry={chrome.refreshAll}
+			/>
+		);
+	}
+	if (chrome.buildProjects.length === 0) {
+		return (
+			<section className="card-surface settings-panel" data-testid="repositories-start-first">
+				<div className="r-section-head">
+					<div>
+						<p className="kicker" data-tone="action">
+							SETUP
+						</p>
+						<h2 className="ev-title">Continue existing code</h2>
+						<p className="page-lede">
+							The repository connection belongs to a workspace, so it needs a project first. Start a
+							project from an idea — Caddie drafts a plan before it builds anything — then connect the
+							repository here.
+						</p>
+					</div>
+				</div>
+				<div className="row">
+					<Link to="/onboarding" className="btn-key" data-testid="repositories-start-idea">
+						Start from an idea
+					</Link>
+					<Link to="/discover" className="btn-ghost" data-testid="repositories-find-contest">
+						Find a hackathon first
+					</Link>
+				</div>
+			</section>
+		);
+	}
+	return <RepositoriesBody projectId={chrome.effectiveProjectId ?? ''} />;
 }
 
 function RepositoriesBody(props: { projectId: string }): ReactElement {

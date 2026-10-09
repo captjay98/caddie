@@ -37,6 +37,7 @@ export function schedulesMigrationPaths(): string[] {
 		join(root, 'apps', 'app', 'migrations', '0005_runs.sql'),
 		join(root, 'apps', 'app', 'migrations', '0007_schedules.sql'),
 		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
+		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
 	];
 }
 
@@ -48,6 +49,7 @@ export function schedulesUnitMigrationPaths(): string[] {
 		join(root, 'apps', 'app', 'migrations', '0004_evidence.sql'),
 		join(root, 'apps', 'app', 'migrations', '0007_schedules.sql'),
 		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
+		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
 	];
 }
 

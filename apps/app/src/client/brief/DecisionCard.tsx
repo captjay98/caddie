@@ -32,16 +32,30 @@ export function DecisionCardView(props: {
 	card: DecisionCardType;
 	now?: Date;
 	onAction?: (card: DecisionCardType) => void;
+	/** Account-brief read marker: "seen" only records that the actor read the
+	 *  card — it never resolves the underlying work (approved navigation). */
+	seen?: boolean;
 }): ReactElement {
 	const { card } = props;
 	const [detailOpen, setDetailOpen] = useState(false);
 	return (
-		<article className="decision-card card-surface" data-testid="decision-card" data-kind={card.kind} data-status={card.status}>
+		<article
+			className="decision-card card-surface"
+			data-testid="decision-card"
+			data-kind={card.kind}
+			data-status={card.status}
+			data-seen={props.seen === true ? 'true' : 'false'}
+		>
 			<div className="card-head">
 				<p className="kind-kicker">{KIND_LABEL[card.kind]}</p>
 				<span className="pill status-pill" data-status={card.status}>
 					{card.status}
 				</span>
+				{props.seen === false ? (
+					<span className="pill status-pill" data-status="unseen" data-testid="card-unseen">
+						new
+					</span>
+				) : null}
 			</div>
 			<h3>{card.headline}</h3>
 			<p className="summary">{card.summary}</p>
@@ -108,7 +122,7 @@ export function BriefLane(props: {
 			<StatePanel
 				kind={state.kind}
 				detail={retryable && state.error instanceof Error ? state.error.message : undefined}
-				onRetry={retryable ? state.retry : undefined}
+				onRetry={state.retry}
 			/>
 		);
 	} else if (props.feedError) {
@@ -116,6 +130,7 @@ export function BriefLane(props: {
 			<StatePanel
 				kind={failureKind(props.feedError)}
 				detail={props.feedError instanceof Error ? props.feedError.message : undefined}
+				onRetry={state.retry}
 			/>
 		);
 	} else if (props.feedPending) {
@@ -166,6 +181,153 @@ export function BriefLane(props: {
 					{props.cards.length} decisions · {waitingCount} waiting on you
 				</span>
 				<StaleChip stale={state.stale} />
+			</div>
+			{content}
+		</div>
+	);
+}
+
+/**
+ * The ACCOUNT Brief lane (approved navigation 2026-10-09): the aggregated
+ * feed across every authorised project, grouped per project, with per-actor
+ * read state, freshness and the explicit mark-all-read action.
+ *
+ * Read semantics: opening this lane marks NOTHING read. A card is marked
+ * read by its primary action (which first navigates to the exact work) or by
+ * "Mark all read". Read state lives server-side per actor (brief_read_state)
+ * and never resolves the underlying approval/schedule/artifact/preview.
+ *
+ * Empty states: a brand-new account (no builds) is taught what Brief will
+ * contain with a discovery path; a returning account with nothing outstanding
+ * gets a calm "you're caught up". Retrieval failure renders an explicit error
+ * with retry; a stale refetch keeps the last known cards and says so.
+ */
+export function AccountBriefLane(props: {
+	state: { kind: StateKind; error?: unknown; stale: boolean; retry: () => void };
+	cards: readonly DecisionCardType[];
+	projects: ReadonlyArray<{ id: string; name: string; kind?: string }>;
+	asOf?: string;
+	feedPending?: boolean;
+	feedError?: unknown;
+	hasBuildProjects: boolean;
+	onAction?: (card: DecisionCardType) => void;
+	onMarkAllRead?: () => void;
+}): ReactElement {
+	const { state, cards } = props;
+	const retryable = state.kind === 'error' || state.kind === 'offline' || state.kind === 'limit';
+	const unseenCount = cards.filter((card) => !card.seen).length;
+	const waitingCount = cards.filter((card) => card.status === 'needs-you').length;
+	const projectName = new Map(props.projects.map((project) => [project.id, project.name]));
+
+	// Group cards by project, preserving the server's rank order within each.
+	const groups: { projectId: string; cards: DecisionCardType[] }[] = [];
+	for (const card of cards) {
+		const group = groups.find((g) => g.projectId === card.projectId);
+		if (group) group.cards.push(card);
+		else groups.push({ projectId: card.projectId, cards: [card] });
+	}
+
+	let content: ReactElement;
+	if (state.kind !== 'empty') {
+		content = (
+			<StatePanel
+				kind={state.kind}
+				detail={retryable && state.error instanceof Error ? state.error.message : undefined}
+				onRetry={state.retry}
+			/>
+		);
+	} else if (props.feedError) {
+		content = (
+			<StatePanel
+				kind={failureKind(props.feedError)}
+				detail={props.feedError instanceof Error ? props.feedError.message : undefined}
+				onRetry={state.retry}
+			/>
+		);
+	} else if (props.feedPending) {
+		content = <StatePanel kind="loading" title="Reading updates across your projects…" />;
+	} else if (cards.length === 0) {
+		content = props.hasBuildProjects ? (
+			<div className="card-stack" data-testid="brief-caught-up">
+				<section className="decision-card card-surface">
+					<div className="card-head">
+						<p className="kind-kicker">BRIEF</p>
+						<span className="pill status-pill" data-status="handled">
+							caught up
+						</span>
+					</div>
+					<h3>You're caught up</h3>
+					<p className="summary">
+						Nothing across your projects needs a decision right now. When an approval, a deadline, a
+						preview or a blocker appears, it lands here with one clear action.
+					</p>
+				</section>
+			</div>
+		) : (
+			<div className="card-stack" data-testid="brief-new-user">
+				<section className="decision-card card-surface">
+					<div className="card-head">
+						<p className="kind-kicker">BRIEF · WHAT GOES HERE</p>
+						<span className="pill status-pill" data-status="handled">
+							waiting for your first build
+						</span>
+					</div>
+					<h3>This is where decisions land</h3>
+					<p className="summary">
+						When Caddie finds a hackathon that fits you, drafts a plan for your approval, finishes a
+						preview or gets blocked, it reports it here — one clear action per update, across every
+						project. Start by finding something to build.
+					</p>
+					<div className="actions">
+						<Link className="r-link" to="/discover" data-testid="brief-teach-discover">
+							<Icon name="target" title="discover" /> Find a hackathon that fits you
+						</Link>
+					</div>
+				</section>
+			</div>
+		);
+	} else {
+		content = (
+			<div className="card-stack" data-testid="brief-groups">
+				{groups.map((group) => (
+					<div className="brief-group" key={group.projectId} data-testid={`brief-group-${group.projectId}`}>
+						<p className="brief-group-head" data-testid="brief-group-name">
+							{projectName.get(group.projectId) ?? group.projectId}
+						</p>
+						{group.cards.map((card) => (
+							<DecisionCardView key={card.id} card={card} seen={card.seen} onAction={props.onAction} />
+						))}
+					</div>
+				))}
+			</div>
+		);
+	}
+
+	return (
+		<div data-testid="account-brief-lane">
+			<div className="section-head">
+				<h3>Brief</h3>
+				<span className="count" data-testid="brief-count">
+					{cards.length} update{cards.length === 1 ? '' : 's'}
+					{waitingCount > 0 ? ` · ${waitingCount} waiting on you` : ''}
+					{unseenCount > 0 ? ` · ${unseenCount} unseen` : ''}
+				</span>
+				{props.asOf ? (
+					<span className="mono-id" data-testid="brief-asof">
+						updated {formatTimeAgo(props.asOf)}
+					</span>
+				) : null}
+				<StaleChip stale={state.stale} />
+				{unseenCount > 0 && props.onMarkAllRead ? (
+					<button
+						type="button"
+						className="detail-toggle"
+						data-testid="brief-mark-all-read"
+						onClick={props.onMarkAllRead}
+					>
+						Mark all read
+					</button>
+				) : null}
 			</div>
 			{content}
 		</div>

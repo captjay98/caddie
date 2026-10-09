@@ -220,14 +220,14 @@ test.describe('discovery-first acceptance journey (composed build, one account, 
 
 		// ---- A. Home is the actionable brief on the GENERAL scope -----------------
 		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('home-screen')).toBeVisible();
-		await expect(page.getByTestId('home-primary')).toBeVisible();
-		await expect(page.getByTestId('home-find-hackathon')).toBeVisible();
-		await expect(page.getByTestId('home-start-idea')).toBeVisible();
+		await expect(page.getByTestId('brief-screen')).toBeVisible();
+		await expect(page.getByTestId('brief-primary')).toBeVisible();
+		await expect(page.getByTestId('brief-find-hackathon')).toBeVisible();
+		await expect(page.getByTestId('brief-start-idea')).toBeVisible();
 		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
 		await expect(page.getByTestId('conv-context-label')).toContainText('General');
 		// Exactly three global destinations; no global chat/build/ship tab.
-		await expect(page.getByTestId('nav-home')).toHaveAttribute('aria-current', 'page');
+		await expect(page.getByTestId('nav-brief')).toHaveAttribute('aria-current', 'page');
 		await expect(page.getByTestId('nav-discover')).toBeVisible();
 		await expect(page.getByTestId('nav-projects')).toBeVisible();
 		await expect(page.getByTestId('nav-chat')).toHaveCount(0);
@@ -262,7 +262,7 @@ test.describe('discovery-first acceptance journey (composed build, one account, 
 		await expect(page.getByTestId('project-tab-overview')).toHaveAttribute('aria-current', 'page');
 		await expect(page.getByTestId('project-tab-build')).toBeVisible();
 		await expect(page.getByTestId('project-tab-submission')).toBeVisible();
-		await expect(page.getByTestId('nav-home')).toBeVisible();
+		await expect(page.getByTestId('nav-brief')).toBeVisible();
 		await expect(page.getByTestId('nav-discover')).toBeVisible();
 		await expect(page.getByTestId('nav-projects')).toBeVisible();
 		await expect(page.getByTestId('nav-build')).toHaveCount(0); // still no global Build tab

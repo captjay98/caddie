@@ -30,6 +30,10 @@ const MIGRATION_PATHS = [
 	'0004_evidence.sql',
 	'0005_runs.sql',
 	'0007_schedules.sql',
+	'0009_discovery.sql',
+	'0010_judge.sql',
+	'0011_home_project.sql',
+	'0012_brief_read.sql',
 ].map((name) => join(REPO_ROOT, 'apps', 'app', 'migrations', name));
 
 function wrapSqliteAsD1(sqlite: Database): D1Database {
@@ -222,5 +226,140 @@ describe('brief feed (projectBrief)', () => {
 		await expect(
 			projectBrief(world.db, { actorId: 'unit-bob', workspaceId: 'unit-ws-b', projectId: 'unit-proj-a' }),
 		).rejects.toThrow();
+	});
+});
+// --- ACCOUNT BRIEF (approved navigation 2026-10-09) ------------------------------
+
+import { accountBrief, markBriefRead } from '../apps/app/src/server/brief.ts';
+import type { AccountBriefPayload, DecisionCard as AccountCard } from '@caddie/contracts';
+
+/** Alice's second build project + a Home project (account scope) with a
+ *  saved discovery candidate, plus previews and a submission package. */
+function seedAccountState(sqlite: Database): void {
+	sqlite.exec(`
+		insert into "projects" ("id","workspaceId","name","kind","status","createdAt","updatedAt") values
+			('unit-proj-a2','unit-ws-a','Alice Project Two','standard','active','${ISO}','${ISO}'),
+			('unit-home-a','unit-ws-a','Home','home','active','${ISO}','${ISO}');
+		insert into "approvals" ("id","projectId","action","resourceId","revisionHash","policyVersion","intentHash","decidedBy","status","expiresAt","createdAt","decidedAt") values
+			('unit-ap-a2','unit-proj-a2','feature-review','build-r1','hash-b1','v1','intent-a2',null,'pending','2999-01-01T00:00:00.000Z','2026-10-04T12:00:00.000Z',null);
+		-- account scope: one saved candidate + one brand-new candidate
+		insert into "discovery_feed_runs" ("id","projectId","requestedBy","requestedAt","candidateCount") values
+			('unit-feed-a','unit-home-a','unit-alice','2026-10-04T14:00:00.000Z',1);
+		insert into "discovery_candidates" ("id","projectId","source","url","title","summary","requirementsJson","status","feedRunId","firstSeenAt","updatedAt") values
+			('cand_unit_saved','unit-home-a','local-seed','https://contest.example/solar','Solar Hackweek','Build a climate dashboard in a weekend.','[]','accepted','unit-feed-a','2026-10-04T14:00:00.000Z','2026-10-04T14:00:00.000Z'),
+			('cand_unit_new','unit-home-a','local-seed','https://contest.example/other','Other Contest','Not saved yet.','[]','new','unit-feed-a','2026-10-04T14:00:00.000Z','2026-10-04T14:00:00.000Z');
+		-- previews: one live, one revoked (never a card)
+		insert into "preview_tokens" ("id","projectId","revisionId","tokenHash","createdBy","expiresAt","revokedAt","createdAt") values
+			('unit-pvw-live','unit-proj-a','unit-art-current','hash-pvw-live','unit-alice','2999-01-01T00:00:00.000Z',null,'2026-10-04T15:00:00.000Z'),
+			('unit-pvw-revoked','unit-proj-a','unit-art-current','hash-pvw-rev','unit-alice','2999-01-01T00:00:00.000Z','2026-10-04T16:00:00.000Z','2026-10-04T15:30:00.000Z');
+		-- submission package with one unresolved checklist item
+		insert into "submission_packages" ("id","projectId","title","descriptionJson","reuseRequired","reuseState","requirementsVersion","createdBy","createdAt") values
+			('unit-pkg-1','unit-proj-a','Submission Package','{}',0,'unconfirmed','v1','unit-alice','2026-10-04T17:00:00.000Z');
+		insert into "submission_checklist_items" ("id","packageId","projectId","kind","requirementText","citationClaimId","citationQuote","citationUrl","status","evidenceJson","createdAt") values
+			('unit-item-1','unit-pkg-1','unit-proj-a','video','Demo video must be recorded','unit-claim-1','14 Oct 23:59 UTC','https://rules.example/page','missing','[]','2026-10-04T17:00:00.000Z');
+	`);
+}
+
+describe('account brief (accountBrief)', () => {
+	test('aggregates every authorised project, keyed and unseen, with project names', async () => {
+		const world = makeWorld();
+		seedAliceState(world.sqlite);
+		seedConflictEvidence(world.sqlite);
+		seedAccountState(world.sqlite);
+
+		const brief: AccountBriefPayload = await accountBrief(world.db, 'unit-alice');
+
+		// Every card parses against the extended contract and carries key+seen.
+		for (const card of brief.cards) {
+			const parsed = safeParse(DecisionCardSchema, card);
+			expect(parsed.success).toBe(true);
+			expect(typeof card.key).toBe('string');
+			expect(card.seen).toBe(false);
+		}
+
+		// Cards from BOTH build projects plus the account-scope opportunity.
+		const projectIds = new Set(brief.cards.map((card) => card.projectId));
+		expect(projectIds.has('unit-proj-a')).toBe(true);
+		expect(projectIds.has('unit-proj-a2')).toBe(true);
+		expect(projectIds.has('unit-home-a')).toBe(true);
+
+		// Project names travel for grouping UI.
+		const names = new Map(brief.projects.map((p) => [p.id, p.name]));
+		expect(names.get('unit-proj-a')).toBe('Alice Project');
+		expect(names.get('unit-proj-a2')).toBe('Alice Project Two');
+		expect(names.get('unit-home-a')).toBe('Home');
+
+		// Needs-you first: the two live approvals AND the unresolved submission
+		// rank above everything else (3 needs-you cards, newest first).
+		const needsYou = brief.cards.filter((card) => card.status === 'needs-you');
+		expect(needsYou.length).toBe(3);
+		const approvalProjects = needsYou.filter((card) => card.kind === 'approval').map((card) => card.projectId).sort();
+		expect(approvalProjects).toEqual(['unit-proj-a', 'unit-proj-a2']);
+		expect(brief.cards[0]!.status).toBe('needs-you');
+		expect(brief.unseenCount).toBe(brief.cards.length);
+	});
+
+	test('saved opportunities carry the local-seed limitation; previews and submissions surface honestly', async () => {
+		const world = makeWorld();
+		seedAliceState(world.sqlite);
+		seedConflictEvidence(world.sqlite);
+		seedAccountState(world.sqlite);
+
+		const brief: AccountBriefPayload = await accountBrief(world.db, 'unit-alice');
+
+		// Exactly ONE opportunity card — the saved candidate; the new one is not a card.
+		const opportunities = brief.cards.filter((card) => card.primaryAction.kind === 'inspect' && card.projectId === 'unit-home-a');
+		expect(opportunities.length).toBe(1);
+		expect(opportunities[0]!.headline).toContain('Solar Hackweek');
+		expect(opportunities[0]!.summary).toContain('local seed');
+		expect(opportunities[0]!.summary).toContain('not connected yet');
+
+		// The LIVE preview is a card; the revoked one is not.
+		const previews = brief.cards.filter((card) => card.primaryAction.kind === 'preview');
+		expect(previews.length).toBe(1);
+		expect(previews[0]!.primaryAction.targetId).toBe('unit-pvw-live');
+
+		// The unresolved submission package is a needs-you card; no package
+		// exists for proj-a2, so no card is invented there.
+		const submissions = brief.cards.filter((card) => card.primaryAction.label === 'Prepare submission');
+		expect(submissions.length).toBe(1);
+		expect(submissions[0]!.projectId).toBe('unit-proj-a');
+		expect(submissions[0]!.status).toBe('needs-you');
+		expect(submissions[0]!.primaryAction.targetId).toBe('unit-pkg-1');
+	});
+
+	test('read state is actor-scoped, idempotent, and never resolves the underlying work', async () => {
+		const world = makeWorld();
+		seedAliceState(world.sqlite);
+		seedConflictEvidence(world.sqlite);
+		seedAccountState(world.sqlite);
+
+		const before = await accountBrief(world.db, 'unit-alice');
+		const approvalCard = before.cards.find((card) => card.kind === 'approval' && card.projectId === 'unit-proj-a') as AccountCard;
+		expect(approvalCard).toBeDefined();
+
+		// Explicit action marks ONE card read; the approval row stays pending.
+		await markBriefRead(world.db, 'unit-alice', [approvalCard.key!]);
+		const after = await accountBrief(world.db, 'unit-alice');
+		const reread = after.cards.find((card) => card.key === approvalCard.key)!;
+		expect(reread.seen).toBe(true);
+		expect(after.unseenCount).toBe(before.unseenCount - 1);
+
+		// The underlying approval is untouched — projectBrief still demands it.
+		const projectCards = await projectBrief(world.db, world.aliceScope);
+		expect(projectCards.some((card) => card.kind === 'approval' && card.status === 'needs-you')).toBe(true);
+
+		// Idempotent: marking again changes nothing.
+		await markBriefRead(world.db, 'unit-alice', [approvalCard.key!]);
+		const twice = await accountBrief(world.db, 'unit-alice');
+		expect(twice.unseenCount).toBe(after.unseenCount);
+
+		// Alice's read state never leaks to Bob: his own brief has no cards,
+		// and a second actor's reads cannot be written by Bob (actor-scoped key).
+		const bobBrief = await accountBrief(world.db, 'unit-bob');
+		expect(bobBrief.unseenCount).toBe(0);
+		await markBriefRead(world.db, 'unit-bob', [approvalCard.key!]);
+		const aliceAgain = await accountBrief(world.db, 'unit-alice');
+		expect(aliceAgain.cards.find((card) => card.key === approvalCard.key)!.seen).toBe(true);
 	});
 });

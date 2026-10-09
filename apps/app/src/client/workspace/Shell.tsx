@@ -3,73 +3,114 @@ import type { ReactElement } from 'react';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { SignInPanel } from '../auth.ts';
 import { failureKind, StatePanel } from '../states.tsx';
-import { BriefLane } from '../brief/DecisionCard.tsx';
-import { Link } from '@tanstack/react-router';
-import { useBriefCards, useDiscoveryCandidates, useProfile, type ProfileRecord } from '../queries.ts';
+import { AccountBriefLane } from '../brief/DecisionCard.tsx';
+import { briefActionRoute } from '../brief/navigate.ts';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { useAccountBrief, useDiscoveryCandidates, useMarkBriefRead, useProfile, type ProfileRecord } from '../queries.ts';
 import { useWorkspaceChrome } from './Chrome.tsx';
 
 /**
- * Home — the personalised, actionable brief (discovery-first redesign).
+ * Brief — the default left-hand surface (approved navigation 2026-10-09).
  *
- * Home is where the loop is steered from, so it leads with ONE thing the person
- * can do, backed only by real data:
- *   - A new account (no projects) sees a one-sentence explainer, a short
- *     progressive profile setup, a primary "Find a hackathon that fits you",
- *     a browse-anyway path, and secondary start paths — never an empty data pane.
- *   - A returning account sees what needs them (the brief), top
- *     recommendations, and project progress — one primary action per card.
+ * Brief leads with the ACCOUNT-wide update feed — every authorised project's
+ * approvals, changes, deadlines, previews, submission gaps and saved
+ * opportunities — grouped per project, ranked needs-you → changed → blocked →
+ * handled. Read state is separate from resolution: opening Brief marks
+ * nothing read; acting on a card marks it read AND navigates to the exact
+ * work (audit F08 targeting, extended to previews/submissions/opportunities).
  *
- * Honest states are distinct and never conflated: incomplete profile, loading,
- * no matches, failed, and stale are each their own message. There is no
- * account-wide brief-aggregation endpoint, so the needs-you lane reads the
- * actor's Home scope (the account project) — a known backend gap, surfaced as
- * such rather than faked with a merge across projects. No match score is ever
- * invented: recommendations are exactly what the server evaluated.
+ * A new account (no projects) sees the discovery-first intro with the three
+ * start paths before an honest "what goes here" empty state; a returning
+ * account with nothing outstanding gets "You're caught up". No match score is
+ * ever invented: recommendations are exactly what the server evaluated, and
+ * the live-source limitation stays explicit on opportunity cards.
  */
 
 export function Shell(): ReactElement {
 	// The chrome comes from the shell layout route once, above every page —
-	// Home renders only its content so navigating never remounts the
+	// Brief renders only its content so navigating never remounts the
 	// conversation (audit F01).
-	return <HomeBody />;
+	return <BriefBody />;
 }
 
-function HomeBody(): ReactElement {
+function BriefBody(): ReactElement {
 	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const brief = useAccountBrief(actor);
+	const markRead = useMarkBriefRead(actor);
+
 	if (!chrome.authenticated) return <SignInWall />;
 
+	// Every card routes by its OWN identity (briefActionRoute): kind picks the
+	// surface, projectId scopes it, targetId is the exact revision/claim/
+	// schedule/preview/package/candidate. Acting on a card marks it read —
+	// reading never resolves the underlying work.
+	function onCardAction(card: DecisionCardType) {
+		if (card.key) void markRead.mutate([card.key]);
+		const route = briefActionRoute(card, chrome.homeProject?.id ?? null);
+		chrome.goProjectTab(route.to, route.search);
+	}
+
+	function markAllRead() {
+		const keys = (brief.data?.cards ?? [])
+			.filter((card) => !card.seen)
+			.map((card) => card.key)
+			.filter((key): key is string => typeof key === 'string');
+		if (keys.length > 0) void markRead.mutate(keys);
+	}
+
+	const isNewUser = chrome.buildProjects.length === 0;
+
 	return (
-		<div className="home-brief" data-testid="home-screen">
+		<div className="home-brief" data-testid="brief-screen">
 			<header className="home-head">
 				<p className="kicker" data-tone="action">
-					HOME
+					BRIEF
 				</p>
-				<h1 className="page-title">Caddie — your build assistant</h1>
+				<h1 className="page-title">Updates &amp; decisions</h1>
 				<p className="page-lede">
-					You talk, Caddie reads the rules, drafts a plan and builds it. You approve every step. Here is what
-					it needs from you and what it found.
+					What Caddie needs from you and what it finished — across every project. Reading an update never
+					decides it; acting on it does.
 				</p>
 			</header>
 
 			<ProfileSetup />
 
-			<section className="card-surface home-panel" data-testid="home-primary">
-				<h3 className="state-title">Ready when you are</h3>
-				<p className="state-detail">
-					Discovery works before you have any project — start by finding something that fits.
-				</p>
-				<div className="row">
-					<button type="button" className="btn-key" data-testid="home-find-hackathon" onClick={() => chrome.goProjectTab('/discover', {})}>
-						Find a hackathon that fits you
-					</button>
-					<button type="button" className="btn-ghost" data-testid="home-start-idea" onClick={chrome.newProject}>
-						Start from an idea instead
-					</button>
-				</div>
+			{isNewUser ? (
+				<section className="card-surface home-panel" data-testid="brief-primary">
+					<h3 className="state-title">Ready when you are</h3>
+					<p className="state-detail">
+						Discovery works before you have any project — start by finding something that fits.
+					</p>
+					<div className="row">
+						<button type="button" className="btn-key" data-testid="brief-find-hackathon" onClick={() => chrome.goProjectTab('/discover', {})}>
+							Find a hackathon that fits you
+						</button>
+						<button type="button" className="btn-ghost" data-testid="brief-start-idea" onClick={chrome.newProject}>
+							Start from an idea
+						</button>
+						<button type="button" className="btn-ghost" data-testid="brief-continue-code" onClick={() => chrome.goProjectTab('/repositories', {})}>
+							Continue existing code
+						</button>
+					</div>
+				</section>
+			) : null}
+
+			<section className="card-surface home-panel" data-testid="brief-lane-panel">
+				<AccountBriefLane
+					state={{ kind: 'empty', stale: chrome.projectsFetching || brief.isFetching, retry: chrome.refreshAll }}
+					cards={brief.data?.cards ?? []}
+					projects={brief.data?.projects ?? []}
+					asOf={brief.data?.asOf}
+					feedPending={brief.isPending}
+					feedError={brief.error}
+					hasBuildProjects={!isNewUser}
+					onAction={onCardAction}
+					onMarkAllRead={markAllRead}
+				/>
 			</section>
 
 			<Recommendations />
-			<NeedsYou />
 			<ProjectProgress />
 		</div>
 	);
@@ -139,6 +180,7 @@ function InlineProfile(props: {
 	actorId: string | null;
 	onSaved: () => void;
 }): ReactElement {
+	const navigate = useNavigate();
 	const [country, setCountry] = useState(props.profile?.country ?? '');
 	const [timezone, setTimezone] = useState(props.profile?.timezone ?? '');
 	const [weeklyHours, setWeeklyHours] = useState(props.profile?.weeklyHours == null ? '' : String(props.profile.weeklyHours));
@@ -170,6 +212,9 @@ function InlineProfile(props: {
 			}
 			setSaved(true);
 			props.onSaved();
+			// The button says "Save & browse" — make it true: leave the form and
+			// open Discover so the saved profile immediately shapes matches.
+			void navigate({ to: '/discover' });
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Saving your profile failed.');
 		} finally {
@@ -179,8 +224,11 @@ function InlineProfile(props: {
 
 	return (
 		<section className="card-surface home-panel profile-setup" data-testid="profile-setup">
-			<h3 className="state-title">Two fields sharpen your matches</h3>
-			<p className="state-detail">Optional — Caddie works without them. These feed the eligibility verdicts.</p>
+			<h3 className="state-title">A few fields sharpen your matches</h3>
+			<p className="state-detail">
+				Optional — Caddie works without them. Country, time zone, weekly hours and experience feed the
+				eligibility verdicts.
+			</p>
 			<div className="row">
 				<input className="input" placeholder="Country (2-letter, e.g. CL)" aria-label="Country" data-testid="home-profile-country" value={country} onChange={(e) => setCountry(e.target.value)} />
 				<input className="input" placeholder="Time zone (e.g. Europe/Paris)" aria-label="Time zone" data-testid="home-profile-timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} />
@@ -221,6 +269,10 @@ function Recommendations(): ReactElement {
 		);
 	}
 	const ranked = candidates.data?.ranked ?? [];
+	// Readable recommendations (carry-forward correction): join the ranked
+	// ids with the evaluated records so real titles and summaries render —
+	// candidate ids stay in the audit detail, never as the primary text.
+	const byId = new Map((candidates.data?.evaluations ?? []).map((evaluation) => [evaluation.candidate.id, evaluation.candidate]));
 	return (
 		<section className="card-surface home-panel" data-testid="home-recommendations">
 			<div className="r-section-head">
@@ -249,75 +301,28 @@ function Recommendations(): ReactElement {
 				<StatePanel kind="empty" title="No matches read yet" detail="Nothing has been swept for this account — run the feed in Discover and this fills with real, evidenced matches." />
 			) : (
 				<ul className="rec-list">
-					{ranked.slice(0, 3).map((entry) => (
-						<li key={entry.candidateId} className="rec-item">
-							<span className="rec-title">{entry.candidateId}</span>
-							<span className="rec-fit mono-id">{entry.matchedRequirements} requirement(s) evidenced · {entry.verdict}</span>
-						</li>
-					))}
+					{ranked.slice(0, 3).map((entry) => {
+						const candidate = byId.get(entry.candidateId);
+						return (
+							<li key={entry.candidateId} className="rec-item" data-testid={`rec-${entry.candidateId}`}>
+								<span className="rec-title">{candidate?.title ?? entry.candidateId}</span>
+								{candidate?.summary ? <span className="rec-summary">{candidate.summary}</span> : null}
+								<span className="rec-fit mono-id">
+									{entry.matchedRequirements} requirement(s) evidenced · {entry.verdict} · id {entry.candidateId}
+								</span>
+								<button
+									type="button"
+									className="btn-ghost"
+									data-testid={`rec-open-${entry.candidateId}`}
+									onClick={() => chrome.goProjectTab('/discover', {})}
+								>
+									Review in Discover
+								</button>
+							</li>
+						);
+					})}
 				</ul>
 			)}
-			<div className="row">
-				<button type="button" className="btn-ghost" data-testid="home-open-discover" onClick={() => chrome.goProjectTab('/discover', {})}>
-					Open Discover
-				</button>
-			</div>
-		</section>
-	);
-}
-
-// --- needs-you (the account-scope brief) -----------------------------------------
-
-function NeedsYou(): ReactElement {
-	const chrome = useWorkspaceChrome();
-	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
-	const brief = useBriefCards(actor, chrome.homeProject?.id ?? null);
-
-	// Audit F08: every card routes by its OWN identity — kind decides the
-	// surface, projectId scopes it, primaryAction.targetId carries the claim
-	// when the card cites evidence. The card is never discarded.
-	function onCardAction(card: DecisionCardType) {
-		const search = { project: card.projectId };
-		switch (card.kind) {
-			case 'approval':
-				chrome.goProjectTab('/design-review', search);
-				break;
-			case 'change':
-				if (card.evidenceIds.length > 0) {
-					chrome.goProjectTab('/evidence', { ...search, claim: card.primaryAction.targetId });
-				} else {
-					chrome.goProjectTab('/artifacts', search);
-				}
-				break;
-			case 'deadline':
-				chrome.goProjectTab('/schedules', search);
-				break;
-			case 'result':
-				chrome.goProjectTab('/project', search);
-				break;
-		}
-	}
-
-	return (
-		<section className="card-surface home-panel" data-testid="home-needs-you">
-			<div className="r-section-head">
-				<div>
-					<p className="kicker" data-tone="action">
-						NEEDS YOU
-					</p>
-					<h3 className="state-title">Waiting on your OK</h3>
-					<p className="state-detail">
-						Approvals, changes, and deadlines from this account that need your decision.
-					</p>
-				</div>
-			</div>
-			<BriefLane
-				state={{ kind: 'empty', stale: chrome.projectsFetching, retry: chrome.refreshAll }}
-				cards={brief.data?.cards ?? []}
-				feedPending={brief.isPending}
-				feedError={brief.error}
-				onAction={onCardAction}
-			/>
 		</section>
 	);
 }

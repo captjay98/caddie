@@ -1,6 +1,11 @@
 # Caddie — surface map & backend gap list (discovery-first)
 
-**Date:** 2026-10-08 · **Status:** AS BUILT
+**Date:** 2026-10-08 · **Status:** AS BUILT — navigation REVISED 2026-10-09
+(owner-approved decision, `2026-10-09-navigation-brief-default.md`): the first
+global destination is **Brief** (updates & decisions, default left-hand surface
+on desktop); Chat is the mobile default tab; the Brief feed is the
+ACCOUNT-wide aggregation (`GET /api/brief`) with per-actor read state. All
+"Home" labels in this map read "Brief" from 2026-10-09.
 **Companions:** `2026-10-08-bottom-nav-visions.html` (nav review),
 `2026-10-08-product-charter.md` (product language),
 `tests/browser/{workspace,discovery,discovery-journey,submission,conversation}.spec.ts`
@@ -31,18 +36,21 @@ persistently on the right. Everything else in this map stands unchanged.
 
 ## The one rule
 
-Three global destinations — **Home · Discover · Projects** — plus one persistent
-Caddie conversation. Everything else is either an **account surface** (reached
-from the capsule's Search / Account controls) or a **project-local tab**. The
-conversation binds to a *safe* scope: the account **Home** project on global and
-account routes (**General**), the resolved **selected project** on a project
-route. It never silently retargets to an unrelated project.
+Three global destinations — **Brief · Discover · Projects** — plus one persistent
+Caddie conversation. Brief is the default left-hand surface on desktop; Chat is
+the initial default on mobile (the same `/` root renders Chat on mobile and
+Brief beside the persistent conversation on desktop). Everything else is either
+an **account surface** (reached from the capsule's Search / Account controls) or
+a **project-local tab**. The conversation binds to a *safe* scope: the account
+**Home** project on global and account routes (**General**), the resolved
+**selected project** on a project route. It never silently retargets to an
+unrelated project.
 
 ## Global destinations
 
 | Surface | Route | chrome `nav` | Conversation scope | REST read | Primary testids |
 |---|---|---|---|---|---|
-| Home — actionable brief | `/` | `home` | General (Home project) | `/api/projects`, `/api/home-project`, `/api/profile`, `/api/projects/:home/brief`, `/api/projects/:home/discovery/candidates` | `home-screen`, `home-primary`, `home-find-hackathon`, `home-start-idea`, `profile-setup`/`profile-complete`, `home-recommendations`, `home-needs-you`, `home-progress` |
+| Brief — updates & decisions | `/` | `brief` | General (Home project) | `/api/projects`, `/api/home-project`, `/api/profile`, **`/api/brief`** (account-wide aggregation + read state), `/api/projects/:home/discovery/candidates` | `brief-screen`, `brief-primary`, `brief-find-hackathon`, `brief-start-idea`, `brief-continue-code`, `profile-setup`/`profile-complete`, `home-recommendations`, `brief-lane-panel`, `account-brief-lane`, `brief-groups`, `brief-caught-up`/`brief-new-user` |
 | Discover — account-level hackathons | `/discover` | `discover` | General (Home project) | `/api/projects/:home/discovery/candidates?evaluate=1`, `…/discovery/feed`, `…/discovery/candidates/:id/accept` (POST) | `discovery-results`, `explore-ideas-<id>` (primary), `save-candidate-<id>` (secondary), `eligibility-<id>`, `feed-gaps`, `discovery-error` |
 | Projects — real builds + start paths | `/projects` | `projects` | General (Home project) | `/api/projects` (Home excluded) | `project-list`, `project-row-<id>`, `new-idea-project`, `import-repo-project` |
 
@@ -100,11 +108,11 @@ These are real server gaps the discovery-first UX works **around honestly**
 (empty/explicit states), not fakes. Each is DOCUMENTATION ONLY until the server
 adds it — no UI here claims LIVE VERIFIED for them.
 
-1. **No account-wide brief roll-up.** Home's "Needs you" lane reads only the
-   actor's **Home/account** scope (`/api/projects/:home/brief`); there is no
-   endpoint that aggregates approvals / deadlines / results **across every
-   project**. Copy states this outright. *Needed:* `GET /api/brief` (account
-   scope, per-project cards with source project).
+1. **~~No account-wide brief roll-up~~ FIXED 2026-10-09.** `GET /api/brief`
+   aggregates every authorised project's approvals / conflicts / stale
+   artifacts / failed rounds / schedules / previews / submission gaps / saved
+   opportunities, grouped per project, with per-actor read state
+   (`POST /api/brief/read`, migration 0012).
 2. **No read-only account usage / budget summary.** Budgets are enforced
    server-side per run (`server/budgets.ts`), but there is no account roll-up to
    read, so Usage shows "not exposed" rather than a number. *Needed:*

@@ -4,6 +4,11 @@ import { assertProjectScope } from './scope.ts';
 import { listClaims, surveyClaims } from './evidence/claims.ts';
 import { listArtifacts } from './artifacts.ts';
 import { listSchedules } from './schedules.ts';
+import type { AccountBriefPayload } from '@caddie/contracts';
+import { listProjectsForActor } from './projects.ts';
+import { listCandidates } from './discovery.ts';
+import { listPreviews } from './previews.ts';
+import { listPackages, getReadiness } from './submission.ts';
 
 /**
  * UI review board screen 05/06 — the brief feed. `GET /api/projects/:id/brief`
@@ -244,4 +249,188 @@ export async function projectBrief(db: D1Database, scope: Scope): Promise<Decisi
 			return a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0;
 		})
 		.slice(0, MAX_CARDS);
+}
+
+// --- ACCOUNT BRIEF (approved navigation 2026-10-09) ------------------------------
+//
+// `GET /api/brief` aggregates every card the ACTOR's authorised projects
+// demand — the old per-project surface only read the synthetic Home scope.
+// Sources, all derived from real rows (nothing invented):
+//   - per build project: the existing projectBrief (approvals, conflicts,
+//     stale artifacts, failed rounds, schedules);
+//   - live previews             -> result / preview action ("working preview");
+//   - existing submission packages that are not ready -> change / review
+//     action ("prepare submission");
+//   - SAVED discovery candidates (account scope) -> result / inspect action
+//     ("review opportunity") with the local-seed limitation stated outright.
+// Grouping: one card per (projectId, kind, targetId) — a single unresolved
+// issue never repeats per event. Read state is actor-scoped and separate
+// from resolution (brief_read_state, migration 0012).
+
+
+const ACCOUNT_MAX_CARDS = 40;
+
+/** Stable card identity across reads — the read-state key (actor-scoped). */
+export function cardKey(card: DecisionCard): string {
+	return `${card.projectId}:${card.kind}:${card.primaryAction.targetId}`;
+}
+
+async function seenKeysForActor(db: D1Database, actorId: string): Promise<Set<string>> {
+	const rows = await queryAll(
+		db,
+		'select "cardKey" from "brief_read_state" where "actorId" = ?',
+		actorId,
+	);
+	return new Set(rows.map((row) => String(row['cardKey'])));
+}
+
+/** Mark cards read (explicit action / mark-all-read). Read NEVER resolves the
+ *  underlying work — approvals, schedules and artifacts are untouched. */
+export async function markBriefRead(
+	db: D1Database,
+	actorId: string,
+	keys: readonly string[],
+): Promise<void> {
+	const now = new Date().toISOString();
+	const stmt = db.prepare(
+		'insert or ignore into "brief_read_state" ("actorId","cardKey","seenAt") values (?,?,?)',
+	);
+	for (const key of keys) {
+		if (typeof key === 'string' && key.trim() !== '') {
+			await stmt.bind(actorId, key, now).run();
+		}
+	}
+}
+
+/** Dedupe on (projectId, kind, targetId) — one card per unresolved issue,
+ *  newest update wins. */
+function groupCards(cards: readonly DecisionCard[]): DecisionCard[] {
+	const byKey = new Map<string, DecisionCard>();
+	for (const card of cards) {
+		const key = cardKey(card);
+		const existing = byKey.get(key);
+		if (!existing || card.updatedAt > existing.updatedAt) byKey.set(key, card);
+	}
+	return [...byKey.values()];
+}
+
+/** Live (non-revoked, unexpired) previews -> "a working preview is ready". */
+async function previewCards(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
+	const nowIso = new Date().toISOString();
+	const previews = await listPreviews(db, scope);
+	return previews
+		.filter((preview) => !preview.revoked && preview.expiresAt > nowIso)
+		.map((preview) => ({
+			id: newCardId('preview', preview.id),
+			projectId: scope.projectId,
+			kind: 'result',
+			headline: 'A working preview is ready to view',
+			summary:
+				'The share link is live and unexpired. Previewed content runs in an isolated origin — it never carries your session.',
+			evidenceIds: [],
+			status: 'handled',
+			updatedAt: preview.createdAt,
+			primaryAction: { label: 'View preview', kind: 'preview', targetId: preview.id },
+		}) satisfies DecisionCard);
+}
+
+/** Existing submission packages whose checklist is not ready -> one card per
+ *  package (dedupe by package id). No package exists -> no card: submission
+ *  requirements are never invented for projects that have none. */
+async function submissionCards(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
+	const packages = await listPackages(db, scope);
+	const cards: DecisionCard[] = [];
+	for (const pkg of packages) {
+		try {
+			const readiness = await getReadiness(db, scope, pkg.id);
+			if (readiness.status === 'ready') continue;
+			cards.push({
+				id: newCardId('submission', pkg.id),
+				projectId: scope.projectId,
+				kind: 'change',
+				headline: 'Submission requirements are not fully met',
+				summary: `${readiness.reasons.length > 0 ? `${readiness.reasons.length} requirement(s) still unresolved — ` : ''}open the package to see exactly what is missing and what to do about it.`,
+				evidenceIds: [],
+				status: 'needs-you',
+				updatedAt: pkg.createdAt,
+				primaryAction: { label: 'Prepare submission', kind: 'review', targetId: pkg.id },
+			});
+		} catch (error) {
+			console.error('brief: submission readiness failed:', error);
+		}
+	}
+	return cards;
+}
+
+/** Saved discovery candidates -> "a suitable opportunity was found". The
+ *  local-seed limitation is stated on the card — live sources are a named
+ *  prerequisite, never implied. */
+async function opportunityCards(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
+	const candidates = await listCandidates(db, scope);
+	return candidates
+		.filter((candidate) => candidate.status === 'accepted')
+		.map((candidate) => ({
+			id: newCardId('opportunity', candidate.id),
+			projectId: scope.projectId,
+			kind: 'result',
+			headline: `A suitable opportunity is saved: ${candidate.title}`,
+			summary:
+				'This was saved from the local seed feed — live contest sources are not connected yet, so this is Caddie\'s built-in sample, not a live match. Explore ideas for it when you are ready.',
+			evidenceIds: [],
+			status: 'handled',
+			updatedAt: candidate.updatedAt,
+			primaryAction: { label: 'Review opportunity', kind: 'inspect', targetId: candidate.id },
+		}) satisfies DecisionCard);
+}
+
+/** The account-wide brief: every authorised project's cards, grouped, ranked
+ *  needs-you → changed → blocked → handled, with per-actor read state. */
+export async function accountBrief(db: D1Database, actorId: string): Promise<AccountBriefPayload> {
+	const projects = await listProjectsForActor(db, actorId);
+	const nowIso = new Date().toISOString();
+	const perProject = await Promise.all(
+		projects.map(async (project) => {
+			const scope: Scope = { actorId, projectId: project.id, workspaceId: project.workspaceId };
+			if (project.kind === 'home') {
+				// The account scope: saved discovery candidates only — the Home
+				// project never carries approvals/artifacts/schedules.
+				return opportunityCards(db, scope).catch((error) => {
+					console.error('brief: opportunity survey failed:', error);
+					return [] as DecisionCard[];
+				});
+			}
+			const [cards, previews, submissions] = await Promise.all([
+				projectBrief(db, scope).catch((error) => {
+					console.error('brief: project brief failed:', error);
+					return [] as DecisionCard[];
+				}),
+				previewCards(db, scope).catch((error) => {
+					console.error('brief: preview survey failed:', error);
+					return [] as DecisionCard[];
+				}),
+				submissionCards(db, scope).catch((error) => {
+					console.error('brief: submission survey failed:', error);
+					return [] as DecisionCard[];
+				}),
+			]);
+			return [...cards, ...previews, ...submissions];
+		}),
+	);
+	const all = groupCards(perProject.flat()).sort((a, b) => {
+		const rank = STATUS_RANK[a.status] - STATUS_RANK[b.status];
+		if (rank !== 0) return rank;
+		return a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0;
+	});
+	const seenKeys = await seenKeysForActor(db, actorId);
+	const cards = all.slice(0, ACCOUNT_MAX_CARDS).map((card) => ({
+		...card,
+		key: cardKey(card),
+		seen: seenKeys.has(cardKey(card)),
+	}));
+	return {
+		cards,
+		unseenCount: cards.filter((card) => !card.seen).length,
+		projects: projects.map((project) => ({ id: project.id, name: project.name, kind: project.kind })),
+		asOf: nowIso,
+	};
 }

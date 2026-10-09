@@ -33,6 +33,7 @@ export function discoveryMigrationPaths(): string[] {
 		join(root, 'apps', 'app', 'migrations', '0008_profile.sql'),
 		join(root, 'apps', 'app', 'migrations', '0009_discovery.sql'),
 		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
+		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
 	];
 }
 

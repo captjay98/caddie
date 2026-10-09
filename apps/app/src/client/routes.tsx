@@ -124,7 +124,7 @@ const homeRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/',
 	validateSearch,
-	staticData: { nav: 'home' },
+	staticData: { nav: 'brief' },
 	component: Shell,
 });
 

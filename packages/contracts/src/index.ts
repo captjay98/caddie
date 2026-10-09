@@ -179,10 +179,38 @@ export const DecisionCardSchema = v.pipe(
 			]),
 			targetId: v.string(),
 		}),
+		/** Stable identity `<projectId>:<kind>:<targetId>` — set by the ACCOUNT
+		 *  brief so read state can be persisted without a generic notification
+		 *  platform. Absent on the per-project brief payload. */
+		key: v.optional(v.string()),
+		/** True once the actor has marked this card read (explicit action or
+		 *  "mark all read"). Read state NEVER resolves the underlying work. */
+		seen: v.optional(v.boolean()),
 	}),
 	v.readonly(),
 );
 export type DecisionCard = v.InferOutput<typeof DecisionCardSchema>;
+
+/** The account-wide brief payload (`GET /api/brief`): every card the actor's
+ *  authorised projects demand, grouped server-side per project, with
+ *  per-actor read state and a fresh-as-of timestamp. */
+export const AccountBriefPayloadSchema = v.pipe(
+	v.strictObject({
+		cards: v.array(DecisionCardSchema),
+		unseenCount: v.number(),
+		/** Project names for grouping UI — id -> display name. */
+		projects: v.array(
+			v.strictObject({
+				id: v.string(),
+				name: v.string(),
+				kind: v.optional(v.string()),
+			}),
+		),
+		asOf: v.pipe(v.string(), v.isoTimestamp()),
+	}),
+	v.readonly(),
+);
+export type AccountBriefPayload = v.InferOutput<typeof AccountBriefPayloadSchema>;
 
 // --- stack recipe -------------------------------------------------------------
 

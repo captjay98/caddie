@@ -184,6 +184,19 @@ async function stubAccount(context: BrowserContext, config: { current: ListConfi
 	await context.route('**/api/profile', (route) =>
 		route.request().method() === 'PUT' ? json(route, 200, { profile: null }) : json(route, 200, { profile: null }),
 	);
+	// The account brief (approved navigation): deterministic cards + read state
+	// so the badge, the Brief lane and the Chat notice render real state.
+	await context.route('**/api/brief/read', (route) =>
+		json(route, 200, { marked: 0 }),
+	);
+	await context.route('**/api/brief', (route) =>
+		json(route, 200, {
+			cards: [],
+			unseenCount: 0,
+			projects: [{ id: 'home-1', name: 'Home', kind: 'home' }],
+			asOf: NOW,
+		}),
+	);
 	await context.route('**/api/projects', async (route) => {
 		if (route.request().method() !== 'GET') return json(route, 405, { error: 'method_not_allowed' });
 		if (config.current.delayMs) await sleep(config.current.delayMs);
@@ -226,7 +239,7 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await page.goto(`${BASE}/app/`);
 
 		await expect(page.getByTestId('nav-capsule')).toBeVisible();
-		await expect(page.getByTestId('nav-home')).toHaveAttribute('aria-current', 'page');
+		await expect(page.getByTestId('nav-brief')).toHaveAttribute('aria-current', 'page');
 		// Exactly three global destinations; the removed tabs are gone.
 		await expect(page.getByTestId('nav-discover')).toBeVisible();
 		await expect(page.getByTestId('nav-projects')).toBeVisible();
@@ -234,10 +247,12 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await expect(page.getByTestId('nav-build')).toHaveCount(0);
 		await expect(page.getByTestId('nav-ship')).toHaveCount(0);
 
-		await expect(page.getByTestId('home-screen')).toBeVisible();
-		await expect(page.getByTestId('home-primary')).toBeVisible();
-		await expect(page.getByTestId('home-find-hackathon')).toBeVisible();
-		await expect(page.getByTestId('home-start-idea')).toBeVisible();
+		await expect(page.getByTestId('brief-screen')).toBeVisible();
+		// Returning account (build projects exist): the account brief lane is
+		// the surface — the new-user intro is reserved for zero-build accounts.
+		await expect(page.getByTestId('brief-lane-panel')).toBeVisible();
+		await expect(page.getByTestId('account-brief-lane')).toBeVisible();
+		await expect(page.getByTestId('brief-primary')).toHaveCount(0);
 
 		// The persistent conversation is present and bound to the account scope.
 		await expect(page.getByTestId('conversation-panel')).toBeVisible();
@@ -537,7 +552,7 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 			await expect(page.getByTestId(width < 768 ? 'conversation-panel' : 'conversation-panel')).toBeVisible();
 			if (width < 768) {
 				await page.goto(`${BASE}/app/?pane=brief`);
-				await expect(page.getByTestId('home-screen')).toBeVisible();
+				await expect(page.getByTestId('brief-screen')).toBeVisible();
 				expect(await assertNoOverflow()).toEqual({ scrollWidth: width, clientWidth: width });
 			}
 			expect(await assertNoOverflow()).toEqual({ scrollWidth: width, clientWidth: width });

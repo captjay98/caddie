@@ -53,6 +53,7 @@ export function githubMigrationPaths(): string[] {
 		join(root, 'apps', 'app', 'migrations', '0002_controls.sql'),
 		join(root, 'apps', 'app', 'migrations', '0006_github.sql'),
 		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
+		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
 	];
 }
 

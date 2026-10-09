@@ -6,6 +6,15 @@
 level above them: what the product *is*, how it is organised, and what every
 surface must say.
 
+> **Revision — approved navigation (2026-10-09).** The navigation rows below
+> are superseded by `docs/reviews/2026-10-09-navigation-brief-default.md`:
+> the three global destinations are **Brief · Discover · Projects** (the
+> first destination renamed Home → Brief and re-scoped as the account-wide
+> updates & decisions feed with per-actor read state); Chat is the mobile
+> default tab and the persistent conversation on desktop; Brief is the
+> default left-hand surface. The product language (loop, workspace
+> vocabulary, honesty rules) is unchanged.
+
 > **Revision — discovery-first (2026-10-08, same day, later).** The loop-as-nav
 > model in §1–§2 was replaced the same day. The product now exposes **exactly
 > three global destinations — Home · Discover · Projects** — plus **one

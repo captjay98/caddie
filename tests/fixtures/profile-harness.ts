@@ -21,6 +21,7 @@ export const FIXTURE_ENTRY = join(REPO_ROOT, 'tests', 'fixtures', 'profile.ts');
 export const IDENTITY_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0001_product.sql');
 export const PROFILE_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0008_profile.sql');
 export const HOME_PROJECT_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0011_home_project.sql');
+export const BRIEF_READ_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0012_brief_read.sql');
 
 export const ALICE_EMAIL = 'alice@example.com';
 export const BOB_EMAIL = 'bob@example.com';
@@ -173,7 +174,7 @@ export function stopProfileFixture(port: number) {
 
 /** Apply the production migrations P14 depends on: identity+product, then P14. */
 export async function applyMigrations(port: number): Promise<void> {
-	for (const path of [IDENTITY_MIGRATION_PATH, PROFILE_MIGRATION_PATH, HOME_PROJECT_MIGRATION_PATH]) {
+	for (const path of [IDENTITY_MIGRATION_PATH, PROFILE_MIGRATION_PATH, HOME_PROJECT_MIGRATION_PATH, BRIEF_READ_MIGRATION_PATH]) {
 		const ddl = readFileSync(path, 'utf8');
 		const statements = ddl
 			.split(/;\s*(?:\n|$)/)

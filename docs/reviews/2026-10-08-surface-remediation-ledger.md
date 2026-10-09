@@ -66,13 +66,13 @@ NOT APPLICABLE WITH EVIDENCE
 | S12 | Browse/filter/search opportunities | FIXED (client-side) | Status chips (All/New/Saved) + text filter over the loaded account feed, explicit filter-empty state; server-side search of opportunity sources stays with F06. | LOCAL VERIFIED: discovery.spec "browse filters work" + battery. |
 | S13 | Saved opportunities | FIXED | Saved filter + Explore-after-save (F07); unsave endpoint = server prerequisite (documented). | LOCAL VERIFIED: discovery.spec + battery. |
 | S14 | Opportunity details | FIXED | Readable detail emphasis (fit/eligibility/source), claim ids inspectable, idea action via commit step. | LOCAL VERIFIED: battery. |
-| S15 | Explore ideas → project | FIXED | Commit step (name + consequence + visible errors), idempotent continue-first create (F07). | LOCAL VERIFIED: discovery.spec + journey D + battery. |
+| S15 | Explore ideas → project | PARTIAL (follow-up packet) | The EXPLICIT COMMIT step is complete (name + consequence + visible errors, idempotent continue-first create, F07). ACTUAL IDEA EXPLORATION BEFORE COMMITMENT is not: clicking Explore commits immediately; Caddie never drafts/explores the idea first and asks before creating — owned as a follow-up packet. | LOCAL VERIFIED: discovery.spec + journey D + battery; pre-commit exploration OPEN. |
 | S16 | Projects list | FIXED | Rows carry real status + updated; next action is one click into the project brief; Home never appears; selection preserved on all links. | LOCAL VERIFIED: workspace.spec + journey F + battery. |
 | S17 | Start from idea | FIXED | Idea form on `/onboarding` → creates the project → opens it (wave 3). | LOCAL VERIFIED: discovery.spec start-from-idea + battery. |
 | S18 | Continue existing code | FIXED | Router-aware entry usable before any build project; repository connect path via /repositories (F10). | LOCAL VERIFIED: battery. |
 | S19 | Project Overview | FIXED | Real fields replace the hardcoded "deadline: none recorded" — the header derives the next deadline from the brief's real deadline cards or states "none scheduled yet"; padding via F03. | LOCAL VERIFIED: battery. |
 | S20 | Plan review | FIXED | F09 plan content rendered readably. | LOCAL VERIFIED: artifacts.spec plan-body assertions + battery. |
-| S21 | Approval history | FIXED (session record) / server prerequisite | No approvals LIST endpoint exists — recorded as prerequisite; the client shows the session's dated decisions honestly. | LOCAL VERIFIED: artifacts.spec decision record + battery. |
+| S21 | Approval history | PARTIAL/OPEN (follow-up packet) | The client records this session's dated decisions honestly, but there is NO persistent approval-history surface: no approvals LIST endpoint exists and no history is read back after a reload. A missing internal endpoint is implementation work, not an external blocker — owned as a follow-up packet (GET /api/approvals + project history surface). | LOCAL VERIFIED for the session-record part (artifacts.spec); history persistence OPEN. |
 | S22 | Build/activity | FIXED | Preview entry per F10; activity secondary. | LOCAL VERIFIED: battery. |
 | S23 | Preview/change request | FIXED (entry) | Wire the real P07 previews surface: mint (token once) / revoke / extend with honest isolation copy. Live previewed BYTES still require a completed build (credential-gated, documented). | LOCAL VERIFIED: artifacts.spec preview tests + battery. |
 | S24 | Files/diffs | FIXED | Initial diff selection valid after load; server-computed diff with add/del grammar; readable plan content view (F09); download with stated consequence. | LOCAL VERIFIED: artifacts.spec + battery. |
@@ -80,10 +80,10 @@ NOT APPLICABLE WITH EVIDENCE
 | S26 | Account automations | FIXED | Automations aggregates the REAL schedules of every project (cadence, next run, pause state) with a named per-project error branch. | LOCAL VERIFIED: battery. |
 | S27 | Schedules | FIXED | Mutation failures surface in-row with the message; readable cadence; creation surface = server prerequisite (documented). | LOCAL VERIFIED: battery. |
 | S28 | Evidence | FIXED | Source-first summary emphasis; hashes stay inspectable/copyable. | LOCAL VERIFIED: battery. |
-| S29 | Judge | FIXED | Blank-score validation client-side (named criteria, refuses silently posting 0); "your score" labelling — the coaching average is the user's own recorded assessment; the automated judge RUN itself stays provider-gated (documented). | LOCAL VERIFIED: submission.spec judge validation + battery. |
+| S29 | Judge | PARTIAL (follow-up packet) | Coaching surface complete: blank-score validation client-side (named criteria, refuses silently posting 0), honest "your score" labelling. The AUTOMATED judge run (model invocation that scores against the rubric) is NOT wired — the exact external dependency is a provider/model call, owned as a follow-up packet. | LOCAL VERIFIED: submission.spec judge validation + battery; automated run OPEN. |
 | S30 | Submission | FIXED | Human-readable package, readiness band with reasons, hash/requirements as copyable tokens, never-submits honesty promoted; gap→section links noted where the server exposes the target. | LOCAL VERIFIED: submission.spec + battery. |
-| S31 | Standalone delivery | BLOCKED | No standalone project concept server-side — recorded as prerequisite; the UI never invents contest fields. | n/a until unblocked. |
-| S32 | Repository picker | FIXED | Bind via the real bind endpoint (persists, typed conflicts, reloads); suspended/revoked/deselected as named states; removed repos not selectable. | LOCAL VERIFIED: battery. |
+| S31 | Standalone delivery | OPEN (follow-up packet) | Standalone projects still flow through the contest/submission vocabulary; a standalone project concept (kind/namespace) is implementation work, owned as a follow-up packet. The UI never invents contest fields meanwhile. | n/a until the follow-up packet. |
+| S32 | Repository picker | PARTIAL (follow-up packet) | INSTALLATION BINDING persists via POST /api/github/installations/bind (typed conflicts, reloads; suspended/revoked/deselected named states). REPOSITORY SELECTION/IMPORT persistence is NOT complete: picking a repo only fills client state (`picked`), nothing binds the selection to the project or records an import — owned as a follow-up packet. | LOCAL VERIFIED for bind; import persistence OPEN. |
 | S33 | Account menu/sections | FIXED | `?section=` selects/scrolls/focuses; menu items carry it. | LOCAL VERIFIED: settings.spec + battery. |
 | S34 | Profile editor | FIXED | Explicit nulls + invalidation of profile/brief/discovery + friendly fields. | LOCAL VERIFIED: settings.spec + battery. |
 | S35 | Connections | FIXED | User connection state first, deployment diagnostics secondary (integration health reordered). | LOCAL VERIFIED: battery. |
@@ -250,3 +250,47 @@ packets P01/P06-implied/P07/P11/P13/P14 all PASS on the refactored tree.
   (standalone project concept), S21 (approvals list endpoint), S23 live
   previewed bytes (needs a completed build), live OAuth round-trip, real-
   device keyboard acceptance.
+
+### Wave 7 — approved navigation: Brief-first default + account brief (2026-10-09)
+
+Owner-approved navigation decision (`docs/reviews/2026-10-09-navigation-brief-default.md`):
+- Desktop capsule: **Brief · Discover · Projects** (Home → Brief label + testid
+  `nav-brief`); Brief is the default left-hand surface; Chat stays the
+  persistent right conversation. Mobile: Chat default tab (unchanged),
+  Brief · Discover · Projects follow; floating bottom bar + composer preserved.
+- **Account-wide brief** `GET /api/brief` (+ `POST /api/brief/read`): every
+  authorised project's cards (projectBrief sources + live previews +
+  unresolved submission packages + SAVED discovery candidates with the
+  local-seed limitation stated), grouped per project, ranked
+  needs-you → changed → blocked → handled, capped at 40. Migration
+  `0012_brief_read.sql` (per-actor `(actorId, cardKey, seenAt)`); contract
+  gains optional `key`/`seen`. The old Home-scope-only lane is gone.
+- **Read ≠ resolved**: opening Brief marks nothing read; a card is marked read
+  by its explicit action (which first navigates to the exact work) or
+  "Mark all read". The unseen badge (capsule + mobile tab) counts unseen
+  updates and never shifts tab alignment. Read state is actor-scoped.
+- **Chat starting point**: deterministic welcome panel (find hackathon / start
+  idea / continue existing code — priority order; no fabricated message, no
+  model call) shown only while the general transcript is empty and the actor
+  has not engaged it; the urgent notice surfaces the top unseen actionable
+  card and opens the exact review surface.
+- **Restoration precedence**: explicit deep link > actor-keyed restored
+  destination (sessionStorage, global destinations only) > platform default.
+- **Carry-forward corrections folded in**: recommendations now render REAL
+  titles/summaries (candidate ids demoted to audit detail); profile setup copy
+  is accurate ("A few fields…" naming all four) and "Save & browse" actually
+  navigates to Discover; RepositoriesGate gives a zero-project account a
+  targeted start path (the welcome panel's tertiary action lands somewhere
+  useful).
+- Honest PARTIAL/OPEN records added (follow-up packets, separately owned):
+  repository SELECTION/IMPORT persistence (S32), persistent approval history
+  (S21), idea exploration before commitment (S15), automated judge run (S29),
+  standalone delivery (S31).
+
+Verification (all LOCAL VERIFIED): `bun run typecheck` PASS; `bun run build`
+PASS (0 collisions); new `tests/browser/brief.spec.ts` 12/12 (badge, grouping,
+read≠resolve, exact-target actions, welcome, notice, no-paid-call-on-open,
+restoration, account switching, error+retry, mobile tabs); full browser
+battery 83/83 across 12 spec files; `tests/brief.test.ts` 6/6 (aggregation,
+grouping, read isolation, read≠resolve, opportunity/preview/submission cards);
+P02/P11/P12 `verify:packet` PASS.

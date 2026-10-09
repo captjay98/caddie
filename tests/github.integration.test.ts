@@ -169,6 +169,7 @@ beforeAll(async () => {
 		// POST /api/projects fails without it (fixture schema drift, fixed
 		// with the production numbering order).
 		join(REPO_ROOT, 'apps/app/migrations/0011_home_project.sql'),
+		join(REPO_ROOT, 'apps/app/migrations/0012_brief_read.sql'),
 	]);
 
 	ALICE = await signIn(worker, idp, ALICE_EMAIL, 'alice-p08', 'Alice');

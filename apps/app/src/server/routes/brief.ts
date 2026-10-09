@@ -1,14 +1,25 @@
 import { Hono } from 'hono';
 import type { AuthEnv } from '../auth.ts';
-import { ScopeError, requireProjectScope } from '../scope.ts';
-import { projectBrief } from '../brief.ts';
+import { ScopeError, requireProjectScope, sessionUserId } from '../scope.ts';
+import { accountBrief, markBriefRead, projectBrief } from '../brief.ts';
 
 /**
- * UI review board phase 2 — the brief feed route. One GET reads the
- * project's real state (approvals, retained conflicts, stale artifacts,
- * failed rounds, armed schedules) and returns decision-card shapes. The scope
- * is derived server-side from the verified session + membership, exactly the
- * P02/P10 pattern; the service layer re-verifies against D1 at entry.
+ * The brief feed routes.
+ *
+ *   GET  /api/projects/:projectId/brief   project-scoped decision cards
+ *   GET  /api/brief                      ACCOUNT-wide brief (approved
+ *                                        navigation 2026-10-09): every
+ *                                        authorised project's cards with
+ *                                        per-actor read state
+ *   POST /api/brief/read { keys }        mark cards read (explicit action or
+ *                                        mark-all-read) — read NEVER resolves
+ *                                        the underlying approval/schedule/
+ *                                        artifact/preview
+ *
+ * The scope is derived server-side from the verified session + membership,
+ * exactly the P02/P10 pattern; the service layer re-verifies against D1 at
+ * entry. Read state is keyed by actorId — another account can never read or
+ * write another account's rows.
  */
 
 type Env = AuthEnv;
@@ -34,5 +45,28 @@ export function createBriefRouter(): Hono<{ Bindings: Env }> {
 		return c.json({ cards: await projectBrief(c.env.DB, scope) });
 	});
 
+	router.get('/brief', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		return c.json(await accountBrief(c.env.DB, actorId));
+	});
+
+	router.post('/brief/read', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const body = (await c.req.json().catch(() => null)) as { keys?: unknown } | null;
+		const keys = Array.isArray(body?.keys)
+			? (body.keys as unknown[]).filter((k): k is string => typeof k === 'string')
+			: [];
+		await markBriefRead(c.env.DB, actorId, keys);
+		return c.json({ marked: keys.length });
+	});
+
 	return router;
+}
+
+async function requireSessionActorId(env: Env, headers: Headers): Promise<string> {
+	const userId = await sessionUserId(env, headers);
+	if (!userId) {
+		throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
+	}
+	return userId;
 }

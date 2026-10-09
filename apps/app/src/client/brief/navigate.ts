@@ -1,0 +1,48 @@
+import type { DecisionCard } from '@caddie/contracts';
+
+/**
+ * Where a brief card's primary action actually goes (audit F08, carried into
+ * the account brief): kind decides the surface, `projectId` scopes it,
+ * `primaryAction.targetId` rides along as the exact identity (claim, revision,
+ * schedule, preview, run, package, candidate). No card ever degrades to a
+ * generic project page. Preview-kind actions open the Files surface where the
+ * share lives; opportunity cards (the Home scope) open Discover — the feed
+ * the candidate came from, since there is no per-candidate route yet.
+ */
+export function briefActionRoute(
+	card: DecisionCard,
+	homeProjectId: string | null = null,
+): { to: string; search: Record<string, string | undefined> } {
+	const search: Record<string, string | undefined> = { project: card.projectId };
+	switch (card.primaryAction.kind) {
+		case 'preview':
+			return { to: '/artifacts', search };
+		case 'inspect':
+			// Opportunity review → the account feed the candidate came from.
+			if (homeProjectId !== null && card.projectId === homeProjectId) {
+				return { to: '/discover', search: {} };
+			}
+			if (card.evidenceIds.length > 0) {
+				return { to: '/evidence', search: { ...search, claim: card.primaryAction.targetId } };
+			}
+			return { to: '/artifacts', search };
+		case 'review':
+		default:
+			break;
+	}
+	switch (card.kind) {
+		case 'approval':
+			return { to: '/design-review', search };
+		case 'deadline':
+			return { to: '/schedules', search };
+		case 'result':
+			return { to: '/project', search };
+		case 'change':
+			// "Prepare submission" → the submission package (its checklist).
+			if (card.primaryAction.label === 'Prepare submission') return { to: '/submission', search };
+			if (card.evidenceIds.length > 0) {
+				return { to: '/evidence', search: { ...search, claim: card.primaryAction.targetId } };
+			}
+			return { to: '/artifacts', search };
+	}
+}

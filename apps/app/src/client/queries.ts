@@ -5,6 +5,7 @@ import {
 	type QueryClient,
 } from '@tanstack/react-query';
 import type {
+	AccountBriefPayload,
 	ArtifactRevision,
 	DecisionCard,
 	PlanDocRevision,
@@ -136,6 +137,34 @@ export function useBriefCards(actor: ActorScope, projectId: string | null) {
 				`/api/projects/${encodeURIComponent(projectId ?? '')}/brief`,
 			),
 		enabled: actor.actorId !== null && projectId !== null,
+	});
+}
+
+/**
+ * The ACCOUNT brief (approved navigation 2026-10-09): every authorised
+ * project's decision cards with per-actor read state (`GET /api/brief`).
+ * Shared cache with the chrome (badge + chat notice) and the Brief surface:
+ * keyed by actor, `placeholderData` keeps the last known cards during a
+ * refetch so a stale/offline refresh never blanks the surface.
+ */
+export function useAccountBrief(actor: ActorScope) {
+	return useQuery({
+		queryKey: ['brief', 'account', actor.actorId ?? 'pending'],
+		queryFn: () => fetchJson<AccountBriefPayload>('/api/brief'),
+		enabled: actor.actorId !== null,
+		placeholderData: (previous) => previous,
+	});
+}
+
+/** Mark brief cards read (explicit action / mark-all-read). Read state never
+ *  resolves the underlying work — only the read marker moves. */
+export function useMarkBriefRead(actor: ActorScope) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (keys: string[]) => postJson<{ marked: number }>('/api/brief/read', { keys }),
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: ['brief', 'account', actor.actorId ?? 'pending'] });
+		},
 	});
 }
 
