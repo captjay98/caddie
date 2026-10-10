@@ -4,8 +4,10 @@ import { formatTimeAgo } from '@caddie/ui/time';
 import { StatePanel, StaleChip, failureKind } from '../states.tsx';
 
 /**
- * RunInspector — inspectable completed (and recorded) runs: the real P02
- * run-bindings + artifact-revisions surfaces, never a summarized claim.
+ * RunInspector — the Build tab's Activity list (v2, HANDOFF §4): past builds
+ * as sentences, each opening a detail fold (the run drawer), with "Ask for a
+ * change" opening the change-request window (which drafts the ask in the
+ * project's chat — the chat is where Caddie takes the request).
  *
  * Row status is typed metadata only: 'recorded' comes from the stored binding;
  * 'running' | 'completed' | 'failed' | 'cancelled' arrive (P05) through the
@@ -15,16 +17,24 @@ import { StatePanel, StaleChip, failureKind } from '../states.tsx';
 
 export type RunStatus = 'recorded' | 'running' | 'completed' | 'failed' | 'cancelled';
 
-const STATUS_LABEL: Record<RunStatus, string> = {
-	recorded: 'recorded',
-	running: 'running',
-	completed: 'completed',
-	failed: 'failed',
-	cancelled: 'cancelled',
-};
-
 function shortId(id: string, keep = 12): string {
 	return id.length > keep ? `${id.slice(0, keep)}…` : id;
+}
+
+/** The past build as one sentence (§4). Statuses come from real data only. */
+function buildSentence(status: RunStatus, stackId: string, when: string): string {
+	switch (status) {
+		case 'running':
+			return `Building now on ${stackId}.`;
+		case 'completed':
+			return `A build finished on ${stackId} ${when}.`;
+		case 'failed':
+			return `A build stopped ${when} — the run was marked failed. Ask Caddie in the chat what happened.`;
+		case 'cancelled':
+			return `A build was cancelled ${when}.`;
+		default:
+			return `A build ran ${when} on ${stackId}.`;
+	}
 }
 
 function RunRow(props: {
@@ -36,30 +46,22 @@ function RunRow(props: {
 	createdAt: string;
 	status: RunStatus;
 	now: Date;
-	projectId?: string | null;
 }): ReactElement {
 	const [open, setOpen] = useState(false);
 	return (
 		<div className="inspector-row" data-testid="run-row" data-status={props.status}>
 			<div className="row-main">
-				<span className="row-title mono-id">run {shortId(props.runId, 18)}</span>
-				<span className="row-status" data-status={props.status}>
-					{STATUS_LABEL[props.status]}
-				</span>
+				<span className="row-title">{buildSentence(props.status, props.stackId, formatTimeAgo(props.createdAt, props.now))}</span>
+				<button
+					type="button"
+					className="detail-toggle"
+					aria-expanded={open}
+					data-testid="run-detail-toggle"
+					onClick={() => setOpen((value) => !value)}
+				>
+					{open ? 'Hide details' : 'Details'}
+				</button>
 			</div>
-			<div className="row-main">
-				<span className="mono-id">{props.stackId}</span>
-				<span className="mono-id">{formatTimeAgo(props.createdAt, props.now)}</span>
-			</div>
-			<button
-				type="button"
-				className="detail-toggle"
-				aria-expanded={open}
-				data-testid="run-detail-toggle"
-				onClick={() => setOpen((value) => !value)}
-			>
-				{open ? 'Hide run details' : 'Run details'}
-			</button>
 			{open ? (
 				<div className="row-details" data-testid="run-details">
 					<span className="mono-id">run {props.runId}</span>
@@ -70,58 +72,6 @@ function RunRow(props: {
 					<span className="mono-id">recorded {formatTimeAgo(props.createdAt, props.now)}</span>
 				</div>
 			) : null}
-			{props.projectId ? (
-				<div className="row-actions">
-					<a className="r-link" href={`./evidence?project=${encodeURIComponent(props.projectId)}`}>
-						Open evidence
-					</a>
-				</div>
-			) : null}
-		</div>
-	);
-}
-
-function ArtifactRow(props: {
-	artifactId: string;
-	kind: string;
-	revision: number;
-	metadataHash: string;
-	createdAt: string;
-	now: Date;
-	projectId?: string | null;
-}): ReactElement {
-	const [open, setOpen] = useState(false);
-	return (
-		<div className="inspector-row" data-testid="artifact-row">
-			<div className="row-main">
-				<span className="row-title">
-					{props.kind} <span className="mono-id">rev {props.revision}</span>
-				</span>
-				<span className="mono-id">{formatTimeAgo(props.createdAt, props.now)}</span>
-			</div>
-			<button
-				type="button"
-				className="detail-toggle"
-				aria-expanded={open}
-				data-testid="artifact-detail-toggle"
-				onClick={() => setOpen((value) => !value)}
-			>
-				{open ? 'Hide artifact details' : 'Artifact details'}
-			</button>
-			{open ? (
-				<div className="row-details">
-					<span className="mono-id">artifact {props.artifactId}</span>
-					<span className="mono-id">metadata {shortId(props.metadataHash, 19)}</span>
-					<span className="mono-id">recorded {formatTimeAgo(props.createdAt, props.now)}</span>
-				</div>
-			) : null}
-			{props.projectId ? (
-				<div className="row-actions">
-					<a className="r-link" href={`./artifacts?project=${encodeURIComponent(props.projectId)}`}>
-						Open artifacts
-					</a>
-				</div>
-			) : null}
 		</div>
 	);
 }
@@ -130,9 +80,8 @@ export function RunInspector(props: {
 	/** Typed transport outcomes per run (P05); absent = honest 'recorded'. */
 	statusByRunId?: Readonly<Record<string, RunStatus>>;
 	now?: Date;
-	/** Present when the lane can link rows into the screens that hold their
-	 *  evidence and artifacts (board screens 07/09/10). */
 	projectId?: string | null;
+	onAskChange?: () => void;
 	runs: {
 		isPending: boolean;
 		isFetching: boolean;
@@ -147,29 +96,21 @@ export function RunInspector(props: {
 		}>;
 		retry: () => void;
 	};
-	artifacts: {
-		isPending: boolean;
-		isFetching: boolean;
-		error: unknown;
-		items: ReadonlyArray<{
-			artifactId: string;
-			kind: string;
-			revision: number;
-			metadataHash: string;
-			createdAt: string;
-		}>;
-		retry: () => void;
-	};
 }): ReactElement {
 	const now = props.now ?? new Date();
 	const kindOf = (error: unknown) => failureKind(error);
 
 	return (
 		<div data-testid="run-inspector">
-			<section className="inspector-section" aria-label="Runs">
+			<section className="inspector-section" aria-label="Builds">
 				<div className="section-head">
-					<h3>Runs</h3>
+					<h3>Past builds</h3>
 					<StaleChip stale={props.runs.isFetching && !props.runs.isPending} />
+					{props.onAskChange ? (
+						<button type="button" className="btn-ghost" data-testid="change-request-open" onClick={props.onAskChange}>
+							Ask for a change
+						</button>
+					) : null}
 				</div>
 				{props.runs.isPending ? (
 					<StatePanel kind="loading" />
@@ -182,8 +123,8 @@ export function RunInspector(props: {
 				) : props.runs.items.length === 0 ? (
 					<StatePanel
 						kind="empty"
-						title="No runs recorded"
-						detail="Start a run and its durable identity — binding, stack, plan revision — lands here."
+						title="No builds yet"
+						detail="Approve a plan and Caddie builds; every build is recorded here as it happens."
 					/>
 				) : (
 					<div className="row-list">
@@ -197,44 +138,6 @@ export function RunInspector(props: {
 								submissionId={run.submissionId}
 								createdAt={run.createdAt}
 								status={props.statusByRunId?.[run.runId] ?? 'recorded'}
-								now={now}
-								projectId={props.projectId}
-							/>
-						))}
-					</div>
-				)}
-			</section>
-
-			<section className="inspector-section" aria-label="Artifacts">
-				<div className="section-head">
-					<h3>Artifacts</h3>
-					<StaleChip stale={props.artifacts.isFetching && !props.artifacts.isPending} />
-				</div>
-				{props.artifacts.isPending ? (
-					<StatePanel kind="loading" />
-				) : props.artifacts.error ? (
-					<StatePanel
-						kind={kindOf(props.artifacts.error)}
-						detail={props.artifacts.error instanceof Error ? props.artifacts.error.message : undefined}
-						onRetry={props.artifacts.retry}
-					/>
-				) : props.artifacts.items.length === 0 ? (
-					<StatePanel
-						kind="empty"
-						title="No artifacts yet"
-						detail="Plan revisions, previews and build outputs appear here as run evidence."
-					/>
-				) : (
-					<div className="row-list">
-						{props.artifacts.items.map((artifact) => (
-							<ArtifactRow
-								key={`${artifact.artifactId}:${artifact.revision}`}
-								artifactId={artifact.artifactId}
-								kind={artifact.kind}
-								revision={artifact.revision}
-								metadataHash={artifact.metadataHash}
-								createdAt={artifact.createdAt}
-								projectId={props.projectId}
 								now={now}
 							/>
 						))}

@@ -28,8 +28,9 @@ type LoadState =
 	| { readonly kind: 'denied' }
 	| { readonly kind: 'error'; readonly message: string };
 
-export function Tasks(props: { projectId: string | null }): ReactElement {
+export function Tasks(props: { projectId: string | null; /** Overview embed: the create form hides behind an "Add a to-do" button (the v2 add-task window). */ embedded?: boolean }): ReactElement {
 	const [state, setState] = useState<LoadState>({ kind: 'loading' });
+	const [addOpen, setAddOpen] = useState(false);
 	const [busyId, setBusyId] = useState<string | null>(null);
 	const [actionError, setActionError] = useState<{ taskId: string; message: string } | null>(null);
 	const [title, setTitle] = useState('');
@@ -135,12 +136,20 @@ export function Tasks(props: { projectId: string | null }): ReactElement {
 	return (
 		<section className="state-panel card-surface" data-testid="tasks-panel">
 			<p className="kicker" data-tone="action">
-				BUILD
+				{props.embedded ? 'THIS BUILD' : 'BUILD'}
 			</p>
-			<h3 className="state-title">To-dos</h3>
+			<div className="r-section-head">
+				<h3 className="state-title">To-dos</h3>
+				{props.embedded ? (
+					<button type="button" className="btn-ghost" data-testid="add-task-open" onClick={() => setAddOpen((value) => !value)}>
+						{addOpen ? 'Close' : 'Add a to-do'}
+					</button>
+				) : null}
+			</div>
 			<p className="page-lede">
 				Human to-dos on this build — yours and the specialists', kept next to the runs that produced them.
 			</p>
+			{props.embedded && !addOpen ? null : (
 			<form className="task-create" onSubmit={create} data-testid="task-create">
 				<input
 					type="text"
@@ -160,9 +169,10 @@ export function Tasks(props: { projectId: string | null }): ReactElement {
 					onChange={(event) => setDueAt(event.target.value)}
 				/>
 				<button type="submit" className="btn-key" disabled={creating || title.trim() === ''} data-testid="task-add">
-					{creating ? 'Adding…' : 'Add task'}
+					{creating ? 'Adding…' : 'Add to-do'}
 				</button>
 			</form>
+			)}
 			{createError ? (
 				<div role="alert" className="row-error" data-testid="task-create-error">
 					<b>The task was not created.</b> {createError}

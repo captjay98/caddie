@@ -243,13 +243,19 @@ test.describe('P07 artifacts viewer + design review (composed build, stubbed /ap
 		await expect(page.getByTestId('design-review-row')).toHaveCount(2);
 		await expect(page.getByTestId('design-review-row').first()).toHaveAttribute('data-latest', 'true');
 
-		// The plan body renders readably for the revision under review (F09).
-		await expect(page.getByTestId('design-review-plan-body')).toContainText('The plan as drafted — r2');
+		// The plan body renders readably for the revision under review (F09),
+		// titled in the v2 plain words.
+		await expect(page.getByTestId('design-review-plan-body')).toContainText("What you're making — plan version 2");
 		await expect(page.getByTestId('plan-body-content')).toContainText('render a live chart');
 
+		// v2 (U06): both decisions act through confirmation windows.
+		await page.getByTestId('plan-approve-open').click();
+		await expect(page.getByTestId('approve-plan-window')).toBeVisible();
 		await page.getByTestId('design-review-approve').click();
 		await expect(page.getByTestId('design-review-outcome')).toHaveAttribute('data-decision', 'approved');
 
+		await page.getByTestId('plan-changes-open').click();
+		await expect(page.getByTestId('request-changes-window')).toBeVisible();
 		await page.getByTestId('design-review-reject').click();
 		await expect(page.getByTestId('design-review-outcome')).toHaveAttribute('data-decision', 'rejected');
 

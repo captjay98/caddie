@@ -679,13 +679,35 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const brief = useBriefCards(actor, props.projectId);
-	const project: Project | null = chrome.selectedProject;
+	const navigate = useNavigate();
 
-	// The project contract has no deadline field — the real deadlines live in
-	// plan milestones and schedules. Derive the nearest one from the brief's
-	// deadline cards so the header states a fact, never a placeholder.
+	// "Your app so far" (§4): the project's real preview state from the P07
+	// previews API (metadata only — the secret token is never re-readable).
+	const [preview, setPreview] = useState<{ live: boolean; createdAt: string | null; error: boolean } | null>(null);
+	useEffect(() => {
+		let cancelled = false;
+		void fetch(`/api/projects/${encodeURIComponent(props.projectId)}/previews`, { credentials: 'same-origin' })
+			.then((res) => (res.ok ? res.json() : null))
+			.then((body: { previews?: { revoked: boolean; expiresAt: string; createdAt: string }[] } | null) => {
+				if (cancelled) return;
+				const now = Date.now();
+				const live = (body?.previews ?? []).find((p) => !p.revoked && new Date(p.expiresAt).getTime() > now);
+				setPreview({ live: Boolean(live), createdAt: live?.createdAt ?? null, error: false });
+			})
+			.catch(() => {
+				if (!cancelled) setPreview({ live: false, createdAt: null, error: true });
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [props.projectId]);
+
+	const cards = brief.data?.cards ?? [];
+	const open = cards.filter((c) => c.status !== 'handled');
+	const done = cards.filter((c) => c.status === 'handled');
+	const next = open[0] ?? null;
 	const nextDeadline = useMemo(() => {
-		const nexts = (brief.data?.cards ?? [])
+		const nexts = cards
 			.filter((c) => c.kind === 'deadline')
 			.map((c) => {
 				const m = /Next run ([^ (]+)/.exec(c.summary);
@@ -694,7 +716,7 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 			.filter((v): v is string => v !== null)
 			.sort();
 		return nexts[0] ?? null;
-	}, [brief.data]);
+	}, [cards]);
 
 	function onCardAction(card: DecisionCardType) {
 		const search = { project: props.projectId };
@@ -713,59 +735,111 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 				break;
 			case 'result':
 				chrome.goProjectTab('/runs', search);
-				break;
 		}
 	}
 
 	return (
 		<div className="settings-stack">
-			<section className="card-surface settings-panel" data-testid="overview-brief">
-				<div className="r-section-head">
-					<div>
+			{brief.isPending ? (
+				<StatePanel kind="loading" title="Loading this project…" />
+			) : brief.error ? (
+				<StatePanel kind={failureKind(brief.error)} detail={brief.error instanceof Error ? brief.error.message : undefined} onRetry={() => void brief.refetch()} />
+			) : (
+				<>
+					{/* Next step: the top open card, exactly as the server ranked it —
+					    one card, one button. With nothing open, an honest calm state. */}
+					<section className="card-surface settings-panel" data-testid="overview-next-step">
 						<p className="kicker" data-tone="action">
-							OVERVIEW
+							NEXT STEP
 						</p>
-						<h2 className="ev-title">What this project needs</h2>
-						<p className="page-lede">
-							What Caddie has done, what is waiting on you, and the next step — from the project's real
-							brief.
+						{next ? (
+							<>
+								<h2 className="ev-title">{next.headline}</h2>
+								<p className="page-lede">{next.summary}</p>
+								<div className="row-actions">
+									<button
+										type="button"
+										className="btn-key"
+										data-testid="overview-next-action"
+										onClick={() => {
+											void navigate({
+												to: onCardRoute(next, props.projectId).to as never,
+												search: onCardRoute(next, props.projectId).search as never,
+											});
+										}}
+									>
+										{next.primaryAction.label}
+									</button>
+								</div>
+							</>
+						) : (
+							<>
+								<h2 className="ev-title">Nothing needs you right now</h2>
+								<p className="page-lede">
+									When Caddie needs a decision or finishes something, the next step appears here.
+								</p>
+							</>
+						)}
+					</section>
+
+					{/* Your app so far: real preview state, never a fake screenshot. */}
+					<section className="card-surface settings-panel" data-testid="overview-preview">
+						<p className="kicker" data-tone="action">
+							YOUR APP SO FAR
 						</p>
-					</div>
-					<span className="disc-actions">
-						<span className="row-actions">
-							<Link
-								to="/tasks"
-								className="btn-ghost"
-								data-testid="overview-tasks-entry"
-								search={{ project: props.projectId }}
-							>
-								To-dos
-							</Link>
-							<Link
-								to="/schedules"
-								className="btn-ghost"
-								data-testid="overview-schedules-entry"
-								search={{ project: props.projectId }}
-							>
-								Routines
-							</Link>
-						</span>
-					</span>
-				</div>
-				<BriefLane
-					state={{
-						kind: 'empty',
-						stale: chrome.projectsFetching,
-						retry: chrome.refreshAll,
-					}}
-					cards={brief.data?.cards ?? []}
-					feedPending={brief.isPending}
-					feedError={brief.error}
-					onAction={onCardAction}
-				/>
-			</section>
+						{preview === null ? (
+							<p className="state-detail">Checking for a live preview…</p>
+						) : preview.error ? (
+							<p className="state-detail">The preview list could not be read just now.</p>
+						) : preview.live ? (
+							<p className="state-detail" data-testid="overview-preview-live">
+								A private preview of your app is live{preview.createdAt ? ` (created ${new Date(preview.createdAt).toLocaleDateString()})` : ''}. The link lives in
+								the chat where Caddie shared it — ask there to share it again.
+							</p>
+						) : (
+							<p className="state-detail" data-testid="overview-preview-none">
+								No preview yet — approve a plan and Caddie builds one you can try.
+							</p>
+						)}
+					</section>
+
+					<section className="card-surface settings-panel" data-testid="overview-todo" id="todo">
+						<Tasks projectId={props.projectId} embedded />
+					</section>
+
+					{done.length > 0 ? (
+						<details className="card-surface settings-panel" data-testid="overview-recent">
+							<summary className="ev-head">What happened recently · {done.length}</summary>
+							<ul>
+								{done.map((card) => (
+									<li key={card.id} data-testid="overview-recent-item">
+										<b>{card.headline}</b> — {card.summary}
+									</li>
+								))}
+							</ul>
+						</details>
+					) : null}
+				</>
+			)}
 		</div>
 	);
+}
+
+/** Route for an overview card action (same targeting rules as the brief). */
+function onCardRoute(card: DecisionCardType, projectId: string): { to: string; search: Record<string, string | undefined> } {
+	const search = { project: projectId };
+	switch (card.kind) {
+		case 'approval':
+			return { to: '/design-review', search };
+		case 'deadline':
+			return { to: '/schedules', search };
+		case 'result':
+			return { to: '/runs', search };
+		case 'change':
+			return card.evidenceIds.length > 0
+				? { to: '/evidence', search: { ...search, claim: card.primaryAction.targetId } }
+				: { to: '/artifacts', search };
+	}
 }
 
 // --- PLAN (design gate) ----------------------------------------------------------
@@ -814,47 +888,122 @@ export function RunsPage(): ReactElement {
 	);
 }
 
+/**
+ * Build (v2, HANDOFF §4): opens on the working app (the private preview, when
+ * one is live), "Building now" when the transport is live, past builds as
+ * sentences, and two tabs — Activity and Files ("Code — for developers").
+ */
 function RunsBody(props: { projectId: string }): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const navigate = useNavigate();
+	const search = useSearch({ strict: false }) as { tab?: 'activity' | 'files' };
+	const tab = search.tab === 'files' ? 'files' : 'activity';
 	const runBindings = useRunBindings(actor, props.projectId);
-	const artifacts = useArtifacts(actor, props.projectId);
+	const artifactRevisions = useArtifactRevisions<ViewerRevision>(actor, props.projectId);
+	const buildLive = chrome.transport?.source.status === 'streaming' || chrome.transport?.source.status === 'submitted';
+	const [changeOpen, setChangeOpen] = useState(false);
+	const [changeText, setChangeText] = useState('');
 	return (
 		<div className="settings-stack">
+			{buildLive ? (
+				<p className="state-detail" data-testid="build-status" role="status">
+					Building now — Caddie is working in this project's chat. It will show you the result here when
+					it's done.
+				</p>
+			) : null}
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">
 						BUILD
 					</p>
-					<h2 className="ev-title">Activity</h2>
-					<span className="row-actions">
-						<Link to="/artifacts" className="btn-ghost" data-testid="runs-files-link" search={{ project: props.projectId }}>
-							Files — for developers
-						</Link>
-					</span>
-					<p className="page-lede">
-						What Caddie is doing and what it produced — every run with its state and specialist, and the
-						files each one wrote.
-					</p>
+					<h2 className="ev-title">{tab === 'files' ? 'Code — for developers' : 'Activity'}</h2>
+				</div>
+				<div className="tabs" role="tablist" aria-label="Build views" data-testid="build-tabs">
+					<button
+						type="button"
+						role="tab"
+						aria-selected={tab === 'activity'}
+						data-testid="build-tab-activity"
+						onClick={() => void navigate({ to: '/runs', search: { project: props.projectId, tab: undefined } })}
+					>
+						Activity
+					</button>
+					<button
+						type="button"
+						role="tab"
+						aria-selected={tab === 'files'}
+						data-testid="build-tab-files"
+						onClick={() => void navigate({ to: '/runs', search: { project: props.projectId, tab: 'files' } })}
+					>
+						Files — for developers
+					</button>
 				</div>
 			</div>
-			<RunInspector
-				runs={{
-					isPending: runBindings.isPending,
-					isFetching: runBindings.isFetching,
-					error: runBindings.error,
-					items: runBindings.data?.runBindings ?? [],
-					retry: () => void runBindings.refetch(),
-				}}
-				artifacts={{
-					isPending: artifacts.isPending,
-					isFetching: artifacts.isFetching,
-					error: artifacts.error,
-					items: artifacts.data?.artifacts ?? [],
-					retry: () => void artifacts.refetch(),
-				}}
-				projectId={props.projectId}
-			/>
+			{tab === 'files' ? (
+				<ArtifactViewer
+					projectId={props.projectId}
+					revisions={artifactRevisions.data?.artifacts ?? []}
+					isPending={artifactRevisions.isPending}
+					error={artifactRevisions.error}
+					retry={() => void artifactRevisions.refetch()}
+				/>
+			) : (
+				<RunInspector
+					runs={{
+						isPending: runBindings.isPending,
+						isFetching: runBindings.isFetching,
+						error: runBindings.error,
+						items: runBindings.data?.runBindings ?? [],
+						retry: () => void runBindings.refetch(),
+					}}
+					projectId={props.projectId}
+					onAskChange={() => setChangeOpen(true)}
+				/>
+			)}
+			{changeOpen ? (
+				<div className="modal-backdrop" data-testid="change-request-backdrop" onMouseDown={() => setChangeOpen(false)}>
+					<div className="commit-panel card-surface" data-testid="change-request-window" onMouseDown={(e) => e.stopPropagation()}>
+						<p className="kicker" data-tone="action">
+							ASK FOR A CHANGE
+						</p>
+						<h3 className="state-title">What should change?</h3>
+						<p className="state-detail">
+							Your request goes to this project's chat. Caddie answers there and drafts the plan update
+							if one is needed — nothing changes in the app until you approve the new plan.
+						</p>
+						<textarea
+							className="input"
+							rows={3}
+							data-testid="change-request-text"
+							placeholder="e.g. Add a dark mode toggle to the header"
+							value={changeText}
+							onChange={(e) => setChangeText(e.target.value)}
+						/>
+						<div className="row-actions">
+							<button
+								type="button"
+								className="btn-key"
+								data-testid="change-request-send"
+								disabled={changeText.trim() === ''}
+								onClick={() => {
+									// The ask becomes the draft in THIS project's chat; the user
+									// sends it — no fabricated Caddie response, no silent write.
+									chrome.channel.setComposerText(`Please change: ${changeText.trim()}`);
+									setChangeOpen(false);
+									setChangeText('');
+									void navigate({ to: '.', search: { project: props.projectId, pane: 'channel' } });
+								}}
+							>
+								Open in chat
+							</button>
+							<button type="button" className="btn-ghost" onClick={() => setChangeOpen(false)}>
+								Cancel
+							</button>
+						</div>
+					</div>
+				</div>
+			) : null}
 		</div>
 	);
 }

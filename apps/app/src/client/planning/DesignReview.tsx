@@ -63,6 +63,35 @@ export function DesignReview(props: {
 	const [busy, setBusy] = useState<'approved' | 'rejected' | null>(null);
 	const [records, setRecords] = useState<DecisionRecord[]>([]);
 	const [decisionError, setDecisionError] = useState<string | null>(null);
+	// v2 decision windows (§4): "Looks good — build it" (states the spend cap)
+	// and "Suggest a change". Both act through the real approvals API.
+	const [windowOpen, setWindowOpen] = useState<'approve' | 'changes' | null>(null);
+	const [spendCap, setSpendCap] = useState<{ limit: string | null; settled: string | null } | null>(null);
+	const [capLoading, setCapLoading] = useState(false);
+
+	// The approve window states the real spend cap from /api/usage — "no budget
+	// set" when none is configured, never a fabricated number.
+	const openWindow = (which: 'approve' | 'changes') => {
+		setWindowOpen(which);
+		if (which === 'approve' && spendCap === null && !capLoading) {
+			setCapLoading(true);
+			void fetch('/api/usage', { credentials: 'same-origin' })
+				.then((res) => (res.ok ? res.json() : null))
+				.then((body: { payer?: { limitMinorUnits?: number | null; currency?: string }; totals?: { settledMinorUnits?: number } } | null) => {
+					if (body?.payer && typeof body.payer.limitMinorUnits === 'number') {
+						const fmt = new Intl.NumberFormat(undefined, { style: 'currency', currency: body.payer.currency ?? 'USD', maximumFractionDigits: 0 });
+						setSpendCap({
+							limit: fmt.format(body.payer.limitMinorUnits / 100),
+							settled: typeof body.totals?.settledMinorUnits === 'number' ? fmt.format(body.totals.settledMinorUnits / 100) : null,
+						});
+					} else {
+						setSpendCap({ limit: null, settled: null });
+					}
+				})
+				.catch(() => setSpendCap({ limit: null, settled: null }))
+				.finally(() => setCapLoading(false));
+		}
+	};
 
 	const decide = async (decision: 'approved' | 'rejected', revision: DesignReviewRevision) => {
 		setBusy(decision);
@@ -126,32 +155,124 @@ export function DesignReview(props: {
 
 	return (
 		<div data-testid="design-review" className="design-review-panel settings-stack">
-			<div className="r-section-head">
-				<div>
-					<p className="kicker" data-tone="action">
-						PLAN
-					</p>
-					<h2 className="ev-title">Plan review</h2>
-					<p className="page-lede">
-						Caddie drafts the plan; building starts only after you say it’s good. Saying yes lets
-						specialists build against plan version {latest.revision}, under policy {policyVersion}.
-					</p>
+			{/* v2 §4 order: the "Is this OK?" decision bar comes FIRST, then the
+			    plan itself. Both decisions act through the real approvals API. */}
+			<section className="card-surface settings-panel" data-testid="design-review-decision-bar">
+				<div className="r-section-head">
+					<div>
+						<p className="kicker" data-tone="action">
+							IS THIS OK?
+						</p>
+						<h2 className="ev-title">Plan version {latest.revision}</h2>
+						<p className="page-lede">
+							Building starts only after you say it's good. Saying yes lets specialists build against
+							this plan version, under policy {policyVersion}.
+						</p>
+					</div>
+					{latestRecord ? (
+						<span
+							className="badge"
+							data-tone={latestRecord.decision === 'approved' ? 'ok' : 'danger'}
+							data-testid="design-review-outcome"
+							data-decision={latestRecord.decision}
+						>
+							{latestRecord.decision} · version {latestRecord.revisionId}
+						</span>
+					) : (
+						<span className="badge" data-tone="warn">
+							waiting on you
+						</span>
+					)}
 				</div>
-				{latestRecord ? (
-					<span
-						className="badge"
-						data-tone={latestRecord.decision === 'approved' ? 'ok' : 'danger'}
-						data-testid="design-review-outcome"
-						data-decision={latestRecord.decision}
-					>
-						{latestRecord.decision} · r{latestRecord.revisionId}
-					</span>
-				) : (
-					<span className="badge" data-tone="warn">
-						waiting on you
-					</span>
-				)}
-			</div>
+				<div className="row-actions">
+					<button type="button" className="btn-key" data-testid="plan-approve-open" disabled={busy !== null} onClick={() => openWindow('approve')}>
+						Looks good — build it
+					</button>
+					<button type="button" className="btn-ghost" data-testid="plan-changes-open" disabled={busy !== null} onClick={() => openWindow('changes')}>
+						Suggest a change
+					</button>
+				</div>
+			</section>
+
+			{windowOpen === 'approve' ? (
+				<div className="modal-backdrop" data-testid="approve-plan-backdrop" onMouseDown={() => setWindowOpen(null)}>
+					<div className="commit-panel card-surface" data-testid="approve-plan-window" onMouseDown={(e) => e.stopPropagation()}>
+						<p className="kicker" data-tone="action">
+							LOOKS GOOD — BUILD IT
+						</p>
+						<h3 className="state-title">Approve plan version {latest.revision}?</h3>
+						<p className="state-detail">
+							Caddie builds against this plan inside a test account. The approval is bound to the exact
+							revision hash — if the plan changes, your decision stops applying.
+						</p>
+						<p className="state-detail" data-testid="approve-plan-spend">
+							{capLoading
+								? 'Checking your spending limit…'
+								: spendCap?.limit
+									? `This runs under your spending limit of ${spendCap.limit}${spendCap.settled ? ` (${spendCap.settled} used so far)` : ''}.`
+									: 'No budget is set, so Caddie will ask before anything costs money.'}
+						</p>
+						{decisionError ? (
+							<div role="alert" className="sign-in-error" data-testid="design-review-error">
+								<b>Could not record the decision.</b>
+								<span> {decisionError}</span>
+							</div>
+						) : null}
+						<div className="row-actions">
+							<button
+								type="button"
+								className="btn-key"
+								data-testid="design-review-approve"
+								disabled={busy !== null}
+								onClick={() => {
+									void decide('approved', latest).then(() => setWindowOpen(null));
+								}}
+							>
+								{busy === 'approved' ? 'Saving…' : 'Approve and build'}
+							</button>
+							<button type="button" className="btn-ghost" onClick={() => setWindowOpen(null)} disabled={busy !== null}>
+								Cancel
+							</button>
+						</div>
+					</div>
+				</div>
+			) : null}
+			{windowOpen === 'changes' ? (
+				<div className="modal-backdrop" data-testid="request-changes-backdrop" onMouseDown={() => setWindowOpen(null)}>
+					<div className="commit-panel card-surface" data-testid="request-changes-window" onMouseDown={(e) => e.stopPropagation()}>
+						<p className="kicker" data-tone="action">
+							SUGGEST A CHANGE
+						</p>
+						<h3 className="state-title">Send it back to Caddie?</h3>
+						<p className="state-detail">
+							Caddie redrafts the plan with your change. Nothing gets built, and nothing is charged —
+							the current plan simply waits for a new version.
+						</p>
+						{decisionError ? (
+							<div role="alert" className="sign-in-error" data-testid="design-review-error">
+								<b>Could not record the decision.</b>
+								<span> {decisionError}</span>
+							</div>
+						) : null}
+						<div className="row-actions">
+							<button
+								type="button"
+								className="btn-ghost btn-danger"
+								data-testid="design-review-reject"
+								disabled={busy !== null}
+								onClick={() => {
+									void decide('rejected', latest).then(() => setWindowOpen(null));
+								}}
+							>
+								{busy === 'rejected' ? 'Saving…' : 'Yes — redraft the plan'}
+							</button>
+							<button type="button" className="btn-ghost" onClick={() => setWindowOpen(null)} disabled={busy !== null}>
+								Cancel
+							</button>
+						</div>
+					</div>
+				</div>
+			) : null}
 
 			<section className="card-surface settings-panel" data-testid="design-review-scope">
 				<h3 className="ev-head">What this decision binds</h3>
@@ -183,7 +304,7 @@ export function DesignReview(props: {
 			) : null}
 
 			<section className="card-surface settings-panel" data-testid="design-review-plan-body">
-				<h3 className="ev-head">The plan as drafted — r{latest.revision}</h3>
+				<h3 className="ev-head">What you're making — plan version {latest.revision}</h3>
 				{latest.body.trim() === '' ? (
 					<p className="state-detail">This revision carries no plan text.</p>
 				) : (
@@ -193,65 +314,39 @@ export function DesignReview(props: {
 				)}
 			</section>
 
-			<section className="card-surface settings-panel">
-				<div className="row-list">
-					{props.planRevisions.map((revision, index) => (
-						<div
-							className="inspector-row"
-							data-testid="design-review-row"
-							data-latest={index === 0 ? 'true' : undefined}
-							key={revision.id}
-						>
-							<div className="row-main">
-								<span className="row-title">
-									plan <span className="mono-id">r{revision.revision}</span>
-									{index === 0 ? (
-										<span className="badge" data-tone="action">
-											latest
-										</span>
-									) : (
-										<span className="mono-id">superseded by r{props.planRevisions[0]!.revision}</span>
-									)}
-								</span>
-								<span className="mono-id">{formatTimeAgo(revision.createdAt)}</span>
-							</div>
-							<div className="row-details">
-								<span className="ev-field">
-									<span className="fk">revision hash</span>
-									<CopyableId value={revision.bodyHash} label="revision hash" />
-								</span>
-							</div>
-							{index === 0 ? (
-								<div className="row-actions">
-									<button
-										type="button"
-										className="btn-key"
-										disabled={busy !== null}
-										onClick={() => void decide('approved', revision)}
-										data-testid="design-review-approve"
-									>
-										{busy === 'approved' ? 'Saving…' : 'Looks good — build it'}
-									</button>
-									<button
-										type="button"
-										className="btn-ghost btn-danger"
-										disabled={busy !== null}
-										onClick={() => void decide('rejected', revision)}
-										data-testid="design-review-reject"
-									>
-										{busy === 'rejected' ? 'Rejecting…' : 'Reject and replan'}
-									</button>
-									<span className="mono-id">
-										rejecting stops the lane and returns the plan to the author
+			{/* Earlier versions fold (§4 anchor #earlier): history stays reachable
+			    without competing with the decision for the current version. */}
+			<section className="card-surface settings-panel" id="earlier" data-testid="design-review-earlier">
+				<details>
+					<summary className="ev-head">Earlier versions · {props.planRevisions.length - 1}</summary>
+					<div className="row-list">
+						{props.planRevisions.map((revision, index) => (
+							<div
+								className="inspector-row"
+								data-testid="design-review-row"
+								data-latest={index === 0 ? 'true' : undefined}
+								key={revision.id}
+							>
+								<div className="row-main">
+									<span className="row-title">
+										version <span className="mono-id">{revision.revision}</span>
+										{index === 0 ? (
+											<span className="badge" data-tone="action">
+												current
+											</span>
+										) : (
+											<span className="mono-id">superseded by version {props.planRevisions[0]!.revision}</span>
+										)}
 									</span>
+									<span className="mono-id">{formatTimeAgo(revision.createdAt)}</span>
 								</div>
-							) : null}
-						</div>
-					))}
-				</div>
+							</div>
+						))}
+					</div>
+				</details>
 			</section>
 
-{records.length > 0 ? (
+			{records.length > 0 ? (
 					<section className="card-surface settings-panel" data-testid="design-review-record">
 						<h3 className="ev-head">Your decisions this session</h3>
 						<div className="row-list">

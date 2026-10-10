@@ -14,9 +14,7 @@ import {
 	JudgePage,
 	SubmissionPage,
 	SchedulesPage,
-	TasksPage,
 	EvidencePage,
-	ArtifactsPage,
 	RunsPage,
 	DesignReviewPage,
 	RepositoriesPage,
@@ -81,6 +79,19 @@ function validateSearch(search: Record<string, unknown>): {
 		...(typeof project === 'string' && project.trim() !== '' ? { project } : {}),
 		...(pane === 'channel' || pane === 'brief' || pane === 'runs' ? { pane } : {}),
 		...(typeof section === 'string' && section.trim() !== '' ? { section } : {}),
+	};
+}
+
+/**
+ * /runs accepts ?tab=files|activity (v2: Build owns Files as a tab). Unknown
+ * values fall back to the default activity tab.
+ */
+function validateRunsSearch(search: Record<string, unknown>): { project?: string; tab?: 'activity' | 'files'; pane?: 'channel' | 'brief' | 'runs' } {
+	const base = validateSearch(search);
+	const tab = search.tab;
+	return {
+		...base,
+		...(tab === 'files' || tab === 'activity' ? { tab } : {}),
 	};
 }
 
@@ -222,17 +233,26 @@ const designReviewRoute = createRoute({
 const runsRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/runs',
-	validateSearch,
+	validateSearch: validateRunsSearch,
 	staticData: { nav: 'project' },
 	component: RunsPage,
 });
 
+// v2 (HANDOFF §2): /artifacts was the standalone Files page; Build now owns
+// it as a tab. Old links land on the right tab, keeping ?project=.
 const artifactsRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/artifacts',
 	validateSearch,
 	staticData: { nav: 'project' },
-	component: ArtifactsPage,
+	beforeLoad: ({ search }) => {
+		throw redirect({
+			to: '/runs',
+			search: { ...carryProject(search as Record<string, unknown>), tab: 'files' },
+			replace: true,
+		});
+	},
+	component: () => null,
 });
 
 const schedulesRoute = createRoute({
@@ -243,12 +263,22 @@ const schedulesRoute = createRoute({
 	component: SchedulesPage,
 });
 
+// v2 (HANDOFF §2): /tasks moved onto the Overview's to-do list. Old links
+// land there, keeping ?project= and the #todo anchor.
 const tasksRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/tasks',
 	validateSearch,
 	staticData: { nav: 'project' },
-	component: TasksPage,
+	beforeLoad: ({ search }) => {
+		throw redirect({
+			to: '/project',
+			search: carryProject(search as Record<string, unknown>),
+			hash: 'todo',
+			replace: true,
+		});
+	},
+	component: () => null,
 });
 
 const evidenceRoute = createRoute({
