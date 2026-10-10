@@ -3657,3 +3657,98 @@ body.conv-resizing * {
 	color: var(--color-warn);
 	font-family: var(--font-mono);
 }
+
+/* --- U05: discover rows, project cards, import window ------------------------ */
+
+/* v2 project card: name + purpose + four mini step bars + step text + doing. */
+.project-row-purpose {
+	display: block;
+	font-size: 13px;
+	color: var(--color-muted);
+	margin-top: 0.15rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 60ch;
+}
+
+.steps-mini {
+	display: flex;
+	gap: 3px;
+	flex: none;
+	align-self: center;
+}
+
+.steps-mini i {
+	width: 18px;
+	height: 5px;
+	border-radius: 3px;
+	background: var(--color-lift);
+}
+
+.steps-mini i.ok,
+.steps-mini i[data-tone='ok'] {
+	background: var(--color-ok);
+}
+
+.steps-mini i.warn,
+.steps-mini i[data-tone='warn'] {
+	background: var(--color-warn);
+}
+
+.project-row-meta {
+	display: grid;
+	gap: 0.2rem;
+	font-size: 13px;
+	color: var(--color-muted);
+	min-width: 0;
+}
+
+.project-step-text {
+	font-family: var(--font-mono);
+	font-size: var(--r-meta);
+	color: var(--color-bright);
+}
+
+.project-row-doing {
+	font-size: 13px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.project-archived {
+	border-top: 1px solid var(--color-line-soft);
+	margin-top: 0.8rem;
+}
+
+.project-archived > summary {
+	cursor: pointer;
+	padding: 0.6rem 0.2rem;
+	color: var(--color-muted);
+	font-weight: 600;
+	font-size: 13px;
+}
+
+.project-archived > summary:hover {
+	color: var(--color-bright);
+}
+
+.project-row.archived {
+	border: none;
+	padding: 0.4rem 0.2rem;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+/* Card context label (which project a v2 brief card belongs to). */
+.card-context {
+	color: var(--color-action);
+}
+
+/* Discover rows: verdict badge + fit reason + related action links. */
+.disc-verdict-line {
+	font-size: 14px;
+	line-height: 1.5;
+}

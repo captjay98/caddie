@@ -18,6 +18,7 @@ import { RunInspector } from './runs/RunInspector.tsx';
 import { Search } from './search/Search.tsx';
 import { BriefLane } from './brief/DecisionCard.tsx';
 import {
+	useAccountBrief,
 	useArtifactRevisions,
 	useArtifacts,
 	useBriefCards,
@@ -147,6 +148,8 @@ function DiscoverBody(): ReactElement {
 	const navigate = useNavigate();
 	const [exploreBusy, setExploreBusy] = useState(false);
 	const [commitFor, setCommitFor] = useState<DiscoveryCandidateRecord | null>(null);
+	const [commitStep, setCommitStep] = useState<'idea' | 'confirm'>('idea');
+	const [commitIdea, setCommitIdea] = useState('');
 	const [commitName, setCommitName] = useState('');
 	const [exploreError, setExploreError] = useState<string | null>(null);
 
@@ -162,7 +165,11 @@ function DiscoverBody(): ReactElement {
 			chrome.openProject(existing.id);
 			return;
 		}
+		// v2 explore-ideas (§4): TWO steps — pick or type an idea, then confirm.
+		// No project exists until the user confirms.
+		setCommitIdea('');
 		setCommitName(candidate.title);
+		setCommitStep('idea');
 		setExploreError(null);
 		setCommitFor(candidate);
 	}
@@ -170,6 +177,7 @@ function DiscoverBody(): ReactElement {
 	function closeCommit() {
 		if (exploreBusy) return;
 		setCommitFor(null);
+		setCommitStep('idea');
 		setExploreError(null);
 	}
 
@@ -180,7 +188,7 @@ function DiscoverBody(): ReactElement {
 		void createProject
 			.mutateAsync({
 				name: commitName.trim() || commitFor.title,
-				...(commitFor.summary ? { description: commitFor.summary } : {}),
+				description: commitIdea.trim() || commitFor.summary || undefined,
 				contestUrl: commitFor.url,
 				workspaceId: chrome.buildProjects[0]?.workspaceId,
 			})
@@ -210,53 +218,105 @@ function DiscoverBody(): ReactElement {
 							onMouseDown={(e) => e.stopPropagation()}
 							onSubmit={(e) => {
 								e.preventDefault();
-								submitCommit();
+								if (commitStep === 'idea') setCommitStep('confirm');
+								else submitCommit();
 							}}
 						>
 							<p className="kicker" data-tone="action">
 								EXPLORE IDEAS
 							</p>
-							<h3 className="state-title">Start a project for this contest</h3>
-							<p className="state-detail">
-								Opens a project for “{commitFor.title}”, linked to the contest. No build starts until you send
-								your first message — nothing is submitted anywhere.
-							</p>
-							<label className="kicker" htmlFor="explore-commit-name">
-								Project name
-							</label>
-							<input
-								id="explore-commit-name"
-								className="input"
-								data-testid="explore-commit-name"
-								value={commitName}
-								onChange={(e) => setCommitName(e.target.value)}
-								autoFocus
-							/>
-							{exploreError ? (
-								<div role="alert" className="sign-in-error" data-testid="explore-commit-error">
-									<b>Could not create the project.</b>
-									<span> {exploreError}</span>
-								</div>
-							) : null}
-							<div className="row-actions">
-								<button
-									type="submit"
-									className="btn-key"
-									data-testid="explore-commit-create"
-									disabled={exploreBusy || commitName.trim() === ''}
-								>
-									{exploreBusy ? 'Creating…' : 'Create project'}
-								</button>{' '}
-								<button
-									type="button"
-									className="btn-ghost"
-									data-testid="explore-commit-cancel"
-									onClick={() => closeCommit()}
-									disabled={exploreBusy}
-								>
-									Cancel
-								</button>
-							</div>
+							{commitStep === 'idea' ? (
+								<>
+									<h3 className="state-title">What's the idea?</h3>
+									<p className="state-detail">
+										Pick or type an idea for “{commitFor.title}”. You'll confirm before anything is
+										created.
+									</p>
+									<label className="kicker" htmlFor="explore-idea-text">
+										The idea
+									</label>
+									<input
+										id="explore-idea-text"
+										className="input"
+										data-testid="explore-idea-text"
+										placeholder={commitFor.title}
+										value={commitIdea}
+										onChange={(e) => setCommitIdea(e.target.value)}
+										autoFocus
+									/>
+									<div className="row-actions">
+										<button
+											type="submit"
+											className="btn-key"
+											data-testid="explore-ideas-next"
+										>
+											Next
+										</button>
+										<button
+											type="button"
+											className="btn-ghost"
+											data-testid="explore-commit-cancel"
+											onClick={() => closeCommit()}
+										>
+											Cancel
+										</button>
+									</div>
+								</>
+							) : (
+								<>
+									<h3 className="state-title">Start a project for this contest</h3>
+									<p className="state-detail">
+										Creates a project for “{commitFor.title}”{commitIdea.trim() ? ` — idea: ${commitIdea.trim()}` : ''}, linked to
+										the contest. No build starts until you send your first message — nothing is submitted
+										anywhere.
+									</p>
+									<label className="kicker" htmlFor="explore-commit-name">
+										Project name
+									</label>
+									<input
+										id="explore-commit-name"
+										className="input"
+										data-testid="explore-commit-name"
+										value={commitName}
+										onChange={(e) => setCommitName(e.target.value)}
+										autoFocus
+									/>
+									{exploreError ? (
+										<div role="alert" className="sign-in-error" data-testid="explore-commit-error">
+											<b>Could not create the project.</b>
+											<span> {exploreError}</span>
+										</div>
+									) : null}
+									<div className="row-actions">
+										<button
+											type="submit"
+											className="btn-key"
+											data-testid="explore-commit-create"
+											disabled={exploreBusy || commitName.trim() === ''}
+										>
+											{exploreBusy ? 'Creating…' : 'Create project'}
+										</button>
+										<button
+											type="button"
+											className="btn-ghost"
+											data-testid="explore-commit-back"
+											onClick={() => setCommitStep('idea')}
+											disabled={exploreBusy}
+										>
+											Back
+										</button>
+										<button
+											type="button"
+											className="btn-ghost"
+											data-testid="explore-commit-cancel"
+											onClick={() => closeCommit()}
+											disabled={exploreBusy}
+										>
+											Cancel
+										</button>
+									</div>
+								</>
+							)}
 						</form>
 					</div>
 				) : null}
@@ -307,22 +367,211 @@ export function ProjectsPage(): ReactElement {
 
 function ProjectsActions(): ReactElement {
 	const chrome = useWorkspaceChrome();
+	const [importOpen, setImportOpen] = useState(false);
 	return (
 		<span className="disc-actions">
 			<button type="button" className="btn-key" data-testid="new-idea-project" onClick={() => void chrome.newProject()}>
-				Start from an idea
-			</button>{' '}
-			<Link className="btn-ghost" to="/onboarding" data-testid="import-repo-project">
-				Continue existing code
-			</Link>
+				New project
+			</button>
+			<button type="button" className="btn-ghost" data-testid="import-repo-project" onClick={() => setImportOpen(true)}>
+				Bring your code
+			</button>
+			{importOpen ? <ImportRepoWindow onClose={() => setImportOpen(false)} /> : null}
 		</span>
 	);
 }
 
+/**
+ * The "Bring your code" window (v2, HANDOFF §4 import-repo): pick a repo from
+ * the real GitHub installations, choose what it's for, confirm. The project is
+ * created only on confirm, and the window states plainly that Caddie only
+ * READS the repository at first — writing, merging and deploying stay behind
+ * their own separate approvals.
+ */
+function ImportRepoWindow(props: { onClose: () => void }): ReactElement {
+	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const createProject = useCreateProject(actor);
+	const navigate = useNavigate();
+	const [picked, setPicked] = useState<SelectedRepository | null>(null);
+	const [purpose, setPurpose] = useState<'improve' | 'contest'>('improve');
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const workspaceId = chrome.buildProjects[0]?.workspaceId;
+
+	async function confirm() {
+		if (!picked || busy) return;
+		setBusy(true);
+		setError(null);
+		try {
+			const shortName = picked.repoFullName.split('/').pop() ?? picked.repoFullName;
+			const result = await createProject.mutateAsync({
+				name: shortName,
+				description:
+					purpose === 'contest'
+						? 'Imported from GitHub to enter a hackathon.'
+						: 'Imported from GitHub to keep improving it.',
+				...(workspaceId ? { workspaceId } : {}),
+			});
+			// Bind the repo to the new project and pull a read-only snapshot.
+			await fetch(`/api/projects/${encodeURIComponent(result.project.id)}/github/imports`, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ installationId: picked.installationId, repoFullName: picked.repoFullName }),
+			});
+			props.onClose();
+			void navigate({ to: '/project', search: { project: result.project.id } });
+		} catch (cause) {
+			setError(cause instanceof Error ? cause.message : String(cause));
+			setBusy(false);
+		}
+	}
+
+	return (
+		<div className="modal-backdrop" data-testid="import-repo-backdrop" onMouseDown={props.onClose}>
+			<div className="commit-panel card-surface" data-testid="import-repo-window" onMouseDown={(e) => e.stopPropagation()}>
+				<p className="kicker" data-tone="action">
+					BRING YOUR CODE
+				</p>
+				{!picked ? (
+					<>
+						<h3 className="state-title">Which repository?</h3>
+						<p className="state-detail">
+							Caddie reads the repo you pick — at first only reads it. Writing, merging and deploying
+							stay behind their own separate approvals.
+						</p>
+						{workspaceId ? (
+							<RepositoryPicker workspaceId={workspaceId} onSelected={setPicked} />
+						) : (
+							<StatePanel kind="empty" title="No workspace yet" detail="Start a project first — a repository connects to a project's workspace." />
+						)}
+						<div className="row-actions">
+							<button type="button" className="btn-ghost" onClick={props.onClose}>
+								Cancel
+							</button>
+						</div>
+					</>
+				) : (
+					<>
+						<h3 className="state-title">What is {picked.repoFullName} for?</h3>
+						<p className="state-detail">
+							Caddie reads it and drafts a plan from what it finds. Nothing changes in the repo without
+							your OK.
+						</p>
+						<div className="row">
+							<label className="check">
+								<input
+									type="radio"
+									name="import-purpose"
+									checked={purpose === 'improve'}
+									onChange={() => setPurpose('improve')}
+									data-testid="import-purpose-improve"
+								/>
+								<span>Keep improving it — my own project</span>
+							</label>
+						</div>
+						<div className="row">
+							<label className="check">
+								<input
+									type="radio"
+									name="import-purpose"
+									checked={purpose === 'contest'}
+									onChange={() => setPurpose('contest')}
+									data-testid="import-purpose-contest"
+								/>
+								<span>Enter it in a hackathon — link a contest after</span>
+							</label>
+						</div>
+						{error ? (
+							<div role="alert" className="sign-in-error" data-testid="import-repo-error">
+								<b>Could not start from that repository.</b>
+								<span> {error}</span>
+							</div>
+						) : null}
+						<div className="row-actions">
+							<button type="button" className="btn-key" data-testid="import-repo-confirm" disabled={busy} onClick={() => void confirm()}>
+								{busy ? 'Starting…' : 'Start from this repo'}
+							</button>
+							<button type="button" className="btn-ghost" onClick={() => setPicked(null)} disabled={busy}>
+								Back
+							</button>
+							<button type="button" className="btn-ghost" onClick={props.onClose} disabled={busy}>
+								Cancel
+							</button>
+						</div>
+					</>
+				)}
+			</div>
+		</div>
+	);
+}
+
+/**
+ * Step state per project, derived ONLY from the account brief's real cards
+ * (v2 Projects, HANDOFF §4: "Step N of 4 · <step>" in words plus four small
+ * bars). Deterministic mapping, no invention:
+ *   plan   — an approval card: needs-you -> "Needs your OK", settled -> done
+ *   build  — a result card (verified output / live preview) -> done
+ *   check  — an unresolved submission-readiness gap -> "Not all ready"
+ *   submit — an unresolved submission package card -> "Not submitted yet"
+ * The step number is the highest step with any signal; with none, the card
+ * says "No updates yet" and every bar stays neutral.
+ */
+function projectStepState(cards: readonly DecisionCardType[]): {
+	text: string | null;
+	tones: { plan: string; build: string; check: string; submit: string };
+	latest: string | null;
+} {
+	const tones = { plan: '', build: '', check: '', submit: '' };
+	for (const card of cards) {
+		if (card.kind === 'approval') {
+			if (card.status === 'needs-you') tones.plan = 'warn';
+			else if (card.status === 'handled') tones.plan = 'ok';
+		} else if (card.kind === 'result') {
+			tones.build = 'ok';
+		} else if (card.kind === 'change' && card.status === 'needs-you') {
+			tones.build = 'warn';
+		}
+		if (card.id.startsWith('brf_submission_') && card.status === 'needs-you') {
+			tones.check = 'warn';
+			tones.submit = 'warn';
+		}
+	}
+	// Step number and label follow the prototype grammar: the first step that
+	// needs attention (warn) is where the project IS; with nothing pending, the
+	// step after the last finished one. The label is the step's NAME — the
+	// attention-grabbing detail lives in the bars and the doing-line.
+	const order: (keyof typeof tones)[] = ['plan', 'build', 'check', 'submit'];
+	const names: Record<string, string> = { plan: 'Plan', build: 'Build', check: 'Check', submit: 'Submit' };
+	let n: number | null = null;
+	let label: string | null = null;
+	const firstWarn = order.findIndex((step) => tones[step] === 'warn');
+	if (firstWarn >= 0) {
+		n = firstWarn + 1;
+		label = names[order[firstWarn]!] ?? null;
+	} else {
+		let lastOk = -1;
+		order.forEach((step, index) => {
+			if (tones[step] === 'ok') lastOk = index;
+		});
+		if (lastOk >= 0) {
+			const next = Math.min(lastOk + 1, order.length - 1);
+			n = next + 1;
+			label = names[order[next]!] ?? null;
+		}
+	}
+	const newest = [...cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+	return { text: n === null ? null : `Step ${n} of 4 · ${label}`, tones, latest: newest?.summary ?? null };
+}
+
 function ProjectList(): ReactElement {
 	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const brief = useAccountBrief(actor);
 	if (!chrome.authenticated) return <SignInGate />;
-	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
+	if (chrome.projectsPending) return <StatePanel kind="loading" title="Loading your projects…" />;
 	if (chrome.projectsError) {
 		return (
 			<StatePanel
@@ -337,32 +586,72 @@ function ProjectList(): ReactElement {
 			<StatePanel
 				kind="empty"
 				title="No projects yet"
-				detail="Discover a hackathon and explore ideas for it, or start from an idea — Caddie drafts a plan before it builds anything."
+				detail="Find a hackathon that fits, start from an idea, or bring your code — Caddie drafts a plan before it builds anything."
 			/>
 		);
 	}
+	const cardsByProject = new Map<string, DecisionCardType[]>();
+	for (const card of brief.data?.cards ?? []) {
+		const list = cardsByProject.get(card.projectId) ?? [];
+		list.push(card);
+		cardsByProject.set(card.projectId, list);
+	}
+	const active = chrome.buildProjects.filter((p) => p.status === 'active');
+	const archived = chrome.buildProjects.filter((p) => p.status !== 'active');
 	return (
-		<ul className="project-list" data-testid="project-list">
-			{chrome.buildProjects.map((project) => (
-				<li key={project.id} className="project-row card-surface" data-testid={`project-row-${project.id}`}>
-					<div className="project-row-main">
-						<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
-							{project.name}
-						</button>
-						{project.contestUrl ? (
-							<a className="project-contest" href={project.contestUrl} target="_blank" rel="noreferrer noopener">
-								linked hackathon
-							</a>
-						) : (
-							<span className="project-contest muted">no linked hackathon</span>
-						)}
-					</div>
-					<div className="project-row-meta mono-id">
-						<span data-status={project.status}>{project.status}</span> · updated {whenIso(project.updatedAt)}
-					</div>
-				</li>
-			))}
-		</ul>
+		<div data-testid="project-list">
+			<ul className="project-list">
+				{active.map((project) => {
+					const state = projectStepState(cardsByProject.get(project.id) ?? []);
+					return (
+						<li key={project.id} className="project-row card-surface" data-testid={`project-row-${project.id}`}>
+							<div className="project-row-main">
+								<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
+									{project.name}
+								</button>
+								<span className="project-row-purpose">
+									{project.description ?? (project.contestUrl ? 'For the linked hackathon' : 'A personal project')}
+								</span>
+							</div>
+							<span className="steps-mini" aria-hidden="true" data-testid={`project-steps-${project.id}`}>
+								{(['plan', 'build', 'check', 'submit'] as const).map((step) => (
+									<i key={step} data-tone={state.tones[step] || undefined} />
+								))}
+							</span>
+							<div className="project-row-meta">
+								{state.text ? (
+									<span className="project-step-text" data-testid={`project-step-text-${project.id}`}>
+										{state.text}
+									</span>
+								) : (
+									<span className="project-step-text muted" data-testid={`project-step-text-${project.id}`}>
+										No updates yet
+									</span>
+								)}
+								<span className="project-row-doing">
+									{state.latest ?? 'Caddie is ready when you are.'}
+								</span>
+							</div>
+						</li>
+					);
+				})}
+			</ul>
+			{archived.length > 0 ? (
+				<details className="project-archived" data-testid="project-archived">
+					<summary>Archived · {archived.length}</summary>
+					<ul>
+						{archived.map((project) => (
+							<li key={project.id} className="project-row archived">
+								<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
+									{project.name}
+								</button>
+								<span className="project-row-meta mono-id">archived · {whenIso(project.updatedAt)}</span>
+							</li>
+						))}
+					</ul>
+				</details>
+			) : null}
+		</div>
 	);
 }
 

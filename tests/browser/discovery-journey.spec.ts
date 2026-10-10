@@ -243,12 +243,17 @@ test.describe('discovery-first acceptance journey (composed build, one account, 
 		await expect(page.getByRole('button', { name: 'Accept', exact: true })).toHaveCount(0);
 
 		// ---- C. Saving an opportunity never creates a build -----------------------
+		// cand-2 is hard-ineligible: hidden by default behind the named reveal.
+		await page.getByTestId('discovery-reveal-ineligible').click();
 		await page.getByTestId('save-candidate-cand-2').click();
-		await expect(page.getByTestId('discovery-results')).toContainText('status accepted');
+		await expect(page.getByTestId('discovery-results')).toContainText('· saved');
 		expect(created).toHaveLength(0); // no POST /api/projects from a save
 
 		// ---- D. Explore commits exactly one project + retargets the conversation --
+		// v2 explore-ideas: step 1 picks/types the idea, step 2 confirms.
 		await page.getByTestId('explore-ideas-cand-1').click();
+		await expect(page.getByTestId('explore-idea-text')).toBeVisible();
+		await page.getByTestId('explore-ideas-next').click();
 		await expect(page.getByTestId('explore-commit')).toBeVisible();
 		await page.getByTestId('explore-commit-create').click();
 		await expect(page).toHaveURL(/\/app\/project\?project=proj-committed$/);
@@ -259,7 +264,8 @@ test.describe('discovery-first acceptance journey (composed build, one account, 
 
 		// ---- E. Project keeps the three globals + only local tabs -----------------
 		await expect(page.getByTestId('project-tabs')).toBeVisible();
-		await expect(page.getByTestId('project-tab-overview')).toHaveAttribute('aria-current', 'page');
+		// v2: Overview orients above the four steps (no current step on it).
+		await expect(page.locator('.project-step.current')).toHaveCount(0);
 		await expect(page.getByTestId('project-tab-build')).toBeVisible();
 		await expect(page.getByTestId('project-tab-submission')).toBeVisible();
 		await expect(page.getByTestId('nav-brief')).toBeVisible();

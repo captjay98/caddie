@@ -398,9 +398,14 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 
 		await expect(page.getByTestId('discovery-results')).toBeVisible();
 		await expect(page.getByText('Solar Hackweek')).toBeVisible();
-		await expect(page.getByText('ELIGIBLE', { exact: true })).toBeVisible();
-		await expect(page.getByText('HARD-INELIGIBLE', { exact: true })).toBeVisible();
-		await expect(page.getByText('fit: 2 requirement(s) evidenced')).toBeVisible();
+		// v2 verdict words (§6): plain, never jargon. The hard-ineligible row is
+		// hidden until the named reveal is used.
+		await expect(page.getByText('You can enter', { exact: true })).toBeVisible();
+		await expect(page.getByText("Can't enter", { exact: true })).toHaveCount(0);
+		await page.getByTestId('discovery-reveal-ineligible').click();
+		await expect(page.getByText("Can't enter", { exact: true })).toBeVisible();
+		// One reason it fits: the first evidenced claim's statement.
+		await expect(page.getByText('The recorded rules state teams of 1-4 may enter.').first()).toBeVisible();
 
 		// Partial feed failure is a VISIBLE, NAMED gap — never silently dropped.
 		const gaps = page.getByRole('status').filter({ hasText: 'Feed gaps' });
@@ -410,7 +415,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		await expect(page.getByText('Whether you can enter is judged with your profile country: US')).toBeVisible();
 
 		// Fit detail cites the evidence claim id, or records its assumption.
-		await page.getByRole('button', { name: 'Explain fit' }).first().click();
+		await page.getByRole('button', { name: 'Can you enter?' }).first().click();
 		await expect(page.getByText('SUPPORTED — The recorded rules state teams of 1-4 may enter.')).toBeVisible();
 		await expect(page.getByText('evidence: cl-team-1')).toBeVisible();
 		await expect(page.getByText('assumption: region rule assumed unrestricted absent a recorded rule')).toBeVisible();
@@ -452,18 +457,20 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 
 		// Saving only flips candidate status — it must never spin up a build.
 		await page.getByTestId('save-candidate-cand-1').click();
-		await expect(page.getByText('status accepted')).toBeVisible();
+		await expect(page.getByText('source local-seed · saved')).toBeVisible();
 		expect(state.acceptedCalls).toHaveLength(1);
 		expect(new URL(state.acceptedCalls[0]!.url).pathname).toBe(
 			'/api/projects/home-1/discovery/candidates/cand-1/accept',
 		);
 		expect(created.calls).toHaveLength(0); // no project created by Save
 
-		// Exploring the other candidate opens an explicit commit step (name +
-		// consequence + errors) and only then creates one project carrying the
-		// contest link and routes into it (the commit handoff).
+		// Exploring the other candidate opens the two-step idea flow; cand-2 is
+		// hard-ineligible, so it must be revealed first (hidden by default).
+		await page.getByTestId('discovery-reveal-ineligible').click();
 		await page.getByTestId('explore-ideas-cand-2').click();
-		await expect(page.getByTestId('explore-commit')).toBeVisible();
+		// v2 explore-ideas: step 1 picks/types the idea, step 2 confirms.
+		await expect(page.getByTestId('explore-idea-text')).toBeVisible();
+		await page.getByTestId('explore-ideas-next').click();
 		await expect(page.getByTestId('explore-commit')).toContainText('Start a project for this contest');
 		await page.getByTestId('explore-commit-create').click();
 		await expect(page).toHaveURL(/\/app\/project\?project=proj-new$/);
@@ -484,7 +491,9 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		await page.goto(`${BASE}/app/discover`);
 
 		await page.getByTestId('explore-ideas-cand-1').click();
-		await expect(page.getByTestId('explore-commit')).toBeVisible();
+		await expect(page.getByTestId('explore-idea-text')).toBeVisible();
+		await page.getByTestId('explore-ideas-next').click();
+		await expect(page.getByTestId('explore-commit')).toContainText('Start a project for this contest');
 		await page.getByTestId('explore-commit-create').click();
 		await expect(page.getByTestId('explore-commit-error')).toBeVisible();
 		await expect(page.getByTestId('explore-commit')).toBeVisible(); // still open, nothing created
@@ -493,7 +502,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		await context.close();
 	});
 
-	test('browse filters work over the loaded feed — Saved isolates saved candidates (audit S12)', async ({ browser }) => {
+	test("v2 list: can't-enter rows hide by default with a named reveal; the can-enter filter narrows", async ({ browser }) => {
 		const context = await browser.newContext();
 		const state = initialState();
 		state.evaluated = WITH_CANDIDATES;
@@ -502,29 +511,24 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/discover`);
 
-		// Save cand-1; cand-2 stays new.
+		// Save cand-1 (stays the accept semantics until B01); cand-2 stays new.
 		await page.getByTestId('save-candidate-cand-1').click();
-		await expect(page.getByText('status accepted')).toBeVisible();
+		await expect(page.getByText('source local-seed · saved')).toBeVisible();
 
-		// The Saved filter isolates the accepted candidate; New shows the rest.
-		await page.getByTestId('discovery-filter-saved').click();
+		// Hard-ineligible rows are hidden by default behind a named reveal.
+		await expect(page.getByTestId('eligibility-cand-2')).toHaveCount(0);
+		const reveal = page.getByTestId('discovery-reveal-ineligible');
+		await expect(reveal).toContainText("Show 1 you can't enter");
+		await reveal.click();
+		await expect(page.getByTestId('eligibility-cand-2')).toBeVisible();
+
+		// The can-enter filter narrows to eligible candidates only.
+		await page.getByTestId('discovery-filter-canenter').click();
 		await expect(page.getByTestId('eligibility-cand-1')).toBeVisible();
 		await expect(page.getByTestId('eligibility-cand-2')).toHaveCount(0);
-		await page.getByTestId('discovery-filter-new').click();
-		await expect(page.getByTestId('eligibility-cand-2')).toBeVisible();
-		await expect(page.getByTestId('eligibility-cand-1')).toHaveCount(0);
-
-		// Text filter narrows by title/summary/source.
-		await page.getByTestId('discovery-filter-all').click();
-		await page.getByTestId('discovery-filter-text').fill('employees');
-		await expect(page.getByTestId('eligibility-cand-2')).toBeVisible();
-		await expect(page.getByTestId('eligibility-cand-1')).toHaveCount(0);
-
-		// A filter with no matches is an explicit empty state, never a silent blank.
-		await page.getByTestId('discovery-filter-text').fill('zzz-nonexistent');
-		await expect(page.getByTestId('discovery-filter-empty')).toBeVisible();
 		await context.close();
 	});
+
 
 	test('Explore CONTINUES an existing project already linked to the contest — it never creates a duplicate', async ({ browser }) => {
 		const context = await browser.newContext();
