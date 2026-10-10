@@ -523,3 +523,104 @@ export async function listMilestones(db: D1Database, scope: Scope): Promise<Mile
 	);
 	return rows.map(milestoneFromRow);
 }
+
+// --- B04: stored plan decisions ------------------------------------------------------
+
+/** One stored decision: approved or suggest-a-change, bound to ONE revision. */
+export interface PlanDecisionRecord {
+	readonly id: string;
+	readonly projectId: string;
+	readonly planRevisionId: string;
+	readonly decision: 'approved' | 'changes';
+	readonly note: string | null;
+	/** The approvals id this decision was carried by (may be null when the
+	 *  decision was recorded without an approval gate — never from chat text). */
+	readonly approvalId: string | null;
+	readonly decidedBy: string;
+	readonly createdAt: string;
+}
+
+function planDecisionFromRow(row: Record<string, unknown>): PlanDecisionRecord {
+	const decision = row['decision'];
+	if (decision !== 'approved' && decision !== 'changes') {
+		fail(500, 'invalid_row', `plan decision carries an unknown decision: ${String(decision)}`);
+	}
+	return {
+		id: String(row['id']),
+		projectId: String(row['projectId']),
+		planRevisionId: String(row['planRevisionId']),
+		decision,
+		note: row['note'] == null ? null : String(row['note']),
+		approvalId: row['approvalId'] == null ? null : String(row['approvalId']),
+		decidedBy: String(row['decidedBy']),
+		createdAt: String(row['createdAt']),
+	};
+}
+
+/**
+ * Persist a plan decision for one revision. The decision is stored per
+ * (revision, actor): the same actor re-deciding the same revision UPDATES
+ * their stored decision (last decision wins for that actor+version), while
+ * a NEWER revision always needs its own decision — nothing is inherited.
+ */
+export async function recordPlanDecision(
+	db: D1Database,
+	scope: Scope,
+	input: {
+		planRevisionId: string;
+		decision: 'approved' | 'changes';
+		note?: string | null;
+		approvalId?: string | null;
+	},
+): Promise<PlanDecisionRecord> {
+	const verified = await assertProjectScope(db, scope);
+	const revisionRows = await queryAll(
+		db,
+		'select "id" from "plan_doc_revisions" where "id" = ? and "projectId" = ?',
+		input.planRevisionId,
+		verified.projectId,
+	);
+	if (revisionRows.length === 0) {
+		fail(404, 'plan_revision_not_found', 'that plan revision does not exist in this project');
+	}
+	const note = input.note == null ? null : String(input.note).slice(0, 2000);
+	const approvalId = input.approvalId == null ? null : String(input.approvalId);
+	const id = `pdec_${crypto.randomUUID()}`;
+	const now = nowIso();
+	await db
+		.prepare(
+			'insert into "plan_decisions" ("id","projectId","planRevisionId","decision","note","approvalId","decidedBy","createdAt") values (?,?,?,?,?,?,?,?)',
+		)
+		.bind(id, verified.projectId, input.planRevisionId, input.decision, note, approvalId, verified.actorId, now)
+		.run();
+	const rows = await queryAll(db, 'select * from "plan_decisions" where "id" = ?', id);
+	return planDecisionFromRow(rows[0]!);
+}
+
+/** The decisions for one revision (all actors), newest first. */
+export async function listPlanDecisions(
+	db: D1Database,
+	scope: Scope,
+	planRevisionId: string,
+): Promise<PlanDecisionRecord[]> {
+	const verified = await assertProjectScope(db, scope);
+	const rows = await queryAll(
+		db,
+		'select * from "plan_decisions" where "projectId" = ? and "planRevisionId" = ? order by "createdAt" desc, "id" asc',
+		verified.projectId,
+		planRevisionId,
+	);
+	return rows.map(planDecisionFromRow);
+}
+
+/** Decisions for every revision of one kind, newest first — the "earlier
+ *  versions" fold reads this. */
+export async function listProjectPlanDecisions(db: D1Database, scope: Scope): Promise<PlanDecisionRecord[]> {
+	const verified = await assertProjectScope(db, scope);
+	const rows = await queryAll(
+		db,
+		'select * from "plan_decisions" where "projectId" = ? order by "createdAt" desc, "id" asc',
+		verified.projectId,
+	);
+	return rows.map(planDecisionFromRow);
+}

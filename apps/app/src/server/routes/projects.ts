@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AuthEnv } from '../auth.ts';
 import { createAuthRouter } from './auth.ts';
+import { listPlanDecisions, listProjectPlanDecisions, recordPlanDecision } from '../planning.ts';
 import { ScopeError, requireProjectScope, requireWorkspaceScope, sessionUserId } from '../scope.ts';
 import {
 	archiveProject,
@@ -144,6 +145,34 @@ export function createProjectsRouter(): Hono<{ Bindings: Env }> {
 		// `latest` spans incomparable counters — clients should pass kind.
 		const revisions = await listPlanDocRevisions(c.env.DB, scope, kind);
 		return c.json({ revisions, latest: revisions[0] ?? null });
+	});
+
+	// B04 — stored plan decisions: approve / suggest-a-change persisted per
+	// revision, linked to the approval id. A decision is bound to ONE
+	// revision; a newer revision needs a new decision (nothing inherited).
+	router.post('/projects/:projectId/plan-docs/:revisionId/decision', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		const body = (await readJson(c.req.raw)) as { decision?: unknown; note?: unknown; approvalId?: unknown };
+		if (body.decision !== 'approved' && body.decision !== 'changes') {
+			throw new ScopeError(400, 'invalid_input', "decision must be 'approved' or 'changes'");
+		}
+		const decision = await recordPlanDecision(c.env.DB, scope, {
+			planRevisionId: c.req.param('revisionId') ?? '',
+			decision: body.decision,
+			note: typeof body.note === 'string' ? body.note : null,
+			approvalId: typeof body.approvalId === 'string' ? body.approvalId : null,
+		});
+		return c.json({ decision }, 201);
+	});
+
+	router.get('/projects/:projectId/plan-docs/:revisionId/decision', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		return c.json({ decisions: await listPlanDecisions(c.env.DB, scope, c.req.param('revisionId') ?? '') });
+	});
+
+	router.get('/projects/:projectId/plan-decisions', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		return c.json({ decisions: await listProjectPlanDecisions(c.env.DB, scope) });
 	});
 
 	// --- run bindings ----------------------------------------------------------------
