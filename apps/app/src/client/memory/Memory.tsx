@@ -181,8 +181,15 @@ function MemoryFactRow(props: {
 		<div className="inspector-row" data-testid="memory-fact" data-status={fact.status}>
 			<div className="row-main">
 				<span className="row-title">{fact.content}</span>
+				{/* §4: each fact says where it came from — real fields only. A
+				    proposed fact is Caddie's unconfirmed guess; a confirmed one was
+				    accepted in the chat; a correction replaces an earlier fact. */}
 				<span className="row-status" data-testid="memory-kind">
-					{fact.kind}
+					{fact.status === 'proposed'
+						? 'Caddie guessed this — not confirmed'
+						: fact.kind === 'correction'
+							? 'You corrected this in chat'
+							: 'You confirmed this in chat'}
 					{fact.projectId ? ' · project' : ' · personal'}
 				</span>
 				<span className="status-pill" data-status={fact.status === 'proposed' ? 'needs-you' : 'handled'}>

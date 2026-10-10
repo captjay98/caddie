@@ -214,7 +214,7 @@ test.describe('page states with the character (U03)', () => {
 		await expect(page.getByTestId('project-head-name')).toContainText('Pit wall');
 		await expect(page.getByTestId('project-tabs')).toBeVisible();
 		// The page's own title stays real; only the content below shows the error.
-		await expect(page.getByText('Activity')).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible();
 		await expect(page.getByTestId('state-error').first()).toBeVisible();
 		await context.close();
 	});
@@ -247,14 +247,16 @@ test.describe('page states with the character (U03)', () => {
 		await context.close();
 	});
 
-	test('the gear is disabled with an honest reason until the project settings route exists', async ({ browser }) => {
+	test('the gear opens Project settings (U08 route)', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubAccount(context);
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/project?project=proj-a`);
 		const gear = page.getByTestId('project-settings-gear');
-		await expect(gear).toBeDisabled();
-		await expect(gear).toHaveAttribute('title', 'Project settings is coming');
+		await expect(gear).toBeVisible();
+		await gear.click();
+		await expect(page).toHaveURL(/\/app\/project\/settings\?project=proj-a/);
+		await expect(page.getByTestId('ps-general')).toBeVisible();
 		await context.close();
 	});
 

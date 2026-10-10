@@ -45,7 +45,9 @@ export function Schedules(props: { projectId: string | null }): ReactElement {
 			const payload = await fetchJson<{ schedules: ScheduleRow[] }>(
 				`/api/projects/${encodeURIComponent(projectId)}/schedules`,
 			);
-			setState({ kind: 'ready', schedules: payload.schedules });
+			// Defensive: a payload without the schedules array is an empty list,
+			// not a crash — the surrounding page keeps rendering.
+			setState({ kind: 'ready', schedules: Array.isArray(payload.schedules) ? payload.schedules : [] });
 		} catch (error) {
 			const kind = (error as { kind?: string }).kind;
 			if (kind === 'denied') setState({ kind: 'denied' });

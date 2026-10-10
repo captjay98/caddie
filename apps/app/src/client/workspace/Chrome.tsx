@@ -1012,23 +1012,20 @@ function AccountMenu(props: {
 					<Link to="/search" search={keepSearch} role="menuitem" data-testid="account-search" onClick={() => props.setAccountOpen(false)}>
 						<Icon name="search" title="Search" /> Search
 					</Link>
-					<Link to="/settings" search={keepSearch} role="menuitem" data-testid="account-profile" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="user" title="Profile" /> Profile &amp; preferences
+					<Link to="/settings" search={{ tab: 'profile' } as Record<string, unknown>} role="menuitem" data-testid="account-profile" onClick={() => props.setAccountOpen(false)}>
+						<Icon name="user" title="Profile" /> Profile &amp; interests
 					</Link>
-					<Link to="/settings" search={{ section: 'memory' } as Record<string, unknown>} role="menuitem" data-testid="account-memory" onClick={() => props.setAccountOpen(false)}>
+					<Link to="/settings" search={{ tab: 'knows' } as Record<string, unknown>} role="menuitem" data-testid="account-memory" onClick={() => props.setAccountOpen(false)}>
 						<Icon name="memory" title="What Caddie knows" /> What Caddie knows
 					</Link>
-					<Link to="/settings" search={{ section: 'connections' } as Record<string, unknown>} role="menuitem" data-testid="account-connections" onClick={() => props.setAccountOpen(false)}>
+					<Link to="/settings" search={{ tab: 'accounts' } as Record<string, unknown>} role="menuitem" data-testid="account-connections" onClick={() => props.setAccountOpen(false)}>
 						<Icon name="link" title="Connected accounts" /> Connected accounts
 					</Link>
-					<Link to="/automations" search={keepSearch} role="menuitem" data-testid="account-automations" onClick={() => props.setAccountOpen(false)}>
+					<Link to="/settings" search={{ tab: 'routines' } as Record<string, unknown>} role="menuitem" data-testid="account-automations" onClick={() => props.setAccountOpen(false)}>
 						<Icon name="calendar" title="Routines" /> Routines
 					</Link>
-					<Link to="/usage" search={keepSearch} role="menuitem" data-testid="account-usage" onClick={() => props.setAccountOpen(false)}>
+					<Link to="/settings" search={{ tab: 'spending' } as Record<string, unknown>} role="menuitem" data-testid="account-usage" onClick={() => props.setAccountOpen(false)}>
 						<Icon name="box" title="Spending" /> Spending
-					</Link>
-					<Link to="/settings" search={{ section: 'settings' } as Record<string, unknown>} role="menuitem" data-testid="account-settings" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="doc" title="Settings" /> Settings
 					</Link>
 					<button type="button" role="menuitem" data-testid="theme-menu-item" onClick={toggleTheme}>
 						{theme === 'dark' ? <Icon name="sun" title="Switch to light theme" /> : <Icon name="moon" title="Switch to dark theme" />}

@@ -270,8 +270,8 @@ async function startHarness(): Promise<void> {
 			send(readFileSync(WORKSPACE_CSS, 'utf8'), 'text/css; charset=utf-8');
 			return;
 		}
-		res.writeHead(404);
-		res.end('not found');
+		// SPA fallback: the harness router owns every other path (/search, /settings).
+		send(readFileSync(join(HARNESS_DIR, 'index.html'), 'utf8'), 'text/html; charset=utf-8');
 	});
 	await new Promise<void>((resolve, reject) => {
 		server!.once('error', reject);
@@ -332,12 +332,15 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 		await expect(page.getByTestId('profile-timezone')).toBeVisible();
 		await expect(page.getByTestId('profile-experience')).toBeVisible();
 
-		// stacks: react-hono enabled, the others honestly planned
-		await expect(page.getByTestId('stacks-list')).toBeVisible();
-		await expect(page.getByTestId('stack-react-hono')).toContainText('enabled');
-		await expect(page.getByTestId('stack-tanstack-start')).toContainText('planned');
-		await expect(page.getByTestId('stack-flutter')).toContainText('planned');
+		// v2 tabs: Build tools and Connected accounts live behind their tabs.
+		await page.getByTestId('settings-tab-tools').click();
+		// v2 wording: enabled = "Being proven first"; planned = "Later" — the
+		// labels never run ahead of the feature ledger.
+		await expect(page.getByTestId('stack-react-hono')).toContainText('Being proven first');
+		await expect(page.getByTestId('stack-tanstack-start')).toContainText('Later');
+		await expect(page.getByTestId('stack-flutter')).toContainText('Later');
 
+		await page.getByTestId('settings-tab-accounts').click();
 		// integration health is honest: nothing configured in this deployment
 		await expect(page.getByTestId('integration-auth-google')).toContainText('not configured');
 		await expect(page.getByTestId('integration-auth-github')).toContainText('not configured');
@@ -350,7 +353,7 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 	});
 
 	test('memory: confirm a proposal, retract a fact, and the retracted entry moves to history', async ({ page }) => {
-		await page.goto(`${BASE}/`);
+		await page.goto(`${BASE}/?tab=knows`);
 		await expect(page.getByTestId('memory-panel')).toBeVisible();
 
 		// both seeded facts are visible with their status
@@ -371,7 +374,7 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 	});
 
 	test('memory correction: saving a correction replaces the active wording and retains the old version', async ({ page }) => {
-		await page.goto(`${BASE}/`);
+		await page.goto(`${BASE}/?tab=knows`);
 		await page.getByTestId('memory-correct-mem_proposed_1').click();
 		await page.getByTestId('memory-correct-input-mem_proposed_1').fill('Bump minor version after fixes');
 		await page.getByTestId('memory-correct-save-mem_proposed_1').click();
@@ -384,7 +387,7 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 	});
 
 	test('search isolation is visible: only accessible content is rendered, nothing leaks', async ({ page }) => {
-		await page.goto(`${BASE}/`);
+		await page.goto(`${BASE}/search`);
 		await page.getByTestId('search-input').fill('alpha');
 		await page.getByTestId('search-submit').click();
 

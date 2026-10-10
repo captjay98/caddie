@@ -3752,3 +3752,48 @@ body.conv-resizing * {
 	font-size: 14px;
 	line-height: 1.5;
 }
+
+/* --- U08: settings tabs + project settings ----------------------------------- */
+
+.settings-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px;
+	border-bottom: 1px solid var(--color-line-soft);
+}
+
+.settings-tab {
+	display: inline-flex;
+	align-items: center;
+	height: 40px;
+	padding: 0 12px;
+	color: var(--color-muted);
+	font-weight: 600;
+	font-size: 13.5px;
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	border-radius: 6px 6px 0 0;
+	position: relative;
+	white-space: nowrap;
+}
+
+.settings-tab:hover {
+	color: var(--color-bright);
+	background: color-mix(in srgb, var(--color-bright) 5%, transparent);
+}
+
+.settings-tab[aria-current='page'] {
+	color: var(--color-bright);
+}
+
+.settings-tab[aria-current='page']::after {
+	content: '';
+	position: absolute;
+	left: 10px;
+	right: 10px;
+	bottom: -1px;
+	height: 2px;
+	border-radius: 2px;
+	background: var(--color-action);
+}

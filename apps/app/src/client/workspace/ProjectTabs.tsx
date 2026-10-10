@@ -121,16 +121,16 @@ export function ProjectTabs(props: {
 							<Icon name="calendar" title="" /> {deadline}
 						</span>
 					) : null}
-					<button
-						type="button"
+					<Link
+						to="/project/settings"
 						className="project-head-gear"
 						data-testid="project-settings-gear"
-						disabled
-						title="Project settings is coming"
-						aria-label="Project settings (coming soon)"
+						title="Project settings"
+						aria-label="Project settings"
+						search={(prev: Record<string, unknown>) => ({ ...prev })}
 					>
 						<Icon name="panel" title="" />
-					</button>
+					</Link>
 				</span>
 			</div>
 			{stepsNav}

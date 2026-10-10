@@ -4,19 +4,16 @@ import { WorkspaceChrome, type WorkspaceNavId } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
 import { Start, IdeaForm } from './onboarding/Start.tsx';
+import { ProjectSettingsPage } from './settings/ProjectSettings.tsx';
 import {
 	DiscoverPage,
 	ProjectsPage,
 	ProjectOverviewPage,
 	SearchPage,
-	AutomationsPage,
-	UsagePage,
 	SubmissionPage,
-	SchedulesPage,
 	EvidencePage,
 	RunsPage,
 	DesignReviewPage,
-	RepositoriesPage,
 } from './surface.tsx';
 
 /**
@@ -181,30 +178,61 @@ const searchRoute = createRoute({
 	component: SearchPage,
 });
 
+// v2 (HANDOFF §2): /automations became Settings › Routines.
 const automationsRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/automations',
 	validateSearch,
 	staticData: { nav: 'account' },
-	component: AutomationsPage,
+	beforeLoad: () => {
+		throw redirect({ to: '/settings', search: { tab: 'routines' }, replace: true });
+	},
+	component: () => null,
 });
 
+// v2 (HANDOFF §2): /usage became Settings › Spending.
 const usageRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/usage',
 	validateSearch,
 	staticData: { nav: 'account' },
-	component: UsagePage,
+	beforeLoad: () => {
+		throw redirect({ to: '/settings', search: { tab: 'spending' }, replace: true });
+	},
+	component: () => null,
 });
+
+/** /settings accepts ?tab=profile|interests|tools|knows|accounts|routines|spending|appearance. */
+function validateSettingsSearch(search: Record<string, unknown>): { project?: string; pane?: 'channel' | 'brief' | 'runs'; tab?: string } {
+	const base = validateSearch(search);
+	const tab = search.tab;
+	return {
+		...base,
+		...(typeof tab === 'string' &&
+		['profile', 'interests', 'tools', 'knows', 'accounts', 'routines', 'spending', 'appearance'].includes(tab)
+			? { tab }
+			: {}),
+	};
+}
 
 const settingsRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/settings',
-	validateSearch,
+	validateSearch: validateSettingsSearch,
 	staticData: { nav: 'account' },
 	component: function SettingsPage() {
 		return <Settings />;
 	},
+});
+
+// v2 (HANDOFF §2): Project settings — General / Code / Routines / What Caddie
+// knows / Archive. The project header's gear navigates here (U03).
+const projectSettingsRoute = createRoute({
+	getParentRoute: () => shellLayoutRoute,
+	path: '/project/settings',
+	validateSearch,
+	staticData: { nav: 'project' },
+	component: ProjectSettingsPage,
 });
 
 const onboardingRoute = createRoute({
@@ -260,12 +288,16 @@ const artifactsRoute = createRoute({
 	component: () => null,
 });
 
+// v2 (HANDOFF §2): /schedules became Project settings › Routines.
 const schedulesRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/schedules',
 	validateSearch,
 	staticData: { nav: 'project' },
-	component: SchedulesPage,
+	beforeLoad: ({ search }) => {
+		throw redirect({ to: '/project/settings', search: carryProject(search as Record<string, unknown>), hash: 'routines', replace: true });
+	},
+	component: () => null,
 });
 
 // v2 (HANDOFF §2): /tasks moved onto the Overview's to-do list. Old links
@@ -319,12 +351,16 @@ const submissionRoute = createRoute({
 	component: SubmissionPage,
 });
 
+// v2 (HANDOFF §2): /repositories became Project settings › Code.
 const repositoriesRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/repositories',
 	validateSearch,
 	staticData: { nav: 'project' },
-	component: RepositoriesPage,
+	beforeLoad: ({ search }) => {
+		throw redirect({ to: '/project/settings', search: carryProject(search as Record<string, unknown>), hash: 'code', replace: true });
+	},
+	component: () => null,
 });
 
 // --- legacy deep-link redirects --------------------------------------------------
@@ -371,6 +407,7 @@ artifactsRoute,
 	judgeRoute,
 	submissionRoute,
 	repositoriesRoute,
+		projectSettingsRoute,
 		legacyDiscoveryRoute,
 	]),
 ]);

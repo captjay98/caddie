@@ -1413,7 +1413,7 @@ export function AutomationsPage(): ReactElement {
 	);
 }
 
-function AutomationsBody(): ReactElement {
+export function AutomationsBody(): ReactElement {
 	const chrome = useWorkspaceChrome();
 	// Audit F12: Automations aggregates the REAL schedules of every project
 	// instead of being a bare project picker. Each project's read is
@@ -1550,7 +1550,7 @@ interface UsageResponse {
 	unavailable?: string;
 }
 
-function UsageBody(): ReactElement {
+export function UsageBody(): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const usage = useQuery({

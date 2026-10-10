@@ -1,4 +1,4 @@
-import { useSearch } from '@tanstack/react-router';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -6,7 +6,8 @@ import { fetchJson } from '../api.ts';
 import { failureKind, StatePanel } from '../states.tsx';
 import { useSessionActor } from '../queries.ts';
 import { Memory } from '../memory/Memory.tsx';
-import { Search } from '../search/Search.tsx';
+import { AutomationsBody, UsageBody } from '../surface.tsx';
+import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
 
 /**
  * P14 settings UI: profile editing, honest integration health, enabled
@@ -56,7 +57,8 @@ const CLIENT_STACK_IDS = [
 ] as const;
 
 export function Settings(): ReactElement {
-	const section = useSearch({ strict: false }) as { section?: string };
+	const search = useSearch({ strict: false }) as { tab?: string; section?: string };
+	const tab = TAB_IDS.includes((search.tab ?? 'profile') as SettingsTab) ? ((search.tab ?? 'profile') as SettingsTab) : 'profile';
 	const actor = useSessionActor(true);
 	const profile = useQuery({
 		queryKey: ['profile', actor.data ?? 'pending'],
@@ -77,8 +79,6 @@ export function Settings(): ReactElement {
 	if (actor.isPending || profile.isPending || health.isPending || stacks.isPending) {
 		return <StatePanel kind="loading" title="Loading your settings…" />;
 	}
-	const panelsReady = !actor.isPending;
-	const sectionRef = section.section;
 	const error = actor.error ?? profile.error ?? health.error ?? stacks.error;
 	if (error) {
 		return (
@@ -92,18 +92,174 @@ export function Settings(): ReactElement {
 
 	return (
 		<div className="shell-loading shell-page" data-testid="settings-screen">
-			<SectionFocus section={panelsReady ? sectionRef : undefined} />
+			<SectionFocus section={search.section} />
 			<div className="page-col">
-			<div className="settings-stack">
-				<SettingsSubnav />
-				<ProfileEditor initial={profile.data?.profile ?? null} />
-				<IntegrationHealthPanel health={health.data!} />
-				<StacksPanel stacks={stacks.data!.stacks} />
-				<Memory />
-				<Search />
-			</div>
+				<div className="settings-stack">
+					<SettingsTabs active={tab} />
+					{tab === 'profile' ? <ProfileEditor initial={profile.data?.profile ?? null} /> : null}
+					{tab === 'interests' ? <InterestsPanel profile={profile.data?.profile ?? null} /> : null}
+					{tab === 'tools' ? <StacksPanel stacks={stacks.data!.stacks} /> : null}
+					{tab === 'knows' ? <Memory /> : null}
+					{tab === 'accounts' ? <IntegrationHealthPanel health={health.data!} /> : null}
+					{tab === 'routines' ? <AutomationsBody /> : null}
+					{tab === 'spending' ? <UsageBody /> : null}
+					{tab === 'appearance' ? <AppearancePanel /> : null}
+				</div>
 			</div>
 		</div>
+	);
+}
+
+/** The eight settings tabs (v2 §4, HANDOFF §2 route table). */
+type SettingsTab = 'profile' | 'interests' | 'tools' | 'knows' | 'accounts' | 'routines' | 'spending' | 'appearance';
+
+const TAB_IDS: readonly SettingsTab[] = ['profile', 'interests', 'tools', 'knows', 'accounts', 'routines', 'spending', 'appearance'];
+
+const TAB_LABELS: Record<SettingsTab, string> = {
+	profile: 'You',
+	interests: 'Interests',
+	tools: 'Build tools',
+	knows: 'What Caddie knows',
+	accounts: 'Connected accounts',
+	routines: 'Routines',
+	spending: 'Spending',
+	appearance: 'Appearance',
+};
+
+function SettingsTabs(props: { active: SettingsTab }): ReactElement {
+	const navigate = useNavigate();
+	return (
+		<nav className="settings-tabs" aria-label="Settings sections" data-testid="settings-tabs">
+			{TAB_IDS.map((id) => (
+				<button
+					key={id}
+					type="button"
+					className="settings-tab"
+					data-testid={`settings-tab-${id}`}
+					aria-current={props.active === id ? 'page' : undefined}
+					onClick={() => void navigate({ to: '/settings', search: { tab: id } })}
+				>
+					{TAB_LABELS[id]}
+				</button>
+			))}
+		</nav>
+	);
+}
+
+/** Appearance (§4): the theme toggle and "Reset Caddie width" — the same
+ *  reset the resize handle's double-click performs. */
+function AppearancePanel(): ReactElement {
+	const { theme, toggleTheme, convWidth } = useWorkspaceChrome();
+	return (
+		<section className="card-surface settings-panel" data-testid="appearance-panel" id="appearance-panel">
+			<p className="kicker" data-tone="action">
+				APPEARANCE
+			</p>
+			<h3 className="state-title">Theme</h3>
+			<p className="state-detail">Saved only when you pick one — until then pages follow your device.</p>
+			<div className="row-actions">
+				<button type="button" className="btn-ghost" data-testid="appearance-theme-toggle" onClick={toggleTheme}>
+					{theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+				</button>
+			</div>
+			<h3 className="state-title">Caddie panel</h3>
+			<div className="row-actions">
+				<button type="button" className="btn-ghost" data-testid="appearance-reset-width" onClick={convWidth.reset}>
+					Reset Caddie width
+				</button>
+				<span className="state-detail">Back to 40% of the window.</span>
+			</div>
+		</section>
+	);
+}
+
+/** Interests (§4 tab list): what Caddie matches hackathons with. Reuses the
+ *  real profile PATCH; empty input saves as "nothing recorded". */
+function InterestsPanel({ profile }: { profile: ProfileRecord | null }): ReactElement {
+	const queryClient = useQueryClient();
+	const actor = useSessionActor(true);
+	const [freeText, setFreeText] = useState((profile?.freeTextInterests ?? []).join(', '));
+	const [stackIds, setStackIds] = useState<string[]>(profile?.stackIds ?? []);
+	const [busy, setBusy] = useState(false);
+	const [saved, setSaved] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const toggleStack = (id: string) =>
+		setStackIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+
+	async function save() {
+		setBusy(true);
+		setError(null);
+		setSaved(false);
+		try {
+			await fetchJson('/api/profile', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({
+					country: profile?.country ?? null,
+					timezone: profile?.timezone ?? null,
+					weeklyHours: profile?.weeklyHours ?? null,
+					experienceLevel: profile?.experienceLevel ?? null,
+					stackIds,
+					freeTextInterests: freeText
+						.split(',')
+						.map((entry) => entry.trim())
+						.filter((entry) => entry.length > 0)
+						.slice(0, MAX_INTERESTS),
+				}),
+			});
+			setSaved(true);
+			void queryClient.invalidateQueries({ queryKey: ['profile', actor.data ?? 'pending'] });
+		} catch (cause) {
+			setError(cause instanceof Error ? cause.message : String(cause));
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	return (
+		<section className="card-surface settings-panel" data-testid="interests-panel" id="interests-panel">
+			<p className="kicker" data-tone="action">
+				INTERESTS
+			</p>
+			<h3 className="state-title">What would you enjoy building?</h3>
+			<p className="state-detail">
+				Free-text interests (comma separated) and the tools you prefer shape what Discover ranks for
+				you.
+			</p>
+			<label className="kicker" htmlFor="interests-free">
+				Interests
+			</label>
+			<input
+				id="interests-free"
+				className="input"
+				data-testid="interests-free"
+				placeholder="e.g. developer tools, climate, dashboards"
+				value={freeText}
+				onChange={(e) => setFreeText(e.target.value)}
+			/>
+			<p className="kicker">Preferred tools to build with</p>
+			<div className="row">
+				{CLIENT_STACK_IDS.map((id) => (
+					<label key={id} className="check">
+						<input type="checkbox" checked={stackIds.includes(id)} onChange={() => toggleStack(id)} data-testid={`interest-stack-${id}`} />
+						<span>{id}</span>
+					</label>
+				))}
+			</div>
+			{error ? (
+				<div role="alert" className="sign-in-error" data-testid="interests-error">
+					<b>Could not save.</b>
+					<span> {error}</span>
+				</div>
+			) : null}
+			<div className="row-actions">
+				<button type="button" className="btn-key" disabled={busy} onClick={() => void save()} data-testid="interests-save">
+					{busy ? 'Saving…' : 'Save interests'}
+				</button>
+				{saved ? <span className="status-pill" data-status="handled" data-testid="interests-saved">saved</span> : null}
+			</div>
+		</section>
 	);
 }
 
@@ -379,23 +535,29 @@ function StacksPanel({ stacks }: { stacks: StacksResponse['stacks'] }): ReactEle
 	return (
 		<section className="card-surface settings-panel" data-testid="stacks-panel" id="stacks-panel">
 			<p className="kicker" data-tone="action">
-				OUTPUT STACKS
+				BUILD TOOLS
 			</p>
-			<h3 className="state-title">Stack availability</h3>
-			<p className="state-detail">The heading names what the list contains: enabled stacks work today; planned stacks are roadmap, not failure.</p>
+			<h3 className="state-title">Tools to build with</h3>
+			<p className="state-detail">
+				Each tool opens for building only after it passes its own full live test — the wording here
+				never runs ahead of the feature ledger.
+			</p>
 			<div className="row-list" data-testid="stacks-list">
 				{stacks.map((stack) => (
 					<div className="inspector-row" key={stack.id} data-testid={`stack-${stack.id}`}>
 						<div className="row-main">
 							<span className="row-title">{stack.id}</span>
 							<span className="status-pill" data-status={stack.status === 'enabled' ? 'handled' : 'planned'}>
-								{stack.status}
-								{stack.note ? ` · ${stack.note}` : ''}
+								{stack.status === 'enabled' ? 'Being proven first' : 'Later'}
 							</span>
 						</div>
+						{/* B03 (not yet landed): the "Tell me when it's ready" toggle
+						    stays hidden until the server can record it — never a fake
+						    switch. */}
 					</div>
 				))}
 			</div>
+			<p className="state-detail">"Start a project" lists the Later tools greyed out until they pass their live test.</p>
 		</section>
 	);
 }
