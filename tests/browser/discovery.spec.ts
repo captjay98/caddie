@@ -407,7 +407,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		await expect(gaps).toBeVisible();
 		await expect(gaps).toContainText('devpost failed — upstream returned 503 (recorded receipt)');
 
-		await expect(page.getByText('Eligibility uses your profile country: US')).toBeVisible();
+		await expect(page.getByText('Whether you can enter is judged with your profile country: US')).toBeVisible();
 
 		// Fit detail cites the evidence claim id, or records its assumption.
 		await page.getByRole('button', { name: 'Explain fit' }).first().click();

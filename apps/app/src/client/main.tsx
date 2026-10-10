@@ -15,6 +15,7 @@ import '@fontsource/ibm-plex-mono/600.css';
 import '@fontsource/ibm-plex-mono/700.css';
 import '@caddie/ui/tokens.css';
 import '@caddie/ui/markdown.css';
+import '@caddie/ui/mascot.css';
 import './workspace.css';
 
 /**

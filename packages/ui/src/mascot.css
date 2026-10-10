@@ -1,0 +1,316 @@
+/* Mascot.css — the Caddie character rig (Caddie v2, HANDOFF §7).
+   One SVG drawing; the mood is driven entirely by [data-state], which the
+   React component maps from the v2 mood names (ready→idle, building→working,
+   paused→sleep). Colors come from CSS variables so both themes work; the
+   default values match the halo dark palette.
+
+   prefers-reduced-motion: static faces, no animation — every keyframe
+   animation and transition is disabled by the app-level rule, and the base
+   transforms are already the resting pose. */
+
+:root {
+	--m-blue: var(--seed-primary, #4d9fff);
+	--m-deep: var(--seed-primary-deep, #2f7ddd);
+	--m-ink: var(--seed-bg, #090b10);
+	--m-flag: var(--seed-accent, #f0a83c);
+	--m-cheek: var(--seed-danger, #ff7a83);
+	--m-line: transparent;
+}
+
+:root[data-theme='light'] {
+	--m-ink: #f6f8fc;
+	--m-line: color-mix(in srgb, #155fbe 55%, transparent);
+}
+
+.mascot {
+	display: block;
+	overflow: visible;
+	flex: none;
+	color: var(--color-muted, #8b93a3);
+}
+
+.mascot * {
+	transform-box: fill-box;
+	transform-origin: center;
+}
+
+.mascot .m-all {
+	transform-origin: 50% 100%;
+	animation: caddie-m-bob 3.6s ease-in-out infinite;
+}
+
+.mascot .m-body {
+	stroke: var(--m-line);
+	stroke-width: 1.4;
+	transition: filter 0.3s;
+}
+
+.mascot .m-flag {
+	transform-origin: 0% 100%;
+	transition: transform 0.3s;
+}
+
+.mascot .m-open {
+	animation: caddie-m-blink 5.2s infinite;
+}
+
+.mascot .m-look {
+	transition: transform 0.25s;
+}
+
+.mascot .m-happy,
+.mascot .m-closed,
+.mascot .m-flat,
+.mascot .m-mo,
+.mascot .m-mflat,
+.mascot .m-z,
+.mascot .m-dots,
+.mascot .m-badge {
+	opacity: 0;
+}
+
+/* Small sizes drop the fine details. */
+.mascot[data-size='s'] .m-cheek,
+.mascot[data-size='s'] .m-gloss {
+	display: none;
+}
+
+/* --- ready (idle): gentle bob, occasional blink --- */
+.mascot[data-state='idle'] {
+	/* default rig */
+}
+
+/* --- listening: leaning in, eyes wide, flag tilted --- */
+.mascot[data-state='listening'] .m-all {
+	animation: none;
+	transform: rotate(-6deg);
+}
+.mascot[data-state='listening'] .m-open {
+	animation: none;
+	transform: scale(1.08, 1.14);
+}
+.mascot[data-state='listening'] .m-flag {
+	transform: rotate(-10deg);
+}
+
+/* --- thinking: eyes up-left, dots pulsing, mouth becomes a small 'o' --- */
+.mascot[data-state='thinking'] .m-look {
+	transform: translate(-2px, -3px);
+}
+.mascot[data-state='thinking'] .m-dots {
+	opacity: 1;
+}
+.mascot[data-state='thinking'] .m-dots circle {
+	animation: caddie-m-think 1.2s infinite;
+}
+.mascot[data-state='thinking'] .m-dots circle:nth-child(2) {
+	animation-delay: 0.2s;
+}
+.mascot[data-state='thinking'] .m-dots circle:nth-child(3) {
+	animation-delay: 0.4s;
+}
+.mascot[data-state='thinking'] .m-mouth {
+	opacity: 0;
+}
+.mascot[data-state='thinking'] .m-mo {
+	opacity: 1;
+}
+.mascot[data-state='thinking'] .m-flag {
+	animation: caddie-m-sway 2.4s ease-in-out infinite;
+}
+
+/* --- building (working): bouncing, flag waving, focused eyes --- */
+.mascot[data-state='working'] .m-all {
+	animation: caddie-m-busy 0.8s ease-in-out infinite;
+}
+.mascot[data-state='working'] .m-flag {
+	animation: caddie-m-wave 0.45s ease-in-out infinite alternate;
+}
+.mascot[data-state='working'] .m-open {
+	animation: none;
+	transform: scaleY(0.72);
+}
+
+/* --- needs: tilting toward you with an exclamation badge --- */
+.mascot[data-state='needs'] .m-all {
+	animation: caddie-m-tilt 2.6s ease-in-out infinite;
+}
+.mascot[data-state='needs'] .m-badge {
+	opacity: 1;
+	animation: caddie-m-pop 0.4s ease-out;
+}
+
+/* --- done: happy eyes, a little hop, flag lowered --- */
+.mascot[data-state='done'] .m-open {
+	opacity: 0;
+	animation: none;
+}
+.mascot[data-state='done'] .m-happy {
+	opacity: 1;
+}
+.mascot[data-state='done'] .m-all {
+	animation: caddie-m-hop 1.8s ease-out infinite;
+}
+.mascot[data-state='done'] .m-flag {
+	transform: rotate(-14deg);
+}
+
+/* --- stuck: flat mouth, deflated, flag drooped, body desaturated --- */
+.mascot[data-state='stuck'] .m-open,
+.mascot[data-state='stuck'] .m-mouth {
+	opacity: 0;
+	animation: none;
+}
+.mascot[data-state='stuck'] .m-flat,
+.mascot[data-state='stuck'] .m-mflat {
+	opacity: 1;
+}
+.mascot[data-state='stuck'] .m-all {
+	animation: none;
+	transform: translateY(1.5px);
+}
+.mascot[data-state='stuck'] .m-flag {
+	transform: rotate(48deg);
+}
+.mascot[data-state='stuck'] .m-body {
+	filter: saturate(0.45);
+}
+
+/* --- paused (sleep): closed eyes, breathing, drifting z's --- */
+.mascot[data-state='sleep'] .m-open {
+	opacity: 0;
+	animation: none;
+}
+.mascot[data-state='sleep'] .m-closed {
+	opacity: 1;
+}
+.mascot[data-state='sleep'] .m-all {
+	animation: caddie-m-breathe 4.8s ease-in-out infinite;
+}
+.mascot[data-state='sleep'] .m-z {
+	opacity: 1;
+}
+.mascot[data-state='sleep'] .m-z text {
+	animation: caddie-m-z 3s ease-out infinite;
+}
+.mascot[data-state='sleep'] .m-z text:nth-child(2) {
+	animation-delay: 1.5s;
+}
+.mascot[data-state='sleep'] .m-flag {
+	transform: rotate(22deg);
+}
+
+/* --- keyframes --- */
+@keyframes caddie-m-bob {
+	0%,
+	100% {
+		transform: translateY(0);
+	}
+	50% {
+		transform: translateY(-1.6px);
+	}
+}
+@keyframes caddie-m-blink {
+	0%,
+	93%,
+	100% {
+		transform: scaleY(1);
+	}
+	96% {
+		transform: scaleY(0.08);
+	}
+}
+@keyframes caddie-m-wave {
+	from {
+		transform: rotate(-12deg);
+	}
+	to {
+		transform: rotate(12deg);
+	}
+}
+@keyframes caddie-m-sway {
+	0%,
+	100% {
+		transform: rotate(-5deg);
+	}
+	50% {
+		transform: rotate(7deg);
+	}
+}
+@keyframes caddie-m-busy {
+	0%,
+	100% {
+		transform: translateY(0);
+	}
+	50% {
+		transform: translateY(-2.4px) scale(1.01, 0.985);
+	}
+}
+@keyframes caddie-m-tilt {
+	0%,
+	100% {
+		transform: rotate(0);
+	}
+	25%,
+	65% {
+		transform: rotate(8deg);
+	}
+}
+@keyframes caddie-m-hop {
+	0%,
+	45%,
+	100% {
+		transform: translateY(0);
+	}
+	14% {
+		transform: translateY(-7px);
+	}
+	26% {
+		transform: translateY(0) scale(1.04, 0.95);
+	}
+	34% {
+		transform: translateY(-2px);
+	}
+}
+@keyframes caddie-m-think {
+	0%,
+	100% {
+		opacity: 0.25;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+@keyframes caddie-m-pop {
+	0% {
+		transform: scale(0);
+	}
+	70% {
+		transform: scale(1.25);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+@keyframes caddie-m-breathe {
+	0%,
+	100% {
+		transform: scale(1, 1);
+	}
+	50% {
+		transform: scale(1.02, 0.975);
+	}
+}
+@keyframes caddie-m-z {
+	0% {
+		opacity: 0;
+		transform: translate(0, 0);
+	}
+	25% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+		transform: translate(5px, -9px);
+	}
+}

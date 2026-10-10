@@ -1,10 +1,18 @@
 import type { ReactElement } from 'react';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { ApiError, type FailureKind } from './api.ts';
+import { Mascot } from '@caddie/ui/Mascot';
 
 /**
  * Explicit state surfaces — the P06 acceptance grammar: loading, empty,
  * stale, denied, error, offline and limit states are first-class renderable
  * panels, never silent blanks. One shared visual grammar, token-only.
+ *
+ * v2 (HANDOFF §3.8): loading shows the "thinking" character and a specific
+ * line; error shows the "stuck" character, "Your work is safe — this is only
+ * the connection", "Try again now" and "Ask Caddie what happened". Page titles
+ * and project steps stay real above the panel — pages render those outside
+ * the state surface, and only the content below is replaced.
  *
  * `data-state` + `data-testid="state-<kind>"` make every state assertable
  * from browser specs without touching internals.
@@ -27,6 +35,13 @@ export function failureKind(error: unknown): StateKind {
 	return 'error';
 }
 
+/** The character mood for a state kind (§3.8) — real state only. */
+function stateMood(kind: StateKind): 'thinking' | 'stuck' | undefined {
+	if (kind === 'loading') return 'thinking';
+	if (kind === 'error' || kind === 'offline') return 'stuck';
+	return undefined;
+}
+
 export function StatePanel(props: {
 	kind: StateKind;
 	title?: string;
@@ -38,6 +53,7 @@ export function StatePanel(props: {
 	const { kind } = props;
 	const copy = COPY[kind];
 	const retryable = Boolean(props.onRetry) && kind !== 'loading' && kind !== 'empty';
+	const mood = stateMood(kind);
 	return (
 		<section
 			className="state-panel card-surface"
@@ -45,6 +61,11 @@ export function StatePanel(props: {
 			data-testid={`state-${kind}`}
 			aria-busy={kind === 'loading' || props.busy ? true : undefined}
 		>
+			{mood ? (
+				<span className="state-mascot" aria-hidden="true">
+					<Mascot mood={mood} size={44} />
+				</span>
+			) : null}
 			<p className="kicker" data-tone={kind === 'empty' ? 'action' : kind}>
 				{copy.kicker}
 			</p>
@@ -64,8 +85,16 @@ export function StatePanel(props: {
 					data-testid={`state-retry-${kind}`}
 					onClick={props.onRetry}
 				>
-					{props.retryLabel ?? 'Try again'}
+					{props.retryLabel ?? 'Try again now'}
 				</button>
+			) : null}
+			{(kind === 'error' || kind === 'offline') && retryable ? (
+				<>
+					<p className="state-detail" data-testid="state-safety-note">
+						Your work is safe — this is only the connection.
+					</p>
+					<AskCaddieWhatHappened />
+				</>
 			) : null}
 			{kind === 'denied' ? (
 				<p className="state-detail">
@@ -73,6 +102,29 @@ export function StatePanel(props: {
 				</p>
 			) : null}
 		</section>
+	);
+}
+
+/**
+ * "Ask Caddie what happened" (§3.8): opens the conversation pane, where the
+ * user can ask about the failure — on desktop this is the full-screen chat,
+ * on mobile the Caddie tab. The question itself is left to the user; this
+ * control never fabricates a Caddie reply.
+ */
+function AskCaddieWhatHappened(): ReactElement {
+	const navigate = useNavigate();
+	const search = useSearch({ strict: false }) as Record<string, unknown>;
+	return (
+		<button
+			type="button"
+			className="btn-ghost"
+			data-testid="state-ask-caddie"
+			onClick={() => {
+				void navigate({ to: '.', search: { ...search, pane: 'channel' } });
+			}}
+		>
+			Ask Caddie what happened
+		</button>
 	);
 }
 

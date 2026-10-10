@@ -54,6 +54,7 @@ import { useCoordinatorTransport, type CoordinatorTransport } from '../coordinat
 import { briefActionRoute } from '../brief/navigate.ts';
 import { ConvResizeHandle, useConvWidth } from './ConvResize.tsx';
 import { AskBar } from './AskBar.tsx';
+import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
 import { WORDS } from '../copy.ts';
 import {
 	useAccountBrief,
@@ -161,6 +162,8 @@ interface WorkspaceChromeContextValue {
 	setConvOpen: (open: boolean) => void;
 	/** The resizable panel width (desktop); `resetConvWidth` backs Settings › Appearance. */
 	convWidth: { reset: () => void; frac: number };
+	/** Caddie's current character mood, from real state only (U03). */
+	caddieMood: MascotMood;
 	/** The channel store + run transport, bound to the conversation scope. */
 	channel: {
 		drafts: readonly ChannelDraft[];
@@ -401,6 +404,15 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		void navigate({ to: route.to as never, search: route.search as never });
 	};
 
+	// Caddie's character mood (v2, HANDOFF §7): derived from REAL state only —
+	// a live transport means Caddie is working; an unseen needs-you or blocked
+	// card means something waits for your OK; otherwise it's ready.
+	const caddieMood: MascotMood = live
+		? 'thinking'
+		: urgentCard
+			? 'needs'
+			: 'ready';
+
 	// --- Restoration precedence (approved navigation) --------------------------
 	// 1. Explicit deep link / current URL wins (any path, pane or project param).
 	// 2. A valid restored global destination for this actor (sessionStorage,
@@ -536,6 +548,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		toggleConvOverlay,
 		setConvOpen,
 		convWidth: { reset: convWidth.reset, frac: convWidth.frac },
+		caddieMood,
 		channel,
 		transport,
 		sendText,
@@ -635,9 +648,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 										aria-label="Show Caddie"
 										onClick={() => setConvOpen(true)}
 									>
-										<span className="conv-avatar" aria-hidden="true">
-											C
-										</span>
+										<Mascot mood={caddieMood} size={36} live />
 									</button>
 								</div>
 							) : null}
@@ -651,9 +662,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 							    desktop gets expand (full-screen chat) and close (the rail). */}
 							<div className="conv-head-float" data-testid="conv-context" data-scope={conversationKind}>
 								<span className="conv-head-left">
-									<span className="conv-avatar" aria-hidden="true">
-										C
-									</span>
+									<Mascot mood={caddieMood} size={30} live />
 									<TalkingAbout conversationKind={conversationKind} label={conversationLabel} />
 								</span>
 								<span className="conv-head-chips">
@@ -1083,6 +1092,7 @@ function MobileNav(props: {
 					<AskBar
 						onOpen={() => setMobileConversation(true)}
 						scopeName={props.conversationKind === 'project' ? (scopeName ?? undefined) : undefined}
+						mood={chrome.caddieMood}
 					/>
 				)}
 			</div>
@@ -1094,7 +1104,7 @@ function MobileNav(props: {
 					aria-current={chatOpen ? 'page' : undefined}
 					search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'channel' as const })}
 				>
-					<Icon name="chat" title="" />
+					<Mascot mood={chrome.caddieMood} size={22} live />
 					Caddie
 				</Link>
 				<Link

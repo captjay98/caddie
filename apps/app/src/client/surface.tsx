@@ -28,7 +28,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from './api.ts';
 import { useWorkspaceChrome } from './workspace/Chrome.tsx';
-import { ProjectTabs, ProjectSubTabs } from './workspace/ProjectTabs.tsx';
+import { ProjectTabs } from './workspace/ProjectTabs.tsx';
 
 /**
  * The routed surfaces for the discovery-first shell.
@@ -67,6 +67,14 @@ function SignInGate(): ReactElement {
  * states, then hands the concrete project id to the body. No fetch of project
  * data happens before the project is resolved.
  */
+/** A quiet gate: renders children only when a project is resolved, without
+ *  state panels of its own — the full ProjectGate next to it owns errors. */
+function ProjectGateSoft(props: { children: (projectId: string) => ReactElement }): ReactElement | null {
+	const chrome = useWorkspaceChrome();
+	if (!chrome.authenticated || !chrome.effectiveProjectId) return null;
+	return props.children(chrome.effectiveProjectId);
+}
+
 function ProjectGate(props: { children: (projectId: string) => ReactElement }): ReactElement | null {
 	const chrome = useWorkspaceChrome();
 	if (!chrome.authenticated) return <SignInGate />;
@@ -422,7 +430,6 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 
 	return (
 		<div className="settings-stack">
-			<ProjectHeader projectId={props.projectId} project={project} nextDeadline={nextDeadline} />
 			<section className="card-surface settings-panel" data-testid="overview-brief">
 				<div className="r-section-head">
 					<div>
@@ -436,14 +443,24 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 						</p>
 					</div>
 					<span className="disc-actions">
-						<Link
-							to="/tasks"
-							className="btn-ghost"
-							data-testid="overview-tasks-entry"
-							search={{ project: props.projectId }}
-						>
-							Tasks
-						</Link>
+						<span className="row-actions">
+							<Link
+								to="/tasks"
+								className="btn-ghost"
+								data-testid="overview-tasks-entry"
+								search={{ project: props.projectId }}
+							>
+								To-dos
+							</Link>
+							<Link
+								to="/schedules"
+								className="btn-ghost"
+								data-testid="overview-schedules-entry"
+								search={{ project: props.projectId }}
+							>
+								Routines
+							</Link>
+						</span>
 					</span>
 				</div>
 				<BriefLane
@@ -459,37 +476,6 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 				/>
 			</section>
 		</div>
-	);
-}
-
-function ProjectHeader(props: {
-	projectId: string;
-	project: Project | null;
-	nextDeadline?: string | null;
-}): ReactElement {
-	const project = props.project;
-	if (!project) return <></>;
-	return (
-		<header className="project-header card-surface" data-testid="project-header" data-project={props.projectId}>
-			<p className="kicker" data-tone="action">
-				PROJECT
-			</p>
-			<h1 className="page-title">{project.name}</h1>
-			{project.contestUrl ? (
-				<p className="page-lede">
-					Linked hackathon: <a href={project.contestUrl} target="_blank" rel="noreferrer noopener">{project.contestUrl}</a>
-				</p>
-			) : (
-				<p className="page-lede muted">No linked hackathon yet.</p>
-			)}
-			{/* Honesty: the project contract has no deadline — milestone deadlines
-			    live in the plan and schedules. State the nearest real one when the
-			    brief knows it; otherwise say so plainly. */}
-			<p className="project-facts mono-id" data-testid="project-facts">
-				status: {project.status} ·{' '}
-				{props.nextDeadline ? `next deadline: ${props.nextDeadline} (in Schedules)` : 'next deadline: none scheduled yet'} · progress: see Build
-			</p>
-		</header>
 	);
 }
 
@@ -532,7 +518,6 @@ export function RunsPage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="build" />
-					<ProjectSubTabs group="build" current="runs" />
 					<ProjectGate>{(projectId) => <RunsBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
@@ -553,6 +538,11 @@ function RunsBody(props: { projectId: string }): ReactElement {
 						BUILD
 					</p>
 					<h2 className="ev-title">Activity</h2>
+					<span className="row-actions">
+						<Link to="/artifacts" className="btn-ghost" data-testid="runs-files-link" search={{ project: props.projectId }}>
+							Files — for developers
+						</Link>
+					</span>
 					<p className="page-lede">
 						What Caddie is doing and what it produced — every run with its state and specialist, and the
 						files each one wrote.
@@ -586,7 +576,6 @@ export function ArtifactsPage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="build" />
-					<ProjectSubTabs group="build" current="artifacts" />
 					<ProjectGate>{(projectId) => <ArtifactsBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
@@ -615,7 +604,6 @@ export function SchedulesPage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="build" />
-					<ProjectSubTabs group="build" current="schedules" />
 					<ProjectGate>{(projectId) => <Schedules projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
@@ -631,7 +619,6 @@ export function TasksPage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="build" />
-					<ProjectSubTabs group="build" current="tasks" />
 					<ProjectGate>{(projectId) => <Tasks projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
@@ -647,7 +634,20 @@ export function SubmissionPage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="submission" />
-					<ProjectSubTabs group="submission" current="submission" />
+					<nav className="row-actions" data-testid="submission-related" aria-label="Related surfaces">
+						<ProjectGateSoft>
+							{(projectId) => (
+								<>
+									<Link to="/evidence" className="btn-ghost" data-testid="submission-evidence-link" search={{ project: projectId }}>
+										Check — proof
+									</Link>
+									<Link to="/judge" className="btn-ghost" data-testid="submission-judge-link" search={{ project: projectId }}>
+										What judges look for
+									</Link>
+								</>
+							)}
+						</ProjectGateSoft>
+					</nav>
 					<ProjectGate>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
@@ -662,7 +662,6 @@ export function EvidencePage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="submission" />
-					<ProjectSubTabs group="submission" current="evidence" />
 					<ProjectGate>
 						{(projectId) => <EvidenceDrawer projectId={projectId} focusClaimType={search.claim} />}
 					</ProjectGate>
@@ -678,7 +677,6 @@ export function JudgePage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="submission" />
-					<ProjectSubTabs group="submission" current="judge" />
 					<ProjectGate>{(projectId) => <JudgeScorecard projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>

@@ -1,6 +1,8 @@
 import type { ReactElement } from 'react';
 import { Icon } from '../icons.tsx';
 import { ASK_BAR_PLACEHOLDER } from '../copy.ts';
+import type { MascotMood } from '@caddie/ui/Mascot';
+import { Mascot } from '@caddie/ui/Mascot';
 
 /**
  * AskBar — the mobile "Ask Caddie…" affordance (v2 shell, HANDOFF §3.4).
@@ -18,6 +20,8 @@ export function AskBar(props: {
 	onOpen: () => void;
 	/** What the opened chat will be about, e.g. a project name. */
 	scopeName?: string;
+	/** Caddie's current mood, from real state (U03). */
+	mood?: MascotMood;
 }): ReactElement {
 	const placeholder = props.scopeName ? `Ask about ${props.scopeName}…` : ASK_BAR_PLACEHOLDER;
 	return (
@@ -28,9 +32,7 @@ export function AskBar(props: {
 			aria-label={`Ask Caddie — opens the chat${props.scopeName ? ` about ${props.scopeName}` : ''}`}
 			onClick={props.onOpen}
 		>
-			<span className="conv-avatar ask-bar-mark" aria-hidden="true">
-				C
-			</span>
+			<Mascot mood={props.mood ?? 'ready'} size={30} live className="ask-bar-mark" />
 			<span className="ask-bar-ph">{placeholder}</span>
 			<span className="ask-bar-go" aria-hidden="true">
 				<Icon name="send" title="" />

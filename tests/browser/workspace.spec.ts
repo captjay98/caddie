@@ -337,10 +337,12 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await page.goto(`${BASE}/app/project?project=proj-a`);
 
 		await expect(page.getByTestId('project-tabs')).toBeVisible();
-		await expect(page.getByTestId('project-tab-overview')).toHaveAttribute('aria-current', 'page');
+		// v2: Overview orients above the four steps (Plan/Build/Check/Share);
+		// no step is current on Overview.
+		await expect(page.locator('.project-step.current')).toHaveCount(0);
 		await page.getByTestId('project-tab-build').click();
 		await expect(page).toHaveURL(/\/app\/runs\?project=proj-a$/); // the binding is preserved
-		await expect(page.getByTestId('sub-tab-activity')).toBeVisible();
+		await expect(page.getByTestId('project-tab-build')).toHaveAttribute('aria-current', 'page');
 		await expect(page.getByTestId('run-row')).toHaveCount(1);
 		await expect(page.getByTestId('run-row')).toContainText('react-hono');
 		await page.getByTestId('run-detail-toggle').click();

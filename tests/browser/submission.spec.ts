@@ -558,9 +558,9 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		await expect(page).toHaveURL(/\/app\/submission\?project=proj-a$/);
 		await expect(page.locator('section[aria-label="Submission package"]')).toBeVisible();
 
-		// The submission sub-strip reaches the judge review surface, keeping the
-		// same ?project= so the conversation never retargets.
-		await page.getByTestId('sub-tab-judge').click();
+		// The v2 related-surface links reach the judge surface, keeping the same
+		// ?project= so the conversation never retargets.
+		await page.getByTestId('submission-judge-link').click();
 		await expect(page).toHaveURL(/\/app\/judge\?project=proj-a$/);
 		await expect(page.locator('section[aria-label="Judge scorecard"]')).toBeVisible();
 		await context.close();

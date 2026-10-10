@@ -5,7 +5,9 @@
 	"exports": {
 		"./tokens.css": "./src/tokens.css",
 		"./markdown.css": "./src/markdown.css",
+		"./mascot.css": "./src/mascot.css",
 		"./Markdown": "./src/Markdown.tsx",
+		"./Mascot": "./src/Mascot.tsx",
 		"./time": "./src/time.ts"
 	},
 	"dependencies": {
