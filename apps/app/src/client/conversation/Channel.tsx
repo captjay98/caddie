@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import type { FlueConversationMessage, FlueConversationPart } from '@flue/react';
 import { safeParse } from 'valibot';
 import { DecisionCardSchema, type DecisionCard as DecisionCardType } from '@caddie/contracts';
+import { ApprovalCardData, ApprovalCardView } from './ApprovalCard.tsx';
 import { Markdown } from '@caddie/ui/Markdown';
 import { StatePanel } from '../states.tsx';
 import { Icon } from '../icons.tsx';
@@ -200,6 +201,20 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 			);
 		}
 		return <DecisionCardView card={parsed.output} />;
+	}
+	if (part.type === 'data-approvalCard') {
+		// B06: the in-chat "OK to spend?" card. Its identity is the SERVER
+		// approval id; Allow / Not now POST the authenticated decision route
+		// and the card state reloads from the server.
+		const parsed = safeParse(ApprovalCardData, part.data);
+		if (!parsed.success) {
+			return (
+				<p className="tool-banner" data-state="output-error" data-testid="approval-payload-fault">
+					[card] payload did not match the approval card contract — not rendered as an action
+				</p>
+			);
+		}
+		return <ApprovalCardView data={parsed.output} />;
 	}
 	// any other data-* part: display-only collapsed disclosure
 	const name = part.type.slice('data-'.length) || 'note';

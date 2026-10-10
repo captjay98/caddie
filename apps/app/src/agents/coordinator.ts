@@ -2,6 +2,7 @@
 import {
 	sandboxFromDriver,
 	useAgentFinish,
+	useDataWriter,
 	useInstruction,
 	useModel,
 	useSandbox,
@@ -10,6 +11,7 @@ import {
 	useTool,
 	type SandboxDriver,
 } from '@flue/runtime';
+import * as v from 'valibot';
 import { findModelRoute } from './providers.ts';
 import { makeCreateProject, makeListStacks, makeRecordAcceptance } from './tools.ts';
 import { PACKAGED_SKILLS } from './skills.ts';
@@ -71,6 +73,16 @@ let hostContext:
 			}>;
 			/** Home runs only: the honest stack catalog (src/server/stacks.ts). */
 			listStacks?: () => Promise<readonly { id: string; status: string; note?: string }[]>;
+			/** B06: create a PENDING approval (the agent-facing request bridge).
+			 *  Returns the approval id; the user's Allow / Not now decision goes
+			 *  through the authenticated REST route — never through chat text. */
+			requestApproval?: (input: {
+				projectId: string;
+				action: string;
+				resourceId: string;
+				revisionHash: string;
+				policyVersion: string;
+			}) => Promise<{ id: string; expiresAt: string }>;
 	  })
 	| null = null;
 
@@ -87,6 +99,13 @@ export function provideCoordinatorContext(
 			workspaceId: string;
 		}>;
 		listStacks?: () => Promise<readonly { id: string; status: string; note?: string }[]>;
+		requestApproval?: (input: {
+			projectId: string;
+			action: string;
+			resourceId: string;
+			revisionHash: string;
+			policyVersion: string;
+		}) => Promise<{ id: string; expiresAt: string }>;
 	},
 ): void {
 	hostContext = context;
@@ -130,6 +149,60 @@ export function Coordinator() {
 		useSubagent(declaration);
 	}
 	useTool(makeRecordAcceptance(currentRevision));
+
+	// B06 — the in-chat "OK to spend?" card. The coordinator writes a typed
+	// data part carrying the SERVER approval id and the plan's spend cap; the
+	// card's Allow / Not now buttons call the authenticated approvals REST
+	// route, and the card state reloads from the server. Chat text can never
+	// approve anything: only a card backed by a server approval id acts.
+	const writeApprovalCard = useDataWriter('approvalCard', {
+		schema: v.object({
+			approvalId: v.string(),
+			projectId: v.string(),
+			what: v.string(),
+			capMinorUnits: v.nullable(v.number()),
+			currency: v.nullable(v.string()),
+			status: v.picklist(['pending', 'approved', 'rejected', 'expired']),
+		}),
+	});
+	if (requireHostContext().requestApproval) {
+		const requestApproval = requireHostContext().requestApproval;
+		useTool({
+			name: 'request_approval',
+			description:
+				'Ask the user to approve a spend or a plan action. Creates a PENDING approval on the server and shows an approval card in the chat. Call this BEFORE any work that needs user authorization; never claim the user approved something without this card being approved on the server.',
+			input: v.object({
+				projectId: v.string(),
+				action: v.string(),
+				resourceId: v.string(),
+				revisionHash: v.string(),
+				policyVersion: v.string(),
+				what: v.string(),
+				capMinorUnits: v.optional(v.nullable(v.number())),
+				currency: v.optional(v.nullable(v.string())),
+			}),
+			async run({ data }) {
+				const bridge = requireHostContext().requestApproval;
+				if (!bridge) return 'approvals are not available in this run';
+				const approval = await bridge({
+					projectId: data.projectId,
+					action: data.action,
+					resourceId: data.resourceId,
+					revisionHash: data.revisionHash,
+					policyVersion: data.policyVersion,
+				});
+				writeApprovalCard({
+					approvalId: approval.id,
+					projectId: data.projectId,
+					what: data.what,
+					capMinorUnits: data.capMinorUnits ?? null,
+					currency: data.currency ?? null,
+					status: 'pending',
+				});
+				return `Approval requested (id ${approval.id}). The user decides with the card in the chat; check its status with read_approval before proceeding.`;
+			},
+		});
+	}
 
 	// Home conversation capabilities (product charter: the chat is the
 	// universal interface): the home chat creates projects and answers
