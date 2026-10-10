@@ -47,6 +47,27 @@ export default {
 				return Response.json({ error: String(error) }, { status: 500 });
 			}
 		}
+		// Test-only control route: run the REAL B03 flip helper against this
+		// worker's D1 (in production the flip fires from the deploy path).
+		if (url.pathname === '/__test/notify-stack-enabled' && request.method === 'POST') {
+			const body = (await request.json()) as { stackId?: string };
+			const { STACK_CATALOG, notifyStackEnabled } = await import('../../apps/app/src/server/stacks.ts');
+			const entry = STACK_CATALOG.find((c) => c.id === body.stackId);
+			if (!entry) return Response.json({ error: 'no such stack' }, { status: 404 });
+			// Simulate the deploy flip: the catalog is code-defined, so a real
+			// flip is a deploy. Flip → notify → restore, contained in this
+			// fixture process only.
+			const original = entry.status;
+			entry.status = 'enabled';
+			try {
+				const result = await notifyStackEnabled(env.DB, String(body.stackId ?? ''));
+				return Response.json(result);
+			} catch (error) {
+				return Response.json({ error: String(error) }, { status: 500 });
+			} finally {
+				entry.status = original;
+			}
+		}
 		if (url.pathname === '/__test/d1' && request.method === 'POST') {
 			const body = (await request.json()) as { sql?: string };
 			if (!body.sql) return Response.json({ error: 'sql required' }, { status: 400 });

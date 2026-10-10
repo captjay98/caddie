@@ -14,7 +14,13 @@ import {
 	proposeMemoryFact,
 	retractMemoryFact,
 } from '../memory.ts';
-import { STACK_CATALOG } from '../stacks.ts';
+import {
+	STACK_CATALOG,
+	StackNotifyError,
+	listStackNotifySubscriptions,
+	subscribeStackNotify,
+	unsubscribeStackNotify,
+} from '../stacks.ts';
 
 /**
  * P14 profile/memory/search router — every route derives its user id
@@ -49,6 +55,11 @@ type Env = ProfileEnv;
 
 function errorJson(error: unknown): { status: number; body: { error: string; message?: string } } {
 	if (error instanceof ScopeError) {
+		return { status: error.status, body: { error: error.code, message: error.message } };
+	}
+	// B03: typed stack notify refusals (already enabled, unknown stack) map
+	// exactly like ScopeErrors.
+	if (error instanceof StackNotifyError) {
 		return { status: error.status, body: { error: error.code, message: error.message } };
 	}
 	console.error('unhandled profile route error:', error);
@@ -234,6 +245,25 @@ export function createProfileRouter(): Hono<{ Bindings: Env }> {
 	// --- enabled stacks (honest, no inherited pricing or fake availability) -----
 
 	router.get('/stacks', (c) => c.json({ stacks: STACK_CATALOG }));
+
+	// B03 — "Tell me when it's ready" for a planned stack. Subscribing to an
+	// enabled stack is a typed 409 (the notification would never fire).
+	router.post('/stacks/:stackId/notify', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const sub = await subscribeStackNotify(c.env.DB, actorId, c.req.param('stackId') ?? '');
+		return c.json({ subscription: sub }, 200);
+	});
+
+	router.delete('/stacks/:stackId/notify', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const result = await unsubscribeStackNotify(c.env.DB, actorId, c.req.param('stackId') ?? '');
+		return c.json(result);
+	});
+
+	router.get('/stacks/notify', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		return c.json({ subscriptions: await listStackNotifySubscriptions(c.env.DB, actorId) });
+	});
 
 	return router;
 }

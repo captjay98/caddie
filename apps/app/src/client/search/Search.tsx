@@ -21,7 +21,7 @@ import { WORDS } from '../copy.ts';
  */
 
 interface SearchHit {
-	type: 'project' | 'planDoc' | 'task' | 'memory';
+	type: 'project' | 'planDoc' | 'task' | 'memory' | 'hackathon';
 	id: string;
 	projectId: string | null;
 	title: string;
@@ -44,6 +44,7 @@ const SECTION_LABELS: Record<string, string> = {
 	planDocs: 'Plan',
 	tasks: 'To-do',
 	memory: 'Caddie knows',
+	hackathons: 'Hackathon',
 };
 
 const PAGE_SIZE = 5; // v2 results: 5 per page with "1–5 of 7" + Previous/Next
@@ -57,6 +58,8 @@ function hitDestination(hit: SearchHit): {
 	switch (hit.type) {
 		case 'project':
 			return { to: '/project', search: { project: hit.id } };
+		case 'hackathon':
+			return { to: '/discover', search: {} };
 		case 'planDoc':
 			return { to: '/design-review', search: { project: project ?? undefined } };
 		case 'task':
@@ -227,7 +230,7 @@ export function Search(): ReactElement {
 			) : (
 				<div data-testid="search-results">
 					{/* v2 filter chips with counts (§4) — real counts from the server's
-					    section totals; no hackathon chip until the server supports it. */}
+					    section totals (B02 added the hackathon section). */}
 					{(() => {
 						const sections = results.data?.sections;
 						if (!sections) return null;

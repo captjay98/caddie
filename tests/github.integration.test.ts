@@ -171,6 +171,7 @@ beforeAll(async () => {
 		join(REPO_ROOT, 'apps/app/migrations/0011_home_project.sql'),
 		join(REPO_ROOT, 'apps/app/migrations/0012_brief_read.sql'),
 		join(REPO_ROOT, 'apps/app/migrations/0013_discovery_saved.sql'),
+		join(REPO_ROOT, 'apps/app/migrations/0014_stack_notify.sql'),
 	]);
 
 	ALICE = await signIn(worker, idp, ALICE_EMAIL, 'alice-p08', 'Alice');
