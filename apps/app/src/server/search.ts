@@ -33,10 +33,10 @@ export const DEFAULT_SECTION_LIMIT = 10;
 export const MAX_SECTION_LIMIT = 50;
 const MAX_QUERY_LENGTH = 200;
 
-export type SearchSectionName = 'projects' | 'planDocs' | 'tasks' | 'memory';
+export type SearchSectionName = 'projects' | 'planDocs' | 'tasks' | 'memory' | 'hackathons';
 
 export interface SearchHit {
-	type: 'project' | 'planDoc' | 'task' | 'memory';
+	type: 'project' | 'planDoc' | 'task' | 'memory' | 'hackathon';
 	id: string;
 	projectId: string | null;
 	title: string;
@@ -219,6 +219,34 @@ const SECTIONS: SectionSpec[] = [
 			snippet: null,
 		}),
 	},
+	{
+		// B02: saved and accepted discovery candidates as hackathon hits. The
+		// permission predicate mirrors the projects section (membership join on
+		// the candidate's project), so counts never include other accounts'.
+		name: 'hackathons',
+		itemsSql: `select c."id", c."projectId", c."title", c."summary", c."url"
+			from "discovery_candidates" c
+			join "projects" p on p."id" = c."projectId"
+			join "workspace_memberships" m on m."workspaceId" = p."workspaceId" and m."userId" = ?
+			where (c."status" = 'accepted' or c."savedAt" is not null)
+			  and (c."title" like ? escape '\\' or c."summary" like ? escape '\\')
+			order by c."updatedAt" desc, c."id" desc limit ? offset ?`,
+		countSql: `select count(*) as "n"
+			from "discovery_candidates" c
+			join "projects" p on p."id" = c."projectId"
+			join "workspace_memberships" m on m."workspaceId" = p."workspaceId" and m."userId" = ?
+			where (c."status" = 'accepted' or c."savedAt" is not null)
+			  and (c."title" like ? escape '\\' or c."summary" like ? escape '\\')`,
+		params: (actorId, pattern, limit, offset) => [actorId, pattern, pattern, limit, offset],
+		countParams: (actorId, pattern) => [actorId, pattern, pattern],
+		map: (row) => ({
+			type: 'hackathon',
+			id: String(row['id']),
+			projectId: String(row['projectId']),
+			title: String(row['title']),
+			snippet: excerpt(String(row['summary'])),
+		}),
+	},
 ];
 
 // --- service -----------------------------------------------------------------------
@@ -251,6 +279,7 @@ export async function searchContent(
 		planDocs: emptySection(),
 		tasks: emptySection(),
 		memory: emptySection(),
+		hackathons: emptySection(),
 	};
 	let total = 0;
 

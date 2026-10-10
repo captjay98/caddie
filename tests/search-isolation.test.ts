@@ -150,6 +150,33 @@ beforeAll(async () => {
 		 select 'p14-search-carol', '${aliceWs.workspace.id}', (select "id" from "user" where email = 'carol@example.com'), 'member', '2026-10-05T00:00:00.000Z'`,
 	);
 
+	// B02: discovery candidates — alice's are accepted/saved (searchable);
+	// bob's is a plain 'new' candidate (NOT searchable); carol, as a member
+	// of alice's workspace, can see alice's.
+	await d1Exec(
+		WORKER_BASE,
+		`insert into "discovery_feed_runs" ("id","projectId","requestedBy","requestedAt")
+		 select 'p14-feed-a', '${aliceProject.project.id}', (select "id" from "user" where email = 'alice@example.com'), '2026-10-05T00:00:00.000Z'`,
+	);
+	await d1Exec(
+		WORKER_BASE,
+		`insert into "discovery_candidates" ("id","projectId","source","url","title","summary","status","savedAt","feedRunId","firstSeenAt","updatedAt")
+		 values
+		 ('p14-cand-acc', '${aliceProject.project.id}', 'local-seed', 'https://contest.example/alpha-cup', 'Alpha Cup', 'A robotics contest about alpha telemetry.', 'accepted', null, 'p14-feed-a', '2026-10-05', '2026-10-05'),
+		 ('p14-cand-sav', '${aliceProject.project.id}', 'local-seed', 'https://contest.example/orbital-prize', 'Orbital Prize', 'An orbital challenge with prize money.', 'new', '2026-10-06T00:00:00.000Z', 'p14-feed-a', '2026-10-05', '2026-10-06'),
+		 ('p14-cand-new', '${aliceProject.project.id}', 'local-seed', 'https://contest.example/unlisted', 'Unlisted Contest', 'A plain candidate nobody saved.', 'new', null, 'p14-feed-a', '2026-10-05', '2026-10-05')`,
+	);
+	await d1Exec(
+		WORKER_BASE,
+		`insert into "discovery_feed_runs" ("id","projectId","requestedBy","requestedAt")
+		 select 'p14-feed-b', '${bobProject.project.id}', (select "id" from "user" where email = 'bob@example.com'), '2026-10-05T00:00:00.000Z'`,
+	);
+	await d1Exec(
+		WORKER_BASE,
+		`insert into "discovery_candidates" ("id","projectId","source","url","title","summary","status","feedRunId","firstSeenAt","updatedAt")
+		 values ('p14-cand-bob', '${bobProject.project.id}', 'local-seed', 'https://contest.example/alpha-secret', 'Alpha Secret Cup', 'Bob never saved or accepted this.', 'new', 'p14-feed-b', '2026-10-05', '2026-10-05')`,
+	);
+
 	seeded = {
 		alice,
 		bob,
@@ -168,6 +195,41 @@ beforeAll(async () => {
 afterAll(async () => {
 	stopProfileFixture(WORKER_PORT);
 	await stub.stop();
+});
+
+describe('B02 search: hackathon section — saved and accepted candidates only, scoped', () => {
+	test('alice sees her saved and accepted candidates; the plain new one and bob\u2019s never appear', async () => {
+		const { status, body } = await search(seeded.alice, 'alpha');
+		expect(status).toBe(200);
+		const r = body as SearchResponse;
+		// Only the ACCEPTED candidate matches "alpha"; the saved one (Orbital
+		// Prize) matches a different query — saved+accepted are searchable.
+		const hackathonIds = ids(r.sections.hackathons);
+		expect(hackathonIds).toEqual(['p14-cand-acc']);
+		// Counts share the permission predicate: bob's candidate is never counted.
+		expect(r.sections.hackathons.total).toBe(1);
+		// The saved candidate is searchable by its own summary.
+		const prize = await search(seeded.alice, 'prize');
+		const prizeBody = prize.body as SearchResponse;
+		expect(ids(prizeBody.sections.hackathons)).toEqual(['p14-cand-sav']);
+	});
+
+	test('a plain (unsaved, unaccepted) candidate is not searchable', async () => {
+		const { body } = await search(seeded.alice, 'Unlisted');
+		const r = body as SearchResponse;
+		expect(r.sections.hackathons.total).toBe(0);
+	});
+
+	test('carol (member of alice\u2019s workspace) sees alice\u2019s candidates; bob never does', async () => {
+		const carolRes = await search(seeded.carol, 'alpha');
+		const carolBody = carolRes.body as SearchResponse;
+		expect(ids(carolBody.sections.hackathons)).toEqual(['p14-cand-acc']);
+
+		const bobRes = await search(seeded.bob, 'alpha');
+		const bobBody = bobRes.body as SearchResponse;
+		expect(ids(bobBody.sections.hackathons)).toEqual(['p14-cand-bob'].filter(() => false));
+		expect(bobBody.sections.hackathons.total).toBe(0);
+	});
 });
 
 // --- helpers ---------------------------------------------------------------------
@@ -204,7 +266,7 @@ describe('P14 search: isolation matrix — results and counts cover exactly the 
 		expect(r.sections.planDocs.total).toBe(2);
 		expect(r.sections.tasks.total).toBe(1);
 		expect(r.sections.memory.total).toBe(2);
-		expect(r.total).toBe(6);
+		expect(r.total).toBe(7); // + the accepted hackathon hit
 	});
 
 	test('bob searching "alpha" sees exactly his own content, never alice\u2019s', async () => {
