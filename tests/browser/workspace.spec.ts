@@ -622,7 +622,8 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 			}),
 		);
 		await page.getByTestId('account-usage').click();
-		await expect(page).toHaveURL(/\/app\/usage$/);
+		// v2 (U08): the account menu routes to Settings › Spending.
+		await expect(page).toHaveURL(/\/app\/settings\?tab=spending$/);
 		// Usage reads the real budget read model (audit F11/S40): the payer
 		// limit plus reserved/settled totals — no fabricated numbers.
 		await expect(page.getByTestId('usage-panel')).toBeVisible();

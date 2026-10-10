@@ -1,8 +1,34 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useCreateProject } from '../queries.ts';
+import { useAuthStatus, useCreateProject, useSessionActor } from '../queries.ts';
 import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
+import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
+
+/** Storage key for the name the user gave Caddie in the welcome (v2 §4). */
+export const PROFILE_NAME_KEY = 'caddie:profile-name';
+
+/**
+ * The suggested first name (§4 Welcome): take the first word of the account
+ * name — but a single token containing digits or symbols is a username, not a
+ * name, so it suggests nothing (the input stays empty).
+ */
+export function suggestFirstName(full: string | null | undefined): string {
+	const cleaned = String(full ?? '').trim().replace(/\s+/g, ' ').slice(0, 40);
+	if (!cleaned) return '';
+	if (!cleaned.includes(' ') && /[\d_.\-]/.test(cleaned)) return '';
+	return cleaned.split(' ')[0] ?? '';
+}
+
+export function saveProfileName(name: string): void {
+	try {
+		const trimmed = name.trim().slice(0, 40);
+		if (trimmed) localStorage.setItem(PROFILE_NAME_KEY, trimmed);
+		else localStorage.removeItem(PROFILE_NAME_KEY);
+	} catch {
+		// private mode: the name stays session-only
+	}
+}
 
 /**
  * Onboarding entry — three ways to start, in the order the product promises
@@ -17,6 +43,181 @@ import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
  * Rendered inside the shell layout's chrome on the zero-project Home branch
  * and on /onboarding; never opens its own `<main>`.
  */
+
+/**
+ * The welcome intro (v2, HANDOFF §4 Welcome): Caddie introduces itself one
+ * line at a time with its face changing per line, asks what to call you
+ * (prefilled from the account, never a username), then shows the three moods,
+ * then hands off to the start paths. "Say that again" replays;
+ * prefers-reduced-motion shows all lines at once. The saved name is the
+ * profile name used by the account menu (chat greeting wires up as the
+ * surfaces adopt it); React escapes it everywhere it renders.
+ */
+export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
+	const sessionName = useSessionName();
+	const reduceMotion =
+		typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+	const LINES: { text: string; mood: MascotMood }[] = [
+		{ text: 'Hi — I\u2019m Caddie.', mood: 'ready' },
+		{ text: 'I read the rules, draft the plan, and build it.', mood: 'thinking' },
+		{ text: 'You approve every step, and I ask before spending anything.', mood: 'done' },
+	];
+
+	const [line, setLine] = useState(reduceMotion ? LINES.length - 1 : 0);
+	useEffect(() => {
+		if (reduceMotion || line >= LINES.length - 1) return;
+		const timer = window.setTimeout(() => setLine((value) => value + 1), 1500);
+		return () => window.clearTimeout(timer);
+	}, [line, reduceMotion, LINES.length]);
+
+	const [stage, setStage] = useState<'intro' | 'name' | 'faces'>('intro');
+	const suggested = suggestFirstName(sessionName);
+	const [name, setName] = useState('');
+	const [usernameHint, setUsernameHint] = useState(false);
+
+	useEffect(() => {
+		if (stage === 'name') {
+			setName(suggested);
+			setUsernameHint(suggested === '' && Boolean(sessionName));
+		}
+	}, [stage, suggested, sessionName]);
+
+	if (stage === 'intro') {
+		return (
+			<section className="card-surface start-card welcome-intro" data-testid="welcome-intro">
+				<span className="welcome-intro-face" aria-hidden="true">
+					<Mascot mood={LINES[line]!.mood} size={64} live />
+				</span>
+				<div aria-live="polite">
+					{LINES.slice(0, line + 1).map((entry) => (
+						<p key={entry.text} className="start-lede">
+							{entry.text}
+						</p>
+					))}
+				</div>
+				<div className="row-actions">
+					<button
+						type="button"
+						className="btn-key"
+						data-testid="welcome-next"
+						onClick={() => setStage('name')}
+					>
+						Next
+					</button>
+					<button
+						type="button"
+						className="btn-ghost"
+						data-testid="welcome-replay"
+						onClick={() => setLine(reduceMotion ? LINES.length - 1 : 0)}
+					>
+						Say that again
+					</button>
+				</div>
+			</section>
+		);
+	}
+
+	if (stage === 'name') {
+		return (
+			<section className="card-surface start-card welcome-intro" data-testid="welcome-name">
+				<span className="welcome-intro-face" aria-hidden="true">
+					<Mascot mood="listening" size={64} live />
+				</span>
+				<h3 className="start-card-title">What should I call you?</h3>
+				{sessionName ? (
+					<p className="state-detail">From your account. Change it if you like.</p>
+				) : (
+					<p className="state-detail">Caddie greets you by this name.</p>
+				)}
+				<input
+					className="input"
+					data-testid="welcome-name-input"
+					value={name}
+					maxLength={40}
+					onChange={(event) => setName(event.target.value)}
+				/>
+				{usernameHint ? (
+					<p className="state-detail">Your account name looks like a username, so I left this blank.</p>
+				) : null}
+				<div className="row-actions">
+					<button
+						type="button"
+						className="btn-key"
+						data-testid="welcome-name-save"
+						onClick={() => {
+							saveProfileName(name);
+							setStage('faces');
+						}}
+					>
+						Continue
+					</button>
+					<button
+						type="button"
+						className="btn-ghost"
+						data-testid="welcome-name-skip"
+						onClick={() => {
+							saveProfileName('');
+							setStage('faces');
+						}}
+					>
+						Skip — I&rsquo;ll add it later
+					</button>
+				</div>
+			</section>
+		);
+	}
+
+	return (
+		<section className="card-surface start-card welcome-intro" data-testid="welcome-faces">
+			<div className="welcome-faces">
+				<span className="welcome-face">
+					<Mascot mood="building" size={56} live />
+					<b>Building</b>
+					<small>Caddie writes the code</small>
+				</span>
+				<span className="welcome-face">
+					<Mascot mood="needs" size={56} live />
+					<b>Needs you</b>
+					<small>A plan waits for your OK</small>
+				</span>
+				<span className="welcome-face">
+					<Mascot mood="done" size={56} live />
+					<b>Done</b>
+					<small>You can try what it built</small>
+				</span>
+			</div>
+			<div className="row-actions">
+				<button type="button" className="btn-key" data-testid="welcome-go" onClick={props.onDone}>
+					Let&rsquo;s go
+				</button>
+			</div>
+		</section>
+	);
+}
+
+/** The verified session's account name (for the welcome prefill suggestion). */
+function useSessionName(): string | null {
+	const auth = useAuthStatus();
+	const actor = useSessionActor(Boolean(auth.data?.authenticated));
+	const [name, setName] = useState<string | null>(null);
+	useEffect(() => {
+		let cancelled = false;
+		if (!actor.data) return;
+		void fetch('/api/auth/get-session', { credentials: 'same-origin' })
+			.then((res) => (res.ok ? res.json() : null))
+			.then((body: { user?: { name?: unknown } } | null) => {
+				if (cancelled) return;
+				const value = body?.user?.name;
+				setName(typeof value === 'string' && value.trim() !== '' ? value : null);
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, [actor.data]);
+	return name;
+}
 
 function StartCard(props: {
 	testId: string;

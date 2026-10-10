@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import { Link, Outlet, createBrowserHistory, createRootRoute, createRoute, createRouter, redirect, useMatches } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
 import { WorkspaceChrome, type WorkspaceNavId } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
-import { Start, IdeaForm } from './onboarding/Start.tsx';
+import { Start, IdeaForm, WelcomeIntro } from './onboarding/Start.tsx';
 import { ProjectSettingsPage } from './settings/ProjectSettings.tsx';
+import { Mascot } from '@caddie/ui/Mascot';
 import {
 	DiscoverPage,
 	ProjectsPage,
@@ -31,23 +33,42 @@ import {
  * persistent conversation is always present with an explicit context label.
  */
 
+function OnboardingFlow(): ReactElement {
+	const [stage, setStage] = useState<'welcome' | 'start'>('welcome');
+	return (
+		<div className="shell-loading shell-page">
+			<div className="page-col">
+				{stage === 'welcome' ? (
+					<WelcomeIntro onDone={() => setStage('start')} />
+				) : (
+					<Start ideaForm={<IdeaForm />} />
+				)}
+			</div>
+		</div>
+	);
+}
+
 const rootRoute = createRootRoute({
 	component: () => <Outlet />,
 	notFoundComponent: function WorkspaceNotFound() {
 		return (
 			<WorkspaceChrome nav="none">
 				<div className="shell-loading">
-					<section className="state-panel card-surface">
+					<section className="state-panel card-surface" data-testid="not-found">
+						<span className="state-mascot" aria-hidden="true">
+							<Mascot mood="stuck" size={56} />
+						</span>
 						<p className="kicker" data-tone="error">
 							NOT FOUND
 						</p>
-						<h3 className="state-title">This workspace path does not exist</h3>
+						<h3 className="state-title">We couldn't find that page</h3>
 						<p className="state-detail">
-							Everything lives under the workspace root: <Link to="/">open the workspace</Link>.
+							The link may be old or mistyped. Your work is safe — everything lives in the workspace:{' '}
+							<Link to="/">open the workspace</Link>.
 						</p>
 						<p className="state-detail">
-							Paths under <code>/app</code> are the SPA; anything else returns the landing page — two halves, one
-							product.
+							Paths under <code>/app</code> are the app; anything else returns the landing page — two halves,
+							one product.
 						</p>
 					</section>
 				</div>
@@ -170,10 +191,20 @@ const projectRoute = createRoute({
 
 // --- account surfaces ----------------------------------------------------------
 
+/** /search accepts ?q=<query> — the results page is a real URL (v2 §4). */
+function validateSearchQuery(search: Record<string, unknown>): { project?: string; pane?: 'channel' | 'brief' | 'runs'; q?: string } {
+	const base = validateSearch(search);
+	const q = search.q;
+	return {
+		...base,
+		...(typeof q === 'string' && q.trim() !== '' ? { q: q.slice(0, 200) } : {}),
+	};
+}
+
 const searchRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/search',
-	validateSearch,
+	validateSearch: validateSearchQuery,
 	staticData: { nav: 'account' },
 	component: SearchPage,
 });
@@ -241,15 +272,9 @@ const onboardingRoute = createRoute({
 	validateSearch,
 	staticData: { nav: 'account' },
 	component: function OnboardingPage() {
-		// The idea capture (audit S17) is the real primary path here: name +
-		// plain-words idea -> one project -> straight into it.
-		return (
-			<div className="shell-loading shell-page">
-				<div className="page-col">
-					<Start ideaForm={<IdeaForm />} />
-				</div>
-			</div>
-		);
+		// v2 (§4 Welcome): Caddie introduces itself and asks what to call you,
+		// THEN the three start paths (idea capture is the real primary, S17).
+		return <OnboardingFlow />;
 	},
 });
 

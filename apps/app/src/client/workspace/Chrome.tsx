@@ -54,6 +54,7 @@ import { useCoordinatorTransport, type CoordinatorTransport } from '../coordinat
 import { briefActionRoute } from '../brief/navigate.ts';
 import { ConvResizeHandle, useConvWidth } from './ConvResize.tsx';
 import { AskBar } from './AskBar.tsx';
+import { QuickSearch, useQuickSearchHotkey } from '../search/QuickSearch.tsx';
 import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
 import { WORDS } from '../copy.ts';
 import {
@@ -220,6 +221,9 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	const sessionEmail = useSessionEmail();
 	const [theme, setTheme] = useState<'light' | 'dark'>(currentTheme);
 	const [accountOpen, setAccountOpen] = useState(false);
+	const [quickSearchOpen, setQuickSearchOpen] = useState(false);
+	const openQuickSearch = () => setQuickSearchOpen(true);
+	useQuickSearchHotkey(openQuickSearch);
 	const { mode: viewportMode, isDesktop } = useViewportMode();
 
 	// The account brief (approved navigation 2026-10-09): ONE shared cache
@@ -585,6 +589,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 										unseenCount={unseenCount}
 										showConvToggle={viewportMode === 'tablet'}
 										convOpen={tabletOpen}
+										onQuickSearch={openQuickSearch}
 									/>
 								)
 							) : (
@@ -806,6 +811,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 						/>
 					) : null}
 			</div>
+			<QuickSearch open={quickSearchOpen} onClose={() => setQuickSearchOpen(false)} />
 		</WorkspaceChromeContext.Provider>
 	);
 }
@@ -834,6 +840,7 @@ function NavCapsule(props: {
 	unseenCount: number;
 	showConvToggle?: boolean;
 	convOpen?: boolean;
+	onQuickSearch?: () => void;
 }): ReactElement {
 	const { theme, toggleTheme, toggleConvOverlay } = useWorkspaceChrome();
 	return (
@@ -873,15 +880,16 @@ function NavCapsule(props: {
 					Caddie
 				</button>
 			) : null}
-			<Link
-				to="/search"
+			<button
+				type="button"
 				className="capsule-icon"
 				data-testid="nav-search"
-				title="Search your projects, plans, tasks and memory"
-				search={keepSearch}
+				title="Quick search (⌘K)"
+				aria-label="Quick search"
+				onClick={props.onQuickSearch}
 			>
 				<Icon name="search" title="Search" />
-			</Link>
+			</button>
 			<button
 				type="button"
 				className="capsule-icon theme-toggle-btn"
@@ -981,6 +989,16 @@ function AccountMenu(props: {
 }): ReactElement {
 	const { signOut, theme, toggleTheme } = useWorkspaceChrome();
 	const email = useSessionEmail().data ?? null;
+	// The name the user gave Caddie in the welcome (v2 §4) is used everywhere
+	// the account name appears; the session name is the fallback.
+	const savedName = (() => {
+		try {
+			return localStorage.getItem('caddie:profile-name');
+		} catch {
+			return null;
+		}
+	})();
+	const shownName = (savedName && savedName.trim() !== '' ? savedName : props.displayName) ?? null;
 	return (
 		<div
 			className="account-menu"
@@ -994,11 +1012,11 @@ function AccountMenu(props: {
 				aria-label="Account"
 				aria-expanded={props.accountOpen}
 				data-testid="account-menu"
-				title={props.displayName ?? 'Account'}
+				title={shownName ?? 'Account'}
 				onClick={() => props.setAccountOpen(!props.accountOpen)}
 			>
-				{props.displayName ? (
-					<span className="avatar-initial">{props.displayName.trim()[0]!.toUpperCase()}</span>
+				{shownName ? (
+					<span className="avatar-initial">{shownName.trim()[0]!.toUpperCase()}</span>
 				) : (
 					<Icon name="user" title="Account" />
 				)}
@@ -1006,7 +1024,7 @@ function AccountMenu(props: {
 			{props.accountOpen ? (
 				<div className="account-menu-pop" role="menu" data-testid="account-menu-pop">
 					<div className="account-menu-head" data-testid="account-menu-head">
-						<span className="account-menu-name">{props.displayName ?? 'Your account'}</span>
+						<span className="account-menu-name" data-testid="account-menu-name">{shownName ?? 'Your account'}</span>
 						{email ? <span className="account-menu-email">{email}</span> : null}
 					</div>
 					<Link to="/search" search={keepSearch} role="menuitem" data-testid="account-search" onClick={() => props.setAccountOpen(false)}>

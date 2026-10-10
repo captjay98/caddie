@@ -505,9 +505,10 @@ test.describe('U04 — the v2 brief layout', () => {
 		await page.goto(`${BASE}/app/`);
 		await expect(page.getByTestId('brief-deadlines').locator('[data-testid="brief-deadline-row"]')).toHaveCount(1);
 		await expect(page.getByTestId('brief-deadline-row')).toContainText('Submission window closes soon');
-		// The deadline row carries its own action (routes to Routines).
+		// The deadline row carries its own action (routes to Routines — the
+		// project settings section since U08).
 		await page.getByTestId('brief-deadline-action').click();
-		await expect(page).toHaveURL(/\/app\/schedules\?project=proj-b$/);
+		await expect(page).toHaveURL(/\/app\/project\/settings\?project=proj-b#routines$/);
 		await context.close();
 	});
 });
