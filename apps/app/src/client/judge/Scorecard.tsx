@@ -113,7 +113,15 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 				fetchJson<{ rubric: Rubric; assessment: CriterionEvidence[] }>(`${base}/assessment`),
 				fetchJson<{ scorecards: ScorecardRecord[] }>(`${base}/scorecards`),
 			]);
-			setRubric(assessmentPayload.rubric);
+			setRubric(
+				assessmentPayload.rubric ?? {
+					criteria: [],
+					warnings: ['the assessment payload carried no rubric'],
+					conflicts: [],
+					hash: 'unavailable',
+					extractionVersion: 'unavailable',
+				},
+			);
 			setAssessment(assessmentPayload.assessment);
 			setScorecards(scorecardsPayload.scorecards);
 		} catch (cause) {

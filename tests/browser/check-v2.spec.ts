@@ -232,14 +232,16 @@ test.describe('Check page (U07)', () => {
 			detail: PACKAGE_DETAIL,
 		});
 		await context.unroute('**/api/projects/**');
+		// Catch-all first; the judge routes below are registered after and so
+		// take precedence (Playwright: last matching route wins).
+		await context.route('**/api/projects/**', (route) => json(route, 200, {}));
 		await context.route('**/api/projects/proj-a/judge/**', (route) => {
 			const path = new URL(route.request().url()).pathname;
 			if (path.endsWith('/assessment')) return json(route, 200, RUBRIC);
 			if (path.endsWith('/scorecards')) return json(route, 200, { scorecards: [] });
-			if (path.endsWith('/rubric')) return json(route, 200, RUBRIC.rubric ? { rubric: RUBRIC.rubric } : {});
+			if (path.endsWith('/rubric')) return json(route, 200, { rubric: RUBRIC.rubric });
 			return json(route, 200, {});
 		});
-		await context.route('**/api/projects/**', (route) => json(route, 200, {}));
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/judge?project=proj-a`);
 		await expect(page).toHaveURL(/\/app\/evidence\?project=proj-a&open=score/);
