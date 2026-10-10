@@ -109,7 +109,7 @@ function project(id: string, name: string, kind: 'standard' | 'home' = 'standard
 
 const HOME = project('home-1', 'Home', 'home');
 
-function candidatesEvaluated(acceptedIds: string[]) {
+function candidatesEvaluated(acceptedIds: string[], savedIds: string[] = []) {
 	const mk = (id: string, title: string, url: string, verdict: 'eligible' | 'ineligible') => ({
 		candidate: {
 			id,
@@ -118,6 +118,7 @@ function candidatesEvaluated(acceptedIds: string[]) {
 			summary: `${title} — a contest Caddie read from a watched source.`,
 			source: 'local-seed',
 			status: acceptedIds.includes(id) ? 'accepted' : 'new',
+			savedAt: savedIds.includes(id) ? NOW : null,
 			firstSeenAt: NOW,
 		},
 		fit: { matchedRequirements: verdict === 'eligible' ? 2 : 1, claims: [] },
@@ -154,6 +155,7 @@ async function stubJourneyAccount(context: BrowserContext): Promise<{ created: R
 	const created: Record<string, unknown>[] = [];
 	const projects: Record<string, unknown>[] = [HOME];
 	const acceptedIds: string[] = [];
+	const savedIds: string[] = [];
 
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
 	await context.route('**/api/auth/get-session', (route) =>
@@ -192,12 +194,24 @@ async function stubJourneyAccount(context: BrowserContext): Promise<{ created: R
 	await context.route('**/api/projects/home-1/discovery/**', (route) => {
 		const path = new URL(route.request().url()).pathname;
 		if (path.endsWith('/feed')) return json(route, 200, { runs: [{ id: 'feed-1', requestedAt: NOW, sources: [{ source: 'local-seed', outcome: 'succeeded', failureReason: null, candidateCount: 2 }, { source: 'devpost', outcome: 'failed', failureReason: 'upstream returned 503 (recorded receipt)', candidateCount: 0 }] }] });
+		// B01: save/unsave bookmarks — never an accept, never a project.
+		if (/\/candidates\/[^/]+\/save$/.test(path)) {
+			const id = path.split('/')[6] ?? '';
+			if (route.request().method() === 'POST') {
+				if (!savedIds.includes(id)) savedIds.push(id);
+				return json(route, 200, { candidate: { id, savedAt: NOW, status: 'new' } });
+			}
+			const without = savedIds.filter((x) => x !== id);
+			savedIds.length = 0;
+			savedIds.push(...without);
+			return json(route, 200, { candidate: { id, savedAt: null, status: 'new' } });
+		}
 		if (/\/candidates\/[^/]+\/accept$/.test(path)) {
 			const id = path.split('/')[6] ?? '';
 			if (!acceptedIds.includes(id)) acceptedIds.push(id);
 			return json(route, 200, { candidate: { id, url: '', title: '', summary: '', source: 'local-seed', status: 'accepted', firstSeenAt: NOW } });
 		}
-		if (path.endsWith('/candidates')) return json(route, 200, candidatesEvaluated(acceptedIds));
+		if (path.endsWith('/candidates')) return json(route, 200, candidatesEvaluated(acceptedIds, savedIds));
 		return json(route, 404, { error: 'not_found' });
 	});
 

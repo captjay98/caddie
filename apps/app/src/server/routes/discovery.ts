@@ -7,6 +7,9 @@ import { ScopeError, requireProjectScope, sessionUserId } from '../scope.ts';
 import { generatePlan, getPlanOverview, recordUserPlanRevision } from '../planning.ts';
 import {
 	acceptCandidate,
+	listSavedCandidates,
+	saveCandidate,
+	unsaveCandidate,
 	createLocalSeedAdapter,
 	evaluateCandidate,
 	listCandidateEvaluations,
@@ -170,6 +173,40 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 		);
 		const candidate = await acceptCandidate(c.env.DB, scope, c.req.param('candidateId') ?? '');
 		return c.json({ candidate });
+	});
+
+	// B01 — saved hackathons: bookmark without accepting; DELETE unsaves;
+	// GET lists the project's shortlist. Never creates a project or a run.
+	router.post('/projects/:projectId/discovery/candidates/:candidateId/save', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		const candidate = await saveCandidate(c.env.DB, scope, c.req.param('candidateId') ?? '');
+		return c.json({ candidate });
+	});
+
+	router.delete('/projects/:projectId/discovery/candidates/:candidateId/save', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		const candidate = await unsaveCandidate(c.env.DB, scope, c.req.param('candidateId') ?? '');
+		return c.json({ candidate });
+	});
+
+	router.get('/projects/:projectId/discovery/saved', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		return c.json({ candidates: await listSavedCandidates(c.env.DB, scope) });
 	});
 
 	return router;

@@ -83,6 +83,8 @@ export interface CandidateRecord {
 	readonly publishedAt: string | null;
 	readonly requirements: readonly CandidateRequirement[];
 	readonly status: CandidateStatus;
+	/** B01: the saved bookmark (its own axis, never a status). Null = not saved. */
+	readonly savedAt: string | null;
 	readonly feedRunId: string;
 	readonly firstSeenAt: string;
 	readonly updatedAt: string;
@@ -175,6 +177,7 @@ function candidateFromRow(row: Record<string, unknown>): CandidateRecord {
 		publishedAt: row['publishedAt'] == null ? null : String(row['publishedAt']),
 		requirements: parseRequirementsJson(row['requirementsJson']),
 		status,
+		savedAt: row['savedAt'] == null ? null : String(row['savedAt']),
 		feedRunId: String(row['feedRunId']),
 		firstSeenAt: String(row['firstSeenAt']),
 		updatedAt: String(row['updatedAt']),
@@ -536,6 +539,42 @@ export async function acceptCandidate(db: D1Database, scope: Scope, candidateId:
 		.bind(nowIso(), candidate.id, scope.projectId)
 		.run();
 	return getCandidate(db, scope, candidateId);
+}
+
+/**
+ * B01 — save/unsave a candidate WITHOUT accepting it (HANDOFF §8.1).
+ * `savedAt` is its own axis: saving bookmarks the candidate on the project's
+ * shortlist and never touches `status`, never creates a project, and never
+ * starts a run. Unsave clears the bookmark.
+ */
+export async function saveCandidate(db: D1Database, scope: Scope, candidateId: string): Promise<CandidateRecord> {
+	const candidate = await getCandidate(db, scope, candidateId);
+	await db
+		.prepare('update "discovery_candidates" set "savedAt" = ?, "updatedAt" = ? where "id" = ? and "projectId" = ?')
+		.bind(nowIso(), nowIso(), candidate.id, scope.projectId)
+		.run();
+	return getCandidate(db, scope, candidateId);
+}
+
+export async function unsaveCandidate(db: D1Database, scope: Scope, candidateId: string): Promise<CandidateRecord> {
+	const candidate = await getCandidate(db, scope, candidateId);
+	await db
+		.prepare('update "discovery_candidates" set "savedAt" = NULL, "updatedAt" = ? where "id" = ? and "projectId" = ?')
+		.bind(nowIso(), candidate.id, scope.projectId)
+		.run();
+	return getCandidate(db, scope, candidateId);
+}
+
+/** The project's saved shortlist, newest saved first. Project-scoped by the
+ *  same scope checks as every other candidate read. */
+export async function listSavedCandidates(db: D1Database, scope: Scope): Promise<CandidateRecord[]> {
+	await assertProjectScope(db, scope);
+	const rows = await queryAll(
+		db,
+		'select * from "discovery_candidates" where "projectId" = ? and "savedAt" is not null order by "savedAt" desc, "id" asc',
+		scope.projectId,
+	);
+	return rows.map(candidateFromRow);
 }
 
 // --- explainable fit --------------------------------------------------------------------

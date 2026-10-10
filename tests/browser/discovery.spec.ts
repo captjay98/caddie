@@ -132,6 +132,8 @@ interface StubState {
 	candidatesStatus: number;
 	candidatesBody: Record<string, unknown>;
 	acceptedIds: string[];
+	savedIds: string[];
+	savedCalls: { url: string }[];
 	acceptedCalls: { url: string }[];
 }
 
@@ -142,6 +144,8 @@ function initialState(): StubState {
 		candidatesStatus: 200,
 		candidatesBody: {},
 		acceptedIds: [],
+		savedIds: [],
+		savedCalls: [],
 		acceptedCalls: [],
 	};
 }
@@ -285,6 +289,18 @@ async function stubDiscovery(context: BrowserContext, state: StubState) {
 			}
 			return json(route, 200, { runs: state.feedRuns });
 		}
+		// B01: save/unsave bookmarks — the stub tracks saved ids and the
+		// candidates listing reflects them (read state is dynamic, like reads).
+		if (/\/candidates\/[^/]+\/save$/.test(path)) {
+			const candidateId = path.split('/')[6];
+			state.savedCalls.push({ url: request.url() });
+			if (request.method() === 'POST') {
+				if (!state.savedIds.includes(candidateId ?? '')) state.savedIds.push(candidateId ?? '');
+				return json(route, 200, { candidate: { id: candidateId, savedAt: NOW, status: 'new' } });
+			}
+			state.savedIds = state.savedIds.filter((id) => id !== candidateId);
+			return json(route, 200, { candidate: { id: candidateId, savedAt: null, status: 'new' } });
+		}
 		if (/\/candidates\/[^/]+\/accept$/.test(path)) {
 			const candidateId = path.split('/')[6];
 			state.acceptedIds.push(candidateId ?? '');
@@ -306,9 +322,10 @@ async function stubDiscovery(context: BrowserContext, state: StubState) {
 				return json(route, state.candidatesStatus, state.candidatesBody);
 			}
 			const evaluated = structuredClone(state.evaluated) as {
-				evaluations: { candidate: { id: string; status: string } }[];
+				evaluations: { candidate: { id: string; status: string; savedAt?: string | null } }[];
 			};
 			for (const evaluation of evaluated.evaluations) {
+				evaluation.candidate.savedAt = state.savedIds.includes(evaluation.candidate.id) ? NOW : null;
 				if (state.acceptedIds.includes(evaluation.candidate.id)) {
 					evaluation.candidate.status = 'accepted';
 				}
@@ -444,7 +461,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		await context.close();
 	});
 
-	test('Save accepts on the real route and creates NO project; Explore commits to exactly one with the contest link', async ({ browser }) => {
+	test('Save posts the real save route (never accept, never a project); Explore commits to one with the contest link', async ({ browser }) => {
 		const context = await browser.newContext();
 		const state = initialState();
 		state.evaluated = WITH_CANDIDATES;
@@ -455,12 +472,14 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/discover`);
 
-		// Saving only flips candidate status — it must never spin up a build.
+		// B01: saving hits the real save route — never the accept route, never
+		// a project creation.
 		await page.getByTestId('save-candidate-cand-1').click();
 		await expect(page.getByText('source local-seed · saved')).toBeVisible();
-		expect(state.acceptedCalls).toHaveLength(1);
-		expect(new URL(state.acceptedCalls[0]!.url).pathname).toBe(
-			'/api/projects/home-1/discovery/candidates/cand-1/accept',
+		expect(state.acceptedCalls).toHaveLength(0);
+		expect(state.savedCalls).toHaveLength(1);
+		expect(new URL(state.savedCalls[0]!.url).pathname).toBe(
+			'/api/projects/home-1/discovery/candidates/cand-1/save',
 		);
 		expect(created.calls).toHaveLength(0); // no project created by Save
 
@@ -511,11 +530,20 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/discover`);
 
-		// Save cand-1 (stays the accept semantics until B01); cand-2 stays new.
+		// Save cand-1 (B01: the real saved bookmark, never an accept).
 		await page.getByTestId('save-candidate-cand-1').click();
 		await expect(page.getByText('source local-seed · saved')).toBeVisible();
 
+		// The Saved segment isolates the bookmark; unsave returns it to For you.
+		await page.getByTestId('discovery-view-saved').click();
+		await expect(page.getByTestId('eligibility-cand-1')).toBeVisible();
+		await expect(page.getByTestId('eligibility-cand-2')).toHaveCount(0);
+		await page.getByTestId('unsave-candidate-cand-1').click();
+		await expect(page.getByTestId('discovery-view-saved').locator('..')).toBeVisible(); // stays on Saved
+		await expect(page.locator('.disc-list [data-testid="eligibility-cand-1"]')).toHaveCount(0);
+
 		// Hard-ineligible rows are hidden by default behind a named reveal.
+		await page.getByTestId('discovery-view-foryou').click();
 		await expect(page.getByTestId('eligibility-cand-2')).toHaveCount(0);
 		const reveal = page.getByTestId('discovery-reveal-ineligible');
 		await expect(reveal).toContainText("Show 1 you can't enter");

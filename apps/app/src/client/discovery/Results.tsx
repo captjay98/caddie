@@ -30,6 +30,8 @@ export interface DiscoveryCandidateRecord {
 	summary: string;
 	source: string;
 	status: 'new' | 'accepted' | 'dismissed';
+	/** B01: the saved bookmark — its own axis, never the acceptance status. */
+	savedAt?: string | null;
 	firstSeenAt: string;
 }
 
@@ -159,6 +161,21 @@ export function DiscoveryResults(props: {
 		}
 	}
 
+	/** B01: bookmark / unbookmark without accepting — the real save routes. */
+	async function toggleSaved(candidateId: string, save: boolean) {
+		setBusy(true);
+		setError(null);
+		try {
+			await fetchJson(`${base}/candidates/${encodeURIComponent(candidateId)}/save`, {
+				method: save ? 'POST' : 'DELETE',
+			});
+			await load();
+		} catch (cause) {
+			setError(cause instanceof Error ? cause.message : String(cause));
+			setBusy(false);
+		}
+	}
+
 	async function accept(candidateId: string) {
 		setBusy(true);
 		setError(null);
@@ -181,19 +198,20 @@ export function DiscoveryResults(props: {
 	const byId = new Map((list?.evaluations ?? []).map((e) => [e.candidate.id, e]));
 	const failedSources = (latestFeed?.sources ?? []).filter((s) => s.outcome === 'failed');
 
-	// v2 Discover (HANDOFF §4): ONE list, no search, no sort. Two real filters
-	// only — "Can enter" (eligible-only) and the "can't enter" reveal. The
-	// prototype's date/prize filters need feed data the sources don't carry yet
-	// (no closes-at or prize field on a candidate), so they stay unrendered
-	// rather than faked. "Saved" as its own segment lands with B01 (saved vs.
-	// accepted are the same flag today); until then Save keeps its current
-	// accept semantics and no Saved segment is shown.
+	// v2 Discover (HANDOFF §4): ONE list, no search, no sort. Segmented
+	// "For you · Saved" (B01 landed the real saved bookmark), plus two real
+	// filters — "Can enter" (eligible-only) and the "can't enter" reveal. The
+	// prototype's date/prize filters need feed data the sources don't carry
+	// yet (no closes-at or prize field on a candidate), so they stay
+	// unrendered rather than faked.
+	const [view, setView] = useState<'forYou' | 'saved'>('forYou');
 	const [canEnterOnly, setCanEnterOnly] = useState(false);
 	const [showIneligible, setShowIneligible] = useState(false);
 	const [expanded, setExpanded] = useState<string | null>(null);
 	const visible = ranked.filter((entry) => {
 		const evaluation = byId.get(entry.candidateId);
 		if (!evaluation) return true;
+		if (view === 'saved' && !evaluation.candidate.savedAt) return false;
 		if (canEnterOnly && evaluation.eligibility.verdict !== 'eligible') return false;
 		if (!showIneligible && evaluation.eligibility.verdict === 'ineligible') return false;
 		return true;
@@ -252,6 +270,24 @@ export function DiscoveryResults(props: {
 
 			{ranked.length > 0 ? (
 				<div className="disc-filters" data-testid="discovery-filters">
+					<span className="seg" data-testid="discovery-view">
+						<button
+							type="button"
+							aria-pressed={view === 'forYou'}
+							data-testid="discovery-view-foryou"
+							onClick={() => setView('forYou')}
+						>
+							For you
+						</button>
+						<button
+							type="button"
+							aria-pressed={view === 'saved'}
+							data-testid="discovery-view-saved"
+							onClick={() => setView('saved')}
+						>
+							Saved
+						</button>
+					</span>
 					<button
 						type="button"
 						className="detail-toggle"
@@ -325,7 +361,7 @@ export function DiscoveryResults(props: {
 										{candidate.url}
 									</a>{' '}
 									· source {candidate.source}
-									{candidate.status === 'accepted' ? ' · saved' : ''}
+									{candidate.savedAt ? ' · saved' : ''}
 								</div>
 								<div className="row-actions">
 									{candidate.status === 'new' || candidate.status === 'accepted' ? (
@@ -340,21 +376,27 @@ export function DiscoveryResults(props: {
 												>
 													{exploreBusy ? 'Opening…' : 'Find an idea'}
 												</button>{' '}
-												{candidate.status === 'new' ? (
-													<button
-														type="button"
-														className="btn-ghost"
-														data-testid={`save-candidate-${candidate.id}`}
-														onClick={() => void accept(candidate.id)}
-														disabled={busy}
-													>
-														Save
-													</button>
-												) : (
-													<span className="state-chip" data-testid={`saved-candidate-${candidate.id}`}>
-														Saved
-													</span>
-												)}
+											{candidate.savedAt ? (
+												<button
+													type="button"
+													className="btn-ghost"
+													data-testid={`unsave-candidate-${candidate.id}`}
+													onClick={() => void toggleSaved(candidate.id, false)}
+													disabled={busy}
+												>
+													Remove from saved
+												</button>
+											) : (
+												<button
+													type="button"
+													className="btn-ghost"
+													data-testid={`save-candidate-${candidate.id}`}
+													onClick={() => void toggleSaved(candidate.id, true)}
+													disabled={busy}
+												>
+													Save
+												</button>
+											)}
 											</>
 										) : (
 											<button type="button" className="btn-key" onClick={() => void accept(candidate.id)} disabled={busy}>

@@ -28,6 +28,7 @@ export function submissionMigrationPaths(): string[] {
 		join(root, 'apps', 'app', 'migrations', '0010_judge.sql'),
 		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
 		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
+		join(root, 'apps', 'app', 'migrations', '0013_discovery_saved.sql'),
 	];
 }
 
