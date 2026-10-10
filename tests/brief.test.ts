@@ -34,8 +34,8 @@ const MIGRATION_PATHS = [
 	'0010_judge.sql',
 	'0011_home_project.sql',
 	'0012_brief_read.sql',
-	join(REPO_ROOT, 'apps/app/migrations/0013_discovery_saved.sql'),
-	join(REPO_ROOT, 'apps/app/migrations/0014_stack_notify.sql'),
+	'0013_discovery_saved.sql',
+	'0014_stack_notify.sql',
 ].map((name) => join(REPO_ROOT, 'apps', 'app', 'migrations', name));
 
 function wrapSqliteAsD1(sqlite: Database): D1Database {
