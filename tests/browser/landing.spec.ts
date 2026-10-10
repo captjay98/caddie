@@ -46,15 +46,17 @@ test.describe('P16 landing — pit-board shell', () => {
 		expect(html).toContain('pb-hero-h');
 		expect(html).toContain('spine-rail');
 		expect(html).toContain('LOCKED LINE');
-		// Zero client scripts — Astro output must stay script-free.
-		expect(html).not.toContain('<script');
+		// v2 (U10): the ONLY client scripts are the theme pre-paint/inline
+		// enhancement — every content surface is readable with JS disabled.
+		const scripts = html.match(/<script/g) ?? [];
+		expect(scripts.length).toBe(2);
 	});
 
 	test('topbar wordmark and section navigation render', async ({ page }) => {
 		await page.goto('/');
 		await expect(page.locator('.topbar .wordmark')).toHaveText('Caddie');
 		const nav = page.locator('.topbar nav a');
-		await expect(nav).toHaveCount(5);
+		await expect(nav).toHaveCount(7);
 		const hrefs = await nav.evaluateAll((links) =>
 			links.map((a) => (a as unknown as { getAttribute(name: string): string | null }).getAttribute('href')),
 		);
@@ -62,16 +64,18 @@ test.describe('P16 landing — pit-board shell', () => {
 		expect(hrefs).toContain('#pb-honest');
 	});
 
-	test('hero headline and both CTAs render; primary routes to /app/', async ({
+	test('hero headline and both CTAs render; primary is Request access, Sign in outline', async ({
 		page,
 	}) => {
 		await page.goto('/');
 		await expect(page.locator('#pb-hero-h')).toBeVisible();
+		// v2 (§4): one primary per viewport — "Request access"; "Sign in" outline.
 		const key = page.locator('.hero-cta .btn-key');
-		await expect(key).toHaveAttribute('href', '/app/');
+		await expect(key).toHaveAttribute('href', /mailto:captjay98@gmail\.com/);
+		await expect(key).toContainText('Request access');
 		await expect(page.locator('.hero-cta .btn-line')).toHaveAttribute(
 			'href',
-			'#pb-card',
+			'/app/',
 		);
 		const res = await page.request.get('/app/');
 		expect(res.status()).toBe(200);
@@ -87,13 +91,14 @@ test.describe('P16 landing — pit-board shell', () => {
 				return `${spans[0]?.textContent} ${spans[1]?.textContent}`;
 			}),
 		);
+		// v2 plain-word step names (§6).
 		expect(steps).toEqual([
-			'01 Discover',
-			'02 Vet',
+			'01 Find',
+			'02 Read the rules',
 			'03 Plan',
-			'04 Forge',
-			'05 Deliver',
-			'06 Prepare',
+			'04 Build',
+			'05 Check',
+			'06 Submit',
 		]);
 		for (const id of [
 			'pb-discover',
@@ -111,6 +116,9 @@ test.describe('P16 landing — pit-board shell', () => {
 		page,
 	}) => {
 		await page.goto('/');
+		// Device default applies first (v2 §3.9); pin dark for this assertion.
+		await page.emulateMedia({ colorScheme: 'dark' });
+		await page.reload();
 		const color = await page
 			.locator('#pb-discover .act-step b')
 			.evaluate((el) => getComputedStyle(el).color);
@@ -258,5 +266,54 @@ test.describe('P16 landing — mobile, motion and keyboard checks', () => {
 			...html.matchAll(/(?:src|href)="(https?:\/\/[^"]+)"/g),
 		].map((m) => m[1]);
 		expect(externals).toEqual([]);
+	});
+});
+
+test.describe('U10 — landing refinement', () => {
+	test('Your brief and "What it can build" sections render with ledger-faithful statuses', async ({ page }) => {
+		await page.goto('/');
+		await expect(page.locator('#pb-brief')).toBeVisible();
+		await expect(page.locator('#pb-brief')).toContainText('Your brief');
+		await expect(page.locator('#pb-tools')).toBeVisible();
+		// Statuses never run ahead of the feature ledger.
+		await expect(page.locator('#pb-tools')).toContainText('being proven first');
+		const later = page.locator('#pb-tools .pill', { hasText: 'later' });
+		expect(await later.count()).toBe(4);
+		// The word "ready" is not claimed anywhere in the stacks section.
+		const stacksText = await page.locator('#pb-tools').innerText();
+		expect(stacksText.toLowerCase()).not.toMatch(/\bready\b/);
+	});
+
+	test('theme toggle shares caddie-theme; no saved choice means device default and no write on load', async ({ browser }) => {
+		const context = await browser.newContext({ colorScheme: 'light' });
+		const page = await context.newPage();
+		await page.goto('/');
+		// No saved choice: device default applied, nothing written.
+		expect(await page.evaluate(() => localStorage.getItem('caddie-theme'))).toBeNull();
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+
+		// Toggle writes only on click, and the label names the target theme.
+		const toggle = page.locator('[data-pb-theme]');
+		await expect(toggle).toHaveAttribute('aria-label', 'Switch to dark theme');
+		await toggle.click();
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+		expect(await page.evaluate(() => localStorage.getItem('caddie-theme'))).toBe('dark');
+		await page.reload();
+		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+		await context.close();
+	});
+
+	test('at most one primary button per viewport at 390/768/1440', async ({ browser }) => {
+		for (const [width, height] of [[390, 844], [768, 1024], [1440, 900]] as const) {
+			const context = await browser.newContext({ viewport: { width, height } });
+			const page = await context.newPage();
+			await page.goto('/');
+			// The hero viewport has exactly one .btn-key; the closing card has one.
+			expect(await page.locator('.hero-cta .btn-key').count()).toBe(1);
+			expect(await page.locator('.close .btn-key').count()).toBe(1);
+			// The mobile bar's button is outline (no second primary on screen).
+			expect(await page.locator('.mbar .btn-key').count()).toBe(0);
+			await context.close();
+		}
 	});
 });
