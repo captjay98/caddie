@@ -89,7 +89,7 @@ test.afterAll(async () => {
 
 const NOW = '2026-10-04T10:00:00.000Z';
 
-function project(id: string, name: string) {
+function project(id: string, name: string, extra: Record<string, unknown> = {}) {
 	return {
 		id,
 		workspaceId: 'ws-1',
@@ -98,12 +98,16 @@ function project(id: string, name: string) {
 		contestId: null,
 		contestUrl: null,
 		status: 'active',
+		kind: 'standard',
 		createdAt: NOW,
 		updatedAt: NOW,
+		...extra,
 	};
 }
 
-const PROJECT_A = project('proj-a', 'Pit wall');
+// The judge + submission surfaces are contest features; the project carries a
+// linked hackathon so the Check page renders the judges section.
+const PROJECT_A = project('proj-a', 'Pit wall', { contestUrl: 'https://contest.example/demo', contestId: 'contest-1' });
 
 const EMPTY_RUBRIC_PAYLOAD = {
 	rubric: {
@@ -361,7 +365,7 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		await page.goto(`${BASE}/app/submission`);
 		await expect(page.getByTestId('sign-in-panel')).toBeVisible();
 		await expect(page.locator('section[aria-label="Submission package"]')).toHaveCount(0);
-		await expect(page.locator('section[aria-label="Judge scorecard"]')).toHaveCount(0);
+		await expect(page.locator('section[aria-label="Score it yourself"]')).toHaveCount(0);
 	});
 
 	test('judge: an empty rubric stays empty with its warning — never a generic criteria set', async ({ browser }) => {
@@ -372,7 +376,7 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/judge?project=proj-a`);
 
-		await expect(page.locator('section[aria-label="Judge scorecard"]')).toBeVisible();
+		await expect(page.locator('section[aria-label="Score it yourself"]')).toBeVisible();
 		await expect(page.getByText('No judging criteria are on record in this project')).toBeVisible();
 		await expect(page.getByText('no rubric-bearing claims are on record for this project')).toBeVisible();
 		// No scoring controls can exist against a rubric that does not exist.
@@ -483,10 +487,10 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		await expect(page.locator('a[href="https://contest.example/rules"]')).toHaveCount(2);
 		await expect(page.getByText('backed by: rc-2 (git ls-remote receipt)')).toBeVisible();
 
-		// Export/record CTAs are honest before any export exists.
+		// Export/record CTAs are honest before any export exists (v2: the record
+		// form lives behind the "I've submitted" window, disabled with none).
 		await expect(page.getByRole('button', { name: 'Copy latest export' })).toBeDisabled();
-		await expect(page.getByRole('button', { name: 'Record submitted' })).toBeDisabled();
-		await expect(page.getByText('This tool never submits anywhere. After you submit')).toBeVisible();
+		await expect(page.getByTestId('record-submission-open')).toBeDisabled();
 
 		// Reuse disclosure needs an explicit human confirmation; it rides the
 		// real package route.
@@ -522,10 +526,14 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 
 		// With an export on record both CTAs are live.
 		await expect(page.getByRole('button', { name: 'Copy latest export' })).toBeEnabled();
-		await expect(page.getByRole('button', { name: 'Record submitted' })).toBeEnabled();
+		await expect(page.getByTestId('record-submission-open')).toBeEnabled();
 
 		// Recording the submission only RECORDS the human's attestation, bound
 		// to the exported hash — the final submission stays a human action.
+		// v2: the record form is the "I've submitted" window.
+		await page.getByTestId('record-submission-open').click();
+		await expect(page.getByTestId('record-submission-window')).toBeVisible();
+		await expect(page.getByText('This tool never submits anywhere. After you submit')).toBeVisible();
 		await page
 			.getByLabel('your attestations (one per line, required)')
 			.fill('I submitted this package myself on the contest portal');
@@ -558,11 +566,11 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 		await expect(page).toHaveURL(/\/app\/submission\?project=proj-a$/);
 		await expect(page.locator('section[aria-label="Submission package"]')).toBeVisible();
 
-		// The v2 related-surface links reach the judge surface, keeping the same
-		// ?project= so the conversation never retargets.
+		// The v2 related-surface link reaches the score drawer (old /judge links
+		// redirect to /evidence?open=score), keeping the same ?project=.
 		await page.getByTestId('submission-judge-link').click();
-		await expect(page).toHaveURL(/\/app\/judge\?project=proj-a$/);
-		await expect(page.locator('section[aria-label="Judge scorecard"]')).toBeVisible();
+		await expect(page).toHaveURL(/\/app\/evidence\?project=proj-a&open=score/);
+		await expect(page.locator('section[aria-label="Score it yourself"]')).toBeVisible();
 		await context.close();
 	});
 });

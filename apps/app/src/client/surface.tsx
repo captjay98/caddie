@@ -1094,33 +1094,155 @@ export function SubmissionPage(): ReactElement {
 }
 
 export function EvidencePage(): ReactElement {
-	const search = useSearch({ strict: false }) as { claim?: string };
+	const search = useSearch({ strict: false }) as { claim?: string; open?: 'score' };
 	return (
 		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="submission" />
-					<ProjectGate>
-						{(projectId) => <EvidenceDrawer projectId={projectId} focusClaimType={search.claim} />}
-					</ProjectGate>
+					<ProjectGate>{(projectId) => <CheckBody projectId={projectId} openScore={search.open === 'score'} focusClaimType={search.claim} />}</ProjectGate>
 				</div>
 			</div>
 		</>
 	);
 }
 
-export function JudgePage(): ReactElement {
+/**
+ * Check (v2, HANDOFF §4): "N of M ready" from the submission package's real
+ * checklist, the hand-in list with one fix per gap, what judges look for with
+ * Caddie's honest read, the "Score it yourself" drawer (old /judge links land
+ * here via ?open=score), and the proof drawer with the evidence claims.
+ * Personal projects have no judges: the section is replaced by "No judges
+ * here" and the step stays optional.
+ */
+function CheckBody(props: { projectId: string; openScore: boolean; focusClaimType?: string }): ReactElement {
+	const chrome = useWorkspaceChrome();
+	const personal = !chrome.selectedProject?.contestUrl;
+	const base = `/api/projects/${encodeURIComponent(props.projectId)}/submission`;
+	const [packages, setPackages] = useState<readonly { id: string; title: string }[] | null>(null);
+	const [detail, setDetail] = useState<null | {
+		readiness: { status: string; reasons: readonly string[] };
+		checklist: readonly {
+			id: string;
+			kind: string;
+			status: 'missing' | 'declared' | 'verified' | 'conflict';
+			requirementText: string;
+			citation: { quote: string; url: string };
+		}[];
+	}>(null);
+	const [loadError, setLoadError] = useState<string | null>(null);
+
+	useEffect(() => {
+		let cancelled = false;
+		void (async () => {
+			try {
+				const listResponse = await fetch(`${base}/packages`, { credentials: 'same-origin' });
+				if (!listResponse.ok) throw new Error(`packages ${listResponse.status}`);
+				const list = (await listResponse.json()) as { packages: { id: string; title: string }[] };
+				if (cancelled) return;
+				setPackages(list.packages ?? []);
+				if ((list.packages ?? []).length === 0) {
+					setDetail(null);
+					return;
+				}
+				const detailResponse = await fetch(`${base}/packages/${encodeURIComponent(list.packages[0]!.id)}`, { credentials: 'same-origin' });
+				if (!detailResponse.ok) throw new Error(`package ${detailResponse.status}`);
+				const body = (await detailResponse.json()) as NonNullable<typeof detail>;
+				if (!cancelled) setDetail(body);
+			} catch (cause) {
+				if (!cancelled) setLoadError(cause instanceof Error ? cause.message : String(cause));
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [base]);
+
+	const checklist = detail?.checklist ?? [];
+	const verified = checklist.filter((item) => item.status === 'verified').length;
+	const FIX_HINT: Record<string, string> = {
+		missing: 'Not in the package yet — add it or point Caddie at the evidence in the chat.',
+		declared: 'You said you have it — Caddie has not verified it against the rules yet.',
+		conflict: 'The evidence disagrees with what you declared — resolve it in the chat.',
+		verified: '',
+	};
+
 	return (
-		<>
-			<div className="shell-loading shell-page">
-				<div className="page-col">
-					<ProjectTabs current="submission" />
-					<ProjectGate>{(projectId) => <JudgeScorecard projectId={projectId} />}</ProjectGate>
-				</div>
-			</div>
-		</>
+		<div className="settings-stack">
+			{/* N of M ready (§4): from the real checklist, never an estimate. */}
+			<section className="card-surface settings-panel" data-testid="check-readiness">
+				<p className="kicker" data-tone="action">
+					CHECK
+				</p>
+				{loadError ? (
+					<StatePanel kind="error" title="Could not load the checklist" detail={loadError} onRetry={() => window.location.reload()} />
+				) : packages === null ? (
+					<StatePanel kind="loading" title="Loading the hand-in list…" />
+				) : packages.length === 0 ? (
+					<p className="state-detail" data-testid="check-empty">
+						No checklist yet — prepare the submission package and the hand-in list appears here.
+					</p>
+				) : (
+					<>
+						<h2 className="ev-title" data-testid="check-ready-count">
+							{verified} of {checklist.length} things are ready
+						</h2>
+						<ul className="disc-list" data-testid="check-handin-list">
+							{checklist.map((item) => (
+								<li key={item.id} className="disc-item" data-status={item.status} data-testid="check-handin-item">
+									<div className="disc-head">
+										<code>{item.kind}</code>
+										<span
+											className="badge"
+											data-tone={item.status === 'verified' ? 'ok' : item.status === 'conflict' ? 'action' : item.status === 'declared' ? 'warn' : 'danger'}
+										>
+											{item.status === 'verified' ? 'READY' : item.status === 'declared' ? 'ALMOST' : item.status === 'conflict' ? 'CONFLICT' : 'MISSING'}
+										</span>
+										<span className="disc-claim-line">{item.requirementText}</span>
+									</div>
+									{FIX_HINT[item.status] ? <div className="disc-meta">{FIX_HINT[item.status]}</div> : null}
+								</li>
+							))}
+						</ul>
+					</>
+				)}
+			</section>
+
+			{/* What judges look for — with the honest personal-project variant. */}
+			{personal ? (
+				<section className="card-surface settings-panel" data-testid="check-no-judges">
+					<p className="kicker" data-tone="action">
+						JUDGES
+					</p>
+					<h2 className="ev-title">No judges here</h2>
+					<p className="state-detail">
+						This is a personal project, so this step is optional — there is no jury to score it. You can
+						still check the readiness list above.
+					</p>
+				</section>
+			) : (
+				<section className="card-surface settings-panel" data-testid="check-judges" id={props.openScore ? 'score' : undefined}>
+					<p className="kicker" data-tone="action">
+						JUDGES
+					</p>
+					<h2 className="ev-title">What judges look for</h2>
+					<p className="state-detail">
+						Caddie's honest read of each criterion, with the evidence it can actually see — never a
+						predicted score.
+					</p>
+					<JudgeScorecard projectId={props.projectId} />
+				</section>
+			)}
+
+			{/* Proof: the evidence claims behind the readiness lines. */}
+			<details className="card-surface settings-panel" data-testid="check-proof" open={Boolean(props.focusClaimType)}>
+				<summary className="ev-head">Proof — the evidence behind each line</summary>
+				<EvidenceDrawer projectId={props.projectId} focusClaimType={props.focusClaimType} />
+			</details>
+		</div>
 	);
 }
+
 
 // --- REPOSITORIES (setup, reached from onboarding + settings) --------------------
 

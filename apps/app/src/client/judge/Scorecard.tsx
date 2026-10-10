@@ -174,7 +174,7 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 	const assessmentByCriterion = new Map(assessment.map((entry) => [entry.criterionText, entry]));
 
 	return (
-		<section aria-label="Judge scorecard" className="judge-panel" data-testid="judge-scorecard">
+		<section aria-label="Score it yourself" className="judge-panel" data-testid="judge-scorecard">
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">

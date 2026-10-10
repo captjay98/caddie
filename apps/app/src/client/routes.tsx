@@ -11,7 +11,6 @@ import {
 	SearchPage,
 	AutomationsPage,
 	UsagePage,
-	JudgePage,
 	SubmissionPage,
 	SchedulesPage,
 	EvidencePage,
@@ -95,13 +94,19 @@ function validateRunsSearch(search: Record<string, unknown>): { project?: string
 	};
 }
 
-/** ?project=<id> + ?claim=<type> for the evidence inspector's focus mode. */
-function validateEvidenceSearch(search: Record<string, unknown>): { project?: string; claim?: string } {
+/**
+ * ?project=<id> + ?claim=<type> for the evidence inspector's focus mode, plus
+ * ?open=score (v2: the "Score it yourself" drawer opens from the old /judge
+ * links).
+ */
+function validateEvidenceSearch(search: Record<string, unknown>): { project?: string; claim?: string; open?: 'score' } {
 	const project = search.project;
 	const claim = search.claim;
+	const open = search.open;
 	return {
 		...(typeof project === 'string' && project.trim() !== '' ? { project } : {}),
 		...(typeof claim === 'string' && claim.trim() !== '' ? { claim } : {}),
+		...(open === 'score' ? { open } : {}),
 	};
 }
 
@@ -289,12 +294,21 @@ const evidenceRoute = createRoute({
 	component: EvidencePage,
 });
 
+// v2 (HANDOFF §2): /judge was the standalone judge review page; Check owns
+// scoring as the "Score it yourself" drawer. Old links land there.
 const judgeRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/judge',
 	validateSearch,
 	staticData: { nav: 'project' },
-	component: JudgePage,
+	beforeLoad: ({ search }) => {
+		throw redirect({
+			to: '/evidence',
+			search: { ...carryProject(search as Record<string, unknown>), open: 'score' },
+			replace: true,
+		});
+	},
+	component: () => null,
 });
 
 const submissionRoute = createRoute({

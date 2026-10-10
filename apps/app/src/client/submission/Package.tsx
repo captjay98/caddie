@@ -116,6 +116,28 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 	const [reuseRequired, setReuseRequired] = useState(false);
 	const [attestationsText, setAttestationsText] = useState('');
 	const [confirmationNote, setConfirmationNote] = useState('');
+	// The demo video link (§4 video-link window): a DRAFT kept on this device
+	// only — it is pasted into the contest portal by the user, never uploaded
+	// or recorded server-side by Caddie.
+	const videoKey = `caddie:video-link:${props.projectId}`;
+	const [videoLink, setVideoLinkState] = useState(() => {
+		try {
+			return sessionStorage.getItem(`caddie:video-link:${props.projectId}`) ?? '';
+		} catch {
+			return '';
+		}
+	});
+	const [videoOpen, setVideoOpen] = useState(false);
+	const [recordOpen, setRecordOpen] = useState(false);
+	const setVideoLink = (value: string) => {
+		setVideoLinkState(value);
+		try {
+			if (value) sessionStorage.setItem(videoKey, value);
+			else sessionStorage.removeItem(videoKey);
+		} catch {
+			// private mode: the link stays in memory for the session
+		}
+	};
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 
@@ -398,6 +420,52 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 						))}
 					</ul>
 
+					<div className="row-actions">
+						<button type="button" className="btn-ghost" data-testid="video-link-open" onClick={() => setVideoOpen((value) => !value)}>
+							{videoOpen ? 'Close video link' : 'Add the demo video link'}
+						</button>
+						<button
+							type="button"
+							className="btn-key"
+							data-testid="record-submission-open"
+							onClick={() => setRecordOpen(true)}
+							disabled={busy || detail!.exports.length === 0}
+						>
+							I've submitted
+						</button>
+					</div>
+
+					{videoOpen ? (
+						<div className="modal-backdrop" data-testid="video-link-backdrop" onMouseDown={() => setVideoOpen(false)}>
+							<div className="commit-panel card-surface" data-testid="video-link-window" onMouseDown={(e) => e.stopPropagation()}>
+								<p className="kicker" data-tone="action">
+									DEMO VIDEO LINK
+								</p>
+								<h3 className="state-title">Where is the demo video?</h3>
+								<p className="state-detail">
+									Paste the public link (e.g. YouTube). It is kept on this device and copied with the
+									other fields below — Caddie never uploads or submits anything.
+								</p>
+								<input
+									type="url"
+									className="input"
+									placeholder="https://youtube.com/watch?v=…"
+									data-testid="video-link-input"
+									value={videoLink}
+									onChange={(event) => setVideoLink(event.target.value)}
+								/>
+								<div className="row-actions">
+									<button type="button" className="btn-key" onClick={() => setVideoOpen(false)}>
+										Done
+									</button>
+								</div>
+							</div>
+						</div>
+					) : null}
+
+					{recordOpen ? (
+						<div className="modal-backdrop" data-testid="record-submission-backdrop" onMouseDown={() => setRecordOpen(false)}>
+							<div className="commit-panel card-surface" data-testid="record-submission-window" onMouseDown={(e) => e.stopPropagation()}>
 					<div className="submission-attest">
 						<h3 className="ev-head">Record the submission (after YOU submit)</h3>
 						<p className="state-detail">
@@ -452,6 +520,21 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 							</ul>
 						) : null}
 					</div>
+						<div className="row-actions">
+							<button type="button" className="btn-ghost" onClick={() => setRecordOpen(false)}>
+								Close
+							</button>
+						</div>
+							</div>
+						</div>
+					) : null}
+
+					{/* Fields ready to copy (§4): the video draft rides along. */}
+					{videoLink ? (
+						<p className="state-detail" data-testid="video-link-copied">
+							Demo video: <code>{videoLink}</code>
+						</p>
+					) : null}
 				</>
 			)}
 		</section>
