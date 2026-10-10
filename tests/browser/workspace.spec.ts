@@ -343,13 +343,14 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await page.getByTestId('project-tab-build').click();
 		await expect(page).toHaveURL(/\/app\/runs\?project=proj-a$/); // the binding is preserved
 		await expect(page.getByTestId('project-tab-build')).toHaveAttribute('aria-current', 'page');
+		// v2 Build: past builds as sentences; details fold; Files is a tab.
 		await expect(page.getByTestId('run-row')).toHaveCount(1);
 		await expect(page.getByTestId('run-row')).toContainText('react-hono');
 		await page.getByTestId('run-detail-toggle').click();
 		await expect(page.getByTestId('run-details')).toContainText('conv-01HZX');
-		await expect(page.getByTestId('artifact-row')).toHaveCount(1);
-		await page.getByTestId('artifact-detail-toggle').click();
-		await expect(page.locator('[data-testid="artifact-row"]').locator('.row-details')).toContainText('art-spec');
+		await page.getByTestId('build-tab-files').click();
+		await expect(page).toHaveURL(/tab=files/);
+		await expect(page.getByTestId('artifact-viewer')).toBeVisible();
 		await context.close();
 	});
 

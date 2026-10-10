@@ -44,7 +44,9 @@ export function Tasks(props: { projectId: string | null; /** Overview embed: the
 			const payload = await fetchJson<{ tasks: TaskRow[] }>(
 				`/api/projects/${encodeURIComponent(projectId)}/tasks`,
 			);
-			setState({ kind: 'ready', tasks: payload.tasks });
+			// Defensive: a payload without the tasks array is an empty list, not a
+			// crash — the page around it keeps rendering.
+			setState({ kind: 'ready', tasks: Array.isArray(payload.tasks) ? payload.tasks : [] });
 		} catch (error) {
 			const kind = (error as { kind?: string }).kind;
 			if (kind === 'denied') setState({ kind: 'denied' });
