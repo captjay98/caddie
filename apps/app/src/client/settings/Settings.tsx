@@ -128,8 +128,8 @@ function SettingsSubnav(): ReactElement {
 	const sections = [
 		['profile-editor', 'Profile'],
 		['integrations-health', 'Integrations'],
-		['stacks-panel', 'Stacks'],
-		['memory-panel', 'Memory'],
+		['stacks-panel', 'Build tools'],
+		['memory-panel', 'What Caddie knows'],
 		['search-panel', 'Search'],
 	] as const;
 	return (

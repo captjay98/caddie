@@ -137,7 +137,7 @@ export function Tasks(props: { projectId: string | null }): ReactElement {
 			<p className="kicker" data-tone="action">
 				BUILD
 			</p>
-			<h3 className="state-title">Tasks</h3>
+			<h3 className="state-title">To-dos</h3>
 			<p className="page-lede">
 				Human to-dos on this build — yours and the specialists', kept next to the runs that produced them.
 			</p>

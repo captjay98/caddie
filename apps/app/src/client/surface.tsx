@@ -770,7 +770,7 @@ function RepositoriesBody(props: { projectId: string }): ReactElement {
 					<p className="kicker" data-tone="action">
 						SETUP
 					</p>
-					<h2 className="ev-title">Repositories</h2>
+					<h2 className="ev-title">Your code on GitHub</h2>
 					<p className="page-lede">
 						The GitHub connection Caddie builds through. Reading lets Caddie plan and gather evidence from a
 						repository — writing, merging and deploying stay behind their own separate approvals.
@@ -841,7 +841,7 @@ export function AutomationsPage(): ReactElement {
 							<p className="kicker" data-tone="action">
 								AUTOMATION
 							</p>
-							<h1 className="page-title">Automations</h1>
+							<h1 className="page-title">Routines</h1>
 							<p className="page-lede">
 								Every scheduled check Caddie runs for you, across all your projects — read from each
 								project's real schedule table. Open a project to manage its automations.
@@ -972,7 +972,7 @@ export function UsagePage(): ReactElement {
 							<p className="kicker" data-tone="action">
 								USAGE
 							</p>
-							<h1 className="page-title">Usage &amp; budget</h1>
+							<h1 className="page-title">Spending</h1>
 							<p className="page-lede">
 								What Caddie reserved and spent against your budget — read straight from the same
 								numbers the server enforces before every run.

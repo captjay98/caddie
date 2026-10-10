@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ReactElement, KeyboardEvent } from 'react';
 import { Icon } from '../icons.tsx';
+import { COMPOSER_PLACEHOLDER } from '../copy.ts';
 
 /**
  * Composer — Enter sends, Shift+Enter breaks a line, visible pending state.
@@ -58,8 +59,8 @@ export function Composer(props: {
 					disabled={disabled}
 					enterKeyHint="send"
 					rows={1}
-					aria-label="Message the channel"
-					placeholder={props.disabledReason ? undefined : (props.placeholder ?? 'Message Caddie…')}
+					aria-label="Message Caddie"
+					placeholder={props.disabledReason ? undefined : (props.placeholder ?? COMPOSER_PLACEHOLDER)}
 					data-testid="composer-input"
 				/>
 				<button

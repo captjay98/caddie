@@ -53,6 +53,8 @@ import { useChannelStore, standbySource as STANDBY, type ChannelDraft } from '..
 import { useCoordinatorTransport, type CoordinatorTransport } from '../coordinator.ts';
 import { briefActionRoute } from '../brief/navigate.ts';
 import { ConvResizeHandle, useConvWidth } from './ConvResize.tsx';
+import { AskBar } from './AskBar.tsx';
+import { WORDS } from '../copy.ts';
 import {
 	useAccountBrief,
 	useAuthStatus,
@@ -264,7 +266,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		conversationKind === 'project'
 			? (selectedProject?.name ?? 'Project')
 			: conversationKind === 'general'
-				? 'General'
+				? WORDS.everything
 				: 'No conversation';
 	const conversationResolving =
 		conversationKind === 'general' && homeProject === null && !projects.error;
@@ -652,9 +654,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 									<span className="conv-avatar" aria-hidden="true">
 										C
 									</span>
-									<span className="conv-name-pill" data-testid="conv-context-label" title="The conversation you are in — General is your account-level chat with Caddie">
-										{conversationLabel}
-									</span>
+									<TalkingAbout conversationKind={conversationKind} label={conversationLabel} />
 								</span>
 								<span className="conv-head-chips">
 									{!isDesktop ? (
@@ -911,8 +911,8 @@ function MobileHeader(props: {
 	else if (props.nav === 'account') {
 		const path = location.pathname;
 		if (path.endsWith('/search')) identity = 'Search';
-		else if (path.endsWith('/usage')) identity = 'Usage & budget';
-		else if (path.endsWith('/automations')) identity = 'Automations';
+		else if (path.endsWith('/usage')) identity = 'Spending';
+		else if (path.endsWith('/automations')) identity = 'Routines';
 		else if (path.endsWith('/onboarding')) identity = 'Start';
 		else identity = 'Settings';
 	}
@@ -1006,16 +1006,16 @@ function AccountMenu(props: {
 						<Icon name="user" title="Profile" /> Profile &amp; preferences
 					</Link>
 					<Link to="/settings" search={{ section: 'memory' } as Record<string, unknown>} role="menuitem" data-testid="account-memory" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="doc" title="Memory" /> What Caddie remembers
+						<Icon name="memory" title="What Caddie knows" /> What Caddie knows
 					</Link>
 					<Link to="/settings" search={{ section: 'connections' } as Record<string, unknown>} role="menuitem" data-testid="account-connections" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="link" title="Connections" /> Connections
+						<Icon name="link" title="Connected accounts" /> Connected accounts
 					</Link>
 					<Link to="/automations" search={keepSearch} role="menuitem" data-testid="account-automations" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="calendar" title="Automations" /> Automations
+						<Icon name="calendar" title="Routines" /> Routines
 					</Link>
 					<Link to="/usage" search={keepSearch} role="menuitem" data-testid="account-usage" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="box" title="Usage" /> Usage &amp; budget
+						<Icon name="box" title="Spending" /> Spending
 					</Link>
 					<Link to="/settings" search={{ section: 'settings' } as Record<string, unknown>} role="menuitem" data-testid="account-settings" onClick={() => props.setAccountOpen(false)}>
 						<Icon name="doc" title="Settings" /> Settings
@@ -1049,8 +1049,10 @@ function MobileNav(props: {
 	resolving: boolean;
 	unseenCount: number;
 }): ReactElement {
-	const { channel } = useWorkspaceChrome();
+	const chrome = useWorkspaceChrome();
+	const { channel, setMobileConversation } = chrome;
 	const onDiscover = props.nav === 'discover';
+	const scopeName = props.conversationKind === 'project' ? (chrome.selectedProject?.name ?? null) : null;
 	const onProjects = props.nav === 'projects';
 	// The conversation IS the mobile Chat tab: it is current whenever the
 	// channel pane is open; the Brief tab owns the default's left content.
@@ -1068,14 +1070,21 @@ function MobileNav(props: {
 	return (
 		<nav className="bottom-nav" aria-label="Primary" data-testid="bottom-nav">
 			<div className="bottom-nav-composer">
-				<Composer
-					onSend={props.sendText}
-					disabled={disabled}
-					disabledReason={disabledReason}
-					value={channel.composerText}
-					onValueChange={channel.setComposerText}
-					placeholder={onDiscover ? 'Ask Caddie about these hackathons…' : 'Message Caddie…'}
-				/>
+				{chatOpen ? (
+					<Composer
+						onSend={props.sendText}
+						disabled={disabled}
+						disabledReason={disabledReason}
+						value={channel.composerText}
+						onValueChange={channel.setComposerText}
+						placeholder={onDiscover ? 'Ask Caddie about these hackathons…' : 'Ask Caddie or tell it what to do…'}
+					/>
+				) : (
+					<AskBar
+						onOpen={() => setMobileConversation(true)}
+						scopeName={props.conversationKind === 'project' ? (scopeName ?? undefined) : undefined}
+					/>
+				)}
 			</div>
 			<div className="bottom-nav-row">
 				<Link
@@ -1086,7 +1095,7 @@ function MobileNav(props: {
 					search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'channel' as const })}
 				>
 					<Icon name="chat" title="" />
-					Chat
+					Caddie
 				</Link>
 				<Link
 					to="/"
@@ -1146,6 +1155,77 @@ function useViewportMode(): { mode: ViewportMode; isDesktop: boolean } {
 		return () => window.removeEventListener('resize', evaluate);
 	}, []);
 	return { mode, isDesktop: mode === 'desktop' };
+}
+
+/**
+ * The "Talking about" switch (v2 shell, HANDOFF §3.5): Everything plus one
+ * entry per active project. Selecting a scope navigates to it — the
+ * conversation binds to the route's scope, and drafts are kept per scope by
+ * the channel store. Separate chat THREADS per scope are B05 (not landed), so
+ * the menu says what it does ("switches what this chat is about") and never
+ * claims independent threads.
+ */
+function TalkingAbout(props: { conversationKind: ConversationKind; label: string }): ReactElement {
+	const chrome = useWorkspaceChrome();
+	const navigate = useNavigate();
+	const [open, setOpen] = useState(false);
+	const currentId = props.conversationKind === 'project' ? chrome.effectiveProjectId : null;
+
+	function goScope(projectId: string | null) {
+		setOpen(false);
+		// Keep the chat pane open on mobile so the switched chat is visible;
+		// on desktop ?pane=channel means full-screen, which is not the intent.
+		const keepPane = !chrome.isDesktop && props.conversationKind !== 'none';
+		if (projectId === null) {
+			void navigate({ to: '/', search: keepPane ? { pane: 'channel' } : {} });
+		} else {
+			void navigate({ to: '/project', search: { project: projectId, ...(keepPane ? { pane: 'channel' } : {}) } as Record<string, unknown> as never });
+		}
+	}
+
+	return (
+		<span
+			className="talking-about"
+			onBlur={(event) => {
+				if (!event.currentTarget.contains(event.relatedTarget as Node)) setOpen(false);
+			}}
+		>
+			<button
+				type="button"
+				className="talking-about-btn"
+				data-testid="talking-about"
+				aria-haspopup="menu"
+				aria-expanded={open}
+				title="Switch what this chat is about — the project page you are on, or everything"
+				onClick={() => setOpen((value) => !value)}
+			>
+				<span className="talking-about-kicker">Talking about</span>
+				<span className="talking-about-scope" data-testid="conv-context-label">
+					{props.label}
+				</span>
+			</button>
+			{open ? (
+				<span className="talking-about-menu" role="menu" data-testid="talking-about-menu">
+					<span className="talking-about-note">Switches what this chat is about.</span>
+					<button type="button" role="menuitem" data-testid="scope-everything" aria-current={currentId === null ? 'true' : undefined} onClick={() => goScope(null)}>
+						<Icon name="chat" title="" /> Everything
+					</button>
+					{chrome.buildProjects.map((project) => (
+						<button
+							type="button"
+							role="menuitem"
+							key={project.id}
+							data-testid={`scope-${project.id}`}
+							aria-current={currentId === project.id ? 'true' : undefined}
+							onClick={() => goScope(project.id)}
+						>
+							<Icon name="box" title="" /> {project.name}
+						</button>
+					))}
+				</span>
+			) : null}
+		</span>
+	);
 }
 
 /** The unseen-brief badge: absolutely positioned so it never shifts tab

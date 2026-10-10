@@ -353,7 +353,7 @@ async function submissionCards(db: D1Database, scope: Scope): Promise<DecisionCa
 				evidenceIds: [],
 				status: 'needs-you',
 				updatedAt: pkg.createdAt,
-				primaryAction: { label: 'Prepare submission', kind: 'review', targetId: pkg.id },
+				primaryAction: { label: 'Prepare to submit', kind: 'review', targetId: pkg.id },
 			});
 		} catch (error) {
 			console.error('brief: submission readiness failed:', error);

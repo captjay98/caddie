@@ -425,4 +425,79 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		expect(overflow.scrollWidth).toBe(overflow.clientWidth);
 		await context.close();
 	});
+
+	test('U02: the ask bar sits above the mobile tab bar on non-Caddie tabs and opens the Caddie tab bound to the screen', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await stubAccount(context);
+		const page = await context.newPage();
+
+		// The Caddie tab (mobile default): the real composer, no ask bar.
+		await page.goto(`${BASE}/app/`);
+		await expect(page.getByTestId('composer-input')).toBeVisible();
+		await expect(page.getByTestId('ask-bar')).toHaveCount(0);
+
+		// Brief tab: the ask bar replaces the composer above the tab bar.
+		await page.goto(`${BASE}/app/?pane=brief`);
+		await expect(page.getByTestId('ask-bar')).toBeVisible();
+		await expect(page.getByTestId('composer-input')).toHaveCount(0);
+
+		// Tapping it opens the Caddie tab (pane=channel), scoped to Everything.
+		await page.getByTestId('ask-bar').click();
+		await expect(page).toHaveURL(/pane=channel/);
+		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
+
+		// On a project route the ask bar names the project it will open.
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('ask-bar')).toBeVisible();
+		await expect(page.getByTestId('ask-bar')).toContainText('Ask about Pit wall…');
+		await page.getByTestId('ask-bar').click();
+		await expect(page).toHaveURL(/pane=channel/);
+		await expect(page.getByTestId('conv-context-label')).toContainText('Pit wall');
+		await context.close();
+	});
+
+	test('U02: the mobile tab bar reads Caddie · Brief · Discover · Projects', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await stubAccount(context);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const nav = page.getByTestId('bottom-nav');
+		await expect(nav).toContainText('Caddie');
+		await expect(nav).toContainText('Brief');
+		await expect(nav).toContainText('Discover');
+		await expect(nav).toContainText('Projects');
+		// The old word is gone from the visible tab bar.
+		await expect(nav).not.toContainText('Chat');
+		await context.close();
+	});
+
+	test('U02: the Talking about switch lists Everything + projects and navigates between scopes', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('conv-context-label')).toContainText('Pit wall');
+
+		// Open the switch: Everything + the active projects; the current one marked.
+		await page.getByTestId('talking-about').click();
+		const menu = page.getByTestId('talking-about-menu');
+		await expect(menu).toBeVisible();
+		// U02 honesty (B05 pending): the switch describes itself as a scope
+		// switch, never as separate chat threads.
+		await expect(menu).toContainText('Switches what this chat is about.');
+		await expect(menu.getByTestId('scope-everything')).toBeVisible();
+		await expect(menu.getByTestId('scope-proj-a')).toBeVisible();
+
+		// Selecting Everything navigates out of the project; scope follows.
+		await menu.getByTestId('scope-everything').click();
+		await expect(page).toHaveURL(/\/app\/$/);
+		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
+
+		// Back into the project via the switch.
+		await page.getByTestId('talking-about').click();
+		await page.getByTestId('talking-about-menu').getByTestId('scope-proj-a').click();
+		await expect(page).toHaveURL(/project=proj-a/);
+		await expect(page.getByTestId('conv-context-label')).toContainText('Pit wall');
+		await context.close();
+	});
 });

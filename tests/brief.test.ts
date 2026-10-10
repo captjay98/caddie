@@ -322,7 +322,7 @@ describe('account brief (accountBrief)', () => {
 
 		// The unresolved submission package is a needs-you card; no package
 		// exists for proj-a2, so no card is invented there.
-		const submissions = brief.cards.filter((card) => card.primaryAction.label === 'Prepare submission');
+		const submissions = brief.cards.filter((card) => card.id.startsWith('brf_submission_'));
 		expect(submissions.length).toBe(1);
 		expect(submissions[0]!.projectId).toBe('unit-proj-a');
 		expect(submissions[0]!.status).toBe('needs-you');

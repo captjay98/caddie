@@ -41,8 +41,8 @@ interface SearchResults {
 const SECTION_LABELS: Record<string, string> = {
 	projects: 'Projects',
 	planDocs: 'Plan documents',
-	tasks: 'Tasks',
-	memory: 'Memory',
+	tasks: 'To-do',
+	memory: 'Caddie knows',
 };
 
 const PAGE_SIZE = 10;

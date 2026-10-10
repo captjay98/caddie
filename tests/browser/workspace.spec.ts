@@ -257,7 +257,7 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		// The persistent conversation is present and bound to the account scope.
 		await expect(page.getByTestId('conversation-panel')).toBeVisible();
 		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
-		await expect(page.getByTestId('conv-context-label')).toContainText('General');
+		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
 		await context.close();
 	});
 
@@ -593,10 +593,11 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		// navigate away (no Back button in the Today grammar). The pill carries
 		// the scope name; the tooltip carries the explanation.
 		await expect(page.getByTestId('conv-context')).toBeVisible();
-		await expect(page.getByTestId('conv-context-label')).toContainText('General');
-		await expect(page.getByTestId('conv-context-label')).toHaveAttribute(
+		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
+		// The scope label is now the "Talking about" switch button (U02).
+		await expect(page.getByTestId('talking-about')).toHaveAttribute(
 			'title',
-			'The conversation you are in — General is your account-level chat with Caddie',
+			'Switch what this chat is about — the project page you are on, or everything',
 		);
 		await context.close();
 	});

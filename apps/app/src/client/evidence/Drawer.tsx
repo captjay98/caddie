@@ -163,7 +163,7 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 					<p className="kicker" data-tone="action">
 						PROVE
 					</p>
-					<h2 className="ev-title">Evidence</h2>
+					<h2 className="ev-title">Proof</h2>
 					<p className="page-lede">
 						Nothing here is asserted without a snapshot behind it — every claim points at an immutable
 						source with its SHA-256, and a refused fetch is listed with its stored reason, never as an

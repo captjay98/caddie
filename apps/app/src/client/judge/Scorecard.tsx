@@ -180,7 +180,7 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 					<p className="kicker" data-tone="action">
 						PROVE
 					</p>
-					<h2 className="ev-title">Judge review</h2>
+					<h2 className="ev-title">What judges look for</h2>
 <p className="page-lede">
 							Caddie extracts the contest rubric from your evidence and shows what is verified; you record
 							your own assessment against it — coaching to make it better, never a prediction of the result.
@@ -193,7 +193,7 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 
 			{error ? (
 				<div role="alert" className="sign-in-error disc-error" data-testid="judge-error">
-					<b>Judge review could not continue.</b>
+					<b>Checking what judges look for could not continue.</b>
 					<span> {error}</span>
 				</div>
 			) : null}

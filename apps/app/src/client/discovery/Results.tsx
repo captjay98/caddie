@@ -251,7 +251,7 @@ export function DiscoveryResults(props: {
 			) : null}
 
 			<p className="state-detail">
-				Eligibility uses your profile country: {list?.profileCountry ?? 'none recorded — country rules stay UNKNOWN'}.
+				Whether you can enter is judged with your profile country: {list?.profileCountry ?? 'none recorded — country rules stay UNKNOWN'}.
 				Ranking never presents a hard-ineligible candidate as eligible.
 			</p>
 

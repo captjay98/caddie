@@ -133,8 +133,8 @@ export function DesignReview(props: {
 					</p>
 					<h2 className="ev-title">Plan review</h2>
 					<p className="page-lede">
-						Caddie drafts the plan; building starts only after you approve it. Approving lets
-						specialists build against plan r{latest.revision}, under policy {policyVersion}.
+						Caddie drafts the plan; building starts only after you say it’s good. Saying yes lets
+						specialists build against plan version {latest.revision}, under policy {policyVersion}.
 					</p>
 				</div>
 				{latestRecord ? (
@@ -230,7 +230,7 @@ export function DesignReview(props: {
 										onClick={() => void decide('approved', revision)}
 										data-testid="design-review-approve"
 									>
-										{busy === 'approved' ? 'Approving…' : `Approve plan r${revision.revision}`}
+										{busy === 'approved' ? 'Saving…' : 'Looks good — build it'}
 									</button>
 									<button
 										type="button"

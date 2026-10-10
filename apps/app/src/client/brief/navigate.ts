@@ -38,8 +38,11 @@ export function briefActionRoute(
 		case 'result':
 			return { to: '/project', search };
 		case 'change':
-			// "Prepare submission" → the submission package (its checklist).
-			if (card.primaryAction.label === 'Prepare submission') return { to: '/submission', search };
+			// The submission-gap card → the submission package (its checklist).
+			// Routed on the server's stable card id (brf_submission_<packageId>),
+			// never on the display label — labels are copy (they get reworded),
+			// ids are identity.
+			if (card.id.startsWith('brf_submission_')) return { to: '/submission', search };
 			if (card.evidenceIds.length > 0) {
 				return { to: '/evidence', search: { ...search, claim: card.primaryAction.targetId } };
 			}

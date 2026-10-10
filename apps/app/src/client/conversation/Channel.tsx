@@ -391,7 +391,7 @@ export function Channel(props: {
 					<StatePanel
 						kind="empty"
 						title="No conversation here yet"
-						detail="This screen has no conversation scope. Open a project, or head to the Chat tab to talk to Caddie."
+						detail="This screen has no conversation scope. Open a project, or head to the Caddie tab to talk to Caddie."
 					/>
 				</div>
 			</div>

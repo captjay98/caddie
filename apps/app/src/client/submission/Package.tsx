@@ -260,7 +260,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 					<p className="kicker" data-tone="action">
 						SHIP
 					</p>
-					<h2 className="ev-title">Submission</h2>
+					<h2 className="ev-title">Submit</h2>
 					<p className="page-lede">
 						Prepare here, submit elsewhere — this tool never submits anywhere. The package is checked
 						against the rules before you send it.

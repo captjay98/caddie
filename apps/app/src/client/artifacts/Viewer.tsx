@@ -79,7 +79,7 @@ function humanSize(bytes: number): string {
 }
 
 function optionLabel(revision: ViewerRevision): string {
-	return `r${revision.planRevision} · ${revision.filename} · ${shortHash(revision.sha256)}`;
+	return `version ${revision.planRevision} · ${revision.filename} · ${shortHash(revision.sha256)}`;
 }
 
 export function ArtifactViewer(props: {

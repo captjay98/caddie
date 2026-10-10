@@ -3294,3 +3294,143 @@ body.conv-resizing * {
 		height: 44px;
 	}
 }
+
+/* --- U02: mobile ask bar + the "Talking about" switch ------------------------ */
+
+/* The ask bar sits above the tab bar on non-Caddie mobile tabs; it acts as a
+   button that opens the Caddie tab bound to the thing on screen. */
+.ask-bar {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	width: 100%;
+	min-height: 50px;
+	padding: 0 6px 0 8px;
+	border-radius: 16px;
+	background: color-mix(in srgb, var(--color-panel) 96%, transparent);
+	border: 1px solid var(--color-line);
+	box-shadow:
+		0 12px 32px rgb(0 0 0 / 0.4),
+		inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 6%, transparent);
+	cursor: pointer;
+	color: var(--color-muted);
+	font-size: 14.5px;
+	text-align: left;
+}
+
+.ask-bar-mark {
+	width: 30px;
+	height: 30px;
+	font-size: 12px;
+	box-shadow: none;
+}
+
+.ask-bar-ph {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.ask-bar-go {
+	width: 38px;
+	height: 38px;
+	border-radius: 50%;
+	display: grid;
+	place-items: center;
+	background: var(--color-raised);
+	border: 1px solid var(--color-line-soft);
+	color: var(--color-bright);
+	flex: none;
+}
+
+.ask-bar:active {
+	transform: translateY(1px);
+}
+
+/* The "Talking about" switch in the conversation head (§3.5). */
+.talking-about {
+	position: relative;
+	min-width: 0;
+}
+
+.talking-about-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	max-width: 100%;
+	padding: 0.28rem 0.6rem;
+	border-radius: 999px;
+	background: var(--color-panel);
+	border: 1px solid var(--color-line-soft);
+	color: var(--color-muted);
+	cursor: pointer;
+	box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
+	font-family: var(--font-mono);
+	font-size: var(--r-label);
+	letter-spacing: 0.04em;
+}
+
+.talking-about-btn:hover {
+	border-color: var(--color-line);
+	color: var(--color-bright);
+}
+
+.talking-about-kicker {
+	white-space: nowrap;
+	color: var(--color-muted);
+}
+
+.talking-about-scope {
+	color: var(--color-bright);
+	font-weight: 600;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.talking-about-menu {
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	z-index: 30;
+	min-width: 230px;
+	display: grid;
+	padding: 6px;
+	border-radius: 10px;
+	background: var(--color-panel);
+	border: 1px solid var(--color-line);
+	box-shadow: 0 24px 60px rgb(0 0 0 / 0.5);
+}
+
+.talking-about-note {
+	padding: 8px 10px;
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+	border-bottom: 1px solid var(--color-line-soft);
+}
+
+.talking-about-menu button {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 36px;
+	padding: 0 10px;
+	border-radius: 6px;
+	color: var(--color-bright);
+	font-size: 13.5px;
+	width: 100%;
+	text-align: left;
+	cursor: pointer;
+	background: transparent;
+	border: none;
+}
+
+.talking-about-menu button:hover {
+	background: color-mix(in srgb, var(--color-bright) 6%, transparent);
+}
+
+.talking-about-menu button[aria-current='true'] {
+	color: var(--color-action);
+}
