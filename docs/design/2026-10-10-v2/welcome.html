@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Welcome · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .chips-select { display: flex; flex-wrap: wrap; gap: 8px; }
+  .w-foot { display: flex; align-items: center; gap: 10px; }
+  .w-foot .spacer { flex: 1; }
+  @media (max-width: 760px) { .w-foot .btn.primary { flex: 1; } }
+
+  /* Step 0 · Caddie introduces itself */
+  .intro { display: grid; gap: 22px; }
+  .intro-top { display: flex; justify-content: flex-end; }
+  .intro-hero { display: grid; justify-items: center; gap: 4px; margin-top: -6px; }
+  .intro-hero .halo { width: 168px; height: 168px; display: grid; place-items: center; border-radius: 50%;
+    background: radial-gradient(closest-side, color-mix(in srgb, var(--action) 18%, transparent), transparent); }
+  .intro-hero .mascot { width: 132px; height: 132px; }
+  .intro-lines { display: grid; gap: 12px; max-width: 540px; width: 100%; margin: 0 auto; }
+  .intro-lines .text { font-size: 15.5px; line-height: 1.6; }
+  .intro-lines .text.hello { font-size: 26px; font-weight: 650; line-height: 1.2; letter-spacing: -0.01em; text-align: center; }
+  .intro-lines [data-line] { opacity: 0; transform: translateY(6px); transition: opacity .35s ease, transform .35s ease; }
+  .intro-lines [data-line].on { opacity: 1; transform: none; }
+  .faces { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .face { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--r); border: 1px solid var(--line-soft); background: var(--raised); }
+  .face .mascot { width: 40px; height: 40px; }
+  .face b { display: block; font-size: 13px; font-weight: 600; }
+  .face small { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.35; }
+  .faces-label { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  /* Name ask: Caddie pauses here until you answer or skip */
+  .ask { display: grid; gap: 10px; justify-items: center; text-align: center; }
+  .ask[hidden] { display: none; }
+  .ask label { font-size: 15.5px; line-height: 1.5; }
+  .name-row { display: flex; gap: 8px; width: 100%; max-width: 380px; }
+  .name-row .input { flex: 1; min-width: 0; height: 44px; font-size: 15px; }
+  .name-row .btn { height: 44px; }
+  .ask .err, .ask .from { margin-top: -4px; }
+  .ask .from[hidden] { display: none; }
+  .ask-skip { font-size: 13px; color: var(--muted); padding: 6px 8px; border-radius: var(--r-sm); min-height: 32px; }
+  .ask-skip:hover { color: var(--fg); background: var(--hover); }
+  .ask-skip:focus-visible, .name-row .btn:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+  .intro-lines .text.greet { font-size: 18px; font-weight: 600; text-align: center; text-wrap: balance; }
+  .intro-lines .text.greet[hidden] { display: none; }
+  @media (max-width: 760px) {
+    .intro-hero .halo { width: 136px; height: 136px; } .intro-hero .mascot { width: 104px; height: 104px; }
+    .intro-lines .text.hello { font-size: 22px; }
+    .faces { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app bare" data-page="welcome">
+  <main class="entry">
+    <div class="entry-card wide" data-od-id="welcome-card">
+      <div id="w-head" style="display:flex;align-items:center;justify-content:space-between;gap:12px" hidden>
+        <div style="display:flex;align-items:center;gap:10px"><span id="w-mascot"></span><b>Caddie</b></div>
+        <div class="steps-dots" aria-hidden="true"><i class="on"></i><i></i><i></i></div>
+      </div>
+
+      <!-- Step 0 · the character introduces itself -->
+      <section data-step="0" class="intro" data-od-id="welcome-intro" aria-labelledby="intro-hello">
+        <div class="intro-top"><button class="btn ghost sm" id="intro-replay" data-od-id="welcome-intro-replay"><i data-i="repeat"></i>Say that again</button></div>
+        <div class="intro-hero"><span class="halo" id="intro-mascot"></span></div>
+        <div class="intro-lines" aria-live="polite">
+          <h1 class="text hello" id="intro-hello" data-line>Hi, I’m Caddie.</h1>
+          <div class="ask" id="intro-ask" data-line data-od-id="welcome-intro-name">
+            <label for="intro-name">What should I call you?</label>
+            <form class="name-row" id="intro-name-form" novalidate>
+              <input class="input" id="intro-name" name="name" maxlength="40" autocomplete="given-name" autocapitalize="words" spellcheck="false" placeholder="Your first name" aria-describedby="intro-name-err">
+              <button class="btn secondary" type="submit" data-od-id="welcome-intro-name-save">That’s me</button>
+            </form>
+            <span class="meta from" id="intro-name-from" hidden></span>
+            <span class="err" id="intro-name-err" hidden>Type a name, or skip this.</span>
+            <button type="button" class="ask-skip" id="intro-name-skip" data-od-id="welcome-intro-name-skip">Skip — I’ll add it later</button>
+          </div>
+          <p class="text greet" id="intro-greet" data-line hidden data-od-id="welcome-intro-greet"></p>
+          <p class="text" data-line>I help you take part in <b>hackathons</b> — online contests where you build an app in a few weeks. I can help with your own projects too.</p>
+          <p class="text" data-line>I find hackathons you can enter, write a plan, <b>build the app with you</b>, and check it against the rules before you submit.</p>
+          <p class="text" data-line>I always <b>show you the plan first</b>, and I ask before I spend anything.</p>
+          <div data-line style="margin-top:6px">
+            <p class="faces-label">You can tell what I’m doing from my face:</p>
+            <div class="faces">
+              <div class="face" data-od-id="welcome-face-working"><span data-face="working"></span><span><b>Building</b><small>Making your app</small></span></div>
+              <div class="face" data-od-id="welcome-face-needs"><span data-face="needs"></span><span><b>Needs you</b><small>Waiting for your OK</small></span></div>
+              <div class="face" data-od-id="welcome-face-done"><span data-face="done"></span><span><b>Done</b><small>Finished what you asked</small></span></div>
+            </div>
+          </div>
+          <p class="text" data-line style="color:var(--muted)">First, three quick questions so I only show you hackathons you can actually enter.</p>
+        </div>
+      </section>
+
+      <!-- Step 1 -->
+      <section data-step="1" class="section" style="gap:20px" hidden>
+        <div><div class="kicker" style="margin-bottom:8px">Step 1 of 3 · About you</div><h1 style="font-size:26px;font-weight:650">Let's check what you can enter</h1><p class="muted" style="margin-top:8px">Hackathon rules often depend on where you live and your age. This stays private.</p></div>
+        <div class="grid-2">
+          <div class="field"><label for="w-country">Country you live in</label><select class="select" id="w-country"><option value="">Choose…</option><option>Nigeria</option><option>Ghana</option><option>Kenya</option><option>United Kingdom</option><option>United States</option></select><span class="err" hidden>Choose a country so eligibility can be checked.</span></div>
+          <div class="field"><label for="w-age">Age</label><select class="select" id="w-age"><option>18 or older</option><option>13–17</option><option>Prefer not to say</option></select></div>
+        </div>
+        <div class="field"><label for="w-tz">Timezone</label><select class="select" id="w-tz"><option>Lagos (WAT, UTC+1) · detected</option><option>London</option><option>New York</option></select><span class="hint">Deadlines are shown in your time.</span></div>
+      </section>
+
+      <!-- Step 2 -->
+      <section data-step="2" class="section" style="gap:20px" hidden>
+        <div><div class="kicker" style="margin-bottom:8px">Step 2 of 3 · What you like</div><h1 style="font-size:26px;font-weight:650">What should Caddie look for?</h1><p class="muted" style="margin-top:8px">Pick a few. You can change these any time in Settings → Interests.</p></div>
+        <div class="field"><span class="label">Interests</span><div class="chips-select"><button class="pill" data-toggle aria-pressed="false">Fintech</button><button class="pill" data-toggle aria-pressed="false">AI agents</button><button class="pill" data-toggle aria-pressed="false">Games</button><button class="pill" data-toggle aria-pressed="false">Community impact</button><button class="pill" data-toggle aria-pressed="false">Health</button><button class="pill" data-toggle aria-pressed="false">Education</button></div></div>
+        <div class="field"><span class="label">Tools you like to build with</span><div class="chips-select"><button class="pill" data-toggle aria-pressed="false">Web apps (React)</button><button class="pill" data-toggle aria-pressed="false">Phone apps (Flutter)</button><button class="pill" data-toggle aria-pressed="false">Python</button><button class="pill" data-toggle aria-pressed="false">Not sure yet</button></div></div>
+        <div class="field"><label for="w-hours">Free hours a week</label><select class="select" id="w-hours"><option>Up to 5</option><option selected>5–10</option><option>10–20</option><option>20+</option></select></div>
+      </section>
+
+      <!-- Step 3 -->
+      <section data-step="3" class="section" style="gap:16px" hidden>
+        <div><div class="kicker" style="margin-bottom:8px">Step 3 of 3 · Where to start</div><h1 style="font-size:26px;font-weight:650">How do you want to begin?</h1><p class="muted" style="margin-top:8px">Whichever you pick, Caddie shows you a plan before it builds anything.</p></div>
+        <label class="choice"><input type="radio" name="start" value="find" checked><span><b>Find a hackathon</b><small>See hackathons that suit you — Caddie checks you can enter.</small></span></label>
+        <label class="choice"><input type="radio" name="start" value="idea"><span style="flex:1"><b>I have an idea</b><small>Describe it and Caddie writes a plan.</small><textarea class="textarea" id="w-idea" placeholder="e.g. Track which invoices are overdue and nudge customers" style="margin-top:10px;min-height:70px"></textarea></span></label>
+        <label class="choice"><input type="radio" name="start" value="code"><span><b>I already have code</b><small>Let Caddie read a GitHub repo first.</small></span></label>
+      </section>
+
+      <div class="w-foot">
+        <button class="btn ghost" id="w-back" hidden>Back</button>
+        <span class="spacer"></span>
+        <a class="btn ghost" href="caddie.html" id="w-skip">Skip for now</a>
+        <button class="btn primary" id="w-next" data-od-id="welcome-continue">Continue</button>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="assets/caddie.js"></script>
+<script src="assets/characters.js"></script>
+<script>
+(function () {
+  let step = 0; const $ = (s) => document.querySelector(s);
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let v = 'flag'; try { v = JSON.parse(localStorage.getItem('caddie2.character')) || 'flag'; } catch (e) {}
+  const C = (s, n, live) => window.CaddieCharacter(v, s, n, live);
+  $('#w-mascot').outerHTML = C('idle', 34, true).replace('<svg class="mascot"', '<svg class="mascot" id="w-mascot"');
+  $('#intro-mascot').innerHTML = C('idle', 132, true);
+  document.querySelectorAll('[data-face]').forEach((el) => { el.outerHTML = C(el.dataset.face, 40); });
+
+  /* Intro: lines arrive one at a time; the face matches what each line is about.
+     Caddie pauses after "Hi" to ask your name, then greets you by it and carries on. */
+  const big = $('#intro-mascot .mascot');
+  const all = Array.from(document.querySelectorAll('.intro-lines [data-line]'));
+  const hello = $('#intro-hello'), ask = $('#intro-ask'), greet = $('#intro-greet');
+  const nameIn = $('#intro-name'), nameErr = $('#intro-name-err');
+  const rest = all.slice(all.indexOf(greet) + 1);
+  const REST = [['idle', 2600], ['working', 2600], ['idle', 2300], ['idle', 2400], ['listening', 0]];
+  const savedName = () => { try { const n = localStorage.getItem('caddie2.name'); return n === null ? null : JSON.parse(n); } catch (e) { return null; } };
+  const saveName = (n) => { try { localStorage.setItem('caddie2.name', JSON.stringify(n)); } catch (e) { /* private mode */ } };
+  const tidy = (s) => s.trim().replace(/\s+/g, ' ').slice(0, 40);
+  let timers = [], answered = false;
+  const clear = () => { timers.forEach(clearTimeout); timers = []; };
+  const at = (ms, fn) => timers.push(setTimeout(fn, ms));
+  const setErr = (on) => { nameErr.hidden = !on; nameIn.classList.toggle('invalid', on); nameIn.setAttribute('aria-invalid', on ? 'true' : 'false'); };
+  /* Prefill from the sign-in account; say where it came from while it's still unchanged. */
+  const acct = window.CaddieAccount || { provider: 'GitHub', suggested: '' };
+  const fromLine = $('#intro-name-from');
+  fromLine.textContent = 'From your ' + acct.provider + ' account. Change it if you like.';
+  const syncFrom = () => { fromLine.hidden = !(acct.suggested && tidy(nameIn.value) === acct.suggested); };
+
+  const play = () => {
+    clear(); answered = false;
+    all.forEach((l) => l.classList.remove('on'));
+    ask.hidden = false; greet.hidden = true; setErr(false);
+    nameIn.value = savedName() || acct.suggested || '';
+    syncFrom();
+    if (reduce) { hello.classList.add('on'); ask.classList.add('on'); big.dataset.state = 'listening'; return; }
+    big.dataset.state = 'idle';
+    at(350, () => { hello.classList.add('on'); big.dataset.state = 'done'; });
+    at(1250, () => { big.dataset.state = 'thinking'; });
+    at(1700, () => { ask.classList.add('on'); big.dataset.state = 'listening'; nameIn.focus({ preventScroll: true }); nameIn.select(); });
+  };
+
+  const answer = (name) => {
+    if (answered) return;
+    answered = true; clear(); saveName(name);
+    ask.hidden = true;
+    greet.textContent = '';
+    if (name) { const b = document.createElement('b'); b.textContent = name; greet.append('Nice to meet you, ', b, '.'); }
+    else greet.textContent = 'No problem. You can add your name any time in Settings.';
+    greet.hidden = false; greet.tabIndex = -1; greet.focus({ preventScroll: true });
+    if (reduce) { greet.classList.add('on'); rest.forEach((l) => l.classList.add('on')); big.dataset.state = 'listening'; return; }
+    void greet.offsetWidth; // let the fade-in run after un-hiding
+    greet.classList.add('on'); big.dataset.state = name ? 'done' : 'idle';
+    let t = 1700;
+    REST.forEach(([mood, hold], i) => {
+      at(t - 650, () => { big.dataset.state = 'thinking'; });
+      at(t, () => { rest[i].classList.add('on'); big.dataset.state = mood; });
+      t += hold;
+    });
+  };
+
+  $('#intro-name-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const n = tidy(nameIn.value);
+    if (!n) { setErr(true); nameIn.focus(); return; }
+    answer(n);
+  });
+  nameIn.addEventListener('input', () => { setErr(false); syncFrom(); });
+  $('#intro-name-skip').addEventListener('click', () => answer(''));
+  $('#intro-replay').addEventListener('click', play);
+
+  const show = () => {
+    document.querySelectorAll('[data-step]').forEach((s) => { s.hidden = +s.dataset.step !== step; });
+    $('#w-head').hidden = step === 0;
+    document.querySelectorAll('.steps-dots i').forEach((d, i) => d.classList.toggle('on', i < step));
+    const m = $('#w-mascot'); if (m) { m.dataset.state = step === 3 ? 'listening' : 'idle'; }
+    $('#w-back').hidden = step === 0;
+    const mode = (document.querySelector('input[name="start"]:checked') || {}).value;
+    $('#w-next').textContent = step === 0 ? 'Let’s go' : step < 3 ? 'Continue' : mode === 'idea' ? 'Write my plan' : mode === 'code' ? 'Connect GitHub' : 'Show my matches';
+  };
+  $('#w-next').addEventListener('click', () => {
+    if (step === 0) {
+      // "Let's go" before answering: keep a typed name; otherwise treat it as a skip.
+      if (!answered) { const n = tidy(nameIn.value); if (n) saveName(n); else if (savedName() === null) saveName(''); }
+      clear(); step = 1; show(); $('#w-country').focus(); return;
+    }
+    if (step === 1 && !$('#w-country').value) { $('#w-country').classList.add('invalid'); $('#w-country').nextElementSibling.hidden = false; $('#w-country').focus(); return; }
+    if (step < 3) { step++; show(); return; }
+    const mode = document.querySelector('input[name="start"]:checked').value;
+    if (mode === 'idea' && !$('#w-idea').value.trim()) { $('#w-idea').classList.add('invalid'); $('#w-idea').focus(); return; }
+    location.href = mode === 'find' ? 'discover.html' : mode === 'idea' ? 'project-plan.html?p=pantry' : 'projects.html?open=new-project';
+  });
+  $('#w-back').addEventListener('click', () => { step--; show(); if (step === 0) play(); });
+  $('#w-country').addEventListener('change', () => { $('#w-country').classList.remove('invalid'); $('#w-country').nextElementSibling.hidden = true; });
+  document.querySelectorAll('input[name="start"]').forEach((r) => r.addEventListener('change', show));
+  $('#w-idea').addEventListener('focus', () => { document.querySelector('input[value="idea"]').checked = true; show(); });
+  show(); play();
+})();
+</script>
+</body>
+</html>

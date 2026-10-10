@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Settings · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .form-grid { display: grid; gap: 18px; max-width: 600px; }
+  .chips-select { display: flex; flex-wrap: wrap; gap: 8px; }
+  .usage-top { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .usage-top .stat { border-left: 1px solid var(--line-soft); }
+  .usage-top .stat:first-child { border-left: 0; }
+  @media (max-width: 760px) { .usage-top { grid-template-columns: 1fr; } .usage-top .stat { border-left: 0; border-top: 1px solid var(--line-soft); } .usage-top .stat:first-child { border-top: 0; } }
+</style>
+</head>
+<body>
+<div class="app" data-page="settings" data-title="Settings" data-suggest="Forget that I prefer TypeScript|Lower my monthly limit to $30|What do you know about me?" data-reply="See what Caddie knows|Settings · What Caddie knows|#knows">
+<main class="main">
+  <div class="page">
+    <header class="page-head"><div><h1>Settings</h1><p class="lede">You, what Caddie knows, and what it can spend.</p></div></header>
+
+    <div class="tabs" role="tablist" data-tabs="hash" data-od-id="settings-tabs">
+      <a class="tab" role="tab" href="#profile" data-tab-target="profile" aria-selected="true">You</a>
+      <a class="tab" role="tab" href="#interests" data-tab-target="interests">Interests</a>
+      <a class="tab" role="tab" href="#tools" data-tab-target="tools">Build tools</a>
+      <a class="tab" role="tab" href="#knows" data-tab-target="knows">What Caddie knows</a>
+      <a class="tab" role="tab" href="#accounts" data-tab-target="accounts">Connected accounts</a>
+      <a class="tab" role="tab" href="#routines" data-tab-target="routines">Routines</a>
+      <a class="tab" role="tab" href="#spending" data-tab-target="spending">Spending</a>
+      <a class="tab" role="tab" href="#appearance" data-tab-target="appearance">Appearance</a>
+    </div>
+
+    <section id="profile" data-tabpanel class="panel panel-body" data-od-id="settings-profile">
+      <div class="form-grid">
+        <p class="muted" style="font-size:13.5px">Used only to check if you can enter a hackathon. Caddie never shares it.</p>
+        <div class="field"><label for="p-name">Name</label><input class="input" id="p-name" value="Jay" maxlength="40" autocomplete="given-name"><span class="hint">Caddie greets you by this name. It started as the name on the account you signed in with.</span></div>
+        <div class="grid-2">
+          <div class="field"><label for="p-country">Country you live in</label><select class="select" id="p-country"><option>Nigeria</option><option>Ghana</option><option>Kenya</option><option>United Kingdom</option><option>United States</option></select></div>
+          <div class="field"><label for="p-tz">Timezone</label><select class="select" id="p-tz"><option>Lagos (WAT, UTC+1)</option><option>London (BST/GMT)</option><option>New York (EST/EDT)</option></select></div>
+        </div>
+        <div class="grid-2">
+          <div class="field"><label for="p-age">Age</label><select class="select" id="p-age"><option>18 or older</option><option>13–17</option><option>Prefer not to say</option></select><span class="hint">Many hackathons are for adults only.</span></div>
+          <div class="field"><label for="p-student">Student?</label><select class="select" id="p-student"><option>Not a student</option><option>University student</option><option>High school student</option></select></div>
+        </div>
+        <div><button class="btn primary" data-toast="Saved — Discover will update">Save</button></div>
+      </div>
+    </section>
+
+    <section id="interests" data-tabpanel class="panel panel-body" hidden data-od-id="settings-matching">
+      <div class="form-grid">
+        <p class="muted" style="font-size:13.5px">Decides what shows up in Discover. Whether you can enter always comes from each hackathon’s own rules.</p>
+        <div class="field"><span class="label">Topics you like</span><div class="chips-select"><button class="pill" data-toggle aria-pressed="true">Fintech</button><button class="pill" data-toggle aria-pressed="true">AI agents</button><button class="pill" data-toggle aria-pressed="false">Games</button><button class="pill" data-toggle aria-pressed="true">Community impact</button><button class="pill" data-toggle aria-pressed="false">Health</button><button class="pill" data-toggle aria-pressed="false">VR / AR</button><button class="pill" data-toggle aria-pressed="false">Education</button></div></div>
+        <div class="field"><span class="label">Tools you like to build with</span><div class="chips-select"><button class="pill" data-toggle aria-pressed="true">Web apps (React)</button><button class="pill" data-toggle aria-pressed="true">Phone apps (Flutter)</button><button class="pill" data-toggle aria-pressed="true">Python</button><button class="pill" data-toggle aria-pressed="false">PHP (Laravel)</button></div></div>
+        <div class="field"><label for="m-hours">Hours a week you can give</label><div style="display:flex;gap:14px;align-items:center"><input type="range" id="m-hours" min="2" max="40" value="10" style="flex:1;accent-color:var(--action)"><b class="mono" id="m-hours-v" style="min-width:56px;text-align:right">10 h</b></div></div>
+        <label class="check"><input type="checkbox" checked>Hide hackathons I can't enter</label>
+        <label class="check"><input type="checkbox">Only show hackathons with cash prizes</label>
+        <div><button class="btn primary" data-toast="Saved — Discover will update">Save</button></div>
+      </div>
+    </section>
+
+    <!-- Build tools (was Stacks, S36): statuses follow caddie-forge docs/feature-ledger.md "Supported stack availability": react-hono proving first; the other four planned; recipes unverified until their own gate. -->
+    <section id="tools" data-tabpanel class="section" hidden data-od-id="settings-stacks">
+      <p class="muted" style="font-size:13.5px;max-width:62ch">What Caddie can build your app with. React web apps come first. Each of the others is offered only once Caddie has built, tested and previewed a whole app with it, start to finish.</p>
+      <div class="panel row-list">
+        <div class="row" data-od-id="stack-react-hono"><span class="ico-box ok"><i data-i="globe"></i></span><div class="grow"><div class="title">Web app · React</div><div class="sub">Runs in the browser, with a small server behind it. This is the one Caddie builds with today, and its full start-to-finish test is still running.</div></div><div class="trail"><span class="chip ok">Being proven first</span></div></div>
+        <div class="row" data-od-id="stack-tanstack-start"><span class="ico-box"><i data-i="globe"></i></span><div class="grow"><div class="title">Web app · TanStack Start</div><div class="sub">For apps with their own server. Comes after React, once it passes its own full test.</div><button class="btn sm secondary notify" type="button" data-notify="tanstack-start" data-notify-name="TanStack Start" aria-pressed="false" data-od-id="notify-tanstack-start"><span class="off"><i data-i="bell"></i>Tell me when it’s ready</span><span class="on"><i data-i="check"></i>I’ll tell you</span><span class="sr-only"> — TanStack Start</span></button></div><div class="trail"><span class="chip outline">Later</span></div></div>
+        <div class="row" data-od-id="stack-laravel-inertia"><span class="ico-box"><i data-i="globe"></i></span><div class="grow"><div class="title">Web app · PHP (Laravel)</div><div class="sub">Comes later, once sign-in and sessions are tested where the app would really run.</div><button class="btn sm secondary notify" type="button" data-notify="laravel" data-notify-name="PHP (Laravel)" aria-pressed="false" data-od-id="notify-laravel"><span class="off"><i data-i="bell"></i>Tell me when it’s ready</span><span class="on"><i data-i="check"></i>I’ll tell you</span><span class="sr-only"> — PHP (Laravel)</span></button></div><div class="trail"><span class="chip outline">Later</span></div></div>
+        <div class="row" data-od-id="stack-fastapi-react"><span class="ico-box"><i data-i="globe"></i></span><div class="grow"><div class="title">Web app · Python (FastAPI)</div><div class="sub">Comes later: a Python server and a web front end under one private preview.</div><button class="btn sm secondary notify" type="button" data-notify="fastapi" data-notify-name="Python (FastAPI)" aria-pressed="false" data-od-id="notify-fastapi"><span class="off"><i data-i="bell"></i>Tell me when it’s ready</span><span class="on"><i data-i="check"></i>I’ll tell you</span><span class="sr-only"> — Python (FastAPI)</span></button></div><div class="trail"><span class="chip outline">Later</span></div></div>
+        <div class="row" data-od-id="stack-flutter"><span class="ico-box"><i data-i="layers"></i></span><div class="grow"><div class="title">Phone app · Flutter</div><div class="sub">Comes later, once Caddie has installed a real Android app on a test phone and tapped through it — a web screenshot doesn’t count.</div><button class="btn sm secondary notify" type="button" data-notify="flutter" data-notify-name="Flutter" aria-pressed="false" data-od-id="notify-flutter"><span class="off"><i data-i="bell"></i>Tell me when it’s ready</span><span class="on"><i data-i="check"></i>I’ll tell you</span><span class="sr-only"> — Flutter</span></button></div><div class="trail"><span class="chip outline">Later</span></div></div>
+      </div>
+      <div class="panel">
+        <details class="more" style="border:0">
+          <summary><i data-i="chevron"></i>Why can’t I pick the others?</summary>
+          <div class="plain muted">So Caddie never starts a project it can’t finish. When a tool passes its full test, it appears in “Tools to build with” when you start a project. If you pressed “Tell me when it’s ready”, Caddie also tells you in the chat and puts it on your Brief, once. The tools you like under <a class="link" href="#interests" data-tab-jump="interests">Interests</a> only change which hackathons you see.</div>
+        </details>
+        <details class="more">
+          <summary><i data-i="chevron"></i>For developers</summary>
+          <div><table class="table" style="font-size:13px"><thead><tr><th>Recipe</th><th>Status (feature ledger)</th></tr></thead><tbody>
+            <tr><td class="mono">react-hono</td><td class="mono">proving first · P09 gate</td></tr>
+            <tr><td class="mono">tanstack-start</td><td class="mono">planned · P15a · unverified</td></tr>
+            <tr><td class="mono">laravel-inertia</td><td class="mono">planned · P15b · unverified</td></tr>
+            <tr><td class="mono">fastapi-react</td><td class="mono">planned · P15c · unverified</td></tr>
+            <tr><td class="mono">flutter</td><td class="mono">planned · P15d · unverified</td></tr>
+          </tbody></table></div>
+        </details>
+      </div>
+    </section>
+
+    <section id="knows" data-tabpanel class="section" hidden data-od-id="settings-memory">
+      <div class="seg" role="group" aria-label="Show"><button aria-pressed="true" data-value="personal">About you</button><button aria-pressed="false" data-value="projects">About each project</button></div>
+      <div class="panel row-list" id="mem-personal">
+        <div class="row"><div class="grow"><div class="title">Prefers TypeScript</div><div class="sub">Noticed across 3 projects · from your code: corroborated</div></div><div class="trail"><button class="btn ghost sm" data-open="correct-memory">Correct</button><button class="btn ghost sm" data-toast="Forgotten">Forget</button></div></div>
+        <div class="row"><div class="grow"><div class="title">Usually builds solo</div><div class="sub">You said this in chat · Sep 30</div></div><div class="trail"><button class="btn ghost sm" data-open="correct-memory">Correct</button><button class="btn ghost sm" data-toast="Forgotten">Forget</button></div></div>
+        <div class="row"><div class="grow"><div class="title">Likes plans with screens drawn out</div><div class="sub">Caddie guessed this from your plan feedback · not confirmed</div></div><div class="trail"><button class="btn secondary sm" data-toast="Confirmed">Confirm</button><button class="btn ghost sm" data-open="correct-memory">Correct</button></div></div>
+      </div>
+      <div class="panel row-list" id="mem-projects" hidden>
+        <a class="row" href="project-settings.html#knows"><span class="ico-box"><i data-i="folder"></i></span><div class="grow"><div class="title">Ledger Nudge</div><div class="sub">3 things remembered</div></div><i data-i="chevron"></i></a>
+        <a class="row" href="project-settings.html?p=founder#knows"><span class="ico-box"><i data-i="folder"></i></span><div class="grow"><div class="title">Founder Hours</div><div class="sub">5 things remembered</div></div><i data-i="chevron"></i></a>
+        <a class="row" href="project-settings.html?p=pantry#knows"><span class="ico-box"><i data-i="folder"></i></span><div class="grow"><div class="title">Pantry Scale</div><div class="sub">1 thing remembered</div></div><i data-i="chevron"></i></a>
+      </div>
+    </section>
+
+    <section id="accounts" data-tabpanel class="section" hidden data-od-id="settings-connections">
+      <div class="panel row-list">
+        <div class="row"><span class="ico-box"><i data-i="user"></i></span><div class="grow"><div class="title">GitHub sign-in</div><div class="sub">captjay98 · how you sign in</div></div><div class="trail"><span class="chip ok">Connected</span></div></div>
+        <div class="row"><span class="ico-box"><i data-i="git"></i></span><div class="grow"><div class="title">GitHub code access</div><div class="sub">Caddie can save code to 4 of your repos</div></div><div class="trail"><span class="chip ok">Connected</span><button class="btn secondary sm" data-toast="Opening GitHub to change access" data-toast-icon="external">Manage on GitHub</button></div></div>
+        <div class="row"><span class="ico-box"><i data-i="globe"></i></span><div class="grow"><div class="title">Google sign-in</div><div class="sub">Add a second way to sign in</div></div><div class="trail"><button class="btn secondary sm" data-toast="Opening Google" data-toast-icon="external">Connect</button></div></div>
+      </div>
+      <details class="panel panel-body"><summary class="meta" style="cursor:pointer">Is Caddie working normally?</summary><dl class="kv" style="margin-top:12px"><dt>Build runners</dt><dd><span class="chip ok">Available</span></dd><dt>Discovery sources</dt><dd>Devpost · read today 09:12</dd></dl></details>
+    </section>
+
+    <section id="routines" data-tabpanel class="section" hidden data-od-id="settings-automations">
+      <p class="muted" style="font-size:13.5px">Things Caddie does on a schedule, across all your projects. Change one in its project’s settings.</p>
+      <div class="panel" style="overflow-x:auto">
+        <table class="table">
+          <thead><tr><th>Routine</th><th>Project</th><th>Next</th><th>Last time</th></tr></thead>
+          <tbody>
+            <tr><td><a class="link" href="project-settings.html#routines">Check the rules for changes</a></td><td>Ledger Nudge</td><td>Tomorrow 08:00</td><td><span class="chip ok">No changes</span></td></tr>
+            <tr><td><a class="link" href="project-settings.html#routines">Nightly check that it works</a></td><td>Ledger Nudge</td><td>Tonight 02:00</td><td><span class="chip ok">All good</span></td></tr>
+            <tr><td><a class="link" href="project-settings.html#routines">Deadline reminders</a></td><td>Ledger Nudge</td><td>Nov 5</td><td class="muted">Not yet</td></tr>
+            <tr><td><a class="link" href="project-settings.html?p=founder#routines">Weekly progress summary</a></td><td>Founder Hours</td><td>Mon 09:00</td><td><span class="chip ok">Sent</span></td></tr>
+            <tr><td><a class="link" href="project-settings.html?p=founder#routines">Nightly check that it works</a></td><td>Founder Hours</td><td>Paused</td><td><span class="chip danger">Stopped Oct 6</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="spending" data-tabpanel class="section" hidden data-od-id="settings-usage">
+      <div class="panel">
+        <div class="usage-top">
+          <div class="stat"><span class="kicker">October so far</span><b>$9.48</b><span class="meta">of $50 monthly limit</span></div>
+          <div class="stat"><span class="kicker">Set aside</span><b>$3.00</b><span class="meta">For work you already approved</span></div>
+          <div class="stat"><span class="kicker">Paid by</span><b style="font-size:16px;margin-top:6px">Your account</b><span class="meta">Visa ending 4242</span></div>
+        </div>
+        <div class="panel-body" style="border-top:1px solid var(--line-soft)"><div class="bar"><i style="width:19%"></i></div><div class="meta" style="margin-top:8px">19% of your monthly limit · resets Nov 1</div></div>
+      </div>
+      <div class="panel" style="overflow-x:auto">
+        <table class="table">
+          <thead><tr><th>Project</th><th>This month</th><th>Limit</th><th></th></tr></thead>
+          <tbody>
+            <tr><td>Ledger Nudge</td><td>$6.12</td><td>$25</td><td style="width:30%"><div class="bar"><i style="width:24%"></i></div></td></tr>
+            <tr><td>Founder Hours</td><td>$2.55</td><td>$20</td><td><div class="bar"><i style="width:13%"></i></div></td></tr>
+            <tr><td>Pantry Scale</td><td>$0.81</td><td>$10</td><td><div class="bar"><i style="width:8%"></i></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="panel panel-body form-grid" style="max-width:none">
+        <div class="grid-2"><div class="field"><label for="u-limit">Monthly limit</label><input class="input" id="u-limit" value="$50"></div><div class="field"><label for="u-ask">Ask me before any one build costs more than</label><input class="input" id="u-ask" value="$3.00"></div></div>
+        <div><button class="btn primary" data-toast="Saved">Save</button></div>
+      </div>
+    </section>
+
+    <section id="appearance" data-tabpanel class="panel panel-body" hidden data-od-id="settings-appearance">
+      <div style="display:grid;gap:22px">
+        <div class="field"><span class="label">Theme</span><div class="seg" role="group" aria-label="Theme" id="theme-seg"><button aria-pressed="false" data-value="dark">Dark</button><button aria-pressed="false" data-value="light">Light</button></div></div>
+        <div class="field hide-m" data-od-id="settings-caddie-width"><span class="label">Caddie panel width</span><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="muted" style="font-size:13.5px" id="cw-now">On large screens Caddie takes 40% of the window.</span><button class="btn secondary sm" id="cw-reset">Reset to 40%</button></div><span class="hint">Drag the left edge of the Caddie panel to make it wider or narrower — up to 60%, and the page always keeps room to read.</span></div>
+      </div>
+    </section>
+
+    <section class="panel row-list">
+      <a class="row" href="sign-in.html"><span class="ico-box"><i data-i="logout"></i></span><div class="grow"><div class="title">Sign out</div></div><i data-i="chevron"></i></a>
+    </section>
+  </div>
+</main>
+</div>
+
+<div class="modal" id="correct-memory" role="dialog" aria-modal="true" aria-labelledby="cm-title">
+  <div class="modal-head"><div class="grow"><h2 id="cm-title">Fix what Caddie knows</h2><p>Caddie keeps the old version so you can see what changed.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body"><div class="field"><label for="cm-text">What’s actually true</label><textarea class="textarea" id="cm-text" data-required>Prefers TypeScript</textarea><span class="err" hidden>Write the corrected version, or use Forget instead.</span></div></div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-toast="Got it — Caddie updated what it knows">Save</button></div>
+</div>
+
+<script src="assets/caddie.js"></script>
+<script>
+  const h = document.getElementById('m-hours'); h.addEventListener('input', () => { document.getElementById('m-hours-v').textContent = h.value + ' h'; });
+  document.querySelector('#knows .seg').addEventListener('seg', (e) => { document.getElementById('mem-personal').hidden = e.detail !== 'personal'; document.getElementById('mem-projects').hidden = e.detail !== 'projects'; });
+  const ts = document.getElementById('theme-seg');
+  const cur = document.documentElement.dataset.theme || 'dark';
+  ts.querySelector(`[data-value="${cur}"]`).setAttribute('aria-pressed', 'true');
+  ts.addEventListener('seg', (e) => { if (e.detail !== document.documentElement.dataset.theme) document.querySelector('[data-theme-toggle]').click(); });
+  // "Tell me when it's ready": saved per tool. Real delivery needs a backend alert (listed on the review page).
+  const NK = 'caddie2.notifyTools';
+  const readN = () => { try { return JSON.parse(localStorage.getItem(NK)) || []; } catch (e) { return []; } };
+  const paintN = () => { const on = readN(); document.querySelectorAll('[data-notify]').forEach((b) => b.setAttribute('aria-pressed', String(on.includes(b.dataset.notify)))); };
+  paintN();
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-notify]'); if (!b) return;
+    const on = readN(), k = b.dataset.notify, was = on.includes(k);
+    const next = was ? on.filter((x) => x !== k) : on.concat(k);
+    try { localStorage.setItem(NK, JSON.stringify(next)); } catch (err) { /* private mode: the toggle still works for this visit */ }
+    b.setAttribute('aria-pressed', String(!was));
+    window.CaddieToast(was ? `OK, no message about ${b.dataset.notifyName}` : `Caddie will tell you when ${b.dataset.notifyName} is ready`, was ? 'x' : 'bell');
+  });
+  const cwNow = document.getElementById('cw-now');
+  const cwShow = () => { const f = window.CaddieConvWidth ? window.CaddieConvWidth.get() : 0.4; cwNow.textContent = `On large screens Caddie takes ${Math.round(f * 100)}% of the window${Math.abs(f - 0.4) < 0.005 ? ' (the default)' : ''}.`; };
+  cwShow();
+  document.getElementById('cw-reset').addEventListener('click', () => { if (window.CaddieConvWidth) window.CaddieConvWidth.reset(); cwShow(); window.CaddieToast('Caddie is back to 40% wide', 'sidebar'); });
+  document.addEventListener('click', (e) => { const j = e.target.closest('[data-tab-jump]'); if (j) { e.preventDefault(); document.querySelector(`[data-tab-target="${j.dataset.tabJump}"]`).click(); } });
+  window.addEventListener('hashchange', () => { const t = document.querySelector(`[data-tab-target="${location.hash.slice(1)}"]`); if (t) t.click(); });
+</script>
+</body>
+</html>

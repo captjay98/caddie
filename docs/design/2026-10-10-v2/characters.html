@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three character directions · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  body { overflow-y: auto; height: auto; }
+  .sheet { max-width: 1180px; margin: 0 auto; padding: 40px 32px 96px; display: grid; gap: 48px; background: var(--horizon); }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .intro h1 { font-size: 30px; font-weight: 650; line-height: 1.15; max-width: 22ch; text-wrap: balance; }
+  .intro p { color: var(--muted); font-size: 15px; line-height: 1.6; max-width: 64ch; margin-top: 10px; }
+  .sheet h2 { font-size: 20px; font-weight: 650; }
+  .lede { color: var(--muted); font-size: 14.5px; max-width: 64ch; margin-top: 6px; }
+
+  .switcher { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .switcher .label { font: 500 var(--t-label)/1 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin-right: 6px; }
+
+  .dirs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .dir { display: grid; grid-template-rows: auto auto 1fr auto; overflow: hidden; }
+  .dir[data-picked="true"] { border-color: var(--action); box-shadow: 0 0 0 1px var(--action), var(--lift-shadow); }
+  .dir .stage { display: grid; place-items: center; height: 220px; border-bottom: 1px solid var(--line-soft); position: relative;
+    background-image: linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px); background-size: 20px 20px; background-position: center; }
+  .dir .stage .mascot { width: 140px; height: 140px; }
+  .dir .stage .chip { position: absolute; top: 12px; left: 12px; }
+  .dir .head { padding: 18px 20px 4px; display: grid; gap: 6px; }
+  .dir .head b { font-size: 17px; font-weight: 650; }
+  .dir .head p { color: color-mix(in srgb, var(--fg) 82%, var(--muted)); font-size: 14px; line-height: 1.55; }
+  .dir .body { padding: 12px 20px 4px; display: grid; gap: 18px; align-content: start; }
+  .dir dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; font-size: 13.5px; line-height: 1.5; }
+  .dir dt { font: 500 var(--t-meta)/1.5 var(--font-mono); color: var(--muted); }
+  .dir dd { margin: 0; }
+  .dir .foot { padding: 16px 20px 20px; }
+  .dir .foot .btn { width: 100%; }
+  .dir .foot .btn[aria-pressed="true"] { background: var(--tint-action); border-color: var(--action); color: var(--fg); }
+
+  .ctx { display: grid; gap: 8px; }
+  .ctx-chat { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--panel); border: 1px solid var(--line); }
+  .ctx-chat .mascot { width: 30px; height: 30px; }
+  .ctx-chat b { display: block; font-size: 13.5px; font-weight: 600; }
+  .ctx-chat span { display: block; font-size: 12.5px; color: var(--muted); }
+  .ctx-ask { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 14px 0 10px; border-radius: 99px; background: var(--raised); border: 1px solid var(--line); color: var(--muted); font-size: 13.5px; }
+  .ctx-ask .mascot { width: 26px; height: 26px; }
+  .ctx-icons { display: flex; align-items: center; gap: 14px; }
+  .ctx-icons figure { margin: 0; display: grid; justify-items: center; gap: 6px; }
+  .ctx-icons figcaption { font: 400 var(--t-label)/1 var(--font-mono); color: var(--muted); }
+  .appicon { display: grid; place-items: center; border-radius: 22%; background: #101319; box-shadow: inset 0 0 0 1px rgb(230 233 239 / .1); }
+  .tab16 { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 8px 8px 0 0; background: var(--raised); border: 1px solid var(--line); border-bottom: 0; font-size: 12px; }
+
+  .pros { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; font-size: 13.5px; line-height: 1.5; }
+  .pros h4 { margin: 0 0 6px; font: 500 var(--t-label)/1.2 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
+  .pros .good h4 { color: var(--ok); } .pros .watch h4 { color: var(--warn); }
+  .pros ul { margin: 0; padding-left: 16px; display: grid; gap: 6px; }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .matrix-wrap { overflow-x: auto; }
+  .matrix { width: 100%; min-width: 820px; border-collapse: collapse; }
+  .matrix th, .matrix td { padding: 14px 10px; text-align: center; border-bottom: 1px solid var(--line-soft); }
+  .matrix thead th { font: 500 var(--t-label)/1.2 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  .matrix tbody th { text-align: left; font-size: 13.5px; font-weight: 600; white-space: nowrap; padding-left: 20px; }
+  .matrix tr:last-child td, .matrix tr:last-child th { border-bottom: 0; }
+  .matrix .mascot { width: 56px; height: 56px; margin: 0 auto; }
+
+  .call { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 24px; }
+  .call h3 { font-size: 17px; font-weight: 650; margin-bottom: 8px; }
+  .call p { font-size: 14px; line-height: 1.6; color: color-mix(in srgb, var(--fg) 84%, var(--muted)); }
+  .call p + p { margin-top: 10px; }
+
+  @media (max-width: 1000px) { .dirs { grid-template-columns: 1fr; } .dir .stage { height: 200px; } .call { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .sheet { padding: 24px 16px 64px; gap: 36px; } .intro h1 { font-size: 24px; } .pros { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main class="sheet">
+
+  <div class="top">
+    <a class="back-link" href="logo.html"><i data-i="back"></i>Logo and character</a>
+    <div class="btn-row">
+      <a class="btn ghost sm" href="welcome.html" data-od-id="chars-intro-link">See your pick introduce itself</a>
+      <button class="btn secondary sm" data-theme-toggle data-od-id="chars-theme"><i data-i="sun"></i><span data-theme-label>Light mode</span></button>
+    </div>
+  </div>
+
+  <header class="intro" data-od-id="chars-intro">
+    <div class="kicker" style="margin-bottom:10px">Character · three directions to compare</div>
+    <h1>Same face, same eight moods. Three different bodies.</h1>
+    <p>The two new directions use the flag block’s face and its state system exactly, so the comparison is about shape and meaning only. Each one has one part that moves the most: the flag, the bubble’s tail, or the cap. Switch the state below to see all three react together.</p>
+  </header>
+
+  <section class="section" data-od-id="chars-compare">
+    <div class="switcher" role="group" aria-label="Show every character as" id="switcher"><span class="label">Show as</span></div>
+    <div class="dirs" id="dirs"></div>
+  </section>
+
+  <section class="section" data-od-id="chars-matrix">
+    <div><h2>All eight states side by side</h2><p class="lede">Read each column across. If one body makes a mood harder to tell apart, it shows here first.</p></div>
+    <div class="panel matrix-wrap"><table class="matrix" id="matrix"></table></div>
+  </section>
+
+  <section class="section" data-od-id="chars-call">
+    <div><h2>My recommendation</h2></div>
+    <div class="panel call">
+      <div>
+        <h3>Keep the flag block as the logo</h3>
+        <p>It is the only one that stays clear at 16px. It also says “caddie” without looking like a sports app, and the flag gives a natural reason for every movement: aiming, waving while it builds, drooping when it’s stuck.</p>
+        <p>The talking bubble is the strongest idea for a chat-first product, but it looks too much like the chat and message icons. Next to the speech-bubble icons in the app, people would read it as “messages”, not “Caddie”.</p>
+      </div>
+      <div>
+        <h3>Use the ball in a cap for moments, not as the logo</h3>
+        <p>The cap is the most charming, and it’s good for one-off big moments: the welcome screen, “You submitted!” and empty screens. It gets crowded below 24px and adds a second colour mass, so it’s weaker as an icon.</p>
+        <p>If you pick it anyway, it still works in the app because the faces and states are shared. Your choice above is saved and used by the welcome introduction, so you can see it in place.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+<script src="assets/caddie.js"></script>
+<script src="assets/characters.js"></script>
+<script>
+(function () {
+  const C = window.CaddieCharacter, I = window.CaddieIcon, LIST = window.CaddieCharacters;
+  document.querySelectorAll('i[data-i]').forEach((el) => { el.outerHTML = I(el.dataset.i); });
+  const STATES = [['idle', 'Ready'], ['listening', 'Listening'], ['thinking', 'Thinking'], ['working', 'Building'], ['needs', 'Needs you'], ['done', 'Done'], ['stuck', 'Stuck'], ['sleep', 'Paused']];
+  const STATUS = { idle: 'Ready · 3 things in your brief', listening: 'Listening…', thinking: 'Reading the rules…', working: 'Building · about 6 min left', needs: 'Waiting for your OK', done: 'Finished your plan', stuck: 'The build failed', sleep: 'Paused' };
+  const INFO = {
+    flag: { part: 'The flag on top', why: 'A caddie walks the course with you; the flag marks the hole you’re aiming for.',
+      good: ['Clear at every size, including 16px', 'Says “caddie” without needing words', 'Flag gives every motion a reason'], watch: ['The quietest personality of the three', 'Flag adds a second colour at small sizes'] },
+    bubble: { part: 'The bubble’s tail', why: 'Caddie is the chat. The tail wags while it works and droops when it’s stuck.',
+      good: ['Matches “Caddie is the first tab” perfectly', 'Simplest outline to draw and animate', 'One colour, strongest at small sizes'], watch: ['Looks like the chat and message icons', 'Says “chat app”, not what Caddie does for you'] },
+    cap: { part: 'The amber cap', why: 'A golf ball dressed as the caddie. The cap tips back, wobbles, or slides down when it sleeps.',
+      good: ['The most charming and memorable', 'Great for welcome and celebration moments', 'Cap tilt is very expressive'], watch: ['Gets crowded below 24px', 'Could read as a sports or golf app', 'Two big colour areas compete for attention'] },
+  };
+  let picked = (() => { try { return JSON.parse(localStorage.getItem('caddie2.character')) || 'flag'; } catch (e) { return 'flag'; } })();
+  if (!INFO[picked]) picked = 'flag';
+
+  const sw = document.getElementById('switcher');
+  sw.insertAdjacentHTML('beforeend', STATES.map(([s, n], i) => `<button class="pill" data-state="${s}" aria-pressed="${i === 0}" data-od-id="chars-state-${s}">${n}</button>`).join(''));
+
+  document.getElementById('dirs').innerHTML = LIST.map((d) => {
+    const x = INFO[d.id];
+    return `<article class="panel dir" data-v="${d.id}" data-od-id="chars-dir-${d.id}">
+      <div class="stage">${d.id === 'flag' ? '<span class="chip action">Current proposal</span>' : '<span class="chip">New</span>'}${C(d.id, 'idle', 140, true)}</div>
+      <div class="head"><b>${d.name}</b><p>${d.line}</p></div>
+      <div class="body">
+        <dl><dt>Moves most</dt><dd>${x.part}</dd><dt>The idea</dt><dd>${x.why}</dd></dl>
+        <div class="ctx" aria-label="${d.name} in the app">
+          <div class="ctx-chat">${C(d.id, 'idle', 30, true)}<div><b>Caddie</b><span data-status>${STATUS.idle}</span></div></div>
+          <div class="ctx-ask">${C(d.id, 'idle', 26, true)}Ask Caddie…</div>
+          <div class="ctx-icons">
+            <figure><span class="appicon" style="width:56px;height:56px">${C(d.id, 'idle', 40)}</span><figcaption>App icon</figcaption></figure>
+            <figure>${C(d.id, 'idle', 24)}<figcaption>24px</figcaption></figure>
+            <figure><span class="tab16">${C(d.id, 'idle', 16)}Caddie</span><figcaption>Browser tab · 16px</figcaption></figure>
+          </div>
+        </div>
+        <div class="pros"><div class="good"><h4>Works well</h4><ul>${x.good.map((g) => `<li>${g}</li>`).join('')}</ul></div><div class="watch"><h4>Watch out</h4><ul>${x.watch.map((g) => `<li>${g}</li>`).join('')}</ul></div></div>
+      </div>
+      <div class="foot"><button class="btn secondary" data-pick="${d.id}" data-od-id="chars-pick-${d.id}"></button></div>
+    </article>`;
+  }).join('');
+
+  document.getElementById('matrix').innerHTML = `<thead><tr><th scope="col"><span class="sr-only">Direction</span></th>${STATES.map(([, n]) => `<th scope="col">${n}</th>`).join('')}</tr></thead>
+    <tbody>${LIST.map((d) => `<tr><th scope="row">${d.name}</th>${STATES.map(([s]) => `<td>${C(d.id, s, 56)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+
+  const paintPick = () => {
+    document.querySelectorAll('.dir').forEach((el) => el.dataset.picked = el.dataset.v === picked ? 'true' : 'false');
+    document.querySelectorAll('[data-pick]').forEach((b) => {
+      const on = b.dataset.pick === picked;
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.innerHTML = on ? I('check') + '<span>Your pick · used in the welcome</span>' : '<span>Pick this one</span>';
+    });
+  };
+  document.addEventListener('click', (e) => {
+    const p = e.target.closest('[data-pick]');
+    if (p) { picked = p.dataset.pick; try { localStorage.setItem('caddie2.character', JSON.stringify(picked)); } catch (x) {} paintPick(); return; }
+    const s = e.target.closest('#switcher .pill');
+    if (s) {
+      sw.querySelectorAll('.pill').forEach((b) => b.setAttribute('aria-pressed', b === s ? 'true' : 'false'));
+      document.querySelectorAll('.dir .mascot[data-live]').forEach((m) => { m.dataset.state = s.dataset.state; });
+      document.querySelectorAll('[data-status]').forEach((t) => { t.textContent = STATUS[s.dataset.state]; });
+      return;
+    }
+    if (e.target.closest('[data-theme-toggle]')) {
+      const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+      document.documentElement.dataset.theme = t; try { localStorage.setItem('caddie2.theme', JSON.stringify(t)); } catch (x) {}
+      document.querySelectorAll('[data-theme-label]').forEach((l) => { l.textContent = t === 'light' ? 'Dark mode' : 'Light mode'; });
+    }
+  });
+  document.querySelectorAll('[data-theme-label]').forEach((l) => { l.textContent = document.documentElement.dataset.theme === 'light' ? 'Dark mode' : 'Light mode'; });
+  paintPick();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hackathon · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .opp-hero { display: flex; gap: 18px; align-items: flex-start; }
+  .opp-hero .opp-logo { width: 56px; height: 56px; font-size: 18px; border-radius: 12px; }
+  .opp-hero h1 { font-size: 26px; font-weight: 650; line-height: 1.2; }
+  .req-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 24px; }
+  .req { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; }
+  .req > svg { color: var(--muted); margin-top: 2px; }
+  .req small { display: block; color: var(--muted); font-size: 13px; margin-top: 1px; }
+  @media (max-width: 760px) { .req-list { grid-template-columns: 1fr; } }
+  .idea { align-items: flex-start; }
+  .idea .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  @media (max-width: 760px) { .opp-hero .opp-logo { width: 44px; height: 44px; font-size: 15px; } .opp-hero h1 { font-size: 22px; } }
+</style>
+</head>
+<body>
+<div class="app" data-page="discover" data-title="Hackathon" data-back="discover.html"
+     data-suggest="Explain the rules in 3 lines|Which idea fits my free time?|Can I enter with a friend?"
+     data-reply="See who can enter|This hackathon · Can you enter?|#eligibility">
+<main class="main">
+  <div class="page">
+
+    <header class="section" data-od-id="opp-head">
+      <a class="back-link hide-m" href="discover.html"><i data-i="back"></i>Discover</a>
+      <div class="opp-hero">
+        <span class="opp-logo" id="o-logo"></span>
+        <div style="flex:1;min-width:0">
+          <h1 id="o-title"></h1>
+          <p class="lede muted" id="o-tag" style="margin-top:6px;font-size:15px"></p>
+        </div>
+      </div>
+      <div class="band" id="o-facts"></div>
+      <div class="btn-row" id="o-actions" data-od-id="opp-actions"></div>
+    </header>
+
+    <div id="o-project-note"></div>
+
+    <!-- Rules read (PayPal) -->
+    <div id="o-read" class="section" style="gap:16px">
+      <section class="panel bcard" id="eligibility" data-od-id="opp-eligibility">
+        <span class="eyebrow ok"><i data-i="check"></i>Can you enter? · yes</span>
+        <h2>You meet every rule about who can join.</h2>
+        <p>You’re over 18, you live in a country that’s allowed, and you can enter alone or with a team. <span class="muted">From the official rules, checked Oct 2.</span></p>
+      </section>
+
+      <section class="panel bcard" data-od-id="opp-submit-needs">
+        <span class="eyebrow"><i data-i="list"></i>What you’ll hand in · 7 things</span>
+        <h2>A working app that uses PayPal and AI, plus a short video.</h2>
+        <div class="req-list">
+          <div class="req"><i data-i="check"></i><div>An app where PayPal does real work<small>Not just a pay button</small></div></div>
+          <div class="req"><i data-i="check"></i><div>AI that’s an actual part of it</div></div>
+          <div class="req"><i data-i="check"></i><div>A demo judges can try<small>A link or clear steps to run it — pictures alone don’t count</small></div></div>
+          <div class="req"><i data-i="check"></i><div>Public code on GitHub, with a licence</div></div>
+          <div class="req"><i data-i="check"></i><div>A YouTube video under 3 minutes</div></div>
+          <div class="req"><i data-i="check"></i><div>A written description and the tools you used</div></div>
+        </div>
+        <p class="meta">Caddie tracks all of these for you in the project’s Check step.</p>
+      </section>
+
+      <section class="panel" data-od-id="opp-more">
+        <details class="more" style="border:0">
+          <summary><i data-i="chevron"></i>Prizes, dates and sources</summary>
+          <div class="plain" style="display:grid;gap:14px">
+            <div><b>Prizes</b> — 1st place <b>$12,000</b>, 2nd place <b>$8,000</b>, plus category prizes. $67,500 in total.</div>
+            <div><b>Dates</b> — open since Oct 1. Closes <b>Nov 12 at 3:00pm EST</b> (9:00pm in Lagos). Winners around Dec 21.</div>
+            <div><b>Why it fits you</b> — it uses web tools you already know, fintech is one of your interests, and at about 10 hours a week you have roughly 50 hours. That’s enough for a working app and a video.</div>
+            <div class="btn-row"><a class="btn ghost sm" href="https://paypalaihackathon.devpost.com" target="_blank" rel="noopener">Overview<i data-i="external"></i></a><a class="btn ghost sm" href="https://paypalaihackathon.devpost.com/rules" target="_blank" rel="noopener">Official rules<i data-i="external"></i></a><a class="btn ghost sm" href="https://paypalaihackathon.devpost.com/details/faqs" target="_blank" rel="noopener">FAQ<i data-i="external"></i></a></div>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <!-- Rules not read (every other event) -->
+    <section id="o-unread" class="panel" hidden data-od-id="opp-unread">
+      <div class="empty" style="padding:44px 24px">
+        <i data-mascot="sleep" data-size="56"></i>
+        <h3>Caddie hasn’t read the rules yet</h3>
+        <p>When you look for ideas, Caddie reads the rules first and checks you can enter. Nothing is created until you pick an idea.</p>
+      </div>
+    </section>
+
+  </div>
+</main>
+</div>
+
+<!-- Explore ideas: choose an idea, then confirm. Replaces the old instant "Explore → project". -->
+<div class="modal lg" id="explore-ideas" role="dialog" aria-modal="true" aria-labelledby="ei-title" data-od-id="modal-explore-ideas">
+  <div class="modal-head"><div class="grow"><div class="kicker" id="ei-kicker" style="margin-bottom:6px">Step 1 of 2</div><h2 id="ei-title">Pick an idea</h2><p id="ei-sub">Ideas Caddie thinks you could finish in time — or bring your own.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body" id="ei-step1">
+    <div id="ei-reading" class="notice action" hidden><i data-i="file"></i><div class="grow"><b>Rules read.</b> Nothing stops you from entering.</div></div>
+    <div id="ei-ideas" class="section" role="radiogroup" aria-label="Ideas"></div>
+    <label class="choice idea"><input type="radio" name="idea" value="own"><span style="flex:1"><b>My own idea</b><small>Describe it and Caddie checks it fits the rules.</small>
+      <textarea class="textarea" id="ei-own" placeholder="What do you want to build?" style="margin-top:10px;min-height:72px"></textarea></span></label>
+  </div>
+  <div class="modal-body" id="ei-step2" hidden>
+    <div class="field"><label for="ei-name">Project name</label><input class="input" id="ei-name" data-required><span class="err" hidden>Give the project a name.</span></div>
+    <div class="grid-2">
+      <div class="field"><label for="ei-stack">Tools to build with</label><select class="select" id="ei-stack"><option>React web app (suggested)</option><option>Flutter phone app</option><option>Python (FastAPI) + React</option></select></div>
+      <div class="field"><span class="label">Deadline</span><div class="input" style="display:flex;align-items:center;color:var(--muted)" id="ei-deadline"></div></div>
+    </div>
+    <div class="notice"><i data-i="shield"></i><div class="grow">Caddie writes a plan for you to read. <b>Nothing is built and nothing costs money until you say OK.</b></div></div>
+  </div>
+  <div class="modal-foot"><span class="meta" id="ei-meta">You can change the idea later</span><button class="btn ghost" id="ei-back" hidden>Back</button><button class="btn ghost" data-close id="ei-cancel">Cancel</button><button class="btn primary" id="ei-next">Continue</button></div>
+</div>
+
+<script src="assets/events.js"></script>
+<script src="assets/caddie.js"></script>
+<script>
+(function () {
+  const I = window.CaddieIcon, $ = (s) => document.querySelector(s);
+  const id = new URLSearchParams(location.search).get('e') || 'paypal';
+  const e = window.CADDIE_EVENTS.find((x) => x.id === id) || window.CADDIE_EVENTS[0];
+  const read = e.id === 'paypal';
+  document.title = e.title + ' · Caddie';
+  const mt = document.querySelector('.m-title'); if (mt) mt.textContent = e.title;
+  $('#o-logo').textContent = e.logo; $('#o-title').textContent = e.title; $('#o-tag').textContent = e.tag;
+  $('#o-facts').innerHTML = `<span><b>${e.when}</b></span><span>${e.prize}</span><span>Online</span>${e.people !== '—' ? `<span><b>${e.people}</b> joined</span>` : ''}`;
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('caddie2.saved') || '[]'); } catch (x) { return []; } })();
+  $('#o-actions').innerHTML = (e.project
+      ? `<a class="btn primary" href="project-overview.html${e.projectId ? '?p=' + e.projectId : ''}">Open ${e.project}</a>`
+      : e.verdict[0] === 'danger' ? '' : `<button class="btn primary" data-open="explore-ideas" data-od-id="opp-explore">Find an idea</button>`)
+    + `<button class="btn ghost" id="o-save" aria-pressed="${saved.includes(e.id)}">${I('bookmark')}${saved.includes(e.id) ? 'Saved' : 'Save'}</button><a class="btn ghost" href="${e.url}" target="_blank" rel="noopener">Devpost${I('external')}</a>`;
+  $('#o-save').addEventListener('click', function () {
+    const s = saved.includes(e.id) ? saved.splice(saved.indexOf(e.id), 1) : saved.push(e.id);
+    localStorage.setItem('caddie2.saved', JSON.stringify(saved));
+    this.setAttribute('aria-pressed', saved.includes(e.id)); this.innerHTML = I('bookmark') + (saved.includes(e.id) ? 'Saved' : 'Save');
+    window.CaddieToast(saved.includes(e.id) ? 'Saved' : 'Removed from saved', 'bookmark');
+  });
+  if (e.project) $('#o-project-note').innerHTML = `<div class="notice action">${I('folder')}<div class="grow">You’re entering this with <b>${e.project}</b>.</div></div>`;
+  if (e.verdict[0] === 'danger') $('#o-project-note').innerHTML = `<div class="notice danger">${I('x')}<div class="grow"><b>You can’t enter this one.</b> It’s only for people aged 13–18, so Caddie hides it from your list.</div></div>`;
+  $('#o-read').hidden = !read; $('#o-unread').hidden = read;
+  if (e.verdict[0] === 'danger') $('#o-unread').hidden = true;
+
+  /* ideas */
+  const IDEAS = {
+    paypal: [['Invoice follow-up agent', 'Reads unpaid PayPal invoices and writes polite, escalating reminders.', ['React', '~40 h']], ['Agentic checkout for chat sellers', 'Turns a WhatsApp-style order chat into a PayPal checkout.', ['React', '~55 h']], ['Donation matcher', 'Matches community fundraisers with donors and pays out through PayPal.', ['Python + React', '~45 h']]],
+    bridge: [['Pocket translator for markets', 'Offline phrase cards for traders, with voice playback.', ['Flutter', '~25 h']], ['Bus stop reporter', 'Crowd-sourced arrival times for routes without live data.', ['Flutter', '~30 h']], ['Chore swap game', 'A small family game that trades chores for points.', ['Flutter', '~20 h']]],
+    metavr: [['Needs a VR app', 'Caddie can’t build or test VR apps yet. It can still help you plan.', ['Caddie can’t build VR', '—']]],
+  };
+  const ideas = IDEAS[e.id] || [['A tool for your own workflow', 'Caddie will suggest specifics once it has read the rules.', ['Your choice', '—']], ['Something from your saved ideas', 'Reuse an idea you described in a past conversation.', ['Your choice', '—']], ['Ask Caddie for three directions', 'Get ideas shaped by the theme and your hours.', ['Your choice', '—']]];
+  $('#ei-ideas').innerHTML = ideas.map((d, i) => `<label class="choice idea"><input type="radio" name="idea" value="${i}" ${i === 0 ? 'checked' : ''}><span><b>${d[0]}</b><small>${d[1]}</small><span class="chips">${d[2].map((c) => `<span class="chip outline">${c}</span>`).join('')}</span></span></label>`).join('');
+  $('#ei-reading').hidden = read || !!e.project;
+  $('#ei-deadline').textContent = e.when;
+  let step = 1;
+  const setStep = (n) => {
+    step = n; $('#ei-step1').hidden = n !== 1; $('#ei-step2').hidden = n !== 2; $('#ei-back').hidden = n !== 2; $('#ei-cancel').hidden = n === 2;
+    $('#ei-kicker').textContent = `Step ${n} of 2`; $('#ei-title').textContent = n === 1 ? 'Pick an idea' : 'Name it and start';
+    $('#ei-sub').textContent = n === 1 ? 'Ideas Caddie thinks you could finish in time — or bring your own.' : 'Caddie writes a plan next. You OK it before anything is built.';
+    $('#ei-next').textContent = n === 1 ? 'Continue' : 'Start and write the plan';
+  };
+  $('#ei-next').addEventListener('click', () => {
+    if (step === 1) {
+      const v = document.querySelector('input[name="idea"]:checked');
+      if (v.value === 'own' && !$('#ei-own').value.trim()) { $('#ei-own').classList.add('invalid'); $('#ei-own').focus(); return; }
+      $('#ei-name').value = v.value === 'own' ? '' : ideas[+v.value][0];
+      setStep(2); $('#ei-name').focus(); return;
+    }
+    if (!$('#ei-name').value.trim()) { $('#ei-name').classList.add('invalid'); $('#ei-name').nextElementSibling.hidden = false; $('#ei-name').focus(); return; }
+    window.CaddieToast('Project started — Caddie is writing the plan'); window.CaddieClose();
+    setTimeout(() => { location.href = 'project-plan.html?p=pantry'; }, 900);
+  });
+  $('#ei-back').addEventListener('click', () => setStep(1));
+  $('#ei-own').addEventListener('focus', () => { document.querySelector('input[name="idea"][value="own"]').checked = true; });
+})();
+</script>
+</body>
+</html>

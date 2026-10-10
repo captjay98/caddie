@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meet Caddie · Logo and character</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  body { overflow-y: auto; height: auto; }
+  .sheet { max-width: 1080px; margin: 0 auto; padding: 40px 32px 96px; display: grid; gap: 56px; background: var(--horizon); }
+  .sheet h2 { font-size: 20px; font-weight: 650; }
+  .sheet .lede { color: var(--muted); font-size: 15px; max-width: 62ch; margin-top: 6px; }
+  .top { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+  .hero { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; align-items: stretch; }
+  .stage-box { display: grid; place-items: center; gap: 18px; padding: 40px 24px 28px; min-height: 380px; position: relative;
+    background-image: linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px); background-size: 24px 24px; background-position: center; }
+  .stage-box .mascot { width: 200px; height: 200px; }
+  .stage-box .now { text-align: center; display: grid; gap: 4px; }
+  .stage-box .now b { font-size: 16px; font-weight: 650; }
+  .stage-box .now span { color: var(--muted); font-size: 13.5px; }
+  .take { display: grid; gap: 16px; padding: 24px; align-content: start; }
+  .take h1 { font-size: 30px; font-weight: 650; line-height: 1.15; }
+  .take p { font-size: 14.5px; line-height: 1.65; color: color-mix(in srgb, var(--fg) 84%, var(--muted)); }
+  .take ul { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 14px; line-height: 1.55; }
+  .states { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .st { display: grid; gap: 10px; justify-items: start; padding: 18px; text-align: left; border-radius: var(--r); border: 1px solid var(--line); background: var(--card); width: 100%; }
+  .st:hover { border-color: color-mix(in srgb, var(--fg) 24%, transparent); background: var(--raised); }
+  .st[aria-pressed="true"] { border-color: var(--action); background: var(--tint-action); }
+  .st .mascot { width: 72px; height: 72px; margin: 6px 0 4px; }
+  .st b { font-weight: 650; }
+  .st small { color: var(--muted); font-size: 13px; line-height: 1.45; }
+  .sizes { display: flex; align-items: flex-end; gap: 28px; flex-wrap: wrap; padding: 28px 24px; }
+  .sizes figure { margin: 0; display: grid; justify-items: center; gap: 10px; }
+  .sizes figcaption { font: 400 var(--t-meta)/1 var(--font-mono); color: var(--muted); }
+  .appicon { display: grid; place-items: center; border-radius: 22%; background: #101319; box-shadow: inset 0 0 0 1px rgb(230 233 239 / .1); }
+  .lockups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .lock { display: grid; place-items: center; gap: 22px; padding: 36px 20px; border-radius: var(--r); border: 1px solid var(--line); min-height: 220px; }
+  .lock.dark { background: #090b10; color: #e6e9ef; --panel: #090b10; --m-line: transparent; }
+  .lock.light { background: #ffffff; color: #0b101a; --panel: #ffffff; --m-line: color-mix(in srgb, #155fbe 55%, transparent); }
+  .wm { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: -0.02em; }
+  .wm.h { font-size: 34px; } .wm.h .mascot { width: 52px; height: 52px; }
+  .wm.v { flex-direction: column; gap: 8px; font-size: 22px; } .wm.v .mascot { width: 64px; height: 64px; }
+  .lock-row { display: flex; gap: 40px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .rules ul { margin: 0; padding: 0 20px 20px 38px; display: grid; gap: 8px; font-size: 14px; line-height: 1.5; }
+  .rules .panel-head .chip { margin-left: auto; }
+  .anatomy { display: grid; grid-template-columns: 220px 1fr; gap: 24px; align-items: center; padding: 24px; }
+  .anatomy .mascot { width: 200px; height: 200px; }
+  .anatomy dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 12px 18px; font-size: 14px; }
+  .anatomy dt { font: 500 var(--t-meta)/1.5 var(--font-mono); color: var(--muted); }
+  .anatomy dd { margin: 0; }
+  @media (max-width: 860px) {
+    .sheet { padding: 24px 16px 64px; gap: 40px; }
+    .hero, .lockups, .rules, .anatomy { grid-template-columns: 1fr; }
+    .states { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .stage-box { min-height: 300px; } .stage-box .mascot { width: 150px; height: 150px; }
+    .anatomy .mascot { width: 150px; height: 150px; justify-self: center; }
+    .wm.h { font-size: 26px; } .wm.h .mascot { width: 40px; height: 40px; }
+  }
+</style>
+</head>
+<body>
+<main class="sheet">
+
+  <div class="top">
+    <a class="back-link" href="index.html"><i data-i="back"></i>Review overview</a>
+    <div class="btn-row">
+      <a class="btn secondary sm" href="characters.html" data-od-id="logo-compare">Compare 3 directions</a>
+      <a class="btn ghost sm" href="welcome.html" data-od-id="logo-intro">See it introduce itself</a>
+      <button class="btn ghost sm" data-theme-toggle data-od-id="logo-theme"><i data-i="sun"></i><span data-theme-label>Light mode</span></button>
+    </div>
+  </div>
+
+  <section class="hero" data-od-id="logo-hero">
+    <div class="panel stage-box" aria-live="polite">
+      <span id="hero-mascot"></span>
+      <div class="now"><b id="hero-name">Ready</b><span id="hero-when">Waiting for you. Blinks now and then.</span></div>
+      <div class="btn-row"><button class="btn secondary sm" id="cycle" aria-pressed="true"><i data-i="pause"></i><span>Pause the tour</span></button></div>
+    </div>
+    <div class="panel take" data-od-id="logo-take">
+      <div class="kicker">Logo &amp; character · proposal</div>
+      <h1>Yes — give Caddie a face, and make its face tell you what it’s doing.</h1>
+      <p>Caddie works for you in the background: it reads rules, writes plans and builds apps. A character shows <b>who</b> is doing the work and <b>what it’s doing right now</b> without making you read a status line. That only works if the character stays small and every movement means something.</p>
+      <ul>
+        <li><b>A soft blue block</b> in Caddie’s own blue. It still reads clearly as a 16px browser icon.</li>
+        <li><b>A little golf flag</b> on top. A caddie walks the course with you, and the flag marks the hole you’re aiming for. The flag is the part that moves most.</li>
+        <li><b>The eyes do the talking.</b> Eight states, each tied to something Caddie is actually doing. It never acts cute for no reason.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="section" data-od-id="logo-states">
+    <div><h2>Eight states, eight real meanings</h2><p class="lede">Pick one to see it large. Each state appears only when Caddie is doing that thing: in the chat header, the mobile input and the Caddie tab.</p></div>
+    <div class="states" id="states" role="group" aria-label="Character states"></div>
+  </section>
+
+  <section class="section" data-od-id="logo-anatomy">
+    <div><h2>How it’s built</h2><p class="lede">One 64-unit drawing with no extra artwork per state. The eyes, mouth and flag swap or move, so the motion is cheap to build and stays consistent.</p></div>
+    <div class="panel anatomy">
+      <span id="anatomy-mascot"></span>
+      <dl>
+        <dt>Body</dt><dd>Rounded block, 46 × 41.5 units, corner radius 18. Caddie blue <span class="mono">#4d9fff</span> fading to <span class="mono">#2f7ddd</span>.</dd>
+        <dt>Flag</dt><dd>Amber <span class="mono">#f0a83c</span> on a blue pole. It waves while building, droops when stuck and perks up when you type.</dd>
+        <dt>Eyes</dt><dd>Two dark rounded bars with a highlight. Each state swaps them for happy arcs, closed arcs or flat lines.</dd>
+        <dt>Extras</dt><dd>Thinking dots, a “needs you” badge and sleep z’s sit outside the body, so the outline never changes.</dd>
+        <dt>Small sizes</dt><dd>At 24px and below, the cheeks and shine drop out so the face stays crisp.</dd>
+        <dt>Motion</dt><dd>Loops for ongoing work last under a second. When idle it blinks about every 5 seconds. With Reduce Motion turned on, it holds still.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section class="section" data-od-id="logo-sizes">
+    <div><h2>Sizes and app icon</h2></div>
+    <div class="panel sizes" id="sizes"></div>
+  </section>
+
+  <section class="section" data-od-id="logo-lockups">
+    <div><h2>Lockups</h2><p class="lede">The wordmark is Inter Bold with tight letter spacing, matching the product UI. The character always sits to the left of the word or above it, never inside it.</p></div>
+    <div class="lockups">
+      <div class="lock dark"><div class="lock-row"><span class="wm h" data-lock="idle">Caddie</span><span class="wm v" data-lock="done">Caddie</span></div></div>
+      <div class="lock light"><div class="lock-row"><span class="wm h" data-lock="idle">Caddie</span><span class="wm v" data-lock="done">Caddie</span></div></div>
+    </div>
+  </section>
+
+  <section class="rules" data-od-id="logo-rules">
+    <div class="panel"><div class="panel-head"><h3>Where it shows up</h3><span class="chip ok">Do</span></div>
+      <ul><li>Next to Caddie’s name in the chat, and on its messages</li><li>The Caddie tab and the always-on input on mobile</li><li>The welcome screen and empty screens (“nothing here yet”)</li><li>App icon, browser icon and sign-in</li></ul></div>
+    <div class="panel"><div class="panel-head"><h3>Where it doesn’t</h3><span class="chip danger">Don’t</span></div>
+      <ul><li>Beside headings or on every card — one per area at most</li><li>As the icon for a feature (Brief, Discover and the rest keep plain icons)</li><li>In a new colour, outfit or pose drawn for one screen</li><li>Animating when nothing is happening, beyond the idle blink</li></ul></div>
+  </section>
+
+</main>
+<script src="assets/caddie.js"></script>
+<script>
+(function () {
+  const M = window.CaddieMascot, I = window.CaddieIcon;
+  document.querySelectorAll('i[data-i]').forEach((el) => { el.outerHTML = I(el.dataset.i); });
+  const STATES = [
+    ['idle', 'Ready', 'Waiting for you. Blinks now and then.'],
+    ['listening', 'Listening', 'You’re typing. It leans in and the flag perks up.'],
+    ['thinking', 'Thinking', 'Reading rules or working out an answer. Eyes look up and dots appear.'],
+    ['working', 'Building', 'Making or changing your app. The flag waves until it’s done.'],
+    ['needs', 'Needs you', 'Waiting for your OK — a plan or a payment. Tilts and shows a badge.'],
+    ['done', 'Done', 'Finished something you asked for. A happy hop, then back to ready.'],
+    ['stuck', 'Stuck', 'Something failed and it can’t carry on alone. The flag droops.'],
+    ['sleep', 'Paused', 'You paused Caddie, or nothing is scheduled. Slow breathing and z’s.'],
+  ];
+  const hero = document.getElementById('hero-mascot');
+  const show = (i) => {
+    const [s, n, w] = STATES[i];
+    hero.innerHTML = M(s, 200);
+    document.getElementById('hero-name').textContent = n;
+    document.getElementById('hero-when').textContent = w;
+    document.querySelectorAll('.st').forEach((b, j) => b.setAttribute('aria-pressed', j === i ? 'true' : 'false'));
+  };
+  document.getElementById('states').innerHTML = STATES.map(([s, n, w], i) => `<button class="st" data-i="${i}" data-od-id="state-${s}">${M(s, 72)}<b>${n}</b><small>${w}</small></button>`).join('');
+  document.getElementById('anatomy-mascot').innerHTML = M('idle', 200);
+  document.getElementById('sizes').innerHTML = [128, 64, 40, 32, 24, 16].map((n) => `<figure>${M('idle', n)}<figcaption>${n}px</figcaption></figure>`).join('')
+    + `<figure><span class="appicon" style="width:96px;height:96px">${M('idle', 70)}</span><figcaption>App icon</figcaption></figure>`
+    + `<figure><span class="appicon" style="width:32px;height:32px;border-radius:8px">${M('idle', 24)}</span><figcaption>Browser tab</figcaption></figure>`;
+  document.querySelectorAll('[data-lock]').forEach((el) => { el.insertAdjacentHTML('afterbegin', M(el.dataset.lock, 52)); });
+  let idx = 0, timer = null;
+  const cycle = document.getElementById('cycle');
+  const play = () => { timer = setInterval(() => { idx = (idx + 1) % STATES.length; show(idx); }, 2600); cycle.setAttribute('aria-pressed', 'true'); cycle.innerHTML = I('pause') + '<span>Pause the tour</span>'; };
+  const stop = () => { clearInterval(timer); timer = null; cycle.setAttribute('aria-pressed', 'false'); cycle.innerHTML = I('play') + '<span>Play the tour</span>'; };
+  cycle.addEventListener('click', () => (timer ? stop() : play()));
+  document.getElementById('states').addEventListener('click', (e) => { const b = e.target.closest('.st'); if (!b) return; stop(); idx = +b.dataset.i; show(idx); });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-theme-toggle]')) return;
+    const t = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t; try { localStorage.setItem('caddie2.theme', JSON.stringify(t)); } catch (x) {}
+    document.querySelectorAll('[data-theme-label]').forEach((l) => { l.textContent = t === 'light' ? 'Dark mode' : 'Light mode'; });
+  });
+  document.querySelectorAll('[data-theme-label]').forEach((l) => { l.textContent = document.documentElement.dataset.theme === 'light' ? 'Dark mode' : 'Light mode'; });
+  show(0);
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) play(); else stop();
+})();
+</script>
+</body>
+</html>

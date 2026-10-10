@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Brief · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+</head>
+<body>
+<!-- Brief replaces Home. Today-style: dimmed day, one title, a few editorial cards, one action each. -->
+<div class="app" data-page="brief" data-title="Brief"
+     data-suggest="What should I do first?|Explain the plan change simply|Is Bridge The Gap worth it?"
+     data-reply="Back to your brief|Brief · today|brief.html">
+<main class="main">
+  <div class="page">
+
+    <header class="brief-head" data-od-id="brief-head">
+      <span class="day">Friday, 9 October</span>
+      <h1>Your brief</h1>
+      <p>Three things could use you. Everything else is moving on its own.</p>
+    </header>
+
+    <!-- 1. A decision -->
+    <article class="panel bcard" data-od-id="brief-card-plan">
+      <span class="eyebrow warn"><i data-i="edit"></i>Ledger Nudge · needs your OK</span>
+      <h2>The plan now lets people choose how often reminders go out.</h2>
+      <p>You asked for this yesterday. It changes <b>2 screens</b> and keeps everything you already approved. Building it takes about <b>25 minutes</b> and up to <b>$4</b>.</p>
+      <div class="bcard-foot">
+        <a class="btn primary" href="project-plan.html" data-od-id="brief-review-plan">Review the plan</a>
+        <button class="btn ghost" data-ask="Explain the plan change for Ledger Nudge simply">Explain it simply</button>
+      </div>
+    </article>
+
+    <!-- 2. A trade-off -->
+    <article class="panel bcard" data-od-id="brief-card-founder">
+      <span class="eyebrow warn"><i data-i="shield"></i>Founder Hours · judges</span>
+      <h2>Judges will look for 2 things you haven’t shown yet.</h2>
+      <p>The rules ask for <b>a link to a working app</b> and <b>setup instructions</b>. You have 70 days, so neither is urgent. Doing both now takes about an hour.</p>
+      <div class="trade">
+        <div><span class="eyebrow action">Do it now</span><p>Caddie writes the setup guide and shares the preview link.</p><em>About 1 hour of building · up to $2</em></div>
+        <div><span class="eyebrow">Leave it for later</span><p>Caddie reminds you 2 weeks before the deadline.</p><em>Risk: it’s easy to forget, and both are required</em></div>
+      </div>
+      <div class="bcard-foot">
+        <a class="btn secondary" href="project-check.html?p=founder">See what’s missing</a>
+      </div>
+    </article>
+
+    <!-- 3. A find -->
+    <article class="panel bcard" data-od-id="brief-card-match">
+      <span class="eyebrow action"><i data-i="compass"></i>Discover · new for you</span>
+      <h2>Bridge The Gap Hacks suits your Flutter work.</h2>
+      <p>It’s online, open to everyone, and runs for <b>one week</b> (Nov 15–21). The prizes aren’t cash. Caddie hasn’t read the full rules yet.</p>
+      <div class="band"><span>Opens <b>Nov 15</b></span><span>Closes <b>Nov 21</b></span><span><b>31</b> people joined</span></div>
+      <div class="bcard-foot">
+        <a class="btn secondary" href="opportunity.html?e=bridge">Take a look</a>
+      </div>
+    </article>
+
+    <!-- Coming up: traffic-light deadlines -->
+    <section class="section" data-od-id="brief-due">
+      <div class="section-head"><h2>Coming up</h2></div>
+      <div class="panel">
+        <a class="due" href="project-overview.html" data-od-id="due-ledger"><span class="dot warn"></span><span class="grow"><b>Ledger Nudge</b><small>PayPal AI Hackathon · Nov 12</small></span><span class="chip warn">34 days</span></a>
+        <a class="due" href="project-overview.html?p=founder" data-od-id="due-founder"><span class="dot ok"></span><span class="grow"><b>Founder Hours</b><small>AI Agents for Founders · Dec 18</small></span><span class="chip ok">70 days</span></a>
+        <a class="due" href="project-build.html?p=pantry" data-od-id="due-pantry"><span class="dot action pulse"></span><span class="grow"><b>Pantry Scale</b><small>Building now · about 6 min left</small></span><span class="chip action">Building</span></a>
+      </div>
+    </section>
+
+    <!-- Done: dimmed archive, folded away -->
+    <section class="panel archive" data-od-id="brief-done">
+      <details class="more" style="border:0">
+        <summary><i data-i="chevron"></i>Done since yesterday · 3</summary>
+        <div style="padding:0">
+          <div class="due"><span class="dot ok"></span><span class="grow"><b>Ledger Nudge build passed — the preview is updated</b><small>Yesterday · 42 checks passed</small></span></div>
+          <div class="due"><span class="dot ok"></span><span class="grow"><b>PayPal rules checked — nothing changed</b><small>Today, 08:00 · daily routine</small></span></div>
+          <div class="due"><span class="dot ok"></span><span class="grow"><b>Pantry Scale plan approved</b><small>Today, 10:12</small></span></div>
+        </div>
+      </details>
+    </section>
+
+  </div>
+</main>
+</div>
+<script src="assets/caddie.js"></script>
+</body>
+</html>

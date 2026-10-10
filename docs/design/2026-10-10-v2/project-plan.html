@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Plan · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .decision { position: sticky; top: 64px; z-index: 4; display: flex; gap: 16px; align-items: center; padding: 14px 16px 14px 18px; border-radius: var(--r); background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(10px); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); box-shadow: var(--pop-shadow); }
+  .decision.approved { border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+  .decision .grow { flex: 1; min-width: 0; }
+  .decision b { font-weight: 600; }
+  .screen-mock { aspect-ratio: 4 / 3; padding: 12px; font: 11.5px/1.4 var(--font-ui); display: grid; align-content: start; gap: 7px; }
+  .screen-mock .r { background: #fff; border: 1px solid #e3e3e0; border-radius: 6px; padding: 7px 9px; display: flex; justify-content: space-between; gap: 6px; }
+  .screen-mock .on { border-color: #003087; box-shadow: 0 0 0 2px rgb(0 48 135 / .14); }
+  @media (max-width: 760px) {
+    .decision { position: static; flex-wrap: wrap; }
+    .decision .btn-row { width: 100%; } .decision .btn-row .btn { flex: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="app" data-page="project" data-project-tab="plan"
+     data-suggest="Why would anyone pick “firm”?|Remove the firm option|How much will this cost?"
+     data-reply="Suggest a change to the plan|Plan · suggest a change|?open=request-changes">
+<main class="main">
+  <div class="page">
+    <div data-project-head></div>
+
+    <div class="decision" id="decision" data-od-id="plan-decision-bar">
+      <i data-mascot="needs" data-size="40" id="d-mascot"></i>
+      <div class="grow"><b id="d-title">Caddie updated the plan. Is this OK?</b><div class="meta" id="d-meta">Building it takes about 25 min and up to $4</div></div>
+      <div class="btn-row" id="d-actions"><button class="btn secondary" data-open="request-changes" data-od-id="plan-request-changes">Suggest a change</button><button class="btn primary" data-open="approve-plan" data-od-id="plan-approve">Looks good — build it</button></div>
+    </div>
+
+    <article class="panel bcard" data-od-id="plan-what">
+      <span class="eyebrow">What you’re making</span>
+      <h2>An app that chases unpaid PayPal invoices for small businesses, so the owner doesn’t have to.</h2>
+    </article>
+
+    <article class="panel bcard" data-od-id="plan-change">
+      <span class="eyebrow warn"><i data-i="edit"></i>What’s new in this version</span>
+      <h2>Owners choose how often each customer gets a reminder.</h2>
+      <div class="trade">
+        <div><span class="eyebrow">Before</span><p>Everyone gets reminders 3 and 10 days after the invoice is due.</p></div>
+        <div style="border-color:color-mix(in srgb, var(--ok) 40%, transparent);background:var(--tint-ok)"><span class="eyebrow ok">Now</span><p><b>Gentle</b> (weekly), <b>standard</b> (3, 7, 14 days) or <b>firm</b> (daily). The AI suggests one and says why.</p></div>
+      </div>
+      <div class="band"><span><b>1</b> new screen</span><span><b>1</b> screen changed</span><span><b>Nothing</b> removed</span></div>
+    </article>
+
+    <section class="section" data-od-id="plan-screens">
+      <div class="section-head"><h2>What it will look like</h2></div>
+      <div class="grid-2">
+        <figure style="margin:0;display:grid;gap:8px">
+          <div class="frame"><div class="frame-body screen-mock">
+            <b style="font-size:13px">Reminders · Ada Foods</b>
+            <div class="r"><span>Gentle — every 7 days</span><span>○</span></div>
+            <div class="r on"><span><b>Standard</b> — 3, 7, 14 days</span><span>●</span></div>
+            <div class="r"><span>Firm — every day once late</span><span>○</span></div>
+            <div style="color:#5b5f66;font-size:11px">Suggested: paid late twice, always within a week of a second reminder.</div>
+          </div></div>
+          <figcaption class="meta"><span class="chip ok">New</span> Reminder settings</figcaption>
+        </figure>
+        <figure style="margin:0;display:grid;gap:8px">
+          <div class="frame"><div class="frame-body screen-mock">
+            <div style="display:flex;justify-content:space-between"><b style="font-size:13px">Invoice #1042</b><b>$420.00</b></div>
+            <div class="r"><span>Due</span><span>Oct 2 · 7 days late</span></div>
+            <div class="r on"><span>Reminders</span><span>Standard ▾</span></div>
+            <div class="r"><span>Next reminder</span><span>Oct 16, 09:00</span></div>
+          </div></div>
+          <figcaption class="meta"><span class="chip warn">Changed</span> Invoice page</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <article class="panel bcard" data-od-id="plan-rules">
+      <span class="eyebrow ok"><i data-i="check"></i>Still follows the hackathon rules</span>
+      <p><b>PayPal does real work</b> — invoices are read and sent through PayPal. <b>AI does real work</b> — it now picks the reminder schedule as well as writing the message, which makes your entry stronger.</p>
+    </article>
+
+    <section class="panel" data-od-id="plan-more">
+      <details class="more" style="border:0">
+        <summary><i data-i="chevron"></i>Left out on purpose</summary>
+        <div class="plain muted">Text-message reminders and invoices in more than one currency. Ask Caddie to add either one.</div>
+      </details>
+      <details class="more" id="earlier">
+        <summary><i data-i="chevron"></i>Earlier versions · 2</summary>
+        <div><div class="timeline">
+          <div class="tl"><span class="node ok"><i data-i="check"></i></span><div>Version 2 — you approved it<div class="meta">Switched from payment links to PayPal invoices, at your request</div></div><span class="meta">Oct 4</span></div>
+          <div class="tl"><span class="node"><i data-i="file"></i></span><div>Version 1 — first draft<div class="meta">From the idea “Invoice follow-up agent”</div></div><span class="meta">Oct 2</span></div>
+        </div></div>
+      </details>
+      <details class="more">
+        <summary><i data-i="chevron"></i>For developers</summary>
+        <div><div class="code">
+          <div><span class="ln">+</span><span class="k">POST</span> /api/invoices/:id/schedule  <span class="c">// gentle | standard | firm</span></div>
+          <div><span class="ln">~</span>src/routes/invoice-detail.tsx</div>
+          <div><span class="ln">+</span>src/routes/reminder-settings.tsx</div>
+          <div><span class="ln"> </span><span class="c">version 3 · a91f3c2 · based on 7d04be1</span></div>
+        </div></div>
+      </details>
+    </section>
+  </div>
+</main>
+</div>
+
+<div class="modal" id="approve-plan" role="dialog" aria-modal="true" aria-labelledby="ap-title" data-od-id="modal-approve-plan">
+  <div class="modal-head"><div class="grow"><h2 id="ap-title">Build this version?</h2><p>Caddie builds exactly what’s in the plan. If anything needs to change, it asks you first.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <div class="band" style="font-size:13px"><span>Costs up to <b>$4</b></span><span><b>$18.88</b> left of this project’s $25 limit</span><span>About <b>25 min</b></span></div>
+    <label class="check"><input type="checkbox" checked>Tell me when I can try it</label>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Not yet</button><button class="btn primary" id="ap-confirm">Build it</button></div>
+</div>
+
+<div class="modal" id="request-changes" role="dialog" aria-modal="true" aria-labelledby="rc-title" data-od-id="modal-request-changes">
+  <div class="modal-head"><div class="grow"><h2 id="rc-title">Suggest a change</h2><p>Say it however you like. Caddie updates the plan and shows you again — nothing gets built in between.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <div class="field"><label for="rc-text">What should be different?</label><textarea class="textarea" id="rc-text" placeholder="e.g. “Firm” feels pushy — make it every 2 days instead" data-required></textarea><span class="err" hidden>Tell Caddie what to change.</span></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-toast="Sent — Caddie is updating the plan">Send</button></div>
+</div>
+
+<script src="assets/caddie.js"></script>
+<script>if (location.hash === '#earlier') { const d = document.getElementById('earlier'); d.open = true; setTimeout(() => { const m = document.querySelector('.main'); m.scrollTop = d.getBoundingClientRect().top + m.scrollTop - 90; }, 80); }</script>
+<script>
+  document.getElementById('ap-confirm').addEventListener('click', () => {
+    window.CaddieClose(); window.CaddieToast('Approved — Caddie is building');
+    document.getElementById('decision').classList.add('approved');
+    document.querySelector('#decision .mascot').dataset.state = 'working';
+    window.CaddieMood && window.CaddieMood('working');
+    document.getElementById('d-title').textContent = 'Approved — Caddie is building it';
+    document.getElementById('d-meta').textContent = 'Started just now · about 25 min left';
+    document.getElementById('d-actions').innerHTML = '<a class="btn secondary" href="project-build.html">Watch the build</a>';
+  });
+</script>
+</body>
+</html>

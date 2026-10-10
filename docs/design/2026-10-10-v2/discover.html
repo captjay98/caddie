@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Discover · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .opp-line { display: flex; gap: 14px; align-items: center; padding: 16px 20px; border-top: 1px solid var(--line-soft); }
+  .opp-line:first-child { border-top: 0; }
+  .opp-line:hover { background: var(--hover); }
+  .opp-line .grow { flex: 1; min-width: 0; }
+  .opp-line h3 { font-size: 15px; font-weight: 600; line-height: 1.3; }
+  .opp-line .facts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; color: var(--muted); font-size: 13px; }
+  .opp-line .why { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .opp-line .trail { display: flex; align-items: center; gap: 4px; flex: none; }
+  .save-btn { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; color: var(--muted); }
+  .save-btn:hover { background: var(--hover); color: var(--fg); }
+  .save-btn[aria-pressed="true"] { color: var(--action); }
+  .save-btn[aria-pressed="true"] svg { fill: currentColor; }
+  .hidden-note { display: flex; align-items: center; gap: 10px; justify-content: space-between; flex-wrap: wrap; padding: 12px 20px; border-top: 1px solid var(--line-soft); color: var(--muted); font-size: 13px; }
+  .new-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--action); margin-left: 6px; vertical-align: 2px; }
+  @media (max-width: 760px) { .opp-line { padding: 14px 16px; align-items: flex-start; } .opp-line .opp-logo { width: 38px; height: 38px; font-size: 13px; } }
+</style>
+</head>
+<body>
+<div class="app" data-page="discover" data-title="Discover"
+     data-suggest="Which of these can I finish in 3 weeks?|Only show ones with cash prizes|What does Bridge The Gap need?"
+     data-reply="See the shorter list|Discover · closes soon|discover.html?f=soon">
+<main class="main">
+  <div class="page">
+
+    <header class="page-head" data-od-id="discover-head">
+      <div>
+        <h1>Discover</h1>
+        <p class="lede">Hackathons that fit what you like to build. Caddie reads the rules and tells you if you can enter.</p>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="filter-bar" data-od-id="discover-pills">
+        <button class="pill" data-view="for-you" aria-pressed="true">For you</button>
+        <button class="pill" data-view="saved" aria-pressed="false">Saved <span id="n-saved"></span></button>
+        <span style="width:1px;height:20px;background:var(--line);margin:0 2px" aria-hidden="true"></span>
+        <button class="pill" data-toggle data-f="soon" aria-pressed="false">Closes in November</button>
+        <button class="pill" data-toggle data-f="money" aria-pressed="false">Cash prizes</button>
+      </div>
+      <div class="panel" id="list" data-od-id="discover-results" aria-live="polite"></div>
+      <p class="meta" style="text-align:center">From Devpost · checked today at 09:12 · <a class="link" href="settings.html#interests">Change what you like</a></p>
+    </section>
+
+  </div>
+</main>
+</div>
+<script src="assets/events.js"></script>
+<script src="assets/caddie.js"></script>
+<script>
+(function () {
+  const I = window.CaddieIcon, E = window.CADDIE_EVENTS;
+  const $ = (s) => document.querySelector(s);
+  let saved; try { saved = JSON.parse(localStorage.getItem('caddie2.saved') || '["bridge","arbiter"]'); } catch (e) { saved = ['bridge', 'arbiter']; }
+  let view = 'for-you', showHidden = false;
+  if (new URLSearchParams(location.search).get('f') === 'soon') $('[data-f="soon"]').setAttribute('aria-pressed', 'true');
+  const on = (f) => $(`[data-f="${f}"]`).getAttribute('aria-pressed') === 'true';
+  const icon = (v) => (v === 'ok' ? 'check' : v === 'danger' ? 'x' : v === 'warn' ? 'alert' : 'info');
+  const line = (e) => `
+    <div class="opp-line" data-od-id="opp-${e.id}">
+      <span class="opp-logo">${e.logo}</span>
+      <div class="grow">
+        <h3><a href="opportunity.html?e=${e.id}">${e.title}</a>${e.isNew ? '<span class="new-dot" title="New this week"></span><span class="sr">New this week</span>' : ''}</h3>
+        <div class="facts"><span>${e.when.replace(/,? \d{1,2}:\d{2}[ap]m [A-Z]{3}/, '')}</span><span>${e.prize}</span></div>
+        <div class="why"><span class="chip ${e.verdict[0]}">${I(icon(e.verdict[0]))}${e.verdict[1]}</span>${e.why.slice(0, 1).map((w) => `<span class="chip ${e.whyWarn ? 'warn' : 'outline'}">${w}</span>`).join('')}${e.project ? `<span class="chip action">${I('folder')}${e.project}</span>` : ''}</div>
+      </div>
+      <div class="trail"><button class="save-btn" data-save="${e.id}" aria-pressed="${saved.includes(e.id)}" aria-label="${saved.includes(e.id) ? 'Remove from saved' : 'Save'} ${e.title}">${I('bookmark')}</button><a class="btn ghost icon sm hide-m" href="opportunity.html?e=${e.id}" aria-label="Open ${e.title}">${I('chevron')}</a></div>
+    </div>`;
+  const render = () => {
+    let items = E.filter((e) => (view === 'saved' ? saved.includes(e.id) : e.verdict[0] !== 'danger'));
+    const hidden = view === 'for-you' ? E.filter((e) => e.verdict[0] === 'danger') : [];
+    items = items.filter((e) => (!on('soon') || e.closes < '2026-12-01') && (!on('money') || e.money)).sort((a, b) => a.closes.localeCompare(b.closes));
+    $('#n-saved').textContent = saved.length ? '· ' + saved.length : '';
+    let html = items.map(line).join('');
+    if (!items.length) html = view === 'saved' && !on('soon') && !on('money')
+      ? `<div class="empty"><span class="ico-box">${I('bookmark')}</span><h3>Nothing saved yet</h3><p>Tap the bookmark on any hackathon to keep it here.</p></div>`
+      : `<div class="empty"><span class="ico-box">${I('filter')}</span><h3>Nothing matches</h3><p>Turn off a filter, or ask Caddie to look wider.</p><button class="btn secondary sm" id="clear">Show all</button></div>`;
+    if (hidden.length) html += `<div class="hidden-note"><span>${hidden.length} hidden because you can’t enter</span><button class="btn ghost sm" id="show-hidden">${showHidden ? 'Hide' : 'Show'}</button></div>${showHidden ? hidden.map(line).join('') : ''}`;
+    $('#list').innerHTML = html;
+  };
+  document.querySelectorAll('[data-view]').forEach((t) => t.addEventListener('click', () => {
+    view = t.dataset.view;
+    document.querySelectorAll('[data-view]').forEach((x) => x.setAttribute('aria-pressed', x === t ? 'true' : 'false'));
+    render();
+  }));
+  document.addEventListener('click', (ev) => {
+    if (ev.target.closest('.pill[data-f]')) setTimeout(render, 0);
+    const sv = ev.target.closest('[data-save]');
+    if (sv) { const id = sv.dataset.save; saved = saved.includes(id) ? saved.filter((x) => x !== id) : saved.concat(id); localStorage.setItem('caddie2.saved', JSON.stringify(saved)); window.CaddieToast(saved.includes(id) ? 'Saved' : 'Removed from saved', 'bookmark'); render(); }
+    if (ev.target.closest('#clear')) { document.querySelectorAll('.pill[data-f]').forEach((p) => p.setAttribute('aria-pressed', 'false')); render(); }
+    if (ev.target.closest('#show-hidden')) { showHidden = !showHidden; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Check · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .sum { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; align-items: center; padding: 22px 24px; }
+  .sum h2 { font-size: 20px; font-weight: 650; }
+  .sum p { color: var(--muted); font-size: 14px; margin-top: 4px; max-width: 54ch; }
+  .sum .bar-seg { margin-top: 12px; max-width: 360px; }
+  .item { display: flex; gap: 14px; align-items: center; padding: 14px 20px; border-top: 1px solid var(--line-soft); min-height: 64px; }
+  .item:first-child { border-top: 0; }
+  .item .grow { flex: 1; min-width: 0; }
+  .item .title { font-weight: 550; }
+  .item .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .item .ico-box { width: 30px; height: 30px; }
+  button.item { width: 100%; text-align: left; }
+  button.item:hover { background: var(--hover); }
+  .judge { display: grid; gap: 6px; padding: 16px 20px; border-top: 1px solid var(--line-soft); }
+  .judge:first-child { border-top: 0; }
+  .judge .top { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+  .judge b { font-weight: 600; }
+  .judge p { font-size: 13.5px; color: color-mix(in srgb, var(--fg) 80%, var(--muted)); line-height: 1.55; }
+  .judge .marks { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .crit { border: 1px solid var(--line); border-radius: var(--r); padding: 14px; margin: 0; display: grid; gap: 10px; min-width: 0; }
+  .crit.invalid { border-color: var(--danger); box-shadow: 0 0 0 3px var(--tint-danger); }
+  .crit legend { float: left; width: 100%; padding: 0; display: flex; gap: 10px; justify-content: space-between; align-items: center; font-weight: 600; }
+  .crit legend + * { clear: both; }
+  .scale { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+  .scale label { position: relative; display: grid; place-items: center; height: 44px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--ink); font: 600 15px/1 var(--font-mono); cursor: pointer; color: var(--fg); }
+  .scale label:hover { background: var(--raised); border-color: color-mix(in srgb, var(--fg) 24%, transparent); }
+  .scale input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .scale label:has(input:checked) { border-color: var(--action); background: var(--tint-action); color: var(--fg); box-shadow: inset 0 0 0 1px var(--action); }
+  .scale label:has(input:focus-visible) { outline: 2px solid var(--action); outline-offset: 2px; }
+  .scale-ends { display: flex; justify-content: space-between; font-size: var(--t-meta); color: var(--muted); }
+  .crit .textarea { min-height: 64px; }
+  .score-progress { display: flex; align-items: center; gap: 12px; }
+  .score-progress .bar { flex: 1; }
+  .yours { display: flex; gap: 12px; align-items: flex-start; padding: 14px 20px; border-top: 1px solid var(--line-soft); font-size: 13.5px; }
+  .yours b { font-weight: 600; }
+  @media (max-width: 760px) {
+    .sum { grid-template-columns: auto minmax(0, 1fr); padding: 18px 16px; } .sum .btn { grid-column: 1 / -1; }
+    .item, .judge { padding-left: 16px; padding-right: 16px; } .item { align-items: flex-start; }
+  }
+</style>
+</head>
+<body>
+<!-- Check (was "Prove"): are you ready for the judges? Plain language, one list, coaching folded into each line. -->
+<div class="app" data-page="project" data-project-tab="check"
+     data-suggest="What’s the quickest thing to fix?|Write the setup guide for me|What do judges care about most?"
+     data-reply="See what’s still missing|Check · what you hand in|#hand-in">
+<main class="main">
+  <div class="page">
+    <div data-project-head></div>
+
+    <!-- Contest projects -->
+    <div data-when="contest" class="section" style="gap:24px">
+      <section class="panel sum" data-od-id="check-summary">
+        <i data-mascot="needs" data-size="56" id="c-mascot"></i>
+        <div>
+          <h2 id="c-title">4 of 6 things are ready</h2>
+          <p id="c-body">Everything the rules ask you to hand in, and whether it’s done. This is Caddie’s advice — the judges make the final call.</p>
+          <div class="bar-seg" id="c-bar" aria-hidden="true"></div>
+        </div>
+        <button class="btn secondary" data-toast="Checking again against the rules — about a minute" data-toast-icon="repeat" data-od-id="check-again"><i data-i="repeat"></i>Check again</button>
+      </section>
+
+      <section class="section" id="hand-in" data-od-id="check-hand-in">
+        <div class="section-head"><h2>What you hand in</h2><span class="meta">From the official rules</span></div>
+        <div class="panel" id="items"></div>
+      </section>
+
+      <section class="section" data-od-id="check-judges">
+        <div class="section-head"><h2>What judges look for</h2><button class="btn secondary sm" data-open="score" data-od-id="check-score-open"><i data-i="star"></i><span id="score-btn-label">Score it yourself</span></button></div>
+        <div class="panel" id="judges"></div>
+      </section>
+    </div>
+
+    <!-- Personal projects -->
+    <section data-when="standalone" hidden class="panel" data-od-id="check-personal">
+      <div class="empty" style="padding:48px 24px">
+        <i data-mascot="idle" data-size="56"></i>
+        <h3>No judges here</h3>
+        <p>Personal projects don’t have rules to meet. Caddie still checks that your app works every time it builds.</p>
+        <div class="btn-row" style="justify-content:center"><a class="btn secondary sm" href="project-submit.html?p=pantry">Share it instead</a><a class="btn ghost sm" href="project-settings.html?p=pantry">Link it to a hackathon</a></div>
+      </div>
+    </section>
+  </div>
+</main>
+</div>
+
+<!-- Proof drawer: why Caddie thinks an item is ready -->
+<div class="drawer" id="proof" role="dialog" aria-modal="true" aria-labelledby="pf-title" data-od-id="drawer-proof">
+  <div class="modal-head"><div class="grow"><div class="kicker" style="margin-bottom:6px">How Caddie knows</div><h2 id="pf-title"></h2><p id="pf-rule"></p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body"><div class="timeline" id="pf-list"></div></div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Close</button><button class="btn secondary" data-toast="Marked as not ready — Caddie will look again" data-toast-icon="alert">This isn’t right</button></div>
+</div>
+
+<!-- Score it yourself (Judge, S29): your own practice scores, never posted as 0, never sent to the judges. -->
+<div class="drawer" id="score" role="dialog" aria-modal="true" aria-labelledby="sc-title" data-od-id="drawer-score">
+  <div class="modal-head"><div class="grow"><div class="kicker" style="margin-bottom:6px">Practice round</div><h2 id="sc-title">Score it like a judge</h2><p>Rate each thing from 1 to 5, the way the judges will. Only you see these — they’re not sent to the judges.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <div class="score-progress"><span class="meta" id="sc-count">0 of 0 scored</span><div class="bar"><i id="sc-bar" style="width:0"></i></div></div>
+    <div class="notice danger" id="sc-err" role="alert" hidden><i data-i="alert"></i><div class="grow" id="sc-err-text"></div></div>
+    <div id="sc-list" style="display:grid;gap:12px"></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" id="sc-clear" hidden>Clear my scores</button><span class="meta">Saved only for you</span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="sc-save">Save my scores</button></div>
+</div>
+
+<!-- Licence picker -->
+<div class="modal" id="licence" role="dialog" aria-modal="true" aria-labelledby="lc-title" data-od-id="modal-licence">
+  <div class="modal-head"><div class="grow"><h2 id="lc-title">Pick a licence</h2><p>A licence tells people what they may do with your code. The rules require one because your code must be public.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body" role="radiogroup" aria-label="Licence">
+    <label class="choice"><input type="radio" name="lc" checked><span><b>MIT (recommended)</b><small>Anyone can use it for anything, as long as they keep your name on it. Most hackathon projects use this.</small></span></label>
+    <label class="choice"><input type="radio" name="lc"><span><b>Apache 2.0</b><small>Like MIT, with extra protection around patents.</small></span></label>
+    <label class="choice"><input type="radio" name="lc"><span><b>GPL 3.0</b><small>Anyone who changes and shares it must share their code too.</small></span></label>
+  </div>
+  <div class="modal-foot"><span class="meta">Caddie adds the file to your GitHub repo</span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-toast="Licence added to your repo" data-go="project-check.html#hand-in">Add licence</button></div>
+</div>
+
+<script src="assets/caddie.js"></script>
+<script>
+(function () {
+  const I = window.CaddieIcon, $ = (s) => document.querySelector(s), id = window.CaddieProject.id;
+  if (window.CaddieProject.kind !== 'contest') return;
+  /* [state, title, sub, action] — state ok | warn | danger */
+  const DATA = {
+    ledger: {
+      items: [
+        ['ok', 'An app where PayPal does real work', 'Invoices are read and sent through PayPal', 'paypal'],
+        ['ok', 'AI that’s an actual part of it', 'The AI writes every reminder', 'ai'],
+        ['ok', 'A demo judges can try', 'The setup steps work from scratch', 'demo'],
+        ['ok', 'A written description', 'Caddie wrote it — read it before you submit', 'desc'],
+        ['warn', 'Public code with a licence', 'Your code is public, but has no licence yet', '<button class="btn secondary sm" data-open="licence">Pick a licence</button>'],
+        ['danger', 'A video under 3 minutes', 'Only you can record this. Upload it to YouTube as public.', '<a class="btn secondary sm" href="project-submit.html#video">Add the link</a>'],
+      ],
+      judges: [
+        ['ok', 'Strong', 'Uses PayPal in a real way', 'You use PayPal invoicing to read and send — not just a pay button. The rules call this out.'],
+        ['warn', 'Could be stronger', 'Uses AI in a real way', 'Right now the AI only writes the message. The updated plan lets it choose the schedule too, which is a clearer answer. <a class="link" href="project-plan.html">See the plan</a>'],
+        ['ok', 'Strong', 'It actually works', 'All 42 checks pass and the setup steps work from scratch.'],
+        ['warn', 'A small gap', 'Explained well enough to judge', 'The guide says how to run it, but not how the AI picks a tone. One paragraph with an example would fix this.'],
+      ],
+    },
+    founder: {
+      items: [
+        ['ok', 'An AI helper that saves founders time', 'Plans a founder’s week from their calendar', 'ai'],
+        ['ok', 'A written description', 'You reviewed it on Oct 6', 'desc'],
+        ['ok', 'A short pitch video', 'Linked Oct 7', 'demo'],
+        ['ok', 'Public code', 'github.com/captjay98/founder-hours', 'paypal'],
+        ['danger', 'A link to a working app', 'Judges need to try it themselves', '<button class="btn secondary sm" data-toast="Sharing a preview link — Caddie will add it to your submission">Share preview</button>'],
+        ['danger', 'Setup instructions', 'How to run it on their own computer', '<button class="btn secondary sm" data-ask="Write the setup instructions for Founder Hours">Ask Caddie to write it</button>'],
+      ],
+      judges: [
+        ['ok', 'Strong', 'Solves a real founder problem', 'Your description opens with a clear, specific problem.'],
+        ['danger', 'Missing', 'A working prototype', 'There’s nothing for judges to click yet. Sharing the preview fixes this.'],
+        ['warn', 'Could be stronger', 'Clear documentation', 'There’s no setup guide yet. Caddie can write one from the code.'],
+      ],
+    },
+  };
+  const d = DATA[id];
+  const ready = d.items.filter((x) => x[0] === 'ok').length;
+  $('#c-title').textContent = `${ready} of ${d.items.length} things are ready`;
+  if (id === 'founder') $('#c-body').textContent = 'Two things are missing, and both are quick. You have 70 days.';
+  $('#c-bar').innerHTML = d.items.map((x) => `<i class="${x[0]}"></i>`).join('');
+  const ico = (s) => (s === 'ok' ? 'check' : s === 'warn' ? 'alert' : 'x');
+  const lbl = { ok: 'Ready', warn: 'Almost', danger: 'Missing' };
+  $('#items').innerHTML = d.items.map((x) => {
+    const inner = `<span class="ico-box ${x[0]}">${I(ico(x[0]))}</span><span class="grow"><span class="title" style="display:block">${x[1]}</span><span class="sub" style="display:block">${x[2]}</span></span>`;
+    return x[0] === 'ok'
+      ? `<button class="item" data-open="proof" data-pf="${x[3]}" data-od-id="check-item-${x[3]}">${inner}<span class="chip ok">Ready</span>${I('chevron')}</button>`
+      : `<div class="item">${inner}<span class="chip ${x[0]} hide-m">${lbl[x[0]]}</span>${x[3]}</div>`;
+  }).join('');
+  /* ---- Your own scores (practice). Caddie's read: ok ≈ 4–5, warn ≈ 3, danger ≈ 1–2. ---- */
+  const sKey = 'caddie2.scores.' + id;
+  let mine; try { mine = JSON.parse(localStorage.getItem(sKey) || 'null'); } catch (e) { mine = null; }
+  const band = (n) => (n >= 4 ? 'ok' : n === 3 ? 'warn' : 'danger');
+  const renderJudges = () => {
+    $('#judges').innerHTML = d.judges.map((j, i) => {
+      const n = mine && mine.scores[i];
+      return `<div class="judge" data-od-id="check-judge-${i}"><div class="top"><b>${j[2]}</b><span class="marks"><span class="chip ${j[0]}" title="Caddie’s read">${j[1]}</span>${n ? `<span class="chip outline" title="Your score">You: ${n}/5</span>` : ''}</span></div><p>${j[3]}</p>${mine && mine.notes[i] ? `<p class="meta">Your note: ${esc(mine.notes[i])}</p>` : ''}</div>`;
+    }).join('') + (mine ? (() => {
+      const avg = mine.scores.reduce((a, b) => a + b, 0) / mine.scores.length;
+      const differ = d.judges.filter((j, i) => band(mine.scores[i]) !== j[0]).map((j) => j[2]);
+      return `<div class="yours" data-od-id="check-your-scores">${I('star')}<div class="grow"><b>Your scores average ${avg.toFixed(1)} of 5</b> · saved ${mine.at}.${differ.length ? ` You and Caddie see <b>${differ.length === 1 ? differ[0] : differ.length + ' things'}</b> differently — <button class="link" data-ask="Why do we disagree about ${esc(differ[0])}?">ask Caddie why</button>.` : ' You and Caddie agree on every line.'}</div></div>`;
+    })() : '');
+    $('#score-btn-label').textContent = mine ? 'Change my scores' : 'Score it yourself';
+  };
+  const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  renderJudges();
+  $('#judges').insertAdjacentHTML('afterend', '<p class="meta">Caddie’s read is its honest take on the published rules. Neither it nor your scores come from the judges.</p>');
+
+  const fill = () => {
+    $('#sc-list').innerHTML = d.judges.map((j, i) => `<fieldset class="crit" data-crit="${i}"><legend><span>${j[2]}</span><span class="chip ${j[0]}">Caddie: ${j[1]}</span></legend>
+      <div class="scale" role="radiogroup" aria-label="Score for ${esc(j[2])}">${[1, 2, 3, 4, 5].map((n) => `<label><input type="radio" name="sc-${i}" value="${n}" ${mine && mine.scores[i] === n ? 'checked' : ''} aria-label="${n} of 5">${n}</label>`).join('')}</div>
+      <div class="scale-ends" aria-hidden="true"><span>1 · weak</span><span>3 · OK</span><span>5 · strong</span></div>
+      <label class="sr" for="sc-note-${i}">Note for ${esc(j[2])}</label><textarea class="textarea" id="sc-note-${i}" maxlength="280" placeholder="What would make it better? (optional)">${mine && mine.notes[i] ? esc(mine.notes[i]) : ''}</textarea></fieldset>`).join('');
+    $('#sc-err').hidden = true; $('#sc-clear').hidden = !mine; progress();
+  };
+  const picked = () => d.judges.map((j, i) => { const r = document.querySelector(`[name="sc-${i}"]:checked`); return r ? +r.value : 0; });
+  const progress = () => { const n = picked().filter(Boolean).length; $('#sc-count').textContent = `${n} of ${d.judges.length} scored`; $('#sc-bar').style.width = (n / d.judges.length) * 100 + '%'; };
+  document.addEventListener('click', (e) => { if (e.target.closest('[data-open="score"]')) fill(); });
+  if (new URLSearchParams(location.search).get('open') === 'score') fill();
+  $('#sc-list').addEventListener('change', (e) => {
+    const f = e.target.closest('.crit'); if (f) f.classList.remove('invalid');
+    progress();
+    if (!$('#sc-err').hidden && picked().every(Boolean)) $('#sc-err').hidden = true;
+  });
+  $('#sc-save').addEventListener('click', () => {
+    const sc = picked();
+    const missing = d.judges.map((j, i) => (sc[i] ? null : i)).filter((x) => x !== null);
+    document.querySelectorAll('.crit').forEach((f) => f.classList.toggle('invalid', missing.includes(+f.dataset.crit)));
+    if (missing.length) {
+      $('#sc-err-text').innerHTML = `<b>Give a score for ${missing.length === 1 ? 'this' : 'these'}:</b> ${missing.map((i) => esc(d.judges[i][2])).join(', ')}. A blank isn’t saved as 0 — every line needs a score.`;
+      $('#sc-err').hidden = false;
+      document.querySelector(`[name="sc-${missing[0]}"]`).focus();
+      return;
+    }
+    mine = { scores: sc, notes: d.judges.map((j, i) => document.getElementById('sc-note-' + i).value.trim()), at: 'today' };
+    try { localStorage.setItem(sKey, JSON.stringify(mine)); } catch (e) { /* private mode */ }
+    renderJudges(); window.CaddieClose(); window.CaddieToast('Your scores are saved — only you can see them', 'star');
+  });
+  $('#sc-clear').addEventListener('click', () => {
+    mine = null; try { localStorage.removeItem(sKey); } catch (e) { /* private mode */ }
+    renderJudges(); window.CaddieClose(); window.CaddieToast('Your scores are cleared', 'trash');
+  });
+  const PROOF = {
+    paypal: ['PayPal does real work', '“Your project must integrate at least one PayPal API, SDK or product” — Official rules', [['Code', 'src/paypal/invoices.ts reads unpaid invoices'], ['Code', 'Reminders are sent through PayPal invoicing'], ['Build', 'Checked yesterday — all 42 checks passed']]],
+    ai: ['AI is an actual part of it', '“AI should be meaningfully part of the experience” — Official rules', [['Code', 'src/agent/reminder.ts writes each reminder'], ['Preview', 'The draft reminder shows on the invoice screen']]],
+    demo: ['Judges can try it', '“Run instructions judges can follow, or a hosted link” — What to submit', [['Guide', 'README → “Run it locally”, 3 steps'], ['Build', 'Caddie ran those steps from scratch yesterday']]],
+    desc: ['A written description', '“Features and functionality” — What to submit', [['Draft', 'Written by Caddie on Oct 8 — 180 words'], ['You', 'Not read yet. You’ll find it in Submit.']]],
+  };
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pf]'); if (!b) return;
+    const p = PROOF[b.dataset.pf] || PROOF.ai;
+    $('#pf-title').textContent = p[0]; $('#pf-rule').textContent = p[1];
+    $('#pf-list').innerHTML = p[2].map((r) => `<div class="tl"><span class="node ok">${I('check')}</span><div>${r[1]}</div><span class="meta">${r[0]}</span></div>`).join('');
+  });
+})();
+</script>
+</body>
+</html>

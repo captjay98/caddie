@@ -943,3 +943,78 @@ Status, evidence, review verdicts and integrated SHA. Planning-only rows say NOT
   "limitations": ["entering Home still costs one moderate (~0.4s production) task to diff the large transcript — acceptable; splitting virtualization is the next lever if the history grows much larger"]
 }
 ```
+
+## 2026-10-10 — Caddie v2 redesign wave (U01–U10, B01–B06)
+
+Source spec: `docs/design/2026-10-10-v2/` (HANDOFF.md + PACKETS.md, owner-reviewed
+prototype). All 16 packets implemented and verified locally; commits are the
+packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
+
+```json
+{
+  "packet": "U01-U10 (v2 shell, plain words, character, brief/chat, discover/projects, overview/plan/build, check/submit, settings, search/welcome, landing)",
+  "status": "LOCAL VERIFIED",
+  "commands": [
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "0 collisions"},
+    {"command": "bunx playwright test tests/browser --workers=1", "exitCode": 0, "receipt": "135 pass"},
+    {"command": "bun run verify:packet U01..U10 (--browser)", "exitCode": 0, "receipt": "all 10 packets PASS with named spec receipts"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/workspace/ConvResize.tsx", "note": "fraction-based resizable panel (40% default, 340px min, min(60%, vw-520) max), ARIA separator, keyboard resize, persisted per browser"},
+    {"path": "apps/app/src/client/workspace/AskBar.tsx", "note": "mobile ask bar on non-Caddie tabs, opens the chat scoped to the screen"},
+    {"path": "packages/ui/src/Mascot.tsx", "note": "8-mood character, reduced-motion static, real-state mapping (transport/urgent card)"},
+    {"path": "apps/app/src/client/copy.ts", "note": "§6 plain-words vocabulary; built-client grep clean of banned words"},
+    {"path": "apps/app/src/client/brief/DecisionCard.tsx", "note": "AccountBriefV2: ≤3 cards, deadline rows, Done fold, mark-all-read kept"},
+    {"path": "apps/app/src/client/discovery/Results.tsx", "note": "v2 list: For you/Saved segments (B01), can't-enter reveal, Can enter filter, plain verdict words"},
+    {"path": "apps/app/src/client/surface.tsx", "note": "Overview next-step/app-so-far/todo embed; Build tabs Activity|Files with ?tab=; two-step explore-ideas; project step-state from real brief cards only"},
+    {"path": "apps/app/src/client/planning/DesignReview.tsx", "note": "Is-this-OK bar first; approve window states the REAL spend cap from /api/usage; suggest-a-change window; #earlier fold"},
+    {"path": "apps/app/src/client/settings/Settings.tsx", "note": "8 tabs with ?tab=; stacks wording 'Being proven first'/'Later'; Appearance with theme + Reset Caddie width"},
+    {"path": "apps/app/src/client/settings/ProjectSettings.tsx", "note": "NEW /project/settings: General/Code/Routines/Knows/Archive (typed-name, archive-only per §8.4)"},
+    {"path": "apps/app/src/client/search/QuickSearch.tsx", "note": "⌘K + / palette with See-all-results → /search?q="},
+    {"path": "apps/app/src/client/onboarding/Start.tsx", "note": "WelcomeIntro: intro lines with mood changes, username rule prefill, skip/replay/reduced-motion, saved profile name"},
+    {"path": "apps/site/src/pages/index.astro", "note": "plain-word steps, Your brief + What-it-can-build sections with ledger-faithful statuses, mascot in wordmark/closing, theme toggle sharing caddie-theme (pre-paint, device default), one primary per viewport"}
+  ],
+  "routes": "INTEGRATION LEAD APPLIED (session owner): /tasks→/project#todo, /artifacts→/runs?tab=files, /judge→/evidence?open=score, /automations→/settings?tab=routines, /usage→/settings?tab=spending, /schedules→/project/settings#routines, /repositories→/project/settings#code, NEW /project/settings; /settings gained ?tab=",
+  "environment": "composed build, vite preview :4173 (workerd), stubbed /api for browser UI-state proofs",
+  "providerCalls": "none",
+  "specReview": "owner visual acceptance pending (prototype side-by-side at 390/768/1440 light+dark)",
+  "qualityReview": "self-reviewed per packet; browser specs extended in the same packet per PACKETS.md",
+  "limitations": [
+    "trade-off brief card type awaits a server card source (§4 Brief) — presentation supported, no data yet",
+    "prototype date/prize discovery filters not rendered (no closes-at/prize fields on candidates) — never faked",
+    "profile name saved locally (caddie:profile-name) — server profile field is a named follow-up",
+    "in-chat routine-labelled messages need coordinator emit (§3.6) — not yet produced by the agent",
+    "B05 recorded as VERIFIED-AND-PINNED: threads were already per scope (transport keys off the scope's run binding); tests/conversation-scope.test.ts pins it"
+  ]
+}
+```
+
+```json
+{
+  "packet": "B01-B06 (saved hackathons, search hackathons, stack notify, plan decisions, per-scope threads, in-chat approval)",
+  "status": "LOCAL VERIFIED",
+  "commands": [
+    {"command": "bun run verify:packet B01..B06", "exitCode": 0, "receipt": "B01 4 tests, B02 14, B03 4, B04 5, B05 4, B06 4 — all PASS"},
+    {"command": "bun test tests/", "exitCode": 0, "receipt": "492 pass; remaining failures are the pre-existing LIVE-gated suites (P17 hosted, P12 Resend, P07 hosted preview, P15d emulator) — BLOCKED per AGENTS.md, unchanged by this wave"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/migrations/0013_discovery_saved.sql", "note": "savedAt axis on candidates; every harness + inline test list got 0013 (0011 drift lesson)"},
+    {"path": "apps/app/migrations/0014_stack_notify.sql", "note": "stack_notify_subscriptions (actorId, stackId)"},
+    {"path": "apps/app/migrations/0015_plan_decisions.sql", "note": "plan_decisions per revision with approvalId link"},
+    {"path": "apps/app/src/server/discovery.ts", "note": "saveCandidate/unsaveCandidate/listSavedCandidates — saving never accepts, never creates a project"},
+    {"path": "apps/app/src/server/search.ts", "note": "hackathons section (saved+accepted candidates) sharing the membership permission predicate"},
+    {"path": "apps/app/src/server/stacks.ts", "note": "subscribe/unsubscribe/list + notifyStackEnabled; subscribing to an enabled stack is a typed 409"},
+    {"path": "apps/app/src/server/planning.ts", "note": "recordPlanDecision/listPlanDecisions — decision bound to ONE revision"},
+    {"path": "apps/app/src/agents/coordinator.ts", "note": "request_approval tool + approvalCard data writer (server approval id + cap); chat text can never approve"},
+    {"path": "apps/app/src/client/conversation/ApprovalCard.tsx", "note": "Allow/Not now → GET approval intent → POST decision; state from server response"}
+  ],
+  "environment": "local workerd fixtures (wrangler dev, real D1), stub OAuth (SIMULATED at the provider boundary)",
+  "providerCalls": "none",
+  "specReview": "independent review pending",
+  "qualityReview": "self-reviewed; integration-lead files (routes/migrations/PACKET_MAP) applied serially in-session",
+  "limitations": [
+    "B02 message search over chat history: BLOCKED — the Flue 2.2.2 conversation stream store lives inside the agent DO with no cross-DO query surface from the HTTP route layer; a message mirror/index would be a separate packet. The client states 'Chats aren't searched yet' honestly",
+    "B03 flip notification fires from a test-only control route (the real flip is a deploy of the code-defined catalog)"
+  ]
+}
+```

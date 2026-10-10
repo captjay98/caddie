@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Build · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .app-mock { position: absolute; inset: 0; display: grid; grid-template-columns: 180px 1fr; font: 13px/1.45 var(--font-ui); }
+  .app-mock aside { background: #fff; border-right: 1px solid #e5e5e2; padding: 16px 12px; display: grid; align-content: start; gap: 4px; }
+  .app-mock aside b { font-size: 14px; margin-bottom: 10px; display: block; }
+  .app-mock aside span { padding: 6px 8px; border-radius: 6px; color: #50545c; }
+  .app-mock aside span.on { background: #eef2fb; color: #003087; font-weight: 600; }
+  .app-mock section { padding: 18px 22px; display: grid; align-content: start; gap: 10px; }
+  .inv { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center; background: #fff; border: 1px solid #e5e5e2; border-radius: 8px; padding: 10px 12px; }
+  .inv small { color: #6b6f76; display: block; font-size: 12px; }
+  .inv .tagg { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #fff4e0; color: #8a5300; }
+  .inv button { font-size: 12px; padding: 5px 10px; border-radius: 6px; background: #003087; color: #fff; }
+  .files { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 420px; }
+  .files nav { border-right: 1px solid var(--line-soft); padding: 8px; display: grid; align-content: start; gap: 2px; }
+  .files nav button { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 6px; font: 400 12.5px/1 var(--font-mono); color: var(--muted); text-align: left; width: 100%; }
+  .files nav button:hover { background: var(--hover); color: var(--fg); }
+  .files nav button[aria-pressed="true"] { background: var(--tint-action); color: var(--fg); }
+  .files nav .chip { margin-left: auto; height: 18px; font-size: 10.5px; padding: 0 6px; }
+  .files .viewer { min-width: 0; display: grid; align-content: start; }
+  .files .viewer-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+  .files .code { border: 0; border-radius: 0; background: transparent; }
+  @media (max-width: 760px) {
+    .app-mock { grid-template-columns: 1fr; } .app-mock aside { display: none; }
+    .frame-body { aspect-ratio: 3 / 4; }
+    .inv { grid-template-columns: 1fr auto; } .inv .tagg { display: none; }
+    .files { grid-template-columns: 1fr; } .files nav { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+  }
+</style>
+</head>
+<body>
+<div class="app" data-page="project" data-project-tab="build" data-suggest="Why did a build fail yesterday?|Make the Nudge button bigger|Check everything still works" data-reply="Ask for a change|Build · Try it|?open=change-request">
+<main class="main">
+  <div class="page">
+    <div data-project-head></div>
+
+    <div class="tabs" role="tablist" data-tabs="hash" data-od-id="build-tabs">
+      <a class="tab" role="tab" href="#preview" data-tab-target="preview" aria-selected="true">Try it</a>
+      <a class="tab" role="tab" href="#activity" data-tab-target="activity">Past builds</a>
+      <a class="tab" role="tab" href="#files" data-tab-target="files">Code <span class="chip">for developers</span></a>
+    </div>
+
+    <!-- Preview: the built app is primary -->
+    <div id="preview" data-tabpanel class="section" style="gap:16px">
+      <div class="notice action" id="b-note"><i data-i="info"></i><div class="grow">This is the version you approved on Oct 4. The new plan is <a class="link" href="project-plan.html">waiting for your OK</a>.</div></div>
+      <div class="frame" data-od-id="build-preview-frame">
+        <div class="frame-bar"><span class="frame-dots"><i></i><i></i><i></i></span><span class="frame-url"><i data-i="shield"></i>Only you can open this link</span><div class="seg hide-m" role="group" aria-label="Device"><button aria-pressed="true">Desktop</button><button aria-pressed="false">Phone</button></div></div>
+        <div class="frame-body">
+          <div class="app-mock">
+            <aside><b>Ledger Nudge</b><span class="on">Unpaid invoices</span><span>Reminders sent</span><span>Customers</span><span>PayPal account</span></aside>
+            <section>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><b style="font-size:17px">Unpaid invoices</b><div style="color:#6b6f76;font-size:12px">3 overdue · $1,696.50 outstanding · PayPal sandbox</div></div><button style="font-size:12px;padding:7px 12px;border-radius:7px;background:#003087;color:#fff">Nudge all</button></div>
+              <div class="inv"><div><b>Ada Foods</b><small>Invoice #1042 · 7 days overdue</small></div><span class="tagg">2nd reminder due</span><button>Nudge</button></div>
+              <div class="inv"><div><b>Kola Prints</b><small>Invoice #1039 · 12 days overdue</small></div><span class="tagg">Firm tone</span><button>Nudge</button></div>
+              <div class="inv"><div><b>Studio Lumen</b><small>Invoice #1031 · 3 days overdue</small></div><span class="tagg">1st reminder sent</span><button>Nudge</button></div>
+              <div style="background:#fff;border:1px dashed #cfd3da;border-radius:8px;padding:10px 12px;color:#50545c;font-size:12.5px"><b style="color:#16181d">Draft for Ada Foods:</b> “Hi Ada — a friendly nudge that invoice #1042 ($420.00) is a week past due. You can pay in one tap through PayPal below. Thanks!”</div>
+            </section>
+          </div>
+        </div>
+      </div>
+      <div class="btn-row" data-od-id="build-preview-actions">
+        <button class="btn primary" data-open="change-request"><i data-i="edit"></i>Ask for a change</button>
+        <button class="btn secondary" data-toast="Opening the private preview in a new tab" data-toast-icon="external"><i data-i="external"></i>Open in new tab</button>
+        <span class="meta" style="margin-left:auto">Updated yesterday · link works until Oct 15</span>
+      </div>
+    </div>
+
+    <!-- Activity -->
+    <div id="activity" data-tabpanel class="section" hidden data-od-id="build-activity">
+      <div class="panel row-list">
+        <button class="row" data-open="run-drawer" data-run="14"><span class="ico-box ok"><i data-i="check"></i></span><div class="grow"><div class="title">Built version 2</div><div class="sub">Everything worked · preview updated</div></div><div class="trail"><span class="meta">12 min · $1.84</span><span class="meta hide-m">Yesterday 18:22</span></div></button>
+        <button class="row" data-open="run-drawer" data-run="13"><span class="ico-box danger"><i data-i="x"></i></span><div class="grow"><div class="title">Build stopped</div><div class="sub">The PayPal test login had expired — Caddie fixed it</div></div><div class="trail"><span class="meta">4 min · $0.41</span><span class="meta hide-m">Yesterday 17:58</span></div></button>
+        <button class="row" data-open="run-drawer" data-run="12"><span class="ico-box ok"><i data-i="check"></i></span><div class="grow"><div class="title">Built the invoice list and reminders</div><div class="sub">Everything worked</div></div><div class="trail"><span class="meta">18 min · $1.46</span><span class="meta hide-m">Oct 5</span></div></button>
+        <button class="row" data-open="run-drawer" data-run="11"><span class="ico-box"><i data-i="repeat"></i></span><div class="grow"><div class="title">Nightly check</div><div class="sub">Routine · everything still works</div></div><div class="trail"><span class="meta">3 min · $0.12</span><span class="meta hide-m">Oct 5</span></div></button>
+      </div>
+      <p class="meta">Showing the last 4 · <button class="link" data-toast="Loaded 11 older builds" data-toast-icon="down">Show older</button></p>
+    </div>
+
+    <!-- Files -->
+    <div id="files" data-tabpanel class="panel" hidden data-od-id="build-files">
+      <div class="files">
+        <nav aria-label="Files">
+          <div class="kicker" style="padding:8px 10px">Changed in version 2</div>
+          <button aria-pressed="true" data-file="0"><i data-i="file"></i>src/paypal/invoices.ts<span class="chip warn">M</span></button>
+          <button aria-pressed="false" data-file="1"><i data-i="file"></i>src/agent/reminder.ts<span class="chip ok">A</span></button>
+          <button aria-pressed="false" data-file="2"><i data-i="file"></i>README.md<span class="chip warn">M</span></button>
+        </nav>
+        <div class="viewer">
+          <div class="viewer-head"><b class="mono" style="font-size:13px" id="f-name">src/paypal/invoices.ts</b><div class="seg" role="group" aria-label="View" id="f-mode"><button aria-pressed="true" data-value="diff">Changes</button><button aria-pressed="false" data-value="file">Whole file</button></div><span style="flex:1"></span><button class="btn ghost sm" data-toast="Downloaded ledger-nudge-r2.zip" data-toast-icon="download"><i data-i="download"></i>Download all</button></div>
+          <div class="code" id="f-code"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+</div>
+
+<div class="drawer" id="run-drawer" role="dialog" aria-modal="true" aria-labelledby="rd-title" data-od-id="drawer-run-detail">
+  <div class="modal-head"><div class="grow"><div class="kicker" style="margin-bottom:6px">Build details</div><h2 id="rd-title">Built version 2</h2><p id="rd-sub">Passed · yesterday 18:22 · 12 min</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <dl class="kv"><dt>Why it ran</dt><dd>You approved version 2</dd><dt>Cost</dt><dd id="rd-cost">$1.84 of a $4 limit</dd><dt>Built with</dt><dd>React web app</dd></dl>
+    <div class="section"><h3 style="font-size:14px;font-weight:600">Steps</h3>
+      <div class="timeline" id="rd-steps"></div></div>
+    <details><summary class="meta" style="cursor:pointer">Technical log</summary>
+      <div class="code" style="margin-top:10px" id="rd-log"></div></details>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Close</button><button class="btn secondary" id="rd-retry" data-toast="Building again — Caddie asks before spending over $1">Try again</button></div>
+</div>
+
+<div class="modal" id="change-request" role="dialog" aria-modal="true" aria-labelledby="cr-title" data-od-id="modal-change-request">
+  <div class="modal-head"><div class="grow"><h2 id="cr-title">Ask for a change</h2><p>Say what you’d like different. Caddie updates the plan and checks with you before building.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <div class="field"><label for="cr-where">Which screen?</label><select class="select" id="cr-where"><option>Unpaid invoices</option><option>Reminders sent</option><option>Customers</option><option>Whole app</option></select></div>
+    <div class="field"><label for="cr-text">What should change?</label><textarea class="textarea" id="cr-text" placeholder="e.g. Show the total outstanding as a big number at the top" data-required></textarea><span class="err" hidden>Describe the change.</span></div>
+  </div>
+  <div class="modal-foot"><span class="meta">Small changes come back in about a minute</span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-toast="Sent — Caddie is updating the plan">Send</button></div>
+</div>
+
+<script src="assets/caddie.js"></script>
+<script>
+(function () {
+  const I = window.CaddieIcon, $ = (s) => document.querySelector(s);
+  const FILES = [
+    ['src/paypal/invoices.ts', [['c', ' import { paypal } from "./client";'], ['', ' '], ['del', '-export async function payLink(id: string) {'], ['del', '-  return paypal.post(`/v1/checkout/links`, { invoice: id });'], ['add', '+export async function listUnpaid() {'], ['add', '+  const res = await paypal.get("/v2/invoicing/invoices", { status: "UNPAID" });'], ['add', '+  return res.items.map(toInvoice);'], ['', '  }']]],
+    ['src/agent/reminder.ts', [['add', '+export async function draftReminder(inv: Invoice, tone: Tone) {'], ['add', '+  const history = await paymentHistory(inv.customer);'], ['add', '+  return agent.write({ inv, tone, history, maxWords: 60 });'], ['add', '+}']]],
+    ['README.md', [['', ' # Ledger Nudge'], ['add', '+## Run it locally'], ['add', '+1. `bun install`'], ['add', '+2. Add PAYPAL_CLIENT_ID to .env (sandbox)'], ['add', '+3. `bun dev` and open http://localhost:5173']]],
+  ];
+  let cur = 0, mode = 'diff';
+  const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const draw = () => {
+    const [name, lines] = FILES[cur];
+    $('#f-name').textContent = name;
+    $('#f-code').innerHTML = lines.filter((l) => mode === 'diff' || l[0] !== 'del').map((l, i) => `<div class="${mode === 'diff' ? l[0] : ''}"><span class="ln">${i + 1}</span>${esc(mode === 'diff' ? l[1] : l[1].replace(/^[+ ]/, ''))}</div>`).join('');
+  };
+  document.querySelectorAll('[data-file]').forEach((b) => b.addEventListener('click', () => { cur = +b.dataset.file; document.querySelectorAll('[data-file]').forEach((x) => x.setAttribute('aria-pressed', x === b)); draw(); }));
+  $('#f-mode').addEventListener('seg', (e) => { mode = e.detail; draw(); });
+  draw();
+  if (window.CaddieProject.id === 'pantry') { const n = $('#b-note'); n.className = 'notice'; n.innerHTML = window.CaddieMascot('working', 28) + '<div class="grow"><b>Caddie is building the “use it up first” list.</b> About 6 minutes left — this preview updates when it’s done.</div>'; }
+  if (window.CaddieProject.id === 'founder') $('#b-note').hidden = true;
+  const RUNS = {
+    14: ['Built version 2', 'Worked · yesterday 18:22 · 12 min', '$1.84 of a $4 limit', [['ok', 'Read the approved plan', '0:04'], ['ok', 'Wrote 6 files', '4:10'], ['ok', 'All 42 checks passed', '9:30'], ['ok', 'Private preview ready', '12:02']], ['✓ vitest  42 passed (42)', '✓ preview ledger-nudge-r2 ready']],
+    13: ['Build stopped', 'Stopped · yesterday 17:58 · 4 min', '$0.41 of a $4 limit', [['ok', 'Read the approved plan', '0:03'], ['ok', 'Wrote 6 files', '2:40'], ['danger', 'Checks failed: PayPal test login expired', '3:55']], ['✗ invoices.test.ts › lists unpaid', '  401 Unauthorized from api-m.sandbox.paypal.com', 'Caddie refreshed the sandbox token and started run 14']],
+    12: ['Built the invoice list and reminders', 'Worked · Oct 5 · 18 min', '$1.46 of a $4 limit', [['ok', 'Wrote 9 files', '8:12'], ['ok', 'All 36 checks passed', '15:40'], ['ok', 'Private preview ready', '17:58']], ['✓ vitest  36 passed (36)']],
+    11: ['Nightly check', 'Worked · Oct 5 · 3 min', '$0.12 · routine', [['ok', 'All 38 checks passed', '2:51']], ['✓ vitest  38 passed (38)']],
+  };
+  document.querySelectorAll('[data-run]').forEach((b) => b.addEventListener('click', () => {
+    const r = RUNS[b.dataset.run];
+    $('#rd-title').textContent = r[0]; $('#rd-sub').textContent = r[1]; $('#rd-cost').textContent = r[2];
+    $('#rd-steps').innerHTML = r[3].map((s) => `<div class="tl"><span class="node ${s[0]}">${I(s[0] === 'danger' ? 'x' : 'check')}</span><div>${s[1]}</div><span class="meta">${s[2]}</span></div>`).join('');
+    $('#rd-log').innerHTML = r[4].map((l) => `<div>${esc(l)}</div>`).join('');
+  }));
+})();
+</script>
+</body>
+</html>

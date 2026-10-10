@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en" data-theme-default="device">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign in · Caddie</title>
+<script>
+/* Apply the saved theme before first paint (same key as the app and landing page). Nothing saved → follow the device. */
+(function () {
+  var t = null;
+  try { t = JSON.parse(localStorage.getItem('caddie2.theme')); } catch (e) { /* storage blocked: fall back to the device */ }
+  if (t !== 'light' && t !== 'dark') t = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  document.documentElement.dataset.theme = t;
+})();
+</script>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .loop { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+  .loop span { display: grid; gap: 4px; padding: 10px; border-radius: var(--r-sm); background: var(--panel); border: 1px solid var(--line-soft); font-size: 12.5px; color: var(--muted); }
+  .loop b { color: var(--fg); font-weight: 600; font-size: 13px; }
+  @media (max-width: 480px) { .loop { grid-template-columns: repeat(2, minmax(0, 1fr)); } .loop span:last-child { grid-column: 1 / -1; } }
+</style>
+</head>
+<body>
+<div class="app bare" data-page="sign-in">
+  <div class="entry-top"><button class="theme-btn" type="button" data-theme-toggle aria-label="Switch to light theme" title="Switch to light theme" data-od-id="sign-in-theme-toggle"><span class="t-sun"><i data-i="sun"></i></span><span class="t-moon"><i data-i="moon"></i></span></button></div>
+  <main class="entry">
+    <div class="entry-card" data-od-id="sign-in-card">
+      <div style="display:flex;align-items:center;gap:12px"><i data-mascot="idle" data-size="44" data-live></i><b style="font-size:20px;letter-spacing:-0.02em">Caddie</b></div>
+      <div>
+        <h1 style="font-size:28px;font-weight:650;line-height:1.15">Find a hackathon. Build something you’re proud of.</h1>
+        <p class="muted" style="margin-top:10px;font-size:15px">Caddie finds hackathons you can enter, then plans and builds your project with you. It always asks before spending money or changing your code.</p>
+      </div>
+      <div class="loop" aria-label="How Caddie works">
+        <span><b>Find</b>Hackathons for you</span><span><b>Plan</b>You say OK</span><span><b>Build</b>A real app</span><span><b>Check</b>Against the rules</span><span><b>Submit</b>Ready to send</span>
+      </div>
+      <div style="display:grid;gap:10px" id="providers">
+        <a class="provider" href="welcome.html?via=github" data-od-id="sign-in-github"><i data-i="git"></i>Continue with GitHub</a>
+        <a class="provider" href="welcome.html?via=google" data-od-id="sign-in-google"><i data-i="globe"></i>Continue with Google</a>
+      </div>
+      <div class="notice danger" id="err" hidden><i data-i="alert"></i><div class="grow"><b>Sign-in didn’t finish.</b> GitHub didn’t give permission. Try again, or use Google.</div></div>
+      <p class="meta">Signing in with GitHub doesn’t give Caddie your code. It asks separately, only if you bring code in.</p>
+    </div>
+  </main>
+</div>
+<script src="assets/caddie.js"></script>
+<script>if (new URLSearchParams(location.search).get('error')) document.getElementById('err').hidden = false;</script>
+</body>
+</html>

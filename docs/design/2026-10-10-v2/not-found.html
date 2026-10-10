@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Not found · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+</head>
+<body>
+<div class="app" data-page="none" data-title="Not found">
+<main class="main">
+  <div class="page">
+    <section class="panel" style="margin-top:6vh" id="nf-page" data-od-id="not-found">
+      <div class="empty" style="padding:56px 24px">
+        <i data-mascot="stuck" data-size="64"></i>
+        <h3 style="font-size:18px">This page doesn’t exist</h3>
+        <p>The link may be old or mistyped. Nothing was lost — your projects are where you left them.</p>
+        <div class="btn-row" style="justify-content:center;margin-top:6px"><a class="btn primary" href="brief.html">Go to your brief</a><button class="btn secondary" data-palette>Search</button></div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:6vh" id="nf-project" hidden data-od-id="project-missing">
+      <div class="empty" style="padding:56px 24px">
+        <i data-mascot="stuck" data-size="64"></i>
+        <h3 style="font-size:18px">That project isn’t in your list</h3>
+        <p>It may have been deleted, or someone hasn’t shared it with you yet.</p>
+        <div class="btn-row" style="justify-content:center;margin-top:6px"><a class="btn primary" href="projects.html">See your projects</a><button class="btn secondary" data-ask="I followed a link to a project I can't open — can you help?">Ask Caddie</button></div>
+      </div>
+    </section>
+  </div>
+</main>
+</div>
+<script src="assets/caddie.js"></script>
+<script>
+  if (new URLSearchParams(location.search).get('missing')) {
+    document.getElementById('nf-page').hidden = true; document.getElementById('nf-project').hidden = false;
+    document.title = 'Project not found · Caddie';
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Projects · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .pcard { display: grid; gap: 10px; padding: 18px 20px; border-top: 1px solid var(--line-soft); }
+  .pcard:first-child { border-top: 0; }
+  .pcard:hover { background: var(--hover); }
+  .pcard .top { display: flex; align-items: center; gap: 12px; }
+  .pcard .top .grow { flex: 1; min-width: 0; }
+  .pcard h3 { font-size: 15.5px; font-weight: 600; }
+  .pcard .for { color: var(--muted); font-size: 13px; }
+  .pcard .now { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+  .pcard .now .mascot { width: 26px; height: 26px; }
+  .repo-list { display: grid; gap: 8px; max-height: 260px; overflow-y: auto; }
+  .repo-list .choice small { display: flex; gap: 10px; flex-wrap: wrap; }
+  @media (max-width: 760px) { .pcard { padding: 16px; } .pcard .top { flex-wrap: wrap; } .step-line { width: 100%; justify-content: space-between; } }
+</style>
+</head>
+<body>
+<div class="app" data-page="projects" data-title="Projects"
+     data-suggest="Which project needs me most?|Start something new|Archive Pantry Scale"
+     data-reply="Open the project that needs you|Ledger Nudge|project-overview.html">
+<main class="main">
+  <div class="page">
+
+    <header class="page-head" data-od-id="projects-head">
+      <div><h1>Projects</h1><p class="lede">Everything you’re making with Caddie.</p></div>
+      <div class="actions"><button class="btn secondary" data-open="import-repo" data-od-id="projects-import"><i data-i="git"></i>Bring your code</button><button class="btn primary" data-open="new-project" data-od-id="projects-new"><i data-i="plus"></i>New project</button></div>
+    </header>
+
+    <section class="panel" data-od-id="projects-list">
+      <a class="pcard" href="project-overview.html" data-od-id="project-ledger">
+        <div class="top"><div class="grow"><h3>Ledger Nudge</h3><div class="for">PayPal AI Hackathon · due Nov 12</div></div><span class="step-line"><span class="step-label">Step 1 of 4 · Plan</span><span class="steps-mini" aria-hidden="true"><i class="warn"></i><i></i><i></i><i></i></span></span></div>
+        <div class="now"><i data-mascot="needs" data-size="26"></i><span>Waiting for your OK on the plan</span></div>
+      </a>
+      <a class="pcard" href="project-overview.html?p=founder" data-od-id="project-founder">
+        <div class="top"><div class="grow"><h3>Founder Hours</h3><div class="for">AI Agents for Founders · due Dec 18</div></div><span class="step-line"><span class="step-label">Step 3 of 4 · Check</span><span class="steps-mini" aria-hidden="true"><i class="ok"></i><i class="ok"></i><i class="warn"></i><i></i></span></span></div>
+        <div class="now"><i data-mascot="needs" data-size="26"></i><span>2 things judges want are missing</span></div>
+      </a>
+      <a class="pcard" href="project-overview.html?p=pantry" data-od-id="project-pantry">
+        <div class="top"><div class="grow"><h3>Pantry Scale</h3><div class="for">Just for me · no deadline</div></div><span class="step-line"><span class="step-label">Step 2 of 4 · Build</span><span class="steps-mini" aria-hidden="true"><i class="ok"></i><i class="action"></i><i></i><i></i></span></span></div>
+        <div class="now"><i data-mascot="working" data-size="26"></i><span>Building · about 6 minutes left</span></div>
+      </a>
+    </section>
+
+    <details class="panel more" style="border-top:1px solid var(--line)" data-od-id="projects-archived">
+      <summary><i data-i="chevron"></i>Archived · 0</summary>
+      <div><p class="muted" style="font-size:13.5px">Nothing archived. When you finish a project, archive it from its settings — everything stays readable here.</p></div>
+    </details>
+
+  </div>
+</main>
+</div>
+
+<!-- Bring your code: start a project from a GitHub repo you already have (the app's import path) -->
+<div class="modal lg" id="import-repo" role="dialog" aria-modal="true" aria-labelledby="ir-title" data-od-id="modal-import-repo">
+  <div class="modal-head"><div class="grow"><h2 id="ir-title">Bring code you already have</h2><p>Pick a GitHub repo. Caddie reads it, then writes a plan for what to do next — nothing changes until you say OK.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <div class="input-wrap"><i data-i="search"></i><input class="input" id="ir-search" placeholder="Search your repos" aria-label="Search your repos" autocomplete="off"></div>
+    <div class="repo-list" role="radiogroup" aria-label="Your repos" id="ir-list">
+      <label class="choice"><input type="radio" name="ir-repo" value="pantry-scale"><span><b class="mono" style="font-size:13.5px">captjay98/pantry-scale</b><small><span>Public</span><span>TypeScript</span><span>Updated 2 days ago</span></small></span></label>
+      <label class="choice"><input type="radio" name="ir-repo" value="invoice-experiments"><span><b class="mono" style="font-size:13.5px">captjay98/invoice-experiments</b><small><span>Private</span><span>TypeScript</span><span>Updated Sep 28</span></small></span></label>
+      <label class="choice"><input type="radio" name="ir-repo" value="farm-ledger"><span><b class="mono" style="font-size:13.5px">captjay98/farm-ledger</b><small><span>Private</span><span>Dart</span><span>Updated Aug 14</span></small></span></label>
+      <label class="choice"><input type="radio" name="ir-repo" value="dotfiles"><span><b class="mono" style="font-size:13.5px">captjay98/dotfiles</b><small><span>Public</span><span>Shell</span><span>Updated Jul 2</span></small></span></label>
+    </div>
+    <p class="err" id="ir-err" hidden>Pick a repo first.</p>
+    <p class="meta" id="ir-empty" hidden>No repo matches. Caddie can only see repos you’ve given it access to.</p>
+    <div class="grid-2">
+      <div class="field"><label for="ir-goal">What do you want to do with it?</label><select class="select" id="ir-goal"><option>Keep improving it</option><option>Enter it in a hackathon</option></select></div>
+      <div class="field"><label for="ir-event">Which hackathon?</label><select class="select" id="ir-event" disabled><option>Choose after you pick “Enter it in a hackathon”</option></select></div>
+    </div>
+    <div class="notice"><i data-i="shield"></i><div class="grow">Caddie only <b>reads</b> the repo for now. It saves code there only after you approve a plan, and never force-pushes. Missing a repo? <a class="link" href="settings.html#accounts">Give Caddie access on GitHub</a>.</div></div>
+  </div>
+  <div class="modal-foot"><span class="meta">Reading is free</span><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="ir-go">Read it and suggest a plan</button></div>
+</div>
+<script src="assets/caddie.js"></script>
+<script>
+(function () {
+  const $ = (x) => document.querySelector(x);
+  const goal = $('#ir-goal'), ev = $('#ir-event');
+  goal.addEventListener('change', () => {
+    const contest = goal.selectedIndex === 1;
+    ev.disabled = !contest;
+    ev.innerHTML = contest ? '<option>PayPal AI Hackathon · closes Nov 12</option><option>AI Agents for Founders — HETIC 2026 · closes Dec 18</option><option>Bridge The Gap Hacks · closes Nov 21</option>' : '<option>Choose after you pick “Enter it in a hackathon”</option>';
+  });
+  $('#ir-search').addEventListener('input', (e) => {
+    const t = e.target.value.trim().toLowerCase(); let shown = 0;
+    document.querySelectorAll('#ir-list .choice').forEach((c) => { const on = !t || c.textContent.toLowerCase().includes(t); c.hidden = !on; if (on) shown++; });
+    $('#ir-empty').hidden = shown > 0;
+  });
+  document.addEventListener('change', (e) => { if (e.target.name === 'ir-repo') $('#ir-err').hidden = true; });
+  $('#ir-go').addEventListener('click', () => {
+    const pick = document.querySelector('[name="ir-repo"]:checked');
+    if (!pick) { $('#ir-err').hidden = false; document.querySelector('[name="ir-repo"]').focus(); return; }
+    window.CaddieToast('Reading ' + pick.value + ' — Caddie will write a plan', 'git');
+    window.CaddieClose();
+    setTimeout(() => { location.href = 'project-plan.html?p=pantry'; }, 900);
+  });
+})();
+</script>
+</body>
+</html>

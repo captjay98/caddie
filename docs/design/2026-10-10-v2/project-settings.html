@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Project settings · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .desc-view { display: flex; gap: 12px; align-items: flex-start; padding: 12px 8px 12px 14px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--ink); }
+  .desc-view p { flex: 1; min-width: 0; font-size: 14px; line-height: 1.55; }
+  .count { font: 400 var(--t-meta)/1 var(--font-mono); color: var(--muted); }
+  .count.over { color: var(--danger); }
+</style>
+</head>
+<body>
+<div class="app" data-page="project" data-project-tab="settings" data-suggest="Remind me 3 days before it’s due|Pause the nightly check|What do you know about this project?" data-reply="Open routines|Project settings · Routines|#routines">
+<main class="main">
+  <div class="page">
+    <div data-project-head></div>
+
+    <div class="tabs" role="tablist" data-tabs="hash" data-od-id="project-settings-tabs">
+      <a class="tab" role="tab" href="#general" data-tab-target="general" aria-selected="true">General</a>
+      <a class="tab" role="tab" href="#code" data-tab-target="code">Code</a>
+      <a class="tab" role="tab" href="#routines" data-tab-target="routines">Routines <span class="chip">3</span></a>
+      <a class="tab" role="tab" href="#knows" data-tab-target="knows">What Caddie knows</a>
+      <a class="tab" role="tab" href="#danger" data-tab-target="danger">Archive or delete</a>
+    </div>
+
+    <section id="general" data-tabpanel class="panel" data-od-id="ps-general">
+      <div class="panel-body" style="display:grid;gap:18px;max-width:560px">
+        <div class="field"><label for="g-name">Project name</label><input class="input" id="g-name" value="Ledger Nudge"></div>
+        <div class="field" data-od-id="ps-description"><span class="label" id="g-desc-label">What it is</span>
+          <div class="desc-view" aria-labelledby="g-desc-label"><p id="g-desc"></p><button class="btn ghost sm" data-open="edit-description" data-od-id="ps-edit-description"><i data-i="edit"></i>Edit</button></div>
+          <span class="hint">A sentence or two in your words. Caddie uses it for plans and your hackathon description.</span></div>
+        <div class="field"><label for="g-event">Hackathon</label><select class="select" id="g-event"><option>PayPal AI Hackathon · closes Nov 12</option><option>None — personal project</option></select><span class="hint">Changing this changes what Check and Submit look for.</span></div>
+        <div class="field"><label for="g-limit">Most Caddie can spend on this project</label><div class="input-wrap"><span style="position:absolute;left:12px;top:10px;color:var(--muted)">$</span><input class="input" id="g-limit" value="25" inputmode="decimal" style="padding-left:26px"></div><span class="hint">Caddie stops and asks before any run would go over. $6.12 used so far.</span></div>
+        <div class="field"><span class="label">Built with</span><div class="input" style="display:flex;align-items:center;gap:8px;color:var(--muted)"><i data-i="layers"></i>React web app · chosen in the plan</div></div>
+        <div><button class="btn primary" data-toast="Project settings saved">Save changes</button></div>
+      </div>
+    </section>
+
+    <section id="code" data-tabpanel class="section" hidden data-od-id="ps-repository">
+      <div class="panel row-list">
+        <div class="row"><span class="ico-box ok"><i data-i="git"></i></span><div class="grow"><div class="title mono" style="font-size:14px">captjay98/ledger-nudge</div><div class="sub">Public · Caddie last saved code here yesterday</div></div><div class="trail"><button class="btn secondary sm" data-open="connect-repo">Change</button></div></div>
+      </div>
+      <div class="notice"><i data-i="shield"></i><div class="grow">Caddie pushes only builds from an approved plan, to the branch above, and never force-pushes. Access comes from your <a class="link" href="settings.html#accounts">GitHub connection</a>.</div></div>
+    </section>
+
+    <section id="routines" data-tabpanel class="section" hidden data-od-id="ps-automations">
+      <div class="section-head"><p class="muted" style="font-size:13.5px">Things Caddie does for this project on a schedule. They never go over your spending limit.</p><button class="btn secondary sm" data-open="new-routine"><i data-i="plus"></i>New routine</button></div>
+      <div class="panel row-list">
+        <div class="row"><span class="ico-box"><i data-i="file"></i></span><div class="grow"><div class="title">Re-check the hackathon rules</div><div class="sub">Every day at 08:00 · last: today, no changes</div></div><div class="trail"><label class="switch" aria-label="Re-check rules on"><input type="checkbox" checked><i></i></label><button class="btn ghost sm" data-toast="Checking the rules now" data-toast-icon="repeat">Run now</button></div></div>
+        <div class="row"><span class="ico-box"><i data-i="check"></i></span><div class="grow"><div class="title">Check everything still works</div><div class="sub">Every night at 02:00 · last night: all good · about $0.12 each</div></div><div class="trail"><label class="switch" aria-label="Nightly tests on"><input type="checkbox" checked><i></i></label><button class="btn ghost sm" data-toast="Run queued" data-toast-icon="repeat">Run now</button></div></div>
+        <div class="row"><span class="ico-box"><i data-i="clock"></i></span><div class="grow"><div class="title">Deadline reminders</div><div class="sub">7 days and 1 day before Nov 12 · in the conversation and by email</div></div><div class="trail"><label class="switch" aria-label="Deadline reminders on"><input type="checkbox" checked><i></i></label></div></div>
+      </div>
+    </section>
+
+    <section id="knows" data-tabpanel class="section" hidden data-od-id="ps-memory">
+      <p class="muted" style="font-size:13.5px">What Caddie remembers about this project. Fix anything that’s wrong — it changes what Caddie plans and writes.</p>
+      <div class="panel row-list">
+        <div class="row"><div class="grow"><div class="title">Reminders should sound friendly, never threatening</div><div class="sub">You said this in chat · Oct 3</div></div><div class="trail"><button class="btn ghost sm" data-open="correct-memory">Correct</button><button class="btn ghost sm" data-toast="Forgotten">Forget</button></div></div>
+        <div class="row"><div class="grow"><div class="title">Use a PayPal test account — no real money</div><div class="sub">From the hackathon FAQ · Oct 2</div></div><div class="trail"><button class="btn ghost sm" data-open="correct-memory">Correct</button><button class="btn ghost sm" data-toast="Forgotten">Forget</button></div></div>
+        <div class="row"><div class="grow"><div class="title">It’s for small businesses in Nigeria and the UK</div><div class="sub">Caddie guessed this from the plan · not confirmed</div></div><div class="trail"><button class="btn secondary sm" data-toast="Confirmed">Confirm</button><button class="btn ghost sm" data-open="correct-memory">Correct</button></div></div>
+      </div>
+    </section>
+
+    <section id="danger" data-tabpanel class="section" hidden data-od-id="ps-danger">
+      <div class="panel row-list">
+        <div class="row"><div class="grow"><div class="title">Archive project</div><div class="sub">Stops its routines. Everything stays readable, and you can bring it back.</div></div><div class="trail"><button class="btn secondary sm" data-toast="Ledger Nudge archived" data-go="projects.html">Archive</button></div></div>
+        <div class="row"><div class="grow"><div class="title">Delete project</div><div class="sub">Removes the plans, builds, preview and what Caddie knows. Your GitHub code is not touched.</div></div><div class="trail"><button class="btn danger sm" data-open="delete-project">Delete…</button></div></div>
+      </div>
+    </section>
+  </div>
+</main>
+</div>
+
+<div class="modal" id="edit-description" role="dialog" aria-modal="true" aria-labelledby="ed-title" data-od-id="modal-edit-description">
+  <div class="modal-head"><div class="grow"><h2 id="ed-title">Describe your project</h2><p>Say what it does and who it’s for, in plain words.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <div class="field"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px"><label for="ed-text">Description</label><span class="count" id="ed-count" aria-live="polite"></span></div><textarea class="textarea" id="ed-text" rows="4" maxlength="500" data-required aria-describedby="ed-hint"></textarea><span class="err" hidden>Write at least a sentence — Caddie needs it to plan.</span></div>
+    <div class="notice" id="ed-hint"><i data-i="info"></i><div class="grow">This doesn’t change a plan you’ve already approved. If the two stop matching, Caddie suggests a plan update in the chat for you to OK.</div></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="ed-save">Save description</button></div>
+</div>
+
+<div class="modal" id="connect-repo" role="dialog" aria-modal="true" aria-labelledby="cr-title" data-od-id="modal-connect-repo">
+  <div class="modal-head"><div class="grow"><h2 id="cr-title">Choose a GitHub repo</h2><p>Where Caddie saves this project’s code.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <div class="input-wrap"><i data-i="search"></i><input class="input" placeholder="Search your repos" aria-label="Search your repos"></div>
+    <label class="choice"><input type="radio" name="repo" checked><span><b class="mono" style="font-size:13.5px">captjay98/ledger-nudge</b><small>Public · current</small></span></label>
+    <label class="choice"><input type="radio" name="repo"><span><b class="mono" style="font-size:13.5px">captjay98/invoice-experiments</b><small>Private · updated Sep 28</small></span></label>
+    <p class="meta">Missing one? <a class="link" href="settings.html#accounts">Grant access on GitHub</a></p>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-toast="Repo saved">Use this repo</button></div>
+</div>
+
+<div class="modal" id="new-routine" role="dialog" aria-modal="true" aria-labelledby="na-title" data-od-id="modal-new-routine">
+  <div class="modal-head"><div class="grow"><h2 id="na-title">New routine</h2><p>Something Caddie does for you on a schedule. It still asks before going over your limit.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <div class="field"><label for="na-what">What should Caddie do?</label><select class="select" id="na-what"><option>Check everything still works</option><option>Check the hackathon rules for changes</option><option>Remind me about the deadline</option><option>Summarise progress in the conversation</option></select></div>
+    <div class="grid-2"><div class="field"><label for="na-when">How often</label><select class="select" id="na-when"><option>Every day</option><option>Every weekday</option><option>Every week</option><option>Once</option></select></div>
+    <div class="field"><label for="na-time">At</label><input class="input" id="na-time" type="time" value="08:00"></div></div>
+    <p class="meta">Times are in your timezone · Africa/Lagos</p>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-toast="Routine added">Add routine</button></div>
+</div>
+
+<div class="modal" id="correct-memory" role="dialog" aria-modal="true" aria-labelledby="cm-title" data-od-id="modal-correct-memory">
+  <div class="modal-head"><div class="grow"><h2 id="cm-title">Fix what Caddie knows</h2><p>Caddie keeps the old version so you can see what changed.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body"><div class="field"><label for="cm-text">What’s actually true</label><textarea class="textarea" id="cm-text" data-required>Reminders should sound friendly, never threatening</textarea><span class="err" hidden>Write the corrected version, or use Forget instead.</span></div></div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" data-toast="Got it — Caddie updated what it knows">Save</button></div>
+</div>
+
+<div class="modal" id="delete-project" role="dialog" aria-modal="true" aria-labelledby="dp-title" data-od-id="modal-delete-project">
+  <div class="modal-head"><div class="grow"><h2 id="dp-title">Delete Ledger Nudge?</h2><p>This removes its plans, builds, preview and what Caddie knows about it. You can’t undo this. Your GitHub code stays.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body"><div class="field"><label for="dp-confirm">Type <b class="mono">Ledger Nudge</b> to confirm</label><input class="input" id="dp-confirm" autocomplete="off"></div></div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Cancel</button><button class="btn danger-solid" id="dp-go" disabled data-toast="Project deleted" data-go="projects.html">Delete project</button></div>
+</div>
+
+<script src="assets/caddie.js"></script>
+<script>
+  const dpi = document.getElementById('dp-confirm'), dpg = document.getElementById('dp-go');
+  dpi.addEventListener('input', () => { dpg.disabled = dpi.value.trim() !== window.CaddieProject.name; });
+  document.querySelector('#dp-title').textContent = 'Delete ' + window.CaddieProject.name + '?';
+  document.querySelector('#dp-confirm').previousElementSibling.querySelector('b').textContent = window.CaddieProject.name;
+  document.getElementById('g-name').value = window.CaddieProject.name;
+  (function () {
+    const DESC = {
+      ledger: 'Friendly payment reminders for small businesses, sent through PayPal invoicing. The AI writes each reminder and picks a good time to send it.',
+      founder: 'An AI helper that plans a founder’s week from their calendar, so they get back time to think.',
+      pantry: 'Scales recipes to what’s left in my pantry, and lists food to use up first.',
+    };
+    const id = window.CaddieProject.id, key = 'caddie2.desc.' + id;
+    const view = document.getElementById('g-desc'), ta = document.getElementById('ed-text'), cnt = document.getElementById('ed-count');
+    let cur; try { cur = localStorage.getItem(key) || DESC[id]; } catch (e) { cur = DESC[id]; }
+    view.textContent = cur; ta.value = cur;
+    const count = () => { cnt.textContent = ta.value.length + ' / 500'; cnt.classList.toggle('over', ta.value.length >= 500); };
+    document.querySelector('[data-open="edit-description"]').addEventListener('click', () => { ta.value = cur; count(); ta.classList.remove('invalid'); ta.nextElementSibling.hidden = true; });
+    ta.addEventListener('input', count); count();
+    document.getElementById('ed-save').addEventListener('click', () => {
+      const v = ta.value.trim();
+      if (v.length < 10) { ta.classList.add('invalid'); ta.nextElementSibling.hidden = false; ta.focus(); return; }
+      cur = v; view.textContent = v;
+      try { localStorage.setItem(key, v); } catch (e) { /* private mode */ }
+      window.CaddieClose(); window.CaddieToast('Description saved');
+    });
+  })();
+</script>
+</body>
+</html>

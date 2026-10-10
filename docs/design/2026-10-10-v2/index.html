@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Caddie v2 · review</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  body { background: var(--horizon), var(--ink); height: auto; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 44px 32px 96px; display: grid; gap: 44px; }
+  .hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 24px; align-items: center; }
+  .hero .mascot { width: 96px; height: 96px; }
+  .hero h1 { font-size: 34px; font-weight: 650; line-height: 1.12; max-width: 24ch; }
+  .hero p { color: var(--muted); font-size: 16px; max-width: 66ch; margin-top: 10px; }
+  .decisions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .decisions .panel { padding: 18px 20px; display: grid; gap: 6px; align-content: start; }
+  .decisions b { font-weight: 600; font-size: 15px; }
+  .decisions p { color: var(--muted); font-size: 13.5px; line-height: 1.55; }
+  .shell { display: grid; grid-template-columns: minmax(0, 1fr) 150px; gap: 0; height: 132px; border-radius: 10px; border: 1px solid var(--line); overflow: hidden; background: var(--ink); margin-top: 6px; }
+  .shell .l { padding: 10px; display: grid; gap: 6px; align-content: start; }
+  .shell .l .nav { display: flex; gap: 4px; } .shell .l .nav i { height: 8px; width: 34px; border-radius: 99px; background: var(--lift); } .shell .l .nav i:nth-child(2) { background: var(--tint-action); }
+  .shell .l .c { height: 30px; border-radius: 6px; background: var(--raised); }
+  .shell .r { border-left: 1px solid var(--line); background: var(--panel); padding: 10px; display: grid; align-content: space-between; }
+  .shell .r .b { display: grid; gap: 5px; } .shell .r .b i { height: 7px; border-radius: 4px; background: var(--lift); } .shell .r .b i:nth-child(2) { width: 70%; justify-self: end; }
+  .shell .r .in { height: 18px; border-radius: 6px; border: 1px solid var(--action); }
+  .mshell { width: 110px; height: 168px; border-radius: 16px; border: 1px solid var(--line); background: var(--ink); position: relative; margin-top: 6px; overflow: hidden; }
+  .mshell .c { position: absolute; left: 8px; right: 8px; top: 12px; display: grid; gap: 5px; } .mshell .c i { height: 20px; border-radius: 5px; background: var(--raised); }
+  .mshell .mdock { display: block; position: absolute; left: 6px; right: 6px; bottom: 30px; height: 14px; border-radius: 6px; border: 1px solid var(--action); background: var(--panel); }
+  .mshell .bar { position: absolute; left: 6px; right: 6px; bottom: 6px; height: 18px; border-radius: 7px; background: var(--panel); display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; padding: 4px; }
+  .mshell .bar i { border-radius: 3px; background: var(--lift); } .mshell .bar i:first-child { background: var(--action); }
+  .map td:first-child { width: 24%; }
+  .map td:nth-child(2) { width: 24%; }
+  .map .old { font: 400 12px/1.4 var(--font-mono); color: var(--muted); display: block; margin-top: 2px; }
+  .map .links { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .map .links a { font: 500 12px/1 var(--font-mono); padding: 6px 8px; border-radius: 6px; background: var(--raised); border: 1px solid var(--line-soft); }
+  .map .links a:hover { border-color: var(--action); background: var(--tint-action); }
+  .map .group td { background: var(--raised); font: 600 var(--t-label)/1.2 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; color: var(--muted); padding-top: 9px; padding-bottom: 9px; }
+  .gloss { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .gloss div { display: flex; gap: 10px; align-items: baseline; padding: 11px 20px; border-top: 1px solid var(--line-soft); font-size: 14px; }
+  .gloss s { color: var(--muted); font: 400 12.5px/1.3 var(--font-mono); text-decoration-color: color-mix(in srgb, var(--danger) 60%, transparent); }
+  .gloss svg { width: 12px; height: 12px; color: var(--muted); flex: none; transform: translateY(1px); }
+  .phones { display: flex; gap: 20px; overflow-x: auto; padding-bottom: 8px; }
+  .phone { flex: none; width: 390px; display: grid; gap: 8px; }
+  .phone iframe { width: 390px; height: 780px; border: 1px solid var(--line); border-radius: 28px; background: var(--ink); }
+  .gaps li { margin-bottom: 8px; }
+  @media (max-width: 900px) { .decisions, .gloss { grid-template-columns: 1fr; } .wrap { padding: 28px 16px 64px; } .hero { grid-template-columns: 1fr; } .hero h1 { font-size: 26px; } .map td:first-child, .map td:nth-child(2) { width: auto; } }
+  @media (max-width: 760px) { .map thead { display: none; } .map tr { display: grid; padding: 10px 0; border-top: 1px solid var(--line-soft); } .map td { border: 0; padding: 2px 14px; } .phone { width: 320px; } .phone iframe { width: 320px; height: 660px; } }
+</style>
+</head>
+<body>
+<div class="app bare" data-page="index">
+<div class="wrap">
+
+  <header class="hero" data-od-id="review-hero">
+    <i data-mascot="done" data-size="96"></i>
+    <div>
+      <div class="kicker" style="margin-bottom:10px">Caddie v2 · for review · 9 Oct 2026 · not in code</div>
+      <h1>Chat comes first, the brief is short, and the words are plain</h1>
+      <p>This version goes back to the Today-style layout. Caddie is the first tab and is always one tap away. The brief replaces Home. Every screen shows less, with nothing important removed. v1 is still in <span class="mono">caddie-redesign/</span> so you can compare.</p>
+      <div class="btn-row" style="margin-top:18px">
+        <a class="btn primary lg" href="caddie.html" data-od-id="review-start">Open Caddie</a>
+        <a class="btn secondary lg" href="logo.html">See the logo and character</a>
+        <a class="btn ghost lg" href="characters.html" data-od-id="review-characters">Compare 3 characters</a>
+        <button class="btn ghost lg" data-theme-toggle><i data-i="sun"></i><span data-theme-label>Light mode</span></button>
+      </div>
+    </div>
+  </header>
+
+  <section class="section" data-od-id="review-decisions">
+    <div class="section-head"><h2>What changed from v1</h2></div>
+    <div class="decisions">
+      <div class="panel"><span class="kicker">1 · Desktop</span><b>Pages on the left, Caddie always on the right</b><p>Brief, Discover and Projects are tabs across the top. The Caddie chat stays open on the right of every page and remembers what you were talking about. It takes <b>40% of the window</b> by default; drag its left edge to resize it (340px up to 60%, and the page always keeps 520px to read). Double-click the edge, or use Settings › Appearance, to reset. You can also shrink it to a small character, or open it full screen.</p>
+        <div class="shell" aria-hidden="true" style="grid-template-columns:minmax(0,3fr) minmax(0,2fr)"><div class="l"><div class="nav"><i></i><i></i><i></i></div><div class="c"></div><div class="c"></div><div class="c" style="height:22px"></div></div><div class="r"><div class="b"><i></i><i></i><i></i></div><div class="in"></div></div></div></div>
+      <div class="panel"><span class="kicker">2 · Mobile</span><b>Caddie · Brief · Discover · Projects, with an input above the tabs</b><p>Caddie is the first and main tab. Every other tab has a “Ask Caddie…” bar just above the tab bar. Tapping it opens the chat about whatever you’re looking at. This replaces v1’s Home-first order.</p>
+        <div class="mshell" aria-hidden="true"><div class="c"><i></i><i></i><i></i></div><span class="mdock"></span><div class="bar"><i></i><i></i><i></i><i></i></div></div></div>
+      <div class="panel"><span class="kicker">3 · Brief replaces Home</span><b>A short morning paper, not a dashboard</b><p>Shows the date and a title, then up to three cards. Each card has a coloured label, one headline, two or three sentences with the key facts in bold, and one button. Below that: deadlines as coloured rows, and finished items folded away.</p></div>
+      <div class="panel"><span class="kicker">4 · Less on every screen</span><b>Details fold away</b><p>Prizes, sources, older plan versions, build logs and code all sit behind “more” sections or a “Code — for developers” tab. Each screen leads with one decision, and secondary content is there when you ask for it.</p></div>
+      <div class="panel"><span class="kicker">5 · Beginner-friendly words</span><b>Plan · Build · Check · Submit</b><p>“Prove” becomes <b>Check</b>, “Ship” becomes <b>Submit</b> (or <b>Share</b> for personal projects), revisions become versions, runs become builds. The full word list is below. The same terms appear everywhere, including in Caddie’s replies.</p></div>
+      <div class="panel"><span class="kicker">6 · A face for Caddie</span><b>A small character whose face shows what it’s doing</b><p>A soft blue block carrying a little golf flag, with eight states (ready, listening, thinking, building, needs you, done, stuck, paused). It shows up only where Caddie itself appears: the chat, the input bar, the tab, sign-in and empty screens.</p></div>
+    </div>
+  </section>
+
+  <section class="section" data-od-id="review-map">
+    <div class="section-head"><h2>Every screen</h2><span class="meta">Links open the screen, or a specific modal</span></div>
+    <div class="panel" style="overflow-x:auto">
+      <table class="table map">
+        <thead><tr><th>Screen</th><th>Where it lives</th><th>What it does now</th></tr></thead>
+        <tbody>
+          <tr class="group"><td colspan="3">Main tabs</td></tr>
+          <tr><td><b>Caddie</b><div class="links"><a href="caddie.html">Everything</a><a href="caddie.html?p=ledger">Ledger Nudge</a><a href="caddie.html?p=pantry">Pantry Scale</a></div></td><td>1st tab · full-screen chat<span class="old">new</span></td><td>The same chat as the right-hand panel, at full size. “Talking about” switches between Everything and a single project. Each has its own chat. Messages can show Caddie’s thinking (folded), result cards that open a screen, “OK to spend?” questions, and notes from routines.</td></tr>
+          <tr><td><b>Brief</b><div class="links"><a href="brief.html">open</a></div></td><td>2nd tab<span class="old">was Home</span></td><td>Up to three cards: something to decide, a trade-off with both sides shown, and a new hackathon. Then deadlines and a folded “done” list. Nothing else.</td></tr>
+          <tr><td><b>Discover</b><div class="links"><a href="discover.html">open</a></div></td><td>3rd tab</td><td>One list. Pick For you or Saved, plus two filters. Each row shows the dates, the prize, whether you can enter and one reason it fits. Search and sort are gone because the list is short. Hackathons you can’t enter are hidden, with a way to show them.</td></tr>
+          <tr><td><b>Hackathon</b><div class="links"><a href="opportunity.html">rules read</a><a href="opportunity.html?e=bridge">not read</a><a href="opportunity.html?open=explore-ideas">find an idea</a></div></td><td>From Discover</td><td>“Can you enter?” in one sentence, and “What you’ll hand in” as six short lines. Prizes, dates, fit and sources fold away. “Find an idea” is the only main button.</td></tr>
+          <tr><td><b>Projects</b><div class="links"><a href="projects.html">open</a><a href="projects.html?open=new-project">new project</a><a href="projects.html?open=import-repo">bring your code</a></div></td><td>4th tab</td><td>One card per project: name, what it’s for, the current step in words (“Step 1 of 4 · Plan”) with four small bars, and one line saying what Caddie is doing. Archived projects fold away. <b>Bring your code</b> (new) starts from a GitHub repo you already have; <b>New project</b> starts from an idea.</td></tr>
+          <tr class="group"><td colspan="3">Inside a project</td></tr>
+          <tr><td><b>Overview</b><div class="links"><a href="project-overview.html">Ledger</a><a href="project-overview.html?p=founder">Founder</a><a href="project-overview.html?p=pantry">Pantry</a><a href="project-overview.html?open=add-task">add to-do</a></div></td><td>Click the project name</td><td>The next step with one button, your app so far, a short to-do list, and a folded “what happened recently”.</td></tr>
+          <tr><td><b>Plan</b><div class="links"><a href="project-plan.html">open</a><a href="project-plan.html?open=approve-plan">build it</a><a href="project-plan.html?open=request-changes">suggest a change</a></div></td><td>Step 1</td><td>“Is this OK?” bar → what you’re making in one sentence → before and after → what the screens will look like → whether it still follows the rules. Things left out, earlier versions and code changes fold away.</td></tr>
+          <tr><td><b>Build</b><div class="links"><a href="project-build.html">try it</a><a href="project-build.html?p=pantry">building now</a><a href="project-build.html#activity">past builds</a><a href="project-build.html?open=change-request">ask for a change</a></div></td><td>Step 2</td><td>Opens on the working app. Past builds read like sentences (“Build stopped — the PayPal test login had expired”). Code is a separate tab marked “for developers”.</td></tr>
+          <tr><td><b>Check</b><div class="links"><a href="project-check.html">Ledger</a><a href="project-check.html?p=founder">Founder</a><a href="project-check.html?p=pantry">personal</a><a href="project-check.html?open=licence">pick a licence</a><a href="project-check.html?open=score">score it yourself</a></div></td><td>Step 3<span class="old">was Prove</span></td><td>“4 of 6 things are ready”. Then a list of what you hand in, each item marked ready, almost or missing, with one fix. Then what judges look for, with Caddie’s honest read. <b>Score it yourself</b> (new) opens a practice round: 1–5 per line, an optional note, and it refuses to save a blank as 0, naming each line you missed. Your scores sit beside Caddie’s read, and it points out where you two disagree. Personal projects show “No judges here”.</td></tr>
+          <tr><td><b>Submit / Share</b><div class="links"><a href="project-submit.html">Submit</a><a href="project-submit.html?p=pantry">Share</a><a href="project-submit.html?open=video-link">add video</a><a href="project-submit.html?open=record-submission">I’ve submitted</a></div></td><td>Step 4<span class="old">was Ship</span></td><td>Hackathon projects: what’s left, then each field ready to copy into Devpost. You submit on Devpost yourself, then tell Caddie. Personal projects: send a link, save to GitHub or download.</td></tr>
+          <tr><td><b>Project settings</b><div class="links"><a href="project-settings.html">open</a><a href="project-settings.html#routines">routines</a><a href="project-settings.html#knows">what Caddie knows</a><a href="project-settings.html?open=edit-description">edit description</a><a href="project-settings.html?open=delete-project">delete</a></div></td><td>Gear next to the project name</td><td>General (now with <b>What it is</b> and an Edit button for the description), Code, Routines, What Caddie knows, Archive or delete. Deleting requires typing the project name.</td></tr>
+          <tr class="group"><td colspan="3">Account and entry</td></tr>
+          <tr><td><b>Settings</b><div class="links"><a href="settings.html">You</a><a href="settings.html#interests">interests</a><a href="settings.html#tools">build tools</a><a href="settings.html#knows">knows</a><a href="settings.html#spending">spending</a><a href="settings.html#appearance">appearance</a></div></td><td>Avatar menu</td><td>You · Interests · <b>Build tools</b> (new, was Stacks: statuses match the feature ledger — React web apps “being proven first”, TanStack Start, PHP, Python and Flutter “later”. Only React can be picked when you start a project; each “later” tool has a “Tell me when it’s ready” toggle) · What Caddie knows · Connected accounts · Routines · Spending · Appearance (theme and Caddie panel width). Each fact Caddie knows says where it came from (“You said this in chat”, “Caddie guessed this — not confirmed”).</td></tr>
+          <tr><td><b>Quick search</b><div class="links"><a href="brief.html">press ⌘K or /</a></div></td><td>Top bar · mobile header</td><td>Jumps to screens, projects, hackathons and recent chats. Typing anything adds “See all results for…”, which opens the full search.</td></tr>
+          <tr><td><b>Search results</b><div class="links"><a href="search.html?q=reminder">“reminder”</a><a href="search.html?q=reminder&amp;page=2">page 2</a><a href="search.html?q=video&amp;in=knows">no match here</a><a href="search.html">empty</a></div></td><td>From quick search<span class="old">new · was /search</span></td><td>Each result is labelled Project, Plan, To-do, Caddie knows or Hackathon and opens the right screen, with the matching words highlighted. Filters show a count for each type. Five per page with “1–5 of 7” and Previous/Next. Says honestly that chats aren’t searched yet.</td></tr>
+          <tr><td><b>Landing page</b><div class="links"><a href="landing.html">open</a></div></td><td>Before sign-in<span class="old">refined · S01 · apps/site</span></td><td>The existing marketing page, kept and refined: same structure, tagline and card style. Steps renamed to match the app (Find · Read the rules · Plan · Build · Check · Submit), plain words throughout, the Caddie character and the new app layout in the illustrations, one "Request access" button per screen, and a light/dark switch in the top bar that shares its saved choice with the app. The earlier rewrite is kept as <a class="link" href="landing-discovery-draft.html">landing-discovery-draft.html</a>.</td></tr>
+          <tr><td><b>Sign in</b><div class="links"><a href="sign-in.html">open</a><a href="sign-in.html?error=1">error</a></div></td><td>Entry</td><td>The character, one sentence and the five steps in plain words. Light/dark switch top-right, saved under the same key as the app and landing page; follows the device until chosen.</td></tr>
+          <tr><td><b>Welcome</b><div class="links"><a href="welcome.html">open</a><a href="welcome.html?via=google&amp;name=Ada%20Lovelace">Google name</a><a href="welcome.html?via=github&amp;name=captjay98">username only</a></div></td><td>After first sign-in</td><td>Starts with Caddie introducing itself: who it is, what it does, and how to read its face. Then three steps: about you, what you like, how to start. “Skip” goes straight to Caddie.</td></tr>
+          <tr><td><b>Not found</b><div class="links"><a href="not-found.html">page</a><a href="not-found.html?missing=1">project</a></div></td><td>Any bad link</td><td>Stuck character, a plain explanation, and one way back.</td></tr>
+                  <tr class="group"><td colspan="3">States</td></tr>
+          <tr><td><b>Loading</b><div class="links"><a href="brief.html?state=loading">Brief</a><a href="projects.html?state=loading">Projects</a><a href="project-check.html?state=loading">a project</a><a href="caddie.html?state=loading">chat</a></div></td><td>Any page · <span class="mono">?state=loading</span><span class="old">new</span></td><td>The page title and project steps stay real; only the content below is replaced by shaped placeholders, with the thinking character and “Loading your projects…”. The chat shows placeholder messages.</td></tr>
+          <tr><td><b>Couldn’t load</b><div class="links"><a href="discover.html?state=error">Discover</a><a href="project-plan.html?state=error">a project</a></div></td><td>Any page · <span class="mono">?state=error</span><span class="old">new</span></td><td>Stuck character, “Your work is safe — this is only the connection”, Try again now, and Ask Caddie what happened.</td></tr>
+          <tr><td><b>Unsent message</b><div class="links"><a href="caddie.html?chat=unsent">full chat</a><a href="project-overview.html?chat=unsent">side panel</a></div></td><td>Chat<span class="old">new · the app’s draft row</span></td><td>When Caddie can’t be reached, a strip says so and messages stay in the chat marked “Not sent”, with Send again · Edit · Discard. Typing you didn’t send survives moving between pages and is labelled “Draft from earlier · not sent yet”.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" data-od-id="review-routes">
+    <div class="section-head"><h2>Every route in the app</h2><span class="meta">From caddie-forge · apps/app/src/client/routes.tsx</span></div>
+    <div class="panel" style="overflow-x:auto">
+      <table class="table map">
+        <thead><tr><th>Route today</th><th>Name today</th><th>Where it lives in v2</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">apps/site /</td><td>Landing</td><td><a class="link" href="landing.html">Landing page</a></td></tr>
+          <tr><td class="mono">/</td><td>Home</td><td><a class="link" href="brief.html">Brief</a> · plus the <a class="link" href="caddie.html">Caddie</a> tab for chat</td></tr>
+          <tr><td class="mono">/onboarding</td><td>Onboarding</td><td><a class="link" href="welcome.html">Welcome</a>, with Caddie’s introduction</td></tr>
+          <tr><td class="mono">/discover</td><td>Hackathons</td><td><a class="link" href="discover.html">Discover</a></td></tr>
+          <tr><td class="mono">/discovery</td><td>Hackathon detail</td><td><a class="link" href="opportunity.html">Hackathon</a></td></tr>
+          <tr><td class="mono">/projects</td><td>Projects</td><td><a class="link" href="projects.html">Projects</a>, with New project and Bring your code</td></tr>
+          <tr><td class="mono">/project</td><td>Workspace</td><td><a class="link" href="project-overview.html">Overview</a></td></tr>
+          <tr><td class="mono">/tasks</td><td>Tasks</td><td>To-do list on <a class="link" href="project-overview.html#todo">Overview</a> · <a class="link" href="project-overview.html?open=add-task">add a to-do</a></td></tr>
+          <tr><td class="mono">/design-review</td><td>Plan review</td><td><a class="link" href="project-plan.html">Plan</a> (step 1)</td></tr>
+          <tr><td class="mono">/runs</td><td>Activity</td><td><a class="link" href="project-build.html#activity">Build › Past builds</a> (step 2)</td></tr>
+          <tr><td class="mono">/artifacts</td><td>Files</td><td><a class="link" href="project-build.html">Build › Files</a>, code marked “for developers”</td></tr>
+          <tr><td class="mono">/evidence</td><td>Evidence</td><td><a class="link" href="project-check.html">Check</a> (step 3) · proof drawer on each ready line</td></tr>
+          <tr><td class="mono">/judge</td><td>Judge review</td><td><a class="link" href="project-check.html?open=score">Check › Score it yourself</a></td></tr>
+          <tr><td class="mono">/submission</td><td>Submission</td><td><a class="link" href="project-submit.html">Submit</a> or <a class="link" href="project-submit.html?p=pantry">Share</a> (step 4)</td></tr>
+          <tr><td class="mono">/schedules</td><td>Automation</td><td><a class="link" href="project-settings.html#routines">Project settings › Routines</a></td></tr>
+          <tr><td class="mono">/repositories</td><td>Repositories</td><td><a class="link" href="project-settings.html#code">Project settings › Code</a></td></tr>
+          <tr><td class="mono">/automations</td><td>All automations</td><td><a class="link" href="settings.html#routines">Settings › Routines</a></td></tr>
+          <tr><td class="mono">/usage</td><td>Usage</td><td><a class="link" href="settings.html#spending">Settings › Spending</a></td></tr>
+          <tr><td class="mono">/settings</td><td>Settings (incl. stacks)</td><td><a class="link" href="settings.html">Settings</a> · <a class="link" href="settings.html#tools">Build tools</a></td></tr>
+          <tr><td class="mono">/search</td><td>Search</td><td><a class="link" href="search.html?q=reminder">Search results</a>, reached from ⌘K</td></tr>
+          <tr><td class="mono">*</td><td>Not found</td><td><a class="link" href="not-found.html">Not found</a> · <a class="link" href="not-found.html?missing=1">missing project</a></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="meta">All 19 app routes plus the landing site have a home. None was dropped; nine became tabs, folds or drawers inside another screen.</p>
+  </section>
+
+  <section class="section" data-od-id="review-glossary">
+    <div class="section-head"><h2>Plain words</h2><span class="meta">Used everywhere, including in Caddie’s replies</span></div>
+    <div class="panel gloss">
+      <div><s>Prove</s><i data-i="arrow"></i>Check</div>
+      <div><s>Ship</s><i data-i="arrow"></i>Submit · Share</div>
+      <div><s>Home</s><i data-i="arrow"></i>Brief</div>
+      <div><s>Revision 3</s><i data-i="arrow"></i>Updated plan · version 3</div>
+      <div><s>Approve</s><i data-i="arrow"></i>Looks good — build it</div>
+      <div><s>Request changes</s><i data-i="arrow"></i>Suggest a change</div>
+      <div><s>Run 14</s><i data-i="arrow"></i>A build</div>
+      <div><s>Tests passed</s><i data-i="arrow"></i>Everything worked</div>
+      <div><s>Evidence / criteria</s><i data-i="arrow"></i>Proof · what judges look for</div>
+      <div><s>Eligibility</s><i data-i="arrow"></i>Can you enter?</div>
+      <div><s>Stack</s><i data-i="arrow"></i>Tools to build with</div>
+      <div><s>Repository</s><i data-i="arrow"></i>Your code on GitHub</div>
+      <div><s>Sandbox</s><i data-i="arrow"></i>PayPal test account</div>
+      <div><s>Automations</s><i data-i="arrow"></i>Routines</div>
+      <div><s>Memory</s><i data-i="arrow"></i>What Caddie knows</div>
+      <div><s>Connections</s><i data-i="arrow"></i>Connected accounts</div>
+      <div><s>Usage &amp; budget</s><i data-i="arrow"></i>Spending</div>
+      <div><s>Conversation scope</s><i data-i="arrow"></i>Talking about</div>
+    </div>
+    <p class="meta">Technical words still appear inside folded “For developers” sections, where people who want them will look.</p>
+  </section>
+
+  <section class="section" data-od-id="review-phones">
+    <div class="section-head"><h2>On a phone</h2><span class="meta">Live, 390px wide — scroll sideways</span></div>
+    <div class="phones">
+      <div class="phone"><iframe src="caddie.html" title="Caddie tab on mobile" loading="lazy"></iframe><span class="meta">Caddie (first tab)</span></div>
+      <div class="phone"><iframe src="brief.html" title="Brief on mobile" loading="lazy"></iframe><span class="meta">Brief, with the input above the tabs</span></div>
+      <div class="phone"><iframe src="project-plan.html" title="Plan on mobile" loading="lazy"></iframe><span class="meta">Plan</span></div>
+    </div>
+  </section>
+
+  <section class="section" data-od-id="review-gaps">
+    <div class="section-head"><h2>Still open</h2></div>
+    <div class="panel panel-body">
+      <ul class="gaps" style="margin:0;padding-left:18px;font-size:14px">
+        <li><b>Backend still needed</b> (carried over from v1): an account-wide brief, a spending endpoint, saving hackathons without entering them, plan content with stored decisions, a preview link, and a to-do API. v2 adds two: one chat per “Talking about”, and the in-chat “OK to spend?” question.</li>
+        <li><b>Sample content:</b> the hackathons are real Devpost listings. The projects, builds, costs and the app shown in previews are made up. Ledger Nudge is the only fully filled-in project. Founder Hours and Pantry Scale change the headers, next steps, Check and Submit mode, but reuse Ledger’s preview and Submit fields.</li>
+        <li><b>New in this round, also needs backend:</b> searching inside chats (there’s no message search today, so the results page says so); Caddie scoring the project itself against the rubric (the app has no automated judge run yet; only your own scores are designed); a “tell me when this tool is ready” signal for Build tools.</li>
+        <li><b>The character is a proposal.</b> Before handing it to the app, it still needs a hand-tuned 16px browser icon and an app-icon version with a safe area.</li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+</div>
+<script src="assets/caddie.js"></script>
+</body>
+</html>

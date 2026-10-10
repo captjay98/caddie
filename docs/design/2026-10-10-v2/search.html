@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Search · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .s-form { display: flex; gap: 8px; }
+  .s-form .input-wrap { flex: 1; }
+  .s-form .input { height: 46px; font-size: 15.5px; padding-right: 44px; }
+  .s-form .input-wrap > svg { top: 15px; }
+  .s-clear { position: absolute; right: 6px; top: 6px; width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+  .s-clear:hover { background: var(--hover); color: var(--fg); }
+  .s-form .btn { height: 46px; }
+  .pill .n { font: 500 var(--t-meta)/1 var(--font-mono); color: inherit; opacity: .8; margin-left: 6px; }
+  .result { display: flex; gap: 14px; align-items: flex-start; padding: 16px 20px; border-top: 1px solid var(--line-soft); }
+  .result:first-child { border-top: 0; }
+  .result:hover { background: var(--hover); }
+  .result .grow { flex: 1; min-width: 0; display: grid; gap: 3px; }
+  .result .where { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .result .title { font-weight: 600; font-size: 15px; line-height: 1.35; }
+  .result .snip { color: color-mix(in srgb, var(--fg) 78%, var(--muted)); font-size: 13.5px; line-height: 1.55; }
+  .result > svg { margin-top: 10px; color: var(--muted); }
+  .pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--line-soft); }
+  .recent { display: flex; flex-wrap: wrap; gap: 8px; }
+  @media (max-width: 760px) { .s-form .btn { display: none; } .result, .pager { padding-left: 16px; padding-right: 16px; } .filter-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 calc(var(--gutter) * -1); padding: 0 var(--gutter); } .pill { flex: none; } }
+</style>
+</head>
+<body>
+<!-- Search results (was /search, S39): typed results that open the right screen, honest scope, real paging. -->
+<div class="app" data-page="search" data-title="Search"
+     data-suggest="Find where I said reminders should be friendly|Which to-dos are due this week?|Search inside my chats"
+     data-reply="Open what Caddie knows|Ledger Nudge · What Caddie knows|project-settings.html#knows">
+<main class="main">
+  <div class="page">
+
+    <header class="page-head" data-od-id="search-head">
+      <div><h1>Search</h1><p class="lede">Your projects, plans, to-dos and what Caddie knows — plus hackathons from Discover.</p></div>
+    </header>
+
+    <section class="section" style="gap:14px">
+      <form class="s-form" id="s-form" role="search" data-od-id="search-form">
+        <div class="input-wrap"><i data-i="search"></i><label class="sr" for="s-q">Search</label><input class="input" id="s-q" type="search" autocomplete="off" maxlength="80" placeholder="Search for a word, like “reminder”"><button type="button" class="s-clear" id="s-clear" aria-label="Clear search" hidden><i data-i="x"></i></button></div>
+        <button class="btn secondary" type="submit">Search</button>
+      </form>
+      <div class="filter-bar" id="s-scopes" role="group" aria-label="Show results from" data-od-id="search-scopes"></div>
+    </section>
+
+    <section class="panel" id="s-results" aria-live="polite" data-od-id="search-results"></section>
+    <p class="meta" id="s-note" style="text-align:center">Search doesn’t look inside chats yet. <a class="link" href="caddie.html#type">Ask Caddie</a> to find something you talked about.</p>
+
+  </div>
+</main>
+</div>
+<script src="assets/caddie.js"></script>
+<script>
+(function () {
+  const I = window.CaddieIcon, $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  /* [type, title, snippet, where, href]. Projects, plans, to-dos and memory are the sample projects;
+     hackathons are the real Devpost listings used across the prototype. */
+  const TYPES = {
+    project: ['Project', 'folder', 'Projects'],
+    plan: ['Plan', 'file', 'Plans'],
+    todo: ['To-do', 'check', 'To-dos'],
+    knows: ['Caddie knows', 'brain', 'What Caddie knows'],
+    hack: ['Hackathon', 'trophy', 'Hackathons'],
+  };
+  const DATA = [
+    ['project', 'Ledger Nudge', 'Friendly payment reminders for small businesses, sent through PayPal invoicing.', 'PayPal AI Hackathon · due Nov 12', 'project-overview.html'],
+    ['project', 'Founder Hours', 'An AI helper that plans a founder’s week from their calendar.', 'HETIC 2026 · due Dec 18', 'project-overview.html?p=founder'],
+    ['project', 'Pantry Scale', 'Scales recipes to what’s left in your pantry.', 'Personal project', 'project-overview.html?p=pantry'],
+    ['plan', 'Updated plan · version 3', 'People choose how often reminders go out. Changes 2 screens; nothing you approved is removed.', 'Ledger Nudge · waiting for your OK', 'project-plan.html'],
+    ['plan', 'Plan · version 2', 'The AI writes each reminder in a friendly tone and picks the right moment to send it.', 'Ledger Nudge · approved Oct 4', 'project-plan.html#earlier'],
+    ['plan', 'Plan · version 1', 'Reads the calendar and suggests three focus blocks each week.', 'Founder Hours · approved Sep 29', 'project-plan.html?p=founder'],
+    ['plan', 'Plan · version 2', 'Adds a “use it up first” list for food about to expire, with a reminder the day before.', 'Pantry Scale · approved today', 'project-plan.html?p=pantry'],
+    ['todo', 'Read the reminder wording Caddie wrote', 'Three sample reminders, from gentle to firm. Change any word you like.', 'Ledger Nudge · to-do', 'project-overview.html#todo'],
+    ['todo', 'Record the demo video', 'Under 3 minutes, uploaded to YouTube as public.', 'Ledger Nudge · due Nov 10', 'project-submit.html#video'],
+    ['todo', 'Pick a licence', 'The rules need public code with a licence. MIT is the usual choice.', 'Ledger Nudge · to-do', 'project-check.html?open=licence'],
+    ['todo', 'Write setup instructions', 'How judges can run it on their own computer.', 'Founder Hours · to-do', 'project-check.html?p=founder'],
+    ['todo', 'Turn on expiry reminders', 'Get a nudge the day before something in your pantry expires.', 'Pantry Scale · to-do', 'project-overview.html?p=pantry#todo'],
+    ['knows', 'Reminders should sound friendly, never threatening', 'You said this in chat on Oct 3.', 'Ledger Nudge · what Caddie knows', 'project-settings.html#knows'],
+    ['knows', 'Use a PayPal test account — no real money', 'From the hackathon FAQ, Oct 2.', 'Ledger Nudge · what Caddie knows', 'project-settings.html#knows'],
+    ['knows', 'Prefers TypeScript', 'Noticed across 3 projects.', 'About you · what Caddie knows', 'settings.html#knows'],
+    ['knows', 'Usually builds solo', 'You said this in chat on Sep 30.', 'About you · what Caddie knows', 'settings.html#knows'],
+    ['hack', 'PayPal AI Hackathon', 'Build what’s next with PayPal and AI.', 'Closes Nov 12 · $67,500 in prizes', 'opportunity.html'],
+    ['hack', 'Bridge The Gap Hacks', 'Create apps and games based on your original ideas.', 'Opens Nov 15 · closes Nov 21', 'opportunity.html?e=bridge'],
+    ['hack', 'AI Agents for Founders Challenge — HETIC 2026', 'Create AI agents that give founders back their most valuable asset: time to think.', 'Opens Nov 4 · closes Dec 18', 'opportunity.html?e=hetic'],
+    ['hack', 'Arbiter Hacks V1', 'Open innovation for all — projects with real impact and usability.', 'Closes Dec 21 · $3,800 in prizes', 'opportunity.html?e=arbiter'],
+  ];
+  const PER = 5;
+  const u = new URLSearchParams(location.search);
+  let q = (u.get('q') || '').slice(0, 80), scope = TYPES[u.get('in')] ? u.get('in') : 'all', pageN = Math.max(1, parseInt(u.get('page'), 10) || 1);
+  let recent; try { recent = JSON.parse(localStorage.getItem('caddie2.recentSearch') || '[]'); } catch (e) { recent = []; }
+  const input = $('#s-q'), clear = $('#s-clear');
+  input.value = q;
+
+  const words = (t) => t.toLowerCase().split(/\s+/).filter(Boolean);
+  const hit = (r, ws) => { const hay = (r[1] + ' ' + r[2] + ' ' + r[3]).toLowerCase(); return ws.every((w) => hay.includes(w)); };
+  const mark = (text, ws) => {
+    let out = esc(text);
+    ws.map(esc).sort((a, b) => b.length - a.length).forEach((w) => {
+      out = out.replace(new RegExp('(' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')(?![^<]*>)', 'gi'), '<mark>$1</mark>');
+    });
+    return out;
+  };
+  const sync = () => {
+    const p = new URLSearchParams();
+    if (q) p.set('q', q); if (scope !== 'all') p.set('in', scope); if (pageN > 1) p.set('page', pageN);
+    const st = new URLSearchParams(location.search).get('state'); if (st) p.set('state', st);
+    history.replaceState(null, '', 'search.html' + (p.toString() ? '?' + p : ''));
+  };
+
+  const render = () => {
+    clear.hidden = !input.value;
+    const ws = words(q);
+    const all = ws.length ? DATA.filter((r) => hit(r, ws)) : [];
+    const count = (t) => all.filter((r) => r[0] === t).length;
+    $('#s-scopes').innerHTML = [['all', 'All', all.length]].concat(Object.entries(TYPES).map(([k, v]) => [k, v[2], count(k)]))
+      .map(([k, l, n]) => `<button class="pill" type="button" data-scope="${k}" aria-pressed="${scope === k}">${l}${ws.length ? `<span class="n">${n}</span>` : ''}</button>`).join('');
+    const box = $('#s-results');
+    $('#s-note').hidden = !ws.length;
+    if (!ws.length) {
+      const chips = (recent.length ? recent : ['reminder', 'demo video', 'licence']).slice(0, 6);
+      box.innerHTML = `<div class="empty" data-od-id="search-start"><span class="ico-box">${I('search')}</span><h3>What are you looking for?</h3><p>Type a word from a project, a plan, a to-do or something you told Caddie.</p><div class="recent" aria-label="${recent.length ? 'Recent searches' : 'Try'}"><span class="meta" style="align-self:center">${recent.length ? 'Recent:' : 'Try:'}</span>${chips.map((c) => `<button class="pill" type="button" data-try="${esc(c)}">${esc(c)}</button>`).join('')}</div></div>`;
+      return;
+    }
+    const list = scope === 'all' ? all : all.filter((r) => r[0] === scope);
+    const pages = Math.max(1, Math.ceil(list.length / PER));
+    pageN = Math.min(pageN, pages);
+    const slice = list.slice((pageN - 1) * PER, pageN * PER);
+    if (!list.length) {
+      const where = scope === 'all' ? '' : ' in ' + TYPES[scope][2].toLowerCase();
+      box.innerHTML = `<div class="empty" data-od-id="search-empty"><span class="ico-box">${I('search')}</span><h3>Nothing matches “${esc(q)}”${where}</h3><p>${scope !== 'all' && all.length ? `There ${all.length === 1 ? 'is 1 result' : 'are ' + all.length + ' results'} in other places.` : 'Try fewer or shorter words. Search doesn’t look inside chats yet.'}</p><div class="btn-row" style="justify-content:center">${scope !== 'all' && all.length ? '<button class="btn secondary sm" type="button" data-scope="all">Show all results</button>' : ''}<button class="btn ghost sm" type="button" data-ask="Find “${esc(q)}” in my projects and chats">Ask Caddie to look</button></div></div>`;
+      return;
+    }
+    const from = (pageN - 1) * PER + 1, to = from + slice.length - 1;
+    box.innerHTML = slice.map((r, i) => {
+      const t = TYPES[r[0]];
+      return `<a class="result" href="${r[4]}" data-od-id="search-result-${from + i}"><span class="ico-box">${I(t[1])}</span><span class="grow"><span class="where"><span class="kicker">${t[0]}</span><span class="meta">${esc(r[3])}</span></span><span class="title">${mark(r[1], ws)}</span><span class="snip">${mark(r[2], ws)}</span></span>${I('chevron')}</a>`;
+    }).join('') + `<div class="pager" data-od-id="search-pager"><span class="meta">${from}–${to} of ${list.length}</span><div class="btn-row"><button class="btn ghost sm" type="button" data-page="-1" ${pageN === 1 ? 'disabled' : ''}>${I('back')}Previous</button><button class="btn secondary sm" type="button" data-page="1" ${pageN === pages ? 'disabled' : ''}>Next${I('chevron')}</button></div></div>`;
+  };
+
+  const run = (term) => {
+    q = term.trim().slice(0, 80); pageN = 1;
+    if (q) { recent = [q].concat(recent.filter((r) => r.toLowerCase() !== q.toLowerCase())).slice(0, 6); try { localStorage.setItem('caddie2.recentSearch', JSON.stringify(recent)); } catch (e) { /* private mode */ } }
+    sync();
+    // A short loading state, the way the real search waits for the server.
+    const box = $('#s-results');
+    if (q) {
+      box.setAttribute('aria-busy', 'true');
+      box.innerHTML = [62, 48, 70].map((w) => `<div class="skel-row"><span class="skel" style="width:34px;height:34px;border-radius:9px;flex:none"></span><span class="grow"><span class="skel" style="height:10px;width:22%"></span><span class="skel" style="height:13px;width:${w}%"></span><span class="skel" style="height:10px;width:${w - 14}%"></span></span></div>`).join('');
+      setTimeout(() => { box.removeAttribute('aria-busy'); render(); }, 380);
+    } else render();
+  };
+
+  $('#s-form').addEventListener('submit', (e) => { e.preventDefault(); run(input.value); });
+  input.addEventListener('input', () => { clear.hidden = !input.value; });
+  clear.addEventListener('click', () => { input.value = ''; run(''); input.focus(); });
+  document.addEventListener('click', (e) => {
+    const s = e.target.closest('[data-scope]'); if (s) { scope = s.dataset.scope; pageN = 1; sync(); render(); return; }
+    const p = e.target.closest('[data-page]'); if (p) { pageN += +p.dataset.page; sync(); render(); document.querySelector('.main').scrollTop = 0; return; }
+    const t = e.target.closest('[data-try]'); if (t) { input.value = t.dataset.try; run(t.dataset.try); }
+  });
+  render();
+  if (!q) setTimeout(() => input.focus(), 60);
+})();
+</script>
+</body>
+</html>

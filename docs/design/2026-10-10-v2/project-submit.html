@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Submit · Caddie</title>
+<link rel="stylesheet" href="assets/caddie.css">
+<style>
+  .left { display: grid; gap: 4px; }
+  .left .item { display: flex; gap: 12px; align-items: center; padding: 12px 20px; border-top: 1px solid var(--line-soft); min-height: 58px; }
+  .left .item:first-child { border-top: 0; }
+  .left .item .grow { flex: 1; min-width: 0; }
+  .left .item small { display: block; color: var(--muted); font-size: 13px; }
+  .left .item.done b { color: var(--muted); text-decoration: line-through; font-weight: 500; }
+  .pkg-field { display: grid; grid-template-columns: 140px minmax(0, 1fr) auto; gap: 16px; align-items: start; padding: 14px 20px; border-top: 1px solid var(--line-soft); }
+  .pkg-field:first-child { border-top: 0; }
+  .pkg-field .k { color: var(--muted); font-size: 13px; padding-top: 2px; }
+  .pkg-field .v { font-size: 14px; line-height: 1.55; min-width: 0; overflow-wrap: anywhere; }
+  .pkg-field .missing { color: var(--danger); }
+  .share { display: grid; gap: 10px; align-content: start; }
+  .share p { color: var(--muted); font-size: 13.5px; }
+  @media (max-width: 760px) {
+    .pkg-field { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 14px 16px; }
+    .pkg-field .k { grid-column: 1 / -1; }
+    .left .item { padding: 12px 16px; }
+  }
+</style>
+</head>
+<body>
+<!-- Submit (contest) / Share (personal). Was "Ship". -->
+<div class="app" data-page="project" data-project-tab="submit"
+     data-suggest="Make the tagline shorter|Is anything still missing?|How do I submit on Devpost?"
+     data-reply="Open what to copy|Submit · copy into Devpost|#package">
+<main class="main">
+  <div class="page">
+    <div data-project-head></div>
+
+    <!-- Contest -->
+    <div data-when="contest" class="section" style="gap:24px">
+      <section class="panel bcard" data-od-id="submit-intro">
+        <span class="eyebrow warn"><i data-i="calendar"></i>Due Nov 12 · 9:00pm in Lagos</span>
+        <h2>Everything to paste into Devpost, ready when you are.</h2>
+        <p>Caddie gets it all ready, but <b>you press submit yourself</b> on Devpost. Then tell Caddie, and it keeps a copy of what you sent.</p>
+        <div class="bcard-foot"><a class="btn secondary" href="https://paypalaihackathon.devpost.com" target="_blank" rel="noopener">Open Devpost<i data-i="external"></i></a><button class="btn ghost" data-open="record-submission" data-od-id="submit-done">I’ve submitted</button></div>
+      </section>
+
+      <section class="section" data-od-id="submit-left">
+        <div class="section-head"><h2>3 things left</h2></div>
+        <div class="panel left">
+          <div class="item"><span class="dot danger"></span><span class="grow"><b>Add your demo video</b><small>Under 3 minutes, public on YouTube</small></span><button class="btn secondary sm" data-open="video-link">Add link</button></div>
+          <div class="item"><span class="dot warn"></span><span class="grow"><b>Pick a licence for your code</b><small>The rules need one</small></span><a class="btn secondary sm" href="project-check.html?open=licence">Pick one</a></div>
+          <div class="item" id="desc-item"><span class="dot warn"></span><span class="grow"><b>Read the description Caddie wrote</b><small>Below — change anything you like</small></span><a class="btn ghost sm" href="#desc">Read it</a></div>
+        </div>
+      </section>
+
+      <section class="section" id="package" data-od-id="submit-package">
+        <div class="section-head"><h2>Copy into Devpost</h2><span class="meta">Same order as the form</span></div>
+        <div class="panel">
+          <div class="pkg-field"><span class="k">Project name</span><span class="v">Ledger Nudge</span><button class="btn ghost sm" data-toast="Copied" data-toast-icon="check">Copy</button></div>
+          <div class="pkg-field"><span class="k">Tagline</span><span class="v">An AI helper that chases unpaid PayPal invoices, so small businesses don’t have to.</span><button class="btn ghost sm" data-toast="Copied">Copy</button></div>
+          <div class="pkg-field" id="video"><span class="k">Demo video</span><span class="v missing" id="video-v">Missing — add a YouTube link</span><button class="btn ghost sm" data-open="video-link">Add</button></div>
+          <div class="pkg-field"><span class="k">Code</span><span class="v mono" style="font-size:13px">github.com/captjay98/ledger-nudge</span><button class="btn ghost sm" data-toast="Copied">Copy</button></div>
+          <div class="pkg-field" id="desc"><span class="k">Description</span><span class="v">Small businesses lose money on invoices that sit unpaid. Ledger Nudge connects to a PayPal business account, finds overdue invoices, and sends reminders written in the owner’s voice. The owner picks how often each customer is reminded, and the AI suggests a schedule from the customer’s payment history.</span><button class="btn ghost sm" data-toast="Copied" id="desc-copy">Copy</button></div>
+          <div class="pkg-field"><span class="k">Built with</span><span class="v">PayPal invoicing, React, an AI model for writing reminders, and Caddie for planning, building and testing.</span><button class="btn ghost sm" data-toast="Copied">Copy</button></div>
+        </div>
+        <details class="panel more" style="border-top:1px solid var(--line)"><summary><i data-i="chevron"></i>Download everything as one file</summary><div class="btn-row"><button class="btn secondary sm" data-toast="Downloaded ledger-nudge-submission.zip" data-toast-icon="download"><i data-i="download"></i>Download .zip</button><span class="meta">Text, screenshots and a copy of your code</span></div></details>
+      </section>
+    </div>
+
+    <!-- Personal: Share -->
+    <div data-when="standalone" class="section" style="gap:20px" hidden>
+      <section class="panel bcard" data-od-id="share-intro">
+        <span class="eyebrow">Share</span>
+        <h2>Show <span data-project-name></span> to someone, or take the code with you.</h2>
+        <p>There are no rules to meet for a personal project. Pick whatever helps.</p>
+      </section>
+      <div class="grid-3">
+        <section class="panel pad share" data-od-id="share-link"><span class="ico-box action"><i data-i="link"></i></span><b>Send a link</b><p>Anyone with the link can try it for 7 days. You can switch it off any time.</p><button class="btn primary sm" data-toast="Link copied — it works for 7 days" data-toast-icon="link">Copy link</button></section>
+        <section class="panel pad share" data-od-id="share-github"><span class="ico-box"><i data-i="git"></i></span><b>Put it on GitHub</b><p>Save the latest approved version to a repo you own.</p><button class="btn secondary sm" data-toast="Saved to github.com/captjay98/pantry-scale" data-toast-icon="git">Save to GitHub</button></section>
+        <section class="panel pad share" data-od-id="share-download"><span class="ico-box"><i data-i="download"></i></span><b>Download it</b><p>A zip of the code with a guide to run it.</p><button class="btn secondary sm" data-toast="Downloaded pantry-scale.zip" data-toast-icon="download">Download</button></section>
+      </div>
+    </div>
+  </div>
+</main>
+</div>
+
+<div class="modal" id="video-link" role="dialog" aria-modal="true" aria-labelledby="vl-title" data-od-id="modal-video-link">
+  <div class="modal-head"><div class="grow"><h2 id="vl-title">Add your demo video</h2><p>Record yourself using the app for under 3 minutes, upload it to YouTube as <b>public</b>, then paste the link.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <div class="field"><label for="vl-url">YouTube link</label><input class="input" id="vl-url" type="url" placeholder="https://youtu.be/…" data-required><span class="err" hidden>Paste a YouTube link.</span></div>
+    <details class="more" style="border:0"><summary style="padding:4px 0"><i data-i="chevron"></i>What to show in 3 minutes</summary><div style="padding:8px 0 0" class="plain muted">Start with the problem (20 seconds). Show unpaid invoices, then send a reminder. Show the AI choosing a schedule. End on why it matters. Don’t use music you don’t have the rights to.</div></details>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Cancel</button><button class="btn primary" id="vl-save">Save link</button></div>
+</div>
+
+<div class="modal" id="record-submission" role="dialog" aria-modal="true" aria-labelledby="rs-title" data-od-id="modal-record-submission">
+  <div class="modal-head"><div class="grow"><h2 id="rs-title">Did you submit on Devpost?</h2><p>Caddie saves a copy of what you sent and stops reminding you about this deadline.</p></div><button class="btn ghost icon sm" data-close aria-label="Close"><i data-i="x"></i></button></div>
+  <div class="modal-body">
+    <div class="field"><label for="rs-url">Link to your Devpost entry</label><input class="input" id="rs-url" type="url" placeholder="https://devpost.com/software/…" data-required><span class="err" hidden>Paste the link to your entry.</span></div>
+  </div>
+  <div class="modal-foot"><button class="btn ghost" data-close>Not yet</button><button class="btn primary" data-toast="Saved — nice work!" data-go="project-overview.html">Yes, I submitted</button></div>
+</div>
+
+<script src="assets/caddie.js"></script>
+<script>
+(function () {
+  const $ = (s) => document.querySelector(s);
+  $('#vl-save').addEventListener('click', () => {
+    const u = $('#vl-url');
+    if (!/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//.test(u.value.trim())) { u.classList.add('invalid'); u.nextElementSibling.hidden = false; u.nextElementSibling.textContent = 'That doesn’t look like a YouTube link.'; u.focus(); return; }
+    $('#video-v').className = 'v mono'; $('#video-v').style.fontSize = '13px'; $('#video-v').textContent = u.value.trim();
+    document.querySelector('.left .item .dot.danger').className = 'dot ok';
+    document.querySelector('.left .item').classList.add('done');
+    window.CaddieClose(); window.CaddieToast('Video link saved');
+  });
+  $('#desc-copy').addEventListener('click', () => { $('#desc-item').classList.add('done'); $('#desc-item .dot').className = 'dot ok'; });
+})();
+</script>
+</body>
+</html>
