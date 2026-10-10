@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { FlueConversationMessage, FlueConversationPart } from '@flue/react';
 import { safeParse } from 'valibot';
@@ -128,12 +128,16 @@ function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
 	const running = parts.some((part) => part.state === 'input-available');
 	const failed = parts.filter((part) => part.state === 'output-error').length;
 	const totalMs = parts.reduce((sum, part) => sum + (typeof part.durationMs === 'number' ? part.durationMs : 0), 0);
-	const calls = `${parts.length} tool call${parts.length === 1 ? '' : 's'}`;
+	const calls = `${parts.length} step${parts.length === 1 ? '' : 's'}`;
+	// §3.6: working steps fold by default ("Thought for 6s"). Raw reasoning
+	// never renders; this summary counts the folded work, never narrates it.
 	const summary = failed > 0
-		? `Caddie worked · ${calls} · ${failed} failed`
+		? `Thought for ${Math.round(totalMs / 100) / 10 || '?'}s · ${calls} · ${failed} failed`
 		: running
-			? `Caddie is working · ${calls}`
-			: `Caddie worked · ${calls}${totalMs > 0 ? ` · ${Math.round(totalMs / 100) / 10}s` : ''}`;
+			? 'Caddie is working…'
+			: totalMs > 0
+				? `Thought for ${Math.round(totalMs / 100) / 10}s`
+				: `Caddie worked · ${calls}`;
 	return (
 		<details className="tool-strip" data-testid="tool-strip">
 			<summary>{summary}</summary>
@@ -300,6 +304,7 @@ function DraftRow(props: {
 	draft: ChannelDraft;
 	transportLive: boolean;
 	onRetry: (id: string) => void;
+	onEdit: (id: string) => void;
 	onDiscard: (id: string) => void;
 }): ReactElement {
 	const { draft } = props;
@@ -308,22 +313,23 @@ function DraftRow(props: {
 			<span className="mono-id">
 				{draft.state === 'cancelled'
 					? 'cancelled — kept for reference'
-					: props.transportLive
-						? 'unsent · the run transport refused it'
-						: 'unsent · held until you send'}{' '}
-				· idempotency key {draft.idempotencyKey.slice(5, 13)} — the guard against a duplicate send
+					: 'Not sent'}{' '}
 				{/* attempts counts FAILED TRANSPORT ATTEMPTS (the rejection handler
 				    increments it) — display the true count, no +1: the original
 				    send IS attempt one now that a transport exists. */}
 				{draft.attempts > 0
 					? ` · ${draft.attempts} ${draft.attempts === 1 ? 'attempt' : 'attempts'}`
 					: ''}
+				{' '}· key {draft.idempotencyKey.slice(5, 13)} — resends reuse it, so the server can never double-submit
 			</span>
 			<span className="draft-text">{draft.text}</span>
 			{draft.state === 'unsent' ? (
 				<span className="draft-actions">
 					<button type="button" className="btn-ghost" data-testid="draft-retry" onClick={() => props.onRetry(draft.id)}>
-						Retry
+						Send again
+					</button>
+					<button type="button" className="btn-ghost" data-testid="draft-edit" onClick={() => props.onEdit(draft.id)}>
+						Edit
 					</button>
 					<button type="button" className="btn-ghost" data-testid="draft-discard" onClick={() => props.onDiscard(draft.id)}>
 						Discard
@@ -353,11 +359,22 @@ export function Channel(props: {
 	resolving?: boolean;
 	onSend: (text: string) => void;
 	onRetryDraft: (id: string) => void;
+	onEditDraft: (id: string) => void;
 	onDiscardDraft: (id: string) => void;
 }): ReactElement {
 	const { source, projectId } = props;
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const pinnedToBottom = useRef(true);
+	// §3.6: leftover typing restored from an earlier visit is labelled until it
+	// is sent or cleared. "From earlier" = text is present and the user has not
+	// typed in this visit — any edit (or clearing) retires the label, and a
+	// fresh load of an untouched draft restores it.
+	const userTyped = useRef(false);
+	const draftNote = !userTyped.current && Boolean(props.composerText && props.composerText.trim() !== '');
+	const handleComposerTextChange = (text: string) => {
+		userTyped.current = true;
+		props.onComposerTextChange?.(text);
+	};
 
 	useEffect(() => {
 		const el = scrollRef.current;
@@ -445,11 +462,12 @@ export function Channel(props: {
 					</p>
 				) : null}
 				{source.status === 'error' ? (
-					<StatePanel
-						kind="error"
-						title="The channel lost its connection"
-						detail={source.error?.message ?? 'Unsent drafts below keep their retry affordance.'}
-					/>
+					<div className="conv-offline" role="status" data-testid="channel-offline">
+						<Icon name="alert" title="Connection problem" />
+						<span>
+							Caddie can't be reached right now. What you send waits here until you send it again.
+						</span>
+					</div>
 				) : null}
 
 				{props.drafts.map((draft) => (
@@ -458,6 +476,7 @@ export function Channel(props: {
 						draft={draft}
 						transportLive={props.transportLive === true}
 						onRetry={props.onRetryDraft}
+						onEdit={props.onEditDraft}
 						onDiscard={props.onDiscardDraft}
 					/>
 				))}
@@ -468,7 +487,8 @@ export function Channel(props: {
 					disabled={live}
 					disabledReason={live ? 'A run is working — wait for it to settle.' : undefined}
 					value={props.composerText}
-					onValueChange={props.onComposerTextChange}
+					onValueChange={handleComposerTextChange}
+					draftNote={draftNote ? 'Draft from earlier · not sent yet' : undefined}
 				/>
 			) : null}
 		</div>

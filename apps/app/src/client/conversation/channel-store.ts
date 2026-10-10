@@ -167,6 +167,24 @@ export function useChannelStore(options: {
 		);
 	}, []);
 
+	/** Edit an unsent draft (§3.6): its text goes back into the composer and
+	 *  the failed row is removed — the user rewords and sends fresh, with a
+	 *  NEW idempotency key (a changed message is a new submission). */
+	const editDraft = useCallback(
+		(id: string) => {
+			const draft = drafts.find((d) => d.id === id && d.state === 'unsent');
+			if (!draft) return;
+			setDrafts((existing) => existing.filter((d) => d.id !== id));
+			setComposerTextState(draft.text);
+			try {
+				sessionStorage.setItem(composerKey_, draft.text);
+			} catch {
+				// storage blocked: text stays in memory for the session
+			}
+		},
+		[drafts, composerKey_],
+	);
+
 	/** Removes the draft entirely — the send-success path. Once the transport
 	 *  admits the message it lives in the transcript; the optimistic row must
 	 *  not linger. Only an explicitly discarded draft is kept for reference
@@ -175,5 +193,5 @@ export function useChannelStore(options: {
 		setDrafts((existing) => existing.filter((draft) => draft.id !== id));
 	}, []);
 
-	return { drafts, addDraft, retryDraft, discardDraft, resolveDraft, composerText, setComposerText };
+	return { drafts, addDraft, retryDraft, discardDraft, editDraft, resolveDraft, composerText, setComposerText };
 }

@@ -35,6 +35,9 @@ export function DecisionCardView(props: {
 	/** Account-brief read marker: "seen" only records that the actor read the
 	 *  card — it never resolves the underlying work (approved navigation). */
 	seen?: boolean;
+	/** Which project this card belongs to (v2 brief: no group headers, so the
+	 *  card itself carries the context). */
+	contextLabel?: string;
 }): ReactElement {
 	const { card } = props;
 	const [detailOpen, setDetailOpen] = useState(false);
@@ -47,7 +50,10 @@ export function DecisionCardView(props: {
 			data-seen={props.seen === true ? 'true' : 'false'}
 		>
 			<div className="card-head">
-				<p className="kind-kicker">{KIND_LABEL[card.kind]}</p>
+				<p className="kind-kicker">
+					{props.contextLabel ? <span className="card-context">{props.contextLabel} · </span> : null}
+					{KIND_LABEL[card.kind]}
+				</p>
 				<span className="pill status-pill" data-status={card.status}>
 					{card.status}
 				</span>
@@ -330,6 +336,187 @@ export function AccountBriefLane(props: {
 				) : null}
 			</div>
 			{content}
+		</div>
+	);
+}
+
+/**
+ * The v2 Brief (Caddie v2, HANDOFF §4): date + one-line title from the caller,
+ * then AT MOST THREE big cards (server order — never re-ranked here), deadlines
+ * as coloured rows, and finished items folded under "Done · N".
+ *
+ * The card layout IS the ranking: open cards render in the server's order and
+ * the first three non-deadline ones become the big cards. Nothing is promoted
+ * or demoted on the client, and a deadline is never a big card — it's a row.
+ */
+export function AccountBriefV2(props: {
+	state: { kind: StateKind; error?: unknown; stale: boolean; retry: () => void };
+	cards: readonly DecisionCardType[];
+	projects: ReadonlyArray<{ id: string; name: string; kind?: string }>;
+	asOf?: string;
+	feedPending?: boolean;
+	feedError?: unknown;
+	hasBuildProjects: boolean;
+	onAction?: (card: DecisionCardType) => void;
+	onMarkAllRead?: () => void;
+}): ReactElement {
+	const { state, cards } = props;
+	const retryable = state.kind === 'error' || state.kind === 'offline' || state.kind === 'limit';
+	const projectName = new Map(props.projects.map((project) => [project.id, project.name]));
+
+	if (state.kind !== 'empty' || props.feedError || props.feedPending) {
+		let content: ReactElement;
+		if (state.kind !== 'empty') {
+			content = (
+				<StatePanel
+					kind={state.kind}
+					detail={retryable && state.error instanceof Error ? state.error.message : undefined}
+					onRetry={state.retry}
+				/>
+			);
+		} else if (props.feedError) {
+			content = (
+				<StatePanel
+					kind={failureKind(props.feedError)}
+					detail={props.feedError instanceof Error ? props.feedError.message : undefined}
+					onRetry={state.retry}
+				/>
+			);
+		} else {
+			content = <StatePanel kind="loading" title="Reading your brief…" />;
+		}
+		return <div data-testid="account-brief-lane">{content}</div>;
+	}
+
+	if (cards.length === 0) {
+		return (
+			<div data-testid="account-brief-lane">
+				{props.hasBuildProjects ? (
+					<div className="card-stack" data-testid="brief-caught-up">
+						<section className="decision-card card-surface">
+							<div className="card-head">
+								<p className="kind-kicker">BRIEF</p>
+								<span className="pill status-pill" data-status="handled">
+									caught up
+								</span>
+							</div>
+							<h3>Nothing needs you</h3>
+							<p className="summary">
+								When Caddie needs a decision, finishes something, or hits a blocker, it lands here
+								with one clear action.
+							</p>
+						</section>
+					</div>
+				) : (
+					<div className="card-stack" data-testid="brief-new-user">
+						<section className="decision-card card-surface">
+							<div className="card-head">
+								<p className="kind-kicker">BRIEF · WHAT GOES HERE</p>
+								<span className="pill status-pill" data-status="handled">
+									waiting for your first build
+								</span>
+							</div>
+							<h3>This is where decisions land</h3>
+							<p className="summary">
+								When Caddie finds a hackathon that fits you, drafts a plan, finishes a preview or
+								gets stuck, it reports it here — one clear action per update, across every project.
+							</p>
+							<div className="actions">
+								<Link className="r-link" to="/discover" data-testid="brief-teach-discover">
+									<Icon name="target" title="discover" /> Find a hackathon that fits you
+								</Link>
+							</div>
+						</section>
+					</div>
+				)}
+			</div>
+		);
+	}
+
+	const open = cards.filter((card) => card.status !== 'handled');
+	const done = cards.filter((card) => card.status === 'handled');
+	const deadlineCards = open.filter((card) => card.kind === 'deadline');
+	const bigCards = open.filter((card) => card.kind !== 'deadline').slice(0, 3);
+	const unseenCount = cards.filter((card) => !card.seen).length;
+	const waitingCount = cards.filter((card) => card.status === 'needs-you').length;
+
+	return (
+		<div data-testid="account-brief-lane">
+			<div className="section-head brief-v2-head">
+				<span className="count" data-testid="brief-count">
+					{cards.length} update{cards.length === 1 ? '' : 's'}
+					{waitingCount > 0 ? ` · ${waitingCount} waiting on you` : ''}
+					{unseenCount > 0 ? ` · ${unseenCount} unseen` : ''}
+				</span>
+				{props.asOf ? (
+					<span className="mono-id" data-testid="brief-asof">
+						updated {formatTimeAgo(props.asOf)}
+					</span>
+				) : null}
+				<StaleChip stale={state.stale} />
+				{unseenCount > 0 && props.onMarkAllRead ? (
+					<button type="button" className="detail-toggle" data-testid="brief-mark-all-read" onClick={props.onMarkAllRead}>
+						Mark all read
+					</button>
+				) : null}
+			</div>
+			<div className="brief-v2">
+				{bigCards.map((card) => (
+					<DecisionCardView
+						key={card.id}
+						card={card}
+						seen={card.seen}
+						onAction={props.onAction}
+						contextLabel={props.projects.length > 1 ? projectName.get(card.projectId) : undefined}
+					/>
+				))}
+
+				{deadlineCards.length > 0 ? (
+					<div className="brief-deadlines" data-testid="brief-deadlines">
+						{deadlineCards.map((card) => (
+							<div className="brief-deadline" key={card.id} data-testid="brief-deadline-row">
+								<Icon name="calendar" title="Deadline" />
+								<span className="brief-deadline-text">
+									<b>{card.headline}</b>
+									<span>
+										{projectName.get(card.projectId) ?? card.projectId} · {card.summary}
+									</span>
+								</span>
+								<button
+									type="button"
+									className="btn-ghost"
+									data-testid="brief-deadline-action"
+									onClick={() => props.onAction?.(card)}
+								>
+									{card.primaryAction.label}
+								</button>
+							</div>
+						))}
+					</div>
+				) : null}
+
+				{done.length > 0 ? (
+					<details className="brief-done" data-testid="brief-done">
+						<summary>
+							Done · {done.length}
+						</summary>
+						<ul>
+							{done.map((card) => (
+								<li key={card.id} data-testid="brief-done-item">
+									<b>{card.headline}</b> — {projectName.get(card.projectId) ?? card.projectId}
+									{card.key ? null : null}
+								</li>
+							))}
+						</ul>
+					</details>
+				) : null}
+
+				{open.length === 0 ? (
+					<p className="state-detail" data-testid="brief-all-done">
+						You're caught up — everything below is finished.
+					</p>
+				) : null}
+			</div>
 		</div>
 	);
 }

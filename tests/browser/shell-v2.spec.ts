@@ -335,7 +335,7 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		await expect(page.getByTestId('conversation-panel')).toBeVisible();
 		await expect(page.getByTestId('conv-scrim')).toBeVisible();
 		const box = await page.getByTestId('conversation-panel').boundingBox();
-		expect(box?.width).toBeLessThanOrEqual(420);
+		expect(Math.ceil(box?.width ?? 0)).toBeLessThanOrEqual(420);
 
 		// Scrim click closes.
 		await page.getByTestId('conv-scrim').click({ position: { x: 40, y: 300 } });

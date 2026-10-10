@@ -3630,3 +3630,30 @@ body.conv-resizing * {
 		font-size: 18px;
 	}
 }
+
+/* --- U04: conversation offline strip + restored-draft note ------------------- */
+
+/* §3.6: when the connection drops, a slim strip above the drafts — never a
+   scary error panel; the drafts below keep their Send again · Edit · Discard. */
+.conv-offline {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	margin: 10px 0.9rem 0;
+	padding: 9px 12px;
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--color-warn) 14%, transparent);
+	color: var(--color-bright);
+	font-size: 13px;
+	flex: none;
+}
+
+.conv-offline svg {
+	color: var(--color-warn);
+	flex: none;
+}
+
+.composer-hint.draft-note {
+	color: var(--color-warn);
+	font-family: var(--font-mono);
+}

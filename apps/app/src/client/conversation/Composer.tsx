@@ -22,6 +22,8 @@ export function Composer(props: {
 	 *  (local state) remains the fallback for standalone use. */
 	value?: string;
 	onValueChange?: (text: string) => void;
+	/** A restored leftover draft (§3.6): labelled until it is sent or cleared. */
+	draftNote?: string;
 }): ReactElement {
 	const [localValue, setLocalValue] = useState('');
 	const value = props.value ?? localValue;
@@ -74,7 +76,9 @@ export function Composer(props: {
 					<Icon name="send" title="" />
 				</button>
 			</form>
-			<p className="composer-hint">Enter to send · Shift + Enter for a new line</p>
+			<p className={props.draftNote ? 'composer-hint draft-note' : 'composer-hint'}>
+				{props.draftNote ?? 'Enter to send · Shift + Enter for a new line'}
+			</p>
 		</div>
 	);
 }

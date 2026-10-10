@@ -123,3 +123,68 @@ test.describe('P05/P06 conversation surface', () => {
 		await context.close();
 	});
 });
+
+test.describe('U04 — unsent messages and restored drafts (v2 §3.6)', () => {
+	test('an unsent message offers Send again · Edit · Discard; Edit returns the text to the composer', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		await context.route('**/api/projects/proj_conversation/runs', (route) =>
+			json(route, 503, { error: 'run_transport_unavailable', message: 'refused in this spec' }),
+		);
+		const page = await context.newPage();
+		await openProjectPage(page);
+
+		await page.getByTestId('composer-input').fill('can the reminder show a preview first?');
+		await page.keyboard.press('Enter');
+		const row = page.getByTestId('draft-row');
+		await expect(row).toBeVisible();
+		await expect(row).toContainText('Not sent');
+		await expect(row.getByTestId('draft-retry')).toContainText('Send again');
+
+		// Edit: the failed row disappears and its text is back in the composer,
+		// ready to reword and send as a NEW submission (fresh idempotency key).
+		await row.getByTestId('draft-edit').click();
+		await expect(page.getByTestId('draft-row')).toHaveCount(0);
+		await expect(page.getByTestId('composer-input')).toHaveValue('can the reminder show a preview first?');
+
+		// Sending the edited text produces exactly one draft with a NEW key.
+		// (Focus returned to the Edit button, so click into the composer first.)
+		await page.getByTestId('composer-input').click();
+		await page.keyboard.press('Enter');
+		const keys = await page.evaluate(() => {
+			const all: string[] = [];
+			for (const k of Object.keys(sessionStorage)) {
+				// Only the failed-draft records carry idempotency keys; the composer
+				// key stores plain text and must not be parsed as JSON.
+				if (!k.includes('channel-drafts')) continue;
+				for (const d of JSON.parse(sessionStorage.getItem(k) ?? '[]') as { idempotencyKey: string }[]) all.push(d.idempotencyKey);
+			}
+			return all;
+		});
+		expect(keys).toHaveLength(1);
+		await context.close();
+	});
+
+	test('leftover typing restored from an earlier visit is labelled "Draft from earlier"', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		const page = await context.newPage();
+		await openProjectPage(page);
+
+		// Type and reload without sending: the composer restores the text and
+		// labels it as a draft from earlier until it is sent or cleared.
+		await page.getByTestId('composer-input').fill('still thinking about this');
+		await page.reload();
+		await expect(page.getByTestId('composer-input')).toHaveValue('still thinking about this');
+		await expect(page.locator('.composer-hint.draft-note')).toContainText('Draft from earlier · not sent yet');
+
+		// Typing retires the restored-draft note (the plain hint returns).
+		await page.getByTestId('composer-input').fill('');
+		await page.getByTestId('composer-input').fill('new text');
+		await expect(page.locator('.composer-hint')).not.toHaveClass(/draft-note/);
+		await expect(page.locator('.composer-hint')).toContainText('Enter to send');
+		await context.close();
+	});
+});

@@ -315,12 +315,14 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 		// Badge on the capsule Brief entry: 3 unseen.
 		await expect(page.getByTestId('nav-brief-badge')).toHaveText('3');
 
-		// Both projects render as separate groups with their names.
-		await expect(page.getByTestId('brief-group-proj-a')).toBeVisible();
-		await expect(page.getByTestId('brief-group-proj-b')).toBeVisible();
-		await expect(page.getByTestId('brief-group-name').first()).toHaveText('Pit wall');
-		// Two proj-a cards (approval + blocked) grouped under one header.
-		await expect(page.getByTestId('brief-group-proj-a').locator('[data-testid="decision-card"]')).toHaveCount(2);
+		// v2 layout: the open cards render big (server order), each card carries
+		// its project as context (no group headers), and finished items fold.
+		// Two big cards from proj-a; the handled deadline card folds under Done.
+		await expect(page.locator('[data-testid="decision-card"]')).toHaveCount(2);
+		await expect(page.locator('.card-context').first()).toContainText('Pit wall');
+		const doneFold = page.getByTestId('brief-done');
+		await expect(doneFold).toContainText('Done · 1');
+		await expect(doneFold).toContainText('Weekly discovery sweep');
 
 		// Opening the brief marks NOTHING read — no read POSTs, badges stay.
 		await expect(page.getByTestId('brief-count')).toContainText('3 unseen');
@@ -338,7 +340,7 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 		await page.goto(`${BASE}/app/`);
 
 		// The approval card's action goes to the exact plan review surface.
-		await page.getByTestId('brief-group-proj-a').getByTestId('card-primary-action').click();
+		await page.getByTestId('card-primary-action').first().click();
 		await expect(page).toHaveURL(/\/app\/design-review\?project=proj-a$/);
 		// Exactly ONE read key — the acted card — and no approval was POSTed.
 		expect(reads).toEqual(['proj-a:approval:ap-1']);
@@ -457,7 +459,55 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 		await expect(page.getByTestId('tab-brief-badge')).toHaveText('1');
 		await page.getByTestId('tab-brief-mobile').click();
 		await expect(page.getByTestId('brief-screen')).toBeVisible();
-		await expect(page.getByTestId('brief-group-proj-a')).toBeVisible();
+		await expect(page.getByTestId('decision-card').first()).toBeVisible();
+		await context.close();
+	});
+});
+test.describe('U04 — the v2 brief layout', () => {
+	test('never more than three big cards, regardless of how many open updates exist', async ({ browser }) => {
+		const context = await browser.newContext();
+		const extras = ['x1', 'x2', 'x3'].map((n, i) =>
+			card({
+				id: `brf_change_${n}`,
+				projectId: 'proj-a',
+				kind: 'change',
+				headline: `Extra update ${i + 1}`,
+				summary: 'An open update that must not become a fourth card.',
+				status: 'changed',
+				primaryAction: { label: 'View the diff', kind: 'inspect', targetId: n },
+			}),
+		);
+		await stubAccount(context, { cards: [APPROVAL_A, BLOCKED_A, ...extras], unseenCount: 5 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/`);
+		await expect(page.getByTestId('account-brief-lane')).toBeVisible();
+		// Exactly the server's top three open cards are big; the rest are not
+		// rendered as cards at all (no infinite feed, no re-ranking).
+		await expect(page.locator('[data-testid="decision-card"]')).toHaveCount(3);
+		// Deadline rows: none of these cards are deadlines.
+		await expect(page.getByTestId('brief-deadlines')).toHaveCount(0);
+		await context.close();
+	});
+
+	test('an open deadline renders as a coloured row with its action', async ({ browser }) => {
+		const context = await browser.newContext();
+		const openDeadline = card({
+			id: 'brf_schedule_sch-9',
+			projectId: 'proj-b',
+			kind: 'deadline',
+			headline: 'Submission window closes soon',
+			summary: 'Next milestone 2026-11-01.',
+			status: 'needs-you',
+			primaryAction: { label: 'Open the schedule', kind: 'review', targetId: 'sch-9' },
+		});
+		await stubAccount(context, { cards: [openDeadline, APPROVAL_A], unseenCount: 2 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/`);
+		await expect(page.getByTestId('brief-deadlines').locator('[data-testid="brief-deadline-row"]')).toHaveCount(1);
+		await expect(page.getByTestId('brief-deadline-row')).toContainText('Submission window closes soon');
+		// The deadline row carries its own action (routes to Routines).
+		await page.getByTestId('brief-deadline-action').click();
+		await expect(page).toHaveURL(/\/app\/schedules\?project=proj-b$/);
 		await context.close();
 	});
 });

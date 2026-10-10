@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { SignInPanel } from '../auth.ts';
 import { failureKind, StatePanel } from '../states.tsx';
-import { AccountBriefLane } from '../brief/DecisionCard.tsx';
+import { AccountBriefV2 } from '../brief/DecisionCard.tsx';
 import { briefActionRoute } from '../brief/navigate.ts';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useAccountBrief, useDiscoveryCandidates, useMarkBriefRead, useProfile, type ProfileRecord } from '../queries.ts';
@@ -60,6 +60,7 @@ function BriefBody(): ReactElement {
 	}
 
 	const isNewUser = chrome.buildProjects.length === 0;
+	const openCards = (brief.data?.cards ?? []).filter((card) => card.status !== 'handled');
 
 	return (
 		<div className="home-brief" data-testid="brief-screen">
@@ -67,10 +68,15 @@ function BriefBody(): ReactElement {
 				<p className="kicker" data-tone="action">
 					BRIEF
 				</p>
-				<h1 className="page-title">Updates &amp; decisions</h1>
+				<h1 className="page-title">
+					{openCards.length > 0
+						? `${openCards.length} thing${openCards.length === 1 ? '' : 's'} could use you today`
+						: 'You\u2019re caught up'}
+				</h1>
 				<p className="page-lede">
-					What Caddie needs from you and what it finished — across every project. Reading an update never
-					decides it; acting on it does.
+					{new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())} —
+					what Caddie needs from you and what it finished. Reading an update never decides it; acting on
+					it does.
 				</p>
 			</header>
 
@@ -97,7 +103,7 @@ function BriefBody(): ReactElement {
 			) : null}
 
 			<section className="card-surface home-panel" data-testid="brief-lane-panel">
-				<AccountBriefLane
+				<AccountBriefV2
 					state={{ kind: 'empty', stale: chrome.projectsFetching || brief.isFetching, retry: chrome.refreshAll }}
 					cards={brief.data?.cards ?? []}
 					projects={brief.data?.projects ?? []}
@@ -109,9 +115,6 @@ function BriefBody(): ReactElement {
 					onMarkAllRead={markAllRead}
 				/>
 			</section>
-
-			<Recommendations />
-			<ProjectProgress />
 		</div>
 	);
 }
@@ -249,117 +252,6 @@ function InlineProfile(props: {
 				{saved ? <span className="status-pill" data-status="handled" data-testid="home-profile-saved">saved</span> : null}
 			</div>
 			{error ? <p className="form-error" role="alert" data-testid="home-profile-error">{error}</p> : null}
-		</section>
-	);
-}
-
-// --- recommendations (what the server actually ranked) ---------------------------
-
-function Recommendations(): ReactElement {
-	const chrome = useWorkspaceChrome();
-	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
-	const candidates = useDiscoveryCandidates(actor, chrome.homeProject?.id ?? null);
-
-	if (chrome.projectsError) {
-		return (
-			<StatePanel
-				kind={failureKind(chrome.projectsError)}
-				detail={chrome.projectsError instanceof Error ? chrome.projectsError.message : undefined}
-			/>
-		);
-	}
-	const ranked = candidates.data?.ranked ?? [];
-	// Readable recommendations (carry-forward correction): join the ranked
-	// ids with the evaluated records so real titles and summaries render —
-	// candidate ids stay in the audit detail, never as the primary text.
-	const byId = new Map((candidates.data?.evaluations ?? []).map((evaluation) => [evaluation.candidate.id, evaluation.candidate]));
-	return (
-		<section className="card-surface home-panel" data-testid="home-recommendations">
-			<div className="r-section-head">
-				<div>
-					<p className="kicker" data-tone="action">
-						DISCOVER
-					</p>
-					<h3 className="state-title">Top matches</h3>
-					<p className="state-detail">
-						{candidates.data
-							? `Ranked only on what Caddie could actually read${candidates.data.profileCountry ? ` · eligibility uses ${candidates.data.profileCountry}` : ' · no country recorded, eligibility stays UNKNOWN'}.`
-							: 'Reading the feeds this account watches…'}
-					</p>
-				</div>
-			</div>
-			{candidates.isFetching && candidates.data ? (
-				<p className="stale-note mono-id" data-testid="home-recommendations-stale">
-					updating…
-				</p>
-			) : null}
-			{candidates.isPending ? (
-				<StatePanel kind="loading" title="Reading recommendations…" />
-			) : candidates.error ? (
-				<StatePanel kind={failureKind(candidates.error)} detail={candidates.error instanceof Error ? candidates.error.message : undefined} onRetry={failureKind(candidates.error) === 'denied' ? undefined : () => void candidates.refetch()} />
-			) : ranked.length === 0 ? (
-				<StatePanel kind="empty" title="No matches read yet" detail="Nothing has been swept for this account — run the feed in Discover and this fills with real, evidenced matches." />
-			) : (
-				<ul className="rec-list">
-					{ranked.slice(0, 3).map((entry) => {
-						const candidate = byId.get(entry.candidateId);
-						return (
-							<li key={entry.candidateId} className="rec-item" data-testid={`rec-${entry.candidateId}`}>
-								<span className="rec-title">{candidate?.title ?? entry.candidateId}</span>
-								{candidate?.summary ? <span className="rec-summary">{candidate.summary}</span> : null}
-								<span className="rec-fit mono-id">
-									{entry.matchedRequirements} requirement(s) evidenced · {entry.verdict} · id {entry.candidateId}
-								</span>
-								<button
-									type="button"
-									className="btn-ghost"
-									data-testid={`rec-open-${entry.candidateId}`}
-									onClick={() => chrome.goProjectTab('/discover', {})}
-								>
-									Review in Discover
-								</button>
-							</li>
-						);
-					})}
-				</ul>
-			)}
-		</section>
-	);
-}
-
-// --- project progress ------------------------------------------------------------
-
-function ProjectProgress(): ReactElement {
-	const chrome = useWorkspaceChrome();
-	if (chrome.buildProjects.length === 0) {
-		return (
-			<section className="card-surface home-panel" data-testid="home-progress-empty">
-				<p className="state-detail">No projects yet — find a hackathon or start from an idea to begin.</p>
-			</section>
-		);
-	}
-	return (
-		<section className="card-surface home-panel" data-testid="home-progress">
-			<div className="r-section-head">
-				<div>
-					<p className="kicker" data-tone="action">
-						BUILD
-					</p>
-					<h3 className="state-title">Where your projects stand</h3>
-				</div>
-			</div>
-			<ul className="project-list">
-				{chrome.buildProjects.slice(0, 4).map((project) => (
-					<li key={project.id} className="project-row" data-testid={`home-project-${project.id}`}>
-						<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
-							{project.name}
-						</button>
-						<span className="project-row-meta mono-id" data-status={project.status}>
-							{project.status}
-						</span>
-					</li>
-				))}
-			</ul>
 		</section>
 	);
 }

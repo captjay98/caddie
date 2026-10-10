@@ -370,7 +370,7 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await page.getByTestId('composer-send').click();
 		const draft = page.getByTestId('draft-row');
 		await expect(draft).toBeVisible();
-		await expect(draft).toContainText('unsent');
+		await expect(draft).toContainText('Not sent'); // v2 §3.6 wording
 		await expect(draft).toContainText(/key [0-9a-z]/); // generated idempotency key rendered short
 		await expect(page.getByTestId('draft-retry')).toBeVisible();
 

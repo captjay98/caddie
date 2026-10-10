@@ -782,6 +782,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 										);
 									}
 								}}
+								onEditDraft={channel.editDraft}
 								onDiscardDraft={channel.discardDraft}
 							/>
 						</aside>
