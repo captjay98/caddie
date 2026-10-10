@@ -52,6 +52,7 @@ import { Channel } from '../conversation/Channel.tsx';
 import { useChannelStore, standbySource as STANDBY, type ChannelDraft } from '../conversation/channel-store.ts';
 import { useCoordinatorTransport, type CoordinatorTransport } from '../coordinator.ts';
 import { briefActionRoute } from '../brief/navigate.ts';
+import { ConvResizeHandle, useConvWidth } from './ConvResize.tsx';
 import {
 	useAccountBrief,
 	useAuthStatus,
@@ -60,9 +61,35 @@ import {
 	useProjects,
 	useSessionActor,
 	useSessionDisplayName,
+	useSessionEmail,
 } from '../queries.ts';
 
 export const THEME_KEY = 'caddie-theme';
+
+/**
+ * The v2 shell breakpoints (HANDOFF §3.1). The two-panel threshold moved from
+ * 768px to 1081px so the content column never drops under 520px; 761–1080 is a
+ * tablet band where Caddie opens as a right overlay from a top-bar button.
+ */
+export type ViewportMode = 'mobile' | 'tablet' | 'desktop';
+
+const CONV_OPEN_KEY = 'caddie:conv-open';
+
+function loadConvOpen(): boolean {
+	try {
+		return localStorage.getItem(CONV_OPEN_KEY) !== '0';
+	} catch {
+		return true;
+	}
+}
+
+function saveConvOpen(open: boolean): void {
+	try {
+		localStorage.setItem(CONV_OPEN_KEY, open ? '1' : '0');
+	} catch {
+		// private mode: open/closed stays session-only
+	}
+}
 
 function currentTheme(): 'light' | 'dark' {
 	return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
@@ -122,6 +149,16 @@ interface WorkspaceChromeContextValue {
 	mobileConversation: boolean;
 	setMobileConversation: (open: boolean) => void;
 	isDesktop: boolean;
+	/** The v2 viewport band: mobile (≤760) / tablet overlay (761–1080) / desktop two-panel (≥1081). */
+	viewportMode: ViewportMode;
+	/** The Caddie panel visibility for the CURRENT mode (excludes full-screen). */
+	convVisible: boolean;
+	/** Tablet: toggle the Caddie overlay from the top-bar button. */
+	toggleConvOverlay: () => void;
+	/** Desktop: close/reopen the persistent panel (closed = the 64px rail). */
+	setConvOpen: (open: boolean) => void;
+	/** The resizable panel width (desktop); `resetConvWidth` backs Settings › Appearance. */
+	convWidth: { reset: () => void; frac: number };
 	/** The channel store + run transport, bound to the conversation scope. */
 	channel: {
 		drafts: readonly ChannelDraft[];
@@ -175,9 +212,10 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 
 	const projects = useProjects(actorMemo);
 	const displayName = useSessionDisplayName();
+	const sessionEmail = useSessionEmail();
 	const [theme, setTheme] = useState<'light' | 'dark'>(currentTheme);
 	const [accountOpen, setAccountOpen] = useState(false);
-	const isDesktop = useIsDesktop();
+	const { mode: viewportMode, isDesktop } = useViewportMode();
 
 	// The account brief (approved navigation 2026-10-09): ONE shared cache
 	// entry feeds the unseen badge on the Brief entries, the compact urgent
@@ -231,11 +269,19 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	const conversationResolving =
 		conversationKind === 'general' && homeProject === null && !projects.error;
 
+	// Conversation panel states (v2 shell, HANDOFF §3.2): open / closed rail /
+	// full screen (?pane=channel), per viewport band.
+	//   desktop ≥1081  persistent right panel; closed = a 64px rail (remembered)
+	//   tablet 761–1080 right overlay min(420px,100vw) + scrim, from the top bar
+	//   mobile ≤760    the conversation IS the Chat tab (pane semantics, kept)
+	const chatFull = search.pane === 'channel';
+
 	// Mobile: Chat is the default tab — the conversation shows full-height on
 	// `/` by default; the Brief tab is the second destination (?pane=brief).
 	// On other routes the conversation opens on demand (?pane=channel).
 	const mobileConversation =
-		search.pane === 'channel' || (!isDesktop && props.nav === 'brief' && search.pane === undefined);
+		viewportMode === 'mobile' &&
+		(search.pane === 'channel' || (props.nav === 'brief' && search.pane === undefined));
 	const setMobileConversation = (open: boolean) => {
 		const nextPane: 'channel' | 'brief' | undefined = open ? 'channel' : props.nav === 'brief' ? 'brief' : undefined;
 		void navigate({
@@ -246,6 +292,33 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 			}),
 		});
 	};
+
+	// Desktop: the persistent panel's open/closed is remembered per browser.
+	const [convOpen, setConvOpenState] = useState(loadConvOpen);
+	const setConvOpen = (open: boolean) => {
+		setConvOpenState(open);
+		saveConvOpen(open);
+	};
+
+	// Tablet: the overlay is a transient choice (the button in the top bar).
+	const [tabletOpen, setTabletOpen] = useState(false);
+	const toggleConvOverlay = () => setTabletOpen((open) => !open);
+
+	// Esc closes the tablet overlay (the scrim click does the same).
+	useEffect(() => {
+		if (viewportMode !== 'tablet' || !tabletOpen) return;
+		const onKey = (event: globalThis.KeyboardEvent) => {
+			if (event.key === 'Escape') setTabletOpen(false);
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	}, [viewportMode, tabletOpen]);
+
+	// The resizable width only applies to the desktop sized column.
+	const convWidth = useConvWidth(viewportMode === 'desktop');
+
+	const convVisible =
+		viewportMode === 'desktop' ? convOpen : viewportMode === 'tablet' ? tabletOpen : mobileConversation;
 
 	// The channel store + run transport bind to the CONVERSATION scope (not the
 	// selected build project), so global-route composer traffic stays on the
@@ -271,7 +344,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		// On mobile, jump to the conversation so the sent message and its reply
 		// are actually visible (the composer rides every route, but the
 		// transcript only shows in the channel pane).
-		if (!isDesktop && conversationKind !== 'none') setMobileConversation(true);
+		if (viewportMode === 'mobile' && conversationKind !== 'none') setMobileConversation(true);
 	}
 
 	// Home is created server-side on first fetch; refresh the list once so the
@@ -456,6 +529,11 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		mobileConversation,
 		setMobileConversation,
 		isDesktop,
+		viewportMode,
+		convVisible,
+		toggleConvOverlay,
+		setConvOpen,
+		convWidth: { reset: convWidth.reset, frac: convWidth.frac },
 		channel,
 		transport,
 		sendText,
@@ -464,30 +542,34 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		goProjectTab,
 	};
 
+	const panelState = chatFull ? 'full' : convVisible ? 'open' : 'closed';
+
 	return (
 		<WorkspaceChromeContext.Provider value={context}>
-			<div className="shell app-shell" data-testid="shell">
+			<div className="shell app-shell" data-testid="shell" data-viewport={viewportMode}>
 				<a className="skip-link" href="#main">
 					Skip to content
 				</a>
-				<div className="app-split">
+				<div className="app-split" data-conv-state={panelState} data-testid="app-split">
 {/* ---------------- LEFT PANEL: capsule nav + content ---------------- */}
 						<section className="shell-left" data-testid="shell-left" aria-label="Caddie content">
 							{authenticated ? (
-								isDesktop ? (
+								viewportMode === 'mobile' ? (
+									<MobileHeader
+										nav={props.nav}
+										accountOpen={accountOpen}
+										setAccountOpen={setAccountOpen}
+										displayName={displayName.data ?? null}
+									/>
+								) : (
 									<NavCapsule
 										nav={props.nav}
 										accountOpen={accountOpen}
 										setAccountOpen={setAccountOpen}
 										displayName={displayName.data ?? null}
 										unseenCount={unseenCount}
-									/>
-								) : (
-									<MobileHeader
-										nav={props.nav}
-										accountOpen={accountOpen}
-										setAccountOpen={setAccountOpen}
-										displayName={displayName.data ?? null}
+										showConvToggle={viewportMode === 'tablet'}
+										convOpen={tabletOpen}
 									/>
 								)
 							) : (
@@ -498,9 +580,9 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 									<span className="capsule-spacer" />
 									<button
 										type="button"
-										className="capsule-icon"
+										className="capsule-icon theme-toggle-btn"
 										title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-										aria-label="Toggle theme"
+										aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
 										data-testid="theme-toggle"
 										onClick={toggleTheme}
 									>
@@ -523,17 +605,48 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 
 					{/* ---------------- RIGHT PANEL: persistent conversation ---------------- */}
 					{conversationKind !== 'none' ? (
+					<>
+						{/* Tablet (761–1080): the overlay opens over a scrim from the
+						    top-bar Caddie button; clicking the scrim or Esc closes it. */}
+						{viewportMode === 'tablet' && tabletOpen && !chatFull ? (
+							<div className="conv-scrim" data-testid="conv-scrim" onClick={() => setTabletOpen(false)} />
+						) : null}
 					<aside
 						className="shell-right"
 						data-testid="conversation-panel"
-						data-open={mobileConversation && !isDesktop ? 'true' : 'false'}
+						data-open={viewportMode === 'mobile' && mobileConversation ? 'true' : 'false'}
+						data-conv-state={panelState}
 						aria-label="Caddie conversation"
+						style={
+							viewportMode === 'desktop' && convOpen && !chatFull
+								? { width: `${convWidth.widthPx}px` }
+								: undefined
+						}
 					>
+							{/* Closed rail (desktop): only the character, click reopens. */}
+							{viewportMode === 'desktop' && !convOpen && !chatFull ? (
+								<div className="conv-rail" data-testid="conv-rail">
+									<button
+										type="button"
+										className="conv-rail-button"
+										data-testid="conv-rail-open"
+										aria-label="Show Caddie"
+										onClick={() => setConvOpen(true)}
+									>
+										<span className="conv-avatar" aria-hidden="true">
+											C
+										</span>
+									</button>
+								</div>
+							) : null}
+							{/* The resizable left edge (desktop two-panel only). */}
+							{viewportMode === 'desktop' && convOpen && !chatFull ? <ConvResizeHandle width={convWidth} /> : null}
 							{/* Floating conversation head — Today-inspired but our own: a slim
-						    left-aligned row over the transcript. The Caddie mark sits
-						    top-left at chip size; the pill beside it is the conversation
-						    scope (General = the account-level chat; a project name inside
-						    a project). Mobile gets the Search/Account chips on the right. */}
+							    left-aligned row over the transcript. The Caddie mark sits
+							    top-left at chip size; the pill beside it is the conversation
+							    scope (General = the account-level chat; a project name inside
+							    a project). Mobile gets the Search/Account chips on the right;
+							    desktop gets expand (full-screen chat) and close (the rail). */}
 							<div className="conv-head-float" data-testid="conv-context" data-scope={conversationKind}>
 								<span className="conv-head-left">
 									<span className="conv-avatar" aria-hidden="true">
@@ -543,14 +656,68 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 										{conversationLabel}
 									</span>
 								</span>
-								{!isDesktop ? (
-									<span className="conv-head-chips">
-										<Link to="/search" className="conv-chip" data-testid="conv-search" title="Search" search={withoutPane}>
-											<Icon name="search" title="Search" />
-										</Link>
-										<AccountMenu accountOpen={accountOpen} setAccountOpen={setAccountOpen} displayName={displayName.data ?? null} />
-									</span>
-								) : null}
+								<span className="conv-head-chips">
+									{!isDesktop ? (
+										<>
+											<Link to="/search" className="conv-chip" data-testid="conv-search" title="Search" search={withoutPane}>
+												<Icon name="search" title="Search" />
+											</Link>
+											<AccountMenu accountOpen={accountOpen} setAccountOpen={setAccountOpen} displayName={displayName.data ?? null} />
+										</>
+									) : null}
+									{chatFull ? (
+										<button
+											type="button"
+											className="conv-head-btn"
+											data-testid="conv-exit-full"
+											aria-label="Back to the page"
+											title="Back to the page"
+											onClick={() => {
+												void navigate({ to: '.', search: (prev: Record<string, unknown>) => ({ ...prev, pane: undefined }) });
+											}}
+										>
+											<Icon name="collapse" title="Back to the page" />
+										</button>
+									) : null}
+									{viewportMode === 'desktop' && convOpen && !chatFull ? (
+										<>
+											<button
+												type="button"
+												className="conv-head-btn"
+												data-testid="conv-expand"
+												aria-label="Open Caddie full screen"
+												title="Open Caddie full screen"
+											onClick={() => {
+												void navigate({ to: '.', search: (prev: Record<string, unknown>) => ({ ...prev, pane: 'channel' as const }) });
+											}}
+											>
+												<Icon name="expand" title="Open Caddie full screen" />
+											</button>
+											<button
+												type="button"
+												className="conv-head-btn"
+												data-testid="conv-collapse"
+												aria-label="Hide Caddie"
+												title="Hide Caddie"
+												onClick={() => setConvOpen(false)}
+											>
+												<Icon name="panel" title="Hide Caddie" />
+											</button>
+										</>
+									) : null}
+									{viewportMode === 'tablet' && tabletOpen && !chatFull ? (
+										<button
+											type="button"
+											className="conv-head-btn"
+											data-testid="conv-collapse"
+											aria-label="Close Caddie"
+											title="Close Caddie"
+											onClick={() => setTabletOpen(false)}
+										>
+											<Icon name="x" title="Close Caddie" />
+										</button>
+									) : null}
+								</span>
 							</div>
 							{/* The urgent decision notice: real state, one compact line, never
 							    covers the transcript or the composer; opening it navigates to
@@ -591,7 +758,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								transportLive={transport?.hasRun === true}
 								drafts={channel.drafts}
 								projectId={conversationProjectId}
-								composerHidden={!isDesktop}
+								composerHidden={viewportMode === 'mobile'}
 								composerText={channel.composerText}
 								onComposerTextChange={channel.setComposerText}
 								resolving={conversationResolving}
@@ -609,6 +776,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								onDiscardDraft={channel.discardDraft}
 							/>
 						</aside>
+					</>
 					) : null}
 				</div>
 
@@ -616,7 +784,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 				    Desktop renders its composer inside the persistent right-panel
 				    Channel, so the bottom nav (with its own composer) is mobile-only —
 				    rendering both would duplicate composer-input in the desktop DOM. */}
-{authenticated && !isDesktop ? (
+{authenticated && viewportMode === 'mobile' ? (
 						<MobileNav
 							nav={props.nav}
 							sendText={sendText}
@@ -642,18 +810,22 @@ const withoutPane = (prev: Record<string, unknown>) => {
 	return rest;
 };
 
-/** The desktop floating navigation capsule: wordmark + the three global
+/** The desktop/tablet floating navigation capsule: wordmark + the three global
  *  destinations + Search, theme and Account, all in one rounded container
  *  that sticks inside the left panel. The unseen brief badge sits on the
- *  Brief tab — absolutely positioned so it never shifts tab alignment. */
+ *  Brief tab — absolutely positioned so it never shifts tab alignment. In the
+ *  tablet band (761–1080) the capsule also carries the Caddie button that
+ *  opens the conversation as a right overlay (HANDOFF §3.1). */
 function NavCapsule(props: {
 	nav: WorkspaceNavId;
 	accountOpen: boolean;
 	setAccountOpen: (open: boolean) => void;
 	displayName: string | null;
 	unseenCount: number;
+	showConvToggle?: boolean;
+	convOpen?: boolean;
 }): ReactElement {
-	const { theme, toggleTheme } = useWorkspaceChrome();
+	const { theme, toggleTheme, toggleConvOverlay } = useWorkspaceChrome();
 	return (
 		<nav className="nav-capsule" aria-label="Primary" data-testid="nav-capsule">
 			<Link to="/" className="capsule-wordmark" data-testid="wordmark" search={withoutPane}>
@@ -677,6 +849,20 @@ function NavCapsule(props: {
 				</Link>
 			))}
 			<span className="capsule-spacer" />
+			{props.showConvToggle ? (
+				<button
+					type="button"
+					className="capsule-conv-toggle"
+					data-testid="conv-toggle"
+					aria-expanded={props.convOpen ? 'true' : 'false'}
+					aria-label={props.convOpen ? 'Hide Caddie' : 'Show Caddie'}
+					title={props.convOpen ? 'Hide Caddie' : 'Show Caddie'}
+					onClick={toggleConvOverlay}
+				>
+					<Icon name="chat" title="Caddie" />
+					Caddie
+				</button>
+			) : null}
 			<Link
 				to="/search"
 				className="capsule-icon"
@@ -688,9 +874,9 @@ function NavCapsule(props: {
 			</Link>
 			<button
 				type="button"
-				className="capsule-icon"
+				className="capsule-icon theme-toggle-btn"
 				title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-				aria-label="Toggle theme"
+				aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
 				data-testid="theme-toggle"
 				onClick={toggleTheme}
 			>
@@ -774,15 +960,17 @@ function MobileHeader(props: {
 	);
 }
 
-/** Avatar + the account menu (Profile, Memory, Connections, Automations,
- *  Usage, Settings, theme, Sign out) — shared by the desktop capsule and the
- *  mobile header. */
+/** Avatar + the account menu. The menu head states the real session identity:
+ *  the name and the account email (U01). The sign-in provider is NOT shown —
+ *  `/api/auth/get-session` carries no provider, and the client never fabricates
+ *  one (evidence rule); a provider line needs a server field first. */
 function AccountMenu(props: {
 	accountOpen: boolean;
 	setAccountOpen: (open: boolean) => void;
 	displayName: string | null;
 }): ReactElement {
 	const { signOut, theme, toggleTheme } = useWorkspaceChrome();
+	const email = useSessionEmail().data ?? null;
 	return (
 		<div
 			className="account-menu"
@@ -807,6 +995,10 @@ function AccountMenu(props: {
 			</button>
 			{props.accountOpen ? (
 				<div className="account-menu-pop" role="menu" data-testid="account-menu-pop">
+					<div className="account-menu-head" data-testid="account-menu-head">
+						<span className="account-menu-name">{props.displayName ?? 'Your account'}</span>
+						{email ? <span className="account-menu-email">{email}</span> : null}
+					</div>
 					<Link to="/search" search={keepSearch} role="menuitem" data-testid="account-search" onClick={() => props.setAccountOpen(false)}>
 						<Icon name="search" title="Search" /> Search
 					</Link>
@@ -932,25 +1124,28 @@ function MobileNav(props: {
 	);
 }
 
-function useIsDesktop(): boolean {
-	const [matches, setMatches] = useState(
-		() => typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches,
-	);
-	useMediaQueryEffect('(min-width: 768px)', setMatches);
-	return matches;
-}
-
-function useMediaQueryEffect(query: string, onChange: (matches: boolean) => void): void {
-	const [mq] = useState(() => window.matchMedia(query));
+/**
+ * The v2 viewport bands (HANDOFF §3.1): ≤760 mobile, 761–1080 tablet overlay,
+ * ≥1081 two-panel desktop. Evaluated on every resize so a window dragged
+ * across a boundary switches layout immediately.
+ */
+function useViewportMode(): { mode: ViewportMode; isDesktop: boolean } {
+	const [mode, setMode] = useState<ViewportMode>(() => {
+		if (typeof window === 'undefined') return 'desktop';
+		const w = window.innerWidth;
+		return w >= 1081 ? 'desktop' : w > 760 ? 'tablet' : 'mobile';
+	});
 	useEffect(() => {
-		const handler = () => onChange(mq.matches);
-		mq.addEventListener('change', handler);
-		window.addEventListener('resize', handler);
-		return () => {
-			mq.removeEventListener('change', handler);
-			window.removeEventListener('resize', handler);
+		const evaluate = () => {
+			const w = window.innerWidth;
+			const next: ViewportMode = w >= 1081 ? 'desktop' : w > 760 ? 'tablet' : 'mobile';
+			setMode((current) => (current === next ? current : next));
 		};
-	}, [mq, onChange]);
+		evaluate();
+		window.addEventListener('resize', evaluate);
+		return () => window.removeEventListener('resize', evaluate);
+	}, []);
+	return { mode, isDesktop: mode === 'desktop' };
 }
 
 /** The unseen-brief badge: absolutely positioned so it never shifts tab

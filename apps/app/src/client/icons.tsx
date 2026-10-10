@@ -39,7 +39,9 @@ export type IconName =
 	| 'plug'
 	| 'send'
 	| 'chat'
-	| 'home';
+	| 'home'
+	| 'expand'
+	| 'collapse';
 
 interface IconProps {
 	name: IconName;
@@ -190,6 +192,16 @@ const PATHS: Record<IconName, ReactElement> = {
 			strokeLinecap="round"
 			strokeLinejoin="round"
 		/>
+	),
+	expand: (
+		<>
+			<path d="M10 2.5h3.5V6M6 13.5H2.5V10M13.5 2.5 9.5 6.5M2.5 13.5l4-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
+	),
+	collapse: (
+		<>
+			<path d="M14 6h-3.5V2.5M2 10h3.5v3.5M10.5 6.5 14 2.5M5.5 9.5 2 13.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
 	),
 };
 

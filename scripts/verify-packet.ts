@@ -128,6 +128,63 @@ const PACKET_MAP: Record<string, Record<Category, string[]>> = {
 		browser: ['tests/browser/release.spec.ts'],
 		live: ['tests/live/release.spec.ts'],
 	},
+	// --- Caddie v2 redesign (docs/design/2026-10-10-v2/PACKETS.md) -------------
+	U01: {
+		tests: [],
+		browser: ['tests/browser/workspace.spec.ts', 'tests/browser/shell-v2.spec.ts'],
+		live: [],
+	},
+	U02: {
+		tests: [],
+		browser: ['tests/browser/conversation.spec.ts', 'tests/browser/shell-v2.spec.ts'],
+		live: [],
+	},
+	U03: {
+		tests: [],
+		browser: ['tests/browser/shell-v2.spec.ts', 'tests/browser/states.spec.ts'],
+		live: [],
+	},
+	U04: {
+		tests: [],
+		browser: ['tests/browser/brief.spec.ts', 'tests/browser/conversation.spec.ts'],
+		live: [],
+	},
+	U05: {
+		tests: [],
+		browser: ['tests/browser/discovery.spec.ts', 'tests/browser/discovery-journey.spec.ts', 'tests/browser/projects-v2.spec.ts'],
+		live: [],
+	},
+	U06: {
+		tests: [],
+		browser: ['tests/browser/artifacts.spec.ts', 'tests/browser/project-v2.spec.ts'],
+		live: [],
+	},
+	U07: {
+		tests: [],
+		browser: ['tests/browser/submission.spec.ts', 'tests/browser/check-v2.spec.ts'],
+		live: [],
+	},
+	U08: {
+		tests: [],
+		browser: ['tests/browser/settings.spec.ts', 'tests/browser/project-settings.spec.ts'],
+		live: [],
+	},
+	U09: {
+		tests: [],
+		browser: ['tests/browser/auth.spec.ts', 'tests/browser/search.spec.ts', 'tests/browser/onboarding-v2.spec.ts'],
+		live: [],
+	},
+	U10: {
+		tests: [],
+		browser: ['tests/browser/landing.spec.ts'],
+		live: [],
+	},
+	B01: { tests: ['tests/discovery-saved.integration.test.ts'], browser: [], live: [] },
+	B02: { tests: ['tests/search-isolation.test.ts'], browser: [], live: [] },
+	B03: { tests: ['tests/stack-notify.integration.test.ts'], browser: [], live: [] },
+	B04: { tests: ['tests/plan-decisions.integration.test.ts'], browser: [], live: [] },
+	B05: { tests: ['tests/conversation-scope.test.ts'], browser: ['tests/browser/conversation.spec.ts'], live: [] },
+	B06: { tests: ['tests/approval-card.test.ts'], browser: [], live: [] },
 };
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));

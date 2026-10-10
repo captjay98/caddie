@@ -2365,7 +2365,12 @@ a.btn-ghost.topbar-nav-link {
 }
 
 .shell-right {
-	flex: 0 0 clamp(340px, 40%, 560px);
+	/* Width comes from the inline style driven by the persisted fraction
+	   (ConvResize, HANDOFF §3.2). flex-basis stays auto so the inline width
+	   actually wins; the band media queries below define the non-desktop
+	   layouts. */
+	flex: 0 0 auto;
+	width: clamp(340px, 40%, 560px);
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
@@ -2990,4 +2995,302 @@ a.btn-ghost.topbar-nav-link {
 	border-color: color-mix(in srgb, var(--color-action) 50%, transparent);
 	background: color-mix(in srgb, var(--color-action) 12%, transparent);
 	color: var(--color-action);
+}
+
+/* ==========================================================================
+   Caddie v2 shell (U01, 2026-10-10) — three viewport bands, resizable panel,
+   closed rail, full-screen chat, tablet overlay. Later rules win at equal
+   specificity, so this section overrides the legacy breakpoint rules above.
+   ========================================================================== */
+
+/* --- full-screen chat (?pane=channel): the conversation is the whole app --- */
+.app-split[data-conv-state='full'] .shell-left {
+	display: none;
+}
+.app-split[data-conv-state='full'] .shell-right {
+	flex: 1 1 auto;
+	width: auto;
+	border-left: none;
+	border-right: none;
+}
+.app-split[data-conv-state='full'] .shell-right::before {
+	display: none;
+}
+/* On desktop the chat reads as a centered column over the canvas, not a panel. */
+@media (min-width: 1081px) {
+	.app-split[data-conv-state='full'] .shell-right {
+		max-width: 780px;
+		margin: 0 auto;
+		background: transparent;
+	}
+}
+
+/* --- the closed rail (desktop): 64px, character only, click reopens -------- */
+.conv-rail {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.8rem 0;
+	width: 100%;
+}
+
+.conv-rail-button {
+	width: 44px;
+	height: 44px;
+	border-radius: 12px;
+	display: grid;
+	place-items: center;
+	border: none;
+	background: transparent;
+	cursor: pointer;
+}
+
+.conv-rail-button:hover {
+	background: color-mix(in srgb, var(--color-bright) 6%, transparent);
+}
+
+/* --- the resize handle (desktop two-panel) ---------------------------------- */
+.conv-resize-handle {
+	position: absolute;
+	z-index: 7;
+	left: -5px;
+	top: 0;
+	bottom: 0;
+	width: 10px;
+	cursor: col-resize;
+	touch-action: none;
+}
+
+.conv-resize-handle::after {
+	content: '';
+	position: absolute;
+	left: 4px;
+	top: 0;
+	bottom: 0;
+	width: 2px;
+	border-radius: 2px;
+	background: transparent;
+	transition: background 0.12s;
+}
+
+.conv-resize-handle:hover::after,
+.conv-resize-handle:focus-visible::after,
+body.conv-resizing .conv-resize-handle::after {
+	background: var(--color-action);
+}
+
+.conv-resize-handle:focus-visible {
+	outline: none;
+}
+
+.conv-resize-grip {
+	position: absolute;
+	left: -1px;
+	top: 50%;
+	width: 12px;
+	height: 36px;
+	margin-top: -18px;
+	border-radius: 6px;
+	background: var(--color-raised);
+	border: 1px solid var(--color-line);
+	display: grid;
+	place-content: center;
+	gap: 3px;
+	opacity: 0;
+	transition: opacity 0.12s;
+}
+
+.conv-resize-grip i {
+	width: 2px;
+	height: 2px;
+	border-radius: 50%;
+	background: var(--color-muted);
+}
+
+.conv-resize-handle:hover .conv-resize-grip,
+.conv-resize-handle:focus-visible .conv-resize-grip,
+body.conv-resizing .conv-resize-grip {
+	opacity: 1;
+}
+
+body.conv-resizing,
+body.conv-resizing * {
+	cursor: col-resize !important;
+	user-select: none !important;
+}
+
+.conv-width-tip {
+	position: absolute;
+	z-index: 8;
+	top: 70px;
+	left: 50%;
+	transform: translateX(-50%);
+	padding: 4px 9px;
+	border-radius: 999px;
+	background: var(--color-bright);
+	color: var(--color-ink);
+	font-family: var(--font-mono);
+	font-size: var(--r-meta);
+	pointer-events: none;
+}
+
+/* --- the tablet overlay + scrim (761–1080) ----------------------------------
+   Caddie opens from the top-bar button over a scrim; closed by default. */
+.conv-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: 39;
+	background: rgb(3 5 9 / 0.55);
+}
+
+@media (min-width: 761px) and (max-width: 1080px) {
+	.shell-right {
+		position: fixed;
+		z-index: 40;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		width: min(420px, 100vw) !important;
+		max-width: none;
+		box-shadow: 0 24px 60px rgb(0 0 0 / 0.45);
+		transform: translateX(102%);
+		visibility: hidden;
+		transition: transform 0.2s ease, visibility 0.2s;
+	}
+	.shell-right[data-conv-state='open'] {
+		transform: none;
+		visibility: visible;
+	}
+	/* Full-screen chat in the tablet band covers the viewport like on mobile. */
+	.shell-right[data-conv-state='full'] {
+		transform: none;
+		visibility: visible;
+		position: fixed;
+		inset: 0;
+		width: 100vw !important;
+		max-width: none;
+		background: var(--color-panel);
+	}
+	/* No bottom nav / mobile header in the tablet band; content is full width. */
+	.bottom-nav {
+		display: none !important;
+	}
+	.shell-main {
+		padding-bottom: 1.4rem;
+	}
+	.mobile-header {
+		display: flex;
+	}
+}
+
+/* --- desktop two-panel (≥1081): closed rail, width from the fraction -------- */
+@media (min-width: 1081px) {
+	.shell-right[data-conv-state='closed'] {
+		width: 64px;
+		align-items: center;
+	}
+	.shell-right[data-conv-state='closed'] > :not(.conv-rail) {
+		display: none;
+	}
+	/* Reading column inside a wide panel: messages stay ~720px, centered. */
+	.shell-right[data-conv-state='open'] .transcript {
+		padding-inline: max(0.9rem, calc((100% - 720px) / 2));
+	}
+	/* The desktop conversation head carries expand + collapse actions. */
+	.conv-head-btn {
+		width: 2.1rem;
+		height: 2.1rem;
+		border-radius: 50%;
+		display: grid;
+		place-items: center;
+		background: var(--color-panel);
+		border: 1px solid var(--color-line-soft);
+		color: var(--color-muted);
+		cursor: pointer;
+		box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
+	}
+	.conv-head-btn:hover {
+		color: var(--color-action);
+	}
+}
+
+.conv-head-chips {
+	gap: 0.35rem;
+}
+
+/* --- the capsule Caddie button (tablet band) -------------------------------- */
+.capsule-conv-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	padding: 0.32rem 0.7rem;
+	border-radius: 999px;
+	border: 1px solid var(--color-line);
+	color: var(--color-bright);
+	font-size: 13px;
+	font-weight: 600;
+	background: var(--color-panel);
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.capsule-conv-toggle:hover {
+	border-color: color-mix(in srgb, var(--color-action) 55%, transparent);
+	color: var(--color-action);
+}
+
+/* --- 44px theme toggle (HANDOFF §3.9) ---------------------------------------
+   The label names the theme it switches TO; a 44px hit area everywhere. */
+.theme-toggle-btn {
+	width: 2.75rem;
+	height: 2.75rem;
+}
+
+/* --- account menu identity head --------------------------------------------- */
+.account-menu-head {
+	display: grid;
+	gap: 0.15rem;
+	padding: 0.5rem 0.6rem 0.55rem;
+	border-bottom: 1px solid var(--color-line-soft);
+}
+
+.account-menu-name {
+	font-size: 13px;
+	font-weight: 650;
+	color: var(--color-bright);
+}
+
+.account-menu-email {
+	font-family: var(--font-mono);
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+	/* Mobile: the conversation is a full-height pane (chat tab), never a side
+	   column; the bottom bar keeps its clearance rules from above. */
+	.shell-right {
+		display: none;
+	}
+	.shell-right[data-conv-state='open'] {
+		display: flex;
+	}
+	.shell-right[data-conv-state='full'] {
+		display: flex;
+	}
+	.app-split[data-conv-state='full'] .shell-right {
+		flex: 1 1 auto;
+		width: 100%;
+		max-width: none;
+		border-left: none;
+		background: var(--color-panel);
+	}
+	.theme-toggle-btn {
+		width: 44px;
+		height: 44px;
+	}
 }

@@ -546,16 +546,22 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 					clientWidth: document.documentElement.clientWidth,
 				}));
 
-			await page.goto(`${BASE}/app/`);
-			// Mobile lands on the conversation (Home IS Chat); the brief is one tab
-			// away. Desktop shows the persistent right panel.
-			await expect(page.getByTestId(width < 768 ? 'conversation-panel' : 'conversation-panel')).toBeVisible();
-			if (width < 768) {
-				await page.goto(`${BASE}/app/?pane=brief`);
-				await expect(page.getByTestId('brief-screen')).toBeVisible();
-				expect(await assertNoOverflow()).toEqual({ scrollWidth: width, clientWidth: width });
-			}
+		// Tablet band (761–1080): content full width, Caddie opens as an overlay
+		// from the top-bar button (v2 shell U01).
+		await page.goto(`${BASE}/app/`);
+		if (width === 768) {
+			await expect(page.getByTestId('conv-toggle')).toBeVisible();
+			await page.getByTestId('conv-toggle').click();
+			await expect(page.getByTestId('conversation-panel')).toBeVisible();
+			await page.getByTestId('conv-collapse').click();
+		} else if (width < 768) {
+			// Mobile lands on the conversation (the chat tab is the default).
+			await expect(page.getByTestId('conversation-panel')).toBeVisible();
+			await page.goto(`${BASE}/app/?pane=brief`);
+			await expect(page.getByTestId('brief-screen')).toBeVisible();
 			expect(await assertNoOverflow()).toEqual({ scrollWidth: width, clientWidth: width });
+		}
+		expect(await assertNoOverflow()).toEqual({ scrollWidth: width, clientWidth: width });
 
 			// Build surface with real rows (desktop tab strip / mobile bottom nav).
 			await page.goto(`${BASE}/app/runs?project=proj-a`);

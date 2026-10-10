@@ -41,7 +41,7 @@ export function useAuthStatus() {
 }
 
 interface SessionPayload {
-	user?: { id?: unknown; name?: unknown } | null;
+	user?: { id?: unknown; name?: unknown; email?: unknown } | null;
 }
 
 /**
@@ -92,6 +92,17 @@ export type ActorScope = { actorId: string | null };
  */
 export function useSessionDisplayName() {
 	return useQuery({ ...sessionQueryOptions(true), select: sessionDisplayName });
+}
+
+function sessionEmail(payload: SessionPayload | null | undefined): string | null {
+	const email = payload?.user?.email;
+	return typeof email === 'string' && email.trim() !== '' ? email : null;
+}
+
+/** The verified session's account email — the account menu's identity line
+ *  (U01). Shares the ['auth','session'] cache; never a fabricated provider. */
+export function useSessionEmail() {
+	return useQuery({ ...sessionQueryOptions(true), select: sessionEmail });
 }
 
 export function useProjects(actor: ActorScope) {
