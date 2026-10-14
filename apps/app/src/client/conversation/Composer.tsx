@@ -1,18 +1,57 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactElement, KeyboardEvent } from 'react';
 import { Icon } from '../icons.tsx';
 import { COMPOSER_PLACEHOLDER } from '../copy.ts';
+import { useSpeechRecognition } from './useSpeechRecognition.ts';
+import {
+	type InputAttachment,
+	type ImageMediaType,
+	type FileMediaType,
+	MAX_IMAGE_BYTES,
+	MAX_FILE_BYTES,
+} from '@caddie/contracts';
 
 /**
  * Composer — Enter sends, Shift+Enter breaks a line, visible pending state.
- * The transport owns delivery: `onSend` goes to the channel store, which
- * hands the text to the run transport with an idempotency key (duplicate-send
- * protection). While a run is working the composer is held with the reason
- * shown on the send key.
+ * Stage 3: an attach button lets the user add images (routed to a vision
+ * model) and text files (.txt/.md/.csv, read directly). Each pick is guarded
+ * client-side (allowed MIME + size ceiling) BEFORE it becomes an attachment;
+ * the server re-validates against the same contract (never trusts the client).
+ * Attachments ride the send alongside text; a message may carry text, an
+ * attachment, or both — never nothing.
  */
 
+const IMAGE_TYPES: readonly ImageMediaType[] = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+const FILE_TYPES: readonly FileMediaType[] = ['application/pdf', 'text/plain', 'text/markdown', 'text/csv'];
+const ACCEPT = [...IMAGE_TYPES, ...FILE_TYPES, '.md', '.markdown', '.csv', '.txt'].join(',');
+const MAX_ATTACHMENTS = 6;
+
+/** A picked file plus its object URL + the typed attachment the send carries. */
+interface PickedAttachment {
+	readonly id: string;
+	readonly attachment: InputAttachment;
+	readonly isImage: boolean;
+}
+
+function classifyMediaType(file: File): { ok: true; isImage: boolean; attachment: Omit<InputAttachment, 'url'> } | { ok: false; reason: string } {
+	const type = file.type;
+	if ((IMAGE_TYPES as readonly string[]).includes(type)) {
+		if (file.size > MAX_IMAGE_BYTES) return { ok: false, reason: `${file.name} is too large (images max ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)} MB)` };
+		if (file.size === 0) return { ok: false, reason: `${file.name} is empty` };
+		return { ok: true, isImage: true, attachment: { kind: 'image', mediaType: type as ImageMediaType, filename: file.name, sizeBytes: file.size } };
+	}
+	// Some browsers report '' or 'application/octet-stream' for .md/.csv — map by extension.
+	const byExt: Record<string, FileMediaType> = { md: 'text/markdown', markdown: 'text/markdown', csv: 'text/csv', txt: 'text/plain' };
+	const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+	const resolved: FileMediaType | undefined = (FILE_TYPES as readonly string[]).includes(type) ? (type as FileMediaType) : byExt[ext];
+	if (!resolved) return { ok: false, reason: `${file.name} is not a supported type (images, PDF, .txt, .md, .csv)` };
+	if (file.size > MAX_FILE_BYTES) return { ok: false, reason: `${file.name} is too large (files max ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB)` };
+	if (file.size === 0) return { ok: false, reason: `${file.name} is empty` };
+	return { ok: true, isImage: false, attachment: { kind: 'file', mediaType: resolved, filename: file.name, sizeBytes: file.size } };
+}
+
 export function Composer(props: {
-	onSend: (text: string) => void;
+	onSend: (text: string, attachments: readonly InputAttachment[]) => void;
 	/** Transport busy (submitted/streaming) or no project selected. */
 	disabled?: boolean;
 	disabledReason?: string;
@@ -29,12 +68,67 @@ export function Composer(props: {
 	const value = props.value ?? localValue;
 	const setValue = props.onValueChange ?? setLocalValue;
 	const disabled = Boolean(props.disabled);
+	const [picked, setPicked] = useState<PickedAttachment[]>([]);
+	const [attachError, setAttachError] = useState<string | null>(null);
+	const fileRef = useRef<HTMLInputElement>(null);
+
+	// Stage 4 — local voice dictation. Each committed phrase is appended to the
+	// composer text (editable before send); voice NEVER auto-sends. Hidden
+	// entirely when the browser has no SpeechRecognition.
+	const speech = useSpeechRecognition({
+		onFinal: (phrase) => {
+			if (!phrase) return;
+			const current = props.value ?? localValue;
+			const next = current ? `${current} ${phrase}` : phrase;
+			setValue(next);
+		},
+	});
+	function toggleDictation() {
+		if (speech.listening) speech.stop();
+		else speech.start();
+	}
+
+	function addFiles(files: FileList | null) {
+		if (!files || files.length === 0) return;
+		setAttachError(null);
+		const next: PickedAttachment[] = [];
+		for (const file of Array.from(files)) {
+			if (picked.length + next.length >= MAX_ATTACHMENTS) {
+				setAttachError(`At most ${MAX_ATTACHMENTS} attachments per message`);
+				break;
+			}
+			const classified = classifyMediaType(file);
+			if (!classified.ok) {
+				setAttachError(classified.reason);
+				continue;
+			}
+			const url = URL.createObjectURL(file);
+			next.push({
+				id: crypto.randomUUID(),
+				isImage: classified.isImage,
+				attachment: { ...classified.attachment, url } as InputAttachment,
+			});
+		}
+		if (next.length) setPicked((existing) => [...existing, ...next]);
+	}
+
+	function removePicked(id: string) {
+		setPicked((existing) => {
+			const target = existing.find((p) => p.id === id);
+			if (target) URL.revokeObjectURL(target.attachment.url);
+			return existing.filter((p) => p.id !== id);
+		});
+	}
 
 	function submit() {
 		const text = value.trim();
-		if (!text || disabled) return;
-		props.onSend(text);
+		const attachments = picked.map((p) => p.attachment);
+		if ((!text && attachments.length === 0) || disabled) return;
+		if (speech.listening) speech.stop();
+		props.onSend(text, attachments);
 		setValue('');
+		setPicked([]);
+		setAttachError(null);
 	}
 
 	function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -44,8 +138,45 @@ export function Composer(props: {
 		}
 	}
 
+	const canSend = !disabled && (value.trim() !== '' || picked.length > 0);
+
 	return (
 		<div className="composer-wrap">
+			{picked.length > 0 ? (
+				<div className="composer-attachments" data-testid="composer-attachments">
+					{picked.map((p) => (
+						<span className="attachment-chip" data-testid="attachment-chip" data-kind={p.isImage ? 'image' : 'file'} key={p.id}>
+							<Icon name={p.isImage ? 'image' : 'file'} title={p.isImage ? 'image' : 'file'} />
+							<span className="attachment-name">{p.attachment.filename}</span>
+							<button
+								type="button"
+								className="attachment-remove"
+								aria-label={`Remove ${p.attachment.filename}`}
+								data-testid="attachment-remove"
+								onClick={() => removePicked(p.id)}
+							>
+								<Icon name="x" title="remove" />
+							</button>
+						</span>
+					))}
+				</div>
+			) : null}
+			{attachError ? (
+				<p className="composer-attach-error" role="alert" data-testid="composer-attach-error">
+					{attachError}
+				</p>
+			) : null}
+			{speech.listening ? (
+				<p className="composer-dictation" role="status" data-testid="composer-dictation">
+					<span className="composer-dictation-dot" aria-hidden="true" /> Listening…
+					{speech.interim ? <span className="composer-dictation-interim"> {speech.interim}</span> : null}
+				</p>
+			) : null}
+			{speech.error ? (
+				<p className="composer-attach-error" role="alert" data-testid="composer-dictation-error">
+					{speech.error}
+				</p>
+			) : null}
 			<form
 				className="composer"
 				data-testid="composer"
@@ -54,6 +185,45 @@ export function Composer(props: {
 					submit();
 				}}
 			>
+				<input
+					ref={fileRef}
+					type="file"
+					className="composer-file-input"
+					accept={ACCEPT}
+					multiple
+					hidden
+					data-testid="composer-file-input"
+					onChange={(event) => {
+						addFiles(event.target.files);
+						event.target.value = ''; // allow re-picking the same file
+					}}
+				/>
+				<button
+					type="button"
+					className="composer-attach"
+					disabled={disabled}
+					aria-label="Attach image or file"
+					title="Attach an image or a text file"
+					data-testid="composer-attach"
+					onClick={() => fileRef.current?.click()}
+				>
+					<Icon name="paperclip" title="attach" />
+				</button>
+				{speech.supported ? (
+					<button
+						type="button"
+						className={speech.listening ? 'composer-mic listening' : 'composer-mic'}
+						disabled={disabled}
+						aria-label={speech.listening ? 'Stop dictation' : 'Dictate your message'}
+						aria-pressed={speech.listening}
+						title={speech.listening ? 'Listening — click to stop' : 'Dictate (speech to text)'}
+						data-testid="composer-mic"
+						data-listening={speech.listening}
+						onClick={toggleDictation}
+					>
+						<Icon name="mic" title={speech.listening ? 'listening' : 'dictate'} />
+					</button>
+				) : null}
 				<textarea
 					value={value}
 					onChange={(event) => setValue(event.target.value)}
@@ -68,7 +238,7 @@ export function Composer(props: {
 				<button
 					type="submit"
 					className="composer-send"
-					disabled={disabled || value.trim() === ''}
+					disabled={!canSend}
 					data-testid="composer-send"
 					aria-label={disabled ? 'Send — held' : 'Send message'}
 					title={props.disabledReason ?? 'Send message'}
@@ -77,7 +247,7 @@ export function Composer(props: {
 				</button>
 			</form>
 			<p className={props.draftNote ? 'composer-hint draft-note' : 'composer-hint'}>
-				{props.draftNote ?? 'Enter to send · Shift + Enter for a new line'}
+				{props.draftNote ?? 'Enter to send · Shift + Enter for a new line · attach an image or text file'}
 			</p>
 		</div>
 	);

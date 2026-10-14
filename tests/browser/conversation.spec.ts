@@ -21,6 +21,7 @@ function json(route: { fulfill(options: Record<string, unknown>): unknown }, sta
 
 async function stubSession(context: BrowserContext) {
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
+	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) =>
 		json(route, 200, { session: { userId: 'actor-test' }, user: { id: 'actor-test', name: 'Test', email: 't@caddie.test' } }),
 	);
@@ -185,6 +186,142 @@ test.describe('U04 — unsent messages and restored drafts (v2 §3.6)', () => {
 		await page.getByTestId('composer-input').fill('new text');
 		await expect(page.locator('.composer-hint')).not.toHaveClass(/draft-note/);
 		await expect(page.locator('.composer-hint')).toContainText('Enter to send');
+		await context.close();
+	});
+});
+
+test.describe('Stage 3/4 — image/file attach + voice dictation composer states', () => {
+	test('the attach button is present and an attachment chip appears then removes', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		const page = await context.newPage();
+		await openProjectPage(page);
+
+		await expect(page.getByTestId('composer-attach')).toBeVisible();
+
+		// Set a small text file on the hidden input; the preview chip must appear
+		// labelled as a file (not an image) and be removable.
+		await page.setInputFiles('[data-testid="composer-file-input"]', {
+			name: 'notes.txt',
+			mimeType: 'text/plain',
+			buffer: Buffer.from('my plan notes'),
+		});
+		const chip = page.getByTestId('attachment-chip');
+		await expect(chip).toBeVisible();
+		await expect(chip).toHaveAttribute('data-kind', 'file');
+		await expect(chip).toContainText('notes.txt');
+
+		await page.getByTestId('attachment-remove').click();
+		await expect(page.getByTestId('attachment-chip')).toHaveCount(0);
+		await context.close();
+	});
+
+	test('an image file produces an image-kind chip', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		const page = await context.newPage();
+		await openProjectPage(page);
+		await page.setInputFiles('[data-testid="composer-file-input"]', {
+			name: 'shot.png',
+			mimeType: 'image/png',
+			buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+		});
+		const chip = page.getByTestId('attachment-chip');
+		await expect(chip).toBeVisible();
+		await expect(chip).toHaveAttribute('data-kind', 'image');
+		await context.close();
+	});
+
+	test('an unsupported file type is refused with a visible error, no chip', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		const page = await context.newPage();
+		await openProjectPage(page);
+		await page.setInputFiles('[data-testid="composer-file-input"]', {
+			name: 'malware.exe',
+			mimeType: 'application/octet-stream',
+			buffer: Buffer.from([0x4d, 0x5a]),
+		});
+		await expect(page.getByTestId('composer-attach-error')).toBeVisible();
+		await expect(page.getByTestId('attachment-chip')).toHaveCount(0);
+		await context.close();
+	});
+
+	test('the mic button shows when SpeechRecognition is available and toggles a listening state', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		const page = await context.newPage();
+		// Inject a controllable SpeechRecognition BEFORE the app loads so the
+		// mic button renders deterministically regardless of the test browser.
+		await page.addInitScript(() => {
+			class FakeRecognition {
+				lang = '';
+				continuous = false;
+				interimResults = false;
+				onresult: ((e: unknown) => void) | null = null;
+				onerror: ((e: unknown) => void) | null = null;
+				onend: (() => void) | null = null;
+				start() {/* listening */}
+				stop() { this.onend?.(); }
+				abort() {}
+			}
+			(window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = FakeRecognition;
+		});
+		await openProjectPage(page);
+
+		const mic = page.getByTestId('composer-mic');
+		await expect(mic).toBeVisible();
+		await expect(mic).toHaveAttribute('data-listening', 'false');
+		await mic.click();
+		await expect(mic).toHaveAttribute('data-listening', 'true');
+		await expect(page.getByTestId('composer-dictation')).toContainText(/listening/i);
+		await mic.click();
+		await expect(mic).toHaveAttribute('data-listening', 'false');
+		await context.close();
+	});
+
+	test('the mic button is hidden when SpeechRecognition is unavailable (graceful fallback)', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		const page = await context.newPage();
+		await page.addInitScript(() => {
+			// Ensure neither global exists (some engines ship webkit-prefixed).
+			delete (window as unknown as Record<string, unknown>).SpeechRecognition;
+			delete (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
+		});
+		await openProjectPage(page);
+		await expect(page.getByTestId('composer-attach')).toBeVisible();
+		await expect(page.getByTestId('composer-mic')).toHaveCount(0);
+		await context.close();
+	});
+
+	test('reduced-motion disables the listening pulse animation', async ({ browser }) => {
+		const context = await browser.newContext({ reducedMotion: 'reduce' });
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		const page = await context.newPage();
+		await page.addInitScript(() => {
+			class FakeRecognition {
+				lang = ''; continuous = false; interimResults = false;
+				onresult: ((e: unknown) => void) | null = null;
+				onerror: ((e: unknown) => void) | null = null;
+				onend: (() => void) | null = null;
+				start() {} stop() { this.onend?.(); } abort() {}
+			}
+			(window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = FakeRecognition;
+		});
+		await openProjectPage(page);
+		await page.getByTestId('composer-mic').click();
+		const animation = await page
+			.getByTestId('composer-mic')
+			.evaluate((el) => getComputedStyle(el).animationName);
+		// Under reduced-motion the pulse keyframes are suppressed → 'none'.
+		expect(animation === 'none' || animation === '').toBeTruthy();
 		await context.close();
 	});
 });
