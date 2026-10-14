@@ -7,7 +7,10 @@ import { GithubError, verifyWebhookSignature, type GithubEnv } from '../adapters
 import {
 	DeliveryGateError,
 	bindInstallation,
+	connectAndLinkRepo,
+	createAndLinkRepo,
 	deliverPatch,
+	getProjectRepo,
 	githubClientFromEnv,
 	getInstallationForActor,
 	importRepoSnapshot,
@@ -185,6 +188,27 @@ export function createGithubRouter(): Hono<{ Bindings: Env }> {
 	router.get('/projects/:projectId/github/imports', async (c) => {
 		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
 		return c.json({ imports: await listImports(c.env.DB, scope) });
+	});
+
+	// --- guided GitHub step: create a new repo / connect existing / read link ---------
+	router.post('/projects/:projectId/github/repos', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		// Fails closed with a typed 503 when the App lacks administration:write.
+		const client = githubClientFromEnv(c.env);
+		const repo = await createAndLinkRepo(c.env.DB, client, scope, await readJson(c.req.raw));
+		return c.json({ repo }, 201);
+	});
+
+	router.post('/projects/:projectId/github/repo/connect', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		const client = githubClientFromEnv(c.env);
+		const repo = await connectAndLinkRepo(c.env.DB, client, scope, await readJson(c.req.raw));
+		return c.json({ repo }, 201);
+	});
+
+	router.get('/projects/:projectId/github/repo', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		return c.json({ repo: await getProjectRepo(c.env.DB, scope) });
 	});
 
 	router.post('/projects/:projectId/github/deliveries', async (c) => {

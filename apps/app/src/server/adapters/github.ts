@@ -163,6 +163,14 @@ export interface GithubRepoInfo {
 	defaultBranch: string;
 }
 
+export interface GithubRepoCreated {
+	fullName: string;
+	htmlUrl: string;
+	visibility: 'private' | 'public';
+	/** The repo already existed under this account and was adopted, not created. */
+	adopted: boolean;
+}
+
 export interface GithubCommitInfo {
 	sha: string;
 	treeSha: string;
@@ -430,6 +438,68 @@ export class GithubRestClient {
 			fullName: typeof body.full_name === 'string' ? body.full_name : fullName,
 			defaultBranch: typeof body.default_branch === 'string' ? body.default_branch : 'main',
 		};
+	}
+
+	/**
+	 * Create a NEW repo under the installation's account (org installation).
+	 *
+	 * Fail-closed, in order:
+	 *   1. the installation must grant `administration: write` — without it the
+	 *      App literally cannot create repos, so we refuse with a typed
+	 *      authorization error (503-class) BEFORE any write call, instead of
+	 *      letting GitHub 403 opaquely;
+	 *   2. a name collision under the account is ADOPTED (returned with
+	 *      adopted=true) rather than erroring — the user asked to end up with
+	 *      this repo connected, and an existing one of the same name satisfies
+	 *      that intent idempotently.
+	 *
+	 * Visibility maps to GitHub's `private` boolean. The repo is created under
+	 * the installation's org (`POST /orgs/{login}/repos`); a user-account
+	 * installation that is not an org is refused with a typed validation error
+	 * (an App cannot create under a user account).
+	 */
+	async createRepository(
+		installationId: string,
+		input: { name: string; visibility: 'private' | 'public' },
+	): Promise<GithubRepoCreated> {
+		const installation = await this.getInstallation(installationId);
+		if ((installation.permissions['administration'] ?? '') !== 'write') {
+			throw new GithubError(
+				503,
+				'GITHUB_AUTHORIZATION',
+				'the GitHub App needs the "administration: write" permission to create repositories — grant it on the App and re-install, then try again',
+			);
+		}
+		const login = installation.accountLogin;
+		if (!login) {
+			throw new GithubError(503, 'GITHUB_VALIDATION', 'the installation has no account login to create a repo under');
+		}
+		const isPrivate = input.visibility === 'private';
+		try {
+			const body = (await this.request('POST', `/orgs/${encodeURIComponent(login)}/repos`, {
+				auth: { installationId },
+				body: { name: input.name, private: isPrivate, auto_init: true },
+			})) as { full_name?: unknown; html_url?: unknown; private?: unknown };
+			return {
+				fullName: typeof body.full_name === 'string' ? body.full_name : `${login}/${input.name}`,
+				htmlUrl: typeof body.html_url === 'string' ? body.html_url : '',
+				visibility: body.private === false ? 'public' : isPrivate ? 'private' : 'public',
+				adopted: false,
+			};
+		} catch (error) {
+			// GitHub returns 422 when a repo of this name already exists on the
+			// account; adopt it instead of failing (idempotent "end up connected").
+			if (error instanceof GithubError && error.code === 'GITHUB_VALIDATION') {
+				const existing = await this.getRepo(installationId, `${login}/${input.name}`);
+				return {
+					fullName: existing.fullName,
+					htmlUrl: `https://github.com/${existing.fullName}`,
+					visibility: input.visibility,
+					adopted: true,
+				};
+			}
+			throw error;
+		}
 	}
 
 	async getCommit(installationId: string, fullName: string, ref: string): Promise<GithubCommitInfo> {

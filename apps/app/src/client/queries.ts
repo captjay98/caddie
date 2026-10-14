@@ -10,6 +10,7 @@ import type {
 	DecisionCard,
 	PlanDocRevision,
 	Project,
+	ProjectExperience,
 	RunBindingRecord,
 	Workspace,
 } from '@caddie/contracts';
@@ -136,6 +137,23 @@ export function useRunBindings(actor: ActorScope, projectId: string | null) {
 }
 
 /**
+ * The project's GitHub imports — one row per repo snapshot taken for this
+ * project (connect-existing or create-new both land here). A non-empty list is
+ * the honest "a repo is connected" signal the guided join steps derive from;
+ * it is real server state, never a client flag.
+ */
+export function useGithubImports(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['github-imports', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () =>
+			fetchJson<{ imports: { id: string; repoFullName: string; ref: string; commitSha: string }[] }>(
+				`/api/projects/${encodeURIComponent(projectId ?? '')}/github/imports`,
+			),
+		enabled: actor.actorId !== null && projectId !== null,
+	});
+}
+
+/**
  * UI review board phase 2 — the brief feed: the project's real decisions
  * (pending approvals, retained conflicts, stale artifacts, failed rounds,
  * armed schedules) projected onto the DecisionCard contract.
@@ -148,6 +166,25 @@ export function useBriefCards(actor: ActorScope, projectId: string | null) {
 				`/api/projects/${encodeURIComponent(projectId ?? '')}/brief`,
 			),
 		enabled: actor.actorId !== null && projectId !== null,
+	});
+}
+
+/**
+ * The shared ProjectExperience projection (R01/R06): the ONE source chat
+ * cards, Projects and the project workspace read for stage, plan/preview
+ * state, the derived user-facing message and the single-primary-action set.
+ * Keyed by actor + project. A short refetch keeps the stage live while a
+ * build runs; authority is always re-checked server-side on any command.
+ */
+export function useProjectExperience(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['experience', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () =>
+			fetchJson<ProjectExperience>(
+				`/api/projects/${encodeURIComponent(projectId ?? '')}/experience`,
+			),
+		enabled: actor.actorId !== null && projectId !== null,
+		refetchInterval: 3000,
 	});
 }
 
@@ -192,6 +229,10 @@ export interface ProfileRecord {
 	experienceLevel: 'beginner' | 'intermediate' | 'senior' | null;
 	stackIds: string[];
 	freeTextInterests: string[];
+	formatPreference: 'online' | 'in_person' | 'either' | null;
+	skills: string[];
+	projectHighlight: string | null;
+	budget: { mode: 'free_only' | 'set' | 'not_sure'; amount: number | null; currency: string | null } | null;
 }
 
 export function useProfile(actor: ActorScope) {

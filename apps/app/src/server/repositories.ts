@@ -810,7 +810,183 @@ export async function listImports(db: D1Database, scope: Scope): Promise<ImportV
 	}));
 }
 
-// --- export (receipt-backed delivery through the P03 operations ledger) -----------------
+// --- project ↔ repo link (guided join → build → GitHub step) ----------------------------
+
+export interface ProjectRepoView {
+	projectId: string;
+	installationId: string;
+	repoFullName: string;
+	visibility: 'private' | 'public';
+	origin: 'created' | 'adopted' | 'connected';
+	htmlUrl: string;
+}
+
+function projectRepoFromRow(row: Record<string, unknown>): ProjectRepoView {
+	return {
+		projectId: String(row['projectId']),
+		installationId: String(row['installationId']),
+		repoFullName: String(row['repoFullName']),
+		visibility: (row['visibility'] as 'private' | 'public') ?? 'private',
+		origin: (row['origin'] as 'created' | 'adopted' | 'connected') ?? 'connected',
+		htmlUrl: String(row['htmlUrl'] ?? ''),
+	};
+}
+
+/** The project's connected repo, or null when none — the honest hasRepo signal. */
+export async function getProjectRepo(db: D1Database, scope: Scope): Promise<ProjectRepoView | null> {
+	const verified = await assertProjectScope(db, scope);
+	const rows = await queryAll(db, 'select * from "github_project_repos" where "projectId" = ?', verified.projectId);
+	return rows[0] ? projectRepoFromRow(rows[0]) : null;
+}
+
+/** Record (or replace) the project's connected repo. One repo per project. */
+async function linkProjectRepo(
+	db: D1Database,
+	projectId: string,
+	actorId: string,
+	link: { installationId: string; repoFullName: string; visibility: 'private' | 'public'; origin: 'created' | 'adopted' | 'connected'; htmlUrl: string },
+): Promise<void> {
+	const now = nowIso();
+	const existing = await queryAll(db, 'select "projectId" from "github_project_repos" where "projectId" = ?', projectId);
+	if (existing[0]) {
+		await db
+			.prepare('update "github_project_repos" set "installationId" = ?, "repoFullName" = ?, "visibility" = ?, "origin" = ?, "htmlUrl" = ?, "updatedAt" = ? where "projectId" = ?')
+			.bind(link.installationId, link.repoFullName, link.visibility, link.origin, link.htmlUrl, now, projectId)
+			.run();
+		return;
+	}
+	await db
+		.prepare(
+			`insert into "github_project_repos" ("projectId","installationId","repoFullName","visibility","origin","htmlUrl","createdBy","createdAt","updatedAt")
+			 values (?,?,?,?,?,?,?,?,?)`,
+		)
+		.bind(projectId, link.installationId, link.repoFullName, link.visibility, link.origin, link.htmlUrl, actorId, now, now)
+		.run();
+}
+
+/** Ensure a repo is a SELECTED repo of the installation (select-then-write). */
+async function ensureRepoSelected(db: D1Database, installationId: string, repoFullName: string): Promise<void> {
+	const now = nowIso();
+	const existing = await queryAll(
+		db,
+		'select "id" from "github_repo_selections" where "installationId" = ? and "repoFullName" = ?',
+		installationId,
+		repoFullName,
+	);
+	if (existing[0]) {
+		await db
+			.prepare('update "github_repo_selections" set "status" = ?, "updatedAt" = ? where "id" = ?')
+			.bind('selected', now, String(existing[0]['id']))
+			.run();
+		return;
+	}
+	try {
+		await db
+			.prepare(
+				`insert into "github_repo_selections" ("id","installationId","repoFullName","status","createdAt","updatedAt")
+				 values (?,?,?,?,?,?)`,
+			)
+			.bind(newId('ghsel'), installationId, repoFullName, 'selected', now, now)
+			.run();
+	} catch (error) {
+		if (!String(error).includes('UNIQUE constraint failed')) throw error;
+		await db
+			.prepare('update "github_repo_selections" set "status" = ?, "updatedAt" = ? where "installationId" = ? and "repoFullName" = ?')
+			.bind('selected', now, installationId, repoFullName)
+			.run();
+	}
+}
+
+const CREATE_REPO_INPUT_SHAPE = 'installationId (string), name (1..100), visibility ("private"|"public")';
+
+/**
+ * Create a NEW repo under a bound installation and link it to the project
+ * (guided GitHub step, "initialise a repo directly").
+ *
+ * Fail-closed order: the installation must be active + bound to the scoped
+ * workspace (requireActiveInstallation), THEN the adapter refuses up front when
+ * the App lacks `administration: write` (typed 503). A name collision adopts
+ * the existing repo rather than erroring. The created/adopted repo is marked
+ * selected and linked to the project; a freshly-created empty repo is NOT
+ * snapshot-imported (no commit exists yet) — the link alone is the connected
+ * signal, and the first delivery populates it.
+ */
+export async function createAndLinkRepo(
+	db: D1Database,
+	client: GithubRestClient,
+	scope: Scope,
+	input: unknown,
+): Promise<ProjectRepoView> {
+	const verified = await assertProjectScope(db, scope);
+	const raw = asRecord(input);
+	const installationId = requireNonEmpty(raw['installationId'], 'installationId');
+	const name = requireNonEmpty(raw['name'], 'name');
+	if (name.length > 100 || /[\s/]/.test(name)) {
+		throw new ScopeError(400, 'invalid_request', `name must be 1..100 chars with no spaces or '/'; expected ${CREATE_REPO_INPUT_SHAPE}`);
+	}
+	const visibility = raw['visibility'] === 'public' ? 'public' : raw['visibility'] === 'private' ? 'private' : null;
+	if (!visibility) {
+		throw new ScopeError(400, 'invalid_request', `visibility must be "private" or "public"; expected ${CREATE_REPO_INPUT_SHAPE}`);
+	}
+
+	const installation = await requireActiveInstallation(db, verified, installationId);
+	const created = await client.createRepository(installation.installationId, { name, visibility });
+	await ensureRepoSelected(db, installation.installationId, created.fullName);
+	await linkProjectRepo(db, verified.projectId, verified.actorId, {
+		installationId: installation.installationId,
+		repoFullName: created.fullName,
+		visibility: created.visibility,
+		origin: created.adopted ? 'adopted' : 'created',
+		htmlUrl: created.htmlUrl || `https://github.com/${created.fullName}`,
+	});
+	return {
+		projectId: verified.projectId,
+		installationId: installation.installationId,
+		repoFullName: created.fullName,
+		visibility: created.visibility,
+		origin: created.adopted ? 'adopted' : 'created',
+		htmlUrl: created.htmlUrl || `https://github.com/${created.fullName}`,
+	};
+}
+
+/**
+ * Connect an EXISTING repo to the project (the other guided path). The repo
+ * must be a selected repo of an active bound installation; we verify it
+ * resolves (getRepo) and record the link. Content import stays a separate,
+ * explicit step (importRepoSnapshot) — connecting does not force a snapshot.
+ */
+export async function connectAndLinkRepo(
+	db: D1Database,
+	client: GithubRestClient,
+	scope: Scope,
+	input: unknown,
+): Promise<ProjectRepoView> {
+	const verified = await assertProjectScope(db, scope);
+	const raw = asRecord(input);
+	const installationId = requireNonEmpty(raw['installationId'], 'installationId');
+	const repoFullName = normalizeRepoFullName(raw['repoFullName']);
+
+	const installation = await requireActiveInstallation(db, verified, installationId);
+	await requireSelectedRepo(db, installation.installationId, repoFullName);
+	const repo = await client.getRepo(installation.installationId, repoFullName); // 404s honestly if gone
+	await linkProjectRepo(db, verified.projectId, verified.actorId, {
+		installationId: installation.installationId,
+		repoFullName: repo.fullName,
+		visibility: 'private',
+		origin: 'connected',
+		htmlUrl: `https://github.com/${repo.fullName}`,
+	});
+	return {
+		projectId: verified.projectId,
+		installationId: installation.installationId,
+		repoFullName: repo.fullName,
+		visibility: 'private',
+		origin: 'connected',
+		htmlUrl: `https://github.com/${repo.fullName}`,
+	};
+}
+
+
 
 export type DeliveryMode = 'pull-request' | 'merge-default-branch';
 

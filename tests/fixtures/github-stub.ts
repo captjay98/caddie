@@ -428,6 +428,47 @@ export class GithubStub {
 				});
 			}
 
+			// --- repo creation (installation token auth): POST /orgs/{login}/repos ----
+			const orgReposMatch = path.match(/^\/orgs\/([^/]+)\/repos$/);
+			if (method === 'POST' && orgReposMatch) {
+				if (auth?.kind !== 'installation-token') {
+					return this.json(res, 401, { message: 'Requires an installation token' });
+				}
+				const installation = this.installations.get(auth.installationId);
+				if (!installation) return this.json(res, 403, { message: 'Resource not accessible by installation' });
+				// The App must hold administration:write to create a repo — the real
+				// API 403s otherwise; the adapter refuses before reaching here, but
+				// the stub enforces it too so the fail-closed path is exercised end to end.
+				if ((installation.permissions['administration'] ?? '') !== 'write') {
+					return this.json(res, 403, { message: 'Resource not accessible by integration (administration: write required)' });
+				}
+				const login = orgReposMatch[1] ?? '';
+				const createBody = (body ?? {}) as { name?: unknown; private?: unknown };
+				const name = typeof createBody.name === 'string' ? createBody.name : '';
+				if (!name) return this.json(res, 422, { message: 'name is required' });
+				const fullName = `${login}/${name}`;
+				if (this.repos.get(fullName)) {
+					return this.json(res, 422, { message: 'name already exists on this account' });
+				}
+				// auto_init: create a non-empty repo with a default branch so it is
+				// a real, snapshot-importable repo.
+				this.seedRepo({
+					fullName,
+					accessInstallationId: installation.installationId,
+					defaultBranch: 'main',
+					files: { 'README.md': `# ${name}\n` },
+				});
+				const isPrivate = createBody.private !== false;
+				return this.json(res, 201, {
+					name,
+					full_name: fullName,
+					owner: { login },
+					private: isPrivate,
+					default_branch: 'main',
+					html_url: `https://github.example/${fullName}`,
+				});
+			}
+
 			// --- repo surface (installation token auth) -----------------------------
 			const repoMatch = path.match(/^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/);
 			if (!repoMatch) return this.json(res, 404, { message: `stub: no route for ${method} ${path}` });
