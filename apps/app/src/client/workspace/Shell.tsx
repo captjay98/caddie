@@ -1,12 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { ReactElement } from 'react';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { SignInPanel } from '../auth.ts';
-import { failureKind, StatePanel } from '../states.tsx';
+import { Mascot } from '@caddie/ui/Mascot';
+import { Icon } from '../icons.tsx';
 import { AccountBriefV2 } from '../brief/DecisionCard.tsx';
 import { briefActionRoute } from '../brief/navigate.ts';
-import { Link, useNavigate } from '@tanstack/react-router';
-import { useAccountBrief, useDiscoveryCandidates, useMarkBriefRead, useProfile, type ProfileRecord } from '../queries.ts';
+import { useAccountBrief, useMarkBriefRead } from '../queries.ts';
 import { useWorkspaceChrome } from './Chrome.tsx';
 
 /**
@@ -61,46 +61,55 @@ function BriefBody(): ReactElement {
 
 	const isNewUser = chrome.buildProjects.length === 0;
 	const openCards = (brief.data?.cards ?? []).filter((card) => card.status !== 'handled');
+	const needsYou = openCards.length;
+	const today = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date());
+	// Honest background line: counts drawn only from real brief data — the
+	// projects Caddie is tracking and the deadline cards it is watching. Never
+	// an invented number; a zero count simply drops its clause.
+	const watching = chrome.buildProjects.length;
+	const deadlines = (brief.data?.cards ?? []).filter((card) => card.kind === 'deadline').length;
+	const watchBits: string[] = [];
+	if (watching > 0) watchBits.push(`${watching} project${watching === 1 ? '' : 's'}`);
+	if (deadlines > 0) watchBits.push(`${deadlines} deadline${deadlines === 1 ? '' : 's'}`);
+	const backgroundLine =
+		watchBits.length > 0
+			? `I've got the watch on ${watchBits.join(' and ')} — I'll surface anything the moment it matters.`
+			: "I'll surface anything the moment it matters: a deadline, a rule change, a hackathon that fits you.";
 
 	return (
 		<div className="home-brief" data-testid="brief-screen">
-			<header className="home-head">
-				<p className="kicker" data-tone="action">
-					BRIEF
-				</p>
-				<h1 className="page-title">
-					{openCards.length > 0
-						? `${openCards.length} thing${openCards.length === 1 ? '' : 's'} could use you today`
-						: 'You\u2019re caught up'}
-				</h1>
-				<p className="page-lede">
-					{new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date())} —
-					what Caddie needs from you and what it finished. Reading an update never decides it; acting on
-					it does.
-				</p>
-			</header>
-
-			<ProfileSetup />
-
-			{isNewUser ? (
-				<section className="card-surface home-panel" data-testid="brief-primary">
-					<h3 className="state-title">Ready when you are</h3>
-					<p className="state-detail">
-						Discovery works before you have any project — start by finding something that fits.
-					</p>
-					<div className="row">
-						<button type="button" className="btn-key" data-testid="brief-find-hackathon" onClick={() => chrome.goProjectTab('/discover', {})}>
-							Find a hackathon that fits you
-						</button>
-						<button type="button" className="btn-ghost" data-testid="brief-start-idea" onClick={chrome.newProject}>
-							Start from an idea
-						</button>
-						<button type="button" className="btn-ghost" data-testid="brief-continue-code" onClick={() => chrome.goProjectTab('/repositories', {})}>
-							Continue existing code
-						</button>
+			{needsYou > 0 ? (
+				<header className="home-head" data-state="active">
+					<span className="home-head-disc" aria-hidden="true">
+						<Icon name="alert" title="Needs you" />
+					</span>
+					<div className="home-head-main">
+						<h1 className="home-head-title">
+							{`${needsYou} thing${needsYou === 1 ? '' : 's'} could use you`}
+							<span className="home-head-count">{needsYou}</span>
+						</h1>
+						<p className="home-head-sub">
+							<span className="home-head-date">{today}</span>
+							<span className="home-head-dot" aria-hidden="true"> · </span>
+							acting on a card is what decides it
+						</p>
 					</div>
-				</section>
-			) : null}
+				</header>
+			) : (
+				<header className="home-head home-head--calm" data-state="calm">
+					<span className="home-head-mascot" aria-hidden="true">
+						<Mascot mood="done" size={52} />
+					</span>
+					<div className="home-head-main">
+						<h1 className="home-head-title">Nothing needs you — I&rsquo;ve got the watch.</h1>
+						<p className="home-head-sub">
+							<span className="home-head-date">{today}</span>
+							<span className="home-head-dot" aria-hidden="true"> · </span>
+							{backgroundLine}
+						</p>
+					</div>
+				</header>
+			)}
 
 			<section className="card-surface home-panel" data-testid="brief-lane-panel">
 				<AccountBriefV2
@@ -113,6 +122,8 @@ function BriefBody(): ReactElement {
 					hasBuildProjects={!isNewUser}
 					onAction={onCardAction}
 					onMarkAllRead={markAllRead}
+					onAskCaddie={() => chrome.goProjectTab('/', { pane: 'channel' })}
+					onBrowse={() => chrome.goProjectTab('/discover', {})}
 				/>
 			</section>
 		</div>
@@ -121,137 +132,21 @@ function BriefBody(): ReactElement {
 
 function SignInWall(): ReactElement {
 	return (
-		<div className="auth-hero">
-			<p className="auth-hero-kicker">CADDIE · your build assistant</p>
-			<h1 className="auth-hero-title">
-				It reads the rules, drafts the plan, and builds it.
-				<span className="auth-hero-sub">You approve every step.</span>
-			</h1>
-			<section className="sign-in-card card-surface">
-				<p className="kicker" data-tone="action">
-					CADDIE · WORKSPACE
+		<div className="signin-view" data-testid="sign-in-wall">
+			<div className="signin-col">
+				<div className="signin-brand">
+					<Mascot mood="ready" size={56} live />
+					<h1 className="signin-title">Sign in to Caddie</h1>
+					<p className="signin-lede">Use the account you already have<br />it&rsquo;s free to start.</p>
+				</div>
+				<div className="signin-card">
+					<SignInPanel callbackURL="/app/" />
+				</div>
+				<p className="signin-note">
+					Signing in doesn&rsquo;t give Caddie your code. It asks separately, only if you bring code in.
 				</p>
-				<h2 className="sign-in-title">Sign in to your workspace</h2>
-				<SignInPanel callbackURL="/app/" />
-			</section>
+			</div>
 		</div>
 	);
 }
 
-// --- progressive profile setup ---------------------------------------------------
-
-function profileComplete(profile: ProfileRecord | null): boolean {
-	if (!profile) return false;
-	return Boolean(profile.country && profile.timezone && profile.weeklyHours != null && profile.experienceLevel);
-}
-
-function ProfileSetup(): ReactElement {
-	const chrome = useWorkspaceChrome();
-	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
-	const profile = useProfile(actor);
-	const p = profile.data?.profile ?? null;
-	const complete = profileComplete(p);
-
-	if (!chrome.authenticated) return <></>;
-	if (profile.isPending) return <StatePanel kind="loading" title="Checking your profile…" />;
-	if (profile.error) {
-		return (
-			<StatePanel
-				kind={failureKind(profile.error)}
-				detail={profile.error instanceof Error ? profile.error.message : undefined}
-				onRetry={failureKind(profile.error) === 'denied' ? undefined : () => void profile.refetch()}
-			/>
-		);
-	}
-	if (complete) {
-		return (
-			<section className="card-surface home-panel profile-complete" data-testid="profile-complete">
-				<p className="state-detail">
-					Profile is set — it shapes what Caddie recommends.{' '}
-					<Link to="/settings" data-testid="profile-edit-link">
-						Edit in Settings
-					</Link>
-				</p>
-			</section>
-		);
-	}
-	return <InlineProfile profile={p} actorId={chrome.actorId} onSaved={() => void profile.refetch()} />;
-}
-
-function InlineProfile(props: {
-	profile: ProfileRecord | null;
-	actorId: string | null;
-	onSaved: () => void;
-}): ReactElement {
-	const navigate = useNavigate();
-	const [country, setCountry] = useState(props.profile?.country ?? '');
-	const [timezone, setTimezone] = useState(props.profile?.timezone ?? '');
-	const [weeklyHours, setWeeklyHours] = useState(props.profile?.weeklyHours == null ? '' : String(props.profile.weeklyHours));
-	const [experience, setExperience] = useState(props.profile?.experienceLevel ?? '');
-	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-	const [saved, setSaved] = useState(false);
-
-	async function save() {
-		setSaving(true);
-		setError(null);
-		setSaved(false);
-		try {
-			const res = await fetch('/api/profile', {
-				method: 'PUT',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({
-					...(country.trim() ? { country: country.trim().toUpperCase() } : { country: null }),
-					...(timezone.trim() ? { timezone: timezone.trim() } : { timezone: null }),
-					...(weeklyHours.trim() === '' ? {} : { weeklyHours: Number(weeklyHours) }),
-					...(experience === '' ? { experienceLevel: null } : { experienceLevel: experience }),
-					stackIds: props.profile?.stackIds ?? [],
-					freeTextInterests: props.profile?.freeTextInterests ?? [],
-				}),
-			});
-			if (!res.ok) {
-				const body = (await res.json().catch(() => null)) as { message?: string } | null;
-				throw new Error(body?.message ?? 'Saving your profile failed.');
-			}
-			setSaved(true);
-			props.onSaved();
-			// The button says "Save & browse" — make it true: leave the form and
-			// open Discover so the saved profile immediately shapes matches.
-			void navigate({ to: '/discover' });
-		} catch (err) {
-			setError(err instanceof Error ? err.message : 'Saving your profile failed.');
-		} finally {
-			setSaving(false);
-		}
-	}
-
-	return (
-		<section className="card-surface home-panel profile-setup" data-testid="profile-setup">
-			<h3 className="state-title">A few fields sharpen your matches</h3>
-			<p className="state-detail">
-				Optional — Caddie works without them. Country, time zone, weekly hours and experience feed the
-				eligibility verdicts.
-			</p>
-			<div className="row">
-				<input className="input" placeholder="Country (2-letter, e.g. CL)" aria-label="Country" data-testid="home-profile-country" value={country} onChange={(e) => setCountry(e.target.value)} />
-				<input className="input" placeholder="Time zone (e.g. Europe/Paris)" aria-label="Time zone" data-testid="home-profile-timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} />
-			</div>
-			<div className="row">
-				<input className="input" placeholder="Weekly hours (0–80)" aria-label="Weekly hours" type="number" min={0} max={80} data-testid="home-profile-hours" value={weeklyHours} onChange={(e) => setWeeklyHours(e.target.value)} />
-				<select className="input" aria-label="Experience level" data-testid="home-profile-experience" value={experience} onChange={(e) => setExperience(e.target.value)}>
-					<option value="">Not set</option>
-					<option value="beginner">Beginner</option>
-					<option value="intermediate">Intermediate</option>
-					<option value="senior">Senior</option>
-				</select>
-			</div>
-			<div className="row">
-				<button type="button" className="btn-key" data-testid="home-profile-save" disabled={saving} onClick={() => void save()}>
-					{saving ? 'Saving…' : 'Save & browse'}
-				</button>
-				{saved ? <span className="status-pill" data-status="handled" data-testid="home-profile-saved">saved</span> : null}
-			</div>
-			{error ? <p className="form-error" role="alert" data-testid="home-profile-error">{error}</p> : null}
-		</section>
-	);
-}

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import type { DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
+import type { ApprovalRecord, DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
 import { SignInPanel } from './auth.ts';
+import { Mascot } from '@caddie/ui/Mascot';
 import { failureKind, StatePanel } from './states.tsx';
 import { Icon } from './icons.tsx';
 import { DiscoveryResults, type DiscoveryCandidateRecord } from './discovery/Results.tsx';
@@ -30,6 +31,7 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from './api.ts';
 import { useWorkspaceChrome } from './workspace/Chrome.tsx';
 import { ProjectTabs } from './workspace/ProjectTabs.tsx';
+import { projectStatus } from './workspace/project-status.ts';
 
 /**
  * The routed surfaces for the discovery-first shell.
@@ -51,15 +53,63 @@ import { ProjectTabs } from './workspace/ProjectTabs.tsx';
  * bind to the same id the body reads), so surfaces consume it from context.
  */
 
+/**
+ * Explore-ideas quick prompts (§4): one-tap starters for the "What's the idea?"
+ * step, so a nontechnical builder is never staring at an empty field. Clicking
+ * one fills the editable idea input — the user still sees and confirms it before
+ * anything is created. "Let's brainstorm together" is the no-fixed-idea path: it
+ * tells Caddie to brainstorm WITH the user rather than committing to a concept.
+ */
+const EXPLORE_QUICK_PROMPTS: ReadonlyArray<{ id: string; label: string; text: string }> = [
+	{ id: 'brainstorm', label: "Let's brainstorm together", text: "Let's brainstorm together — I don't have a fixed idea yet. Ask me a few questions about my skills and interests, then suggest a few directions that fit this hackathon." },
+	{ id: 'strongest-fit', label: 'Something that fits my skills', text: 'Suggest a project that best fits my skills and this hackathon, and explain why it fits.' },
+	{ id: 'quick-win', label: 'A quick, achievable build', text: 'Help me pick a small, achievable project I can realistically finish before the deadline.' },
+	{ id: 'win', label: 'A standout project to win', text: 'Help me come up with an ambitious, standout project with a real shot at winning this hackathon — lean into what makes it impressive to judges.' },
+];
+
 function SignInGate(): ReactElement {
 	return (
-		<section className="sign-in-card card-surface">
-			<p className="kicker" data-tone="action">
-				CADDIE · WORKSPACE
-			</p>
-			<h1 className="sign-in-title">Sign in to your workspace</h1>
-			<SignInPanel callbackURL="/app/" />
-		</section>
+		<div className="signin-split" data-testid="sign-in-gate">
+			{/* LEFT: brand / mascot hero — a signed-out screen has no live session,
+			    so this is an honest static hero (what Caddie does), never a faked
+			    live feed. Themed entirely via tokens so it tracks mode + palette. */}
+			<div className="signin-hero" aria-hidden="true">
+				<div className="signin-hero-grid" />
+				<p className="signin-hero-brand">CADDIE</p>
+				<div className="signin-hero-center">
+					<Mascot mood="ready" size={88} live />
+					<div className="signin-hero-copy">
+						<h2 className="signin-hero-title">Your caddie for the whole round.</h2>
+						<p className="signin-hero-lede">
+							Caddie finds the hackathons that fit you, plans the build, and ships it with you — step by
+							step, nothing without your say-so.
+						</p>
+					</div>
+					<ul className="signin-hero-chips">
+						<li>Finds contests</li>
+						<li>Plans the build</li>
+						<li>Ships with you</li>
+					</ul>
+				</div>
+				<p className="signin-hero-foot">Built for solo builders. Free to start.</p>
+			</div>
+
+			{/* RIGHT: the real sign-in form, vertically centered. */}
+			<div className="signin-form">
+				<div className="signin-col">
+					<div className="signin-brand">
+						<h1 className="signin-title">Sign in to Caddie</h1>
+						<p className="signin-lede">Use the account you already have — it&rsquo;s free to start.</p>
+					</div>
+					<div className="signin-card">
+						<SignInPanel callbackURL="/app/" />
+					</div>
+					<p className="signin-note">
+						Signing in doesn&rsquo;t give Caddie your code. It asks separately, only if you bring code in.
+					</p>
+				</div>
+			</div>
+		</div>
 	);
 }
 
@@ -124,14 +174,9 @@ export function DiscoverPage(): ReactElement {
 				<div className="page-col">
 					<div className="r-section-head">
 						<div>
-							<p className="kicker" data-tone="action">
-								DISCOVER
-							</p>
-							<h1 className="page-title">Hackathons</h1>
+							<h1 className="page-title">Hackathons that fit you</h1>
 							<p className="page-lede">
-								Contests Caddie is watching that fit you — before you have any project. Browse, save the
-								ones you like, and explore ideas for one when you are ready. Nothing here creates a build
-								until you say so.
+								Contests Caddie watches and ranks for fit. Nothing starts a build until you say so.
 							</p>
 						</div>
 					</div>
@@ -235,6 +280,20 @@ function DiscoverBody(): ReactElement {
 									<label className="kicker" htmlFor="explore-idea-text">
 										The idea
 									</label>
+									<div className="explore-quick-prompts" data-testid="explore-quick-prompts">
+										{EXPLORE_QUICK_PROMPTS.map((prompt) => (
+											<button
+												key={prompt.id}
+												type="button"
+												className="explore-quick-prompt"
+												data-testid={`explore-quick-${prompt.id}`}
+												data-selected={commitIdea.trim() === prompt.text ? 'true' : undefined}
+												onClick={() => setCommitIdea(prompt.text)}
+											>
+												{prompt.label}
+											</button>
+										))}
+									</div>
 									<input
 										id="explore-idea-text"
 										className="input"
@@ -347,13 +406,9 @@ export function ProjectsPage(): ReactElement {
 				<div className="page-col">
 					<div className="r-section-head">
 						<div>
-							<p className="kicker" data-tone="action">
-								PROJECTS
-							</p>
 							<h1 className="page-title">Your projects</h1>
 							<p className="page-lede">
-								Every build you have started, with where it stands and the next thing it needs. Start a
-								new one from an idea or an existing repository.
+								Pick up where you left off, or start something new with Caddie.
 							</p>
 						</div>
 						<ProjectsActions />
@@ -508,63 +563,6 @@ function ImportRepoWindow(props: { onClose: () => void }): ReactElement {
 	);
 }
 
-/**
- * Step state per project, derived ONLY from the account brief's real cards
- * (v2 Projects, HANDOFF §4: "Step N of 4 · <step>" in words plus four small
- * bars). Deterministic mapping, no invention:
- *   plan   — an approval card: needs-you -> "Needs your OK", settled -> done
- *   build  — a result card (verified output / live preview) -> done
- *   check  — an unresolved submission-readiness gap -> "Not all ready"
- *   submit — an unresolved submission package card -> "Not submitted yet"
- * The step number is the highest step with any signal; with none, the card
- * says "No updates yet" and every bar stays neutral.
- */
-function projectStepState(cards: readonly DecisionCardType[]): {
-	text: string | null;
-	tones: { plan: string; build: string; check: string; submit: string };
-	latest: string | null;
-} {
-	const tones = { plan: '', build: '', check: '', submit: '' };
-	for (const card of cards) {
-		if (card.kind === 'approval') {
-			if (card.status === 'needs-you') tones.plan = 'warn';
-			else if (card.status === 'handled') tones.plan = 'ok';
-		} else if (card.kind === 'result') {
-			tones.build = 'ok';
-		} else if (card.kind === 'change' && card.status === 'needs-you') {
-			tones.build = 'warn';
-		}
-		if (card.id.startsWith('brf_submission_') && card.status === 'needs-you') {
-			tones.check = 'warn';
-			tones.submit = 'warn';
-		}
-	}
-	// Step number and label follow the prototype grammar: the first step that
-	// needs attention (warn) is where the project IS; with nothing pending, the
-	// step after the last finished one. The label is the step's NAME — the
-	// attention-grabbing detail lives in the bars and the doing-line.
-	const order: (keyof typeof tones)[] = ['plan', 'build', 'check', 'submit'];
-	const names: Record<string, string> = { plan: 'Plan', build: 'Build', check: 'Check', submit: 'Submit' };
-	let n: number | null = null;
-	let label: string | null = null;
-	const firstWarn = order.findIndex((step) => tones[step] === 'warn');
-	if (firstWarn >= 0) {
-		n = firstWarn + 1;
-		label = names[order[firstWarn]!] ?? null;
-	} else {
-		let lastOk = -1;
-		order.forEach((step, index) => {
-			if (tones[step] === 'ok') lastOk = index;
-		});
-		if (lastOk >= 0) {
-			const next = Math.min(lastOk + 1, order.length - 1);
-			n = next + 1;
-			label = names[order[next]!] ?? null;
-		}
-	}
-	const newest = [...cards].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-	return { text: n === null ? null : `Step ${n} of 4 · ${label}`, tones, latest: newest?.summary ?? null };
-}
 
 function ProjectList(): ReactElement {
 	const chrome = useWorkspaceChrome();
@@ -596,13 +594,16 @@ function ProjectList(): ReactElement {
 		list.push(card);
 		cardsByProject.set(card.projectId, list);
 	}
-	const active = chrome.buildProjects.filter((p) => p.status === 'active');
+	const active = chrome.buildProjects.filter((p) => p.status === 'active').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	const archived = chrome.buildProjects.filter((p) => p.status !== 'active');
 	return (
 		<div data-testid="project-list">
+            {brief.error ? <StatePanel kind={failureKind(brief.error)} title="Project updates are unavailable" detail="You can still open a project. Retry to load its latest decisions and progress." onRetry={() => void brief.refetch()} /> : null}
 			<ul className="project-list">
 				{active.map((project) => {
-					const state = projectStepState(cardsByProject.get(project.id) ?? []);
+					const state = brief.isPending || brief.error
+                        ? { label: brief.error ? 'Updates unavailable' : 'Loading updates…', detail: brief.error ? 'Open your project or retry loading its updates.' : 'Checking the latest decisions and progress.', next: null }
+                        : projectStatus(cardsByProject.get(project.id) ?? []);
 					return (
 						<li key={project.id} className="project-row card-surface" data-testid={`project-row-${project.id}`}>
 							<div className="project-row-main">
@@ -613,25 +614,22 @@ function ProjectList(): ReactElement {
 									{project.description ?? (project.contestUrl ? 'For the linked hackathon' : 'A personal project')}
 								</span>
 							</div>
-							<span className="steps-mini" aria-hidden="true" data-testid={`project-steps-${project.id}`}>
-								{(['plan', 'build', 'check', 'submit'] as const).map((step) => (
-									<i key={step} data-tone={state.tones[step] || undefined} />
-								))}
-							</span>
 							<div className="project-row-meta">
-								{state.text ? (
-									<span className="project-step-text" data-testid={`project-step-text-${project.id}`}>
-										{state.text}
-									</span>
-								) : (
-									<span className="project-step-text muted" data-testid={`project-step-text-${project.id}`}>
-										No updates yet
-									</span>
-								)}
-								<span className="project-row-doing">
-									{state.latest ?? 'Caddie is ready when you are.'}
-								</span>
-							</div>
+                                <span className="badge" data-tone={state.next?.status === 'blocked' ? 'danger' : state.next ? 'warn' : undefined} data-testid={`project-step-text-${project.id}`}>
+                                    {state.label}
+                                </span>
+                                <p className="project-row-doing">{state.detail}</p>
+                            </div>
+                            <div className="row-actions project-row-actions">
+                                {state.next ? (
+                                    <Link className="btn-key" to={onCardRoute(state.next, project.id).to as never} search={onCardRoute(state.next, project.id).search as never} data-testid={`project-next-${project.id}`}>
+                                        {state.next.primaryAction.label}
+                                    </Link>
+                                ) : null}
+                                <button type="button" className={state.next ? 'btn-ghost' : 'btn-key'} onClick={() => chrome.openProject(project.id, true)} data-testid={`project-continue-${project.id}`}>
+                                    Continue with Caddie
+                                </button>
+                            </div>
 						</li>
 					);
 				})}
@@ -687,7 +685,7 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 	useEffect(() => {
 		let cancelled = false;
 		void fetch(`/api/projects/${encodeURIComponent(props.projectId)}/previews`, { credentials: 'same-origin' })
-			.then((res) => (res.ok ? res.json() : null))
+			.then((res) => { if (!res.ok) throw new Error('Could not load previews'); return res.json(); })
 			.then((body: { previews?: { revoked: boolean; expiresAt: string; createdAt: string }[] } | null) => {
 				if (cancelled) return;
 				const now = Date.now();
@@ -774,10 +772,13 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 							</>
 						) : (
 							<>
-								<h2 className="ev-title">Nothing needs you right now</h2>
+								<h2 className="ev-title">{cards.length === 0 ? "Let’s get started" : "Nothing needs you right now"}</h2>
 								<p className="page-lede">
-									When Caddie needs a decision or finishes something, the next step appears here.
+									{cards.length === 0 ? "Tell Caddie what you want to make. Your plan, decisions, and progress will appear here." : "You can keep working with Caddie or review your project below."}
 								</p>
+                                <div className="row-actions">
+                                    <button type="button" className="btn-key" onClick={() => chrome.openProject(props.projectId, true)}>Continue with Caddie</button>
+                                </div>
 							</>
 						)}
 					</section>
@@ -803,9 +804,10 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 						)}
 					</section>
 
-					<section className="card-surface settings-panel" data-testid="overview-todo" id="todo">
+					<details className="card-surface settings-panel" data-testid="overview-todo" id="todo">
+                        <summary className="ev-head">Project tasks</summary>
 						<Tasks projectId={props.projectId} embedded />
-					</section>
+					</details>
 
 					{done.length > 0 ? (
 						<details className="card-surface settings-panel" data-testid="overview-recent">
@@ -861,9 +863,24 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const planDocs = usePlanDocRevisions(actor, props.projectId);
-	const revisions = [...(planDocs.data?.revisions ?? [])].sort((a, b) => b.revision - a.revision);
+	// PRD revisions share a counter; spec/note counters are incomparable.
+    const revisions = [...(planDocs.data?.revisions ?? [])].filter((revision) => revision.kind === 'prd').sort((a, b) => b.revision - a.revision);
+    const latest = revisions[0];
+    const approval = useQuery({
+        queryKey: ['plan-approval', chrome.actorId, props.projectId, latest?.id, latest?.bodyHash],
+        enabled: Boolean(chrome.actorId && latest),
+        queryFn: () => fetchJson<{ approval: ApprovalRecord | null }>(`/api/approvals?${new URLSearchParams({ projectId: props.projectId, action: 'design', resourceId: latest!.id, revisionHash: latest!.bodyHash, policyVersion: 'v1' })}`),
+    });
 	return (
 		<DesignReview
+            autoBuild
+            key={`${chrome.actorId}:${props.projectId}:${latest?.id ?? 'empty'}`}
+            approval={approval.data?.approval ?? null}
+            approvalPending={Boolean(latest) && approval.isPending}
+            approvalError={approval.error}
+            retryApproval={() => void approval.refetch()}
+            onDecisionSaved={() => { void approval.refetch(); chrome.refreshAll(); }}
+            onContinue={() => chrome.openProject(props.projectId, true)}
 			projectId={props.projectId}
 			planRevisions={revisions}
 			isPending={planDocs.isPending}

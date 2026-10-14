@@ -4,6 +4,8 @@ import { ScopeError, assertProjectScope } from './scope.ts';
 import { recordRepairRound } from './runs.ts';
 import { runSentinelCheckForSchedule } from './sentinel.ts';
 import { createNotification } from './notifications.ts';
+import { runDiscoverySweep } from './discovery.ts';
+import { getProfile } from './profiles.ts';
 
 /**
  * P12 slice 1 — schedules: a D1 record whose due slots are executed by
@@ -283,6 +285,8 @@ export function nextCronOccurrence(expr: string, timeZone: string, afterMs: numb
 export interface SchedulePayload {
 	readonly sourceId?: string;
 	readonly runId?: string;
+	/** A periodic "fits you / worth it" discovery sweep (DB-only re-evaluation). */
+	readonly discoverySweep?: boolean;
 }
 
 export interface ScheduleRecord {
@@ -714,6 +718,38 @@ async function fireOccurrence(
 			// The binding is gone — fall through to the plain occurrence +
 			// notification path rather than failing the slot.
 			result = 'notified';
+		}
+	} else if (schedule.payload.discoverySweep === true) {
+		// Periodic "fits you / worth it" sweep. DB-ONLY: no key on the cron
+		// tick, so this re-evaluates ALREADY-READ candidates against the
+		// owner's profile and surfaces the eligible + supported-fit ones. The
+		// dedupe key folds the hit set, so an unchanged sweep never re-notifies.
+		try {
+			const profile = await getProfile(db, schedule.createdBy);
+			const sweep = await runDiscoverySweep(
+				db,
+				{ actorId: schedule.createdBy, workspaceId: await projectWorkspaceId(db, schedule.projectId) ?? '', projectId: schedule.projectId },
+				{ country: profile?.country ?? null },
+			);
+			result = `sweep:${sweep.hits.length}/${sweep.evaluated}`;
+			if (sweep.hits.length > 0) {
+				const titles = sweep.hits.slice(0, 3).map((h) => h.title).join(', ');
+				const ids = sweep.hits.map((h) => h.candidateId).sort().join(',');
+				await createNotification(db, {
+					userId: schedule.createdBy,
+					projectId: schedule.projectId,
+					kind: 'discovery_fit',
+					title: `${sweep.hits.length} hackathon${sweep.hits.length === 1 ? '' : 's'} fit you`,
+					body:
+						`${sweep.hits.length} of ${sweep.evaluated} watched hackathons are eligible and a fit for you` +
+						`${titles ? `: ${titles}${sweep.hits.length > 3 ? ' and more' : ''}` : ''}.`,
+					// Fold the hit SET: the same fitting hackathons never re-notify;
+					// a new one entering the set changes the key and alerts once.
+					dedupeKey: `discovery_fit:${schedule.id}:${ids}`,
+				});
+			}
+		} catch (error) {
+			result = `failed:${String(error).slice(0, 160)}`;
 		}
 	}
 	if (result === 'notified') {

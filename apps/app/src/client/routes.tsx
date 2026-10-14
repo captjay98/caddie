@@ -1,12 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { OnboardingGate, useOnboarding, onboardingKey, returnKey, type OnboardingStatus } from './onboarding/Gate.tsx';
+import { postJson } from './api.ts';
+import { SignInPanel } from './auth.ts';
 import { Link, Outlet, createBrowserHistory, createRootRoute, createRoute, createRouter, redirect, useMatches } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
 import { WorkspaceChrome, type WorkspaceNavId } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
-import { Start, IdeaForm, WelcomeIntro } from './onboarding/Start.tsx';
+import { WelcomeIntro } from './onboarding/Start.tsx';
+import { OnboardingProfile } from './onboarding/Profile.tsx';
 import { ProjectSettingsPage } from './settings/ProjectSettings.tsx';
 import { Mascot } from '@caddie/ui/Mascot';
+import { StatePanel, failureKind } from './states.tsx';
 import {
 	DiscoverPage,
 	ProjectsPage,
@@ -34,24 +40,188 @@ import {
  */
 
 function OnboardingFlow(): ReactElement {
-	const [stage, setStage] = useState<'welcome' | 'start'>('welcome');
+ const { auth, actor, status } = useOnboarding();
+ const cache = useQueryClient();
+ const [busy, setBusy] = useState(false);
+ const [atProfile, setAtProfile] = useState(false);
+ const [error, setError] = useState<string | null>(null);
+ // A user who already finished onboarding and navigates BACK to /onboarding
+ // must not get stuck on the "Getting your workspace ready…" message — it has
+ // no completion action to run. Send them into the app (saved destination if
+ // one was captured, else the Brief). Only when NOT mid-finish (busy), so the
+ // real completion redirect in finish() still owns that path.
+ useEffect(() => {
+  if (busy || !auth.data?.authenticated || !status.data?.completedAt || !actor.data) return;
+  let target = '/app/';
+  try {
+   const saved = sessionStorage.getItem(returnKey(actor.data));
+   sessionStorage.removeItem(returnKey(actor.data));
+   if (saved) {
+    const url = new URL(saved, window.location.origin);
+    if (url.origin === window.location.origin && url.pathname.startsWith('/app/') &&
+        (url.pathname !== '/app/' || Boolean(url.search || url.hash)) && !/\/onboarding\/?$/.test(url.pathname)) {
+     target = url.pathname + url.search + url.hash;
+    }
+   }
+  } catch { /* no storage: fall through to the app root */ }
+  window.location.replace(target);
+ }, [busy, auth.data?.authenticated, status.data?.completedAt, actor.data]);
+ async function finish() {
+  if (busy || !actor.data) return;
+  setBusy(true);
+  setError(null);
+  try {
+   const result = await postJson<OnboardingStatus>('/api/onboarding/complete', {});
+   cache.setQueryData(onboardingKey(actor.data), result);
+   let destination: string | null = null;
+   try {
+    destination = sessionStorage.getItem(returnKey(actor.data));
+    sessionStorage.removeItem(returnKey(actor.data));
+   } catch { /* Fall through to the app root without browser storage. */ }
+   // Onboarding hands straight off to the app — there is no interstitial start
+   // screen. Restore a saved same-origin destination if the gate captured one;
+   // otherwise land on the app root (the Brief).
+   let target = '/app/';
+   if (destination) {
+    const url = new URL(destination, window.location.origin);
+    if (url.origin === window.location.origin && url.pathname.startsWith('/app/') &&
+        (url.pathname !== '/app/' || Boolean(url.search || url.hash)) && !/\/onboarding\/?$/.test(url.pathname)) {
+     target = url.pathname + url.search + url.hash;
+    }
+   }
+   window.location.replace(target);
+  } catch {
+   setError('We couldn’t save your progress. Please try again.');
+   throw new Error('We couldn’t finish setup. Please try again.');
+  } finally { setBusy(false); }
+ }
+ return (
+  <main id="main" data-testid="onboarding-page" style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 'clamp(16px, 4vw, 48px)' }}><div style={{ width: '100%', maxWidth: 720 }}>
+   {!auth.data?.authenticated ? <SignInPanel callbackURL="/app/onboarding" /> : status.data?.completedAt ? (
+    <p role="status" aria-live="polite">Getting your workspace ready…</p>
+   ) : (
+    <><fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0 }}>
+     {atProfile && actor.data ? <OnboardingProfile actorId={actor.data} onDone={finish} /> : <WelcomeIntro onDone={() => setAtProfile(true)} />}
+    </fieldset>{busy ? <p role="status">Saving your progress…</p> : null}
+    {error ? <p role="alert">{error}</p> : null}</>
+   )}
+  </div></main>
+ );
+}
+
+/**
+ * The designed error page (P06 state grammar). A render fault anywhere in the
+ * route tree lands here instead of the router's bare "Something went wrong"
+ * box.
+ *
+ * CHROME-FREE BY DESIGN — this is the load-bearing decision. An error boundary
+ * must render something SIMPLER than what failed: it must NOT re-mount the very
+ * subtree that crashed. WorkspaceChrome mounts the live conversation (Channel /
+ * ReasoningView); if the fault came from there and the boundary wrapped itself
+ * in WorkspaceChrome, the error page would re-mount the crashing tree, re-throw
+ * with nothing above to catch it, and the user would see a BLANK SCREEN. So the
+ * error page renders only the themed canvas + the card — no chrome, no
+ * conversation, no queries. It uses NO router hooks either, since the router
+ * subtree itself may be the thing that broke.
+ *
+ * RECOVERY — "Try again" does a HARD reload (window.location), never a bare
+ * boundary reset(): resetting re-renders the same (possibly still-faulting)
+ * tree in place, which is the other way to land on a blank screen. A reload
+ * guarantees a clean mount. "Ask Caddie" is a plain anchor to the app root —
+ * a full document load, so it too starts from a healthy tree.
+ *
+ * PRODUCTION SAFETY: the raw error message is shown ONLY in dev
+ * (`import.meta.env.DEV`). Vite statically removes the dead branch from the
+ * production bundle, so no stack text, internal message, or "hooks" diagnostic
+ * is ever shipped to or shown to real users — they get the friendly line only.
+ */
+function WorkspaceError({ error, info }: { error: unknown; reset?: () => void; info?: { componentStack?: string } }): ReactElement {
+	// Classify known API failures (denied/limit/offline) distinctly from an
+	// unexpected render fault, reusing the shared failure mapping.
+	const kind = failureKind(error);
+	// Dev-only: the raw message, as a diagnostic aid. Never rendered in prod.
+	const devMessage =
+		import.meta.env.DEV && error instanceof Error && error.message ? error.message : null;
+	// Dev-only: the React component stack names the EXACT component that threw —
+	// the only reliable way to pinpoint a hooks-order fault, which otherwise
+	// reports only a generic message. Logged to the console too (full stack),
+	// shown trimmed in the panel. Stripped from prod with the dev branch.
+	const devComponentStack =
+		import.meta.env.DEV && typeof info?.componentStack === 'string' ? info.componentStack.trim() : null;
+	if (import.meta.env.DEV && devComponentStack) {
+		// eslint-disable-next-line no-console
+		console.error('[WorkspaceError] render fault\n', error, '\ncomponent stack:', devComponentStack);
+	}
+	// The app's base path: '/app' in the composed Worker build, '/' under
+	// `bun run dev`. Mirror the router's own detectBasepath so both land right.
+	const base =
+		typeof window !== 'undefined' && window.location.pathname.startsWith('/app') ? '/app' : '';
+	// A full-document load onto a FRESH tree. Reopening the conversation with an
+	// in-SPA navigation would just re-mount whatever crashed and loop straight
+	// back to this error page; a hard load guarantees a clean mount of the Brief
+	// with the chat pane open, which is what "ask Caddie" should actually do.
+	function askCaddie() {
+		if (typeof window !== 'undefined') window.location.href = `${base}/?pane=channel`;
+	}
 	return (
-		<div className="shell-loading shell-page">
-			<div className="page-col">
-				{stage === 'welcome' ? (
-					<WelcomeIntro onDone={() => setStage('start')} />
-				) : (
-					<Start ideaForm={<IdeaForm />} />
-				)}
-			</div>
+		<div className="route-error-view" data-testid="route-error-view">
+			<section className="route-error-card card-surface" data-state={kind} data-testid="route-error">
+				<span className="route-error-halo" aria-hidden="true">
+					<Mascot mood="stuck" size={64} />
+				</span>
+				<p className="kicker" data-tone="error">
+					FAULT
+				</p>
+				<h3 className="route-error-title">Something went wrong on this page</h3>
+				<p className="route-error-lede" data-testid="route-error-safety">
+					Your work is safe — this is only the view. Reload the page, and if it keeps happening, ask Caddie.
+				</p>
+				{devMessage ? (
+					<div className="route-error-detail" data-testid="route-error-detail">
+						<span className="route-error-detail-label">DEV DETAIL · HIDDEN IN PRODUCTION</span>
+						<code>{devMessage}</code>
+						{devComponentStack ? (
+							<code className="route-error-stack" data-testid="route-error-stack">
+								{devComponentStack.split('\n').slice(0, 6).join('\n')}
+							</code>
+						) : null}
+					</div>
+				) : null}
+				<div className="route-error-actions">
+					<button
+						type="button"
+						className="btn-key"
+						data-testid="route-error-retry"
+						onClick={() => {
+							// Hard reload: a clean mount, never an in-place reset that
+							// could re-render the same faulting tree into a blank screen.
+							if (typeof window !== 'undefined') window.location.reload();
+						}}
+					>
+						Reload the page
+					</button>
+					<button
+						type="button"
+						className="btn-ghost"
+						data-testid="route-error-ask"
+						onClick={askCaddie}
+					>
+						Ask Caddie what happened
+						</button>
+					</div>
+				</section>
 		</div>
 	);
 }
 
 const rootRoute = createRootRoute({
 	component: () => <Outlet />,
+	errorComponent: WorkspaceError,
 	notFoundComponent: function WorkspaceNotFound() {
+		// The gate keeps an incomplete account out of the chrome here too — a
+		// mistyped URL must not become a way around onboarding.
 		return (
+			<OnboardingGate>
 			<WorkspaceChrome nav="none">
 				<div className="shell-loading">
 					<section className="state-panel card-surface" data-testid="not-found">
@@ -67,12 +237,13 @@ const rootRoute = createRootRoute({
 							<Link to="/">open the workspace</Link>.
 						</p>
 						<p className="state-detail">
-							Paths under <code>/app</code> are the app; anything else returns the landing page — two halves,
-							one product.
-						</p>
+					Paths under <code>/app</code> are the app; anything else returns the landing page — two halves,
+						one product.
+					</p>
 					</section>
 				</div>
 			</WorkspaceChrome>
+			</OnboardingGate>
 		);
 	},
 });
@@ -145,9 +316,9 @@ const shellLayoutRoute = createRoute({
 			nav?: WorkspaceNavId;
 		};
 		return (
-			<WorkspaceChrome nav={meta.nav ?? 'none'}>
+			<OnboardingGate><WorkspaceChrome nav={meta.nav ?? 'none'}>
 				<Outlet />
-			</WorkspaceChrome>
+			</WorkspaceChrome></OnboardingGate>
 		);
 	},
 });
@@ -181,10 +352,29 @@ const projectsRoute = createRoute({
 // The project workspace: Overview is the landing; Plan/Build/Submission and
 // their siblings are separate routes that all render nav='project' so the
 // conversation binds to the selected project.
+//
+// R06: the canonical workspace also accepts ?view=overview|plan|preview — the
+// consolidated Overview · Plan · Preview model. Unknown values fall back to
+// overview. Details remains reachable via the existing project-local routes
+// (runs/evidence/artifacts) during the migration.
+function validateProjectView(search: Record<string, unknown>): {
+	project?: string;
+	pane?: 'channel' | 'brief' | 'runs';
+	section?: string;
+	view?: 'overview' | 'plan' | 'preview';
+} {
+	const base = validateSearch(search);
+	const view = search.view;
+	return {
+		...base,
+		...(view === 'overview' || view === 'plan' || view === 'preview' ? { view } : {}),
+	};
+}
+
 const projectRoute = createRoute({
 	getParentRoute: () => shellLayoutRoute,
 	path: '/project',
-	validateSearch,
+	validateSearch: validateProjectView,
 	staticData: { nav: 'project' },
 	component: ProjectOverviewPage,
 });
@@ -267,14 +457,15 @@ const projectSettingsRoute = createRoute({
 });
 
 const onboardingRoute = createRoute({
-	getParentRoute: () => shellLayoutRoute,
+	getParentRoute: () => rootRoute,
 	path: '/onboarding',
 	validateSearch,
 	staticData: { nav: 'account' },
 	component: function OnboardingPage() {
 		// v2 (§4 Welcome): Caddie introduces itself and asks what to call you,
-		// THEN the three start paths (idea capture is the real primary, S17).
-		return <OnboardingFlow />;
+		// then hands straight off to the app — "what to build" is a conversation
+		// with Caddie in the shell, not a separate start screen.
+		return <OnboardingGate><OnboardingFlow /></OnboardingGate>;
 	},
 });
 
@@ -413,6 +604,7 @@ const legacyDiscoveryRoute = createRoute({
 });
 
 export const routeTree = rootRoute.addChildren([
+	onboardingRoute,
 	shellLayoutRoute.addChildren([
 		homeRoute,
 	discoverRoute,
@@ -422,7 +614,6 @@ export const routeTree = rootRoute.addChildren([
 	automationsRoute,
 	usageRoute,
 	settingsRoute,
-	onboardingRoute,
 	designReviewRoute,
 	runsRoute,
 artifactsRoute,
@@ -446,6 +637,9 @@ export const router = createRouter({
 	history: createBrowserHistory(),
 	basepath: detectBasepath(),
 	defaultPreload: 'intent',
+	// Any route that throws without its own errorComponent falls back to the
+	// designed FAULT page instead of the router's unstyled default box.
+	defaultErrorComponent: WorkspaceError,
 });
 
 declare module '@tanstack/react-router' {
