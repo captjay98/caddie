@@ -10,14 +10,17 @@ import {
 	listSavedCandidates,
 	saveCandidate,
 	unsaveCandidate,
-	createLocalSeedAdapter,
 	evaluateCandidate,
+	candidateDetail,
+	checkCandidateEligibility,
 	listCandidateEvaluations,
 	listCandidates,
 	listFeedRuns,
-	runDiscoveryFeed,
 } from '../discovery.ts';
 import { getProfile } from '../profiles.ts';
+import { digestProfileFrom } from '../candidate-inspection.ts';
+import { discoverForActor } from '../coordinator-context.ts';
+import { buildHackathonResultsCard } from '../hackathon-card.ts';
 
 /**
  * P11 discovery/planning router — per-project planning endpoints (slice 2)
@@ -36,7 +39,8 @@ import { getProfile } from '../profiles.ts';
  *     P10 claims.
  */
 
-type Env = AuthEnv;
+/** The Nebius key drives rules reading and the AI fit check on a live sweep. */
+type Env = AuthEnv & { NEBIUS_API_KEY?: string; TAVILY_API_KEY?: string };
 
 function errorJson(error: unknown): { status: number; body: { error: string; message?: string } } {
 	if (error instanceof ScopeError) {
@@ -99,10 +103,16 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 
 	// --- discovery candidates (slice 3) ---------------------------------------------
 	//
-	// The feed runs the LOCAL seed adapter (the pluggable local implementation;
-	// a real Devpost adapter is P17 live wiring). Personal eligibility reads the
+	// Discover and the chat share ONE pipeline (discoverForActor): Devpost's
+	// open-contests API first, Tavily for the other platforms (and as Devpost
+	// backup), the top events' rules pages read via Tavily for quoted
+	// eligibility, then the AI fit check. A failed source is a VISIBLE named
+	// feed gap, never a silent empty list. Personal eligibility reads the
 	// ACTOR'S OWN P14 profile — resolved from the verified session, never from
 	// a body field — and stays honest about what it used (profileCountry).
+
+	/** How many ranked events Discover lists (the page folds all but the first dozen). */
+	const DISCOVER_LIMIT = 50;
 
 	async function actorEligibilityProfile(
 		env: Env,
@@ -121,9 +131,13 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 			c.req.raw.headers,
 			c.req.param('projectId'),
 		);
-		const feed = await runDiscoveryFeed(c.env.DB, scope, {
-			adapters: [createLocalSeedAdapter(c.env.DB)],
+		// "Check again": the full live sweep, exactly what the chat runs (paid
+		// Tavily + Nebius calls, bounded inside discoverForActor).
+		await discoverForActor(c.env.DB, scope, { refresh: true, limit: DISCOVER_LIMIT }, {
+			tavilyApiKey: c.env.TAVILY_API_KEY,
+			nebiusApiKey: c.env.NEBIUS_API_KEY,
 		});
+		const [feed] = await listFeedRuns(c.env.DB, scope);
 		return c.json({ feed }, 201);
 	});
 
@@ -146,7 +160,14 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 		);
 		if (c.req.query('evaluate') === '1') {
 			const profile = await actorEligibilityProfile(c.env, c.req.raw.headers);
-			return c.json(await listCandidateEvaluations(c.env.DB, scope, profile));
+			// `card` is the same ranked, filtered, rules-checked view the chat
+			// renders, re-ranked from the stored catalog — no live sweep and no
+			// paid call on a page load. `evaluations` stays for older readers.
+			const [evaluated, result] = await Promise.all([
+				listCandidateEvaluations(c.env.DB, scope, profile),
+				discoverForActor(c.env.DB, scope, { refresh: false, limit: DISCOVER_LIMIT }, { inspect: false }),
+			]);
+			return c.json({ ...evaluated, card: buildHackathonResultsCard(result) });
 		}
 		return c.json({ candidates: await listCandidates(c.env.DB, scope) });
 	});
@@ -161,6 +182,73 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 		const profile = await actorEligibilityProfile(c.env, c.req.raw.headers);
 		return c.json(
 			await evaluateCandidate(c.env.DB, scope, c.req.param('candidateId') ?? '', profile),
+		);
+	});
+
+	// Detail pane: evaluation + grouped verbatim rules + a fail-soft AI digest.
+	// `?digest=defer` returns the rules immediately (digestPending on a cache
+	// miss); the pane then calls `/digest` for the slow model call.
+	router.get('/projects/:projectId/discovery/candidates/:candidateId/detail', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		const userId = await sessionUserId(c.env, c.req.raw.headers);
+		if (!userId) throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
+		const stored = await getProfile(c.env.DB, userId);
+		return c.json(
+			await candidateDetail(
+				c.env.DB,
+				scope,
+				c.req.param('candidateId') ?? '',
+				{ country: stored?.country ?? null },
+				c.env.NEBIUS_API_KEY,
+				digestProfileFrom(stored),
+				{ deferDigest: c.req.query('digest') === 'defer' },
+			),
+		);
+	});
+
+	// The deferred AI digest for the detail pane (the slow model call), split
+	// out so the rules render while it runs. Same scope/auth as /detail.
+	router.get('/projects/:projectId/discovery/candidates/:candidateId/digest', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		const userId = await sessionUserId(c.env, c.req.raw.headers);
+		if (!userId) throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
+		const stored = await getProfile(c.env.DB, userId);
+		const detail = await candidateDetail(
+			c.env.DB,
+			scope,
+			c.req.param('candidateId') ?? '',
+			{ country: stored?.country ?? null },
+			c.env.NEBIUS_API_KEY,
+			digestProfileFrom(stored),
+		);
+		return c.json({ digest: detail.digest, digestGap: detail.digestGap });
+	});
+
+	// On-demand "Check eligibility": read ONE candidate's rules page now, then
+	// re-evaluate. Paid Tavily + Nebius calls, bounded to a single page.
+	router.post('/projects/:projectId/discovery/candidates/:candidateId/check-eligibility', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		const profile = await actorEligibilityProfile(c.env, c.req.raw.headers);
+		return c.json(
+			await checkCandidateEligibility(c.env.DB, scope, c.req.param('candidateId') ?? '', profile, {
+				tavilyApiKey: c.env.TAVILY_API_KEY,
+				nebiusApiKey: c.env.NEBIUS_API_KEY,
+			}),
 		);
 	});
 

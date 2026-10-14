@@ -16,9 +16,14 @@ import {
 	deriveCandidateId,
 	seedCandidates,
 	runDiscoveryFeed,
+	checkCandidateEligibility,
+	runDiscoverySweep,
+	candidateDetail,
 	listCandidates,
 	acceptCandidate,
 	rankCandidateSummaries,
+	parsePrizeUsd,
+	companyWeight,
 	type DiscoverySourceAdapter,
 } from '../apps/app/src/server/discovery.ts';
 import {
@@ -53,6 +58,7 @@ const MIGRATION_PATHS = [
 	join(REPO_ROOT, 'apps', 'app', 'migrations', '0001_product.sql'),
 	join(REPO_ROOT, 'apps', 'app', 'migrations', '0004_evidence.sql'),
 	join(REPO_ROOT, 'apps', 'app', 'migrations', '0009_discovery.sql'),
+	join(REPO_ROOT, 'apps', 'app', 'migrations', '0020_discovery_digest_cache.sql'),
 ];
 
 // --- in-memory D1 (same wrap pattern as tests/evidence.test.ts) -----------------
@@ -490,6 +496,239 @@ describe('P11 explainable fit + ranking: hard-ineligible cannot rank as eligible
 		// The ineligible entry stays on the list with its true verdict — it is
 		// demoted, never relabeled.
 		expect(ranked[2]?.verdict).toBe('ineligible');
+	});
+});
+
+describe('Stage 2 ranking: biggest prizes + bigger companies first (never over eligibility)', () => {
+	test('parsePrizeUsd reads $, k/M, non-USD, and picks the largest figure', () => {
+		expect(parsePrizeUsd('Overall Grand Prize: $40,200 cash; total prizes $98,700')).toBe(98_700);
+		expect(parsePrizeUsd('First place $5,000 USD')).toBe(5_000);
+		expect(parsePrizeUsd('Pool of $1.2M in prizes')).toBe(1_200_000);
+		expect(parsePrizeUsd('up to 50k USD')).toBe(50_000);
+		expect(parsePrizeUsd('Prizes: ₹50,000')).toBe(600); // rough INR→USD ordering only
+		expect(parsePrizeUsd('No cash — swag and mentorship')).toBeNull();
+		expect(parsePrizeUsd(null)).toBeNull();
+	});
+
+	test('companyWeight recognises big sponsors by word boundary, ignores stray words', () => {
+		expect(companyWeight('Google Cloud x MLB Hackathon')).toBeGreaterThanOrEqual(3);
+		expect(companyWeight('NVIDIA Agent Challenge')).toBeGreaterThanOrEqual(3);
+		expect(companyWeight('Elasticsearch Agent Builder')).toBeGreaterThanOrEqual(2);
+		expect(companyWeight('A community hackathon in Lagos')).toBe(0);
+		// "go" must not match "Google".
+		expect(companyWeight('Go Hack: learn and build with Go')).toBe(0);
+	});
+
+	test('within a verdict tier, a bigger prize ranks higher; null prize sorts last', () => {
+		const big = { candidateId: 'cand_big', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 98_700, companyWeight: 3 };
+		const small = { candidateId: 'cand_small', matchedRequirements: 5, verdict: 'eligible' as const, prizeUsd: 5_000, companyWeight: 0 };
+		const noPrize = { candidateId: 'cand_none', matchedRequirements: 9, verdict: 'eligible' as const, prizeUsd: null, companyWeight: 2 };
+		const ranked = rankCandidateSummaries([noPrize, small, big]);
+		// Bigger prize beats better fit; a null prize (unknown money) sorts last
+		// in the tier even with the strongest fit.
+		expect(ranked.map((r) => r.candidateId)).toEqual(['cand_big', 'cand_small', 'cand_none']);
+	});
+
+	test('company weight breaks a prize tie upward', () => {
+		const nvidia = { candidateId: 'cand_nvidia', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 10_000, companyWeight: 3 };
+		const indie = { candidateId: 'cand_indie', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 10_000, companyWeight: 0 };
+		const ranked = rankCandidateSummaries([indie, nvidia]);
+		expect(ranked[0]?.candidateId).toBe('cand_nvidia');
+	});
+
+	test('a huge-prize INELIGIBLE candidate still ranks BELOW every eligible one', () => {
+		const hugeButIneligible = { candidateId: 'cand_huge_ineligible', matchedRequirements: 10, verdict: 'ineligible' as const, prizeUsd: 1_000_000, companyWeight: 3 };
+		const modestEligible = { candidateId: 'cand_modest_eligible', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 500, companyWeight: 0 };
+		const ranked = rankCandidateSummaries([hugeButIneligible, modestEligible]);
+		expect(ranked[0]?.candidateId).toBe('cand_modest_eligible'); // eligibility is not for sale
+		expect(ranked[1]?.verdict).toBe('ineligible');
+	});
+});
+
+describe('Stage 4 ranking: AI fit above prize, below eligibility, unknown stays neutral', () => {
+	test('within a verdict tier, a STRONG AI fit outranks a bigger prize with weak fit', () => {
+		const strongSmallPrize = { candidateId: 'cand_strong', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 5_000, companyWeight: 0, aiFit: 'strong' as const };
+		const weakBigPrize = { candidateId: 'cand_weak', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 98_700, companyWeight: 3, aiFit: 'weak' as const };
+		const ranked = rankCandidateSummaries([weakBigPrize, strongSmallPrize]);
+		// AI fit sits ABOVE prize: a strong fit leads even on a smaller prize.
+		expect(ranked.map((r) => r.candidateId)).toEqual(['cand_strong', 'cand_weak']);
+	});
+
+	test('a STRONG-fit INELIGIBLE candidate still ranks BELOW every eligible one (fit is below verdict)', () => {
+		const strongIneligible = { candidateId: 'cand_strong_ineligible', matchedRequirements: 0, verdict: 'ineligible' as const, prizeUsd: 100_000, companyWeight: 3, aiFit: 'strong' as const };
+		const weakEligible = { candidateId: 'cand_weak_eligible', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 0, companyWeight: 0, aiFit: 'weak' as const };
+		const ranked = rankCandidateSummaries([strongIneligible, weakEligible]);
+		expect(ranked[0]?.candidateId).toBe('cand_weak_eligible'); // a great fit never promotes an ineligible event
+		expect(ranked[1]?.verdict).toBe('ineligible');
+	});
+
+	test("an un-inspected 'unknown' fit is NEUTRAL — not pushed below a weak-fit candidate", () => {
+		const unknownFit = { candidateId: 'cand_unknown', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 1_000, companyWeight: 0, aiFit: 'unknown' as const };
+		const weakFit = { candidateId: 'cand_weak', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 1_000, companyWeight: 0, aiFit: 'weak' as const };
+		const ranked = rankCandidateSummaries([weakFit, unknownFit]);
+		// 'unknown' sits at the 'possible' (neutral) level, ABOVE 'weak' — an
+		// honest un-scored candidate is never penalised as if judged a bad fit.
+		expect(ranked[0]?.candidateId).toBe('cand_unknown');
+	});
+
+	test('a missing aiFit field (back-compat) ranks the same as an explicit unknown', () => {
+		const noField = { candidateId: 'cand_nofield', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 1_000, companyWeight: 0 };
+		const possible = { candidateId: 'cand_possible', matchedRequirements: 0, verdict: 'eligible' as const, prizeUsd: 1_000, companyWeight: 0, aiFit: 'possible' as const };
+		const ranked = rankCandidateSummaries([noField, possible]);
+		// Both at the neutral level → the deterministic candidateId tiebreak decides.
+		expect(ranked.map((r) => r.candidateId)).toEqual(['cand_nofield', 'cand_possible']);
+	});
+});
+
+describe('Stage 4 — on-demand checkCandidateEligibility (fail-soft)', () => {
+	test('no Tavily key -> reads nothing, verdict stays unknown, never throws', async () => {
+		const world = makeDiscoveryWorld();
+		const adapter = createLocalSeedAdapter(world.db);
+		await seedCandidates(world.db, [
+			{
+				source: 'local-seed',
+				url: 'https://devpost.com/software/check-me',
+				title: 'Check-me hackathon',
+				summary: 'An event whose rules have not been read yet.',
+			},
+		]);
+		const feed = await runDiscoveryFeed(world.db, world.aliceScope, { adapters: [adapter] });
+		const candidateId = feed.candidates[0]!.id;
+
+		// No Tavily key: readRulesForCandidates reads nothing and never throws,
+		// so the verdict stays the honest 'unknown' — never a guess.
+		const result = await checkCandidateEligibility(world.db, world.aliceScope, candidateId, { country: 'NG' }, {});
+		expect(result.pagesRead).toBe(0);
+		expect(result.claimsAdded).toBe(0);
+		expect(result.evaluation.candidate.id).toBe(candidateId);
+		expect(result.evaluation.eligibility.verdict).toBe('unknown');
+	});
+
+	test('refuses a fabricated candidate id (never reads rules for an unknown row)', async () => {
+		const world = makeDiscoveryWorld();
+		await expect(
+			checkCandidateEligibility(world.db, world.aliceScope, 'cand_fabricated', { country: 'NG' }, { tavilyApiKey: 'k' }),
+		).rejects.toThrow();
+	});
+});
+
+describe('Stage 5 — runDiscoverySweep (DB-only "fits you" re-evaluation)', () => {
+	test('surfaces an eligible + supported-fit candidate; ignores an unchecked one', async () => {
+		const world = makeDiscoveryWorld();
+		const adapter = createLocalSeedAdapter(world.db);
+		await seedCandidates(world.db, [
+			{
+				source: 'local-seed',
+				url: 'https://devpost.com/software/fits',
+				title: 'Fits-me hackathon',
+				summary: 'Open worldwide, matches the builder.',
+				requirements: [{ text: 'Open to NG residents', claimType: 'eligibility.open_countries' }],
+			},
+			{
+				source: 'local-seed',
+				url: 'https://devpost.com/software/unread',
+				title: 'Unread hackathon',
+				summary: 'No rules read yet.',
+			},
+		]);
+		await runDiscoveryFeed(world.db, world.aliceScope, { adapters: [adapter] });
+
+		// Make the first candidate eligible for NG (open_countries includes NG)
+		// AND a supported fit (evidence backs its requirement).
+		await addEvidenceClaim(world, world.aliceScope, 'eligibility.open_countries', 'NG US GB', '"open to residents of NG, US, GB"');
+
+		const sweep = await runDiscoverySweep(world.db, world.aliceScope, { country: 'NG' });
+		expect(sweep.evaluated).toBe(2);
+		// Only the candidate that is BOTH eligible and a supported fit is a hit;
+		// the unread one stays unknown and is never surfaced as "worth it".
+		expect(sweep.hits.every((h) => h.verdict === 'eligible')).toBe(true);
+		expect(sweep.hits.some((h) => h.title === 'Unread hackathon')).toBe(false);
+	});
+
+	test('no profile country -> eligibility stays unknown -> no hits (never a guess)', async () => {
+		const world = makeDiscoveryWorld();
+		const adapter = createLocalSeedAdapter(world.db);
+		await seedCandidates(world.db, [
+			{ source: 'local-seed', url: 'https://devpost.com/software/x', title: 'X', summary: 'y', requirements: [{ text: 'open', claimType: 'eligibility.open_countries' }] },
+		]);
+		await runDiscoveryFeed(world.db, world.aliceScope, { adapters: [adapter] });
+		await addEvidenceClaim(world, world.aliceScope, 'eligibility.open_countries', 'NG US', '"open to NG, US"');
+		const sweep = await runDiscoverySweep(world.db, world.aliceScope, { country: null });
+		expect(sweep.hits).toHaveLength(0);
+	});
+});
+
+describe('Stage polish — candidateDetail caches the AI digest (no re-read on re-open)', () => {
+	const realFetch = globalThis.fetch;
+	afterAll(() => {
+		globalThis.fetch = realFetch;
+	});
+
+	test('digest is computed ONCE and reused on the second open', async () => {
+		const world = makeDiscoveryWorld();
+		const adapter = createLocalSeedAdapter(world.db);
+		await seedCandidates(world.db, [
+			{ source: 'local-seed', url: 'https://devpost.com/software/cache-me', title: 'Cache-me', summary: 'A hackathon to digest once.' },
+		]);
+		const feed = await runDiscoveryFeed(world.db, world.aliceScope, { adapters: [adapter] });
+		const candidateId = feed.candidates[0]!.id;
+
+		let modelCalls = 0;
+		globalThis.fetch = (async () => {
+			modelCalls += 1;
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({ choices: [{ message: { content: JSON.stringify({ headline: 'Digest.', bullets: ['A → b'], watch_out: null }) } }] }),
+			} as Response;
+		}) as unknown as typeof fetch;
+
+		const first = await candidateDetail(world.db, world.aliceScope, candidateId, { country: 'NG' }, 'model-key');
+		expect(first.digest?.headline).toBe('Digest.');
+		expect(modelCalls).toBe(1);
+
+		// Second open: same content -> cache hit, the model is NOT called again.
+		const second = await candidateDetail(world.db, world.aliceScope, candidateId, { country: 'NG' }, 'model-key');
+		expect(second.digest?.headline).toBe('Digest.');
+		expect(modelCalls).toBe(1);
+	});
+
+	test('deferDigest: a cache miss returns rules now with digestPending and makes NO model call', async () => {
+		const world = makeDiscoveryWorld();
+		const adapter = createLocalSeedAdapter(world.db);
+		await seedCandidates(world.db, [
+			{ source: 'local-seed', url: 'https://devpost.com/software/defer-me', title: 'Defer-me', summary: 'Rules first, digest later.' },
+		]);
+		const feed = await runDiscoveryFeed(world.db, world.aliceScope, { adapters: [adapter] });
+		const candidateId = feed.candidates[0]!.id;
+
+		let modelCalls = 0;
+		globalThis.fetch = (async () => {
+			modelCalls += 1;
+			return {
+				ok: true,
+				status: 200,
+				json: async () => ({ choices: [{ message: { content: JSON.stringify({ headline: 'Later.', bullets: ['A → b'], watch_out: null }) } }] }),
+			} as Response;
+		}) as unknown as typeof fetch;
+
+		const deferred = await candidateDetail(world.db, world.aliceScope, candidateId, { country: 'NG' }, 'model-key', undefined, { deferDigest: true });
+		expect(deferred.digestPending).toBe(true);
+		expect(deferred.digest).toBeNull();
+		expect(deferred.digestGap).toBeNull();
+		expect(modelCalls).toBe(0);
+
+		// The separate digest request computes it (one call)…
+		const computed = await candidateDetail(world.db, world.aliceScope, candidateId, { country: 'NG' }, 'model-key');
+		expect(computed.digest?.headline).toBe('Later.');
+		expect(computed.digestPending).toBe(false);
+		expect(modelCalls).toBe(1);
+
+		// …and a later deferred open serves the cached digest inline, no call.
+		const reopened = await candidateDetail(world.db, world.aliceScope, candidateId, { country: 'NG' }, 'model-key', undefined, { deferDigest: true });
+		expect(reopened.digestPending).toBe(false);
+		expect(reopened.digest?.headline).toBe('Later.');
+		expect(modelCalls).toBe(1);
 	});
 });
 
