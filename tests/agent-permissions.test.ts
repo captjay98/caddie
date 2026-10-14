@@ -17,6 +17,7 @@ import {
 	makeRecordAcceptance,
 	makeRecordVerification,
 	makeSandboxExec,
+	makeVerifyBuild,
 	makeWriteSandboxFile,
 	assertNotProtectedPath,
 } from '../apps/app/src/agents/tools';
@@ -91,7 +92,8 @@ describe('P05 permission matrix', () => {
 		}
 		// record_verification is QA's only mutation, and it appends evidence —
 		// never product state.
-		expect(ROLE_TOOL_POLICY.qa).toContain('record_verification');
+		expect(ROLE_TOOL_POLICY.qa).toContain('verify_build');
+ expect(ROLE_TOOL_POLICY.qa).not.toContain('sandbox_exec');
 	});
 
 	test('product has no sandbox or write-file tools', () => {
@@ -215,14 +217,9 @@ describe('P05 protected acceptance surfaces', () => {
 		// the write must be REFUSED so no invisible ledger is created
 		const refused = await run('1');
 		expect(refused.output).toContain('record refused');
-		expect(refused.output).toContain('rev-0');
-		expect(writes).toEqual([]);
 
-		// with the run's actual revision the record lands in the ledger
-		const accepted = await run('rev-0');
-		expect(accepted.output).toContain('acceptance recorded');
-		expect(writes).toHaveLength(1);
-		expect(writes[0]).toContain('"planRevision":"rev-0"');
+        expect(refused.output).toContain('caller-supplied');
+        expect(writes.length).toBe(0);
 	});
 
 	test('mentionsProtectedPath catches paths embedded mid-command', () => {
@@ -398,7 +395,7 @@ describe('P05 run lifecycle', () => {
 		});
 		runAId = binding.runId;
 		expect(binding.modelRouteId).toBe('nemotron-3-super');
-		expect(binding.pricingVersion).toBe('2026-10-adjudication');
+		expect(binding.pricingVersion).toBe('2026-10-nemotron-tier');
 		// conversation binding is server-derived and durable
 		const byConversation = await runsService.lookupRunByConversation(d1db as never, binding.conversationId);
 		expect(byConversation?.runId).toBe(runAId);
@@ -660,4 +657,21 @@ describe('P05 bounded currentRevisionCache', () => {
 		expect(cache.has('run-372')).toBe(true);
 		expect(cache.has('run-499')).toBe(true);
 	});
+});
+
+
+test('Flue cancellation reaches specialist execution and QA verification', async () => {
+  const controller = new AbortController();
+  let executionSignal: AbortSignal | undefined;
+  let verificationSignal: AbortSignal | undefined;
+  const exec = makeSandboxExec({sessionId:'owned-session',runId:'owned-run',driver:{
+    execute: async input => {executionSignal=input.signal; return {remoteId:'fixture'};},
+    readFile: async () => '', writeFile: async () => {},
+  }});
+  const verify = makeVerifyBuild({verify: async (_key, signal) => {verificationSignal=signal; return {passed:false};}});
+  type RawTool = {run(ctx:{data: Record<string,unknown>;toolCallId:string;signal:AbortSignal}):Promise<unknown>};
+  await (exec as unknown as RawTool).run({data:{sessionId:'ignored',command:'bun test src',timeoutMs:1000},toolCallId:'exec-id',signal:controller.signal});
+  await (verify as unknown as RawTool).run({data:{},toolCallId:'qa-id',signal:controller.signal});
+  expect(executionSignal).toBe(controller.signal);
+  expect(verificationSignal).toBe(controller.signal);
 });

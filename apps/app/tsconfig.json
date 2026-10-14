@@ -10,7 +10,10 @@
 		"verbatimModuleSyntax": true,
 		"strict": true,
 		"skipLibCheck": true,
-		"noEmit": true
+		"noEmit": true,
+		"paths": {
+			"@caddie/contracts": ["../../packages/contracts/src/index.ts"]
+		}
 	},
 	"include": ["src"]
 }
