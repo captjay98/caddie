@@ -1,26 +1,30 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
+import type { HackathonCandidate, HackathonResultsCard } from '@caddie/contracts';
 import { StatePanel } from '../states.tsx';
+import { countryName, countryFlag } from '../country.ts';
+import { Icon } from '../icons.tsx';
+import { EligibilityChip, RuleQuote } from '../conversation/HackathonResultsCard.tsx';
+import { ContestDetailPane } from './ContestDetailPane.tsx';
+import { eligibilityView, metaParts } from '../conversation/hackathon-format.ts';
 
 /**
- * P11 discovery results (slice 3) — candidate list reading the REAL P11
- * routes, rebuilt on the shared class system (UI review board screen 13: the
- * shipped file carried 17 hex literals and 25 inline style attributes with
- * zero className references, so the eligibility verdict — the word the whole
- * product exists to state honestly — was unreadable at 1.01–1.11:1 on the
- * dark theme).
+ * Discover — the account's hackathon list. It shows the SAME ranked, filtered,
+ * rules-checked events as the chat card (the server builds both from one
+ * pipeline, discoverForActor), one dense row per event: title, the facts a
+ * builder decides on (organiser, format, dates, prize, entries, themes), a
+ * short eligibility chip, Save and Find an idea.
  *
  * Honesty rules rendered into the UI (feature-ledger F10, packets P11):
  *   - PARTIAL FEED FAILURE IS VISIBLE: failed sources appear as named gaps
  *     with their failure reason — never silently dropped.
- *   - Every fit claim shows the P10 evidence claim ids it rests on, or its
- *     recorded assumption — nothing invented.
- *   - Eligibility verdicts are conservative: unknown is shown as UNKNOWN
- *     (never as "probably fine"), and a hard-ineligible candidate is labeled
- *     ineligible — ranking demotes it but never relabels it. The badge owns
- *     BOTH its tint and its text colour, so the verdict reads on any theme.
- *   - matchedRequirements is a crude heuristic count, never a win probability.
- *   - the first fetch renders a loading state, never a blank page.
+ *   - Eligibility is the strict engine verdict. "Not checked" means no rules
+ *     page has been read yet (never "probably fine"); a hard-ineligible event
+ *     is hidden behind a named reveal, never relabelled. The verbatim rule
+ *     behind a verdict is one click away, linked to the official rules page.
+ *   - Fit claims keep their evidence claim ids or recorded assumptions.
+ *   - A field the source does not carry is omitted, never invented.
+ *   - The first fetch renders a loading state, never a blank page.
  */
 
 export interface DiscoveryCandidateRecord {
@@ -60,6 +64,8 @@ export interface DiscoveryEvaluatedList {
 	evaluations: readonly DiscoveryEvaluation[];
 	ranked: readonly { candidateId: string; matchedRequirements: number; verdict: string }[];
 	profileCountry: string | null;
+	/** The ranked, filtered, rules-checked view the chat card also renders. */
+	card?: HackathonResultsCard;
 }
 
 export interface DiscoveryFeedRecord {
@@ -73,12 +79,12 @@ export interface DiscoveryFeedRecord {
 	}[];
 }
 
-type FailureKind = 'denied' | 'limit' | 'offline' | 'error';
+/** Rows shown before "Show N more". */
+const FIRST_PAGE = 12;
 
 function classifyFailure(status: number, message: string): string {
-	const kind: FailureKind =
-		status === 401 || status === 403 ? 'denied' : status === 429 ? 'limit' : 'error';
-	return kind === 'denied' ? `Denied: ${message}` : message || `Request failed (${status})`;
+	if (status === 401 || status === 403) return `Denied: ${message}`;
+	return message || `Request failed (${status})`;
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -90,24 +96,43 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 	return (await response.json()) as T;
 }
 
-function verdictLabel(verdict: string): string {
-	// v2 plain words (§6): Eligibility → "Can you enter?" — the badge answers it.
-	if (verdict === 'eligible') return 'You can enter';
-	if (verdict === 'ineligible') return "Can't enter";
-	return "Can't tell yet";
-}
-
-/** UNKNOWN reads as an absence of evidence — never a weak negative. */
-function verdictTone(verdict: string): 'ok' | 'danger' | 'neutral' {
-	if (verdict === 'eligible') return 'ok';
-	if (verdict === 'ineligible') return 'danger';
-	return 'neutral';
-}
-
 function when(iso: string | null): string {
 	if (!iso) return 'never';
 	const date = new Date(iso);
-	return Number.isFinite(date.getTime()) ? date.toISOString() : 'unknown';
+	return Number.isFinite(date.getTime())
+		? new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+		: 'unknown';
+}
+
+/** A row for a stored candidate the ranked card does not carry (an older reader, or a saved event no longer listed). */
+function rowFromEvaluation(evaluation: DiscoveryEvaluation): HackathonCandidate {
+	const { candidate, eligibility } = evaluation;
+	return {
+		id: candidate.id,
+		title: candidate.title,
+		url: candidate.url,
+		platform: null,
+		summary: candidate.summary,
+		startsAt: null,
+		prize: null,
+		endsAt: null,
+		deadline: null,
+		participants: null,
+		format: null,
+		organizer: null,
+		themes: [],
+		topPick: false,
+		eligibility: eligibility.verdict,
+		eligibilityNote: '',
+		eligibilityQuote: null,
+		eligibilityNeedsConfirm: false,
+		rulesUrl: null,
+		openStatusUnverified: false,
+		saved: Boolean(candidate.savedAt),
+		aiFit: 'unknown',
+		aiFitReason: '',
+		aiFitConfidence: null,
+	};
 }
 
 export function DiscoveryResults(props: {
@@ -115,11 +140,9 @@ export function DiscoveryResults(props: {
 	apiBase?: string;
 	/**
 	 * Account-level Discover hands off an opportunity to a real project. When
-	 * present, each new candidate's PRIMARY action is "Explore ideas for this
-	 * hackathon" (calls onExplore — create or continue a project) and the
-	 * secondary action is "Save" (the scoped accept). Without it the surface
-	 * keeps its original project-scoped "Accept" behaviour. The callback owns the
-	 * navigation + duplicate-continue logic; this component only renders it.
+	 * present, each event's PRIMARY action is "Find an idea" (onExplore —
+	 * create or continue a project) and the secondary action is Save. Without
+	 * it the surface keeps its project-scoped "Accept" behaviour.
 	 */
 	onExplore?: (candidate: DiscoveryCandidateRecord) => void;
 	exploreBusy?: boolean;
@@ -129,6 +152,13 @@ export function DiscoveryResults(props: {
 	const [latestFeed, setLatestFeed] = useState<DiscoveryFeedRecord | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+	const [view, setView] = useState<'forYou' | 'saved'>('forYou');
+	const [canEnterOnly, setCanEnterOnly] = useState(false);
+	const [onlineOnly, setOnlineOnly] = useState(false);
+	const [showIneligible, setShowIneligible] = useState(false);
+	const [showAll, setShowAll] = useState(false);
+	const [detailId, setDetailId] = useState<string | null>(null);
+	const [checkingId, setCheckingId] = useState<string | null>(null);
 
 	const base = `${apiBase}/api/projects/${encodeURIComponent(projectId)}/discovery`;
 
@@ -149,11 +179,12 @@ export function DiscoveryResults(props: {
 		}
 	}
 
-	async function runFeed() {
+	/** Run one action, then re-read the list; an error stays visible. */
+	async function act(request: () => Promise<unknown>) {
 		setBusy(true);
 		setError(null);
 		try {
-			await fetchJson<{ feed: DiscoveryFeedRecord }>(`${base}/feed`, { method: 'POST' });
+			await request();
 			await load();
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
@@ -161,30 +192,21 @@ export function DiscoveryResults(props: {
 		}
 	}
 
-	/** B01: bookmark / unbookmark without accepting — the real save routes. */
-	async function toggleSaved(candidateId: string, save: boolean) {
-		setBusy(true);
-		setError(null);
+	const runFeed = () => act(() => fetchJson(`${base}/feed`, { method: 'POST' }));
+	const toggleSaved = (candidateId: string, save: boolean) =>
+		act(() => fetchJson(`${base}/candidates/${encodeURIComponent(candidateId)}/save`, { method: save ? 'POST' : 'DELETE' }));
+	const accept = (candidateId: string) =>
+		act(() => fetchJson(`${base}/candidates/${encodeURIComponent(candidateId)}/accept`, { method: 'POST' }));
+	/** On-demand read of ONE candidate's rules, then refresh the list. */
+	async function checkEligibility(candidateId: string) {
+		setCheckingId(candidateId);
 		try {
-			await fetchJson(`${base}/candidates/${encodeURIComponent(candidateId)}/save`, {
-				method: save ? 'POST' : 'DELETE',
-			});
+			await fetchJson(`${base}/candidates/${encodeURIComponent(candidateId)}/check-eligibility`, { method: 'POST' });
 			await load();
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
-			setBusy(false);
-		}
-	}
-
-	async function accept(candidateId: string) {
-		setBusy(true);
-		setError(null);
-		try {
-			await fetchJson(`${base}/candidates/${encodeURIComponent(candidateId)}/accept`, { method: 'POST' });
-			await load();
-		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
-			setBusy(false);
+		} finally {
+			setCheckingId(null);
 		}
 	}
 
@@ -194,53 +216,113 @@ export function DiscoveryResults(props: {
 		void load();
 	}, [projectId]);
 
-	const ranked = list?.ranked ?? [];
-	const byId = new Map((list?.evaluations ?? []).map((e) => [e.candidate.id, e]));
-	const failedSources = (latestFeed?.sources ?? []).filter((s) => s.outcome === 'failed');
-
-	// v2 Discover (HANDOFF §4): ONE list, no search, no sort. Segmented
-	// "For you · Saved" (B01 landed the real saved bookmark), plus two real
-	// filters — "Can enter" (eligible-only) and the "can't enter" reveal. The
-	// prototype's date/prize filters need feed data the sources don't carry
-	// yet (no closes-at or prize field on a candidate), so they stay
-	// unrendered rather than faked.
-	const [view, setView] = useState<'forYou' | 'saved'>('forYou');
-	const [canEnterOnly, setCanEnterOnly] = useState(false);
-	const [showIneligible, setShowIneligible] = useState(false);
-	const [expanded, setExpanded] = useState<string | null>(null);
-	const visible = ranked.filter((entry) => {
-		const evaluation = byId.get(entry.candidateId);
-		if (!evaluation) return true;
-		if (view === 'saved' && !evaluation.candidate.savedAt) return false;
-		if (canEnterOnly && evaluation.eligibility.verdict !== 'eligible') return false;
-		if (!showIneligible && evaluation.eligibility.verdict === 'ineligible') return false;
+	const evaluations = new Map((list?.evaluations ?? []).map((e) => [e.candidate.id, e]));
+	const isSaved = (row: HackathonCandidate) => {
+		const stored = evaluations.get(row.id)?.candidate.savedAt;
+		return stored === undefined ? row.saved : Boolean(stored);
+	};
+	// The ranked card is the list; without one (an older server), fall back to
+	// the stored evaluations in their ranked order.
+	const ranked: HackathonCandidate[] = list?.card
+		? [...list.card.candidates]
+		: (list?.ranked ?? []).flatMap((entry) => {
+				const evaluation = evaluations.get(entry.candidateId);
+				return evaluation ? [rowFromEvaluation(evaluation)] : [];
+			});
+	const rankedIds = new Set(ranked.map((row) => row.id));
+	// A saved event stays reachable under Saved even after it left the ranking.
+	const savedOutsideRanking = (list?.evaluations ?? [])
+		.filter((e) => e.candidate.savedAt && !rankedIds.has(e.candidate.id))
+		.map(rowFromEvaluation);
+	const pool = view === 'saved' ? [...ranked, ...savedOutsideRanking].filter(isSaved) : ranked;
+	const afterFilters = pool.filter((row) => {
+		if (canEnterOnly && row.eligibility !== 'eligible') return false;
+		if (onlineOnly && row.format !== 'online') return false;
 		return true;
 	});
-	const hiddenIneligible = ranked.length - visible.length;
+	const visible = showIneligible ? afterFilters : afterFilters.filter((row) => row.eligibility !== 'ineligible');
+	const hiddenIneligible = afterFilters.length - visible.length;
+	const shown = showAll ? visible : visible.slice(0, FIRST_PAGE);
+	const savedCount = [...ranked, ...savedOutsideRanking].filter(isSaved).length;
+	const failedSources = (latestFeed?.sources ?? []).filter((s) => s.outcome === 'failed');
+	const profileCountry = list?.card?.profileCountry ?? list?.profileCountry ?? null;
+	const hasAny = ranked.length > 0 || savedOutsideRanking.length > 0;
+
+	function exploreRecord(row: HackathonCandidate): DiscoveryCandidateRecord {
+		return (
+			evaluations.get(row.id)?.candidate ?? {
+				id: row.id,
+				url: row.url,
+				title: row.title,
+				summary: row.summary,
+				source: row.platform ?? 'web',
+				status: 'new',
+				savedAt: null,
+				firstSeenAt: '',
+			}
+		);
+	}
 
 	return (
 		<section aria-label="Discovery results" className="discovery-panel" data-testid="discovery-results">
-			<div className="r-section-head">
-				<div>
-					<p className="kicker" data-tone="action">
-						FIND
-					</p>
-					<h2 className="ev-title">Hackathons that fit you</h2>
-					<p className="page-lede">
-						Ranked only on what Caddie could actually read. Opening one shows whether you can enter and
-						what you'd hand in.
-					</p>
+			{hasAny ? (
+				<div className="disc-toolbar">
+					<span className="disc-seg" role="group" aria-label="Which events" data-testid="discovery-view">
+						<button type="button" aria-pressed={view === 'forYou'} data-testid="discovery-view-foryou" onClick={() => setView('forYou')}>
+							Best for you <span className="seg-count">{ranked.length}</span>
+						</button>
+						<button type="button" aria-pressed={view === 'saved'} data-testid="discovery-view-saved" onClick={() => setView('saved')}>
+							Saved <span className="seg-count">{savedCount}</span>
+						</button>
+					</span>
+					<span className="disc-filter-chips" data-testid="discovery-filters">
+						<button
+							type="button"
+							className="disc-filter"
+							data-testid="discovery-filter-canenter"
+							aria-pressed={canEnterOnly}
+							onClick={() => setCanEnterOnly((value) => !value)}
+						>
+							Can enter only
+						</button>
+						<button
+							type="button"
+							className="disc-filter"
+							data-testid="discovery-filter-online"
+							aria-pressed={onlineOnly}
+							onClick={() => setOnlineOnly((value) => !value)}
+						>
+							Online
+						</button>
+					</span>
+					<span className="disc-actions">
+						{profileCountry ? (
+							<span
+								className="disc-country-chip"
+								data-testid="discovery-country"
+								title={`Entry rules are checked against your profile country: ${countryName(profileCountry)}`}
+							>
+								{countryFlag(profileCountry)} Entry checked for {countryName(profileCountry)}
+							</span>
+						) : (
+							<span
+								className="disc-country-chip disc-country-chip--none"
+								data-testid="discovery-country"
+								title="No profile country recorded — country-based eligibility stays unknown"
+							>
+								Set your country for entry checks
+							</span>
+						)}
+						<button type="button" className="btn-ghost" onClick={() => void runFeed()} disabled={busy} data-testid="discovery-sweep">
+							{busy ? 'Checking…' : 'Check again'}
+						</button>
+					</span>
 				</div>
-				<span className="disc-actions">
-					<button type="button" className="btn-key" onClick={() => void runFeed()} disabled={busy}>
-						{busy ? 'Checking…' : 'Check for new contests'}
-					</button>
-				</span>
-			</div>
+			) : null}
 
 			{error ? (
 				<div role="alert" className="sign-in-error disc-error" data-testid="discovery-error">
-					<b>The sweep could not be read.</b>
+					<b>The list could not be read.</b>
 					<span> {error}</span>
 					<button type="button" className="btn-ghost" onClick={() => void load()}>
 						Retry
@@ -251,210 +333,225 @@ export function DiscoveryResults(props: {
 			{/* Partial feed failure is a visible, named gap — never silently dropped. */}
 			{failedSources.length > 0 ? (
 				<div role="status" className="disc-gaps" data-testid="feed-gaps">
-					<strong>Feed gaps</strong> (last run {when(latestFeed?.requestedAt ?? null)}):
+					<strong>Some sources failed</strong> (last check {when(latestFeed?.requestedAt ?? null)}):
 					<ul>
 						{failedSources.map((s) => (
 							<li key={s.source}>
-								<code>{s.source}</code> failed — {s.failureReason ?? 'unknown reason'}; its candidates are
-								missing from this list.
+								<code>{s.source}</code> failed — {s.failureReason ?? 'unknown reason'}; its events are missing from this list.
 							</li>
 						))}
 					</ul>
 				</div>
 			) : null}
 
-			<p className="state-detail">
-				Whether you can enter is judged with your profile country:{' '}
-				{list?.profileCountry ?? 'none recorded — country rules stay UNKNOWN'}.
-			</p>
-
-			{ranked.length > 0 ? (
-				<div className="disc-filters" data-testid="discovery-filters">
-					<span className="seg" data-testid="discovery-view">
-						<button
-							type="button"
-							aria-pressed={view === 'forYou'}
-							data-testid="discovery-view-foryou"
-							onClick={() => setView('forYou')}
-						>
-							For you
-						</button>
-						<button
-							type="button"
-							aria-pressed={view === 'saved'}
-							data-testid="discovery-view-saved"
-							onClick={() => setView('saved')}
-						>
-							Saved
-						</button>
-					</span>
-					<button
-						type="button"
-						className="detail-toggle"
-						data-testid="discovery-filter-canenter"
-						aria-pressed={canEnterOnly}
-						onClick={() => setCanEnterOnly((value) => !value)}
-					>
-						Can enter
-					</button>
-					{hiddenIneligible > 0 ? (
-						<button
-							type="button"
-							className="detail-toggle"
-							data-testid="discovery-reveal-ineligible"
-							aria-pressed={showIneligible}
-							onClick={() => setShowIneligible((value) => !value)}
-						>
-							{showIneligible ? 'Hide' : 'Show'} {hiddenIneligible} you can't enter
-						</button>
-					) : null}
-				</div>
-			) : null}
-
-			{ranked.length === 0 ? (
+			{!hasAny ? (
 				list ? (
-					<StatePanel
-						kind="empty"
-						title="Nothing has been read, so nothing is ranked"
-						detail="No candidates yet — run the feed. A sweep reads the sources this project watches and ranks only what it could actually read; until one runs this pane stays empty on purpose rather than guessing."
-					/>
+					<div className="disc-empty" data-testid="discovery-empty">
+						<span className="disc-empty-icon" aria-hidden="true">
+							<Icon name="search" title="" />
+						</span>
+						<h3>Let's see what's out there</h3>
+						<p className="disc-empty-lede">
+							Caddie reads every open Devpost contest plus events on Devfolio, HackerEarth, DoraHacks, ETHGlobal and
+							Kaggle, checks the top ones' entry rules, and ranks them for you. Nothing here starts a build until you
+							say so.
+						</p>
+						<button type="button" className="btn-key" onClick={() => void runFeed()} disabled={busy} data-testid="discovery-sweep-empty">
+							{busy ? 'Checking…' : 'Find hackathons for me'}
+						</button>
+					</div>
 				) : (
-					<StatePanel kind="loading" title="Reading the feeds…" />
+					<StatePanel kind="loading" title="Reading the list…" />
 				)
 			) : visible.length === 0 ? (
 				<div data-testid="discovery-filter-empty">
 					<StatePanel
 						kind="empty"
-						title="Nothing matches these filters"
-						detail="Everything in the loaded feed is filtered out. Clear a filter, or check for new contests."
+						title={view === 'saved' && savedCount === 0 ? 'Nothing saved yet' : 'Nothing matches these filters'}
+						detail={view === 'saved' && savedCount === 0 ? 'Save an event to keep it here.' : 'Clear a filter, or check again for new events.'}
 					/>
+					{hiddenIneligible > 0 ? (
+						<button
+							type="button"
+							className="disc-link"
+							data-testid="discovery-reveal-ineligible"
+							aria-pressed={false}
+							onClick={() => setShowIneligible(true)}
+						>
+							Show {hiddenIneligible} you can't enter
+						</button>
+					) : null}
 				</div>
 			) : (
-				<ul className="disc-list">
-					{visible.map((entry) => {
-						const evaluation = byId.get(entry.candidateId);
-						if (!evaluation) return null;
-						const { candidate, fit, eligibility } = evaluation;
-						const open = expanded === candidate.id;
-						// One reason it fits (§4): the first evidenced claim's statement,
-						// or the honest requirement count when nothing was evidenced.
-						const fitReason =
-							fit.claims.find((claim) => claim.verdict === 'supported')?.statement ??
-							`${fit.matchedRequirements} requirement(s) evidenced`;
-						const canYouEnter =
-							eligibility.verdict === 'eligible'
-								? 'You can enter.'
-								: eligibility.verdict === 'ineligible'
-									? "You can't enter."
-									: "Can't tell yet — the rules on record don't cover it.";
-						return (
-							<li key={candidate.id} className="disc-item">
-								<div className="disc-head">
-									<strong>{candidate.title}</strong>
-									<span className="badge" data-tone={verdictTone(eligibility.verdict)} data-testid={`eligibility-${candidate.id}`}>
-										{verdictLabel(eligibility.verdict)}
-									</span>
-								</div>
-								<div className="disc-summary">{fitReason}</div>
-								<div className="disc-meta">
-									<a href={candidate.url} rel="noreferrer noopener" target="_blank">
-										{candidate.url}
-									</a>{' '}
-									· source {candidate.source}
-									{candidate.savedAt ? ' · saved' : ''}
-								</div>
-								<div className="row-actions">
-									{candidate.status === 'new' || candidate.status === 'accepted' ? (
-										onExplore ? (
-											<>
-												<button
-													type="button"
-													className="btn-key"
-													data-testid={`explore-ideas-${candidate.id}`}
-													onClick={() => onExplore(candidate)}
-													disabled={exploreBusy}
-												>
-													{exploreBusy ? 'Opening…' : 'Find an idea'}
-												</button>{' '}
-											{candidate.savedAt ? (
-												<button
-													type="button"
-													className="btn-ghost"
-													data-testid={`unsave-candidate-${candidate.id}`}
-													onClick={() => void toggleSaved(candidate.id, false)}
-													disabled={busy}
-												>
-													Remove from saved
-												</button>
-											) : (
-												<button
-													type="button"
-													className="btn-ghost"
-													data-testid={`save-candidate-${candidate.id}`}
-													onClick={() => void toggleSaved(candidate.id, true)}
-													disabled={busy}
-												>
-													Save
-												</button>
-											)}
-											</>
-										) : (
-											<button type="button" className="btn-key" onClick={() => void accept(candidate.id)} disabled={busy}>
-												Accept
+				<>
+					<ul className="disc-list">
+						{shown.map((row) => {
+							const saved = isSaved(row);
+							const status = evaluations.get(row.id)?.candidate.status ?? 'new';
+							const fitClaims = (evaluations.get(row.id)?.fit.claims ?? []).filter((claim) => claim.verdict === 'supported');
+							const facts = metaParts(row);
+							const eligibility = eligibilityView(row);
+							return (
+								<li key={row.id} className="disc-row" data-testid={`disc-row-${row.id}`}>
+									<div className="disc-row-head">
+										<div className="disc-row-main">
+											<button
+												type="button"
+												className="disc-row-title disc-row-title--btn"
+												onClick={() => setDetailId(row.id)}
+												title={`Open details for ${row.title}`}
+												data-testid={`disc-open-${row.id}`}
+											>
+												{row.title}
 											</button>
-										)
-									) : null}
-									<button type="button" className="btn-ghost" onClick={() => setExpanded(open ? null : candidate.id)}>
-										{open ? 'Hide details' : 'Can you enter?'}
-									</button>
-								</div>
-								{open ? (
-									<div className="disc-detail" data-testid={`disc-detail-${candidate.id}`}>
-										<p className="disc-verdict-line" data-testid={`disc-canenter-${candidate.id}`}>
-											<strong>{canYouEnter}</strong>{' '}
-											{eligibility.rules.length > 0
-												? `Based on ${eligibility.rules.length} quoted rule(s) on record.`
-												: 'No quoted eligibility rules on record, so this stays UNKNOWN — never assumed eligible.'}
-										</p>
-										{fit.claims.length === 0 ? (
-											<p className="state-detail">No evidence-mapped requirements for this candidate.</p>
-										) : (
-											fit.claims.map((claim) => (
-												<div key={`${claim.claimType}:${claim.requirement}`} className="disc-claim">
-													<div className="disc-claim-line">
-														<strong>{claim.verdict.toUpperCase()}</strong> — {claim.statement}
-													</div>
-													{claim.evidenceClaimIds.length > 0 ? (
-														<div className="disc-claim-evidence">
-															evidence:{' '}
-															{claim.evidenceClaimIds.map((id) => (
-																<code key={id}>{id}</code>
+											{facts.length > 0 ? (
+												<ul className="disc-facts" data-testid={`disc-facts-${row.id}`}>
+													{facts.map((part) => (
+														<li key={part.key} className="disc-fact" data-fact={part.key}>
+															<span className="disc-fact-label">{part.label}</span>
+															<span className="disc-fact-value">{part.value}</span>
+														</li>
+													))}
+												</ul>
+											) : null}
+											{fitClaims.length > 0 ? (
+												<details className="hk-why" data-testid={`disc-fit-${row.id}`}>
+													<summary>Why it fits</summary>
+													{fitClaims.map((claim) => (
+														<div key={`${claim.claimType}:${claim.requirement}`} className="disc-claim">
+															<div className="disc-claim-line">{claim.statement}</div>
+															{claim.evidenceClaimIds.length > 0 ? (
+																<div className="disc-claim-evidence">
+																	evidence:{' '}
+																	{claim.evidenceClaimIds.map((id) => (
+																		<code key={id}>{id}</code>
+																	))}
+																</div>
+															) : null}
+															{claim.assumptions.map((assumption) => (
+																<div key={assumption} className="disc-assumption">
+																	assumption: {assumption}
+																</div>
 															))}
 														</div>
-													) : null}
-													{claim.assumptions.map((assumption) => (
-														<div key={assumption} className="disc-assumption">
-															assumption: {assumption}
-														</div>
 													))}
-												</div>
-											))
-										)}
-										{eligibility.rules.map((rule) => (
-											<div key={`${rule.claimType}:${rule.reason}`} className="disc-rules">
-												<code>{rule.claimType}</code> → {rule.verdict} ({rule.basis}): {rule.reason}
-											</div>
-										))}
-										{/* "What you'll hand in" needs deliverable data the feed does
-										    not carry yet — stated honestly, never invented. */}
-										<p className="state-detail">What you'll hand in isn't in this feed yet — check the contest page for its full requirements.</p>
+												</details>
+											) : null}
+										</div>
+										<div className="disc-row-status">
+											{row.openStatusUnverified ? (
+												<span className="hk-chip hk-chip-unverified" title="Found by web search while Devpost's API was down">
+													Unverified
+												</span>
+											) : null}
+											{eligibility.state === 'unknown' ? (
+												<button
+													type="button"
+													className="hk-chip hk-chip-check"
+													data-testid={`check-eligibility-chip-${row.id}`}
+													onClick={() => void checkEligibility(row.id)}
+													disabled={checkingId === row.id || busy}
+													title="Read this contest's rules now to check if you can enter"
+												>
+													{checkingId === row.id ? 'Checking…' : 'Not checked ↻'}
+												</button>
+											) : (
+												<EligibilityChip view={eligibility} compact testId={`eligibility-${row.id}`} />
+											)}
+										</div>
 									</div>
-								) : null}
-							</li>
-						);
-					})}
-				</ul>
+									<div className="disc-row-tail">
+										<RuleQuote candidate={row} view={eligibility} />
+										{status === 'new' || status === 'accepted' ? (
+										<div className="disc-row-actions">
+											{onExplore ? (
+												<>
+													{saved ? (
+														<button
+															type="button"
+															className="btn-ghost"
+															data-testid={`unsave-candidate-${row.id}`}
+															onClick={() => void toggleSaved(row.id, false)}
+															disabled={busy}
+															aria-label={`Remove ${row.title} from saved`}
+														>
+															Saved
+														</button>
+													) : (
+														<button
+															type="button"
+															className="btn-ghost"
+															data-testid={`save-candidate-${row.id}`}
+															onClick={() => void toggleSaved(row.id, true)}
+															disabled={busy}
+															aria-label={`Save ${row.title}`}
+														>
+															Save
+														</button>
+													)}
+													<button
+														type="button"
+														className="btn-key"
+														data-testid={`explore-ideas-${row.id}`}
+														onClick={() => onExplore(exploreRecord(row))}
+														disabled={exploreBusy}
+													>
+														{exploreBusy ? 'Opening…' : 'Find an idea'}
+													</button>
+												</>
+											) : (
+												<button type="button" className="btn-key" onClick={() => void accept(row.id)} disabled={busy}>
+													Accept
+												</button>
+											)}
+										</div>
+									) : null}
+									</div>
+								</li>
+							);
+						})}
+					</ul>
+					<div className="disc-list-foot">
+						{!showAll && visible.length > FIRST_PAGE ? (
+							<button type="button" className="disc-link" data-testid="discovery-show-more" onClick={() => setShowAll(true)}>
+								Show {visible.length - FIRST_PAGE} more
+							</button>
+						) : null}
+						{hiddenIneligible > 0 ? (
+							<button
+								type="button"
+								className="disc-link"
+								data-testid="discovery-reveal-ineligible"
+								aria-pressed={showIneligible}
+								onClick={() => setShowIneligible((value) => !value)}
+							>
+								{showIneligible ? 'Hide' : 'Show'} {hiddenIneligible} you can't enter
+							</button>
+						) : null}
+					</div>
+				</>
 			)}
+			{detailId ? (
+				(() => {
+					const detailRow = visible.find((r) => r.id === detailId) ?? shown.find((r) => r.id === detailId);
+					return (
+						<ContestDetailPane
+							projectId={projectId}
+							candidateId={detailId}
+							apiBase={apiBase}
+							onClose={() => setDetailId(null)}
+							metaParts={detailRow ? metaParts(detailRow) : null}
+							autoCheckOnOpen
+							saved={detailRow ? isSaved(detailRow) : false}
+							busy={busy}
+							checking={checkingId === detailId}
+							onCheck={() => void checkEligibility(detailId)}
+							onSave={detailRow ? () => void toggleSaved(detailRow.id, !isSaved(detailRow)) : undefined}
+							onExplore={detailRow && onExplore ? () => { setDetailId(null); onExplore(exploreRecord(detailRow)); } : undefined}
+						/>
+					);
+				})()
+			) : null}
 		</section>
 	);
 }
