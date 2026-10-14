@@ -9,13 +9,14 @@ import { fileURLToPath } from 'node:url';
  * against the COMPOSED build (`bun run build` first).
  *
  * What U09 guarantees (HANDOFF §4 Welcome):
- *   - Caddie introduces itself with its face changing per line.
- *   - The name question is PREFILLED from the account — "Ada Lovelace"
- *     suggests "Ada"; a GitHub-username-only name ("captjay98") leaves the
- *     box empty with an honest note.
- *   - Skip works; "Say that again" replays; reduced motion shows all lines.
+ *   - Caddie introduces itself; the name question is PREFILLED from the
+ *     account — "Ada Lovelace" suggests "Ada"; a GitHub-username-only name
+ *     ("captjay98") leaves the box empty with an honest note.
+ *   - The intro hands straight to the profile wizard (the 0016/0017 wave
+ *     replaced the faces stage); finishing the wizard lands on the Brief.
  *   - The name the user saves is the name the account menu shows.
  *   - A name containing markup renders as text everywhere (React escaping).
+ *   - "Say that again" replays; reduced motion shows all lines at once.
  */
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -123,6 +124,29 @@ async function stubAccount(context: BrowserContext, userName: string | null) {
 	);
 	await context.route('**/api/projects', (route) => json(route, 200, { projects: [HOME] }));
 	await context.route('**/api/projects/**', (route) => json(route, 200, {}));
+	// Onboarding status: not completed until /complete is called. After that it
+	// reports completed, so the straight-to-app redirect lands on the Brief
+	// instead of the gate bouncing back to /onboarding. The specific /complete
+	// route is registered last so it wins (Playwright matches the most-recently-
+	// added route first).
+	let onboardingCompleted = false;
+	await context.route('**/api/onboarding', (route) =>
+		json(route, 200, { completedAt: onboardingCompleted ? NOW : null }),
+	);
+	await context.route('**/api/onboarding/complete', (route) => {
+		onboardingCompleted = true;
+		return json(route, 200, { completedAt: NOW });
+	});
+}
+
+/** Drive the profile wizard that now follows the welcome intro. */
+async function finishProfileWizard(page: import('@playwright/test').Page): Promise<void> {
+	await page.getByTestId('onboarding-profile').waitFor();
+	await page.getByLabel('Where do you live?').fill('Nigeria');
+	await page.getByTestId('onboarding-profile-continue').click();
+	await page.getByTestId('onboarding-experience').getByRole('radio', { name: 'A few apps' }).click();
+	await page.getByTestId('onboarding-format').getByRole('radio', { name: 'Either' }).click();
+	await page.getByTestId('onboarding-profile-save').click();
 }
 
 test.describe('Welcome intro (U09)', () => {
@@ -142,12 +166,13 @@ test.describe('Welcome intro (U09)', () => {
 		await expect(page.getByTestId('welcome-name-input')).toHaveValue('Ada');
 		await expect(nameStep).toContainText('From your account. Change it if you like.');
 
-		// The user can reword and save; the account menu shows the saved name.
+		// The user can reword and save; the wizard follows, then the app.
 		await page.getByTestId('welcome-name-input').fill('Grace <b>Hopper</b>');
 		await page.getByTestId('welcome-name-save').click();
-		await expect(page.getByTestId('welcome-faces')).toBeVisible();
-		await page.getByTestId('welcome-go').click();
-		await expect(page.getByTestId('start-screen')).toBeVisible();
+		await finishProfileWizard(page);
+
+		// Saving the profile hands off to the Brief shell.
+		await expect(page.getByTestId('brief-screen')).toBeVisible();
 
 		// Markup renders as TEXT, never as tags (React escaping).
 		await page.getByTestId('account-menu').click();
@@ -166,9 +191,8 @@ test.describe('Welcome intro (U09)', () => {
 		await expect(page.getByTestId('welcome-name-input')).toHaveValue('');
 		await expect(page.getByTestId('welcome-name')).toContainText('looks like a username');
 		await page.getByTestId('welcome-name-skip').click();
-		await expect(page.getByTestId('welcome-faces')).toBeVisible();
-		await page.getByTestId('welcome-go').click();
-		await expect(page.getByTestId('start-screen')).toBeVisible();
+		// Skip also hands to the profile wizard, never straight past onboarding.
+		await expect(page.getByTestId('onboarding-profile')).toBeVisible();
 		await context.close();
 	});
 
@@ -178,11 +202,11 @@ test.describe('Welcome intro (U09)', () => {
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/onboarding`);
 		// Wait for the intro to finish advancing, then replay from the start.
-		await page.waitForTimeout(3400);
-		const paragraphs = await page.getByTestId('welcome-intro').locator('p').count();
-		expect(paragraphs).toBeGreaterThanOrEqual(3);
+		// Only the intro LINES count here — the definition details adds its own <p>.
+		const lines = page.getByTestId('welcome-intro').locator('.welcome-intro-line');
+		await expect(lines).toHaveCount(3);
 		await page.getByTestId('welcome-replay').click();
-		await expect(page.getByTestId('welcome-intro').locator('p')).toHaveCount(1);
+		await expect(lines).toHaveCount(1);
 		await context.close();
 
 		const reduce = await browser.newContext({ reducedMotion: 'reduce' });
@@ -190,7 +214,7 @@ test.describe('Welcome intro (U09)', () => {
 		const rPage = await reduce.newPage();
 		await rPage.goto(`${BASE}/app/onboarding`);
 		// All lines present immediately, no waiting.
-		await expect(rPage.getByTestId('welcome-intro').locator('p')).toHaveCount(3);
+		await expect(rPage.getByTestId('welcome-intro').locator('.welcome-intro-line')).toHaveCount(3);
 		await reduce.close();
 	});
 });

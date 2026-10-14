@@ -254,6 +254,7 @@ function json(route: { fulfill(options: Record<string, unknown>): unknown }, sta
  */
 async function stubAccount(context: BrowserContext, buildProjects: ReturnType<typeof project>[]) {
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
+	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) =>
 		json(route, 200, { session: { userId: 'actor-test' }, user: { id: 'actor-test', name: 'Test', email: 't@caddie.test' } }),
 	);
@@ -394,10 +395,12 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 
 		// The surface renders against /api/projects/home-1/discovery/** (home scope).
 		await expect(page.getByTestId('discovery-results')).toBeVisible();
-		await expect(page.getByText('Nothing has been read, so nothing is ranked')).toBeVisible();
-		await expect(page.getByText('No candidates yet — run the feed.')).toBeVisible();
-		// No profile country on record → honest UNKNOWN, never a guess.
-		await expect(page.getByText('none recorded — country rules stay UNKNOWN')).toBeVisible();
+		await expect(page.getByTestId('discovery-empty')).toBeVisible();
+		await expect(page.getByText("Let's see what's out there")).toBeVisible();
+		await expect(page.getByTestId('discovery-sweep-empty')).toBeVisible();
+		// The empty state carries ONE sweep CTA — the results toolbar (and its
+		// country chip) only appears once candidates are ranked.
+		await expect(page.getByTestId('discovery-sweep')).toHaveCount(0);
 		// The persistent conversation stays on the GENERAL (account) scope here.
 		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
 		await context.close();
@@ -429,7 +432,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		await expect(gaps).toBeVisible();
 		await expect(gaps).toContainText('devpost failed — upstream returned 503 (recorded receipt)');
 
-		await expect(page.getByText('Whether you can enter is judged with your profile country: US')).toBeVisible();
+		await expect(page.getByTestId('discovery-country')).toContainText('Checking United States eligibility');
 
 		// Fit detail cites the evidence claim id, or records its assumption.
 		await page.getByRole('button', { name: 'Can you enter?' }).first().click();

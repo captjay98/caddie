@@ -23,7 +23,8 @@ export interface SandboxToolDeps {
 		command: string;
 		operationKey: string;
 		timeoutMs: number;
-	}): Promise<{ remoteId: string }>;
+		signal?: AbortSignal;
+	}): Promise<{ remoteId: string; exitCode?: number | null; stdout?: string; stderr?: string; outputTruncated?: boolean; timedOut?: boolean }>;
 	readFile(input: { sessionId: string; path: string }): Promise<string>;
 	writeFile(input: { sessionId: string; path: string; content: string }): Promise<void>;
 }
@@ -150,12 +151,13 @@ export function makeSandboxExec(deps: {
 			const result = await deps.driver.execute({
 				sessionId: deps.sessionId,
 				command: ctx.data.command,
-				// Deterministic key: hash of the logical action (run + command).
-				// A retry of the same command reuses the key — never an attempt ID.
-				operationKey: `exec:${deps.runId}:${createHash('sha256').update(ctx.data.command).digest('hex').slice(0, 24)}`,
+				// One durable tool delivery is one logical attempt. The host adds the real run id.
+                // A later re-run of the same command must produce a fresh receipt.
+				operationKey: `tool:${ctx.toolCallId}`,
 				timeoutMs: ctx.data.timeoutMs,
+				signal: ctx.signal,
 			});
-			return { output: `dispatched ${result.remoteId}` };
+			return { output: JSON.stringify({ ...result, command: ctx.data.command }) };
 		},
 	});
 }
@@ -216,7 +218,7 @@ export function makeDelegateRepair(deps: {
 				toRole: ctx.data.toRole,
 				task: ctx.data.task,
 			});
-			return { output: `delegated ${ctx.data.round} to ${ctx.data.toRole}` };
+			return { output: `Repair proposal recorded for ${ctx.data.toRole}; invoke that specialist to execute the work.` };
 		},
 	});
 }
@@ -290,35 +292,7 @@ export function makeRecordAcceptance(currentRevision?: () => string) {	return de
 		input: RecordAcceptanceInput,
 		harness: true,
 		run: async (ctx) => {
-			if (ctx.data.exitCode !== 0 && ctx.data.exitCode !== 1) {
-				return { output: 'record refused: exitCode must be 0 (pass) or 1 (fail) from the actual command' };
-			}
-			// The gate reads ONLY the run's current revision file; a record
-			// written under any other revision is invisible to it (the model
-			// invented revisions like "1" and the gate refused completion
-			// forever). Refuse mismatches loudly instead of writing a ledger
-			// the gate can never see.
-			if (currentRevision && ctx.data.planRevision !== currentRevision()) {
-				return {
-					output: `record refused: planRevision must be the run's current revision ("${currentRevision()}") — received "${ctx.data.planRevision}". Re-run the command and record with the current revision.`,
-				};
-			}
-			const record: GateRecord = {
-				check: ctx.data.check,
-				command: ctx.data.command,
-				exitCode: ctx.data.exitCode,
-				outputDigest: ctx.data.outputDigest,
-				operationKey: ctx.data.operationKey,
-				planRevision: ctx.data.planRevision,
-				recordedAt: new Date().toISOString(),
-			};
-			const path = `${GATE_DIR}/${ctx.data.planRevision}.jsonl`;
-			// The Sandbox surface has no appendFile: read-modify-write is safe
-			// here because gate writes happen within this agent's sequential
-			// turn, and the completion gate only appends via this tool.
-			const existing = await ctx.harness.sandbox.readFile(path).catch(() => "");
-			await ctx.harness.sandbox.writeFile(path, `${existing}${JSON.stringify(record)}\n`);
-			return { output: `acceptance recorded for ${ctx.data.check} (exit ${ctx.data.exitCode})` };
+            return { output: 'record refused: caller-supplied acceptance is not evidence. Use verify_build to execute host checks and record machine receipts.' };
 		},
 	});
 }
@@ -384,6 +358,140 @@ export function makeListStacks(deps: {
 			const stacks = await deps.listStacks();
 			const lines = stacks.map((stack) => `- ${stack.id} — ${stack.status}${stack.note ? ` (${stack.note})` : ''}`);
 			return { output: `Available stacks:\n${lines.join('\n')}` };
+		},
+	});
+}
+
+/** QA executes the host-owned checks; no caller supplies pass flags or evidence. */
+export function makeVerifyBuild(deps: {verify:(operationKey:string, signal?:AbortSignal)=>Promise<unknown>}) {
+ return defineTool({name:'verify_build',description:'Run the host-owned test and bundle checks against the approved current plan, record actual sandbox receipts and produce an isolated preview if they pass.',input:v.object({}),async run(ctx){return {output:JSON.stringify(await deps.verify(ctx.toolCallId, ctx.signal))};}});
+}
+
+// --- "Caddie learns you" capture tools (feature: capture → infer → surface) ---
+
+/** The profile fields the coordinator may set from conversation. These are
+ *  PREFERENCES describing the builder — never authorization. Budget is
+ *  deliberately NOT settable here: a budget is a spending-comfort signal that
+ *  stays an explicit, separately-gated action, so the model can never grant
+ *  spending by "remembering" a number. */
+const UpdateProfileInput = v.pipe(
+	v.strictObject({
+		skills: v.optional(v.array(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(60)))),
+		interests: v.optional(v.array(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(60)))),
+		experienceLevel: v.optional(v.picklist(['beginner', 'intermediate', 'senior'])),
+		formatPreference: v.optional(v.picklist(['online', 'in_person', 'either'])),
+		weeklyHours: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(80))),
+		stackIds: v.optional(v.array(v.string())),
+	}),
+	v.readonly(),
+);
+
+/**
+ * Set profile PREFERENCES the user tells Caddie in conversation (e.g. "I'm a
+ * React developer" → skills+stack; "I have about 8 hours a week" →
+ * weeklyHours). The host closure writes through the real profile service with
+ * the actor re-verified server-side; the body can never name a user. Budget
+ * and spending are intentionally not settable here.
+ */
+export function makeUpdateProfile(deps: {
+	updateProfile: (input: {
+		skills?: string[];
+		interests?: string[];
+		experienceLevel?: 'beginner' | 'intermediate' | 'senior';
+		formatPreference?: 'online' | 'in_person' | 'either';
+		weeklyHours?: number;
+		stackIds?: string[];
+	}) => Promise<{ applied: string[] }>;
+}) {
+	return defineTool({
+		name: 'update_profile',
+		description:
+			"Record a profile PREFERENCE the user stated (skills, interests, experience level, participation format, weekly hours, or a preferred stack). Use when the user tells you something durable about themselves — never guess, and never set spending/budget here (that stays a separate explicit decision).",
+		input: UpdateProfileInput,
+		run: async (ctx) => {
+			const result = await deps.updateProfile(ctx.data);
+			return {
+				output:
+					result.applied.length > 0
+						? `Updated profile: ${result.applied.join(', ')}. Tell the user plainly what you noted.`
+						: 'No profile fields were provided to update.',
+			};
+		},
+	});
+}
+
+const RememberInput = v.pipe(
+	v.strictObject({
+		content: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(2000)),
+		kind: v.optional(v.picklist(['preference', 'fact'])),
+		/** True when this is INFERRED (from code, context) rather than stated
+		 *  outright. Inferred facts are proposed and await the user's confirm. */
+		inferred: v.optional(v.boolean()),
+	}),
+	v.readonly(),
+);
+
+/**
+ * Propose a memory fact about the user. Everything proposed starts as a
+ * PROPOSAL that only enters future context once the user confirms it (the R04
+ * rule: inferred memory requires confirmation). The host closure routes to the
+ * real memory service, stamping the source run so a proposal is always
+ * traceable. A statement that reads as authorization ("ok to spend $50") is
+ * refused — memory never grants a capability.
+ */
+export function makeRememberFact(deps: {
+	remember: (input: { content: string; kind: 'preference' | 'fact' }) => Promise<{ proposed: boolean }>;
+}) {
+	return defineTool({
+		name: 'remember',
+		description:
+			"Propose something worth remembering about the user (a durable preference or fact). It is saved as a PROPOSAL and only used in future conversations after the user confirms it. Never record anything that reads as permission to spend, deploy or change data — memory describes the user, it never authorises an action.",
+		input: RememberInput,
+		run: async (ctx) => {
+			// Refuse authorization-shaped memory outright (defence in depth; the
+			// service also never grants capability from memory).
+			if (/\b(ok|okay|allowed|permission|authori[sz]e[d]?|go ahead)\b.*\b(spend|deploy|merge|delete|drop|purchase|pay)\b/i.test(ctx.data.content)
+				|| /\b(spend|deploy|merge|delete|drop|purchase|pay)\b.*\b(approved|authori[sz]ed|allowed)\b/i.test(ctx.data.content)) {
+				return { output: 'refused: that reads like an authorization, not a memory. Spending/deploys/merges are separate explicit decisions — do not record them as memory.' };
+			}
+			const result = await deps.remember({ content: ctx.data.content, kind: ctx.data.kind ?? 'preference' });
+			return {
+				output: result.proposed
+					? 'Noted as a proposal. Ask the user to confirm it so it sticks for next time; it is NOT in effect until they do.'
+					: 'Nothing was recorded.',
+			};
+		},
+	});
+}
+
+/**
+ * Read-only: look at what the user already built. Derives PROPOSED skills /
+ * stack / working-style signals from the project's most recent imported
+ * repository (CL3 pure inference). It writes NOTHING — the coordinator reads
+ * the proposal, tells the user what it noticed, and only records anything the
+ * user confirms via update_profile / remember. "I looked at your repos — looks
+ * like TypeScript + React; want me to remember that?"
+ */
+export function makeInspectRepository(deps: {
+	inspectRepository: () => Promise<{
+		found: boolean;
+		summary: string;
+		skills: { skill: string; confidence: string }[];
+		stacks: { stackId: string; confidence: string }[];
+		notes: { content: string; kind: string }[];
+	}>;
+}) {
+	return defineTool({
+		name: 'inspect_repository',
+		description:
+			"Look at the user's most recently imported repository and infer what they build (languages, stack, whether they write tests). READ-ONLY and PROPOSAL-ONLY: it records nothing. Use it to personalize — tell the user what you noticed and, only if they confirm, call update_profile / remember. Never present an inference as a saved fact.",
+		input: v.pipe(v.object({}), v.readonly()),
+		run: async () => {
+			const r = await deps.inspectRepository();
+			if (!r.found) {
+				return { output: 'No imported repository to inspect yet. Ask the user to connect a GitHub repo if they want Caddie to learn from their code.' };
+			}
+			return { output: JSON.stringify(r) };
 		},
 	});
 }
