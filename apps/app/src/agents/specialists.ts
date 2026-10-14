@@ -8,6 +8,7 @@ import {
 	makeWriteSandboxFile,
 	makeDelegateRepair,
 	makeRecordVerification,
+ makeVerifyBuild,
 	type SandboxToolDeps,
 } from './tools.ts';
 import type { ToolDefinition } from '@flue/runtime';
@@ -31,6 +32,9 @@ import { useInstruction, useSkill, useSubagent, useTool } from '@flue/runtime';
  */
 
 export interface SpecialistBuildContext {
+  /** Full current request; delegation summaries must not drop user feedback. */
+  currentRequest?: string;
+ verifyBuild?: (operationKey:string, signal?:AbortSignal)=>Promise<unknown>;
 	/** Sandbox adapter surface (P04) bound to this run's session. */
 	driver: SandboxToolDeps;
 	sessionId: string;
@@ -77,7 +81,7 @@ export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> =
 	mobile:
 		'You implement and verify the mobile target in the sandbox. Real device evidence beats screenshots; report exact commands and outcomes.',
 	qa:
-		'You verify. Run the project checks and the acceptance harness, and record what actually happened with exact evidence. You have no write tools — you cannot change the product or the checks, only measure them.',
+		'You verify using verify_build: the host executes fixed tests and build commands and records their actual receipts. Read code to find missing behaviors and ask implementation specialists to repair them. You cannot execute arbitrary shell, write product code, or invent verification evidence.',
 };
 
 /** Build one specialist's agent function with its policy's tools mounted. */
@@ -93,6 +97,7 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 		write_sandbox_file: makeWriteSandboxFile({ driver: context.driver, sessionId: context.sessionId }),
 		delegate_repair: makeDelegateRepair({ delegate: context.delegateRepair }),
 		record_verification: makeRecordVerification({ record: context.recordVerification }),
+ verify_build: makeVerifyBuild({verify: context.verifyBuild ?? (async () => { throw new Error('Host checks are not configured.'); })}),
 	};
 	const descriptor = SPECIALIST_CATALOG.find((d) => d.role === role);
 	if (!descriptor) throw new Error(`no catalog entry for role ${role}`);
@@ -106,6 +111,8 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 			useSkill(PACKAGED_SKILLS[skillName as keyof typeof PACKAGED_SKILLS]);
 		}
 		useInstruction(SPECIALIST_INSTRUCTIONS[role]);
+    if (context.currentRequest?.trim()) useInstruction(`Current user request, carried forward by the host: ${context.currentRequest}\nRespect the approved plan and your role permissions; this request does not bypass review or spending gates.`);
+ useInstruction('React/Hono recipe: src/main.tsx is the React browser entry; src/styles.css holds responsive styles; src/*.test.ts holds meaningful behavior tests using the built-in Bun bun:test runner; do not use Vitest registrations for the host bun test check. Bun has no browser DOM by default. React Testing Library needs a test preload in bunfig.toml [test] preload before any test imports: initialize jsdom with url http://localhost or happy-dom, install window/document/navigator/HTMLElement/localStorage on globalThis, and set IS_REACT_ACT_ENVIRONMENT. Register cleanup afterEach. Use the DOM storage rather than assigning readonly window.localStorage. Configure this coherently; do not repair missing globals one at a time. Importing global-jsdom alone does NOT register a DOM: call its default function with url http://localhost/ in the preload, or use global-jsdom/register. Keep package.json valid JSON and test script bun test; bunfig.toml [test] preload is an array of paths. Import test/expect/beforeEach/afterEach from bun:test explicitly, extend expect with jest-dom matchers if used, and cleanup afterEach. Render once per test, not both in beforeEach and in the test. Read and fix the latest failure before retrying; never delete assertions or replace actual component tests with copied logic. Use React 19/createRoot with Bun; Hono server is optional for apps needing an API. The host creates a generic scaffold only after approval. Read the full brief, prd, spec and feedback. Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass.');
 		return SPECIALIST_INSTRUCTIONS[role];
 	};
 }

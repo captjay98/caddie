@@ -7,6 +7,7 @@ import {
 	type ContreeConfig,
 	type ContreeOperationState,
 	type ContreeFileItem,
+	type ContreeOperation,
 } from './contree.ts';
 
 /**
@@ -115,6 +116,22 @@ export interface SandboxFileStat {
 	mtime?: Date;
 }
 
+/** Machine result saved by the driver, never supplied by an agent. */
+export interface SandboxOperationReceipt extends SandboxExecuteResult {
+	operationKey: string;
+	sessionId: string | null;
+	projectId: string | null;
+	runId: string | null;
+	command: string;
+	cwd: string;
+	inputImage: string;
+	resultImage: string | null;
+	state: 'succeeded' | 'failed' | 'cancelled';
+	outputTruncated: boolean;
+	timedOut: boolean;
+	outputBytes: number | null;
+}
+
 export interface SandboxRecord {
 	kind: 'session' | 'operation' | 'artifact';
 	/** `session:<sessionKey>` | `op:<operationKey>` | `artifact:<sessionId>` */
@@ -137,6 +154,12 @@ export interface SandboxRecord {
 	artifactRef: string | null;
 	sha256: string | null;
 	updatedAt: string;
+	/** Immutable identity of a logical command attempt; excludes secret environment values. */
+	inputHash?: string;
+	command?: string;
+	cwd?: string;
+	inputImage?: string;
+	receipt?: SandboxOperationReceipt;
 }
 
 /**
@@ -150,19 +173,35 @@ export interface SandboxRecord {
 export interface SandboxPersistencePort {
 	save(record: SandboxRecord): Promise<void>;
 	load(key: string): Promise<SandboxRecord | null>;
+	/** Atomic insert: only its winner may dispatch the non-idempotent remote call. */
+	claim(record: SandboxRecord): Promise<boolean>;
+	/** Compare-and-swap prevents concurrent commands from forking the image chain. */
+	compareAndSave(expected: SandboxRecord, record: SandboxRecord): Promise<boolean>;
 }
 
 export class InMemorySandboxPersistence implements SandboxPersistencePort {
 	private readonly records = new Map<string, SandboxRecord>();
 
 	save(record: SandboxRecord): Promise<void> {
-		this.records.set(record.key, { ...record });
+		this.records.set(record.key, structuredClone(record));
 		return Promise.resolve();
+	}
+
+	claim(record: SandboxRecord): Promise<boolean> {
+		if (this.records.has(record.key)) return Promise.resolve(false);
+		this.records.set(record.key, structuredClone(record));
+		return Promise.resolve(true);
+	}
+
+	compareAndSave(expected: SandboxRecord, record: SandboxRecord): Promise<boolean> {
+		if (JSON.stringify(this.records.get(expected.key)) !== JSON.stringify(expected)) return Promise.resolve(false);
+		this.records.set(record.key, structuredClone(record));
+		return Promise.resolve(true);
 	}
 
 	load(key: string): Promise<SandboxRecord | null> {
 		const record = this.records.get(key);
-		return Promise.resolve(record ? { ...record } : null);
+		return Promise.resolve(record ? structuredClone(record) : null);
 	}
 }
 
@@ -319,6 +358,7 @@ function resolveWorkspacePath(
 		if (normalized !== rootNoSlash && !normalized.startsWith(`${rootNoSlash}/`)) {
 			throw new SandboxError(400, 'UPLOAD_PATH_ESCAPE', `path escapes the session workspace: ${path}`);
 		}
+		if (normalized === rootNoSlash && !options?.allowRoot) throw new SandboxError(400, 'INVALID_INPUT', 'path resolves to the workspace root');
 		return normalized;
 	}
 	const segments = path.split('/').filter((segment) => segment !== '' && segment !== '.');
@@ -384,6 +424,7 @@ export class SandboxDriver {
 		const image = requireNonEmpty(input.image, 'image');
 		const projectId = requireNonEmpty(input.projectId, 'projectId');
 		const runId = requireNonEmpty(input.runId, 'runId');
+		this.sessionWorkspaceRoot(projectId); // validate before tag lookup or persistence
 		const key = `session:${sessionKey}`;
 		const inflight = this.ensureInflight.get(key);
 		if (inflight) return inflight;
@@ -401,56 +442,41 @@ export class SandboxDriver {
 		runId: string;
 	}): Promise<{ sessionId: string }> {
 		const { sessionKey, image, projectId, runId } = input;
-		const existing = await this.persistence.load(`session:${sessionKey}`);
+		let existing = await this.persistence.load(`session:${sessionKey}`);
 		if (existing?.kind === 'session') {
-			if (existing.state === 'disposed') {
-				throw new SandboxError(410, 'SESSION_LOST', `session ${sessionKey} was disposed`);
+			if (existing.state === 'disposed') throw new SandboxError(410, 'SESSION_LOST', `session ${sessionKey} was disposed`);
+			if (existing.projectId !== projectId || existing.runId !== runId) {
+				throw new SandboxError(409, 'SESSION_KEY_CONFLICT', `session ${sessionKey} belongs to a different project or run`);
 			}
-			if (existing.projectId !== null && existing.projectId !== projectId) {
-				throw new SandboxError(
-					409,
-					'SESSION_KEY_CONFLICT',
-					`session key ${sessionKey} is already bound to project ${existing.projectId}`,
-				);
+			if (existing.state === 'active') {
+				await this.requireActiveSession(sessionKey);
+				return { sessionId: sessionKey };
 			}
-			return { sessionId: existing.sessionId ?? sessionKey };
+		} else {
+			let initialImage = image;
+			if (!isImageUuid(initialImage)) initialImage = await this.contree.resolveImageRef(initialImage, AbortSignal.timeout(this.dispatchTimeoutMs));
+			const creating: SandboxRecord = {
+				kind: 'session', key: `session:${sessionKey}`, sessionId: sessionKey,
+				projectId, runId, image: initialImage, checkpointRef: null,
+				operationKey: null, remoteId: null, state: 'creating',
+				artifactRef: null, sha256: null, updatedAt: nowIso(),
+			};
+			if (!(await this.persistence.claim(creating))) return this.ensureSessionOnce(input);
+			existing = creating;
 		}
 		const workspaceRoot = this.sessionWorkspaceRoot(projectId);
-		// One real instance run bootstraps the workspace directory and yields
-		// the session's first committed image. This is "creating the session".
-		const bootstrapped = await this.runInstance({
+		const bootstrapped = await this.executeForSession(existing, {
 			operationKey: `session-bootstrap:${sessionKey}`,
-			imageRef: image,
 			command: `mkdir -p -- ${shellQuote(workspaceRoot)}`,
 			cwd: '/',
 			timeoutMs: Math.min(120_000, this.config.quotas.maxCommandTimeoutMs),
-		});
+		}, true);
 		if (bootstrapped.exitCode !== 0 || bootstrapped.resultImage === null) {
-			throw new SandboxError(
-				502,
-				'SESSION_BOOTSTRAP_FAILED',
-				`bootstrap of session ${sessionKey} failed (exit ${bootstrapped.exitCode})`,
-				{ stderr: bootstrapped.stderr.slice(0, 2000) },
-			);
+			throw new SandboxError(502, 'SESSION_BOOTSTRAP_FAILED', `bootstrap of session ${sessionKey} failed (exit ${bootstrapped.exitCode})`, { stderr: bootstrapped.stderr.slice(0, 2000) });
 		}
-		// Binding persisted BEFORE the id is exposed: a crash after the remote
-		// work still leaves the binding; ensureSession re-runs are idempotent
-		// because the persistence check above sees it.
-		await this.persistence.save({
-			kind: 'session',
-			key: `session:${sessionKey}`,
-			sessionId: sessionKey,
-			projectId,
-			runId,
-			image: bootstrapped.resultImage,
-			checkpointRef: null,
-			operationKey: null,
-			remoteId: null,
-			state: 'active',
-			artifactRef: null,
-			sha256: null,
-			updatedAt: nowIso(),
-		});
+		const settled = await this.persistence.load(`session:${sessionKey}`);
+		if (!settled || settled.state === 'disposed') throw new SandboxError(410, 'SESSION_LOST', `session ${sessionKey} was disposed during bootstrap`);
+		await this.persistence.save({ ...settled, image: bootstrapped.resultImage, operationKey: null, state: 'active', updatedAt: nowIso() });
 		return { sessionId: sessionKey };
 	}
 
@@ -674,9 +700,8 @@ export class SandboxDriver {
 		} catch (error) {
 			throw this.mapContreeError(error, 'UPLOAD_FAILED', `upload of ${pathValue} failed`);
 		}
-		const committed = await this.runInstance({
-			operationKey: `write:${sessionId}:${record.sha256}`,
-			imageRef: image,
+		const committed = await this.executeForSession(session, {
+			operationKey: `write:${sessionId}:${await shortHash(JSON.stringify([image, absolutePath, record.sha256]))}`,
 			command: 'true',
 			files: [{ path: absolutePath, uuid: record.uuid, mode: '0644' }],
 			timeoutMs: Math.min(120_000, this.config.quotas.maxCommandTimeoutMs),
@@ -689,7 +714,6 @@ export class SandboxDriver {
 				{ stderr: committed.stderr.slice(0, 2000) },
 			);
 		}
-		await this.advanceSessionImage(session, committed.resultImage);
 		return { saved: 1 };
 	}
 
@@ -735,9 +759,8 @@ export class SandboxDriver {
 		} catch (error) {
 			throw this.mapContreeError(error, 'UPLOAD_FAILED', 'batch upload failed');
 		}
-		const committed = await this.runInstance({
-			operationKey: `write-batch:${sessionId}:${nowIso()}`,
-			imageRef: image,
+		const committed = await this.executeForSession(session, {
+			operationKey: `write-batch:${sessionId}:${await shortHash(JSON.stringify([image, attached]))}`,
 			command: 'true',
 			files: attached,
 			timeoutMs: Math.min(120_000, this.config.quotas.maxCommandTimeoutMs),
@@ -745,7 +768,6 @@ export class SandboxDriver {
 		if (committed.exitCode !== 0 || committed.resultImage === null) {
 			throw new SandboxError(502, 'UPLOAD_COMMIT_FAILED', 'commit of the batch into the session image failed');
 		}
-		await this.advanceSessionImage(session, committed.resultImage);
 		return { saved: prepared.length };
 	}
 
@@ -806,7 +828,7 @@ export class SandboxDriver {
 		const command = ['mkdir', ...(options?.recursive ? ['-p'] : []), '--', shellQuote(absolutePath)].join(' ');
 		const result = await this.executeForSession(session, {
 			command,
-			operationKey: `mkdir:${session.sessionId}:${await shortHash(pathValue)}`,
+			operationKey: `mkdir:${session.sessionId}:${await shortHash(JSON.stringify([session.image, command]))}`,
 			timeoutMs: Math.min(60_000, this.config.quotas.maxCommandTimeoutMs),
 		});
 		if (result.exitCode !== 0) {
@@ -838,7 +860,7 @@ export class SandboxDriver {
 		const command = ['rm', ...(flags ? [`-${flags}`] : []), '--', shellQuote(absolutePath)].join(' ');
 		const result = await this.executeForSession(session, {
 			command,
-			operationKey: `rm:${session.sessionId}:${await shortHash(pathValue)}`,
+			operationKey: `rm:${session.sessionId}:${await shortHash(JSON.stringify([session.image, command]))}`,
 			timeoutMs: Math.min(120_000, this.config.quotas.maxCommandTimeoutMs),
 		});
 		if (result.exitCode !== 0 && !options?.force) {
@@ -856,7 +878,7 @@ export class SandboxDriver {
 
 	async execute(input: SandboxExecuteInput): Promise<SandboxExecuteResult> {
 		const sessionId = requireNonEmpty(input.sessionId, 'sessionId');
-		const session = await this.requireActiveSession(sessionId);
+		const session = await this.requireActiveSession(sessionId, input.operationKey);
 		const result = await this.executeForSession(session, input);
 		return {
 			remoteId: result.remoteId,
@@ -927,60 +949,57 @@ export class SandboxDriver {
 				`no persisted operation for key ${operationKey} — reconciliation needs the persisted identity`,
 			);
 		}
-		let remoteId = stored.remoteId;
-		if (remoteId === null) {
-			// No server-side correlation exists: without a remote id the
-			// outcome is unknowable — say so instead of retrying blindly.
-			return { state: 'unknown' };
+		if (stored.receipt) {
+			await this.adoptOperationImage(stored);
+			return this.receiptStatus(stored.receipt);
 		}
+		if (stored.remoteId === null) return { state: 'unknown' };
 		const bound = Date.now() + this.reconcileTimeoutMs;
 		for (;;) {
-			const operation = await this.contree.getOperation(remoteId).catch(() => null);
+			const operation = await this.contree.getOperation(stored.remoteId).catch(() => null);
 			if (operation && isTerminalState(operation.state)) {
-				const outcome = terminalSandboxState(operation.state);
-				await this.persistence.save({ ...stored, remoteId, state: outcome, updatedAt: nowIso() });
-				// Adopt the committed image into the linked session: a driver that
-				// died mid-exec must not leave the session's image chain behind
-				// the work it already settled.
-				if (
-					operation.state === 'SUCCEEDED' &&
-					operation.resultImage !== null &&
-					stored.sessionId !== null
-				) {
-					const session = await this.persistence.load(`session:${stored.sessionId}`);
-					if (session?.kind === 'session' && session.state === 'active' && session.image !== null) {
-						await this.advanceSessionImage(session, operation.resultImage);
-					}
-				}
-				return { state: outcome, exitCode: operation.exitCode ?? undefined };
+				const terminal = await this.persistTerminal(stored, operation);
+				await this.adoptOperationImage(terminal);
+				return this.receiptStatus(terminal.receipt!);
 			}
 			if (Date.now() >= bound) return { state: 'unknown' };
 			await sleep(this.pollIntervalMs);
 		}
 	}
 
+	/** Only genuine terminal results can become verification evidence. */
+	async getOperationReceipt(operationKey: string): Promise<SandboxOperationReceipt | null> {
+		requireNonEmpty(operationKey, 'operationKey');
+		const record = await this.persistence.load(`op:${operationKey}`);
+		return record?.kind === 'operation' && record.receipt ? structuredClone(record.receipt) : null;
+	}
+
 	// --- internals -------------------------------------------------------------------
 
 	/** Workspace directory of one project's sessions. */
 	private sessionWorkspaceRoot(projectId: string): string {
+		if (!projectId || projectId === '.' || projectId === '..' || /[\/\\\0]/.test(projectId)) throw new SandboxError(400, 'INVALID_INPUT', 'projectId must be one workspace path segment');
 		return `${this.config.workspaceRoot.replace(/\/+$/, '')}/${projectId}`;
 	}
 
-	private async requireActiveSession(sessionId: string): Promise<SandboxRecord> {
-		const record = await this.persistence.load(`session:${sessionId}`);
-		if (!record || record.kind !== 'session') {
-			throw new SandboxError(
-				404,
-				'SESSION_LOST',
-				`no persisted binding for session ${sessionId} — create it first`,
-			);
+	private async requireActiveSession(sessionId: string, resumeOperationKey?: string): Promise<SandboxRecord> {
+		let record = await this.persistence.load(`session:${sessionId}`);
+		if (!record || record.kind !== 'session') throw new SandboxError(404, 'SESSION_LOST', `no persisted binding for session ${sessionId} — create it first`);
+		if (record.state === 'disposed') throw new SandboxError(410, 'SESSION_LOST', `session ${sessionId} was disposed`);
+		if (record.operationKey !== null) {
+			const pending = await this.persistence.load(`op:${record.operationKey}`);
+			// Crash between locking the image and claiming an operation: only the
+			// SAME durable attempt may compete for the atomic claim; no remote call
+			// can have occurred before that claim exists. Other work stays blocked.
+			if (!pending && record.operationKey === resumeOperationKey && record.state === 'active') return record;
+			if (!pending) throw new SandboxError(409, 'OPERATION_UNRESOLVED', 'Sandbox work was interrupted before dispatch; retry the same operation key.', { operationKey: record.operationKey });
+			const result = await this.reconcileOperation(record.operationKey);
+			if (result.state === 'unknown' || result.state === 'running') {
+				throw new SandboxError(409, 'OPERATION_UNRESOLVED', 'Previous sandbox work has an unknown outcome; reconcile it before continuing.', { operationKey: record.operationKey });
+			}
+			record = await this.persistence.load(`session:${sessionId}`);
 		}
-		if (record.state === 'disposed') {
-			throw new SandboxError(410, 'SESSION_LOST', `session ${sessionId} was disposed`);
-		}
-		if (record.image === null) {
-			throw new SandboxError(410, 'SESSION_LOST', `session ${sessionId} has no current image`);
-		}
+		if (!record || record.state !== 'active' || record.image === null) throw new SandboxError(410, 'SESSION_LOST', `session ${sessionId} is not ready`);
 		return record;
 	}
 
@@ -1017,12 +1036,48 @@ export class SandboxDriver {
 		return listing;
 	}
 
-	private async advanceSessionImage(session: SandboxRecord, resultImage: string): Promise<void> {
-		await this.persistence.save({
-			...session,
-			image: resultImage,
-			updatedAt: nowIso(),
-		});
+	private receiptStatus(receipt: SandboxOperationReceipt): SandboxStatusResult {
+		return { state: receipt.state, exitCode: receipt.exitCode ?? undefined, stdout: receipt.stdout, stderr: receipt.stderr, outputBytes: receipt.outputBytes ?? undefined };
+	}
+
+	private async persistTerminal(stored: SandboxRecord, operation: ContreeOperation, timedOut = false): Promise<SandboxRecord> {
+		const receipt: SandboxOperationReceipt = {
+			operationKey: stored.operationKey!, sessionId: stored.sessionId, projectId: stored.projectId,
+			runId: stored.runId, command: stored.command ?? '', cwd: stored.cwd ?? '',
+			inputImage: stored.inputImage ?? '', resultImage: operation.resultImage,
+			remoteId: operation.operationId, exitCode: operation.exitCode,
+			stdout: operation.stdout, stderr: operation.stderr,
+			state: terminalSandboxState(operation.state as 'SUCCEEDED' | 'FAILED' | 'CANCELLED'),
+			outputTruncated: operation.outputTruncated, timedOut: operation.timedOut || timedOut,
+			outputBytes: operation.outputBytes,
+		};
+		const terminal = { ...stored, state: receipt.state, receipt, updatedAt: nowIso() };
+		await this.persistence.save(terminal);
+		return terminal;
+	}
+
+	private async adoptOperationImage(operation: SandboxRecord): Promise<void> {
+		if (!operation.sessionId || !operation.receipt) return;
+		const session = await this.persistence.load(`session:${operation.sessionId}`);
+		if (!session || session.state === 'disposed') return;
+		// A replay of a completed old attempt must never roll a newer session back.
+		if (session.operationKey !== operation.operationKey) return;
+		const receipt = operation.receipt;
+		if (session.image !== receipt.inputImage && session.image !== receipt.resultImage) {
+			throw new SandboxError(409, 'SESSION_IMAGE_CONFLICT', 'Cannot adopt a result from an older sandbox image.', { operationKey: operation.operationKey });
+		}
+		const image = receipt.state === 'succeeded' && receipt.resultImage !== null ? receipt.resultImage : session.image;
+		const advanced = { ...session, image, operationKey: null, updatedAt: nowIso() };
+		if (!(await this.persistence.compareAndSave(session, advanced))) {
+			const current = await this.persistence.load(session.key);
+			if (current?.operationKey === operation.operationKey) throw new SandboxError(409, 'SESSION_IMAGE_CONFLICT', 'Sandbox state changed while adopting a result.');
+		}
+	}
+
+	private replayReceipt(receipt: SandboxOperationReceipt): SandboxOperationReceipt {
+		if (receipt.outputTruncated) throw new SandboxError(413, 'QUOTA_OUTPUT_EXCEEDED', 'Recorded command output was truncated.', { remoteId: receipt.remoteId });
+		if (receipt.timedOut) throw new SandboxError(504, 'EXEC_TIMEOUT', 'Recorded command exceeded its time quota.', { remoteId: receipt.remoteId, provenState: receipt.state });
+		return receipt;
 	}
 
 	/**
@@ -1039,7 +1094,9 @@ export class SandboxDriver {
 			signal?: AbortSignal;
 			cwd?: string;
 			env?: Record<string, string>;
+			files?: Array<{ path: string; uuid: string; mode?: string }>;
 		},
+		bootstrap = false,
 	): Promise<{
 		remoteId: string;
 		exitCode: number | null;
@@ -1094,14 +1151,17 @@ export class SandboxDriver {
 
 		const image = requireNonEmpty(session.image, 'session image');
 		const root = this.sessionWorkspaceRoot(session.projectId ?? '');
+		const cwd = bootstrap ? '/' : resolveWorkspacePath(root, input.cwd ?? '.', { allowRoot: true });
+		const inputHash = await sha256Hex(new TextEncoder().encode(JSON.stringify([session.sessionId, command, cwd, input.timeoutMs, Object.entries(input.env ?? {}).sort(([a], [b]) => a.localeCompare(b)), input.files ?? []])));
 		const record = (state: string, remoteId: string | null): SandboxRecord => ({
 			kind: 'operation',
 			key: `op:${operationKey}`,
 			sessionId: session.sessionId,
-			projectId: null,
-			runId: null,
+			projectId: session.projectId,
+			runId: session.runId,
 			image: null,
 			checkpointRef: null,
+			inputImage: image, inputHash, command, cwd,
 			operationKey,
 			remoteId,
 			state,
@@ -1109,6 +1169,29 @@ export class SandboxDriver {
 			sha256: null,
 			updatedAt: nowIso(),
 		});
+
+		const previous = await this.persistence.load(`op:${operationKey}`);
+		if (previous) {
+			if (previous.sessionId !== session.sessionId || previous.inputHash !== inputHash) {
+				throw new SandboxError(409, 'OPERATION_KEY_CONFLICT', 'Operation key belongs to a different command or session.', { operationKey });
+			}
+			if (!previous.receipt) await this.reconcileOperation(operationKey);
+			const reconciled = await this.persistence.load(previous.key);
+			if (reconciled?.receipt) {
+				await this.adoptOperationImage(reconciled);
+				return this.replayReceipt(reconciled.receipt);
+			}
+			throw new SandboxError(409, previous.state === 'failed' && previous.remoteId === null ? 'DISPATCH_REJECTED' : 'OPERATION_UNRESOLVED', 'Recorded operation has no proven result; it was not dispatched again.', { operationKey, remoteId: previous.remoteId });
+		}
+		// Lock the image chain before dispatch. Every mutation uses this path.
+		const pendingSession = { ...session, operationKey, updatedAt: nowIso() };
+		if ((session.operationKey !== null && session.operationKey !== operationKey) || (session.operationKey === null && !(await this.persistence.compareAndSave(session, pendingSession)))) {
+			throw new SandboxError(409, 'SESSION_BUSY', 'Another sandbox operation owns this image; retry after it settles.', { operationKey });
+		}
+		const dispatchRecord = record('dispatching', null);
+		if (!(await this.persistence.claim(dispatchRecord))) {
+			throw new SandboxError(409, 'OPERATION_UNRESOLVED', 'Operation is already claimed; reconcile its persisted identity.', { operationKey });
+		}
 
 		// The caller-abort listener is registered BEFORE the final awaits: an
 		// abort landing inside those awaits must still cancel the dispatch.
@@ -1120,16 +1203,15 @@ export class SandboxDriver {
 		// not sufficient once awaits intervene.
 		if (input.signal?.aborted) {
 			input.signal?.removeEventListener('abort', onCallerAbort);
+			await this.persistence.save(record('failed', null));
+			await this.persistence.compareAndSave(pendingSession, { ...pendingSession, operationKey: null, updatedAt: nowIso() });
 			throw new SandboxError(
 				409,
 				'ABORTED_BEFORE_DISPATCH',
 				'signal was aborted before dispatch — nothing was dispatched',
 			);
 		}
-		// Durable identity BEFORE dispatch: a crash right after the dispatch can
-		// always be reconciled by this key (when the id was learned).
-		await this.persistence.save(record('dispatching', null));
-
+		// The atomic claim above persists identity before the remote effect.
 		let remoteId: string | null = null;
 		const dispatchTimer = setTimeout(() => controller.abort(), this.dispatchTimeoutMs);
 		dispatchTimer.unref?.();
@@ -1139,7 +1221,8 @@ export class SandboxDriver {
 					image,
 					command,
 					shell: true,
-					...(input.cwd !== undefined ? { cwd: input.cwd } : { cwd: root }),
+					cwd,
+					...(input.files?.length ? { files: input.files } : {}),
 					...(input.env !== undefined ? { env: input.env } : {}),
 					timeoutSec: Math.ceil(input.timeoutMs / 1000),
 					truncateOutputAt: this.config.quotas.maxOutputBytes,
@@ -1155,6 +1238,7 @@ export class SandboxDriver {
 			const status = (error as { status?: number }).status;
 			if (typeof status === 'number' && status >= 400 && status < 500 && status !== 408) {
 				await this.persistence.save(record('failed', null));
+				await this.persistence.compareAndSave(pendingSession, { ...pendingSession, operationKey: null, updatedAt: nowIso() });
 				throw new SandboxError(
 					502,
 					'DISPATCH_REJECTED',
@@ -1201,10 +1285,8 @@ export class SandboxDriver {
 				// Persist the receipt AND the committed image chain BEFORE the
 				// caller can observe completion.
 				const outcome = terminalSandboxState(operation.state);
-				await this.persistence.save(record(outcome, remoteId));
-				if (operation.state === 'SUCCEEDED' && operation.resultImage !== null) {
-					await this.advanceSessionImage(session, operation.resultImage);
-				}
+				const terminal = await this.persistTerminal(record(outcome, remoteId), operation, timedOut);
+				await this.adoptOperationImage(terminal);
 				// OUTPUT QUOTA (hardening): the service truncates at the bound we
 				// send (truncate_output_at); a truncated stream is a typed, honest
 				// failure — never silently-shortened output.
@@ -1255,55 +1337,6 @@ export class SandboxDriver {
 				);
 			}
 
-			await sleep(this.pollIntervalMs);
-		}
-	}
-
-	/**
-	 * Instance run NOT bound to an existing session (bootstrap): same dispatch
-	 * and polling machinery, but the resulting image is returned instead of
-	 * advancing a session record.
-	 */
-	private async runInstance(input: {
-		imageRef: string;
-		command: string;
-		operationKey: string;
-		timeoutMs: number;
-		cwd?: string;
-		files?: Array<{ path: string; uuid: string; mode?: string }>;
-	}): Promise<{
-		exitCode: number | null;
-		stdout: string;
-		stderr: string;
-		resultImage: string | null;
-	}> {
-		let image = input.imageRef;
-		if (!isImageUuid(image)) {
-			image = await this.contree.resolveImageRef(image, AbortSignal.timeout(this.dispatchTimeoutMs));
-		}
-		const dispatched = await this.contree.spawnInstance(
-			{
-				image,
-				command: input.command,
-				shell: true,
-				...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
-				timeoutSec: Math.ceil(input.timeoutMs / 1000),
-				truncateOutputAt: this.config.quotas.maxOutputBytes,
-				...(input.files !== undefined && input.files.length > 0 ? { files: input.files } : {}),
-			},
-			AbortSignal.timeout(this.dispatchTimeoutMs),
-		);
-		const remoteId = dispatched.operationId;
-		for (;;) {
-			const operation = await this.contree.getOperation(remoteId).catch(() => null);
-			if (operation && isTerminalState(operation.state)) {
-				return {
-					exitCode: operation.exitCode,
-					stdout: operation.stdout,
-					stderr: operation.stderr,
-					resultImage: operation.state === 'SUCCEEDED' ? operation.resultImage : null,
-				};
-			}
 			await sleep(this.pollIntervalMs);
 		}
 	}

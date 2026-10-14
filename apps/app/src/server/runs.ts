@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { D1Database } from './auth.ts';
 import type { RunBindingRecord, Scope } from '@caddie/contracts';
 import { ScopeError, assertProjectScope } from './scope.ts';
@@ -136,6 +137,8 @@ export interface RepairRoundInput {
 	round: RepairRoundKind;
 	outcome: 'started' | 'succeeded' | 'failed';
 	detail?: string;
+	/** Host receipt identity; recovery must count one logical operation once. */
+	operationKey?: string;
 }
 
 /**
@@ -172,10 +175,12 @@ export async function recordRepairRound(
 	}
 	await db
 		.prepare(
-			'insert into "run_rounds" ("id","runId","projectId","issue","round","outcome","detail","createdAt") values (?,?,?,?,?,?,?,?)',
+			'insert or ignore into "run_rounds" ("id","runId","projectId","issue","round","outcome","detail","createdAt") values (?,?,?,?,?,?,?,?)',
 		)
 		.bind(
-			newId('round'),
+			input.operationKey
+				? `round_${createHash('sha256').update(JSON.stringify([verified.projectId, runId, input.issue, input.operationKey])).digest('hex')}`
+				: newId('round'),
 			runId,
 			verified.projectId,
 			input.issue,

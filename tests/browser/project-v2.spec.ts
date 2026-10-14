@@ -131,8 +131,9 @@ function json(route: { fulfill(options: Record<string, unknown>): unknown }, sta
 	return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; planDocs?: unknown[]; usage?: unknown } = {}) {
+async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; planDocs?: unknown[]; usage?: unknown; approval?: unknown } = {}) {
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
+	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) =>
 		json(route, 200, { session: { userId: 'actor-test' }, user: { id: 'actor-test', name: 'Ada', email: 'ada@caddie.test' } }),
 	);
@@ -147,11 +148,14 @@ async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; p
 	);
 	await context.route('**/api/projects', (route) => json(route, 200, { projects: [HOME, PROJ_A] }));
 	// The design approval posts through the REAL route shape (recorded here).
-	await context.route('**/api/approvals', (route) =>
-		json(route, 201, { approval: { id: 'apr-1', status: (route.request().postDataJSON() as { decision?: string }).decision ?? 'approved' } }),
+	await context.route('**/api/approvals**', (route) =>
+		route.request().method() === 'GET' ? json(route, 200, { approval: opts.approval ?? null }) :
+        json(route, 201, { approval: { id: 'apr-1', status: (route.request().postDataJSON() as { decision?: string }).decision ?? 'approved' } }),
 	);
 	await context.route('**/api/projects/**', (route) => {
 		const path = new URL(route.request().url()).pathname;
+		if (path.endsWith('/workflow/decision')) return json(route, 200, { workflow: null, approval: { id: 'apr-1', status: route.request().postDataJSON().decision } });
+        if (path.endsWith('/workflow')) return json(route, 200, { workflow: null });
 		if (path.endsWith('/brief')) return json(route, 200, { cards: opts.brief ?? [] });
 		if (path.endsWith('/plan-docs')) return json(route, 200, { revisions: opts.planDocs ?? [], latest: null });
 		if (path.endsWith('/run-bindings')) return json(route, 200, { runBindings: [] });
@@ -209,7 +213,8 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await expect(page.getByTestId('overview-preview-live')).toContainText('A private preview of your app is live');
 
 		// The to-do list is embedded; the create form hides behind the button.
-		await expect(page.getByTestId('tasks-panel')).toBeVisible();
+		await page.getByTestId('overview-todo').locator('summary').click();
+        await expect(page.getByTestId('tasks-panel')).toBeVisible();
 		await expect(page.getByTestId('task-create')).toHaveCount(0);
 		await page.getByTestId('add-task-open').click();
 		await expect(page.getByTestId('task-create')).toBeVisible();
@@ -225,6 +230,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 			planDocs: [
 				{
 					id: 'pdr-1',
+                    kind: 'prd',
 					projectId: 'proj-a',
 					revision: 2,
 					body: 'Build a solar dashboard.\n\n- render a live chart',
@@ -254,16 +260,64 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await page.getByTestId('design-review-approve').click();
 		await expect(page.getByTestId('design-review-outcome')).toHaveAttribute('data-decision', 'approved');
 
-		// Suggest a change posts the rejected decision via its own window.
-		await page.getByTestId('plan-changes-open').click();
-		await expect(page.getByTestId('request-changes-window')).toContainText('Caddie redrafts the plan');
-		await page.getByTestId('design-review-reject').click();
-		await expect(page.getByTestId('design-review-outcome')).toHaveAttribute('data-decision', 'rejected');
+        // A settled revision cannot be re-decided by an opposite button.
+        await expect(page.getByTestId('plan-changes-open')).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Continue with Caddie' })).toBeVisible();
+        // Markdown is a real list rather than literal source text.
+        await expect(page.getByTestId('plan-body-content').locator('li')).toContainText('render a live chart');
+        await expect(page.getByTestId('design-review-scope')).not.toHaveAttribute('open');
+        await page.screenshot({ path: '/tmp/caddie-plan-review.png' });
 
 		// Earlier versions fold under #earlier.
 		await expect(page.getByTestId('design-review-earlier')).toBeAttached();
 		await context.close();
 	});
+
+    test('Plan: feedback is required and saved against this revision', async ({ browser }) => {
+        const context = await browser.newContext();
+        const revision = { id: 'pdr-feedback', projectId: 'proj-a', kind: 'prd', revision: 1, body: '# Todo app\n\n- Add tasks', bodyHash: 'sha256-feedback', createdAt: NOW };
+        await stubAccount(context, { planDocs: [revision] });
+        const notes: unknown[] = [];
+        await context.route('**/api/projects/proj-a/workflow/decision', (route) => {
+            notes.push(route.request().postDataJSON());
+            return json(route, 200, { workflow: null, approval: { id: 'apr-1', status: 'rejected' } });
+        });
+        const page = await context.newPage();
+        await page.goto(`${BASE}/app/design-review?project=proj-a`);
+        await page.getByTestId('plan-changes-open').click();
+        await expect(page.getByTestId('design-review-reject')).toBeDisabled();
+        await page.getByTestId('plan-change-note').fill('Include keyboard shortcuts');
+        await page.getByTestId('design-review-reject').click();
+        await expect(page.getByTestId('design-review-outcome')).toHaveAttribute('data-decision', 'rejected');
+        expect(notes).toEqual([{ planId: 'pdr-feedback', decision: 'rejected', note: 'Include keyboard shortcuts' }]);
+        await context.close();
+    });
+
+    test('Plan: a refused approval leaves its error visible and the window open', async ({ browser }) => {
+        const context = await browser.newContext();
+        await stubAccount(context, { planDocs: [{ id: 'pdr-error', projectId: 'proj-a', kind: 'prd', revision: 1, body: '# Todo app', bodyHash: 'sha256-error', createdAt: NOW }] });
+        await context.route('**/api/projects/proj-a/workflow/decision', (route) => json(route, 409, { error: 'STALE_PLAN', message: 'The plan changed. Reload the latest version.' }));
+        const page = await context.newPage();
+        await page.goto(`${BASE}/app/design-review?project=proj-a`);
+        await page.getByTestId('plan-approve-open').click();
+        await page.getByTestId('design-review-approve').click();
+        await expect(page.getByTestId('approve-plan-window')).toBeVisible();
+        await expect(page.getByTestId('approve-plan-window').getByTestId('design-review-error')).toContainText('The plan changed');
+        await expect(page.getByTestId('design-review-outcome')).toHaveCount(0);
+        await context.close();
+    });
+
+    test('Plan: navigation and reload restore a saved approval for this exact revision', async ({ browser }) => {
+        const context = await browser.newContext();
+        await stubAccount(context, { planDocs: [{ id: 'pdr-saved', projectId: 'proj-a', kind: 'prd', revision: 1, body: '# Todo app', bodyHash: 'sha256-saved', createdAt: NOW }], approval: { resourceId: 'pdr-saved', revisionHash: 'sha256-saved', status: 'approved', expiresAt: '2027-01-01T00:00:00Z' } });
+        const page = await context.newPage();
+        await page.goto(`${BASE}/app/design-review?project=proj-a`);
+        await expect(page.getByTestId('design-review-outcome')).toHaveAttribute('data-decision', 'approved');
+        await page.reload();
+        await expect(page.getByTestId('design-review-outcome')).toContainText('Plan approved');
+        await expect(page.getByTestId('plan-approve-open')).toHaveCount(0);
+        await context.close();
+    });
 
 	test('Build: Activity and Files tabs; past builds as sentences; change-request drafts into the chat', async ({ browser }) => {
 		const context = await browser.newContext();

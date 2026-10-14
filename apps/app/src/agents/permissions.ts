@@ -41,7 +41,7 @@ export const ROLE_TOOL_POLICY: Readonly<Record<SpecialistRole, readonly string[]
 	mobile: ['read_project_context', 'sandbox_exec', 'read_sandbox_file', 'write_sandbox_file'],
 	// QA verifies only: read + execute the project's own checks. No write tool
 	// at all, so protected checks cannot be overwritten by QA even in error.
-	qa: ['read_project_context', 'sandbox_exec', 'read_sandbox_file', 'record_verification'],
+	qa: ['read_project_context', 'read_sandbox_file', 'verify_build'],
 };
 
 /** Everything a tool could ever write through, for cross-checks in tests. */
@@ -66,9 +66,8 @@ export const PROTECTED_PATH_PREFIXES: readonly string[] = [
 ];
 
 export function isProtectedPath(path: string): boolean {
-	return PROTECTED_PATH_PREFIXES.some(
-		(prefix) => path === prefix || path.startsWith(prefix),
-	);
+	const normalized = path.replaceAll('\\','/').split('/').reduce<string[]>((parts,part) => { if (part === '..') parts.pop(); else if (part && part !== '.') parts.push(part); return parts; }, []).join('/');
+ return PROTECTED_PATH_PREFIXES.some(prefix => normalized === prefix.replace(/\/$/,'') || normalized.startsWith(prefix) || normalized.includes(`/${prefix}`));
 }
 
 /**
