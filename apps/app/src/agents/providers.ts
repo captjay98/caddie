@@ -29,21 +29,145 @@ export interface ModelRoute {
 	modelId: string;
 	/** The pricingVersion rows P03 budgets resolve against. */
 	pricingVersion: string;
+	/**
+	 * The single per-Mtok rate the P03 budget ledger reserves against. Nebius
+	 * prices input and output ASYMMETRICALLY; the budget schema holds ONE rate
+	 * per (route, pricingVersion), so this is set to the OUTPUT (higher) price —
+	 * the conservative, fail-closed choice (a reservation can never under-price).
+	 * The true input/output split lives in {@link inputPriceMinorUnits} /
+	 * {@link outputPriceMinorUnits} and feeds the provider cost registration.
+	 */
 	unitPriceMinorUnits: number;
+	/** True input price per Mtok, minor units (provider cost accounting). */
+	inputPriceMinorUnits: number;
+	/** True output price per Mtok, minor units (provider cost accounting). */
+	outputPriceMinorUnits: number;
 	currency: string;
+	/** Max input context the model accepts (tokens). */
+	contextWindow: number;
+	/**
+	 * Default completion cap. Nemotron Nano/Ultra are REASONING models that
+	 * spend tokens thinking before any output — a tight cap returns empty, so
+	 * routes used for real replies carry a generous cap (LIVE VERIFIED Stage 1).
+	 */
+	maxTokens: number;
 }
 
+/**
+ * The verified NVIDIA Nemotron tier on Nebius Token Factory (every id + that it
+ * serves confirmed by a live probe 2026-10-12; the exact ids are case-sensitive
+ * and differ from the marketing names). Pricing from Nebius/OpenRouter listings
+ * for pricingVersion '2026-10-nemotron-tier'. Prices are minor units per Mtok.
+ *
+ * Role assignment is NOT encoded on the route (a route is a priced model, not a
+ * role); {@link MODEL_ROLES} maps roles → route ids so one model can serve
+ * several roles and a re-route is a one-line change.
+ */
 export const MODEL_ROUTES: readonly ModelRoute[] = [
 	{
+		// Frontier: strong agentic/tool-calling (agentic index 20.1 vs Super 1.7)
+		// — the chat coordinator and heavy build/plan reasoning.
+		id: 'nemotron-3-ultra',
+		specifier: 'nebius/nvidia/Nemotron-3-Ultra-550b-a55b',
+		providerId: 'nebius',
+		modelId: 'nvidia/Nemotron-3-Ultra-550b-a55b',
+		pricingVersion: '2026-10-nemotron-tier',
+		unitPriceMinorUnits: 220, // output $2.20/Mtok (budget ceiling)
+		inputPriceMinorUnits: 50, // $0.50/Mtok
+		outputPriceMinorUnits: 220, // $2.20/Mtok
+		currency: 'usd',
+		contextWindow: 262144,
+		maxTokens: 8192,
+	},
+	{
+		// Balanced mid tier — retained as a fallback / cheaper coordinator option.
 		id: 'nemotron-3-super',
 		specifier: 'nebius/nvidia/nemotron-3-super-120b-a12b',
 		providerId: 'nebius',
 		modelId: 'nvidia/nemotron-3-super-120b-a12b',
-		pricingVersion: '2026-10-adjudication',
-		unitPriceMinorUnits: 40, // $0.40 per Mtok, in minor units per Mtok
+		pricingVersion: '2026-10-nemotron-tier',
+		unitPriceMinorUnits: 45, // output $0.45/Mtok (budget ceiling)
+		inputPriceMinorUnits: 8, // $0.08/Mtok
+		outputPriceMinorUnits: 45, // $0.45/Mtok
 		currency: 'usd',
+		contextWindow: 262144,
+		maxTokens: 4096,
+	},
+	{
+		// Small/fast/cheap reasoning model — bounded helper calls (discovery query
+		// shaping, research summarization). Generous maxTokens: it is a reasoning
+		// model and a tight cap returns empty output (LIVE VERIFIED Stage 1).
+		id: 'nemotron-3-nano',
+		specifier: 'nebius/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
+		providerId: 'nebius',
+		modelId: 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
+		pricingVersion: '2026-10-nemotron-tier',
+		unitPriceMinorUnits: 20, // output $0.20/Mtok (budget ceiling)
+		inputPriceMinorUnits: 5, // $0.05/Mtok
+		outputPriceMinorUnits: 20, // $0.20/Mtok
+		currency: 'usd',
+		contextWindow: 262144,
+		maxTokens: 2048,
+	},
+	{
+		// VISION route (Stage 3 — image input). Token Factory serves vision-
+		// language models over the SAME OpenAI-compatible API (Qwen2.5-VL etc.);
+		// an image message routes here so Caddie can actually SEE an attachment.
+		// ⚠️ LIVE PROBE REQUIRED: the exact case-sensitive TF id is confirmed by a
+		// live probe the same way the Nemotron ids were (the marketing name is
+		// "Qwen2.5-VL-72B-Instruct"; the served id can differ). Pricing is the
+		// public Qwen-VL listing; re-verify on the probe. inputModalities marks
+		// this as the vision-capable route (ModelCapability contract).
+		id: 'qwen-vl',
+		specifier: 'nebius/Qwen/Qwen2.5-VL-72B-Instruct',
+		providerId: 'nebius',
+		modelId: 'Qwen/Qwen2.5-VL-72B-Instruct',
+		pricingVersion: '2026-10-nemotron-tier',
+		unitPriceMinorUnits: 60, // output $0.60/Mtok (budget ceiling) — re-verify on probe
+		inputPriceMinorUnits: 25, // $0.25/Mtok — re-verify on probe
+		outputPriceMinorUnits: 60,
+		currency: 'usd',
+		contextWindow: 131072,
+		maxTokens: 4096,
 	},
 ];
+
+/**
+ * Role → route id. The one place that assigns models to jobs; call sites resolve
+ * their role here rather than hard-coding a route id, so re-routing a role is a
+ * one-line change. Every value MUST be a route id present in {@link MODEL_ROUTES}
+ * ({@link findModelRouteForRole} throws otherwise — fail closed).
+ */
+export const MODEL_ROLES = {
+	/** Caddie chat / coordinator. Super is fast + cheap and, with the strict
+	 *  "present only tool results" instruction, does not hallucinate listings —
+	 *  the frontier Ultra reasoned on every trivial turn (slow + ~5× cost) and
+	 *  did NOT fix the hallucination, which was always a missing-instruction bug. */
+	chat: 'nemotron-3-super',
+	/** Heavy build/plan specialist reasoning — where Ultra's agentic strength pays. */
+	build: 'nemotron-3-ultra',
+	/** Cheap bounded helper calls (query shaping, summarization). */
+	helper: 'nemotron-3-nano',
+	/** Image understanding (Stage 3) — a vision-language model that accepts image input. */
+	vision: 'qwen-vl',
+} as const satisfies Record<string, string>;
+
+export type ModelRole = keyof typeof MODEL_ROLES;
+
+/** Route ids that accept image input (the vision-capable routes). The one place
+ *  that marks a route as a VLM — the ModelCapability contract reads from here. */
+export const VISION_ROUTE_IDS: readonly string[] = ['qwen-vl'];
+
+/** Whether a route accepts image input (used to pick a vision route for an
+ *  image message, and to report the capability honestly). */
+export function routeAcceptsImage(modelRouteId: string): boolean {
+	return VISION_ROUTE_IDS.includes(modelRouteId);
+}
+
+/** Resolve a role to its route, fail-closed (unknown role id is a bug, throws). */
+export function findModelRouteForRole(role: ModelRole): ModelRoute {
+	return findModelRoute(MODEL_ROLES[role]);
+}
 
 export function findModelRoute(modelRouteId: string): ModelRoute {
 	const route = MODEL_ROUTES.find((route) => route.id === modelRouteId);
@@ -74,17 +198,18 @@ export function registerNebiusProvider(): void {
 				provider: 'nebius',
 				baseUrl: NEBIUS_BASE_URL,
 				reasoning: true,
-				input: ['text'],
-				// pi-ai 0.87.1 rates are dollars-per-Mtok; the budget ledger's
-				// minor-unit price (P03) is derived separately in MODEL_ROUTES.
+				input: routeAcceptsImage(route.id) ? ['text', 'image'] : ['text'],
+				// pi-ai rates are dollars-per-Mtok; convert each route's true
+				// asymmetric minor-unit prices (P03 budget ledger holds the single
+				// output ceiling separately in route.unitPriceMinorUnits).
 				cost: {
-					input: route.unitPriceMinorUnits / 100,
-					output: route.unitPriceMinorUnits / 100,
-					cacheRead: route.unitPriceMinorUnits / 100 / 10,
-					cacheWrite: route.unitPriceMinorUnits / 100 / 10,
+					input: route.inputPriceMinorUnits / 100,
+					output: route.outputPriceMinorUnits / 100,
+					cacheRead: route.inputPriceMinorUnits / 100 / 10,
+					cacheWrite: route.inputPriceMinorUnits / 100 / 10,
 				},
-				contextWindow: 128000,
-				maxTokens: 4096,
+				contextWindow: route.contextWindow,
+				maxTokens: route.maxTokens,
 				compat: {
 					supportsDeveloperRole: false,
 					supportsStore: false,

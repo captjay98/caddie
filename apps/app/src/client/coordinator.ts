@@ -22,6 +22,11 @@ import { standbySource, type ChannelSource } from './conversation/channel-store.
  * at-most-once admission contract.
  */
 
+// MUST equal MODEL_ROLES.chat in apps/app/src/agents/providers.ts (the server
+// authority). The client can't import that module (it pulls server-only Flue /
+// pi-ai deps), so this literal mirrors it; the server re-verifies the route id
+// against the frozen registry (findModelRoute throws on a mismatch), so a drift
+// here fails closed rather than silently mis-pricing a run.
 const COORDINATOR_MODEL_ROUTE = 'nemotron-3-super';
 
 export interface CoordinatorTransport {
