@@ -1,10 +1,10 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { Database } from 'bun:sqlite';
 import {
 	driveOAuth,
 	freePort,
+	makeScratchDir,
 	type Jar,
 	type StubProvider,
 } from './controls-harness.ts';
@@ -208,7 +208,7 @@ export async function startSchedulesFixtureWorker(
 	if (!existsSync(SCHEDULES_FIXTURE_ENTRY)) {
 		throw new Error('schedules fixture worker entry missing: tests/fixtures/schedules.ts');
 	}
-	const tmp = mkdtempSync(join(tmpdir(), 'caddie-p12-'));
+	const tmp = makeScratchDir('caddie-p12-');
 	const config = {
 		name: 'caddie-schedules-fixture',
 		main: SCHEDULES_FIXTURE_ENTRY,

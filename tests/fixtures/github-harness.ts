@@ -1,7 +1,6 @@
 import { createHmac } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import {
 	ALICE_EMAIL,
 	BOB_EMAIL,
@@ -11,6 +10,7 @@ import {
 	driveOAuth,
 	freePort,
 	Jar,
+	makeScratchDir,
 	makeWorker,
 	signIn,
 	SESSION_COOKIE,
@@ -97,7 +97,7 @@ export async function startGithubFixtureWorker(
 	emails: string[],
 	extraVars: Record<string, string> = {},
 ): Promise<StartedGithubFixtureWorker> {
-	const tmp = mkdtempSync(join(tmpdir(), 'caddie-p08-'));
+	const tmp = makeScratchDir('caddie-p08-');
 	const config = {
 		name: 'caddie-github-fixture',
 		main: FIXTURE_ENTRY,

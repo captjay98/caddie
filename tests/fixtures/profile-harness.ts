@@ -1,10 +1,9 @@
 import { createServer, type Server } from 'node:http';
-import { splitSqlStatements } from './controls-harness.ts';
+import { makeScratchDir, splitSqlStatements } from './controls-harness.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import net from 'node:net';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 
 /**
  * Shared local workerd fixture harness for P14 (profile / memory / search),
@@ -21,6 +20,7 @@ export const REPO_ROOT = join(import.meta.dir, '..', '..');
 export const FIXTURE_ENTRY = join(REPO_ROOT, 'tests', 'fixtures', 'profile.ts');
 export const IDENTITY_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0001_product.sql');
 export const PROFILE_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0008_profile.sql');
+export const PROFILE_PREFERENCES_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0017_profile_preferences.sql');
 export const SCHEDULES_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0007_schedules.sql');
 export const DISCOVERY_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0009_discovery.sql');
 export const HOME_PROJECT_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0011_home_project.sql');
@@ -88,7 +88,7 @@ export async function startProfileFixture(
 	port: number,
 	extraVars: Record<string, string> = {},
 ): Promise<StartedFixture> {
-	const tmp = mkdtempSync(join(tmpdir(), 'caddie-p14-'));
+	const tmp = makeScratchDir('caddie-p14-');
 	const config = {
 		name: 'caddie-p14-profile-fixture',
 		main: FIXTURE_ENTRY,
@@ -180,7 +180,7 @@ export function stopProfileFixture(port: number) {
 
 /** Apply the production migrations P14 depends on: identity+product, then P14. */
 export async function applyMigrations(port: number): Promise<void> {
-	for (const path of [IDENTITY_MIGRATION_PATH, SCHEDULES_MIGRATION_PATH, PROFILE_MIGRATION_PATH, DISCOVERY_MIGRATION_PATH, HOME_PROJECT_MIGRATION_PATH, BRIEF_READ_MIGRATION_PATH, DISCOVERY_SAVED_MIGRATION_PATH, STACK_NOTIFY_MIGRATION_PATH, PLAN_DECISIONS_MIGRATION_PATH]) {
+	for (const path of [IDENTITY_MIGRATION_PATH, SCHEDULES_MIGRATION_PATH, PROFILE_MIGRATION_PATH, PROFILE_PREFERENCES_MIGRATION_PATH, DISCOVERY_MIGRATION_PATH, HOME_PROJECT_MIGRATION_PATH, BRIEF_READ_MIGRATION_PATH, DISCOVERY_SAVED_MIGRATION_PATH, STACK_NOTIFY_MIGRATION_PATH, PLAN_DECISIONS_MIGRATION_PATH]) {
 		const ddl = readFileSync(path, 'utf8');
 		// The proper splitter (controls-harness) skips comment lines and
 		// trigger bodies — the naive ';' split emits comment-only chunks that

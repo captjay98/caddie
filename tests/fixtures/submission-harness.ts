@@ -1,8 +1,8 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import {
 	freePort,
+	makeScratchDir,
 	type Jar,
 	type StubProvider,
 } from './controls-harness.ts';
@@ -72,7 +72,7 @@ export async function startSubmissionFixtureWorker(
 	if (!existsSync(SUBMISSION_FIXTURE_ENTRY)) {
 		throw new Error('submission fixture worker entry missing: tests/fixtures/submission.ts');
 	}
-	const tmp = mkdtempSync(join(tmpdir(), 'caddie-p13-'));
+	const tmp = makeScratchDir('caddie-p13-');
 	const config = {
 		name: 'caddie-submission-fixture',
 		main: SUBMISSION_FIXTURE_ENTRY,

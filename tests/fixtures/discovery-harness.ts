@@ -1,6 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import {
 	ALICE_EMAIL,
 	BOB_EMAIL,
@@ -8,6 +7,7 @@ import {
 	StubProvider,
 	applyMigrations,
 	d1Exec,
+	makeScratchDir,
 	makeWorker,
 	signIn,
 	freePort,
@@ -77,7 +77,7 @@ export async function startDiscoveryFixtureWorker(
 	if (!existsSync(DISCOVERY_FIXTURE_ENTRY)) {
 		throw new Error('discovery fixture worker entry missing: tests/fixtures/discovery.ts');
 	}
-	const tmp = mkdtempSync(join(tmpdir(), 'caddie-p11-'));
+	const tmp = makeScratchDir('caddie-p11-');
 	const config = {
 		name: 'caddie-discovery-fixture',
 		main: DISCOVERY_FIXTURE_ENTRY,

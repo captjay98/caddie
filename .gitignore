@@ -15,3 +15,8 @@ playwright-report/
 
 # local tool state
 .zcode/
+.kiro/settings/
+
+# local logs and dev DB backups
+*.log
+.wrangler-backup-*.tar.gz

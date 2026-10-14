@@ -1,9 +1,9 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import {
 	driveOAuth,
 	freePort,
+	makeScratchDir,
 	type Jar,
 	type StubProvider,
 } from './controls-harness.ts';
@@ -71,7 +71,7 @@ export async function startEvidenceFixtureWorker(
 	if (!existsSync(EVIDENCE_FIXTURE_ENTRY)) {
 		throw new Error('evidence fixture worker entry missing: tests/fixtures/evidence.ts');
 	}
-	const tmp = mkdtempSync(join(tmpdir(), 'caddie-p10-'));
+	const tmp = makeScratchDir('caddie-p10-');
 	const config = {
 		name: 'caddie-evidence-fixture',
 		main: EVIDENCE_FIXTURE_ENTRY,

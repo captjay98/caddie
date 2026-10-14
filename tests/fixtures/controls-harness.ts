@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -15,6 +15,44 @@ import { tmpdir } from 'node:os';
 export const ALICE_EMAIL = 'alice@example.com';
 export const BOB_EMAIL = 'bob@example.com';
 export const SESSION_COOKIE = 'better-auth.session_token';
+
+// --- scratch base (fail-fast) ------------------------------------------------------
+
+/**
+ * Resolve the base directory for fixture scratch dirs, FAILING FAST when it is
+ * not usable.
+ *
+ * Prefers $KIROCREW_SCRATCH (session-owned, reclaimed) when set, else the OS
+ * tmpdir. The base is probed for writability ONCE and the result cached. If the
+ * base cannot be created/written (e.g. a sandbox that blocks the tmp path), we
+ * throw IMMEDIATELY with a legible message instead of letting the caller spawn
+ * a wrangler/workerd child and burn the full 90s `waitFor` deadline on a worker
+ * that can never bind. In a normal environment the probe passes and behavior is
+ * unchanged.
+ */
+let cachedScratchBase: string | undefined;
+export function scratchBase(): string {
+	if (cachedScratchBase) return cachedScratchBase;
+	const base = process.env.KIROCREW_SCRATCH?.trim() || tmpdir();
+	const probe = join(base, `.caddie-scratch-probe-${process.pid}-${Date.now()}`);
+	try {
+		mkdirSync(probe, { recursive: true });
+		rmSync(probe, { recursive: true, force: true });
+	} catch (error) {
+		throw new Error(
+			`fixture scratch base is not writable: ${base}\n` +
+				`(set KIROCREW_SCRATCH to a writable dir, or run outside the sandbox)\n` +
+				`cause: ${String(error)}`,
+		);
+	}
+	cachedScratchBase = base;
+	return base;
+}
+
+/** Create a fresh fixture scratch dir under the (fail-fast) scratch base. */
+export function makeScratchDir(prefix: string): string {
+	return mkdtempSync(join(scratchBase(), prefix));
+}
 
 // --- SQL splitting (trigger-aware) -------------------------------------------------
 
@@ -126,7 +164,7 @@ export async function startControlsFixtureWorker(
 	emails: string[],
 	extraVars: Record<string, string> = {},
 ): Promise<StartedFixtureWorker> {
-	const tmp = mkdtempSync(join(tmpdir(), 'caddie-p03-'));
+	const tmp = makeScratchDir('caddie-p03-');
 	const config = {
 		name: 'caddie-controls-fixture',
 		main: FIXTURE_ENTRY,

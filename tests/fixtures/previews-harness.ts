@@ -4,13 +4,13 @@ import {
 	d1Exec,
 	freePort,
 	Jar,
+	makeScratchDir,
 	makeWorker,
 	signIn,
 	StubProvider,
 } from './controls-harness.ts';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 
 /**
  * P07 test-side harness: reuses the shared P03 harness primitives (free
@@ -76,7 +76,7 @@ export async function startPreviewsFixtureWorker(
 	if (!existsSync(PREVIEWS_FIXTURE_ENTRY)) {
 		throw new Error('previews fixture worker entry missing: tests/fixtures/previews.ts');
 	}
-	const tmp = mkdtempSync(join(tmpdir(), 'caddie-p07-'));
+	const tmp = makeScratchDir('caddie-p07-');
 	const config = {
 		name: 'caddie-previews-fixture',
 		main: PREVIEWS_FIXTURE_ENTRY,
