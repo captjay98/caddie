@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { useAuthStatus, useCreateProject, useSessionActor } from '../queries.ts';
-import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
+import { useAuthStatus, useCreateProject, useSessionActor, useHomeProject } from '../queries.ts';
 import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
 
 /** Storage key for the name the user gave Caddie in the welcome (v2 §4). */
@@ -41,14 +40,16 @@ export function saveProfileName(name: string): void {
  * reloads the document, and `/app` deep links keep working.
  *
  * Rendered inside the shell layout's chrome on the zero-project Home branch
- * and on /onboarding; never opens its own `<main>`.
+ * and standalone on /onboarding (before the workspace exists); never opens
+ * its own `<main>`. It resolves the session and home project through queries,
+ * not the workspace chrome, so it works in both places.
  */
 
 /**
  * The welcome intro (v2, HANDOFF §4 Welcome): Caddie introduces itself one
  * line at a time with its face changing per line, asks what to call you
  * (prefilled from the account, never a username), then shows the three moods,
- * then hands off to the start paths. "Say that again" replays;
+ * then hands off to the start paths. "Replay introduction" replays;
  * prefers-reduced-motion shows all lines at once. The saved name is the
  * profile name used by the account menu (chat greeting wires up as the
  * surfaces adopt it); React escapes it everywhere it renders.
@@ -58,10 +59,35 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 	const reduceMotion =
 		typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-	const LINES: { text: string; mood: MascotMood }[] = [
-		{ text: 'Hi — I\u2019m Caddie.', mood: 'ready' },
-		{ text: 'I read the rules, draft the plan, and build it.', mood: 'thinking' },
-		{ text: 'You approve every step, and I ask before spending anything.', mood: 'done' },
+	// The intro body (HANDOFF §4): plain-language lines that arrive one at a
+	// time, the mascot's face matching what each line is about. The "Hi" line
+	// is the headline above these; the spec counts these three <p> lines.
+	const LINES: { text: ReactElement; mood: MascotMood }[] = [
+		{
+			text: (
+				<>
+					I help you find <b>hackathons that fit you</b>, then <b>plan and build your app with you</b>.
+					You can bring your own project too.
+				</>
+			),
+			mood: 'building',
+		},
+		{
+			text: (
+				<>
+					Before you submit, we’ll check your app against the hackathon’s rules.
+				</>
+			),
+			mood: 'thinking',
+		},
+		{
+			text: (
+				<>
+					<b>You approve the plan first.</b> I ask before spending money.
+				</>
+			),
+			mood: 'done',
+		},
 	];
 
 	const [line, setLine] = useState(reduceMotion ? LINES.length - 1 : 0);
@@ -71,7 +97,7 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 		return () => window.clearTimeout(timer);
 	}, [line, reduceMotion, LINES.length]);
 
-	const [stage, setStage] = useState<'intro' | 'name' | 'faces'>('intro');
+	const [stage, setStage] = useState<'intro' | 'name'>('intro');
 	const suggested = suggestFirstName(sessionName);
 	const [name, setName] = useState('');
 	const [usernameHint, setUsernameHint] = useState(false);
@@ -86,16 +112,21 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 	if (stage === 'intro') {
 		return (
 			<section className="card-surface start-card welcome-intro" data-testid="welcome-intro">
-				<span className="welcome-intro-face" aria-hidden="true">
-					<Mascot mood={LINES[line]!.mood} size={64} live />
+				<span className="welcome-intro-halo" aria-hidden="true">
+					<Mascot mood={LINES[line]!.mood} size={120} live />
 				</span>
-				<div aria-live="polite">
-					{LINES.slice(0, line + 1).map((entry) => (
-						<p key={entry.text} className="start-lede">
+				<h1 className="welcome-intro-hello">Hi, I&rsquo;m Caddie.</h1>
+				<div className="welcome-intro-lines" aria-live="polite">
+					{LINES.slice(0, line + 1).map((entry, index) => (
+						<p key={index} className="welcome-intro-line">
 							{entry.text}
 						</p>
 					))}
 				</div>
+				<details className="welcome-definition">
+					<summary>What’s a hackathon?</summary>
+					<p>A hackathon is an event where you build a project, on your own or with a team, and present it within a set time. Many run online, and you don’t have to be an experienced developer to take part.</p>
+				</details>
 				<div className="row-actions">
 					<button
 						type="button"
@@ -103,15 +134,15 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 						data-testid="welcome-next"
 						onClick={() => setStage('name')}
 					>
-						Next
+						Let&rsquo;s go
 					</button>
 					<button
 						type="button"
-						className="btn-ghost"
+						className="welcome-replay"
 						data-testid="welcome-replay"
 						onClick={() => setLine(reduceMotion ? LINES.length - 1 : 0)}
 					>
-						Say that again
+						Replay introduction
 					</button>
 				</div>
 			</section>
@@ -121,25 +152,31 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 	if (stage === 'name') {
 		return (
 			<section className="card-surface start-card welcome-intro" data-testid="welcome-name">
-				<span className="welcome-intro-face" aria-hidden="true">
-					<Mascot mood="listening" size={64} live />
+				<span className="welcome-intro-halo" aria-hidden="true">
+					<Mascot mood="listening" size={120} live />
 				</span>
-				<h3 className="start-card-title">What should I call you?</h3>
-				{sessionName ? (
-					<p className="state-detail">From your account. Change it if you like.</p>
-				) : (
-					<p className="state-detail">Caddie greets you by this name.</p>
-				)}
-				<input
-					className="input"
-					data-testid="welcome-name-input"
-					value={name}
-					maxLength={40}
-					onChange={(event) => setName(event.target.value)}
-				/>
-				{usernameHint ? (
-					<p className="state-detail">Your account name looks like a username, so I left this blank.</p>
-				) : null}
+				<h1 className="welcome-intro-hello">What should I call you?</h1>
+				<div className="welcome-name-ask">
+					<input
+						className="input"
+						data-testid="welcome-name-input"
+						aria-label="What should I call you?"
+						placeholder="Your first name"
+						value={name}
+						maxLength={40}
+						onChange={(event) => setName(event.target.value)}
+					/>
+					{sessionName ? (
+						<p className="welcome-name-note">From your account. Change it if you like.</p>
+					) : (
+						<p className="welcome-name-note">Caddie greets you by this name.</p>
+					)}
+					{usernameHint ? (
+						<p className="welcome-name-note">
+							Your account name looks like a username, so I left this blank.
+						</p>
+					) : null}
+				</div>
 				<div className="row-actions">
 					<button
 						type="button"
@@ -147,10 +184,10 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 						data-testid="welcome-name-save"
 						onClick={() => {
 							saveProfileName(name);
-							setStage('faces');
+							props.onDone();
 						}}
 					>
-						Continue
+						That&rsquo;s me
 					</button>
 					<button
 						type="button"
@@ -158,7 +195,7 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 						data-testid="welcome-name-skip"
 						onClick={() => {
 							saveProfileName('');
-							setStage('faces');
+							props.onDone();
 						}}
 					>
 						Skip — I&rsquo;ll add it later
@@ -168,32 +205,7 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 		);
 	}
 
-	return (
-		<section className="card-surface start-card welcome-intro" data-testid="welcome-faces">
-			<div className="welcome-faces">
-				<span className="welcome-face">
-					<Mascot mood="building" size={56} live />
-					<b>Building</b>
-					<small>Caddie writes the code</small>
-				</span>
-				<span className="welcome-face">
-					<Mascot mood="needs" size={56} live />
-					<b>Needs you</b>
-					<small>A plan waits for your OK</small>
-				</span>
-				<span className="welcome-face">
-					<Mascot mood="done" size={56} live />
-					<b>Done</b>
-					<small>You can try what it built</small>
-				</span>
-			</div>
-			<div className="row-actions">
-				<button type="button" className="btn-key" data-testid="welcome-go" onClick={props.onDone}>
-					Let&rsquo;s go
-				</button>
-			</div>
-		</section>
-	);
+	return <></>;
 }
 
 /** The verified session's account name (for the welcome prefill suggestion). */
@@ -250,8 +262,10 @@ function StartCard(props: {
  * are visible; the busy lock prevents duplicate projects.
  */
 export function IdeaForm(): ReactElement {
-	const chrome = useWorkspaceChrome();
-	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const auth = useAuthStatus();
+	const session = useSessionActor(Boolean(auth.data?.authenticated));
+	const actor = useMemo(() => ({ actorId: session.data ?? null }), [session.data]);
+	const home = useHomeProject(actor, Boolean(auth.data?.authenticated));
 	const createProject = useCreateProject(actor);
 	const navigate = useNavigate();
 	const [name, setName] = useState('');
@@ -266,7 +280,7 @@ export function IdeaForm(): ReactElement {
 			const result = await createProject.mutateAsync({
 				name: name.trim(),
 				...(idea.trim() ? { description: idea.trim() } : {}),
-				workspaceId: chrome.homeProject?.workspaceId,
+				workspaceId: home.data?.project.workspaceId,
 			});
 			void navigate({ to: '/project', search: { project: result.project.id } });
 		} catch (err) {

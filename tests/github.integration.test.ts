@@ -170,6 +170,9 @@ beforeAll(async () => {
 		// with the production numbering order).
 		join(REPO_ROOT, 'apps/app/migrations/0011_home_project.sql'),
 		join(REPO_ROOT, 'apps/app/migrations/0012_brief_read.sql'),
+		// 0013 alters discovery_candidates, so 0009 must come first — the same
+		// fixture schema drift class as 0011 above.
+		join(REPO_ROOT, 'apps/app/migrations/0009_discovery.sql'),
 		join(REPO_ROOT, 'apps/app/migrations/0013_discovery_saved.sql'),
 		join(REPO_ROOT, 'apps/app/migrations/0014_stack_notify.sql'),
 		join(REPO_ROOT, 'apps/app/migrations/0015_plan_decisions.sql'),
