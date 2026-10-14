@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AuthEnv } from '../auth.ts';
 import { ScopeError, requireProjectScope, sessionUserId } from '../scope.ts';
-import { accountBrief, markBriefRead, projectBrief } from '../brief.ts';
+import { accountBrief, briefSummary, markBriefRead, projectBrief } from '../brief.ts';
 
 /**
  * The brief feed routes.
@@ -48,6 +48,13 @@ export function createBriefRouter(): Hono<{ Bindings: Env }> {
 	router.get('/brief', async (c) => {
 		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
 		return c.json(await accountBrief(c.env.DB, actorId));
+	});
+
+	// R05: the brief-in-chat summary — counts derived from the SAME accountBrief
+	// so chat and the Brief destination never drift.
+	router.get('/brief/summary', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		return c.json(await briefSummary(c.env.DB, actorId));
 	});
 
 	router.post('/brief/read', async (c) => {

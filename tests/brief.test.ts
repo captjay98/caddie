@@ -201,7 +201,8 @@ describe('brief feed (projectBrief)', () => {
 		const blocked = cards.filter((card) => card.status === 'blocked');
 		expect(blocked.length).toBe(2);
 		const run1 = blocked.find((card) => card.primaryAction.targetId === 'unit-run-1');
-		expect(run1!.headline).toContain('preview check failed again');
+		expect(run1!.summary).toContain('preview check failed again');
+		expect(run1!.headline).not.toContain('Run stopped');
 		expect(blocked.every((card) => card.kind === 'result')).toBe(true);
 
 		// Handled: armed schedules only.

@@ -4,7 +4,7 @@ import { assertProjectScope } from './scope.ts';
 import { listClaims, surveyClaims } from './evidence/claims.ts';
 import { listArtifacts } from './artifacts.ts';
 import { listSchedules } from './schedules.ts';
-import type { AccountBriefPayload } from '@caddie/contracts';
+import type { AccountBriefPayload, BriefSummary } from '@caddie/contracts';
 import { listProjectsForActor } from './projects.ts';
 import { listCandidates } from './discovery.ts';
 import { listPreviews } from './previews.ts';
@@ -187,13 +187,13 @@ async function failedRunCards(db: D1Database, projectId: string): Promise<Decisi
 			id: newCardId('failed-run', runId),
 			projectId,
 			kind: 'result',
-			headline: `Run stopped: ${String(row.issue)}`,
+			headline: 'Caddie hit a problem and paused this build',
 			summary:
-				'The failure is retained in the repair ledger — nothing was written to the plan after the stop. Read the failure to decide the next move.',
+				`The check that stopped it: ${String(row.issue)}. Nothing was written to your plan after the stop and your files are saved — open it to see the failure and decide the next move.`,
 			evidenceIds: [],
 			status: 'blocked',
 			updatedAt: String(row.createdAt),
-			primaryAction: { label: 'Read the failure', kind: 'inspect', targetId: runId },
+			primaryAction: { label: 'Review the problem', kind: 'inspect', targetId: runId },
 		});
 	}
 	return cards;
@@ -207,8 +207,8 @@ async function scheduleCards(db: D1Database, scope: Scope): Promise<DecisionCard
 			id: newCardId('schedule', schedule.id),
 			projectId: scope.projectId,
 			kind: 'deadline',
-			headline: `${schedule.name} — ${schedule.cron}`,
-			summary: `Next run ${schedule.nextRunAt} (${schedule.timezone}). A finished run reports here and in Runs; a refused or failed read is named, never guessed.`,
+			headline: `${schedule.name} is scheduled`,
+			summary: `Next run ${schedule.nextRunAt} (${schedule.timezone}). A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
 			evidenceIds: [],
 			status: 'handled',
 			updatedAt: schedule.updatedAt,
@@ -433,4 +433,37 @@ export async function accountBrief(db: D1Database, actorId: string): Promise<Acc
 		projects: projects.map((project) => ({ id: project.id, name: project.name, kind: project.kind })),
 		asOf: nowIso,
 	};
+}
+
+/**
+ * The brief-in-chat summary (R05). Derived from the SAME accountBrief, so the
+ * count chat shows and the cards Brief shows are one source of truth. Pure
+ * projection over the payload — never a second query, never invented copy.
+ */
+export function summariseBrief(payload: AccountBriefPayload): BriefSummary {
+	const open = payload.cards.filter((card) => card.status !== 'handled');
+	// Needs-you = unseen AND actionable (needs-you / changed / blocked).
+	const needsYou = open.filter((card) => !card.seen).length;
+	const updates = payload.cards.filter((card) => card.status === 'handled').length;
+	const headline =
+		needsYou > 0
+			? `${needsYou} thing${needsYou === 1 ? '' : 's'} need${needsYou === 1 ? 's' : ''} you${updates > 0 ? ` · ${updates} update${updates === 1 ? '' : 's'}` : ''}`
+			: open.length > 0
+				? `${open.length} open item${open.length === 1 ? '' : 's'} to review`
+				: updates > 0
+					? `${updates} update${updates === 1 ? '' : 's'}, nothing needs you`
+					: 'You\u2019re caught up';
+	return {
+		needsYouCount: needsYou,
+		updatesCount: updates,
+		openCount: open.length,
+		headline,
+		href: '/app/',
+		asOf: payload.asOf,
+	};
+}
+
+/** Convenience: build the summary straight from the actor's account brief. */
+export async function briefSummary(db: D1Database, actorId: string): Promise<BriefSummary> {
+	return summariseBrief(await accountBrief(db, actorId));
 }

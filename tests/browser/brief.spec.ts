@@ -202,6 +202,9 @@ async function stubAccount(
 	await context.route('**/api/auth/get-session', (route) =>
 		json(route, 200, { session: { userId: actorId }, user: { id: actorId, name: 'Test', email: 't@caddie.test' } }),
 	);
+	// The onboarding gate wraps every shell route; a completed account lets the
+	// shell render instead of bouncing to /onboarding.
+	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/home-project', (route) => json(route, 200, { project: HOME }));
 	await context.route('**/api/profile', (route) => json(route, 200, { profile: null }));
 	await context.route('**/api/projects', (route) => {
@@ -261,25 +264,28 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 
 	test('a new mobile user lands on Chat with the welcome panel and discovery as the primary action', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-		const { reads } = await stubAccount(context, { projects: [HOME], cards: [] });
+		const { reads, runPosts } = await stubAccount(context, { projects: [HOME], cards: [] });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/`);
 
 		// Chat is the default: the conversation shows full-height.
 		await expect(page.getByTestId('conversation-panel')).toBeVisible();
-		// The deterministic welcome — three actions, discovery first.
+		// The deterministic welcome — three template cards, discovery first.
 		await expect(page.getByTestId('welcome-panel')).toBeVisible();
 		await expect(page.getByText("Let's find a hackathon that fits you")).toBeVisible();
-		const buttons = page.locator('.welcome-actions button');
-		await expect(buttons.first()).toHaveText('Find my first hackathon');
-		await expect(buttons.nth(1)).toHaveText('Start from an idea');
-		await expect(buttons.nth(2)).toHaveText('Continue existing code');
+		const cardTitles = page.locator('.welcome-card .welcome-card-title');
+		await expect(cardTitles.nth(0)).toHaveText('Find my first hackathon');
+		await expect(cardTitles.nth(1)).toHaveText('Start from an idea');
+		await expect(cardTitles.nth(2)).toHaveText('Continue existing code');
 
-		// Primary action opens the real discovery surface.
+		// Primary action starts a discovery CONVERSATION with Caddie in-chat —
+		// it does NOT bounce to the standalone Discover page (chat-first).
 		await page.getByTestId('welcome-find').click();
-		await expect(page).toHaveURL(/\/app\/discover$/);
-		await expect(page.getByTestId('discovery-results')).toBeVisible();
-		// No assistant message was fabricated and nothing was marked read.
+		await expect(page).not.toHaveURL(/\/app\/discover$/);
+		await expect(page.getByTestId('conversation-panel')).toBeVisible();
+		// Exactly one run was created to carry the discovery message.
+		await expect.poll(() => runPosts.n).toBe(1);
+		// Nothing in the Brief was marked read by starting discovery.
 		expect(reads).toHaveLength(0);
 		await context.close();
 	});

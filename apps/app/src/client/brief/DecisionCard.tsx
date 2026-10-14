@@ -3,6 +3,7 @@ import { useState } from 'react';
 import type { ReactElement } from 'react';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { formatTimeAgo } from '@caddie/ui/time';
+import { Mascot } from '@caddie/ui/Mascot';
 import { StatePanel, StaleChip, failureKind, type StateKind } from '../states.tsx';
 import { Icon } from '../icons.tsx';
 
@@ -359,6 +360,10 @@ export function AccountBriefV2(props: {
 	hasBuildProjects: boolean;
 	onAction?: (card: DecisionCardType) => void;
 	onMarkAllRead?: () => void;
+	/** New-user teaching card actions (v2 empty Brief): the primary opens the
+	 *  Caddie chat where "what to build" is decided; the ghost opens Discover. */
+	onAskCaddie?: () => void;
+	onBrowse?: () => void;
 }): ReactElement {
 	const { state, cards } = props;
 	const retryable = state.kind === 'error' || state.kind === 'offline' || state.kind === 'limit';
@@ -409,23 +414,19 @@ export function AccountBriefV2(props: {
 					</div>
 				) : (
 					<div className="card-stack" data-testid="brief-new-user">
-						<section className="decision-card card-surface">
-							<div className="card-head">
-								<p className="kind-kicker">BRIEF · WHAT GOES HERE</p>
-								<span className="pill status-pill" data-status="handled">
-									waiting for your first build
-								</span>
-							</div>
-							<h3>This is where decisions land</h3>
-							<p className="summary">
-								When Caddie finds a hackathon that fits you, drafts a plan, finishes a preview or
-								gets stuck, it reports it here — one clear action per update, across every project.
+						<section className="decision-card card-surface brief-teach brief-teach-quiet">
+							<span className="brief-teach-mascot" aria-hidden="true">
+								<Mascot mood="ready" size={44} live />
+							</span>
+							<p className="kind-kicker brief-teach-eyebrow">
+								<Icon name="target" title="brief" /> BRIEF
 							</p>
-							<div className="actions">
-								<Link className="r-link" to="/discover" data-testid="brief-teach-discover">
-									<Icon name="target" title="discover" /> Find a hackathon that fits you
-								</Link>
-							</div>
+							<h3>Nothing needs you yet</h3>
+							<p className="summary">
+								Once you start a project with Caddie, the decisions it needs from you — plans to
+								approve, previews to check, blockers to clear — land here, one at a time. Start in
+								the chat.
+							</p>
 						</section>
 					</div>
 				)}
