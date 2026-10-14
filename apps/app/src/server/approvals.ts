@@ -338,6 +338,15 @@ export async function getApprovalForActor(
 	return approvalRecordFromRow(row);
 }
 
+/** Read the exact revision's decision after navigation or a reload. */
+export async function getApprovalForIntent(db: D1Database, actorId: string, input: unknown): Promise<ApprovalRecord | null> {
+	const actor = requireActorId(actorId);
+	const intent = parseOr400(ApprovalIntentSchema, input);
+	await projectScopeForUser(db, actor, intent.projectId);
+	const row = await latestByIntentHash(db, await approvalIntentHash(intent));
+	return row ? approvalRecordFromRow(row) : null;
+}
+
 /**
  * Agent-facing read (agents-bridge). Pending/approval STATE is readable by the
  * run's tooling; this grants no authority — the gate below never trusts a read,

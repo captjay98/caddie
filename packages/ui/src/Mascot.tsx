@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { useId, type ReactElement } from 'react';
 
 /**
  * Mascot — the Caddie character (Caddie v2, HANDOFF §7, flag block).
@@ -47,6 +47,11 @@ const STATE_ATTR: Record<MascotMood, string> = {
 export function Mascot(props: { mood: MascotMood; size?: number; live?: boolean; className?: string }): ReactElement {
 	const size = props.size ?? 32;
 	const state = STATE_ATTR[props.mood];
+	// Per-instance gradient id: every mascot used to define the SAME
+	// `caddie-mascot-fill` id, and with several mascots on one page Chromium's
+	// paint-server lookup could bind to an instance it refuses to render from,
+	// leaving every body unfilled. Unique ids make each svg self-contained.
+	const gradientId = `caddie-grad${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
 	return (
 		<svg
 			className={`mascot${props.className ? ` ${props.className}` : ''}`}
@@ -61,7 +66,7 @@ export function Mascot(props: { mood: MascotMood; size?: number; live?: boolean;
 			focusable="false"
 		>
 			<defs>
-				<linearGradient id="caddie-mascot-fill" x1="0" y1="0" x2="0" y2="1">
+				<linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
 					<stop offset="0" style={{ stopColor: 'var(--m-blue, #4d9fff)' }} />
 					<stop offset="1" style={{ stopColor: 'var(--m-deep, #2f7ddd)' }} />
 				</linearGradient>
@@ -86,7 +91,7 @@ export function Mascot(props: { mood: MascotMood; size?: number; live?: boolean;
 						strokeLinejoin="round"
 					/>
 				</g>
-				<rect className="m-body" x="9" y="16.5" width="46" height="41.5" rx="18" fill="url(#caddie-mascot-fill)" />
+				<rect className="m-body" x="9" y="16.5" width="46" height="41.5" rx="18" fill={`url(#${gradientId})`} />
 				<path className="m-gloss" d="M14.4 31.1A13 13 0 0 1 21.5 22.7" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" opacity=".32" />
 				<g className="m-look">
 					<g className="m-open" fill="var(--m-ink, #090b10)">

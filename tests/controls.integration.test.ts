@@ -346,6 +346,23 @@ describe('P03 slice 1: revision-bound approvals over real workerd + D1', () => {
 		expect(await d1Count(WORKER_BASE, 'approvals', `"projectId" = '${projA}' and "revisionHash" = '${planV1Hash}'`)).toBe(1);
 	});
 
+    test('plan UI can reread the exact saved decision, without leaking another workspace or reusing a changed revision', async () => {
+        const query = new URLSearchParams({ projectId: projA, action: 'deploy-production', resourceId: RESOURCE_ID, revisionHash: planV1Hash, policyVersion: POLICY_VERSION });
+        const path = `/api/approvals?${query}`;
+        const own = await worker(jarA, path);
+        expect(own.status).toBe(200);
+        const saved = (await own.json()) as { approval: { status: string; decidedBy: string } };
+        expect(saved.approval.status).toBe('approved');
+        expect(saved.approval.decidedBy).toBe(aliceId);
+        const denied = await worker(jarB, path);
+        expect(denied.status).toBe(403);
+        query.set('revisionHash', 'sha256-a-different-revision');
+        const changed = await worker(jarA, `/api/approvals?${query}`);
+        expect(changed.status).toBe(200);
+        expect(await changed.json()).toEqual({ approval: null });
+        expect((await worker(jarA, '/api/approvals?projectId=' + projA)).status).toBe(400);
+    });
+
 	test('a non-member cannot decide a pending approval for the project (403, no row changes)', async () => {
 		const pendingHash = planV1Hash; // v1 already approved; request a fresh intent for rejection testing below
 		const freshHash = await revisePlan(jarA, projA, 'controls plan v1-unapproved-branch');

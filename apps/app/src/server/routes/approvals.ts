@@ -6,6 +6,7 @@ import { ScopeError, sessionUserId } from '../scope.ts';
 import {
 	getApprovalById,
 	getApprovalForActor,
+	getApprovalForIntent,
 	recordDecision,
 	requestApproval,
 	revokeApproval,
@@ -77,6 +78,16 @@ export function createApprovalsRouter(): Hono<{ Bindings: Env }> {
 	router.post('/approvals', async (c) => {
 		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
 		const approval = await recordDecision(c.env.DB, actorId, await readJson(c.req.raw));
+		return c.json({ approval });
+	});
+
+	router.get('/approvals', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const approval = await getApprovalForIntent(c.env.DB, actorId, {
+			projectId: c.req.query('projectId'), action: c.req.query('action'),
+			resourceId: c.req.query('resourceId'), revisionHash: c.req.query('revisionHash'),
+			policyVersion: c.req.query('policyVersion'),
+		});
 		return c.json({ approval });
 	});
 

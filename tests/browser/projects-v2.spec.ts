@@ -9,8 +9,7 @@ import { fileURLToPath } from 'node:url';
  * against the COMPOSED build (`bun run build` first).
  *
  * What U05 guarantees for Projects (HANDOFF §4 Projects):
- *   - A card per project: name, what it's for, "Step N of 4 · <step>" in words
- *     plus four small bars, one line of what Caddie is doing. Archived folded.
+ *   - A card per project: name, what it's for, an evidence-backed status, readable purpose, and an actionable continuation. Archived folded.
  *   - Step text derives ONLY from real brief cards (no invented progress).
  *   - Buttons: "New project" (primary) and "Bring your code" (secondary).
  *   - The Bring your code window (import-repo) reads the real GitHub
@@ -132,6 +131,7 @@ function json(route: { fulfill(options: Record<string, unknown>): unknown }, sta
 
 async function stubAccount(context: BrowserContext, opts: { cards?: unknown[] } = {}) {
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
+	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) =>
 		json(route, 200, { session: { userId: 'actor-test' }, user: { id: 'actor-test', name: 'Ada', email: 'ada@caddie.test' } }),
 	);
@@ -154,7 +154,7 @@ async function stubAccount(context: BrowserContext, opts: { cards?: unknown[] } 
 }
 
 test.describe('Projects v2 (U05)', () => {
-	test('cards show name, purpose, step text in words, four bars and what Caddie is doing', async ({ browser }) => {
+	test('cards show purpose, an evidence-backed status, and clear next actions', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubAccount(context, {
 			cards: [
@@ -165,18 +165,20 @@ test.describe('Projects v2 (U05)', () => {
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/projects`);
 		await expect(page.getByTestId('project-list')).toBeVisible();
+        await expect(page.getByTestId('welcome-panel')).toBeVisible();
+        await expect(page.getByText('Say hello — your first message starts a run')).toHaveCount(0);
 
 		const row = page.getByTestId('project-row-proj-a');
 		await expect(row).toContainText('Pit wall');
 		await expect(row).toContainText('Track pit wall strategy');
-		// "Step N of 4" in words: the pending plan approval puts the project at
-		// step 1, and the label is the step's name (prototype grammar).
-		await expect(row.getByTestId('project-step-text-proj-a')).toContainText('Step 1 of 4 · Plan');
-		// Four small bars, the plan one carrying the warn tone.
-		const bars = row.getByTestId(`project-steps-proj-a`).locator('i');
-		await expect(bars).toHaveCount(4);
+		// A pending decision is explicit rather than an inferred percentage.
+		await expect(row.getByTestId('project-step-text-proj-a')).toContainText('Decision needed');
+        await expect(row.getByTestId('project-next-proj-a')).toBeVisible();
+        await expect(row.getByTestId('project-continue-proj-a')).toBeVisible();
+
 		// One line of what Caddie is doing: the newest card's summary.
 		await expect(row).toContainText('The drafted plan waits for your decision.');
+        await page.screenshot({ path: '/tmp/caddie-projects-desktop.png' });
 
 		// Archived projects fold.
 		await expect(page.getByTestId('project-row-proj-b')).toHaveCount(0);
@@ -191,11 +193,41 @@ test.describe('Projects v2 (U05)', () => {
 		await page.goto(`${BASE}/app/projects`);
 		const row = page.getByTestId('project-row-proj-a');
 		await expect(row.getByTestId('project-step-text-proj-a')).toContainText('No updates yet');
-		// No bar may carry a status tone.
-		const tones = await row.getByTestId('project-steps-proj-a').locator('i[data-tone]').count();
+		// No progress bars invent a completion state.
+		const tones = await row.locator('.steps-mini i[data-tone]').count();
 		expect(tones).toBe(0);
 		await context.close();
 	});
+
+    test('New project opens idea capture in Chat instead of returning to onboarding', async ({ browser }) => {
+        const context = await browser.newContext();
+        await stubAccount(context);
+        const page = await context.newPage();
+        await page.goto(`${BASE}/app/projects`);
+        await page.getByTestId('new-idea-project').click();
+        await expect(page.getByTestId('project-start-panel')).toContainText('What would you like to build?');
+        await expect(page.getByTestId('composer-input')).toBeVisible();
+        await expect(page).not.toHaveURL(/onboarding/);
+        await context.close();
+    });
+
+    test('Continue keeps the project conversation visible on mobile and avoids horizontal overflow', async ({ browser }) => {
+        const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+        await stubAccount(context);
+        const page = await context.newPage();
+        await page.goto(`${BASE}/app/projects`);
+        await expect(page.getByTestId('project-continue-proj-a')).toBeVisible();
+        const widths = await page.evaluate(() => {
+            const view = globalThis as unknown as { document: { documentElement: { scrollWidth: number } }; innerWidth: number };
+            return { content: view.document.documentElement.scrollWidth, viewport: view.innerWidth };
+        });
+        expect(widths.content).toBeLessThanOrEqual(widths.viewport);
+        await page.screenshot({ path: '/tmp/caddie-projects-mobile.png' });
+        await page.getByTestId('project-continue-proj-a').click();
+        await expect(page).toHaveURL(/project=proj-a.*pane=channel/);
+        await expect(page.getByTestId('composer-input')).toBeVisible();
+        await context.close();
+    });
 
 	test('New project is the primary and Bring your code opens the import window on the real installations API', async ({ browser }) => {
 		const context = await browser.newContext();

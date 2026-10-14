@@ -236,12 +236,12 @@ test.describe('P07 artifacts viewer + design review (composed build, stubbed /ap
 		await context.close();
 	});
 
-	test('design review posts the real revision-bound intent to /api/approvals (approve and reject)', async ({ browser }) => {
+	test('design review posts the exact revision-bound intent and prevents opposite re-decisions', async ({ browser }) => {
 		const context = await browser.newContext();
 		const { page, approvals } = await openHarness(context);
 
-		await expect(page.getByTestId('design-review-row')).toHaveCount(2);
-		await expect(page.getByTestId('design-review-row').first()).toHaveAttribute('data-latest', 'true');
+		await expect(page.getByTestId('design-review-row')).toHaveCount(1);
+		await expect(page.getByTestId('design-review-row').first()).toHaveAttribute('data-latest', 'false');
 
 		// The plan body renders readably for the revision under review (F09),
 		// titled in the v2 plain words.
@@ -254,12 +254,8 @@ test.describe('P07 artifacts viewer + design review (composed build, stubbed /ap
 		await page.getByTestId('design-review-approve').click();
 		await expect(page.getByTestId('design-review-outcome')).toHaveAttribute('data-decision', 'approved');
 
-		await page.getByTestId('plan-changes-open').click();
-		await expect(page.getByTestId('request-changes-window')).toBeVisible();
-		await page.getByTestId('design-review-reject').click();
-		await expect(page.getByTestId('design-review-outcome')).toHaveAttribute('data-decision', 'rejected');
-
-		expect(approvals).toHaveLength(2);
+		await expect(page.getByTestId('plan-changes-open')).toHaveCount(0);
+		expect(approvals).toHaveLength(1);
 		for (const call of approvals) {
 			expect(new URL(call.url).pathname).toBe('/api/approvals');
 			const intent = (call.body as { intent?: Record<string, unknown> }).intent;
@@ -274,7 +270,6 @@ test.describe('P07 artifacts viewer + design review (composed build, stubbed /ap
 			expect(call.body).not.toHaveProperty('decidedBy');
 		}
 		expect((approvals[0] as unknown as { body: { decision: string } }).body.decision).toBe('approved');
-		expect((approvals[1] as unknown as { body: { decision: string } }).body.decision).toBe('rejected');
 		await context.close();
 	});
 
