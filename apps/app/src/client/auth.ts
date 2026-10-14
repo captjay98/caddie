@@ -92,23 +92,67 @@ interface IntegrationsHealth {
 	auth: { providers: { google: boolean; github: boolean } };
 }
 
+/**
+ * Map an OAuth-callback `?error=<code>` (set by the server when the callback
+ * itself fails, e.g. the invite gate) to a friendly, styled notice. These are
+ * failures that happen AFTER the provider round-trip, so they arrive as a URL
+ * param on return — not as a `signIn.social` result. Unknown codes get an
+ * honest generic message rather than the raw code.
+ */
+function callbackErrorView(code: string, description: string | null): SignInErrorView {
+	if (code === 'INVITE_REQUIRED') {
+		return {
+			title: 'You need an invite to sign in',
+			detail:
+				'Caddie is invite-only right now, and this email isn’t on the allowlist yet. Ask for an invite, then sign in with the same email.',
+			retryable: false,
+		};
+	}
+	return {
+		title: 'Sign-in couldn’t be completed',
+		detail: description?.trim()
+			? description.trim()
+			: 'The sign-in attempt was rejected on return from the provider — you can try again.',
+		retryable: true,
+	};
+}
+
 export interface SignInPanelProps {
 	callbackURL?: string;
 }
 
 /**
- * Sign-in panel: one button per provider, provider availability stated BEFORE
- * the first click (the server's configured/not-configured presence, read from
- * /api/integrations/health — the same source Settings renders), and a failure
- * that separates reason, consequence and action: a rejected attempt keeps
- * Try again; a 503 "not configured on this deployment" is terminal and offers
- * the other provider instead (UI review board screen 02).
+ * Sign-in panel: one button per provider. Availability is read from this
+ * deployment (/api/integrations/health, the same source Settings renders)
+ * before the first click, but it is expressed through the control itself
+ * rather than a status label: a provider that cannot work is blurred and
+ * inert, and when neither provider is configured the buttons are replaced by
+ * a clear message. A failure separates reason, consequence and action — a
+ * rejected attempt keeps Try again; a 503 "not configured on this deployment"
+ * is terminal and offers the other provider instead.
  */
 export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 	const callbackURL = props.callbackURL ?? DEFAULT_CALLBACK_URL;
 	const [pending, setPending] = useState<SocialProvider | null>(null);
 	const [error, setError] = useState<{ provider: SocialProvider; view: SignInErrorView } | null>(null);
+	const [callbackError, setCallbackError] = useState<SignInErrorView | null>(null);
 	const [availability, setAvailability] = useState<{ google: boolean; github: boolean } | null>(null);
+
+	// Read an OAuth-callback error returned as ?error=<code> (e.g. the invite
+	// gate). Render it as a styled notice, then strip the params from the URL so
+	// a refresh does not keep showing a stale error.
+	useEffect(() => {
+		if (typeof window === 'undefined') return;
+		const params = new URLSearchParams(window.location.search);
+		const code = params.get('error');
+		if (!code) return;
+		setCallbackError(callbackErrorView(code, params.get('error_description')));
+		params.delete('error');
+		params.delete('error_description');
+		const qs = params.toString();
+		const cleaned = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+		window.history.replaceState(null, '', cleaned);
+	}, []);
 
 	// Presence check — name and pair only, never the values. Failure to read it
 	// keeps every provider enabled: unknown availability must not block a sign-in.
@@ -132,9 +176,18 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 	const signIn = useCallback(
 		async (provider: SocialProvider) => {
 			setError(null);
+			setCallbackError(null);
 			setPending(provider);
 			try {
-				const result = await authClient.signIn.social({ provider, callbackURL });
+				const result = await authClient.signIn.social({
+					provider,
+					callbackURL,
+					// On a callback-side failure (e.g. the invite gate rejects an
+					// uninvited email), better-auth redirects HERE with ?error=<code>
+					// instead of showing its own unstyled error page. The panel reads
+					// that param on mount and renders a friendly, in-app notice.
+					errorCallbackURL: callbackURL,
+				});
 				if (result.error) {
 					setError({
 						provider,
@@ -165,46 +218,77 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 			: null;
 	const otherAvailable = otherProvider !== null && availability ? availability[otherProvider] : false;
 
+	// Availability is read from this deployment (/api/integrations/health) before
+	// the first click. A provider that cannot work is blurred and inert rather
+	// than offered as a button that is guaranteed to fail. When NEITHER provider
+	// is configured there is nothing to click, so the buttons are replaced by a
+	// clear message. Unknown availability (null) keeps everything enabled.
+	const neitherConfigured = availability !== null && !availability.google && !availability.github;
+
 	return createElement(
 		'section',
 		{ 'data-testid': 'sign-in-panel', 'aria-label': 'Sign in' },
-		PROVIDERS.map(({ id, label }) => {
-			const configured = availability === null ? true : availability[id];
-			return createElement(
-				'div',
-				{ key: id, className: 'sign-in-provider' },
-				createElement(
-					'button',
-					{
-						type: 'button',
-						className: 'btn-ghost sign-in-btn',
-						'data-testid': `sign-in-${id}`,
-						'data-provider': id,
-						disabled: pending !== null || !configured,
-						onClick: () => void signIn(id),
-					},
-					providerIcon(id),
-					createElement('span', { key: 'label' }, pending === id ? 'Signing in…' : label),
-				),
-				createElement(
-					'span',
-					{
-						key: 'state',
-						className: 'status-pill',
-						'data-status': configured ? 'handled' : 'planned',
-						'data-testid': `sign-in-${id}-state`,
-						title:
-							'availability is read from this deployment before you click — so a sign-in button is never offered when it cannot work',
-					},
-					availability === null ? 'checking…' : configured ? 'ready' : 'not set up yet',
-				),
-			);
-		}),
-		availability !== null
+		neitherConfigured
 			? createElement(
 					'p',
-					{ key: 'presence', className: 'mono-id sign-in-presence', 'data-testid': 'sign-in-presence' },
-					'Both options are checked before you click — a sign-in button is never offered when it cannot work.',
+					{
+						key: 'none',
+						role: 'status',
+						className: 'sign-in-none',
+						'data-testid': 'sign-in-unavailable',
+					},
+					createElement('b', { key: 't' }, 'Sign-in isn’t set up on this deployment yet.'),
+					createElement(
+						'span',
+						{ key: 'd' },
+						' Neither Google nor GitHub has been configured here, so there’s nothing to sign in with for now.',
+					),
+				)
+			: PROVIDERS.map(({ id, label }) => {
+					const configured = availability === null ? true : availability[id];
+					return createElement(
+						'div',
+						{
+							key: id,
+							className: configured ? 'sign-in-provider' : 'sign-in-provider is-unavailable',
+							'data-testid': `sign-in-${id}-row`,
+							'data-available': configured ? 'yes' : 'no',
+						},
+						createElement(
+							'button',
+							{
+								type: 'button',
+								className: 'btn-ghost sign-in-btn',
+								'data-testid': `sign-in-${id}`,
+								'data-provider': id,
+								disabled: pending !== null || !configured,
+								'aria-hidden': configured ? undefined : true,
+								tabIndex: configured ? undefined : -1,
+								onClick: () => void signIn(id),
+							},
+							providerIcon(id),
+							createElement('span', { key: 'label' }, pending === id ? 'Signing in…' : label),
+						),
+						configured
+							? null
+							: createElement(
+									'span',
+									{ key: 'why', className: 'sign-in-unavailable-note' },
+									'Not set up on this deployment yet',
+								),
+					);
+				}),
+		callbackError
+			? createElement(
+					'div',
+					{
+						key: 'callback-error',
+						role: 'alert',
+						className: 'sign-in-error',
+						'data-testid': 'sign-in-callback-error',
+					},
+					createElement('b', null, `${callbackError.title}.`),
+					createElement('span', null, ` ${callbackError.detail}`),
 				)
 			: null,
 		error

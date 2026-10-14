@@ -196,3 +196,70 @@ export function evaluateEligibility(
 	}
 	return { verdict, rules, evaluationVersion: ELIGIBILITY_EVALUATION_VERSION };
 }
+
+/** What a card shows for eligibility: a short note, the deciding quote, and whether the user must confirm something. */
+export interface EligibilityDisplay {
+	/** Short user-facing line, e.g. "You can enter", "Only open to US", "Open to NG · confirm you're 18+". '' when no rules were read. */
+	readonly note: string;
+	/** The verbatim rule text that decided it (or the first relevant one); null when none. */
+	readonly quote: string | null;
+	/** True when the only open questions are attributes the profile cannot carry (age, student status). */
+	readonly needsConfirm: boolean;
+}
+
+/**
+ * Describe an evaluation for a card WITHOUT changing it: the verdict stays the
+ * strict engine verdict. The one nuance it surfaces is the common Devpost case —
+ * the country rules pass but an age/student rule cannot be checked from the
+ * profile — as "Open to NG · confirm you're 18+" with `needsConfirm`, rather than
+ * a bare "unknown" (or, worse, an assumed "eligible").
+ *
+ * `values` maps claimId → the claim's value (the evaluation carries the quote
+ * and reason but not the raw value, e.g. the minimum age).
+ */
+export function describeEligibility(
+	evaluation: EligibilityEvaluation,
+	values: ReadonlyMap<string, string>,
+	country: string | null,
+): EligibilityDisplay {
+	const rules = evaluation.rules;
+	if (rules.length === 0) return { note: '', quote: null, needsConfirm: false };
+	const codes = (rule: EligibilityRuleOutcome) => (values.get(rule.claimId) ?? '').toUpperCase().split(/[,;\s]+/).filter(Boolean);
+	const blocking = rules.find((r) => r.verdict === 'ineligible');
+	if (evaluation.verdict === 'ineligible' && blocking) {
+		const listed = codes(blocking);
+		const note =
+			blocking.claimType === 'eligibility.open_countries'
+				? `Only open to ${listed.slice(0, 4).join(', ')}${listed.length > 4 ? '…' : ''}`
+				: blocking.claimType === 'eligibility.restricted_countries' && country
+					? `Not open to residents of ${country.toUpperCase()}`
+					: 'Not eligible';
+		return { note, quote: blocking.quote, needsConfirm: false };
+	}
+	const countryRule = rules.find(
+		(r) => (r.claimType === 'eligibility.open_countries' || r.claimType === 'eligibility.restricted_countries') && r.verdict === 'eligible',
+	);
+	if (evaluation.verdict === 'eligible') {
+		return { note: 'You can enter', quote: (countryRule ?? rules[0]!).quote, needsConfirm: false };
+	}
+	// verdict 'unknown': is it ONLY profile-dependent attributes left?
+	const open = rules.filter((r) => r.verdict === 'unknown');
+	const onlyAttributes = open.length > 0 && open.every((r) => r.basis === 'missing_profile_attribute' &&
+		(r.claimType === 'eligibility.min_age' || r.claimType === 'eligibility.student_only'));
+	if (onlyAttributes) {
+		const ask: string[] = [];
+		const age = open.find((r) => r.claimType === 'eligibility.min_age');
+		if (age) ask.push(`confirm you're ${values.get(age.claimId) ?? '18'}+`);
+		if (open.some((r) => r.claimType === 'eligibility.student_only')) ask.push('confirm you are a student');
+		const prefix = countryRule && country ? `Open to ${country.toUpperCase()} · ` : '';
+		const text = `${prefix}${ask.join(' and ')}`;
+		return { note: text.charAt(0).toUpperCase() + text.slice(1), quote: (countryRule ?? age ?? open[0]!).quote, needsConfirm: true };
+	}
+	// Something genuinely undecidable (no profile country, an unreadable rule).
+	const firstOpen = open[0];
+	const note =
+		firstOpen?.basis === 'missing_profile_attribute' && (firstOpen.claimType.endsWith('_countries'))
+			? 'Add your country to check'
+			: 'Check the rules';
+	return { note, quote: firstOpen?.quote ?? null, needsConfirm: false };
+}

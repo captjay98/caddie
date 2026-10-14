@@ -547,8 +547,13 @@ describe('P01 slice 2: invite allowlist, provider-subject identity, sessions', (
 		});
 		const callbackStatus = result.callback?.status ?? 0;
 		const location = result.callback?.headers.get('location') ?? '';
-		// The gate must visibly fail the sign-in (error response or error redirect).
-		expect(callbackStatus >= 400 || location.includes('error')).toBe(true);
+		// The gate must visibly fail the sign-in — and specifically as a styled
+		// REDIRECT carrying the machine-readable code, NOT a raw-JSON error body
+		// (the regression the user hit: `{"message":"INVITE_REQUIRED…"}` on screen).
+		// better-auth turns the coded APIError into `errorURL?error=INVITE_REQUIRED`.
+		expect(callbackStatus).toBeGreaterThanOrEqual(300);
+		expect(callbackStatus).toBeLessThan(400);
+		expect(location).toContain('error=INVITE_REQUIRED');
 		// Database truth: no user was created for the uninvited email.
 		expect(await d1Count(WORKER_BASE, 'user', "email = 'uninvited@example.com'")).toBe(0);
 		expect(await d1Count(WORKER_BASE, 'account', "accountId = 'uninvited-sub-1'")).toBe(0);

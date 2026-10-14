@@ -52,6 +52,16 @@ export interface AuthEnv {
 	/** Comma-separated invited emails. Unset/empty = no new sign-ups (fail closed). */
 	INVITE_ALLOWLIST?: string;
 	/**
+	 * Tavily search API key — this repo's REQUIRED search provider. Discovery
+	 * uses it to search the platforms Devpost's open-contests API does not
+	 * cover (Devfolio, HackerEarth, DoraHacks, ETHGlobal, Kaggle), as the
+	 * Devpost backup, and to read the top events' official rules pages; it also
+	 * powers the chat research tool. Optional at the type level only: when
+	 * unset, discovery and research surface a VISIBLE configuration gap rather
+	 * than a silent empty result. All Tavily calls go through server/tavily.ts.
+	 */
+	TAVILY_API_KEY?: string;
+	/**
 	 * Test-only: base URL of the stub OAuth provider used by the local
 	 * integration fixture. Honored ONLY when AUTH_TEST_MODE=1 (the fixture
 	 * sets it); any other environment carrying it is a misconfiguration and
@@ -219,7 +229,14 @@ export function createAuth(env: AuthEnv, overrides: CreateAuthOverrides = {}) {
 					async before(user) {
 						const email = (user as { email?: string }).email?.toLowerCase();
 						if (!email || !allowlist.has(email)) {
+							// IMPORTANT: set `code` as well as `message`. better-auth's OAuth
+							// callback only turns a thrown APIError into a styled redirect
+							// (errorURL?error=<code>) when `body.code` is present; without a
+							// code it rethrows and the browser lands on raw JSON
+							// (`{"message":"INVITE_REQUIRED…"}`). The code becomes the
+							// `?error=` the sign-in panel reads to render the friendly notice.
 							throw new APIError('FORBIDDEN', {
+								code: 'INVITE_REQUIRED',
 								message: 'INVITE_REQUIRED: this email is not on the invite allowlist',
 							});
 						}

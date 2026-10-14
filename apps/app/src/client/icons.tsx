@@ -25,6 +25,9 @@ export type IconName =
 	| 'search'
 	| 'shield'
 	| 'link'
+	| 'trophy'
+	| 'users'
+	| 'globe'
 	| 'box'
 	| 'diff'
 	| 'doc'
@@ -40,6 +43,11 @@ export type IconName =
 	| 'send'
 	| 'chat'
 	| 'home'
+	| 'image'
+	| 'file'
+	| 'paperclip'
+	| 'mic'
+	| 'chevronDown'
 	| 'expand'
 	| 'collapse';
 
@@ -115,6 +123,25 @@ const PATHS: Record<IconName, ReactElement> = {
 			strokeLinejoin="round"
 		/>
 	),
+	trophy: (
+		<>
+			<path d="M4.5 3.5h7v3a3.5 3.5 0 0 1-7 0v-3z" fill="none" stroke="currentColor" strokeLinejoin="round" />
+			<path d="M4.5 4.5h-2v1a2 2 0 0 0 2 2M11.5 4.5h2v1a2 2 0 0 1-2 2M8 10v2M5.5 13.5h5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
+	),
+	users: (
+		<>
+			<circle cx="6" cy="6" r="2.3" fill="none" stroke="currentColor" />
+			<path d="M2.5 13c0-2 1.6-3.3 3.5-3.3S9.5 11 9.5 13" fill="none" stroke="currentColor" strokeLinecap="round" />
+			<path d="M10.5 4.2a2.3 2.3 0 0 1 0 4.4M11 9.9c1.6.3 2.8 1.5 2.8 3.1" fill="none" stroke="currentColor" strokeLinecap="round" />
+		</>
+	),
+	globe: (
+		<>
+			<circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" />
+			<path d="M2.5 8h11M8 2.5c1.8 1.6 2.8 3.6 2.8 5.5S9.8 11.9 8 13.5C6.2 11.9 5.2 9.9 5.2 8S6.2 4.1 8 2.5z" fill="none" stroke="currentColor" strokeLinejoin="round" />
+		</>
+	),
 	box: (
 		<>
 			<path d="M2.5 5L8 2.5 13.5 5v6L8 13.5 2.5 11V5z" fill="none" stroke="currentColor" strokeLinejoin="round" />
@@ -174,6 +201,21 @@ const PATHS: Record<IconName, ReactElement> = {
 		</>
 	),
 	plug: <path d="M9 2.5v3M7 2.5v3M5.5 5.5h5V8l1 3H5.5l1-3V5.5z" fill="none" stroke="currentColor" strokeLinejoin="round" />,
+	image: (
+		<>
+			<rect x="2.5" y="3.5" width="11" height="9" rx="1.5" fill="none" stroke="currentColor" />
+			<circle cx="6" cy="6.5" r="1" fill="currentColor" stroke="none" />
+			<path d="M3 11l3-3 2.5 2.5L10.5 8l2.5 3" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
+	),
+	file: <path d="M4 2.5h5l3 3V13.5H4V2.5zM9 2.5v3h3" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
+	paperclip: <path d="M11.5 7.5l-4 4a2.5 2.5 0 0 1-3.5-3.5l5-5a1.6 1.6 0 0 1 2.3 2.3l-5 5a0.8 0.8 0 0 1-1.1-1.1l4.3-4.3" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
+	mic: (
+		<>
+			<rect x="6" y="2" width="4" height="7" rx="2" fill="none" stroke="currentColor" />
+			<path d="M4 7.5a4 4 0 0 0 8 0M8 11.5v2M6 13.5h4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
+	),
 	send: <path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
 	chat: (
 		<path
@@ -203,6 +245,7 @@ const PATHS: Record<IconName, ReactElement> = {
 			<path d="M14 6h-3.5V2.5M2 10h3.5v3.5M10.5 6.5 14 2.5M5.5 9.5 2 13.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
 		</>
 	),
+	chevronDown: <path d="M4 6.5 8 10.5l4-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
 };
 
 export function Icon({ name, title, className }: IconProps): ReactElement {
