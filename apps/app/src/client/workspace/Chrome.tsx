@@ -8,12 +8,16 @@
  * (the default tab) and Brief beside the persistent conversation on desktop.
  * There are no global tabs for Chat/Build/Ship/Evidence.
  *
- * Layout:
- *   - Desktop (>=768px): two panels, independent scroll. Left = all navigable
+ * Layout (three bands, authoritative in workspace.css — mobile ≤760 / tablet
+ * 761–1080 / desktop ≥1081; the two-panel split fires at `@media (min-width:
+ * 1081px)` so the content column never drops under ~520px):
+ *   - Desktop (>=1081px): two panels, independent scroll. Left = all navigable
  *     content with a floating rounded navigation capsule (Brief · Discover ·
  *     Projects) plus compact Search and Account controls. Right = the
  *     persistent conversation with a compact, explicit context label.
- *   - Mobile (<768px): the floating rounded bottom-nav (preserved aesthetics),
+ *   - Tablet (761–1080px): single content column; Caddie opens as a right
+ *     overlay (min(420px,100vw) + scrim) from the top-bar button.
+ *   - Mobile (<=760px): the floating rounded bottom-nav (preserved aesthetics),
  *     four destinations Chat · Brief · Discover · Projects, composer directly
  *     above it. Chat is the initial default (the conversation full-height);
  *     Brief is the second tab.
@@ -45,7 +49,7 @@ import type { ReactElement, ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
-import { authClient } from '../auth.ts';
+import { authClient, SignInPanel } from '../auth.ts';
 import { Icon } from '../icons.tsx';
 import { Composer } from '../conversation/Composer.tsx';
 import { Channel } from '../conversation/Channel.tsx';
@@ -54,9 +58,11 @@ import { useCoordinatorTransport, type CoordinatorTransport } from '../coordinat
 import { briefActionRoute } from '../brief/navigate.ts';
 import { ConvResizeHandle, useConvWidth } from './ConvResize.tsx';
 import { AskBar } from './AskBar.tsx';
+import { ThemePicker } from './ThemePicker.tsx';
 import { QuickSearch, useQuickSearchHotkey } from '../search/QuickSearch.tsx';
 import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
 import { WORDS } from '../copy.ts';
+import { applyTheme, browserStorage, currentTheme, saveThemeChoice, type Palette, type ThemeChoice, type ThemeMode } from '../theme.ts';
 import {
 	useAccountBrief,
 	useAuthStatus,
@@ -68,7 +74,8 @@ import {
 	useSessionEmail,
 } from '../queries.ts';
 
-export const THEME_KEY = 'caddie-theme';
+/** Re-exported for existing importers; the theme module owns both keys. */
+export { THEME_KEY, PALETTE_KEY } from '../theme.ts';
 
 /**
  * The v2 shell breakpoints (HANDOFF §3.1). The two-panel threshold moved from
@@ -93,10 +100,6 @@ function saveConvOpen(open: boolean): void {
 	} catch {
 		// private mode: open/closed stays session-only
 	}
-}
-
-function currentTheme(): 'light' | 'dark' {
-	return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
 }
 
 /**
@@ -138,8 +141,14 @@ interface WorkspaceChromeContextValue {
 	selectProject: (projectId: string) => void;
 	clearProjectParam: () => void;
 	refreshAll: () => void;
+	/** Flip the mode (dark <-> light), keeping the palette. */
 	toggleTheme: () => void;
-	theme: 'light' | 'dark';
+	/** The current MODE. Kept as `theme` for the existing toggle call sites. */
+	theme: ThemeMode;
+	/** The current palette (Caddie, Clearcut, Onesecos, Farmhand). */
+	palette: Palette;
+	/** Pick a palette and/or mode explicitly; only the part that changed is saved. */
+	setThemeChoice: (next: Partial<ThemeChoice>) => void;
 	signOut: () => Promise<void>;
 	/** Which scope the persistent conversation is bound to. */
 	conversation: {
@@ -177,9 +186,9 @@ interface WorkspaceChromeContextValue {
 		setComposerText: (text: string) => void;
 	};
 	transport: CoordinatorTransport | null;
-	sendText: (text: string) => void;
-	openProject: (projectId: string) => void;
-	/** Start a new project: route to the idea-first onboarding flow. */
+	sendText: (text: string, attachments?: readonly import('@caddie/contracts').InputAttachment[]) => void;
+	openProject: (projectId: string, showChat?: boolean) => void;
+	/** Start a new project in the account conversation; onboarding is account setup. */
 	newProject: () => void;
 	/** Move between a project's local tabs, keeping the ?project= binding so the
 	 *  conversation never retargets to a different project. */
@@ -219,9 +228,12 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	const projects = useProjects(actorMemo);
 	const displayName = useSessionDisplayName();
 	const sessionEmail = useSessionEmail();
-	const [theme, setTheme] = useState<'light' | 'dark'>(currentTheme);
+	const [themeChoice, setThemeChoiceState] = useState<ThemeChoice>(() => currentTheme());
+	const theme = themeChoice.mode;
 	const [accountOpen, setAccountOpen] = useState(false);
 	const [quickSearchOpen, setQuickSearchOpen] = useState(false);
+	const [startingProject, setStartingProject] = useState(false);
+	useEffect(() => setStartingProject(false), [actorId]);
 	const openQuickSearch = () => setQuickSearchOpen(true);
 	useQuickSearchHotkey(openQuickSearch);
 	const { mode: viewportMode, isDesktop } = useViewportMode();
@@ -342,10 +354,22 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		transport?.source.status === 'submitted' ||
 		transport?.source.status === 'streaming';
 
-	function sendText(text: string) {
-		const draft = channel.addDraft(text);
+	function sendText(text: string, attachments: readonly import('@caddie/contracts').InputAttachment[] = []) {
+		setStartingProject(false);
+		// A message is text, attachments, or both. The draft text keeps a visible
+		// label when only attachments were sent, so the optimistic row is honest.
+		const draftText = text || (attachments.length ? `(${attachments.length} attachment${attachments.length === 1 ? '' : 's'})` : '');
+		const draft = channel.addDraft(draftText);
 		if (draft && transport) {
-			transport.send(draft.text, draft.idempotencyKey).then(
+			// The transport carries attachments alongside the text when its send
+			// accepts them (Flue message parts); the idempotency key still guards
+			// against a double-submit. Attachments ride as the third argument.
+			const send = transport.send as (
+				text: string,
+				key: string,
+				opts?: { attachments?: readonly import('@caddie/contracts').InputAttachment[] },
+			) => Promise<unknown>;
+			send(text, draft.idempotencyKey, attachments.length ? { attachments } : undefined).then(
 				() => channel.resolveDraft(draft.id),
 				() => channel.retryDraft(draft.id),
 			);
@@ -472,13 +496,17 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		});
 	}
 
-	function openProject(projectId: string) {
-		void navigate({ to: '/project', search: { project: projectId } as Record<string, unknown> });
-	}
+	function openProject(projectId: string, showChat = false) {
+        if (showChat) { setConvOpen(true); setTabletOpen(true); }
+        void navigate({ to: '/project', search: { project: projectId, ...(showChat && !isDesktop ? { pane: 'channel' } : {}) } as Record<string, unknown> });
+    }
 
-	function newProject() {
-		void navigate({ to: '/onboarding' });
-	}
+    function newProject() {
+        setStartingProject(true);
+        setConvOpen(true);
+        setTabletOpen(true);
+        void navigate({ to: '/', search: isDesktop ? {} : { pane: 'channel' } });
+    }
 
 	function goProjectTab(path: string, tabSearch: Record<string, unknown>) {
 		void navigate({ to: path as never, search: tabSearch as never });
@@ -499,15 +527,17 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		void queryClient.invalidateQueries({ queryKey: ['discovery-candidates', actorId] });
 	}
 
+	/** Read the live <html> state (not React state) so rapid clicks never act on a stale choice. */
+	function setThemeChoice(patch: Partial<ThemeChoice>) {
+		const previous = currentTheme();
+		const next: ThemeChoice = { palette: patch.palette ?? previous.palette, mode: patch.mode ?? previous.mode };
+		applyTheme(next);
+		saveThemeChoice(browserStorage(), next, previous);
+		setThemeChoiceState(next);
+	}
+
 	function toggleTheme() {
-		const next = currentTheme() === 'dark' ? 'light' : 'dark';
-		document.documentElement.setAttribute('data-theme', next);
-		try {
-			localStorage.setItem(THEME_KEY, next);
-		} catch {
-			// private mode: theme stays session-only
-		}
-		setTheme(next);
+		setThemeChoice({ mode: currentTheme().mode === 'dark' ? 'light' : 'dark' });
 	}
 
 	async function signOut() {
@@ -537,6 +567,8 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		refreshAll,
 		toggleTheme,
 		theme,
+		palette: themeChoice.palette,
+		setThemeChoice,
 		signOut,
 		conversation: {
 			kind: conversationKind,
@@ -608,9 +640,9 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 									>
 										{theme === 'dark' ? <Icon name="sun" title="Switch to light theme" /> : <Icon name="moon" title="Switch to dark theme" />}
 									</button>
-									<Link to="/" className="capsule-tab" data-testid="back-to-landing" search={() => ({})}>
+									<a href={import.meta.env.DEV ? 'http://localhost:4321/' : '/'} className="capsule-tab" data-testid="back-to-landing">
 										<Icon name="arrowLeft" title="back to the landing page" /> Landing
-									</Link>
+									</a>
 								</header>
 							)}
 						{props.crumbs ? (
@@ -619,7 +651,30 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 							</div>
 						) : null}
 						<main id="main" className="shell-main" data-hidden={conversationKind !== 'none' && mobileConversation && !isDesktop}>
-							{props.children}
+							{authenticated ? (
+								props.children
+							) : (
+								<div className="signin-view" data-testid="sign-in-gate">
+									<div className="signin-col">
+										<div className="signin-brand">
+											<Mascot mood="ready" size={56} live />
+											<h1 className="signin-title">Sign in to Caddie</h1>
+											<p className="signin-lede">
+												Use the account you already have
+												<br />
+												it&rsquo;s free to start.
+											</p>
+										</div>
+										<div className="signin-card">
+											<SignInPanel callbackURL="/app/" />
+										</div>
+										<p className="signin-note">
+											Signing in doesn&rsquo;t give Caddie your code. It asks separately, only if you
+											bring code in.
+										</p>
+									</div>
+								</div>
+							)}
 						</main>
 					</section>
 
@@ -669,6 +724,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								<span className="conv-head-left">
 									<Mascot mood={caddieMood} size={30} live />
 									<TalkingAbout conversationKind={conversationKind} label={conversationLabel} />
+									<CaddieStatus mood={caddieMood} />
 								</span>
 								<span className="conv-head-chips">
 									{!isDesktop ? (
@@ -751,15 +807,28 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 									</button>
 								</div>
 							) : null}
-							{showWelcome ? (
+							{startingProject && conversationKind === 'general' ? (
+                                <section className="project-start-panel card-surface" data-testid="project-start-panel" aria-label="Start a project">
+                                    <p className="kicker" data-tone="action">NEW PROJECT</p>
+                                    <h3 className="state-title">What would you like to build?</h3>
+                                    <p className="state-detail">Describe your idea in the message box. Include who it’s for and what it should do. You don’t need to choose technologies yet.</p>
+                                    <button type="button" className="btn-ghost" onClick={() => setStartingProject(false)}>Cancel</button>
+                                </section>
+                            ) : showWelcome ? (
 								<WelcomePanel
 									onFind={() => {
 										markWelcomeSeen();
-										void navigate({ to: '/discover', search: {} });
+										// Chat-first: start a discovery CONVERSATION with Caddie
+										// (it reads your profile and proposes matches), rather than
+										// bouncing to the standalone Discover page.
+										setConvOpen(true);
+										setTabletOpen(true);
+										void navigate({ to: '/', search: isDesktop ? {} : { pane: 'channel' } });
+										sendText('Help me find my first hackathon — something that fits what I like building.');
 									}}
 									onIdea={() => {
 										markWelcomeSeen();
-										void navigate({ to: '/onboarding' });
+										newProject();
 									}}
 									onImport={() => {
 										markWelcomeSeen();
@@ -770,6 +839,9 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 							<Channel
 								source={transport?.source ?? STANDBY}
 								transportLive={transport?.hasRun === true}
+                                hideEmptyState={showWelcome || (startingProject && conversationKind === 'general')}
+                                emptyTitle={conversationKind === 'project' ? 'What would you like to do next?' : undefined}
+                                emptyDetail={conversationKind === 'project' ? 'Ask a question about this project or describe what you would like to change.' : undefined}
 								drafts={channel.drafts}
 								projectId={conversationProjectId}
 								composerHidden={viewportMode === 'mobile'}
@@ -964,6 +1036,7 @@ function MobileHeader(props: {
 		<header className="mobile-header" data-testid="mobile-header">
 			{identity === 'Caddie' ? (
 				<Link to="/" className="mobile-header-brand" data-testid="wordmark" search={keepSearch}>
+					<Mascot mood={chrome.caddieMood} size={22} live />
 					Caddie<b>·</b>
 				</Link>
 			) : (
@@ -987,7 +1060,7 @@ function AccountMenu(props: {
 	setAccountOpen: (open: boolean) => void;
 	displayName: string | null;
 }): ReactElement {
-	const { signOut, theme, toggleTheme } = useWorkspaceChrome();
+	const { signOut, theme, palette, setThemeChoice } = useWorkspaceChrome();
 	const email = useSessionEmail().data ?? null;
 	// The name the user gave Caddie in the welcome (v2 §4) is used everywhere
 	// the account name appears; the session name is the fallback.
@@ -1045,10 +1118,9 @@ function AccountMenu(props: {
 					<Link to="/settings" search={{ tab: 'spending' } as Record<string, unknown>} role="menuitem" data-testid="account-usage" onClick={() => props.setAccountOpen(false)}>
 						<Icon name="box" title="Spending" /> Spending
 					</Link>
-					<button type="button" role="menuitem" data-testid="theme-menu-item" onClick={toggleTheme}>
-						{theme === 'dark' ? <Icon name="sun" title="Switch to light theme" /> : <Icon name="moon" title="Switch to dark theme" />}
-						{theme === 'dark' ? 'Light theme' : 'Dark theme'}
-					</button>
+					<div className="account-menu-sep" role="separator" />
+					<ThemePicker variant="menu" palette={palette} mode={theme} onChange={setThemeChoice} />
+					<div className="account-menu-sep" role="separator" />
 					<button type="button" role="menuitem" data-testid="sign-out" onClick={() => void signOut()}>
 						<Icon name="arrowLeft" title="Sign out" /> Sign out
 					</button>
@@ -1067,7 +1139,7 @@ function AccountMenu(props: {
  */
 function MobileNav(props: {
 	nav: WorkspaceNavId;
-	sendText: (text: string) => void;
+	sendText: (text: string, attachments?: readonly import('@caddie/contracts').InputAttachment[]) => void;
 	live: boolean;
 	conversationOpen: boolean;
 	conversationKind: ConversationKind;
@@ -1094,7 +1166,7 @@ function MobileNav(props: {
 
 	return (
 		<nav className="bottom-nav" aria-label="Primary" data-testid="bottom-nav">
-			<div className="bottom-nav-composer">
+			<div className="bottom-nav-composer bottom-nav-pill">
 				{chatOpen ? (
 					<Composer
 						onSend={props.sendText}
@@ -1112,7 +1184,7 @@ function MobileNav(props: {
 					/>
 				)}
 			</div>
-			<div className="bottom-nav-row">
+			<div className="bottom-nav-row bottom-nav-pill">
 				<Link
 					to="/"
 					className="tab-btn"
@@ -1218,17 +1290,18 @@ function TalkingAbout(props: { conversationKind: ConversationKind; label: string
 		>
 			<button
 				type="button"
-				className="talking-about-btn"
+				className="talking-about-btn talking-about-pill"
 				data-testid="talking-about"
 				aria-haspopup="menu"
 				aria-expanded={open}
 				title="Switch what this chat is about — the project page you are on, or everything"
 				onClick={() => setOpen((value) => !value)}
 			>
-				<span className="talking-about-kicker">Talking about</span>
+				<span className="talking-about-kicker visually-hidden">Talking about</span>
 				<span className="talking-about-scope" data-testid="conv-context-label">
 					{props.label}
 				</span>
+				<Icon name="chevronDown" title="" className="talking-about-chev" />
 			</button>
 			{open ? (
 				<span className="talking-about-menu" role="menu" data-testid="talking-about-menu">
@@ -1250,6 +1323,28 @@ function TalkingAbout(props: { conversationKind: ConversationKind; label: string
 					))}
 				</span>
 			) : null}
+		</span>
+	);
+}
+
+/**
+ * Header A status cue: turns the dead header space into a live readiness
+ * signal driven by the same caddieMood the mascot uses. 'thinking' = a live
+ * transport (working), 'needs' = something waits for your OK, else ready.
+ */
+function CaddieStatus(props: { mood: MascotMood }): ReactElement {
+	const STATUS: Partial<Record<MascotMood, { tone: string; label: string }>> = {
+		thinking: { tone: 'working', label: 'Working…' },
+		building: { tone: 'working', label: 'Building…' },
+		needs: { tone: 'needs', label: 'Needs you' },
+		stuck: { tone: 'needs', label: 'Stuck' },
+		ready: { tone: 'ready', label: 'Ready' },
+	};
+	const s = STATUS[props.mood] ?? STATUS.ready!;
+	return (
+		<span className="caddie-status" data-tone={s.tone} data-testid="caddie-status">
+			<span className="caddie-status-dot" aria-hidden="true" />
+			<span className="caddie-status-label">{s.label}</span>
 		</span>
 	);
 }
@@ -1278,24 +1373,38 @@ function WelcomePanel(props: {
 	onImport: () => void;
 }): ReactElement {
 	return (
-		<section className="welcome-panel card-surface" data-testid="welcome-panel" aria-label="Start here">
-			<p className="kicker" data-tone="action">
-				START HERE
-			</p>
-			<h3 className="state-title">Let's find a hackathon that fits you</h3>
-			<p className="state-detail">
-				What kinds of things would you enjoy building? Caddie reads the rules, drafts a plan and builds
-				it — you approve every step. Nothing builds until you say so.
-			</p>
-			<div className="welcome-actions">
-				<button type="button" className="btn-key" data-testid="welcome-find" onClick={props.onFind}>
-					Find my first hackathon
+		<section className="welcome-panel" data-testid="welcome-panel" aria-label="Start here">
+			<div className="welcome-intro">
+				<span className="welcome-mascot" aria-hidden="true">
+					<Mascot mood="ready" size={56} live />
+				</span>
+				<h3 className="state-title">Let's find a hackathon that fits you</h3>
+				<p className="state-detail">
+					Pick a starting point below, or just tell Caddie what you want. It reads the rules, drafts a
+					plan and builds it — you approve every step. Nothing builds until you say so.
+				</p>
+			</div>
+			<div className="welcome-templates" role="group" aria-label="Starting points">
+				<button type="button" className="welcome-card" data-testid="welcome-find" onClick={props.onFind}>
+					<span className="welcome-card-icon">
+						<Icon name="target" title="" />
+					</span>
+					<span className="welcome-card-title">Find my first hackathon</span>
+					<span className="welcome-card-sub">Caddie matches one to your interests and skills</span>
 				</button>
-				<button type="button" className="btn-ghost" data-testid="welcome-idea" onClick={props.onIdea}>
-					Start from an idea
+				<button type="button" className="welcome-card" data-testid="welcome-idea" onClick={props.onIdea}>
+					<span className="welcome-card-icon">
+						<Icon name="sparkCheck" title="" />
+					</span>
+					<span className="welcome-card-title">Start from an idea</span>
+					<span className="welcome-card-sub">Describe what you want to build — Caddie scopes it</span>
 				</button>
-				<button type="button" className="btn-ghost" data-testid="welcome-import" onClick={props.onImport}>
-					Continue existing code
+				<button type="button" className="welcome-card" data-testid="welcome-import" onClick={props.onImport}>
+					<span className="welcome-card-icon">
+						<Icon name="github" title="" />
+					</span>
+					<span className="welcome-card-title">Continue existing code</span>
+					<span className="welcome-card-sub">Bring a repo and pick up where you left off</span>
 				</button>
 			</div>
 		</section>

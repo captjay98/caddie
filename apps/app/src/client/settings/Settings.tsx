@@ -8,6 +8,7 @@ import { useSessionActor } from '../queries.ts';
 import { Memory } from '../memory/Memory.tsx';
 import { AutomationsBody, UsageBody } from '../surface.tsx';
 import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
+import { ThemePicker } from '../workspace/ThemePicker.tsx';
 
 /**
  * P14 settings UI: profile editing, honest integration health, enabled
@@ -149,19 +150,15 @@ function SettingsTabs(props: { active: SettingsTab }): ReactElement {
 /** Appearance (§4): the theme toggle and "Reset Caddie width" — the same
  *  reset the resize handle's double-click performs. */
 function AppearancePanel(): ReactElement {
-	const { theme, toggleTheme, convWidth } = useWorkspaceChrome();
+	const { theme, palette, setThemeChoice, convWidth } = useWorkspaceChrome();
 	return (
 		<section className="card-surface settings-panel" data-testid="appearance-panel" id="appearance-panel">
 			<p className="kicker" data-tone="action">
 				APPEARANCE
 			</p>
 			<h3 className="state-title">Theme</h3>
-			<p className="state-detail">Saved only when you pick one — until then pages follow your device.</p>
-			<div className="row-actions">
-				<button type="button" className="btn-ghost" data-testid="appearance-theme-toggle" onClick={toggleTheme}>
-					{theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-				</button>
-			</div>
+			<p className="state-detail">Pick a palette and a mode. Each is saved on this device only once you choose it.</p>
+			<ThemePicker variant="panel" palette={palette} mode={theme} onChange={setThemeChoice} />
 			<h3 className="state-title">Caddie panel</h3>
 			<div className="row-actions">
 				<button type="button" className="btn-ghost" data-testid="appearance-reset-width" onClick={convWidth.reset}>

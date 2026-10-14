@@ -6,6 +6,23 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Caddie</title>
+    <!-- Pre-paint theme: runs before the stylesheet paints the canvas, so a
+         saved light mode or non-default palette never flashes the dark
+         Caddie default. Mirrors readStoredTheme + applyTheme in
+         src/client/theme.ts (tests/theme-state.test.ts keeps them in step).
+         Reads only; a choice is written when the user picks one. -->
+    <script data-theme-boot>
+      (function () {
+        var mode = 'dark', palette = 'caddie';
+        try {
+          if (localStorage.getItem('caddie-theme') === 'light') mode = 'light';
+          var p = localStorage.getItem('caddie-palette');
+          if (p === 'clearcut' || p === 'onesecos' || p === 'farmhand' || p === 'kirocrew') palette = p;
+        } catch (e) {}
+        document.documentElement.setAttribute('data-theme', mode);
+        document.documentElement.setAttribute('data-palette', palette);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

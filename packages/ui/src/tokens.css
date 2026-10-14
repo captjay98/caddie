@@ -4,7 +4,7 @@
    because the pit-board landing is built on the same tokens.
 
    Dual theme, ported from HackSteward's :root[data-theme] pattern. :root
-   defaults to dark; [data-theme="light"] swaps every token. Font families
+   defaults to dark; [data-theme="light"] swaps the seeds. Font families
    match the reference stack (Inter 400-700 + IBM Plex Mono 400/500/600/700);
    the woff2 files are self-hosted via @fontsource/* packages and bundled at
    build time by the importing app (see apps/site/src/pages/index.astro) —
@@ -12,7 +12,29 @@
 
    UI review board screen 16: the seed layer owns the palette, so a theme or
    radius change propagates without touching component rules. Every derived
-   token reads back from a seed; no component rule may restate a colour. */
+   token reads back from a seed; no component rule may restate a colour.
+
+   Palettes. Two independent attributes on <html>:
+     data-theme   = mode:    absent/"dark" | "light"   (unchanged contract)
+     data-palette = palette: absent/"caddie" | "clearcut" | "onesecos" | "farmhand" | "kirocrew"
+   A palette block sets ONLY seeds. The derived layer is declared once, on
+   :root, and resolves against whichever seeds win the cascade on the same
+   element, so no palette restates a derived token.
+
+   Cascade: `:root[data-palette=X]` (0,2,0) sits after the Caddie light block
+   (0,2,0) and wins it on order, so every palette's light block is the
+   compound `:root[data-palette=X][data-theme="light"]` (0,3,0) and both of a
+   palette's blocks set the SAME full seed list — nothing may fall through to
+   Caddie's seeds. tests/theme-tokens.test.ts enforces both rules and the
+   contrast floor.
+
+   Contrast floor (WCAG 2.x, every palette x mode): fg and muted >= 4.5:1 on
+   bg/surface/raised/lift; primary, accent, ok and danger >= 4.5:1 as text on
+   bg/surface; bg >= 4.5:1 on primary AND primary-deep, because filled
+   actions put their label in --color-ink on an action -> action-deep
+   gradient. Palettes are ported from each product's own tokens (OKLCH
+   converted to sRGB hex); where a source colour is a fill rather than text
+   and missed the floor, the nearest same-hue step that clears it is used. */
 
 :root {
 	/* --- seed layer: the single source of truth -------------------------- */
@@ -30,6 +52,10 @@
 	--seed-line-strength: 0.13;
 	--seed-line-soft-strength: 0.07;
 	--seed-horizon-strength: 0.13;
+	/* Top stop of the card gradient (flat = --seed-surface) and the lift
+	   shadow: an inset highlight in dark modes, a drop shadow in light ones. */
+	--seed-card-top: #141821;
+	--seed-lift-shadow: inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 4%, transparent);
 	--seed-radius: 10px;
 
 	/* --- type floor (UI review board screen 16) --------------------------
@@ -54,14 +80,13 @@
 	--color-bright: var(--seed-fg);
 	--color-muted: var(--seed-muted);
 	--horizon: radial-gradient(1200px 500px at 50% -10%, color-mix(in srgb, var(--seed-primary) calc(var(--seed-horizon-strength) * 100%), transparent), transparent 60%);
-	--card-gradient: linear-gradient(180deg, #141821, var(--seed-surface));
-	--lift-shadow: inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 4%, transparent);
+	--card-gradient: linear-gradient(180deg, var(--seed-card-top), var(--seed-surface));
+	--lift-shadow: var(--seed-lift-shadow);
 	--font-ui: "Inter", ui-sans-serif, system-ui, sans-serif;
 	--font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
 :root[data-theme="light"] {
-	/* --- seed layer ------------------------------------------------------ */
 	--seed-bg: #f6f8fc;
 	--seed-surface: #ffffff;
 	--seed-raised: #f1f4fa;
@@ -79,22 +104,171 @@
 	--seed-line-strength: 0.16;
 	--seed-line-soft-strength: 0.08;
 	--seed-horizon-strength: 0.07;
+	--seed-card-top: var(--seed-surface);
+	--seed-lift-shadow: 0 1px 2px rgba(13, 25, 50, 0.05);
+}
 
-	/* --- derived tokens --------------------------------------------------- */
-	--color-ink: var(--seed-bg);
-	--color-panel: var(--seed-surface);
-	--color-raised: var(--seed-raised);
-	--color-lift: var(--seed-lift);
-	--color-line: color-mix(in srgb, var(--seed-fg) calc(var(--seed-line-strength) * 100%), transparent);
-	--color-line-soft: color-mix(in srgb, var(--seed-fg) calc(var(--seed-line-soft-strength) * 100%), transparent);
-	--color-action: var(--seed-primary);
-	--color-action-deep: var(--seed-primary-deep);
-	--color-ok: var(--seed-ok);
-	--color-warn: var(--seed-accent);
-	--color-danger: var(--seed-danger);
-	--color-bright: var(--seed-fg);
-	--color-muted: var(--seed-muted);
-	--horizon: radial-gradient(1200px 500px at 50% -10%, color-mix(in srgb, var(--seed-primary) calc(var(--seed-horizon-strength) * 100%), transparent), transparent 60%);
-	--card-gradient: var(--seed-surface);
-	--lift-shadow: 0 1px 2px rgba(13, 25, 50, 0.05);
+/* --- Clearcut: warm paper + goldenrod (clearcut design-system tokens.css,
+   "script" light / "night" dark). Clearcut's warning IS its accent; here it
+   takes the highlighter-yellow step so a warn chip never reads as an action. */
+:root[data-palette="clearcut"] {
+	--seed-bg: #14161b;
+	--seed-surface: #1c1f26;
+	--seed-raised: #22262e;
+	--seed-lift: #2a2e37;
+	--seed-fg: #e9e7de;
+	--seed-muted: #a8a69c;
+	--seed-primary: #e8a33d;
+	--seed-primary-deep: #cf8c2c;
+	--seed-accent: #e6c65a;
+	--seed-ok: #4cc38a;
+	--seed-danger: #ef8069;
+	--seed-line-strength: 0.13;
+	--seed-line-soft-strength: 0.07;
+	--seed-horizon-strength: 0.1;
+	--seed-card-top: color-mix(in srgb, var(--seed-raised) 70%, var(--seed-surface));
+	--seed-lift-shadow: inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 4%, transparent);
+}
+
+:root[data-palette="clearcut"][data-theme="light"] {
+	--seed-bg: #f6f3ea;
+	--seed-surface: #fdfbf4;
+	--seed-raised: #f1eee2;
+	--seed-lift: #e8e4d6;
+	--seed-fg: #1b1e23;
+	--seed-muted: #4a4e57;
+	--seed-primary: #8a5a00;
+	--seed-primary-deep: #6e4700;
+	--seed-accent: #786000;
+	--seed-ok: #2e6b4f;
+	--seed-danger: #a3311f;
+	--seed-line-strength: 0.16;
+	--seed-line-soft-strength: 0.08;
+	--seed-horizon-strength: 0.06;
+	--seed-card-top: var(--seed-surface);
+	--seed-lift-shadow: 0 1px 2px color-mix(in srgb, var(--seed-fg) 8%, transparent);
+}
+
+/* --- Onesecos: warm-paper light / cool-graphite dark, brand blue
+   (onesecos backend/resources/css/app.css, OKLCH -> hex). */
+:root[data-palette="onesecos"] {
+	--seed-bg: #0b0f14; /* oklch(0.165 0.012 255) */
+	--seed-surface: #12161c; /* oklch(0.20 0.013 255) */
+	--seed-raised: #1a1e25; /* oklch(0.235 0.014 255) */
+	--seed-lift: #22272d; /* oklch(0.27 0.014 255) */
+	--seed-fg: #e4e8ed; /* oklch(0.93 0.008 255) */
+	--seed-muted: #a6abb2; /* oklch(0.74 0.012 255) */
+	--seed-primary: #6684fb; /* brand-blue oklch(0.65 0.18 270) */
+	--seed-primary-deep: #5471f5; /* oklch(0.60 0.20 270) */
+	--seed-accent: #eeb154; /* signal-warning oklch(0.80 0.13 75) */
+	--seed-ok: #00c38b; /* brand-teal oklch(0.72 0.16 165) */
+	--seed-danger: #ef6661; /* signal-risk oklch(0.68 0.17 25) */
+	--seed-line-strength: 0.13;
+	--seed-line-soft-strength: 0.07;
+	--seed-horizon-strength: 0.13;
+	--seed-card-top: color-mix(in srgb, var(--seed-raised) 70%, var(--seed-surface));
+	--seed-lift-shadow: inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 4%, transparent);
+}
+
+:root[data-palette="onesecos"][data-theme="light"] {
+	--seed-bg: #f7f5ec; /* surface-canvas oklch(0.97 0.012 95) */
+	--seed-surface: #fefdfa; /* surface-raised oklch(0.995 0.005 95) */
+	--seed-raised: #f1efe4; /* surface-raised-2 oklch(0.95 0.015 95) */
+	--seed-lift: #e8e5d7; /* oklch(0.92 0.018 95) */
+	--seed-fg: #1f212b; /* text-primary oklch(0.25 0.02 275) */
+	--seed-muted: #4a4c58; /* text-secondary oklch(0.42 0.02 275) */
+	--seed-primary: #3244c5; /* brand-blue oklch(0.46 0.20 270) */
+	--seed-primary-deep: #242bb6; /* oklch(0.40 0.21 270) */
+	--seed-accent: #834300; /* warn-fg oklch(0.45 0.15 75) */
+	--seed-ok: #006437; /* teal-fg oklch(0.42 0.15 165) */
+	--seed-danger: #b3000d; /* risk-fg oklch(0.48 0.20 27) */
+	--seed-line-strength: 0.16;
+	--seed-line-soft-strength: 0.08;
+	--seed-horizon-strength: 0.07;
+	--seed-card-top: var(--seed-surface);
+	--seed-lift-shadow: 0 1px 2px color-mix(in srgb, var(--seed-fg) 6%, transparent);
+}
+
+/* --- Farmhand: field green on cream / graphite (farmhand-ai
+   apps/web/src/styles.css, OKLCH -> hex). The source warning and success
+   are fills; the light text steps below are the same hues at a legible L. */
+:root[data-palette="farmhand"] {
+	--seed-bg: #0f1318; /* background oklch(0.185 0.012 255) */
+	--seed-surface: #181c22; /* card oklch(0.225 0.013 255) */
+	--seed-raised: #1d2228; /* oklch(0.25 0.013 255) */
+	--seed-lift: #22272d; /* secondary oklch(0.27 0.013 255) */
+	--seed-fg: #dee2e7; /* foreground oklch(0.91 0.008 255) */
+	--seed-muted: #969ca3; /* muted-foreground oklch(0.69 0.012 255) */
+	--seed-primary: #3da35e; /* primary oklch(0.64 0.14 151) */
+	--seed-primary-deep: #26914d; /* oklch(0.58 0.14 151) */
+	--seed-accent: #eeb154; /* warning oklch(0.80 0.13 75) */
+	--seed-ok: #5dc47e; /* success oklch(0.74 0.14 152) */
+	--seed-danger: #ef6661; /* status-risk oklch(0.68 0.17 25) */
+	--seed-line-strength: 0.13;
+	--seed-line-soft-strength: 0.07;
+	--seed-horizon-strength: 0.1;
+	--seed-card-top: color-mix(in srgb, var(--seed-raised) 70%, var(--seed-surface));
+	--seed-lift-shadow: inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 4%, transparent);
+}
+
+:root[data-palette="farmhand"][data-theme="light"] {
+	--seed-bg: #f7f5ee; /* background oklch(0.97 0.01 95) */
+	--seed-surface: #fefdfa; /* card oklch(0.995 0.004 95) */
+	--seed-raised: #ece8d9; /* secondary oklch(0.93 0.02 95) */
+	--seed-lift: #e8e5d6; /* oklch(0.92 0.02 95) */
+	--seed-fg: #1b241d; /* foreground oklch(0.25 0.02 150) */
+	--seed-muted: #505b52; /* oklch(0.46 0.02 150) */
+	--seed-primary: #18412c; /* primary oklch(0.34 0.06 158) */
+	--seed-primary-deep: #00331b; /* primary-strong oklch(0.28 0.07 158) */
+	--seed-accent: #915200; /* oklch(0.50 0.13 70) */
+	--seed-ok: #007840; /* oklch(0.50 0.13 155) */
+	--seed-danger: #cc2827; /* destructive oklch(0.55 0.2 27) */
+	--seed-line-strength: 0.16;
+	--seed-line-soft-strength: 0.08;
+	--seed-horizon-strength: 0.06;
+	--seed-card-top: var(--seed-surface);
+	--seed-lift-shadow: 0 1px 2px color-mix(in srgb, var(--seed-fg) 6%, transparent);
+}
+
+/* --- KiroCrew: signature violet on slate (ported from the KiroCrew
+   dashboard, --accent #8E48FF on --backdrop #0f1117). The source accent is a
+   UI fill that clears only ~4.06:1 as text, so per the contrast-floor rule
+   the primary takes the nearest same-hue step that clears 4.5:1 (#a06bff),
+   with #8E48FF kept as the picker swatch identity. */
+:root[data-palette="kirocrew"] {
+	--seed-bg: #0f1117;
+	--seed-surface: #171a22;
+	--seed-raised: #1d212b;
+	--seed-lift: #242836;
+	--seed-fg: #e9e6f5;
+	--seed-muted: #9b93b5;
+	--seed-primary: #a06bff;
+	--seed-primary-deep: #9c66f0;
+	--seed-accent: #e6ad50;
+	--seed-ok: #3ecf8e;
+	--seed-danger: #ff7a83;
+	--seed-line-strength: 0.13;
+	--seed-line-soft-strength: 0.07;
+	--seed-horizon-strength: 0.14;
+	--seed-card-top: color-mix(in srgb, var(--seed-raised) 70%, var(--seed-surface));
+	--seed-lift-shadow: inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 4%, transparent);
+}
+
+:root[data-palette="kirocrew"][data-theme="light"] {
+	--seed-bg: #f7f5fc;
+	--seed-surface: #ffffff;
+	--seed-raised: #f0edf8;
+	--seed-lift: #e7e2f3;
+	--seed-fg: #171320;
+	--seed-muted: #514b61;
+	--seed-primary: #6a28c9;
+	--seed-primary-deep: #54209f;
+	--seed-accent: #8a4f05;
+	--seed-ok: #007b44;
+	--seed-danger: #c13846;
+	--seed-line-strength: 0.16;
+	--seed-line-soft-strength: 0.08;
+	--seed-horizon-strength: 0.06;
+	--seed-card-top: var(--seed-surface);
+	--seed-lift-shadow: 0 1px 2px color-mix(in srgb, var(--seed-fg) 7%, transparent);
 }
