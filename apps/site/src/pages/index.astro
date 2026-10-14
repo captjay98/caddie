@@ -17,6 +17,7 @@ import '@fontsource/ibm-plex-mono/700.css';
 import '../styles/site.css';
 import Hero from '../components/Hero.astro';
 import ProductDemo from '../components/ProductDemo.astro';
+const appHref = import.meta.env.DEV ? 'http://localhost:5176/app/' : '/app/';
 ---
 
 <!doctype html>
@@ -71,7 +72,7 @@ import ProductDemo from '../components/ProductDemo.astro';
 				<div class="actions">
 					<button type="button" class="theme-toggle" data-pb-theme hidden aria-label="Switch to light theme">◐</button>
 					<a class="link-quiet" href="#pb-start">Request access</a>
-					<a class="btn btn-line" href="/app/">Sign in</a>
+					<a class="btn btn-line" href={appHref}>Sign in</a>
 				</div>
 			</div>
 
@@ -437,7 +438,7 @@ import ProductDemo from '../components/ProductDemo.astro';
 						ledger says is available.
 					</p>
 					<nav class="foot-links" aria-label="Footer">
-						<a href="/app/">Open the workspace</a>
+						<a href={appHref}>Open the workspace</a>
 						<a href="mailto:captjay98@gmail.com?subject=Caddie%20access%20request">Request access</a>
 					</nav>
 				</div>
@@ -445,7 +446,7 @@ import ProductDemo from '../components/ProductDemo.astro';
 
 			<div class="mbar">
 				<span>invite-only · first stack in proving</span>
-				<a class="btn btn-line" href="/app/" style="padding: 0.4375rem 0.75rem; font-size: 0.75rem;">Sign in</a>
+				<a class="btn btn-line" href={appHref} style="padding: 0.4375rem 0.75rem; font-size: 0.75rem;">Sign in</a>
 			</div>
 		</div>
 		<script is:inline>

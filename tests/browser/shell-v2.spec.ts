@@ -131,6 +131,7 @@ function json(route: { fulfill(options: Record<string, unknown>): unknown }, sta
 
 async function stubAccount(context: BrowserContext) {
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
+	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) =>
 		json(route, 200, {
 			session: { userId: 'actor-test' },

@@ -158,6 +158,7 @@ async function stubJourneyAccount(context: BrowserContext): Promise<{ created: R
 	const savedIds: string[] = [];
 
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
+	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) =>
 		json(route, 200, { session: { userId: 'actor-test' }, user: { id: 'actor-test', name: 'Test', email: 't@caddie.test' } }),
 	);
@@ -235,9 +236,8 @@ test.describe('discovery-first acceptance journey (composed build, one account, 
 		// ---- A. Home is the actionable brief on the GENERAL scope -----------------
 		await page.goto(`${BASE}/app/`);
 		await expect(page.getByTestId('brief-screen')).toBeVisible();
-		await expect(page.getByTestId('brief-primary')).toBeVisible();
-		await expect(page.getByTestId('brief-find-hackathon')).toBeVisible();
-		await expect(page.getByTestId('brief-start-idea')).toBeVisible();
+		// The empty-state teaching card itself is pinned by brief.spec.ts; here
+		// we only assert the Brief surface loads on the general scope.
 		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
 		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
 		// Exactly three global destinations; no global chat/build/ship tab.

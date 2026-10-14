@@ -4,4 +4,5 @@ import { defineConfig } from 'astro/config';
 // by scripts/compose-assets.ts. No second application server.
 export default defineConfig({
 	output: 'static',
+	server: { host: 'localhost', port: 4321 },
 });

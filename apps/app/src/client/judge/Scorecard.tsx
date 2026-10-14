@@ -183,17 +183,11 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 
 	return (
 		<section aria-label="Score it yourself" className="judge-panel" data-testid="judge-scorecard">
-			<div className="r-section-head">
-				<div>
-					<p className="kicker" data-tone="action">
-						PROVE
-					</p>
-					<h2 className="ev-title">What judges look for</h2>
-<p className="page-lede">
-							Caddie extracts the contest rubric from your evidence and shows what is verified; you record
-							your own assessment against it — coaching to make it better, never a prediction of the result.
-						</p>
-				</div>
+			<div className="r-section-head judge-head">
+				<p className="page-lede">
+					Caddie extracts the contest rubric from your evidence and shows what is verified; you record
+					your own assessment against it — coaching to make it better, never a prediction of the result.
+				</p>
 				<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
 					{busy ? 'Loading…' : 'Refresh'}
 				</button>

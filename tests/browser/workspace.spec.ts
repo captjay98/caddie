@@ -176,6 +176,7 @@ const DATA: ListConfig = { status: 200, body: { projects: [HOME, PROJECT_A, PROJ
  */
 async function stubAccount(context: BrowserContext, config: { current: ListConfig }) {
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
+	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) =>
 		json(route, 200, { session: { userId: 'actor-test' }, user: { id: 'actor-test', name: 'Test', email: 't@caddie.test' } }),
 	);

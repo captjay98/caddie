@@ -101,7 +101,7 @@ test.afterAll(async () => {
 test.describe('P01 sign-in panel (composed build)', () => {
 	test('renders both provider sign-in buttons', async ({ page }) => {
 		// Deterministic availability: both providers configured, so both
-		// buttons are enabled and the presence pills read "configured".
+		// buttons render clean — no status labels, no presence line.
 		await page.route('**/api/integrations/health', (route) =>
 			route.fulfill({
 				status: 200,
@@ -117,14 +117,20 @@ test.describe('P01 sign-in panel (composed build)', () => {
 		await expect(google).toHaveText('Continue with Google');
 		await expect(github).toHaveText('Continue with GitHub');
 		await expect(page.getByTestId('sign-in-panel')).toBeVisible();
-		// availability stated before the click, never after it
-		await expect(page.getByTestId('sign-in-google-state')).toHaveText('ready');
-		await expect(page.getByTestId('sign-in-github-state')).toHaveText('ready');
+		// Both configured: both rows are available and both buttons enabled.
+		await expect(page.getByTestId('sign-in-google-row')).toHaveAttribute('data-available', 'yes');
+		await expect(page.getByTestId('sign-in-github-row')).toHaveAttribute('data-available', 'yes');
+		await expect(google).toBeEnabled();
+		await expect(github).toBeEnabled();
+		// Availability is expressed through the control, not a status label.
+		await expect(page.getByTestId('sign-in-google-state')).toHaveCount(0);
+		await expect(page.getByTestId('sign-in-github-state')).toHaveCount(0);
+		await expect(page.getByTestId('sign-in-presence')).toHaveCount(0);
 		// no stale error state on a fresh page
 		await expect(page.getByTestId('sign-in-error')).toHaveCount(0);
 	});
 
-	test('unconfigured providers are labelled before the click, never a guaranteed-failure button', async ({ page }) => {
+	test('an unconfigured provider is blurred and inert, never a guaranteed-failure button', async ({ page }) => {
 		// Deterministic availability: Google unconfigured, GitHub configured.
 		await page.route('**/api/integrations/health', (route) =>
 			route.fulfill({
@@ -134,10 +140,37 @@ test.describe('P01 sign-in panel (composed build)', () => {
 			}),
 		);
 		await page.goto(`${BASE}/app/`);
-		await expect(page.getByTestId('sign-in-google-state')).toHaveText('not set up yet');
-		await expect(page.getByTestId('sign-in-google')).toBeDisabled();
-		await expect(page.getByTestId('sign-in-github-state')).toHaveText('ready');
+		// Google: marked unavailable, blurred, disabled, out of the tab order,
+		// with a quiet inline reason instead of a status pill.
+		const googleRow = page.getByTestId('sign-in-google-row');
+		await expect(googleRow).toHaveAttribute('data-available', 'no');
+		await expect(googleRow).toContainText('Not set up on this deployment yet');
+		const google = page.getByTestId('sign-in-google');
+		await expect(google).toBeDisabled();
+		await expect(google).toHaveAttribute('aria-hidden', 'true');
+		// GitHub: available and clickable, with no label beside it.
+		await expect(page.getByTestId('sign-in-github-row')).toHaveAttribute('data-available', 'yes');
 		await expect(page.getByTestId('sign-in-github')).toBeEnabled();
+		// No status pills anywhere.
+		await expect(page.getByTestId('sign-in-google-state')).toHaveCount(0);
+		await expect(page.getByTestId('sign-in-github-state')).toHaveCount(0);
+	});
+
+	test('when neither provider is configured, a clear message replaces the buttons', async ({ page }) => {
+		await page.route('**/api/integrations/health', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ auth: { providers: { google: false, github: false } } }),
+			}),
+		);
+		await page.goto(`${BASE}/app/`);
+		const message = page.getByTestId('sign-in-unavailable');
+		await expect(message).toBeVisible();
+		await expect(message).toContainText('Sign-in isn’t set up on this deployment yet');
+		// There is nothing to click: the provider buttons are not rendered.
+		await expect(page.getByTestId('sign-in-google')).toHaveCount(0);
+		await expect(page.getByTestId('sign-in-github')).toHaveCount(0);
 	});
 
 	test('terminal 503 offers the other provider instead of a retry that cannot work', async ({ page }) => {

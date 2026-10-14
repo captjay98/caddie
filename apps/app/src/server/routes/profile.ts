@@ -1,3 +1,4 @@
+import { onboardingStatus, completeOnboarding } from '../onboarding.ts';
 import { Hono } from 'hono';
 import type { AuthEnv } from '../auth.ts';
 import { createAuthRouter } from './auth.ts';
@@ -90,6 +91,15 @@ export function createProfileRouter(): Hono<{ Bindings: Env }> {
 		const mapped = errorJson(error);
 		return c.json(mapped.body, mapped.status as 500);
 	});
+
+ router.get('/onboarding', async (c) => {
+  const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+  return c.json(await onboardingStatus(c.env.DB, actorId));
+ });
+ router.post('/onboarding/complete', async (c) => {
+  const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+  return c.json(await completeOnboarding(c.env.DB, actorId));
+ });
 
 	// --- profile (user-scoped; no userId/projectId is ever taken from input) ---
 	router.get('/profile', async (c) => {

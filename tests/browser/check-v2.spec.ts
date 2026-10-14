@@ -144,6 +144,7 @@ function json(route: { fulfill(options: Record<string, unknown>): unknown }, sta
 async function stubAccount(context: BrowserContext, opts: { project?: typeof CONTEST; packages?: unknown[]; detail?: unknown } = {}) {
 	const active = opts.project ?? CONTEST;
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
+	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) =>
 		json(route, 200, { session: { userId: 'actor-test' }, user: { id: 'actor-test', name: 'Ada', email: 'ada@caddie.test' } }),
 	);
@@ -188,7 +189,7 @@ const PACKAGE_DETAIL = {
 const RUBRIC = {
 	rubric: {
 		criteria: [
-			{ criterion: 'Working public repository link', score: 3, notes: 'repo resolves, README present', access: 'verified' },
+			{ text: 'Working public repository link', weight: 40, claimIds: ['cl-repo'] },
 		],
 		warnings: [],
 		conflicts: [],
@@ -198,11 +199,11 @@ const RUBRIC = {
 	assessment: [
 		{
 			criterionText: 'Working public repository link',
-			requirementClaimId: 'cl-repo',
-			score: 3,
-			basis: 'local',
-			evidenceIds: ['rc-1'],
-			conflict: null,
+			verified: [
+				{ level: 'verified_local', ref: { id: 'rc-1', kind: 'receipt', text: 'repo resolves, README present' } },
+			],
+			declared: [],
+			access: 'verified_local',
 		},
 	],
 };
