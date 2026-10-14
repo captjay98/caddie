@@ -1,15 +1,24 @@
+import { ProjectWorkflow } from './ProjectWorkflow.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { FlueConversationMessage, FlueConversationPart } from '@flue/react';
 import { safeParse } from 'valibot';
 import { DecisionCardSchema, type DecisionCard as DecisionCardType } from '@caddie/contracts';
+import { HackathonResultsCardSchema } from '@caddie/contracts';
+import type { HackathonCandidate } from '@caddie/contracts';
+import { HackathonResultsCard, HackathonDetailProvider } from './HackathonResultsCard.tsx';
+import { ContestDetailPane } from '../discovery/ContestDetailPane.tsx';
+import { metaParts } from './hackathon-format.ts';
 import { ApprovalCardData, ApprovalCardView } from './ApprovalCard.tsx';
+import { GuidedStepsCardData, GuidedStepsCardView } from './GuidedStepsCard.tsx';
 import { Markdown } from '@caddie/ui/Markdown';
 import { StatePanel } from '../states.tsx';
 import { Icon } from '../icons.tsx';
 import { DecisionCardView } from '../brief/DecisionCard.tsx';
 import { Composer } from './Composer.tsx';
 import type { ChannelDraft, ChannelSource } from './channel-store.ts';
+import { cleanAssistantText } from './response-hygiene.ts';
+import { settlementNotice } from './settlement-notice.ts';
 
 /**
  * The Channel — typed conversation rendering (feature-ledger row C7).
@@ -106,21 +115,46 @@ function dayLabel(timestamp: string | undefined): string | null {
 	return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
 }
 
+/**
+ * Human-readable action labels for the tool strip. The raw tool name is an
+ * internal id ("find_hackathons", "research") and must NOT surface in the
+ * normal view (coordinator instruction: keep tool names out of replies). An
+ * unmapped tool falls back to a neutral "Working" rather than leaking its id.
+ */
+const TOOL_ACTION_LABELS: Record<string, { working: string; done: string }> = {
+	find_hackathons: { working: 'Searching for hackathons', done: 'Searched for hackathons' },
+	research: { working: 'Researching the web', done: 'Researched the web' },
+	hackathon_details: { working: 'Looking up that hackathon', done: 'Looked up that hackathon' },
+	create_project: { working: 'Setting up your project', done: 'Set up your project' },
+	continue_project: { working: 'Updating your project', done: 'Updated your project' },
+	update_profile: { working: 'Noting your preferences', done: 'Noted your preferences' },
+	remember: { working: 'Remembering that', done: 'Remembered that' },
+	inspect_repository: { working: 'Looking at your code', done: 'Looked at your code' },
+	list_stacks: { working: 'Checking available stacks', done: 'Checked available stacks' },
+	verify_build: { working: 'Verifying the build', done: 'Verified the build' },
+	request_approval: { working: 'Asking for your go-ahead', done: 'Asked for your go-ahead' },
+	report_blocker: { working: 'Noting what is blocking this', done: 'Noted what is blocking this' },
+};
+
+function toolActionLabel(toolName: string, done: boolean): string {
+	const entry = TOOL_ACTION_LABELS[toolName];
+	if (!entry) return done ? 'Worked' : 'Working';
+	return done ? entry.done : entry.working;
+}
+
 function ToolBanner({ part }: { part: ToolPart }): ReactElement {
-	const stateWord =
-		part.state === 'input-available'
-			? 'working'
-			: part.state === 'output-available'
-				? `done${typeof part.durationMs === 'number' ? ` · ${Math.round(part.durationMs / 100) / 10}s` : ''}`
-				: 'error';
+	const done = part.state === 'output-available';
+	const failed = part.state === 'output-error';
+	// Human action label — never the raw tool id. Failure says a step didn't
+	// complete, still without naming the internal tool.
+	const label = failed ? `${toolActionLabel(part.toolName, false)} — didn't complete` : toolActionLabel(part.toolName, done);
 	return (
 		<p className="tool-banner tool-row" data-state={part.state} data-part-kind="call" data-testid="tool-banner">
 			<Icon
-				name={part.state === 'output-available' ? 'check' : part.state === 'output-error' ? 'alert' : 'play'}
-				title={part.state === 'output-available' ? 'done' : part.state === 'output-error' ? 'failed' : 'working'}
+				name={done ? 'check' : failed ? 'alert' : 'play'}
+				title={done ? 'done' : failed ? 'failed' : 'working'}
 			/>{' '}
-			[{part.toolName}] {stateWord}
-			{part.state === 'output-error' && part.errorText ? ` — ${part.errorText}` : ''}
+			{label}
 		</p>
 	);
 }
@@ -129,16 +163,20 @@ function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
 	const running = parts.some((part) => part.state === 'input-available');
 	const failed = parts.filter((part) => part.state === 'output-error').length;
 	const totalMs = parts.reduce((sum, part) => sum + (typeof part.durationMs === 'number' ? part.durationMs : 0), 0);
-	const calls = `${parts.length} step${parts.length === 1 ? '' : 's'}`;
-	// §3.6: working steps fold by default ("Thought for 6s"). Raw reasoning
-	// never renders; this summary counts the folded work, never narrates it.
-	const summary = failed > 0
-		? `Thought for ${Math.round(totalMs / 100) / 10 || '?'}s · ${calls} · ${failed} failed`
-		: running
-			? 'Caddie is working…'
-			: totalMs > 0
-				? `Thought for ${Math.round(totalMs / 100) / 10}s`
-				: `Caddie worked · ${calls}`;
+	const secs = Math.round(totalMs / 100) / 10;
+	// Distinct human actions in this run (deduped, order-preserving) — the strip
+	// summary names WHAT Caddie did, not raw tool ids or a bare step count.
+	const actions = [...new Set(parts.map((p) => toolActionLabel(p.toolName, true)))];
+	const actionPhrase = actions.length === 0
+		? 'Worked'
+		: actions.length <= 2
+			? actions.join(' · ')
+			: `${actions.slice(0, 2).join(' · ')} +${actions.length - 2} more`;
+	const summary = running
+		? `${actions.length ? actions[0]!.replace(/ed\b/, 'ing') : 'Working'}…`
+		: failed > 0
+			? `${actionPhrase} · ${failed} didn't complete${secs ? ` · ${secs}s` : ''}`
+			: `${actionPhrase}${secs ? ` · ${secs}s` : ''}`;
 	return (
 		<details className="tool-strip" data-testid="tool-strip">
 			<summary>{summary}</summary>
@@ -162,17 +200,91 @@ function ToolGroup({ group, parts }: { group: readonly FlueConversationMessage[]
 	);
 }
 
+/** The reasoning part as the Channel receives it — accumulated text + stream state. */
+type ReasoningPart = Extract<FlueConversationPart, { type: 'reasoning' }>;
+
+/**
+ * Live reasoning view (Stage 4). While the model thinks, its reasoning streams
+ * into a dimmed, scrollable, foldable panel that is OPEN by default so the user
+ * sees progress in real time; when the turn completes it COLLAPSES to a quiet
+ * one-line "Thought it through" summary (openable, never auto-expanded again).
+ *
+ * This threads the needle on the C7 hard constraint ("raw chain-of-thought
+ * never renders as a permanent human-facing block"): raw CoT is shown ONLY
+ * transiently while streaming and behind an explicit disclosure afterwards —
+ * never as settled prose, and always run through the same hygiene cleaner that
+ * strips serialization fragments / nested tags. A redacted reasoning block
+ * shows the marker only, never fabricated text.
+ */
+function ReasoningView({ part }: { part: ReasoningPart }): ReactElement | null {
+	const streaming = part.state === 'streaming';
+	// Defensive: reasoning parts carry accumulated `text`; clean it the same way
+	// assistant text is cleaned so no serialization/tag noise leaks through.
+	const raw = typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : '';
+	const redacted = (part as { redacted?: unknown }).redacted === true;
+	const text = redacted ? '' : cleanAssistantText(raw).trim();
+
+	// Hooks must run unconditionally and in a stable order on EVERY render —
+	// they come before any early return. A reasoning part can start empty (no
+	// text, not streaming) and later gain text/stream; returning null before
+	// these hooks changed the hook count between renders and crashed the tree
+	// with "Rendered more hooks than during the previous render".
+	const ref = useRef<HTMLDivElement>(null);
+	// Autoscroll the streaming panel to the latest reasoning — but ONLY while
+	// the user is pinned to the bottom. If they scroll up to re-read earlier
+	// reasoning, respect that and stop yanking them back down (same contract as
+	// the main transcript). A fresh stream re-pins.
+	const reasoningPinned = useRef(true);
+	useEffect(() => {
+		if (streaming && ref.current && reasoningPinned.current) {
+			ref.current.scrollTop = ref.current.scrollHeight;
+		}
+	}, [streaming, text]);
+
+	// Nothing to show and not streaming: render nothing (quiet by default).
+	// Safe to return after the hooks above have run.
+	if (!streaming && !text && !redacted) return null;
+
+	const summary = streaming
+		? 'Caddie is thinking…'
+		: redacted
+			? 'Reasoning (hidden by the model)'
+			: 'Thought it through';
+
+	return (
+		<details className="reasoning-view" data-testid="reasoning-view" data-state={part.state} open={streaming}>
+			<summary className="reasoning-summary" role="status">
+				<Icon name={streaming ? 'play' : 'check'} title={streaming ? 'thinking' : 'done'} />{' '}
+				{summary}
+			</summary>
+			{redacted ? (
+				<p className="reasoning-redacted">The model kept this reasoning private.</p>
+			) : text ? (
+				<div
+					className="reasoning-body"
+					ref={ref}
+					data-testid="reasoning-body"
+					onScroll={(event) => {
+						const el = event.currentTarget;
+						reasoningPinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+					}}
+				>
+					{text}
+				</div>
+			) : null}
+		</details>
+	);
+}
+
 function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement | null {
 	if (part.type === 'text') {
-		return part.text.trim() ? <Markdown text={part.text} /> : null;
+		// R04 hygiene: strip reasoning tags / raw svg / serialization fragments /
+		// empty placeholder chains that leak INSIDE a text part before Markdown.
+		const clean = cleanAssistantText(part.text);
+		return clean ? <Markdown text={clean} /> : null;
 	}
 		if (part.type === 'reasoning') {
-			// Raw chain-of-thought never renders. Only a live progress marker.
-			return part.state === 'streaming' ? (
-				<p className="thinking-line" role="status" data-testid="thinking-line">
-					Caddie is working
-				</p>
-			) : null;
+			return <ReasoningView part={part} />;
 		}
 	if (part.type === 'dynamic-tool') {
 		return <ToolBanner part={part} />;
@@ -202,6 +314,22 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 		}
 		return <DecisionCardView card={parsed.output} />;
 	}
+ if (part.type === 'data-projectWorkflow') {
+  const data=part.data as {projectId?:unknown;name?:unknown};
+  if(typeof data?.projectId !== 'string' || typeof data?.name !== 'string') return <p role="alert">The project card could not be loaded.</p>;
+  return <ProjectWorkflow projectId={data.projectId} name={data.name}/>;
+ }
+	if (part.type === 'data-hackathonResults') {
+		const parsed = safeParse(HackathonResultsCardSchema, part.data);
+		if (!parsed.success) {
+			return (
+				<p className="tool-banner" data-state="output-error" data-testid="hk-payload-fault">
+					[card] hackathon results payload did not match the contract — not rendered
+				</p>
+			);
+		}
+		return <HackathonResultsCard card={parsed.output} />;
+	}
 	if (part.type === 'data-approvalCard') {
 		// B06: the in-chat "OK to spend?" card. Its identity is the SERVER
 		// approval id; Allow / Not now POST the authenticated decision route
@@ -215,6 +343,17 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 			);
 		}
 		return <ApprovalCardView data={parsed.output} />;
+	}
+	if (part.type === 'data-guidedSteps') {
+		const parsed = safeParse(GuidedStepsCardData, part.data);
+		if (!parsed.success) {
+			return (
+				<p className="tool-banner" data-state="output-error" data-testid="guided-steps-payload-fault">
+					[card] guided-steps payload did not match the contract — not rendered as an action
+				</p>
+			);
+		}
+		return <GuidedStepsCardView data={parsed.output} />;
 	}
 	// any other data-* part: display-only collapsed disclosure
 	const name = part.type.slice('data-'.length) || 'note';
@@ -230,6 +369,16 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
  *  day groups); per-message clocks live in title tooltips only. */
 function buildTranscriptRows(groups: ReturnType<typeof groupMessages>): ReactElement[] {
 	const rows: ReactElement[] = [];
+  // A handoff may mention the same project again. Keep one live workspace
+  // at its latest mention so previews cannot diverge across duplicate frames.
+  const latestCards = new Map<string, FlueConversationPart>();
+  for (const group of groups) for (const message of group.messages) {
+    for (const part of message.parts) {
+      if (part.type !== 'data-projectWorkflow') continue;
+      const data = part.data as { projectId?: unknown };
+      if (typeof data?.projectId === 'string') latestCards.set(data.projectId, part);
+    }
+  }
 	let lastDay: string | null = null;
 	let rowKey = 0;
 	for (const group of groups) {
@@ -264,7 +413,12 @@ function buildTranscriptRows(groups: ReturnType<typeof groupMessages>): ReactEle
 					);
 					lastDay = day;
 				}
-				rows.push(<MessageRow key={message.id} message={message} />);
+				const parts = message.parts.filter(part => {
+          if (part.type !== 'data-projectWorkflow') return true;
+          const data = part.data as { projectId?: unknown };
+          return typeof data?.projectId !== 'string' || latestCards.get(data.projectId) === part;
+        });
+        if (parts.length) rows.push(<MessageRow key={message.id} message={{ ...message, parts }} />);
 			}
 		}
 	}
@@ -361,6 +515,10 @@ export function Channel(props: {
 	projectId: string | null;
 	/** True once the coordinator run transport is wired for this project. */
 	transportLive?: boolean;
+	/** The surrounding shell can supply a single contextual welcome. */
+	hideEmptyState?: boolean;
+	emptyTitle?: string;
+	emptyDetail?: string;
 	/** Mobile: the composer lives in the floating bottom bar (input above the
 	 *  five nav items), so the pane renders the transcript alone. */
 	composerHidden?: boolean;
@@ -372,7 +530,7 @@ export function Channel(props: {
 	 *  is being created/fetched on a global route). Render an honest loading
 	 *  state — NOT the empty "no project" prompt, and NOT an error. */
 	resolving?: boolean;
-	onSend: (text: string) => void;
+	onSend: (text: string, attachments: readonly import('@caddie/contracts').InputAttachment[]) => void;
 	onRetryDraft: (id: string) => void;
 	onEditDraft: (id: string) => void;
 	onDiscardDraft: (id: string) => void;
@@ -386,6 +544,25 @@ export function Channel(props: {
 	// fresh load of an untouched draft restores it.
 	const userTyped = useRef(false);
 	const draftNote = !userTyped.current && Boolean(props.composerText && props.composerText.trim() !== '');
+
+	// Chat → detail pane (steering fix): clicking a hackathon in the chat card
+	// opens the SAME pane the Discover list uses, instead of navigating to the
+	// event page. The pane reads the home/project scope the conversation is
+	// already bound to.
+	const [detailCandidate, setDetailCandidate] = useState<HackathonCandidate | null>(null);
+	const [checkingDetail, setCheckingDetail] = useState(false);
+	async function checkDetailEligibility(candidateId: string) {
+		if (!projectId) return;
+		setCheckingDetail(true);
+		try {
+			await fetch(
+				`/api/projects/${encodeURIComponent(projectId)}/discovery/candidates/${encodeURIComponent(candidateId)}/check-eligibility`,
+				{ method: 'POST', credentials: 'same-origin' },
+			);
+		} finally {
+			setCheckingDetail(false);
+		}
+	}
 	const handleComposerTextChange = (text: string) => {
 		userTyped.current = true;
 		props.onComposerTextChange?.(text);
@@ -405,6 +582,26 @@ export function Channel(props: {
 		() => buildTranscriptRows(groupMessages(source.messages)),
 		[source.messages],
 	);
+
+	const live = source.status === 'connecting' || source.status === 'submitted' || source.status === 'streaming';
+	const latestSettlement = source.settlements.at(-1);
+	const settledFailed = !live && latestSettlement && latestSettlement.outcome !== 'completed' ? [latestSettlement] : [];
+
+	// Live activity (what Caddie is DOING, not just "working"): read the current
+	// turn's parts for the running tool-call count and the most recent tool name,
+	// plus whether it is mid-reasoning. All real data from the transport — a
+	// quiet turn simply shows the plain "working" line.
+	const liveActivity = useMemo(() => {
+		if (!live) return null;
+		const lastAssistant = [...source.messages].reverse().find((m) => m.role === 'assistant');
+		if (!lastAssistant) return null;
+		const toolParts = lastAssistant.parts.filter((p) => typeof p.type === 'string' && p.type.startsWith('tool-'));
+		const latestTool = toolParts.at(-1);
+		const toolName = latestTool ? String(latestTool.type).slice('tool-'.length) : null;
+		const reasoning = lastAssistant.parts.some((p) => p.type === 'reasoning' && (p as { state?: string }).state === 'streaming');
+		return { toolCount: toolParts.length, toolName, reasoning };
+	}, [live, source.messages]);
+
 
 	if (props.resolving && !projectId) {
 		return (
@@ -430,10 +627,9 @@ export function Channel(props: {
 		);
 	}
 
-	const live = source.status === 'connecting' || source.status === 'submitted' || source.status === 'streaming';
-	const settledFailed = source.settlements.filter((s) => s.outcome !== 'completed');
 
 	return (
+		<HackathonDetailProvider value={{ openDetail: (candidate) => setDetailCandidate(candidate) }}>
 		<div className="channel-pane" data-testid="channel" data-transport-status={source.status}>
 			<div
 				className="transcript"
@@ -444,37 +640,55 @@ export function Channel(props: {
 					pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
 				}}
 			>
-				{source.messages.length === 0 ? (
+				{source.messages.length === 0 && !props.hideEmptyState ? (
 					<StatePanel
 						kind="empty"
-						title="Say hello — your first message starts a run"
+						title={props.emptyTitle ?? "Say hello — your first message starts a run"}
 						detail={
-							props.transportLive
+							props.emptyDetail ?? (props.transportLive
 								? 'Tell Caddie what you want in plain words. It drafts a plan, shows you where every fact came from, and waits for your OK before building anything. Every message is answered at most once.'
-								: 'Tell Caddie what you want in plain words. It drafts a plan, shows you where every fact came from, and waits for your OK before building anything.'
+								: 'Tell Caddie what you want in plain words. It drafts a plan, shows you where every fact came from, and waits for your OK before building anything.')
 						}
 					/>
 ) : (
 						transcriptRows
 					)}
 
-				{settledFailed.map((settlement) => (
-					<p
-						key={settlement.submissionId}
-						className="settlement-banner"
-						data-outcome={settlement.outcome}
-						data-testid="settlement-banner"
-						title={`submission ${settlement.submissionId} · ${settlement.outcome}`}
-					>
-						The run stopped before it finished. Nothing was written to the plan, and the failure is
-						kept as evidence.
-					</p>
-				))}
+				{settledFailed.map((settlement) => {
+					const notice = settlementNotice(settlement);
+					return (
+						<p
+							key={settlement.submissionId}
+							className="settlement-banner"
+							data-outcome={settlement.outcome}
+							data-kind={notice.kind}
+							data-testid="settlement-banner"
+							title={`submission ${settlement.submissionId} · ${settlement.outcome}`}
+						>
+							<strong>{notice.title}</strong> {notice.detail}
+						</p>
+					);
+				})}
 
+				<ProjectWorkflow key={projectId} projectId={projectId} showTranscript={false}/>
 				{live ? (
-					<p className="thinking-line" role="status" data-testid="channel-status">
-						Caddie is working
-					</p>
+					<div className="channel-activity" role="status" data-testid="channel-status">
+						<span className="channel-activity-dot" aria-hidden="true" />
+						<span className="channel-activity-label">
+							{liveActivity?.reasoning
+								? 'Caddie is thinking…'
+								: liveActivity?.toolName
+									? // Plain action ("Searching for hackathons…"), never the raw
+										// tool id; an unmapped tool reads "Working…".
+										`${toolActionLabel(liveActivity.toolName, false)}…`
+									: 'Caddie is working'}
+						</span>
+						{liveActivity && liveActivity.toolCount > 0 ? (
+							<span className="channel-activity-count">
+								{liveActivity.toolCount} {liveActivity.toolCount === 1 ? 'step' : 'steps'}
+							</span>
+						) : null}
+					</div>
 				) : null}
 				{source.status === 'error' ? (
 					<div className="conv-offline" role="status" data-testid="channel-offline">
@@ -507,5 +721,17 @@ export function Channel(props: {
 				/>
 			) : null}
 		</div>
+		{detailCandidate && projectId ? (
+			<ContestDetailPane
+				projectId={projectId}
+				candidateId={detailCandidate.id}
+				onClose={() => setDetailCandidate(null)}
+				metaParts={metaParts(detailCandidate)}
+				autoCheckOnOpen
+				checking={checkingDetail}
+				onCheck={() => void checkDetailEligibility(detailCandidate.id)}
+			/>
+		) : null}
+		</HackathonDetailProvider>
 	);
 }
