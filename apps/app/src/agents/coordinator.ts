@@ -33,7 +33,7 @@ import {
   HACKATHON_IDEATION_INSTRUCTION,
   RESEARCH_DESCRIPTION,
 } from "./hackathon-prompts.ts";
-import { findModelRouteForRole } from "./providers.ts";
+import { coordinatorModelRole, findModelRouteForRole, IDEATION_TURN_WINDOW } from "./providers.ts";
 import { makeListStacks, makeVerifyBuild, makeUpdateProfile, makeRememberFact, makeInspectRepository } from "./tools.ts";
 import {
   buildSpecialistDeclarations,
@@ -122,7 +122,6 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
 }
 /** Render executes in the owning Durable Object, including alarm recovery. */
 export function Coordinator({ id }: AgentProps) {
-  useModel(findModelRouteForRole("chat").specifier);
   const identity = getDurableObjectIdentity();
   if (!id || identity.name !== id)
     throw new Error(
@@ -135,6 +134,15 @@ export function Coordinator({ id }: AgentProps) {
       null,
     );
   const snapshot = checkedCoordinatorSnapshot(storedContext, id);
+  // Brainstorming window: entered when the user picks an event to dig into
+  // (hackathon_details) or asks to work out what to build (start_brainstorm),
+  // counted down per user turn, cleared by propose_project. While it is open
+  // the HOME coordinator runs on the deeper ideation model; Flue reads the
+  // model when a submission starts, so the switch lands on the next turn.
+  // Project conversations never switch: their specialists inherit this model.
+  const [ideationTurnsLeft, setIdeationTurnsLeft] = usePersistentState("ideation-turns-left", 0);
+  const isHome = snapshot !== null && snapshot.homeOverview !== null;
+  useModel(findModelRouteForRole(coordinatorModelRole({ isHome, ideationTurnsLeft })).specifier);
   const { context, resolve } = scopedCoordinatorContext(env, id, snapshot);
   const [lastUserRequest, setLastUserRequest] = usePersistentState(
     "last-user-request",
@@ -264,7 +272,23 @@ export function Coordinator({ id }: AgentProps) {
     // bounded so a stalled request settles as a tool error, not a hung turn.
     timeoutMs: 90_000,
     async run(ctx) {
-      return { output: JSON.stringify(await context.hackathonDetails(ctx.data)) };
+      const details = await context.hackathonDetails(ctx.data);
+      // Digging into ONE event is where brainstorming starts (the follow-up
+      // rule offers it next), so the following turns get the ideation model.
+      if (isHome && (details as { found?: unknown } | null)?.found !== false)
+        setIdeationTurnsLeft(IDEATION_TURN_WINDOW);
+      return { output: JSON.stringify(details) };
+    },
+  });
+  useTool({
+    name: "start_brainstorm",
+    description:
+      "Call when the user wants to work out WHAT to build — they ask for project ideas, say \"let's brainstorm\", pick a track, or describe a problem they want to solve — and no project idea has been settled yet. It gives the next replies more careful thinking; it creates nothing and shows nothing. Call it once per brainstorm, then follow the IDEATION rule in the same reply. Do not call it for questions about an existing project.",
+    input: v.object({}),
+    async run() {
+      if (!isHome) return { output: "Brainstorming already happens in this conversation." };
+      setIdeationTurnsLeft(IDEATION_TURN_WINDOW);
+      return { output: JSON.stringify({ brainstorming: true, next: "Follow the IDEATION rule now. Never mention this tool or a mode change to the user." }) };
     },
   });
   useTool({
@@ -319,12 +343,17 @@ export function Coordinator({ id }: AgentProps) {
       const authority = await resolve();
       const original =
         delivery.kind === "user" ? delivery.body : lastUserRequest;
+      // Mid-brainstorm, the latest message is a reaction ("1 and 3 are the
+      // most realistic"), not the request — prefixing it made it the first
+      // line of the saved brief. Only a direct request is kept verbatim.
+      const brainstorming = ideationTurnsLeft > 0;
       const proposal = await authority.proposeProject({
         ...ctx.data,
-        brief: original
+        brief: original && !brainstorming
           ? `${original}\n\nProject brief: ${ctx.data.brief}`
           : ctx.data.brief,
       });
+      setIdeationTurnsLeft(0);
       writeProposal({ proposalId: proposal.id, homeProjectId: proposal.homeProjectId });
       return {
         output: JSON.stringify({
@@ -366,6 +395,9 @@ export function Coordinator({ id }: AgentProps) {
     setContinuations(0);
     if (delivery.kind === "user") {
       setLastUserRequest(delivery.body);
+      // One user turn spent from the brainstorm window (this turn's model was
+      // already chosen at submission start, so this only affects later turns).
+      setIdeationTurnsLeft((left) => (left > 0 ? left - 1 : 0));
       if (authority.homeOverview !== null) {
         let sequence = 0;
         setHomeDeliverySequence(previous => { sequence = previous + 1; return sequence; });

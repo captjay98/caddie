@@ -4,6 +4,8 @@ import {
 	MODEL_ROLES,
 	findModelRoute,
 	findModelRouteForRole,
+	coordinatorModelRole,
+	IDEATION_TURN_WINDOW,
 	type ModelRole,
 } from '../apps/app/src/agents/providers.ts';
 
@@ -55,5 +57,19 @@ describe('model registry (providers.ts)', () => {
 		// the helper really is cheaper than the chat model (per-output rate).
 		expect(findModelRouteForRole('helper').outputPriceMinorUnits)
 			.toBeLessThan(findModelRouteForRole('chat').outputPriceMinorUnits);
+	});
+
+	test('ideation routes to Ultra; chat stays on Super', () => {
+		expect(findModelRouteForRole('ideation').id).toBe('nemotron-3-ultra');
+		expect(findModelRouteForRole('chat').id).toBe('nemotron-3-super');
+	});
+
+	test('coordinatorModelRole: ideation only in Home with an open window; never in a project conversation', () => {
+		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 3 })).toBe('ideation');
+		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 0 })).toBe('chat');
+		// project coordinators: specialists inherit this model — a brainstorm flag must not change a build
+		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 12 })).toBe('chat');
+		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0 })).toBe('chat');
+		expect(IDEATION_TURN_WINDOW).toBeGreaterThan(0);
 	});
 });

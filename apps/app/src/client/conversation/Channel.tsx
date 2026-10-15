@@ -128,6 +128,7 @@ const TOOL_ACTION_LABELS: Record<string, { working: string; done: string }> = {
 	hackathon_details: { working: 'Looking up that hackathon', done: 'Looked up that hackathon' },
 	create_project: { working: 'Setting up your project', done: 'Set up your project' },
 	propose_project: { working: 'Writing up a project idea', done: 'Wrote up a project idea' },
+	start_brainstorm: { working: 'Thinking about ideas with you', done: 'Thinking about ideas with you' },
 	continue_project: { working: 'Updating your project', done: 'Updated your project' },
 	update_profile: { working: 'Noting your preferences', done: 'Noted your preferences' },
 	remember: { working: 'Remembering that', done: 'Remembered that' },

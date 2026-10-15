@@ -144,7 +144,17 @@ export const MODEL_ROLES = {
 	 *  the frontier Ultra reasoned on every trivial turn (slow + ~5× cost) and
 	 *  did NOT fix the hallucination, which was always a missing-instruction bug. */
 	chat: 'nemotron-3-super',
-	/** Heavy build/plan specialist reasoning — where Ultra's agentic strength pays. */
+	/** Brainstorming WHAT to build (Home chat only, a bounded window of turns —
+	 *  see {@link coordinatorModelRole}). This is where judgment pays: asking
+	 *  the right questions once, honest critique of ideas, grounding technical
+	 *  claims in the rules, and NOT taking "1 and 3" as a chosen idea. Ultra ran
+	 *  this same coordinator as the chat model before the switch to Super
+	 *  (execution-ledger P05), so its tool-calling here is not new ground. */
+	ideation: 'nemotron-3-ultra',
+	/** Heavy build/plan specialist reasoning — where Ultra's agentic strength pays.
+	 *  NOTE: today this is recorded on the project RUN BINDING only; the
+	 *  specialists are subagents that inherit the coordinator's turn model
+	 *  (specialists.ts), i.e. `chat`. */
 	build: 'nemotron-3-ultra',
 	/** Cheap bounded helper calls (query shaping, summarization). */
 	helper: 'nemotron-3-nano',
@@ -153,6 +163,30 @@ export const MODEL_ROLES = {
 } as const satisfies Record<string, string>;
 
 export type ModelRole = keyof typeof MODEL_ROLES;
+
+/**
+ * How many user turns a brainstorm keeps the deeper `ideation` model after it
+ * is entered. A bound, so a conversation that drifts off ideas without a
+ * proposal falls back to the fast chat model on its own.
+ */
+export const IDEATION_TURN_WINDOW = 12;
+
+/**
+ * Which role drives THIS coordinator turn. Flue reads `useModel` when a
+ * submission starts and allows the argument to vary render to render from
+ * durable state, so this is evaluated per turn. Ideation applies only in the
+ * Home conversation: a project conversation's specialists inherit the
+ * coordinator's model, and a brainstorm flag must never change what a build
+ * runs on. An unknown home/project identity (first render, no snapshot yet)
+ * is treated as NOT home — the default chat model, never a silent upgrade.
+ *
+ * Pricing note: the Home run binding still records the `chat` route; chat
+ * turns reserve no budget today. When chat budgets are wired, ideation turns
+ * must be priced at the ideation route, not the binding's.
+ */
+export function coordinatorModelRole(input: { isHome: boolean; ideationTurnsLeft: number }): ModelRole {
+	return input.isHome && input.ideationTurnsLeft > 0 ? 'ideation' : 'chat';
+}
 
 /** Route ids that accept image input (the vision-capable routes). The one place
  *  that marks a route as a VLM — the ModelCapability contract reads from here. */

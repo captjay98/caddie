@@ -91,3 +91,36 @@ describe('coordinator ideation rule', () => {
 		expect(source).toContain('NO markdown tables, NO HTML, NO numbered or bulleted lists of product names');
 	});
 });
+
+/**
+ * Guard for the deeper ideation model + tightened rules (2026-10-15 FarmLog AI
+ * replay): four rounds of questions, "1 and 3 are the most realistic" taken as
+ * a chosen idea, a mid-brainstorm reaction saved as the brief's first line, and
+ * an unchecked "NVIDIA time-series model / NeMo speech on Nebius" claim the
+ * rules never made.
+ */
+describe('coordinator ideation model + tightened rules', () => {
+	test('the coordinator picks its model per turn from the ideation window, Home only', () => {
+		expect(source).toContain('coordinatorModelRole({ isHome, ideationTurnsLeft })');
+		expect(source).toContain('usePersistentState("ideation-turns-left", 0)');
+		// a project conversation (homeOverview null) or an uninitialised one is never "home"
+		expect(source).toContain('const isHome = snapshot !== null && snapshot.homeOverview !== null;');
+		// opening an event and explicit brainstorming enter the window; proposing closes it
+		expect(source).toContain('name: "start_brainstorm"');
+		expect(source.match(/setIdeationTurnsLeft\(IDEATION_TURN_WINDOW\)/g)?.length).toBe(2);
+		expect(source).toContain('setIdeationTurnsLeft(0);');
+		expect(source).toContain('setIdeationTurnsLeft((left) => (left > 0 ? left - 1 : 0));');
+	});
+
+	test('a mid-brainstorm reaction is not prefixed into the saved brief', () => {
+		expect(source).toContain('brief: original && !brainstorming');
+	});
+
+	test('one round of questions, two picks are not a choice, technology grounded in the rules', () => {
+		expect(source).toContain('Ask ONE round of questions, not several: never re-ask something the user already answered');
+		expect(source).toContain("Picking two or more ('1 and 3 are the most realistic') is narrowing, NOT choosing");
+		expect(source).toContain('and wait for their yes');
+		expect(source).toContain('name a specific model, platform or service only when the event\'s rules from hackathon_details name it');
+		expect(source).toContain('call start_brainstorm once');
+	});
+});
