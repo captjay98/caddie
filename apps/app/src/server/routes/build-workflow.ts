@@ -15,6 +15,7 @@ import {
   type CoordinatorDeliver,
 } from "../workflow-dispatch.ts";
 import { projectExperience, approvePlan } from "../project-experience.ts";
+import { acceptProposal, dismissProposal, getProposal } from "../project-proposals.ts";
 import { ApprovePlanCommandSchema } from "@caddie/contracts";
 import * as v from "valibot";
 
@@ -133,6 +134,29 @@ export function createBuildWorkflowRouter(
     const deliver = deliverFor(c);
     if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
     return c.json(snapshot);
+  });
+  // Project proposals (Home chat card): Caddie proposes, the USER creates.
+  // GET reads the card state; accept creates the project + planning intake
+  // and dispatches it server-side; dismiss ("Keep refining") creates nothing.
+  router.get("/projects/:projectId/proposals/:proposalId", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    return c.json({ proposal: await getProposal(c.env.DB, scope, c.req.param("proposalId")) });
+  });
+  router.post("/projects/:projectId/proposals/:proposalId/accept", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const result = await acceptProposal(c.env.DB, scope, c.req.param("proposalId"));
+    // Deliver the new project's planning intake now, from the server, exactly
+    // like a plan approval does (the DO dedupes on the same key).
+    const deliver = deliverFor(c);
+    if (deliver) {
+      const target = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, result.project.id);
+      await dispatchPendingWorkflow(c.env.DB, target, deliver);
+    }
+    return c.json(result);
+  });
+  router.post("/projects/:projectId/proposals/:proposalId/dismiss", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    return c.json({ proposal: await dismissProposal(c.env.DB, scope, c.req.param("proposalId")) });
   });
   router.post("/projects/:projectId/workflow/stop", async (c) => {
     const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));

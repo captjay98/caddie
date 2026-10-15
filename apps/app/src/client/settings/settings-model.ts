@@ -35,8 +35,8 @@ export const SETTINGS_GROUPS: readonly { readonly label: string; readonly sectio
 		label: 'Account',
 		sections: [
 			{ id: 'accounts', label: 'Connected accounts', lede: 'The accounts you sign in with, and what Caddie can reach for you.' },
-			{ id: 'spending', label: 'Spending', lede: 'What Caddie has spent on your behalf, and your limit.' },
-			{ id: 'appearance', label: 'Appearance', lede: 'How Caddie looks on this device.' },
+			{ id: 'spending', label: 'Spending', lede: 'Your spending limit and what Caddie has spent on builds.' },
+			{ id: 'appearance', label: 'Appearance', lede: 'How Caddie looks on this device. Changes save as you pick them.' },
 		],
 	},
 ];
@@ -98,4 +98,38 @@ export function serviceStatus(health: {
 	if (signIn && health.sandbox.configured) return { ok: true, summary: 'Sign-in and project builds are working.' };
 	const broken = [!signIn ? 'sign-in' : null, !health.sandbox.configured ? 'project builds' : null].filter(Boolean).join(' and ');
 	return { ok: false, summary: `This server isn’t set up for ${broken} yet.` };
+}
+
+/**
+ * Money stored in MINOR units (cents) shown as money: 2000 USD → "$20.00".
+ * The currency's own decimal count is used (JPY has none), so the division is
+ * never hard-coded to 100. An unknown currency code falls back to "2000 XYZ".
+ */
+export function formatMinorUnits(minor: number, currency: string, locale = 'en-US'): string {
+	try {
+		const fmt = new Intl.NumberFormat(locale, { style: 'currency', currency: currency.toUpperCase() });
+		const digits = fmt.resolvedOptions().maximumFractionDigits ?? 2;
+		return fmt.format(minor / 10 ** digits);
+	} catch {
+		return `${minor.toLocaleString(locale)} ${currency.toUpperCase()}`;
+	}
+}
+
+/**
+ * When a routine next runs, in plain words in the viewer's time zone:
+ * "Today, 11:00", "Tomorrow, 09:30", or "Wed 22 Oct, 11:00". `timeZone` and
+ * `now` are injectable for tests; an unparseable instant returns null.
+ */
+export function formatNextRun(iso: string, now: Date = new Date(), timeZone?: string, locale = 'en-GB'): string | null {
+	const at = new Date(iso);
+	if (Number.isNaN(at.getTime())) return null;
+	const dayKey = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+	const time = new Intl.DateTimeFormat(locale, { timeZone, hour: '2-digit', minute: '2-digit', hour12: false }).format(at);
+	const today = dayKey(now);
+	const tomorrow = dayKey(new Date(now.getTime() + 86_400_000));
+	const target = dayKey(at);
+	if (target === today) return `Today, ${time}`;
+	if (target === tomorrow) return `Tomorrow, ${time}`;
+	const date = new Intl.DateTimeFormat(locale, { timeZone, weekday: 'short', day: 'numeric', month: 'short' }).format(at).replace(',', '');
+	return `${date}, ${time}`;
 }

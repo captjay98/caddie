@@ -402,6 +402,10 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 		await expect(page.getByTestId('memory-history')).toBeVisible();
 		await expect(page.getByTestId('memory-retracted')).toHaveCount(1);
 		await expect(page.getByTestId('memory-retracted')).toContainText('Prefers concise status reports');
+		// Settings presentation: plain rows (no box per fact), plain-language source, "Removed" history.
+		await expect(page.getByTestId('memory-history')).toContainText('Removed');
+		await expect(page.locator('[data-testid="memory-panel"] .inspector-row')).toHaveCount(0);
+		await expect(page.getByTestId('memory-kind').first()).toHaveText(/^(You confirmed this|You corrected this|Caddie’s guess — not confirmed yet) · (Personal|This project)$/);
 	});
 
 	test('memory correction: saving a correction replaces the active wording and retains the old version', async ({ page }) => {

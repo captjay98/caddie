@@ -81,6 +81,7 @@ export function scopedCoordinatorContext(
     continueProject: async (input) => (await resolve()).continueProject(input),
     continueNamedProject: async (input) => (await resolve()).continueNamedProject(input),
     startProject: async (input) => (await resolve()).startProject(input),
+    proposeProject: async (input) => (await resolve()).proposeProject(input),
     listStacks: async () => (await resolve()).listStacks(),
     discover: async (input) => (await resolve()).discover(input),
     research: async (input) => (await resolve()).research(input),

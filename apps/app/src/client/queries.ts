@@ -15,6 +15,7 @@ import type {
 	Workspace,
 } from '@caddie/contracts';
 import type { DiscoveryEvaluatedList } from './discovery/Results.tsx';
+import type { WorkflowPhase } from './workspace/project-status.ts';
 import { fetchJson, postJson } from './api.ts';
 
 /**
@@ -133,6 +134,26 @@ export function useRunBindings(actor: ActorScope, projectId: string | null) {
 				`/api/projects/${encodeURIComponent(projectId ?? '')}/run-bindings`,
 			),
 		enabled: actor.actorId !== null && projectId !== null,
+	});
+}
+
+/**
+ * The project's workflow phase, read from the same /workflow snapshot the
+ * in-chat ProjectWorkflow card polls. Exposed as just the phase so the project
+ * step bar can orient the user from REAL server state (planning → review →
+ * building → ready/blocked), never a client guess. Polls so the bar follows a
+ * live build.
+ */
+export function useWorkflowPhase(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['workflow-phase', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () =>
+			fetchJson<{ workflow: { phase: WorkflowPhase } | null }>(
+				`/api/projects/${encodeURIComponent(projectId ?? '')}/workflow`,
+			),
+		enabled: actor.actorId !== null && projectId !== null,
+		refetchInterval: 4000,
+		select: (data) => data.workflow?.phase ?? null,
 	});
 }
 

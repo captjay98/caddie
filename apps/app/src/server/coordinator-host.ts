@@ -12,6 +12,7 @@ import {
 } from "./runs.ts";
 import { createPlanDocRevision, listProjectsForActor } from "./projects.ts";
 import { requestApproval as requestApprovalOnServer } from "./approvals.ts";
+import { proposeProject as proposeProjectOnServer } from "./project-proposals.ts";
 import { actorContext, discoverForActor, hackathonDetailsForActor, researchForActor } from "./coordinator-context.ts";
 import { upsertProfile } from "./profiles.ts";
 import { proposeMemoryFact } from "./memory.ts";
@@ -417,6 +418,13 @@ export async function createCoordinatorContext(
         ...input,
         sourceConversationId: run.conversationId,
       }),
+    proposeProject: async (input) => {
+      const proposal = await proposeProjectOnServer(env.DB, scope, {
+        ...input,
+        sourceConversationId: run.conversationId,
+      });
+      return { id: proposal.id, homeProjectId: proposal.homeProjectId, status: proposal.status };
+    },
     workflowState: async () => {
       await ensureWorkflow(env.DB, scope);
       const state = await workflowSnapshot(env.DB, scope);

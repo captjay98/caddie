@@ -483,15 +483,15 @@ function AppearanceSection(): ReactElement {
 	const { theme, palette, setThemeChoice, convWidth } = useWorkspaceChrome();
 	return (
 		<section className="settings-section-body" data-testid="appearance-panel" id="appearance-panel">
-			<h2 className="settings-subhead">Theme</h2>
-			<p className="settings-row-detail">Saved on this device.</p>
 			<ThemePicker variant="panel" palette={palette} mode={theme} onChange={setThemeChoice} />
-			<h2 className="settings-subhead">Caddie panel</h2>
-			<div className="settings-save">
-				<button type="button" className="btn-ghost" data-testid="appearance-reset-width" onClick={convWidth.reset}>
-					Reset Caddie width
-				</button>
-				<span className="settings-row-detail">Back to 40% of the window.</span>
+			<div className="settings-group">
+				<h2 className="settings-subhead">Caddie panel</h2>
+				<div className="settings-save">
+					<button type="button" className="btn-ghost" data-testid="appearance-reset-width" onClick={convWidth.reset}>
+						Reset Caddie width
+					</button>
+					<span className="settings-row-detail">Back to 40% of the window.</span>
+				</div>
 			</div>
 		</section>
 	);

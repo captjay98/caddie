@@ -5,7 +5,7 @@ import type { ApprovalRecord, DecisionCard as DecisionCardType, Project } from '
 import { SignInPanel } from './auth.ts';
 import { Mascot } from '@caddie/ui/Mascot';
 import { failureKind, StatePanel } from './states.tsx';
-import { Icon } from './icons.tsx';
+import { formatMinorUnits, formatNextRun } from './settings/settings-model.ts';
 import { DiscoveryResults, type DiscoveryCandidateRecord } from './discovery/Results.tsx';
 import { JudgeScorecard } from './judge/Scorecard.tsx';
 import { SubmissionPackage } from './submission/Package.tsx';
@@ -934,7 +934,12 @@ function RunsBody(props: { projectId: string }): ReactElement {
 					<p className="kicker" data-tone="action">
 						BUILD
 					</p>
-					<h2 className="ev-title">{tab === 'files' ? 'Code — for developers' : 'Activity'}</h2>
+					<h2 className="ev-title">{tab === 'files' ? 'Code — for developers' : 'What Caddie has built'}</h2>
+					{tab === 'files' ? null : (
+						<p className="page-lede">
+							Every build Caddie runs, newest first. Approve a plan in the chat and the build starts here.
+						</p>
+					)}
 				</div>
 				<div className="tabs" role="tablist" aria-label="Build views" data-testid="build-tabs">
 					<button
@@ -944,7 +949,7 @@ function RunsBody(props: { projectId: string }): ReactElement {
 						data-testid="build-tab-activity"
 						onClick={() => void navigate({ to: '/runs', search: { project: props.projectId, tab: undefined } })}
 					>
-						Activity
+						Builds
 					</button>
 					<button
 						type="button"
@@ -1094,7 +1099,7 @@ export function SubmissionPage(): ReactElement {
 							{(projectId) => (
 								<>
 									<Link to="/evidence" className="btn-ghost" data-testid="submission-evidence-link" search={{ project: projectId }}>
-										Check — proof
+										See what Caddie checked
 									</Link>
 									<Link to="/judge" className="btn-ghost" data-testid="submission-judge-link" search={{ project: projectId }}>
 										What judges look for
@@ -1476,61 +1481,55 @@ export function AutomationsBody(): ReactElement {
 	if (!chrome.authenticated) return <SignInGate />;
 	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
 	if (chrome.buildProjects.length === 0) {
-		return <StatePanel kind="empty" title="No projects to automate yet" detail="Start a project first — automations are scheduled runs within a project." />;
+		return <StatePanel kind="empty" title="No routines yet" detail="Routines are checks Caddie runs for a project on a schedule — like watching a hackathon deadline. Start a project first." />;
 	}
-	if (!readDone) return <StatePanel kind="loading" title="Reading your automations…" />;
+	if (!readDone) return <StatePanel kind="loading" title="Reading your routines…" />;
 	return (
-		<ul className="project-list" data-testid="automations-list">
+		<div className="settings-section-body" data-testid="automations-list">
 			{chrome.buildProjects.map((project) => {
 				const row = perProject[project.id];
-				if (row?.state === 'error') {
-					return (
-						<li key={project.id} className="project-row card-surface" data-testid={`automations-error-${project.id}`}>
-							<div className="row-main">
-								<span className="row-title">{project.name}</span>
-								<div role="alert" className="row-error">
-									<b>Could not read its schedules.</b> {row.message}
-								</div>
-							</div>
-						</li>
-					);
-				}
 				const schedules = row?.state === 'ready' ? row.schedules : [];
 				return (
-					<li key={project.id} className="project-row card-surface" data-testid={`automations-project-${project.id}`}>
-						<div className="row-main">
+					<section key={project.id} className="settings-group" data-testid={row?.state === 'error' ? `automations-error-${project.id}` : `automations-project-${project.id}`}>
+						<div className="settings-group-head">
+							<h2 className="settings-subhead">{project.name}</h2>
 							<button
 								type="button"
-								className="row-title r-link"
+								className="r-link settings-group-link"
 								data-testid={`automations-open-${project.id}`}
 								onClick={() => chrome.goProjectTab('/schedules', { project: project.id })}
 							>
-								{project.name}
+								Manage
 							</button>
-							{schedules.length === 0 ? (
-								<span className="mono-id muted">no schedules yet</span>
-							) : (
-								<span className="mono-id" data-testid={`automations-count-${project.id}`}>
-									{schedules.length} scheduled check{schedules.length === 1 ? '' : 's'}
-								</span>
-							)}
 						</div>
-						{schedules.map((schedule) => (
-							<div className="row-main" key={schedule.id} data-testid={`automations-schedule-${schedule.id}`}>
-								<span className="row-title">{schedule.name}</span>
-								<span className="row-status" data-status={schedule.paused ? 'paused' : 'active'}>
-									{schedule.paused ? 'paused' : 'active'}
-								</span>
-								<span className="mono-id">
-									{schedule.cron} · {schedule.timezone}
-								</span>
-								<span className="mono-id">next {schedule.nextRunAt}</span>
-							</div>
-						))}
-					</li>
+						{row?.state === 'error' ? (
+							<p role="alert" className="form-error">Couldn’t read this project’s routines. {row.message}</p>
+						) : schedules.length === 0 ? (
+							<p className="settings-row-detail">No routines yet.</p>
+						) : (
+							<ul className="settings-rows" data-testid={`automations-count-${project.id}`} data-count={schedules.length}>
+								{schedules.map((schedule) => {
+									const next = formatNextRun(schedule.nextRunAt);
+									return (
+										<li className="settings-row" key={schedule.id} data-testid={`automations-schedule-${schedule.id}`}>
+											<div className="settings-row-main">
+												<span className="settings-row-title">{schedule.name}</span>
+												<span className="settings-row-detail">
+													{schedule.paused ? 'Paused' : next ? `Next run: ${next}` : 'Scheduled'}
+												</span>
+											</div>
+											<span className="status-pill" data-status={schedule.paused ? 'planned' : 'handled'}>
+												{schedule.paused ? 'Paused' : 'On'}
+											</span>
+										</li>
+									);
+								})}
+							</ul>
+						)}
+					</section>
 				);
 			})}
-		</ul>
+		</div>
 	);
 }
 
@@ -1579,14 +1578,14 @@ export function UsageBody(): ReactElement {
 	if (!chrome.authenticated) return <SignInGate />;
 	if (usage.isPending) {
 		return (
-			<section className="card-surface settings-panel" data-testid="usage-panel">
-				<StatePanel kind="loading" title="Reading your budget…" />
+			<section className="settings-section-body" data-testid="usage-panel">
+				<StatePanel kind="loading" title="Reading your spending…" />
 			</section>
 		);
 	}
 	if (usage.error) {
 		return (
-			<section className="card-surface settings-panel" data-testid="usage-panel">
+			<section className="settings-section-body" data-testid="usage-panel">
 				<StatePanel
 					kind={failureKind(usage.error)}
 					detail={usage.error instanceof Error ? usage.error.message : undefined}
@@ -1597,65 +1596,51 @@ export function UsageBody(): ReactElement {
 	}
 
 	const data = usage.data;
-	const fmt = (n: number, currency?: string) => `${n.toLocaleString()}${currency ? ` ${currency}` : ''}`;
+	const currency = data?.payer?.currency ?? 'USD';
+	const money = (minor: number) => formatMinorUnits(minor, currency);
 
 	return (
-		<section className="card-surface settings-panel" data-testid="usage-panel">
-			<div className="inspector-row" data-testid="usage-budget-state">
-				<div className="row-main">
-					<span className="row-title">Budget</span>
-					{data?.unavailable ? (
-						<span className="status-pill" data-status="planned">
-							not configured
+		<section className="settings-section-body" data-testid="usage-panel">
+			<ul className="settings-rows">
+				<li className="settings-row" data-testid="usage-budget-state">
+					<div className="settings-row-main">
+						<span className="settings-row-title">Spending limit</span>
+						<span className="settings-row-detail">
+							{data?.unavailable
+								? 'Spending isn’t tracked on this server yet, so nothing is charged here.'
+								: data?.payer
+									? 'Caddie checks this before every build and stops before going over it.'
+									: 'You don’t have a limit yet. One is set up the first time a build needs it.'}
 						</span>
-					) : data?.payer ? (
-						<span className="status-pill" data-status="handled">
-							configured
-						</span>
-					) : (
-						<span className="status-pill" data-status="planned">
-							no budget yet
-						</span>
-					)}
-				</div>
-				<div className="row-details">
-					{data?.unavailable ? (
-						<>This deployment has no budget tracking configured — nothing is spent or tracked here yet.</>
-					) : data?.payer ? (
-						<>
-							Run budget limit: <b>{fmt(data.payer.limitMinorUnits, data.payer.currency)}</b> (minor
-							units, enforced by the server before every run).
-						</>
-					) : (
-						<>No budget is configured for your account yet. One is set up the first time a run needs one.</>
-					)}
-				</div>
-			</div>
-			{data && !data.unavailable ? (
-				<div className="row-list">
-					<div className="inspector-row" data-testid="usage-reserved">
-						<div className="row-main">
-							<span className="row-title">Currently reserved</span>
-							<span className="row-status">{fmt(data.totals.reservedMinorUnits, data.payer?.currency)}</span>
-						</div>
-						<div className="row-details">Held by runs in progress; released or settled when they finish.</div>
 					</div>
-					<div className="inspector-row" data-testid="usage-settled">
-						<div className="row-main">
-							<span className="row-title">Settled so far</span>
-							<span className="row-status">{fmt(data.totals.settledMinorUnits, data.payer?.currency)}</span>
-						</div>
-						<div className="row-details">
-							Actual billed usage across {data.totals.reservations.toLocaleString()} reservation
-							{data.totals.reservations === 1 ? '' : 's'}.
-						</div>
-					</div>
-				</div>
-			) : null}
-			<p className="state-detail">
-				<Icon name="info" title="note" /> Numbers come straight from the budget ledger the server enforces —
-				nothing here is estimated. Per-run detail lives in a project's Build → Activity.
-			</p>
+					{data?.payer && !data.unavailable ? (
+						<span className="settings-amount" data-testid="usage-limit">{money(data.payer.limitMinorUnits)}</span>
+					) : (
+						<span className="status-pill" data-status="planned">{data?.unavailable ? 'Not tracked' : 'Not set'}</span>
+					)}
+				</li>
+				{data && !data.unavailable ? (
+					<>
+						<li className="settings-row" data-testid="usage-reserved">
+							<div className="settings-row-main">
+								<span className="settings-row-title">Held for builds in progress</span>
+								<span className="settings-row-detail">Released or charged when each build finishes.</span>
+							</div>
+							<span className="settings-amount">{money(data.totals.reservedMinorUnits)}</span>
+						</li>
+						<li className="settings-row" data-testid="usage-settled">
+							<div className="settings-row-main">
+								<span className="settings-row-title">Spent so far</span>
+								<span className="settings-row-detail">
+									Across {data.totals.reservations.toLocaleString()} build{data.totals.reservations === 1 ? '' : 's'}.
+								</span>
+							</div>
+							<span className="settings-amount">{money(data.totals.settledMinorUnits)}</span>
+						</li>
+					</>
+				) : null}
+			</ul>
+			<p className="settings-row-detail">These are the exact amounts the server checks — nothing here is an estimate. Each project’s build activity shows what a single build cost.</p>
 		</section>
 	);
 }

@@ -10,6 +10,7 @@ import { HackathonResultsCard, HackathonDetailProvider } from './HackathonResult
 import { ContestDetailPane } from '../discovery/ContestDetailPane.tsx';
 import { metaParts } from './hackathon-format.ts';
 import { ApprovalCardData, ApprovalCardView } from './ApprovalCard.tsx';
+import { ProjectProposalCard, ProjectProposalData } from './ProjectProposalCard.tsx';
 import { GuidedStepsCardData, GuidedStepsCardView } from './GuidedStepsCard.tsx';
 import { Markdown } from '@caddie/ui/Markdown';
 import { StatePanel } from '../states.tsx';
@@ -126,6 +127,7 @@ const TOOL_ACTION_LABELS: Record<string, { working: string; done: string }> = {
 	research: { working: 'Researching the web', done: 'Researched the web' },
 	hackathon_details: { working: 'Looking up that hackathon', done: 'Looked up that hackathon' },
 	create_project: { working: 'Setting up your project', done: 'Set up your project' },
+	propose_project: { working: 'Writing up a project idea', done: 'Wrote up a project idea' },
 	continue_project: { working: 'Updating your project', done: 'Updated your project' },
 	update_profile: { working: 'Noting your preferences', done: 'Noted your preferences' },
 	remember: { working: 'Remembering that', done: 'Remembered that' },
@@ -329,6 +331,19 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 			);
 		}
 		return <HackathonResultsCard card={parsed.output} />;
+	}
+	if (part.type === 'data-projectProposal') {
+		// Caddie proposes, the user creates: the card's identity is the SERVER
+		// proposal id; only its "Start this project" button creates anything.
+		const parsed = safeParse(ProjectProposalData, part.data);
+		if (!parsed.success) {
+			return (
+				<p className="tool-banner" data-state="output-error" data-testid="proposal-payload-fault">
+					[card] payload did not match the project proposal contract — not rendered as an action
+				</p>
+			);
+		}
+		return <ProjectProposalCard data={parsed.output} />;
 	}
 	if (part.type === 'data-approvalCard') {
 		// B06: the in-chat "OK to spend?" card. Its identity is the SERVER

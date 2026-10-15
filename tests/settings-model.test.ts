@@ -50,3 +50,24 @@ describe('settings model', () => {
 		expect(serviceStatus({ auth: { providers: { google: true, github: true } }, sandbox: { configured: false } }).summary).toContain('project builds');
 	});
 });
+
+describe('settings money and times', () => {
+	test('minor units become money in the currency’s own decimals (the old page showed cents as dollars)', async () => {
+		const { formatMinorUnits } = await import('../apps/app/src/client/settings/settings-model.ts');
+		expect(formatMinorUnits(2000, 'usd')).toBe('$20.00');
+		expect(formatMinorUnits(345, 'USD')).toBe('$3.45');
+		expect(formatMinorUnits(100000, 'USD')).toBe('$1,000.00');
+		expect(formatMinorUnits(0, 'USD')).toBe('$0.00');
+		expect(formatMinorUnits(500, 'JPY')).toBe('¥500');
+		expect(formatMinorUnits(2000, 'NOTACODE')).toBe('2,000 NOTACODE');
+	});
+
+	test('next run reads as Today / Tomorrow / a short date, in the given time zone', async () => {
+		const { formatNextRun } = await import('../apps/app/src/client/settings/settings-model.ts');
+		const now = new Date('2026-10-15T08:00:00.000Z');
+		expect(formatNextRun('2026-10-15T10:00:00.000Z', now, 'Africa/Lagos')).toBe('Today, 11:00');
+		expect(formatNextRun('2026-10-16T08:30:00.000Z', now, 'Africa/Lagos')).toBe('Tomorrow, 09:30');
+		expect(formatNextRun('2026-10-22T10:00:00.000Z', now, 'Africa/Lagos')).toBe('Thu 22 Oct, 11:00');
+		expect(formatNextRun('not a date', now)).toBeNull();
+	});
+});

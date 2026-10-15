@@ -1,8 +1,11 @@
 import { Link } from '@tanstack/react-router';
+import { useMemo } from 'react';
 import type { ReactElement } from 'react';
 import { Icon } from '../icons.tsx';
 import { WORDS } from '../copy.ts';
 import { useWorkspaceChrome } from './Chrome.tsx';
+import { useWorkflowPhase } from '../queries.ts';
+import { workflowSteps } from './project-status.ts';
 
 /**
  * Project header + step bar (Caddie v2, HANDOFF §3.7) — replaces the old tab
@@ -53,10 +56,22 @@ export function ProjectTabs(props: {
 	const lastLabel = isPersonal ? WORDS.share : WORDS.submit;
 	const deadline = props.deadline ?? null;
 
+	// Self-source the step statuses from the REAL workflow phase when the page
+	// did not pass its own. A page with richer data (e.g. Check's readiness
+	// count) overrides by passing `steps` explicitly; both are real server
+	// state, never a client guess.
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const phase = useWorkflowPhase(actor, project?.id ?? null);
+	const derivedSteps = useMemo(
+		() => (project ? workflowSteps(phase.data ?? null, { personal: isPersonal }) : undefined),
+		[project, phase.data, isPersonal],
+	);
+	const steps = props.steps ?? derivedSteps;
+
 	const stepsNav = (
 		<nav className="project-steps" aria-label="Project steps" data-testid="project-tabs">
 			{STEPS.map((step) => {
-				const status = props.steps?.[step.id];
+				const status = steps?.[step.id];
 				const isCurrent = props.current === step.id;
 				const label = step.id === 'submission' ? lastLabel : step.label;
 				const stepClass = [
@@ -134,6 +149,17 @@ export function ProjectTabs(props: {
 				</span>
 			</div>
 			{stepsNav}
+			{/* The one line that sets the mental model (§3.7, redesign direction):
+			    the chat is the steering wheel; these steps are the dashboard. A
+			    nontechnical user otherwise reads four tabs as four things THEY
+			    must operate. Shown once, in the header, on every project page. */}
+			<p className="project-head-model" data-testid="project-head-model">
+				<Icon name="chat" title="" />
+				<span>
+					<strong>Talk to Caddie to move things forward.</strong> These steps show you where your
+					project is — Caddie does the work in the chat.
+				</span>
+			</p>
 		</header>
 	);
 }

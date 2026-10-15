@@ -628,8 +628,11 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		// Usage reads the real budget read model (audit F11/S40): the payer
 		// limit plus reserved/settled totals — no fabricated numbers.
 		await expect(page.getByTestId('usage-panel')).toBeVisible();
-		await expect(page.getByTestId('usage-budget-state')).toContainText('configured');
-		await expect(page.getByTestId('usage-settled')).toContainText('2,500 USD');
+		// Amounts are minor units (cents): 100000 → $1,000.00, 2500 → $25.00 —
+		// never the raw number shown as dollars.
+		await expect(page.getByTestId('usage-limit')).toHaveText('$1,000.00');
+		await expect(page.getByTestId('usage-settled')).toContainText('$25.00');
+		await expect(page.getByTestId('usage-settled')).not.toContainText('2,500');
 		await context.close();
 	});
 });

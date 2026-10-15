@@ -30,6 +30,7 @@ import {
   HACKATHON_DETAILS_DESCRIPTION,
   HACKATHON_FOLLOWUPS_INSTRUCTION,
   HACKATHON_HONESTY_INSTRUCTION,
+  HACKATHON_IDEATION_INSTRUCTION,
   RESEARCH_DESCRIPTION,
 } from "./hackathon-prompts.ts";
 import { findModelRouteForRole } from "./providers.ts";
@@ -63,6 +64,16 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     brief: string;
     operationKey: string;
   }) => Promise<{ project: { id: string; name: string }; workflow: unknown }>;
+  /** Store a project PROPOSAL for a card in this chat. Creates no project — the user's click does. */
+  proposeProject: (input: {
+    name: string;
+    idea: string;
+    brief: string;
+    hackathonTitle?: string;
+    hackathonUrl?: string;
+    track?: string;
+    firstStep?: string;
+  }) => Promise<{ id: string; homeProjectId: string; status: string }>;
   listStacks: () => Promise<
     readonly { id: string; status: string; note?: string }[]
   >;
@@ -137,6 +148,12 @@ export function Coordinator({ id }: AgentProps) {
   );
   const writeProject = useDataWriter("projectWorkflow", {
     schema: v.object({ projectId: v.string(), name: v.string() }),
+  });
+  // The project PROPOSAL card: carries only the server proposal id; the card
+  // reads its content and state from the server, and only the user's click on
+  // "Start this project" creates anything.
+  const writeProposal = useDataWriter("projectProposal", {
+    schema: v.object({ proposalId: v.string(), homeProjectId: v.string() }),
   });
   // Hackathon results render as a structured card (not model-authored markdown)
   // so the ranked candidates can't be invented or overflow. Emitted from the
@@ -286,35 +303,35 @@ export function Coordinator({ id }: AgentProps) {
     },
   });
   useTool({
-    name: "create_project",
+    name: "propose_project",
     description:
-      "Create a project with the full user request and start planning in Caddie. The chat shows its plan, review controls, build status and preview; no manual handoff.",
+      "Propose ONE new project as a card in this chat, once the user has agreed on a specific idea. This creates NOTHING: the card shows the name, the idea, the hackathon and track and what to build first, and the project is created only if the user presses its \"Start this project\" button (\"Keep refining\" creates nothing). Never call it while you are still brainstorming or narrowing down, never call it twice for the same idea, and never say a project was created or started.",
     input: v.object({
       name: v.pipe(v.string(), v.minLength(1), v.maxLength(100)),
-      description: v.optional(v.string()),
+      idea: v.pipe(v.string(), v.minLength(1), v.maxLength(600)),
       brief: v.pipe(v.string(), v.minLength(1), v.maxLength(16000)),
+      hackathonTitle: v.optional(v.string()),
+      hackathonUrl: v.optional(v.string()),
+      track: v.optional(v.string()),
+      firstStep: v.optional(v.string()),
     }),
     async run(ctx) {
       const authority = await resolve();
       const original =
         delivery.kind === "user" ? delivery.body : lastUserRequest;
-      const created = await authority.startProject({
+      const proposal = await authority.proposeProject({
         ...ctx.data,
         brief: original
           ? `${original}\n\nProject brief: ${ctx.data.brief}`
           : ctx.data.brief,
-        operationKey: `${authority.runId}:${ctx.toolCallId}`,
       });
-      writeProject({
-        projectId: created.project.id,
-        name: created.project.name,
-      });
+      writeProposal({ proposalId: proposal.id, homeProjectId: proposal.homeProjectId });
       return {
         output: JSON.stringify({
-          projectId: created.project.id,
-          name: created.project.name,
-          status: "planning",
-          next: "Planning is queued for the separate project coordinator. The project card continues that work and shows the plan here. Your Home role is to acknowledge the handoff briefly; do not attempt project planning here, claim missing specialist tools, or ask the user to navigate or resend their request.",
+          proposalId: proposal.id,
+          shown: "project_proposal_card",
+          created: false,
+          next: "The proposal card is shown. NOTHING has been created: the user decides with the card's \"Start this project\" or \"Keep refining\" button. Do not say the project was created, started or queued. Write at most one short sentence (e.g. they can start it from the card, or tell you what to change).",
         }),
       };
     },
@@ -407,15 +424,16 @@ export function Coordinator({ id }: AgentProps) {
   useInstruction(context.actorContext);
   if (context.homeOverview) {
     useInstruction(context.homeOverview);
-    useInstruction("This is Home coordination. New and existing project requests are handed to their project coordinator through create_project or continue_project and their in-chat card. After handoff acknowledge it briefly and settle; project specialists and verification run in the project conversation. Their absence from Home is intentional, not a blocker. Do not expose internal ids/tool names or contradict the server-backed project card with speculative progress or capability claims.");
+    useInstruction("This is Home coordination. Existing project requests are handed to their project coordinator through continue_project and its in-chat card. A NEW project is only ever proposed with propose_project, as a card the user starts themselves. After handoff acknowledge it briefly and settle; project specialists and verification run in the project conversation. Their absence from Home is intentional, not a blocker. Do not expose internal ids/tool names or contradict the server-backed project card with speculative progress or capability claims.");
   }
   useInstruction(
-    `You are Caddie, a helpful assistant for solo builders. Priorities: find suitable hackathons, plan and build new projects, then continue existing projects. Speak in clear user-facing language, never raw internal tool names or opaque ids. The supported proving stack is React + Bun + Hono; the other stacks remain planned. When the user refers to an existing project call continue_project with its actual id from context; never create a duplicate or tell them to navigate first. For a new app call create_project with a faithful full brief, choose a sensible name when none is provided, and let its card continue the work here. Never ask the user to open another page or repeat the request. Profile facts supplied by the host are known; never pretend this is anonymous. Use find_hackathons for actual hackathon results — call it directly for any "find/suggest a hackathon" request, without first asking the user what they like (their saved profile already drives the ranking); explicitly acknowledge when fresh official rules/listings are unavailable. A planning step or greeting is not a completed build. Plan approval does not authorize deployment, purchases, merge, or destructive data changes. If blocked explain the specific prerequisite and stop. A ready workflow means build checks passed, not proof of every real-world outcome.`,
+    `You are Caddie, a helpful assistant for solo builders. Priorities: find suitable hackathons, plan and build new projects, then continue existing projects. Speak in clear user-facing language, never raw internal tool names or opaque ids. The supported proving stack is React + Bun + Hono; the other stacks remain planned. When the user refers to an existing project call continue_project with its actual id from context; never create a duplicate or tell them to navigate first. For a new app, first make sure the user has agreed on a specific idea, then call propose_project with a faithful full brief and a sensible name; the card lets them start it. Nothing is created until they press Start this project. Never ask the user to open another page or repeat the request. Profile facts supplied by the host are known; never pretend this is anonymous. Use find_hackathons for actual hackathon results — call it directly for any "find/suggest a hackathon" request, without first asking the user what they like (their saved profile already drives the ranking); explicitly acknowledge when fresh official rules/listings are unavailable. A planning step or greeting is not a completed build. Plan approval does not authorize deployment, purchases, merge, or destructive data changes. If blocked explain the specific prerequisite and stop. A ready workflow means build checks passed, not proof of every real-world outcome.`,
   );
   useInstruction("Caddie serves nontechnical people and technical people short on time. Own setup, task handoffs, tests and repairs. The user describes the outcome, reviews a readable plan, and tries the app. Ask only for product choices or missing information that changes the result; choose sensible defaults for implementation details. Keep tool names, run ids, revision hashes and debugging steps out of normal replies. Explain progress briefly in terms of the app, and show technical evidence only when requested. Never ask the user to configure the test environment, move between workspaces or pass instructions to specialists. A genuine blocker needs a plain explanation of what is saved, what is incomplete and the specific decision needed. Do not imply the user must repair Caddie. Never describe a generated app as ready until the host-backed workflow publishes its preview.");
   useInstruction("Be smart, proactive and personal, but never presumptuous. Lead with what you already know from the host-supplied profile and confirmed memory — default the stack from a stated preference, greet by what you know, and ask only for facts that are genuinely missing and matter to the current choice. When the user tells you something durable about themselves (a skill, a tool preference, how they work), call update_profile or remember so you keep it — but a memory is a PROPOSAL: tell them you noted it and that it sticks once they confirm; never present a proposed or inferred fact as already saved. You may call inspect_repository to see what the user has already built and offer an observation (\"looks like you work in TypeScript + React — want me to remember that?\"); it records nothing on its own. Never record anything resembling spending or deployment permission as a preference or memory — those remain separate explicit approvals.");
   useInstruction(HACKATHON_HONESTY_INSTRUCTION);
   useInstruction(HACKATHON_FOLLOWUPS_INSTRUCTION);
+  useInstruction(HACKATHON_IDEATION_INSTRUCTION);
   if (context.homeOverview) {
     useInstruction("Your final role is Home intake and handoff. You MUST use continue_project for requested work on a named existing project, passing the full request to its actual id in Home context. That project's coordinator has frontend, QA and the sandbox. You do not execute specialist work here and MUST NOT report those tools as unavailable. If the user asks for technical repairs, forward those requirements intact to the project coordinator; do not evaluate local Home tools as project capabilities.");
   } else {

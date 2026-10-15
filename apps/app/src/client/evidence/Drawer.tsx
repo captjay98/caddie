@@ -163,25 +163,25 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 					<p className="kicker" data-tone="action">
 						PROVE
 					</p>
-					<h2 className="ev-title">Proof</h2>
+					<h2 className="ev-title">What Caddie saw</h2>
 					<p className="page-lede">
-						Nothing here is asserted without a snapshot behind it — every claim points at an immutable
-						source with its SHA-256, and a refused fetch is listed with its stored reason, never as an
-						absent source.
+						Everything Caddie claims about this hackathon or your project, it saw somewhere — and it
+						kept a copy. Each line below links back to exactly what it read, so nothing here is a guess.
+						If a page refused to load, you'll see that too, with the reason.
 					</p>
 				</div>
 				<span className="count">
-					{sourceList.length} sources · {activeClaims.length} claims · {conflicts.length} retained conflicts
+					{sourceList.length} pages read · {activeClaims.length} things found · {conflicts.length} still unsettled
 				</span>
 			</div>
 
 			<section className="card-surface settings-panel" data-testid="evidence-conflicts-section">
-				<h3 className="ev-head">Retained conflicts — both sides, never silently resolved</h3>
+				<h3 className="ev-head">Still unsettled — Caddie found two answers and won't pick one for you</h3>
 				<SectionStates
 					pending={surveys.isPending}
 					empty={conflicts.length === 0 && winners.length === 0}
-					emptyTitle="No readings on record"
-					emptyDetail="A reading appears when a run reads a source: the fetch is stored as a snapshot and the reading becomes a claim pointing at it."
+					emptyTitle="Nothing read yet"
+					emptyDetail="As soon as Caddie reads a hackathon's rules page or your repo, what it saw shows up here — with a link back to the exact page."
 					error={surveys.error}
 					onRetry={() => retry('surveys')}
 				>
@@ -223,12 +223,12 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 			</section>
 
 			<section className="card-surface settings-panel" data-testid="evidence-claims-section">
-				<h3 className="ev-head">Claims — the ids the store uses, in full</h3>
+				<h3 className="ev-head">What Caddie found</h3>
 				<SectionStates
 					pending={claims.isPending}
 					empty={claimList.length === 0}
-					emptyTitle="No claims extracted yet"
-					emptyDetail="A claim appears when a run reads a registered source. Nothing is guessed."
+					emptyTitle="Nothing found yet"
+					emptyDetail="When Caddie reads a page, the facts it picks up — a deadline, who can enter, what to submit — land here. It never fills this in from memory."
 					error={claims.error}
 					onRetry={() => retry('claims')}
 				>
@@ -245,7 +245,7 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 						{historyClaims.length > 0 ? (
 							<details className="ev-history" data-testid="evidence-history">
 								<summary className="kicker">
-									SUPERSEDED HISTORY ({historyClaims.length}) — kept, never deleted
+									EARLIER READINGS ({historyClaims.length}) — replaced by a newer read, kept so you can see what changed
 								</summary>
 								<div className="row-list">
 									{historyClaims.map((claim) => (
@@ -259,12 +259,12 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 			</section>
 
 			<section className="card-surface settings-panel" data-testid="evidence-sources-section">
-				<h3 className="ev-head">Sources — freshness stated, never implied</h3>
+				<h3 className="ev-head">Pages Caddie read — and whether they still open</h3>
 				<SectionStates
 					pending={sources.isPending}
 					empty={sourceList.length === 0}
-					emptyTitle="No sources registered"
-					emptyDetail="A source can be registered before any run needs it — including one that will be refused (the refusal is listed with its reason)."
+					emptyTitle="No pages yet"
+					emptyDetail="The pages Caddie checks — a rules page, your repo — show up here, each with whether it opened cleanly or refused to load."
 					error={sources.error}
 					onRetry={() => retry('sources')}
 				>
@@ -315,7 +315,9 @@ function ClaimRow({ claim }: { claim: EvidenceClaim }): ReactElement {
 				“{claim.quote}”
 				{claim.locator ? <em> — {claim.locator}</em> : null}
 			</blockquote>
-			<div className="row-details">
+			<details className="ev-devdetail">
+				<summary className="kicker">For developers — exact snapshot &amp; hash</summary>
+				<div className="row-details">
 				<span className="ev-field">
 					<span className="fk">claim id</span>
 					<Ident value={claim.id} label="claim id" />
@@ -350,6 +352,7 @@ function ClaimRow({ claim }: { claim: EvidenceClaim }): ReactElement {
 				) : null}
 				<span className="mono-id">{claim.canonicalUrl}</span>
 			</div>
+			</details>
 		</div>
 	);
 }

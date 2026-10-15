@@ -46,7 +46,7 @@ const EMPTY_PLACEHOLDER = /^[\s•\-–—*·]+$/;
  * tool/deliberation reference) so ordinary prose using "we" survives.
  */
 /** Internal tool ids / machinery words whose mention in a planning sentence marks it as scratchpad. */
-const MACHINERY = /\b(find_hackathons|create_project|continue_project|update_profile|inspect_repository|list_stacks|verify_build|the research tool|the tool|tool call|function call|call the|invoke the|API call|json|schema|limit \d|maxResults|query (?:maybe|=|")|candidate ids?|the user (?:wants|asked|explicitly)|we (?:should|must|need to|could|can|will|'ll)|let's|i (?:should|'ll|will|need to) (?:call|use|invoke|search|fetch))\b/i;
+const MACHINERY = /\b(find_hackathons|create_project|propose_project|hackathon_details|continue_project|update_profile|inspect_repository|list_stacks|verify_build|the research tool|the tool|tool call|function call|call the|invoke the|API call|json|schema|limit \d|maxResults|query (?:maybe|=|")|candidate ids?|the user (?:wants|asked|explicitly)|we (?:should|must|need to|could|can|will|'ll)|let's|i (?:should|'ll|will|need to) (?:call|use|invoke|search|fetch))\b/i;
 /** A self-addressed deliberation stance — hedged planning language, not an answer. */
 const DELIBERATION = /\b(we (?:need|should|must|could|can|will|'ll|'ve|have to)|let's|i (?:should|'ll|will|need to|can|could)|maybe|probably|perhaps|let me (?:call|think|check|use)|first,? we|then we|we'll (?:call|get|use|parse)|better to|we got|we can say|the user (?:wants|asked|explicitly|needs|said))\b/i;
 

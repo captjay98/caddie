@@ -215,7 +215,7 @@ test.describe('page states with the character (U03)', () => {
 		await expect(page.getByTestId('project-head-name')).toContainText('Pit wall');
 		await expect(page.getByTestId('project-tabs')).toBeVisible();
 		// The page's own title stays real; only the content below shows the error.
-		await expect(page.getByRole('heading', { name: 'Activity' })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'What Caddie has built' })).toBeVisible();
 		await expect(page.getByTestId('state-error').first()).toBeVisible();
 		await context.close();
 	});
