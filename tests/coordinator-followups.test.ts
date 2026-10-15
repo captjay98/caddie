@@ -101,7 +101,9 @@ describe('coordinator ideation rule', () => {
  */
 describe('coordinator ideation model + tightened rules', () => {
 	test('the coordinator picks its model per turn from the ideation window, Home only', () => {
-		expect(source).toContain('coordinatorModelRole({ isHome, ideationTurnsLeft })');
+		expect(source).toContain('coordinatorModelRole({ isHome, ideationTurnsLeft, hasImage })');
+		// an attached image routes the turn to the vision model
+		expect(source).toContain('(delivery.attachments ?? []).some((part) => part.type === "image")');
 		expect(source).toContain('usePersistentState("ideation-turns-left", 0)');
 		// a project conversation (homeOverview null) or an uninitialised one is never "home"
 		expect(source).toContain('const isHome = snapshot !== null && snapshot.homeOverview !== null;');

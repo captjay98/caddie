@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useFlueAgent } from '@flue/react';
 import { createFlueClient } from '@flue/sdk';
-import type { RunBindingRecord } from '@caddie/contracts';
+import type { InputAttachment, RunBindingRecord } from '@caddie/contracts';
 import { postJson } from './api.ts';
+import { toDeliveredImages } from './conversation/image-attachments.ts';
 import { useRunBindings, type ActorScope } from './queries.ts';
 import { standbySource, type ChannelSource } from './conversation/channel-store.ts';
 
@@ -39,7 +40,7 @@ export interface CoordinatorTransport {
 	 * send is admitted (the run/answer streams separately through `source`);
 	 * rejects on transport failure — the draft stays and retries.
 	 */
-	send: (text: string, idempotencyKey: string) => Promise<void>;
+	send: (text: string, idempotencyKey: string, opts?: { attachments?: readonly InputAttachment[] }) => Promise<void>;
 }
 
 export function useCoordinatorTransport(
@@ -62,7 +63,14 @@ export function useCoordinatorTransport(
 	});
 
 	const send = useCallback(
-		async (text: string, idempotencyKey: string): Promise<void> => {
+		async (
+			text: string,
+			idempotencyKey: string,
+			opts?: { attachments?: readonly InputAttachment[] },
+		): Promise<void> => {
+			// Images ride as inline Flue image parts so the coordinator can route
+			// the turn to the vision model; text files are not delivered yet.
+			const { images } = await toDeliveredImages(opts?.attachments ?? []);
 			let active = run;
 			if (!active) {
 				if (!projectId || actor.actorId === null) {
@@ -82,10 +90,16 @@ export function useCoordinatorTransport(
 				const client = createFlueClient({
 					url: `/agents/coordinator/${encodeURIComponent(active.conversationId)}`,
 				});
-				await client.send({ message: { kind: 'user', body: text }, idempotencyKey });
+				await client.send({
+					message: { kind: 'user', body: text, ...(images.length ? { attachments: images.map((image) => ({ ...image })) } : {}) },
+					idempotencyKey,
+				});
 				return;
 			}
-			await agent.sendMessage(text, { idempotencyKey });
+			await agent.sendMessage(text, {
+				idempotencyKey,
+				...(images.length ? { images: images.map((image) => ({ ...image })) } : {}),
+			});
 		},
 		[run, projectId, actor.actorId, agent],
 	);

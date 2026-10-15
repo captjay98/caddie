@@ -184,7 +184,11 @@ export const IDEATION_TURN_WINDOW = 12;
  * turns reserve no budget today. When chat budgets are wired, ideation turns
  * must be priced at the ideation route, not the binding's.
  */
-export function coordinatorModelRole(input: { isHome: boolean; ideationTurnsLeft: number }): ModelRole {
+export function coordinatorModelRole(input: { isHome: boolean; ideationTurnsLeft: number; hasImage?: boolean }): ModelRole {
+	// A turn that carries an image must reach a model that can see it — a
+	// text-only route would drop or reject the image. Wins in any conversation:
+	// project specialists declare their own model, so this never changes a build.
+	if (input.hasImage) return 'vision';
 	return input.isHome && input.ideationTurnsLeft > 0 ? 'ideation' : 'chat';
 }
 

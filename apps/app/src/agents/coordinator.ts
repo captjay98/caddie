@@ -142,13 +142,17 @@ export function Coordinator({ id }: AgentProps) {
   // Project conversations never switch: their specialists inherit this model.
   const [ideationTurnsLeft, setIdeationTurnsLeft] = usePersistentState("ideation-turns-left", 0);
   const isHome = snapshot !== null && snapshot.homeOverview !== null;
-  useModel(findModelRouteForRole(coordinatorModelRole({ isHome, ideationTurnsLeft })).specifier);
+  const delivery = useDelivery();
+  // An attached image routes THIS submission to the vision model (Flue reads
+  // the model when the submission starts, so the image turn itself switches).
+  const hasImage =
+    delivery.kind === "user" && (delivery.attachments ?? []).some((part) => part.type === "image");
+  useModel(findModelRouteForRole(coordinatorModelRole({ isHome, ideationTurnsLeft, hasImage })).specifier);
   const { context, resolve } = scopedCoordinatorContext(env, id, snapshot);
   const [lastUserRequest, setLastUserRequest] = usePersistentState(
     "last-user-request",
     "",
   );
-  const delivery = useDelivery();
   const [homeDeliverySequence, setHomeDeliverySequence] = usePersistentState("home-delivery-sequence", 0);
   const [continuations, setContinuations] = usePersistentState(
     "build-continuations",

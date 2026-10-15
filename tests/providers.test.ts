@@ -5,6 +5,7 @@ import {
 	findModelRoute,
 	findModelRouteForRole,
 	coordinatorModelRole,
+	routeAcceptsImage,
 	IDEATION_TURN_WINDOW,
 	type ModelRole,
 } from '../apps/app/src/agents/providers.ts';
@@ -71,5 +72,15 @@ describe('model registry (providers.ts)', () => {
 		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 12 })).toBe('chat');
 		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0 })).toBe('chat');
 		expect(IDEATION_TURN_WINDOW).toBeGreaterThan(0);
+	});
+
+	test('coordinatorModelRole: an image turn routes to the vision model in any conversation', () => {
+		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 0, hasImage: true })).toBe('vision');
+		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 5, hasImage: true })).toBe('vision');
+		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0, hasImage: true })).toBe('vision');
+		expect(findModelRouteForRole('vision').id).toBe('qwen-vl');
+		expect(routeAcceptsImage(findModelRouteForRole('vision').id)).toBe(true);
+		// no image: unchanged
+		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0, hasImage: false })).toBe('chat');
 	});
 });
