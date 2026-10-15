@@ -473,3 +473,33 @@ describe('find_hackathons does not wait for the digest pre-warm', () => {
 		} finally { sqlite.close(); }
 	});
 });
+
+describe('interest marker never reaches discovery search', () => {
+	test('"Open to anything" is not a search term or match; compound picks are split into terms', async () => {
+		const { db, sqlite, scope } = await world();
+		try {
+			await upsertProfile(db, 'alice', { country: 'NG', freeTextInterests: ['Open to anything', 'AI & agents'] });
+			await seedCandidates(db, [
+				{ source: 'catalog', url: 'https://events.example/agents', title: 'Agents hack', summary: 'Build AI agents online' },
+				{ source: 'catalog', url: 'https://events.example/open', title: 'Open to anything jam', summary: 'A jam open to anything' },
+			]);
+			const queries: string[] = [];
+			globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+				const url = new URL(typeof input === 'string' ? input : input.toString());
+				if (url.hostname === 'api.tavily.com') {
+					queries.push(String((JSON.parse(String(init?.body ?? '{}')) as { query?: string }).query ?? ''));
+					return new Response(JSON.stringify({ results: [] }), { status: 200 });
+				}
+				return new Response('offline in unit tests', { status: 503 });
+			}) as unknown as typeof fetch;
+
+			const result = await discoverForActor(db, scope, { limit: 20 }, { tavilyApiKey: 'test-key' });
+			expect(queries.length).toBeGreaterThan(0);
+			for (const q of queries) expect(q.toLowerCase()).not.toContain('open to anything');
+			const matches = result.candidates.flatMap((c) => c.interestMatches);
+			expect(matches).not.toContain('open to anything');
+			expect(matches).toContain('agents');
+			expect(result.candidates.find((c) => c.title === 'Open to anything jam')?.interestMatches ?? []).not.toContain('open to anything');
+		} finally { sqlite.close(); }
+	});
+});

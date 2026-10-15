@@ -564,3 +564,4 @@ export * from './projects.ts';
 // --- experience projection (R01) ----------------------------------------------
 
 export * from './experience.ts';
+export * from './interests.ts';

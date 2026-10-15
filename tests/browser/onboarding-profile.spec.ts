@@ -194,8 +194,17 @@ test.describe('Profile wizard (minimal onboarding)', () => {
 
 		// The one remaining chip row is interests, and it is OPTIONAL.
 		const interests = page.getByTestId('onboarding-interests');
-		await interests.getByRole('button', { name: 'AI' }).click();
-		await interests.getByRole('button', { name: 'Climate' }).click();
+		// "Open to anything" leads the row and is exclusive: a topic replaces it.
+		await interests.getByRole('button', { name: 'Open to anything', exact: true }).click();
+		await expect(interests.getByTestId('onboarding-interests-count')).toHaveText('Open to anything');
+		await interests.getByRole('button', { name: 'AI & agents', exact: true }).click();
+		// Search reaches the grouped catalog (not shown by default).
+		await interests.getByTestId('onboarding-interests-search').fill('agri');
+		await interests.getByRole('button', { name: 'Agriculture', exact: true }).click();
+		// Anything not listed is one click away.
+		await interests.getByTestId('onboarding-interests-search').fill('Race telemetry');
+		await interests.getByTestId('onboarding-interests-add').click();
+		await expect(interests.getByTestId('onboarding-interests-count')).toHaveText('3/12');
 
 		// Skills / budget / highlight / tools / hours are GONE from onboarding.
 		await expect(page.getByTestId('onboarding-skills')).toHaveCount(0);
@@ -217,7 +226,7 @@ test.describe('Profile wizard (minimal onboarding)', () => {
 			timezone: expect.any(String),
 			experienceLevel: 'intermediate',
 			formatPreference: 'either',
-			freeTextInterests: ['AI', 'Climate'],
+			freeTextInterests: ['AI & agents', 'Agriculture', 'Race telemetry'],
 		});
 		await context.close();
 	});

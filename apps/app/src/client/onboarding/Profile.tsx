@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
-import { Icon, type IconName } from '../icons.tsx';
 import { useProfile, type ProfileRecord } from '../queries.ts';
 import { fetchJson } from '../api.ts';
+import { InterestPicker } from '../interests/InterestPicker.tsx';
+import { SegmentField } from '../forms/SegmentField.tsx';
+import { COUNTRY_OPTIONS } from '../country.ts';
 
-const countryCodes = 'AF AL DZ AS AD AO AI AQ AG AR AM AW AU AT AZ BS BH BD BB BY BE BZ BJ BM BT BO BQ BA BW BV BR IO BN BG BF BI CV KH CM CA KY CF TD CL CN CX CC CO KM CG CD CK CR CI HR CU CW CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FK FO FJ FI FR GF PF TF GA GM GE DE GH GI GR GL GD GP GU GT GG GN GW GY HT HM VA HN HK HU IS IN ID IR IQ IE IM IL IT JM JP JE JO KZ KE KI KP KR KW KG LA LV LB LS LR LY LI LT LU MO MG MW MY MV ML MT MH MQ MR MU YT MX FM MD MC MN ME MS MA MZ MM NA NR NP NL NC NZ NI NE NG NU NF MK MP NO OM PK PW PS PA PG PY PE PH PN PL PT PR QA RE RO RU RW BL SH KN LC MF PM VC WS SM ST SA SN RS SC SL SG SX SK SI SB SO ZA GS SS ES LK SD SR SJ SE CH SY TW TJ TZ TH TL TG TK TO TT TN TR TM TC TV UG UA AE GB US UM UY UZ VU VE VN VG VI WF EH YE ZM ZW'.split(' ');
 const names = new Intl.DisplayNames(['en'], { type: 'region' });
-const countries = countryCodes.map(code => ({ code, name: names.of(code) ?? code })).sort((a, b) => a.name.localeCompare(b.name));
-const suggestedInterests = ['AI', 'Education', 'Health', 'Climate', 'Finance', 'Developer tools', 'Games', 'Accessibility'];
-const MAX_CHIPS = 12;
+const countries = COUNTRY_OPTIONS;
 
 export function OnboardingProfile({ actorId, onDone }: { actorId: string; onDone: () => Promise<void> }) {
  const profile = useProfile({ actorId });
@@ -100,8 +99,8 @@ function ProfileForm({ initial, actorId, onDone }: { initial: ProfileRecord | nu
       { value: 'either', label: 'Either' },
      ]}
     />
-    <ChipField legend="What would you enjoy building?" optional hint="Pick what you’d enjoy — or skip it and tell me as we go." suggestions={suggestedInterests} selected={interests} onChange={setInterests} testId="onboarding-interests" />
-    <p className="onboarding-defer-note"><span aria-hidden="true">💬</span> That’s all I need. I’ll pick up your skills, tools and the rest from our first conversation — and you can set them anytime in Settings.</p>
+    <InterestPicker legend="What would you enjoy building?" optional hint="Pick any — or skip and tell me as we go." selected={interests} onChange={setInterests} testId="onboarding-interests" />
+    <p className="onboarding-defer-note">That’s all I need. I’ll pick up your skills, tools and the rest from our first conversation — and you can change any of this in Settings.</p>
     </> : null}
     {error ? <p role="alert" className="form-error">{error}</p> : null}
     <div className="onboarding-step-actions">
@@ -111,74 +110,4 @@ function ProfileForm({ initial, actorId, onDone }: { initial: ProfileRecord | nu
    </fieldset>
   </form>
  </section>;
-}
-
-/**
- * A segmented single-choice picker (keyboard-accessible radiogroup): tappable
- * cards instead of a dropdown. The selected value is reflected on the group
- * via data-value so a test can read it; each option is a real radio button.
- */
-function SegmentField({ legend, options, value, onChange, testId }: {
- legend: string;
- options: readonly { value: string; label: string; icon?: IconName }[];
- value: string;
- onChange: (value: string) => void;
- testId: string;
-}) {
- return <fieldset className="onboarding-segment" data-testid={testId} data-value={value}>
-  <legend>{legend}</legend>
-  <div className="segment-options" role="radiogroup" aria-label={legend}>
-   {options.map(option => <button
-    key={option.value}
-    type="button"
-    role="radio"
-    aria-checked={value === option.value}
-    className="segment-option"
-    data-selected={value === option.value}
-    data-value={option.value}
-    onClick={() => onChange(option.value)}
-   >{option.icon ? <span className="segment-icon" aria-hidden="true"><Icon name={option.icon} title="" /></span> : null}<span className="segment-label">{option.label}</span></button>)}
-  </div>
- </fieldset>;
-}
-
-/**
- * Selectable chips with an "Add your own" input: suggestions toggle into the
- * selected row, typed entries join it on Enter, and every selected chip has a
- * remove button — no comma-separated typing.
- */
-function ChipField({ legend, hint, suggestions, selected, onChange, testId, optional }: { legend: string; hint: string; suggestions: readonly string[]; selected: string[]; onChange: (next: string[]) => void; testId: string; optional?: boolean }) {
- const [draft, setDraft] = useState('');
- const full = selected.length >= MAX_CHIPS;
- function add(value: string) {
-  const item = value.trim().slice(0, 60);
-  if (item === '' || selected.includes(item) || full) return;
-  onChange([...selected, item]);
-  setDraft('');
- }
- const remaining = suggestions.filter(item => !selected.includes(item));
- return <fieldset className="onboarding-chips" data-testid={testId}>
-  <div className="chips-legend">
-   <legend>{legend}{optional ? <span className="onboarding-optional-tag"> · optional</span> : null}</legend>
-   <span className="chips-count" aria-hidden="true">{selected.length}/{MAX_CHIPS}</span>
-  </div>
-  <p className="chips-hint">{hint}</p>
-  <div className="chip-flow">
-   {selected.map(item => <button key={item} type="button" className="chip chip-on" data-selected="true" aria-pressed="true" onClick={() => onChange(selected.filter(value => value !== item))}>
-    <span>{item}</span><span className="chip-x" aria-hidden="true"><Icon name="x" title="" /></span>
-    <span className="sr-only">Remove {item}</span>
-   </button>)}
-   {remaining.map(item => <button key={item} type="button" className="chip" aria-pressed="false" disabled={full} onClick={() => onChange([...selected, item])}>{item}</button>)}
-   <input
-    className="chip-add"
-    value={draft}
-    maxLength={60}
-    aria-label="Add your own interest"
-    placeholder={full ? `Up to ${MAX_CHIPS}` : '+ add your own'}
-    disabled={full}
-    onChange={event => setDraft(event.target.value)}
-    onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); add(draft); } }}
-   />
-  </div>
- </fieldset>;
 }

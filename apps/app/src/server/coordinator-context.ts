@@ -1,5 +1,6 @@
 import * as v from 'valibot';
 import type { Scope } from '@caddie/contracts';
+import { searchableInterests } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { assertProjectScope, ScopeError } from './scope.ts';
 import { getProfile, type ProfileRecord } from './profiles.ts';
@@ -329,7 +330,8 @@ export async function discoverForActor(
 	const queryWords = (parsed.output.query?.split(/[\s,.;:!?()]+/) ?? []).map((w) => w.trim().toLowerCase()).filter((w) => w && !QUERY_STOPWORDS.has(w));
 	const firstTimer = profile?.experienceLevel === 'beginner' || /\b(first|beginner|new to)\b/i.test(parsed.output.query ?? '');
 	const searchTerms = [...new Set([
-		...(profile?.freeTextInterests ?? []),
+		// "Open to anything" is a breadth answer, never a search term.
+		...searchableInterests(profile?.freeTextInterests ?? []),
 		...(profile?.skills ?? []),
 		...queryWords,
 		...(firstTimer ? ['beginner'] : []),

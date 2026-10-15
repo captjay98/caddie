@@ -6357,6 +6357,13 @@ mark {
 .chip-add { min-width: 130px; flex: 1 1 130px; padding: 8px 14px; border: 1px dashed var(--color-line); border-radius: 999px; background: none; color: var(--color-bright); font-size: 13px; min-height: 38px; }
 .chip-add::placeholder { color: var(--color-muted); }
 .chip-add:focus { outline: none; border-style: solid; border-color: var(--color-action); }
+/* Shared InterestPicker (onboarding + Settings) */
+.interest-picker .interest-search { width: 100%; min-height: 38px; font-size: 13px; }
+.interest-picker .interest-group { display: grid; gap: 6px; }
+.interest-picker .interest-group-label { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }
+.interest-picker .chip-add-pick { border-style: dashed; }
+.interest-picker .interest-more { justify-self: start; padding: 4px 0; border: 0; background: none; color: var(--color-action); font-size: 13px; cursor: pointer; }
+.interest-picker .interest-more:hover, .interest-picker .interest-more:focus-visible { text-decoration: underline; }
 
 /* Step 1 fields: give the select room so its native arrow never crowds the
    right edge, and make the field label/hint rhythm match the segmented steps. */
