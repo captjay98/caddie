@@ -13,6 +13,7 @@ import {
 	isProtectedPath,
 } from '../apps/app/src/agents/permissions';
 import { SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
+import { findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
 import {
 	makeRecordAcceptance,
 	makeRecordVerification,
@@ -112,13 +113,15 @@ describe('P05 permission matrix', () => {
 		}
 	});
 
-	test('specialist declarations carry the catalog name/description and no model override', () => {
+	test('specialist declarations carry the catalog name/description and run on the build-role model', () => {
 		const context = stubContext();
 		const declarations = buildSpecialistDeclarations(context);
 		expect(declarations.map((d) => d.name)).toEqual(SPECIALIST_CATALOG.map((d) => d.name));
+		const build = findModelRouteForRole('build');
+		expect(build.id).toBe('nemotron-3-ultra');
 		for (const declaration of declarations) {
-			// model lives on the coordinator's turn — definitions omit it
-			expect('model' in declaration).toBe(false);
+			// delegates run on the build role, not the coordinator's cheaper chat turn
+			expect(declaration.model).toBe(build.specifier);
 			expect(declaration.description.length).toBeGreaterThan(10);
 		}
 	});

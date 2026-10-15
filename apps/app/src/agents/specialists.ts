@@ -13,6 +13,7 @@ import {
 } from './tools.ts';
 import type { ToolDefinition } from '@flue/runtime';
 import { useInstruction, useSkill, useSubagent, useTool } from '@flue/runtime';
+import { findModelRouteForRole } from './providers.ts';
 
 /**
  * P05 specialists — seven restricted roles. This module is deliberately NOT
@@ -118,15 +119,20 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 }
 
 /**
- * The seven delegate definitions for the coordinator's useSubagent calls —
- * declared here (model omitted: inherits the coordinator's turn) so the
- * coordinator module stays the only place that names models.
+ * The seven delegate definitions for the coordinator's useSubagent calls.
+ * Each delegate runs on the `build` role (MODEL_ROLES in providers.ts — still
+ * the one place that assigns models): before this override they inherited the
+ * coordinator's turn, i.e. the cheap `chat` model, while the project's run
+ * binding already recorded `build`. The coordinator itself keeps orchestrating
+ * on `chat`.
  */
 export function buildSpecialistDeclarations(context: SpecialistBuildContext) {
+	const model = findModelRouteForRole('build').specifier;
 	return SPECIALIST_CATALOG.map((descriptor) => ({
 		name: descriptor.name,
 		description: descriptor.description,
 		agent: buildSpecialist(descriptor.role, context),
+		model,
 	}));
 }
 
