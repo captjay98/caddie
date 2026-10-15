@@ -19,6 +19,7 @@ import { DecisionCardView } from '../brief/DecisionCard.tsx';
 import { Composer } from './Composer.tsx';
 import type { ChannelDraft, ChannelSource } from './channel-store.ts';
 import { cleanAssistantText } from './response-hygiene.ts';
+import { attachedFileNames, stripAttachedFileText } from './image-attachments.ts';
 import { settlementNotice } from './settlement-notice.ts';
 
 /**
@@ -445,14 +446,26 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 	if (message.display === 'hidden') return null;
 	const clock = turnClock(message.timestamp);
 	if (message.role === 'user') {
-		const text = message.parts
+		const raw = message.parts
 			.filter((part): part is Extract<FlueConversationPart, { type: 'text' }> => part.type === 'text')
 			.map((part) => part.text)
 			.join('\n');
+		// Attached text files ride inside the message body for the model; the
+		// user's bubble shows what they typed plus the file names, not the dump.
+		const text = stripAttachedFileText(raw);
+		const files = attachedFileNames(raw);
 		return (
 			<div className="msg user" data-testid="msg-user" title={fullTime(message.timestamp)}>
 				<span className="sr-only">You{clock ? ` at ${clock}` : ''}</span>
-				<div className="bubble">{text}</div>
+				<div className="bubble">
+					{text}
+					{files.length ? (
+						<span className="bubble-files" data-testid="msg-user-files">
+							{text ? <br /> : null}
+							Attached: {files.join(', ')}
+						</span>
+					) : null}
+				</div>
 			</div>
 		);
 	}

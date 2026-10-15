@@ -3,7 +3,7 @@ import { useFlueAgent } from '@flue/react';
 import { createFlueClient } from '@flue/sdk';
 import type { InputAttachment, RunBindingRecord } from '@caddie/contracts';
 import { postJson } from './api.ts';
-import { toDeliveredImages } from './conversation/image-attachments.ts';
+import { toAttachedFileText, toDeliveredImages } from './conversation/image-attachments.ts';
 import { useRunBindings, type ActorScope } from './queries.ts';
 import { standbySource, type ChannelSource } from './conversation/channel-store.ts';
 
@@ -69,8 +69,13 @@ export function useCoordinatorTransport(
 			opts?: { attachments?: readonly InputAttachment[] },
 		): Promise<void> => {
 			// Images ride as inline Flue image parts so the coordinator can route
-			// the turn to the vision model; text files are not delivered yet.
-			const { images } = await toDeliveredImages(opts?.attachments ?? []);
+			// the turn to the vision model; text files are decoded here and
+			// appended to the body as delimited blocks (PDFs: an explicit
+			// "could not read" line, never a pretend read).
+			const attachments = opts?.attachments ?? [];
+			const { images } = await toDeliveredImages(attachments);
+			const fileText = await toAttachedFileText(attachments);
+			const body = fileText ? (text ? `${text}\n\n${fileText}` : fileText) : text;
 			let active = run;
 			if (!active) {
 				if (!projectId || actor.actorId === null) {
@@ -91,12 +96,12 @@ export function useCoordinatorTransport(
 					url: `/agents/coordinator/${encodeURIComponent(active.conversationId)}`,
 				});
 				await client.send({
-					message: { kind: 'user', body: text, ...(images.length ? { attachments: images.map((image) => ({ ...image })) } : {}) },
+					message: { kind: 'user', body, ...(images.length ? { attachments: images.map((image) => ({ ...image })) } : {}) },
 					idempotencyKey,
 				});
 				return;
 			}
-			await agent.sendMessage(text, {
+			await agent.sendMessage(body, {
 				idempotencyKey,
 				...(images.length ? { images: images.map((image) => ({ ...image })) } : {}),
 			});

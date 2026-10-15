@@ -50,3 +50,62 @@ export async function toDeliveredImages(
 	}
 	return { images, skipped };
 }
+
+/** Text-family types decoded in the browser; mirrors server/attachments.ts DECODABLE_TEXT. */
+const DECODABLE_TEXT: ReadonlySet<string> = new Set(['text/plain', 'text/markdown', 'text/csv']);
+
+/** Per-file cap on characters sent to the model (a 20 MB csv must not become one prompt). */
+export const MAX_FILE_TEXT_CHARS = 60_000;
+
+/** Opening marker of an attached-file block; the chat view strips these blocks
+ *  from the user's own bubble (the file chip shows the attachment instead). */
+export const ATTACHED_FILE_MARKER = '[Attached file:';
+
+/**
+ * Turn the composer's text-file attachments into a block appended to the
+ * message body, so Caddie actually reads them: decoded text inside a fence,
+ * truncated past {@link MAX_FILE_TEXT_CHARS} with the cut stated. A PDF is NOT
+ * extracted in this build; it becomes an explicit "could not read" line so
+ * Caddie asks for pasted text instead of pretending it read the file.
+ */
+export async function toAttachedFileText(
+	attachments: readonly InputAttachment[],
+	read: (url: string) => Promise<Uint8Array> = async (url) => new Uint8Array(await (await fetch(url)).arrayBuffer()),
+): Promise<string> {
+	const blocks: string[] = [];
+	for (const attachment of attachments) {
+		if (attachment.kind !== 'file') continue;
+		const name = attachment.filename || 'file';
+		if (!DECODABLE_TEXT.has(attachment.mediaType)) {
+			blocks.push(`${ATTACHED_FILE_MARKER} ${name} (${attachment.mediaType})] Caddie could not read this file: its text is not extracted in this build. Ask the user to paste the key text or attach a .txt/.md export.`);
+			continue;
+		}
+		const decoded = new TextDecoder('utf-8', { fatal: false }).decode(await read(attachment.url));
+		const truncated = decoded.length > MAX_FILE_TEXT_CHARS;
+		const body = truncated ? decoded.slice(0, MAX_FILE_TEXT_CHARS) : decoded;
+		// A fence longer than any backtick run in the content cannot be closed early.
+		const longestRun = Math.max(2, ...Array.from(body.matchAll(/`+/g), (m) => m[0].length));
+		const fence = '`'.repeat(longestRun + 1);
+		const note = truncated
+			? ` (only the first ${MAX_FILE_TEXT_CHARS.toLocaleString('en-US')} of ${decoded.length.toLocaleString('en-US')} characters are included)`
+			: '';
+		blocks.push(`${ATTACHED_FILE_MARKER} ${name} (${attachment.mediaType})]${note}\n${fence}\n${body}\n${fence}`);
+	}
+	return blocks.join('\n\n');
+}
+
+/** The text the user typed, without appended attached-file blocks (for their own bubble). */
+export function stripAttachedFileText(text: string): string {
+	// A file-only message starts with a block: nothing was typed.
+	if (text.startsWith(ATTACHED_FILE_MARKER)) return '';
+	const at = text.indexOf(`\n\n${ATTACHED_FILE_MARKER}`);
+	return at >= 0 ? text.slice(0, at) : text;
+}
+
+/** File names of the attached-file blocks in a message body, in order. */
+export function attachedFileNames(text: string): string[] {
+	const names: string[] = [];
+	const pattern = /(?:^|\n\n)\[Attached file: (.+?) \((?:text|application)\/[\w.+-]+\)\]/g;
+	for (const match of text.matchAll(pattern)) names.push(match[1]!);
+	return names;
+}
