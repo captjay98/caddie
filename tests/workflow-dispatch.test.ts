@@ -12,7 +12,7 @@ import {
   stopWorkflow,
   readWorkflow,
 } from "../apps/app/src/server/build-workflow.ts";
-import { dispatchPendingWorkflow, type CoordinatorDeliver } from "../apps/app/src/server/workflow-dispatch.ts";
+import { dispatchPendingWorkflow, workerSelfDeliver, type CoordinatorDeliver } from "../apps/app/src/server/workflow-dispatch.ts";
 import { getOperation } from "../apps/app/src/server/operations.ts";
 import { splitSqlStatements } from "./fixtures/controls-harness.ts";
 
@@ -192,5 +192,32 @@ describe("R02 server-owned durable dispatch", () => {
     const result = await dispatchPendingWorkflow(w.db, scope, afterStop);
     expect(result.outcome).toBe("none");
     expect(afterStop.calls).toHaveLength(0);
+  });
+});
+
+describe("workerSelfDeliver — the real self-fetch boundary", () => {
+  // Regression (2026-10-15, FarmLog AI): the self-fetch was `app.fetch(request)`
+  // with NO bindings, so the /agents guard read `c.env.AUTH_TEST_MODE` off
+  // undefined, the delivery 500'd and every accepted proposal / approval sat in
+  // reconciliation-required with the UI stuck on "turning your request into a plan".
+  test("forwards THIS request's Worker env + execution context to the coordinator self-request", async () => {
+    const seen: { url: string; env: unknown; ctx: unknown; body: string; cookie: string | null }[] = [];
+    const app = {
+      async fetch(request: Request, env?: unknown, ctx?: unknown) {
+        seen.push({ url: request.url, env, ctx, body: await request.text(), cookie: request.headers.get("cookie") });
+        return new Response("{}", { status: env ? 200 : 500 });
+      },
+    };
+    const env = { DB: {}, BETTER_AUTH_SECRET: "x" };
+    const ctx = { waitUntil() {} };
+    const deliver = workerSelfDeliver(app, "http://localhost:5176", "session=abc", env, ctx);
+    const result = await deliver({ conversationId: "conv_1", body: "Prepare a plan", idempotencyKey: "intake:k" });
+    expect(result.delivered).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.env).toBe(env);
+    expect(seen[0]!.ctx).toBe(ctx);
+    expect(seen[0]!.url).toBe("http://localhost:5176/agents/coordinator/conv_1");
+    expect(seen[0]!.cookie).toBe("session=abc");
+    expect(JSON.parse(seen[0]!.body)).toEqual({ message: { kind: "user", body: "Prepare a plan" }, idempotencyKey: "intake:k" });
   });
 });

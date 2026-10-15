@@ -27,18 +27,30 @@ import * as v from "valibot";
  * dispatch, exactly as before, so behaviour never silently regresses.
  */
 export function createBuildWorkflowRouter(
-  selfFetch?: () => { fetch: (request: Request) => Promise<Response> | Response },
+  selfFetch?: () => {
+    fetch(request: Request, env?: unknown, executionCtx?: unknown): Promise<Response> | Response;
+  },
 ) {
   const router = new Hono<{ Bindings: AuthEnv }>();
 
-  /** Build the deliver boundary for this request, or null when self-fetch is unavailable. */
+  /** Build the deliver boundary for this request, or null when self-fetch is unavailable.
+   *  Forwards THIS request's Worker bindings — the self-request needs them for auth + the DO. */
   function deliverFor(c: {
     req: { raw: Request; url: string };
+    env: AuthEnv;
+    executionCtx?: unknown;
   }): CoordinatorDeliver | null {
     const app = selfFetch?.();
     if (!app) return null;
     const origin = new URL(c.req.url).origin;
-    return workerSelfDeliver(app, origin, c.req.raw.headers.get("cookie"));
+    let executionCtx: unknown;
+    try {
+      executionCtx = c.executionCtx;
+    } catch {
+      // Hono throws when no ExecutionContext exists (tests); the self-fetch works without it.
+      executionCtx = undefined;
+    }
+    return workerSelfDeliver(app, origin, c.req.raw.headers.get("cookie"), c.env, executionCtx);
   }
 
   router.onError((error, c) => {

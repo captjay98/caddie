@@ -147,11 +147,19 @@ export async function dispatchPendingWorkflow(
  * owns the coordinator send. `app` is the Hono fetch handler; `origin` is the
  * request origin to resolve the agent URL against. Carries the idempotency key
  * and the authenticated cookie header so the /agents guard admits it.
+ *
+ * `env` (and `executionCtx`) MUST be the current request's Worker bindings: a
+ * bare `app.fetch(request)` runs the self-request with `c.env === undefined`,
+ * so the /agents guard's session probe throws, the delivery is not 2xx and the
+ * intake is parked in reconciliation-required forever — the project sits on
+ * "Caddie is turning your request into a plan" with nothing running.
  */
 export function workerSelfDeliver(
-	app: { fetch: (request: Request) => Promise<Response> | Response },
+	app: { fetch(request: Request, env?: unknown, executionCtx?: unknown): Promise<Response> | Response },
 	origin: string,
 	cookieHeader: string | null,
+	env: unknown,
+	executionCtx?: unknown,
 ): CoordinatorDeliver {
 	return async ({ conversationId, body, idempotencyKey }) => {
 		const url = new URL(`/agents/coordinator/${encodeURIComponent(conversationId)}`, origin);
@@ -163,6 +171,8 @@ export function workerSelfDeliver(
 				headers,
 				body: JSON.stringify({ message: { kind: 'user', body }, idempotencyKey }),
 			}),
+			env,
+			executionCtx,
 		);
 		// A 2xx means the DO admitted the submission; anything else is uncertain
 		// and must reconcile rather than silently drop.
