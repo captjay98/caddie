@@ -169,7 +169,12 @@ export function workerSelfDeliver(
 			new Request(url.href, {
 				method: 'POST',
 				headers,
-				body: JSON.stringify({ message: { kind: 'user', body }, idempotencyKey }),
+				// The Flue conversation route admits the DeliveredMessage FLAT, with
+				// send controls as siblings — exactly what @flue/sdk send() posts
+				// (`{ idempotencyKey, kind, body }`). A nested `{ message: {...} }`
+				// is not a message: it was rejected, parking every intake in
+				// reconciliation-required.
+				body: JSON.stringify({ idempotencyKey, kind: 'user', body }),
 			}),
 			env,
 			executionCtx,

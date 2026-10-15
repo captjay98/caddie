@@ -218,6 +218,9 @@ describe("workerSelfDeliver — the real self-fetch boundary", () => {
     expect(seen[0]!.ctx).toBe(ctx);
     expect(seen[0]!.url).toBe("http://localhost:5176/agents/coordinator/conv_1");
     expect(seen[0]!.cookie).toBe("session=abc");
-    expect(JSON.parse(seen[0]!.body)).toEqual({ message: { kind: "user", body: "Prepare a plan" }, idempotencyKey: "intake:k" });
+    // The FLAT shape @flue/sdk send() posts (message fields + idempotencyKey
+    // siblings). The nested { message: {...} } shape this test once pinned was
+    // the second cause of the stuck "Planning your app" card.
+    expect(JSON.parse(seen[0]!.body)).toEqual({ idempotencyKey: "intake:k", kind: "user", body: "Prepare a plan" });
   });
 });
