@@ -1,5 +1,5 @@
 import { findModelRouteForRole } from '../agents/providers.ts';
-import { MODEL_CALL_TIMEOUT_MS, timeoutSignal } from './http-timeouts.ts';
+import { DIGEST_CALL_TIMEOUT_MS, MODEL_CALL_TIMEOUT_MS, timeoutSignal } from './http-timeouts.ts';
 
 /**
  * AI inspection of discovery candidates (feature: "real AI inspection of every
@@ -413,7 +413,7 @@ export async function digestCandidate(input: DigestCandidateInput): Promise<Dige
 		const res = await fetch(`${NEBIUS_BASE_URL}/chat/completions`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${input.apiKey}` },
-			signal: timeoutSignal(MODEL_CALL_TIMEOUT_MS),
+			signal: timeoutSignal(DIGEST_CALL_TIMEOUT_MS),
 			body: JSON.stringify({
 				model: route.modelId,
 				messages: buildDigestMessages(input.profile, input.candidate, input.facts ?? [], input.overview),

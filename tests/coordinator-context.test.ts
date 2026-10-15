@@ -398,3 +398,78 @@ describe('hackathon_details — follow-ups read the stored, checked detail', () 
 		} finally { sqlite.close(); }
 	});
 });
+
+describe('find_hackathons does not wait for the digest pre-warm', () => {
+	test('runBounded keeps at most `limit` jobs in flight and swallows failures', async () => {
+		const { runBounded } = await import('../apps/app/src/server/coordinator-context.ts');
+		let inFlight = 0;
+		let peak = 0;
+		const job = (fail: boolean) => async () => {
+			inFlight += 1;
+			peak = Math.max(peak, inFlight);
+			await new Promise((r) => setTimeout(r, 5));
+			inFlight -= 1;
+			if (fail) throw new Error('boom');
+		};
+		const ok = await runBounded([job(false), job(true), job(false), job(false), job(true)], 2);
+		expect(peak).toBe(2);
+		expect(ok).toBe(3);
+		expect(await runBounded([], 2)).toBe(0);
+	});
+
+	test('the search resolves while every digest call is still hanging; the pre-warm finishes later in the background', async () => {
+		const { db, sqlite, scope } = await world();
+		try {
+			sqlite.exec(readFileSync(new URL('../apps/app/migrations/0020_discovery_digest_cache.sql', import.meta.url), 'utf8'));
+			await upsertProfile(db, 'alice', { country: 'NG', formatPreference: 'online', freeTextInterests: ['AI'] });
+			await seedCandidates(db, [
+				{ source: 'catalog', url: 'https://events.example/ai-one', title: 'AI builders one', summary: 'Build AI tools online' },
+				{ source: 'catalog', url: 'https://events.example/ai-two', title: 'AI builders two', summary: 'Build AI agents online' },
+				{ source: 'catalog', url: 'https://events.example/ai-three', title: 'AI builders three', summary: 'Build AI apps online' },
+			]);
+
+			// Digest calls (the pre-warm) hang until released; every other model
+			// call (fit inspection) answers at once. Track digest concurrency.
+			let releaseDigests!: () => void;
+			const digestsReleased = new Promise<void>((resolve) => { releaseDigests = resolve; });
+			let digestInFlight = 0;
+			let digestPeak = 0;
+			let digestStarted = 0;
+			globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+				const url = new URL(typeof input === 'string' ? input : input.toString());
+				if (url.hostname === 'api.tavily.com') return new Response(JSON.stringify({ results: [] }), { status: 200 });
+				if (url.pathname.endsWith('/chat/completions')) {
+					const isDigest = String(init?.body ?? '').includes('digest of ONE hackathon');
+					if (!isDigest) return new Response(JSON.stringify({ choices: [{ message: { content: '{"items":[]}' } }] }), { status: 200 });
+					digestStarted += 1;
+					digestInFlight += 1;
+					digestPeak = Math.max(digestPeak, digestInFlight);
+					await digestsReleased;
+					digestInFlight -= 1;
+					return new Response(JSON.stringify({ choices: [{ message: { content: '{"headline":"Warm.","bullets":["A → b"]}' } }] }), { status: 200 });
+				}
+				return new Response('offline in unit tests', { status: 503 });
+			}) as unknown as typeof fetch;
+
+			const background: Promise<unknown>[] = [];
+			const result = await discoverForActor(db, scope, { limit: 8 }, {
+				tavilyApiKey: 'test-key',
+				nebiusApiKey: 'model-key',
+				background: (task) => { background.push(task); },
+			});
+			// Returned with the digests still blocked: the card never waited for them.
+			expect(result.candidates.length).toBeGreaterThan(0);
+			expect(background).toHaveLength(1);
+			// The background jobs reach their (blocked) model call shortly after.
+			for (let i = 0; i < 200 && digestInFlight < Math.min(2, result.candidates.length); i++) await new Promise((r) => setTimeout(r, 5));
+			expect(digestStarted).toBeGreaterThan(0);
+			expect(digestInFlight).toBeGreaterThan(0);
+
+			releaseDigests();
+			await Promise.all(background);
+			expect(digestInFlight).toBe(0);
+			expect(digestPeak).toBeLessThanOrEqual(2);
+			expect(digestStarted).toBe(Math.min(5, result.candidates.length));
+		} finally { sqlite.close(); }
+	});
+});

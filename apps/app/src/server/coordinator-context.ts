@@ -250,6 +250,32 @@ export interface ActorDiscoveryResult {
 /* belongsToCandidate / authoritativeSourceUrls live in discovery.ts so the card
  * (here) and the detail pane (evaluateCandidateEligibility) scope rules alike. */
 
+/** Background digest pre-warms allowed in flight at once. */
+const PREWARM_CONCURRENCY = 2;
+
+/**
+ * Run async jobs with at most `limit` in flight. Never rejects: a failed job is
+ * swallowed (background work must not surface as an unhandled rejection or
+ * stop the remaining jobs). Resolves with how many jobs completed without error.
+ */
+export async function runBounded(jobs: readonly (() => Promise<unknown>)[], limit: number): Promise<number> {
+	let next = 0;
+	let ok = 0;
+	const worker = async () => {
+		while (next < jobs.length) {
+			const job = jobs[next++]!;
+			try {
+				await job();
+				ok += 1;
+			} catch {
+				// fail-soft: a pre-warm miss falls back to the on-open path
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, jobs.length)) }, worker));
+	return ok;
+}
+
 /** Discovery for the chat path. The REQUIRED PRIMARY source is a live
  * multi-platform Tavily search (createTavilyDiscoveryAdapter — Devpost /
  * Devfolio / MLH / HackerEarth / …, with the Devpost public feed as a
@@ -271,6 +297,12 @@ export async function discoverForActor(
 		 * not spend a model call every time the page opens.
 		 */
 		inspect?: boolean;
+		/**
+		 * Receives work that must NOT delay the result — the detail-pane digest
+		 * pre-warm. A Worker route passes `executionCtx.waitUntil` so the work
+		 * outlives the response; without it the work still runs, unawaited.
+		 */
+		background?: (task: Promise<unknown>) => void;
 	} = {},
 ): Promise<ActorDiscoveryResult> {
 	const verified = await assertProjectScope(db, scope);
@@ -417,6 +449,25 @@ export async function discoverForActor(
 	const formatFits = (format: string | null) =>
 		!format || !formatPreference || formatPreference === 'either' || format === formatPreference || format === 'hybrid';
 	const shortlist = evaluated.filter((candidate) => formatFits(candidate.format)).sort(byHeuristic);
+	// REAL AI inspection: one batched model call reads the top of the heuristic
+	// shortlist against the profile and returns a fit verdict/reason/confidence.
+	// Fail-soft — a missing key or a failed call yields an empty map + a visible
+	// gap, and ranking falls back to eligibility→heuristics. Never load-bearing.
+	// STARTED NOW, awaited after the rules read below: it needs only the profile
+	// and the summaries, so running it alongside the rules read (instead of
+	// after it) takes ~13s off a fresh search.
+	const notInspected: InspectCandidatesResult = { byId: new Map(), gap: null };
+	const inspectionPending: Promise<InspectCandidatesResult> = options.inspect === false ? Promise.resolve(notInspected) : inspectCandidates({
+		apiKey: options.nebiusApiKey,
+		profile: {
+			country: profile?.country ?? null,
+			experienceLevel: profile?.experienceLevel ?? null,
+			formatPreference: profile?.formatPreference ?? null,
+			interests: profile?.freeTextInterests ?? [],
+			skills: profile?.skills ?? [],
+		},
+		candidates: shortlist.slice(0, 20).map((c) => ({ id: c.id, url: c.url, title: c.title, summary: c.summary })),
+	}).catch((): InspectCandidatesResult => ({ byId: new Map(), gap: 'AI fit inspection failed — results are ranked by heuristics only.' }));
 	// RULES READING (live sweeps only): Tavily reads the official rules page of
 	// the top Devpost contests, the helper model extracts quoted eligibility
 	// rules, and eligibility is re-evaluated from those quotes — so the cards
@@ -444,41 +495,34 @@ export async function discoverForActor(
 			gaps.push(`Eligibility for ${rules.pagesAvailable === 1 ? 'the top event' : `the top ${rules.pagesAvailable} events`} is read from their official rules pages (via Tavily), quoting the rule; other events stay "unknown" until their rules are checked.`);
 		}
 		// PRE-WARM the AI digest for the top 5 using the overview prose the sweep
-		// just read, so the first detail-open is instant (cache hit, no model
-		// call). Best-effort and fail-soft: a missing model key, no overview, or
-		// a digest failure simply leaves the candidate to the lazy on-open path.
-		// Runs AFTER the eligibility refresh above so the pre-warmed hash matches
-		// candidateDetail's. Sequential (≤5) to bound concurrent model calls.
+		// just read, so a later detail-open is a cache hit. OFF the critical
+		// path: each digest is a ~20-30s model call, and awaiting five in a row
+		// held the hackathon card back by minutes (measured 237s for a fresh
+		// search). The detail pane loads rules first and fetches a missing
+		// digest itself, so nothing here is load-bearing. At most 2 run at once
+		// to bound concurrent model calls; every failure is swallowed (a miss
+		// just falls back to the pane's on-open path). Starts AFTER the
+		// eligibility refresh above so the pre-warmed hash matches candidateDetail's.
 		if (options.nebiusApiKey) {
-			for (const entry of shortlist.slice(0, 5)) {
-				await prewarmDigest(
+			const nebiusApiKey = options.nebiusApiKey;
+			const jobs = shortlist.slice(0, 5).map((entry) => () =>
+				prewarmDigest(
 					db,
 					verified,
 					{ id: entry.id, url: entry.url, title: entry.title, summary: entry.summary },
 					{ country: profile?.country ?? null },
 					rules.overviewByCandidateId.get(entry.id) ?? null,
-					options.nebiusApiKey,
+					nebiusApiKey,
 					digestProfileFrom(profile ?? null),
-				);
-			}
+				),
+			);
+			const task = runBounded(jobs, PREWARM_CONCURRENCY);
+			if (options.background) options.background(task);
+			else void task;
 		}
 	}
-	// REAL AI inspection: one batched model call reads the top of the heuristic
-	// shortlist against the profile and returns a fit verdict/reason/confidence.
-	// Fail-soft — a missing key or a failed call yields an empty map + a visible
-	// gap, and ranking falls back to eligibility→heuristics. Never load-bearing.
-	const notInspected: InspectCandidatesResult = { byId: new Map(), gap: null };
-	const inspection = options.inspect === false ? notInspected : await inspectCandidates({
-		apiKey: options.nebiusApiKey,
-		profile: {
-			country: profile?.country ?? null,
-			experienceLevel: profile?.experienceLevel ?? null,
-			formatPreference: profile?.formatPreference ?? null,
-			interests: profile?.freeTextInterests ?? [],
-			skills: profile?.skills ?? [],
-		},
-		candidates: shortlist.slice(0, 20).map((c) => ({ id: c.id, url: c.url, title: c.title, summary: c.summary })),
-	});
+	// The fit inspection started before the rules read; collect it now.
+	const inspection = await inspectionPending;
 	if (inspection.gap) gaps.push(inspection.gap);
 	const withFit = shortlist.map(({ signals: _signals, display, ...c }) => {
 		const fit = inspection.byId.get(c.id);

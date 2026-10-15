@@ -23,6 +23,21 @@ import { discoverForActor } from '../coordinator-context.ts';
 import { buildHackathonResultsCard } from '../hackathon-card.ts';
 
 /**
+ * Background hook for work that must not delay the response. In a Worker it
+ * is `executionCtx.waitUntil`, so the work outlives the response; Hono throws
+ * when there is no execution context (tests, other runtimes), and then the
+ * work simply runs unawaited.
+ */
+function backgroundFor(c: { executionCtx: { waitUntil(promise: Promise<unknown>): void } }): (task: Promise<unknown>) => void {
+	try {
+		const ctx = c.executionCtx;
+		return (task) => ctx.waitUntil(task);
+	} catch {
+		return (task) => void task;
+	}
+}
+
+/**
  * P11 discovery/planning router — per-project planning endpoints (slice 2)
  * and discovery candidate endpoints (slice 3), all scope-checked through the
  * P02 patterns: every route derives its Scope server-side from the verified
@@ -136,6 +151,8 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 		await discoverForActor(c.env.DB, scope, { refresh: true, limit: DISCOVER_LIMIT }, {
 			tavilyApiKey: c.env.TAVILY_API_KEY,
 			nebiusApiKey: c.env.NEBIUS_API_KEY,
+			// Digest pre-warm finishes after the response (Workers waitUntil).
+			background: backgroundFor(c),
 		});
 		const [feed] = await listFeedRuns(c.env.DB, scope);
 		return c.json({ feed }, 201);
