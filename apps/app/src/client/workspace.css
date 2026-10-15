@@ -5665,37 +5665,6 @@ body.conv-resizing * {
 	flex: none;
 }
 
-.project-deadline-chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.35rem;
-	height: 24px;
-	padding: 0 0.55rem;
-	border-radius: 999px;
-	background: color-mix(in srgb, var(--color-warn) 14%, transparent);
-	color: var(--color-warn);
-	font-family: var(--font-mono);
-	font-size: var(--r-label);
-	white-space: nowrap;
-}
-
-.project-head-gear {
-	width: 36px;
-	height: 36px;
-	border-radius: 999px;
-	display: grid;
-	place-items: center;
-	border: 1px solid var(--color-line-soft);
-	background: var(--color-panel);
-	color: var(--color-muted);
-	cursor: pointer;
-}
-
-.project-head-gear:disabled {
-	opacity: 0.5;
-	cursor: not-allowed;
-}
-
 /* The four-step bar: Plan · Build · Check · Submit/Share. Status text comes
    only from real server data (a page that knows it); a step is green ONLY
    when its data says done. */
@@ -5785,35 +5754,51 @@ body.conv-resizing * {
 	color: var(--color-ink);
 }
 
-/* The model-setter line (redesign direction move #1): the chat is the steering
-   wheel, the steps are the dashboard. Calm, informational — never an alert. */
-.project-head-model {
-	display: flex;
-	align-items: flex-start;
-	gap: 0.5rem;
-	margin: 0;
-	padding: 0.55rem 0.7rem;
-	border-radius: 8px;
-	background: var(--color-panel);
-	color: var(--color-muted);
-	font-size: 12.5px;
-	line-height: 1.4;
+/* The step the WORK is on (from the workflow), whichever tab is open. */
+.project-step.active {
+	border-color: var(--color-action);
+	background: color-mix(in srgb, var(--color-action) 10%, transparent);
 }
-
-.project-head-model svg {
-	flex: none;
-	margin-top: 1px;
+.project-step.active .step-state {
 	color: var(--color-action);
-	width: 15px;
-	height: 15px;
+}
+.project-step.active .step-num {
+	background: var(--color-action);
+	color: var(--color-ink);
 }
 
-.project-head-model strong {
+/* Phones: "Step 1 of 4 · Plan" + a bar; hidden on wider screens. */
+.project-steps-wrap {
+	display: grid;
+	gap: 8px;
+}
+.project-steps-compact {
+	display: none;
+	gap: 6px;
+	font-size: 13px;
+	color: var(--color-muted);
+}
+.project-steps-compact b {
 	color: var(--color-bright);
-	font-weight: 600;
+}
+.project-steps-bar {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 4px;
+}
+.project-steps-bar span {
+	height: 5px;
+	border-radius: 3px;
+	background: var(--color-line-soft);
+}
+.project-steps-bar span[data-filled='true'] {
+	background: var(--color-action);
 }
 
 @media (max-width: 760px) {
+	.project-steps-compact {
+		display: grid;
+	}
 	.project-steps {
 		display: flex;
 		overflow-x: auto;
@@ -5821,11 +5806,32 @@ body.conv-resizing * {
 		margin: 0 -1rem;
 		padding: 0 1rem;
 	}
+	/* With the summary line above, the cards become slim labelled tabs:
+	   still the way to each step's page, without four cramped status lines. */
 	.project-step {
-		flex: 0 0 128px;
+		flex: 0 0 auto;
+		padding: 6px 12px;
+		border-radius: 999px;
+	}
+	.project-steps-compact ~ .project-steps .step-state {
+		display: none;
 	}
 	.project-head-name {
 		font-size: 18px;
+	}
+	.project-head-settings span {
+		display: none;
+	}
+	.project-head-settings {
+		padding: 6px 8px;
+	}
+	/* Name + one-line idea on the left, the icon-only Settings on the right. */
+	.project-head-title {
+		flex-wrap: nowrap;
+		align-items: flex-start;
+	}
+	.project-head-text {
+		min-width: 0;
 	}
 }
 
@@ -6715,4 +6721,147 @@ mark {
 	.guided-step-pill {
 		display: none;
 	}
+}
+
+/* --- Project overview: Now panel ------------------------------------------
+   What Caddie is doing on this project right now. The accent border marks it
+   as the page's lead panel; the live dot shows only while Caddie works. */
+.now-panel {
+	border-color: var(--color-action);
+}
+.now-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0 0 6px;
+}
+.now-live {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--color-action);
+	flex: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+	.now-live {
+		animation: now-live-pulse 1.6s ease-in-out infinite;
+	}
+}
+@keyframes now-live-pulse {
+	50% {
+		opacity: 0.35;
+	}
+}
+.now-updated {
+	margin-left: auto;
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+}
+
+/* --- Project header (2026-10-15 redesign) --------------------------------- */
+.project-head-for {
+	display: -webkit-box;
+	-webkit-line-clamp: 1;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+.project-head-settings {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	text-decoration: none;
+	white-space: nowrap;
+}
+.project-head-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 8px 0 2px;
+}
+.project-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 10px;
+	border-radius: 999px;
+	border: 1px solid var(--color-line);
+	background: var(--color-panel);
+	color: var(--color-bright);
+	font-size: var(--r-meta);
+	text-decoration: none;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.project-chip[data-tone='accent'] {
+	border-color: var(--color-action);
+	color: var(--color-action);
+}
+.project-chip[data-tone='ok'] {
+	color: var(--color-ok);
+}
+.project-chip[data-tone='warn'] {
+	color: var(--color-warn);
+	border-color: var(--color-warn);
+}
+.project-chip[data-tone='danger'] {
+	color: var(--color-danger);
+	border-color: var(--color-danger);
+}
+
+/* --- Project overview layout: Now panel + side cards ---------------------- */
+.overview-grid {
+	display: grid;
+	gap: 16px;
+	grid-template-columns: minmax(0, 1fr);
+	align-items: start;
+}
+.overview-main,
+.overview-side {
+	display: grid;
+	gap: 16px;
+	min-width: 0;
+}
+@media (min-width: 900px) {
+	.overview-grid {
+		grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+	}
+}
+.overview-idea-line {
+	margin: 6px 0 0;
+	color: var(--color-bright);
+}
+.overview-brief {
+	margin-top: 8px;
+}
+.overview-brief summary {
+	cursor: pointer;
+	color: var(--color-action);
+	font-size: var(--r-meta);
+}
+.overview-brief-text {
+	margin: 8px 0 0;
+	white-space: pre-wrap;
+	color: var(--color-muted);
+}
+.overview-app {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-top: 6px;
+}
+.overview-app .state-detail {
+	margin: 0;
+}
+.overview-app-phone {
+	flex: none;
+	width: 34px;
+	height: 58px;
+	border-radius: 8px;
+	border: 2px dashed var(--color-line);
+}
+.overview-app-phone[data-live='true'] {
+	border-style: solid;
+	border-color: var(--color-ok);
 }

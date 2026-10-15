@@ -131,7 +131,7 @@ function json(route: { fulfill(options: Record<string, unknown>): unknown }, sta
 	return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; planDocs?: unknown[]; usage?: unknown; approval?: unknown } = {}) {
+async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; planDocs?: unknown[]; usage?: unknown; approval?: unknown; experience?: unknown; hackathon?: unknown; workflowPhase?: string } = {}) {
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
 	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) =>
@@ -155,8 +155,10 @@ async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; p
 	await context.route('**/api/projects/**', (route) => {
 		const path = new URL(route.request().url()).pathname;
 		if (path.endsWith('/workflow/decision')) return json(route, 200, { workflow: null, approval: { id: 'apr-1', status: route.request().postDataJSON().decision } });
-        if (path.endsWith('/workflow')) return json(route, 200, { workflow: null });
+        if (path.endsWith('/workflow')) return json(route, 200, { workflow: opts.workflowPhase ? { phase: opts.workflowPhase, brief: 'Build FarmLog AI.' } : null });
 		if (path.endsWith('/brief')) return json(route, 200, { cards: opts.brief ?? [] });
+		if (path.endsWith('/experience') && opts.experience) return json(route, 200, opts.experience);
+		if (path.endsWith('/hackathon')) return json(route, 200, { hackathon: opts.hackathon ?? null });
 		if (path.endsWith('/plan-docs')) return json(route, 200, { revisions: opts.planDocs ?? [], latest: null });
 		if (path.endsWith('/run-bindings')) return json(route, 200, { runBindings: [] });
 		if (path.endsWith('/tasks') && route.request().method() === 'GET') return json(route, 200, { tasks: [] });
@@ -188,6 +190,85 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		// Exactly ONE button on the next-step card.
 		await expect(next.locator('button')).toHaveCount(1);
 		await page.getByTestId('overview-next-action').click();
+		await expect(page).toHaveURL(/design-review\?project=proj-a/);
+		await context.close();
+	});
+
+	test('Steps: the step the work is on is highlighted; phones get "Step 1 of 4 · Plan" and a bar', async ({ browser }) => {
+		const desktop = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+		await stubAccount(desktop, { workflowPhase: 'planning' });
+		const page = await desktop.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('project-tab-plan')).toHaveAttribute('data-active', 'true');
+		await expect(page.getByTestId('project-tab-plan')).toContainText('Caddie is drafting it');
+		await expect(page.getByTestId('project-tab-build')).toContainText('After you approve');
+		await expect(page.getByTestId('project-steps-compact')).toBeHidden();
+		await expect(page.getByTestId('overview-brief')).toContainText('Read the full brief');
+		await desktop.close();
+
+		const phone = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await stubAccount(phone, { workflowPhase: 'planning' });
+		const mobile = await phone.newPage();
+		await mobile.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(mobile.getByTestId('project-steps-compact')).toBeVisible();
+		await expect(mobile.getByTestId('project-steps-compact')).toContainText('Step 1 of 4 · Plan');
+		await expect(mobile.locator('.project-steps-bar span[data-filled="true"]')).toHaveCount(1);
+		// The four steps stay reachable as tabs.
+		await expect(mobile.locator('.project-step')).toHaveCount(4);
+		await phone.close();
+	});
+
+	test('Header: hackathon chips and a labelled Settings button; no banner or duplicate chat input', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, {
+			hackathon: { title: 'Nebius x NVIDIA Global AI Hackathon', url: 'https://nebiusglobalaihackathon.devpost.com', track: null, deadline: '2026-10-30', daysLeft: 15, ended: false, eligibility: 'eligible' },
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('project-chip-event')).toHaveText('Nebius x NVIDIA Global AI Hackathon');
+		await expect(page.getByTestId('project-chip-event')).toHaveAttribute('target', '_blank');
+		await expect(page.getByTestId('project-chip-deadline')).toHaveText('Ends Oct 30 · 15 days left');
+		await expect(page.getByTestId('project-chip-eligibility')).toHaveText('You can enter');
+		await expect(page.getByTestId('project-settings-gear')).toHaveText('Settings');
+		await expect(page.getByTestId('project-ask-caddie')).toHaveCount(0);
+		await expect(page.getByTestId('project-head-model')).toHaveCount(0);
+		await context.close();
+	});
+
+	test('Overview: while Caddie plans, the Now panel says so instead of "Let\'s get started"', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, {
+			experience: { projectId: 'proj-a', version: Date.now() - 2 * 60_000, stage: 'planning', plan: null, preview: null, message: 'Caddie is preparing a plan for this project.', actions: [] },
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		const now = page.getByTestId('overview-now');
+		await expect(now).toHaveAttribute('data-stage', 'planning');
+		await expect(page.getByTestId('overview-now-title')).toHaveText('Caddie is writing your plan');
+		await expect(page.getByTestId('overview-now-updated')).toHaveText('Updated 2 min ago');
+		await expect(page.getByTestId('overview-next-step')).toHaveCount(0);
+		await expect(page.locator('body')).not.toContainText('Let’s get started');
+		await context.close();
+	});
+
+	test('Overview: a plan ready for review offers the server\'s primary action, which opens the plan', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, {
+			experience: {
+				projectId: 'proj-a', version: Date.now(), stage: 'review', plan: { id: 'plan-1', revision: 'rev-1', approved: false }, preview: null,
+				message: 'A plan is ready for your review.',
+				actions: [
+					{ kind: 'suggest_change', label: 'Suggest a change', enabled: true, primary: false },
+					{ kind: 'review_plan', label: 'Review the plan', enabled: true, primary: true },
+				],
+			},
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('overview-now-title')).toHaveText('Your plan is ready to review');
+		const primary = page.getByTestId('overview-now-review_plan');
+		await expect(primary).toHaveClass(/btn-key/);
+		await primary.click();
 		await expect(page).toHaveURL(/design-review\?project=proj-a/);
 		await context.close();
 	});

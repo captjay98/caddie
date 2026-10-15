@@ -17,6 +17,7 @@ export type IconName =
 	| 'sun'
 	| 'moon'
 	| 'panel'
+	| 'settings'
 	| 'plus'
 	| 'user'
 	| 'sparkCheck'
@@ -71,6 +72,13 @@ const PATHS: Record<IconName, ReactElement> = {
 		</>
 	),
 	moon: <path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.5 4.5 0 0 0 6.5 6.5z" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
+	settings: (
+		<>
+			<path d="M2.5 4.5h4M9.5 4.5h4M2.5 11.5h7M12.5 11.5h1" fill="none" stroke="currentColor" strokeLinecap="round" />
+			<circle cx="8" cy="4.5" r="1.5" fill="none" stroke="currentColor" />
+			<circle cx="11" cy="11.5" r="1.5" fill="none" stroke="currentColor" />
+		</>
+	),
 	panel: (
 		<>
 			<rect x="2.5" y="3.5" width="11" height="9" rx="1.5" fill="none" stroke="currentColor" />

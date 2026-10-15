@@ -23,6 +23,7 @@ import {
 	useArtifactRevisions,
 	useArtifacts,
 	useBriefCards,
+	useWorkflowBrief,
 	useCreateProject,
 	usePlanDocRevisions,
 	useRunBindings,
@@ -30,6 +31,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from './api.ts';
 import { useWorkspaceChrome } from './workspace/Chrome.tsx';
+import { NowPanel } from './project/NowPanel.tsx';
 import { ProjectTabs } from './workspace/ProjectTabs.tsx';
 import { projectStatus } from './workspace/project-status.ts';
 
@@ -677,6 +679,7 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const brief = useBriefCards(actor, props.projectId);
+	const workflowBrief = useWorkflowBrief(actor, props.projectId);
 	const navigate = useNavigate();
 
 	// "Your app so far" (§4): the project's real preview state from the P07
@@ -744,8 +747,14 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 				<StatePanel kind={failureKind(brief.error)} detail={brief.error instanceof Error ? brief.error.message : undefined} onRetry={() => void brief.refetch()} />
 			) : (
 				<>
-					{/* Next step: the top open card, exactly as the server ranked it —
-					    one card, one button. With nothing open, an honest calm state. */}
+					<div className="overview-grid">
+					<div className="overview-main">
+					{/* Now: what Caddie is doing on this project and the next action,
+					    from the shared ProjectExperience projection. Projects with no
+					    workflow yet keep the decision-card next step below. */}
+					<NowPanel
+						projectId={props.projectId}
+						fallback={
 					<section className="card-surface settings-panel" data-testid="overview-next-step">
 						<p className="kicker" data-tone="action">
 							NEXT STEP
@@ -782,27 +791,48 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 							</>
 						)}
 					</section>
+						}
+					/>
+					</div>
 
-					{/* Your app so far: real preview state, never a fake screenshot. */}
-					<section className="card-surface settings-panel" data-testid="overview-preview">
-						<p className="kicker" data-tone="action">
-							YOUR APP SO FAR
+					<aside className="overview-side">
+					{/* Your idea: the one-line idea, with the brief Caddie wrote one click away. */}
+					<section className="card-surface settings-panel" data-testid="overview-idea">
+						<p className="kicker">Your idea</p>
+						<p className="overview-idea-line">
+							{chrome.selectedProject?.description || 'Tell Caddie what you want to make and the idea appears here.'}
 						</p>
-						{preview === null ? (
-							<p className="state-detail">Checking for a live preview…</p>
-						) : preview.error ? (
-							<p className="state-detail">The preview list could not be read just now.</p>
-						) : preview.live ? (
-							<p className="state-detail" data-testid="overview-preview-live">
-								A private preview of your app is live{preview.createdAt ? ` (created ${new Date(preview.createdAt).toLocaleDateString()})` : ''}. The link lives in
-								the chat where Caddie shared it — ask there to share it again.
-							</p>
-						) : (
-							<p className="state-detail" data-testid="overview-preview-none">
-								No preview yet — approve a plan and Caddie builds one you can try.
-							</p>
-						)}
+						{workflowBrief.data ? (
+							<details className="overview-brief" data-testid="overview-brief">
+								<summary>Read the full brief</summary>
+								<p className="overview-brief-text">{workflowBrief.data}</p>
+							</details>
+						) : null}
 					</section>
+
+					{/* Your app: the real preview state, never a fake screenshot. */}
+					<section className="card-surface settings-panel" data-testid="overview-preview">
+						<p className="kicker">Your app</p>
+						<div className="overview-app">
+							<span className="overview-app-phone" data-live={preview?.live ? 'true' : 'false'} aria-hidden="true" />
+							{preview === null ? (
+								<p className="state-detail">Checking for a live preview…</p>
+							) : preview.error ? (
+								<p className="state-detail">The preview list could not be read just now.</p>
+							) : preview.live ? (
+								<p className="state-detail" data-testid="overview-preview-live">
+									A private preview of your app is live{preview.createdAt ? ` (created ${new Date(preview.createdAt).toLocaleDateString()})` : ''}. The link lives in
+									the chat where Caddie shared it — ask there to share it again.
+								</p>
+							) : (
+								<p className="state-detail" data-testid="overview-preview-none">
+									Your app appears here once the plan is approved and built. You’ll get a link to try it on your phone.
+								</p>
+							)}
+						</div>
+					</section>
+					</aside>
+					</div>
 
 					<details className="card-surface settings-panel" data-testid="overview-todo" id="todo">
                         <summary className="ev-head">Project tasks</summary>

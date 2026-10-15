@@ -158,6 +158,33 @@ export function useWorkflowPhase(actor: ActorScope, projectId: string | null) {
 }
 
 /**
+ * The brief the project was started with, from the SAME cached /workflow query
+ * (same key, different select), so the overview's "Your idea" card adds no
+ * request. Older briefs were saved as "<last chat message>\n\nProject brief:
+ * <brief>"; only the brief Caddie wrote is returned. Null when no workflow.
+ */
+export function useWorkflowBrief(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['workflow-phase', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () =>
+			fetchJson<{ workflow: { phase: WorkflowPhase; brief?: string } | null }>(
+				`/api/projects/${encodeURIComponent(projectId ?? '')}/workflow`,
+			),
+		enabled: actor.actorId !== null && projectId !== null,
+		refetchInterval: 4000,
+		select: (data) => briefText(data.workflow?.brief ?? null),
+	});
+}
+
+export function briefText(brief: string | null): string | null {
+	if (!brief) return null;
+	const marker = '\n\nProject brief: ';
+	const at = brief.indexOf(marker);
+	const text = (at >= 0 ? brief.slice(at + marker.length) : brief).trim();
+	return text || null;
+}
+
+/**
  * The project's GitHub imports — one row per repo snapshot taken for this
  * project (connect-existing or create-new both land here). A non-empty list is
  * the honest "a repo is connected" signal the guided join steps derive from;
@@ -206,6 +233,29 @@ export function useProjectExperience(actor: ActorScope, projectId: string | null
 			),
 		enabled: actor.actorId !== null && projectId !== null,
 		refetchInterval: 3000,
+	});
+}
+
+/** The hackathon this project is for (header chips), or null. Derived server-side, read-only. */
+export interface ProjectHackathonView {
+	readonly title: string;
+	readonly url: string | null;
+	readonly track: string | null;
+	readonly deadline: string | null;
+	readonly daysLeft: number | null;
+	readonly ended: boolean;
+	readonly eligibility: 'eligible' | 'ineligible' | 'unknown';
+}
+
+export function useProjectHackathon(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['project-hackathon', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () =>
+			fetchJson<{ hackathon: ProjectHackathonView | null }>(
+				`/api/projects/${encodeURIComponent(projectId ?? '')}/hackathon`,
+			),
+		enabled: actor.actorId !== null && projectId !== null,
+		staleTime: 5 * 60_000,
 	});
 }
 

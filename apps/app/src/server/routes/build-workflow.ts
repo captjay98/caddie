@@ -16,6 +16,7 @@ import {
 } from "../workflow-dispatch.ts";
 import { projectExperience, approvePlan } from "../project-experience.ts";
 import { acceptProposal, dismissProposal, getProposal } from "../project-proposals.ts";
+import { projectHackathon } from "../project-hackathon.ts";
 import { ApprovePlanCommandSchema } from "@caddie/contracts";
 import * as v from "valibot";
 
@@ -82,6 +83,18 @@ export function createBuildWorkflowRouter(
       c.req.param("projectId"),
     );
     return c.json(await projectExperience(c.env.DB, scope));
+  });
+
+  // The hackathon this project is for (header chips): derived read-only from
+  // the started proposal / contest link + the stored event. null = none.
+  router.get("/projects/:projectId/hackathon", async (c) => {
+    const scope = await requireProjectScope(
+      c.env.DB,
+      c.env,
+      c.req.raw.headers,
+      c.req.param("projectId"),
+    );
+    return c.json({ hackathon: await projectHackathon(c.env.DB, scope) });
   });
 
   // R01/R06: the approve-plan command — buttons AND an unambiguous

@@ -4,8 +4,9 @@ import type { ReactElement } from 'react';
 import { Icon } from '../icons.tsx';
 import { WORDS } from '../copy.ts';
 import { useWorkspaceChrome } from './Chrome.tsx';
-import { useWorkflowPhase } from '../queries.ts';
-import { workflowSteps } from './project-status.ts';
+import { useProjectHackathon, useWorkflowPhase } from '../queries.ts';
+import { activeStep, workflowSteps } from './project-status.ts';
+import { hackathonChips, oneLineIdea } from './project-header.ts';
 
 /**
  * Project header + step bar (Caddie v2, HANDOFF §3.7) — replaces the old tab
@@ -52,7 +53,11 @@ export function ProjectTabs(props: {
 }): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const project = chrome.selectedProject;
-	const isPersonal = !project?.contestUrl;
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const hackathon = useProjectHackathon(actor, project?.id ?? null);
+	// A project is for a hackathon when it has a contest link OR was started
+	// from a proposal for one (those never got a contest link).
+	const isPersonal = !project?.contestUrl && !hackathon.data?.hackathon;
 	const lastLabel = isPersonal ? WORDS.share : WORDS.submit;
 	const deadline = props.deadline ?? null;
 
@@ -60,23 +65,44 @@ export function ProjectTabs(props: {
 	// did not pass its own. A page with richer data (e.g. Check's readiness
 	// count) overrides by passing `steps` explicitly; both are real server
 	// state, never a client guess.
-	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const phase = useWorkflowPhase(actor, project?.id ?? null);
 	const derivedSteps = useMemo(
 		() => (project ? workflowSteps(phase.data ?? null, { personal: isPersonal }) : undefined),
 		[project, phase.data, isPersonal],
 	);
 	const steps = props.steps ?? derivedSteps;
+	const active = project ? activeStep(phase.data ?? null) : null;
+	const activeIndex = active ? STEPS.findIndex((step) => step.id === active) : -1;
+	const activeLabel = active ? (active === 'submission' ? lastLabel : STEPS[activeIndex]!.label) : null;
 
 	const stepsNav = (
-		<nav className="project-steps" aria-label="Project steps" data-testid="project-tabs">
+		<nav className="project-steps-wrap" aria-label="Project steps">
+		{activeLabel ? (
+			// Phones: one line + a bar instead of four cramped cards (CSS hides it on wider screens).
+			<div className="project-steps-compact" data-testid="project-steps-compact">
+				<span className="project-steps-compact-text">
+					<b>
+						Step {activeIndex + 1} of {STEPS.length} · {activeLabel}
+					</b>
+					{steps?.[active!]?.text ? <span> — {steps[active!]!.text}</span> : null}
+				</span>
+				<span className="project-steps-bar" aria-hidden="true">
+					{STEPS.map((step, index) => (
+						<span key={step.id} data-filled={index <= activeIndex ? 'true' : 'false'} />
+					))}
+				</span>
+			</div>
+		) : null}
+		<div className="project-steps" data-testid="project-tabs">
 			{STEPS.map((step) => {
 				const status = steps?.[step.id];
 				const isCurrent = props.current === step.id;
+				const isActive = active === step.id;
 				const label = step.id === 'submission' ? lastLabel : step.label;
 				const stepClass = [
 					'project-step',
 					isCurrent ? 'current' : '',
+					isActive ? 'active' : '',
 					status?.tone === 'done' ? 'done' : '',
 					status?.tone === 'needs' ? 'needs' : '',
 				]
@@ -88,7 +114,8 @@ export function ProjectTabs(props: {
 						to={step.to}
 						className={stepClass}
 						data-testid={step.testid}
-						aria-current={isCurrent ? 'page' : undefined}
+						data-active={isActive ? 'true' : undefined}
+						aria-current={isCurrent ? 'page' : isActive ? 'step' : undefined}
 						search={(prev: Record<string, unknown>) => ({ ...prev })}
 					>
 						<span className="step-top">
@@ -101,6 +128,7 @@ export function ProjectTabs(props: {
 					</Link>
 				);
 			})}
+		</div>
 		</nav>
 	);
 
@@ -109,6 +137,11 @@ export function ProjectTabs(props: {
 		// the header facts stay hidden until a real project exists.
 		return <div className="project-head project-head-empty">{stepsNav}</div>;
 	}
+
+	const idea = oneLineIdea(project.description);
+	const chips = hackathonChips(hackathon.data?.hackathon ?? null);
+	// The routine deadline chip stays only when the hackathon gives no deadline.
+	const showRoutineDeadline = deadline && !chips.some((chip) => chip.id === 'deadline');
 
 	return (
 		<header className="project-head" data-testid="project-header">
@@ -122,44 +155,47 @@ export function ProjectTabs(props: {
 					>
 						{project.name}
 					</Link>
-					<span className="project-head-for">
-						{project.description
-							? project.description
-							: project.contestUrl
-								? 'For the linked hackathon'
-								: 'A personal project'}
+					<span className="project-head-for" data-testid="project-head-for" title={project.description ?? undefined}>
+						{idea ?? (project.contestUrl ? 'For the linked hackathon' : 'A personal project')}
 					</span>
 				</span>
 				<span className="project-head-side">
-					{deadline ? (
-						<span className="project-deadline-chip" data-testid="project-deadline-chip" title="The nearest deadline Caddie knows about (in Routines)">
-							<Icon name="calendar" title="" /> {deadline}
-						</span>
-					) : null}
 					<Link
 						to="/project/settings"
-						className="project-head-gear"
+						className="btn-ghost project-head-settings"
 						data-testid="project-settings-gear"
-						title="Project settings"
-						aria-label="Project settings"
 						search={(prev: Record<string, unknown>) => ({ ...prev })}
 					>
-						<Icon name="panel" title="" />
+						<Icon name="settings" title="" />
+						<span>Settings</span>
 					</Link>
 				</span>
 			</div>
+			{chips.length || showRoutineDeadline ? (
+				<div className="project-head-chips" data-testid="project-head-chips">
+					{chips.map((chip) =>
+						chip.href ? (
+							<a key={chip.id} className="project-chip" data-tone={chip.tone} data-testid={`project-chip-${chip.id}`} href={chip.href} target="_blank" rel="noopener noreferrer">
+								{chip.text}
+							</a>
+						) : (
+							<span key={chip.id} className="project-chip" data-tone={chip.tone} data-testid={`project-chip-${chip.id}`}>
+								{chip.id === 'eligibility' && chip.tone === 'ok' ? <Icon name="check" title="" /> : null}
+								{chip.text}
+							</span>
+						),
+					)}
+					{showRoutineDeadline ? (
+						<span className="project-chip" data-tone="neutral" data-testid="project-deadline-chip" title="The nearest deadline Caddie knows about (in Routines)">
+							<Icon name="calendar" title="" /> {deadline}
+						</span>
+					) : null}
+				</div>
+			) : null}
 			{stepsNav}
-			{/* The one line that sets the mental model (§3.7, redesign direction):
-			    the chat is the steering wheel; these steps are the dashboard. A
-			    nontechnical user otherwise reads four tabs as four things THEY
-			    must operate. Shown once, in the header, on every project page. */}
-			<p className="project-head-model" data-testid="project-head-model">
-				<Icon name="chat" title="" />
-				<span>
-					<strong>Talk to Caddie to move things forward.</strong> These steps show you where your
-					project is — Caddie does the work in the chat.
-				</span>
-			</p>
+			{/* No separate "Ask Caddie" entry: the project chat is always present
+			    (docked beside the page on desktop, the composer above the mobile
+			    nav), so a second input here would only duplicate it. */}
 		</header>
 	);
 }

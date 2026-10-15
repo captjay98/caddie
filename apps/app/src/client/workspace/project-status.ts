@@ -49,7 +49,7 @@ export function workflowSteps(
 	else if (phase === 'review') steps.plan = { text: 'Ready for you to review', tone: 'needs' };
 	else if (phase) steps.plan = { text: 'Approved', tone: 'done' };
 	// Build
-	if (phase === 'planning' || phase === 'review') steps.build = { text: 'Starts after you approve', tone: 'neutral' };
+	if (phase === 'planning' || phase === 'review') steps.build = { text: 'After you approve', tone: 'neutral' };
 	else if (phase === 'building') steps.build = { text: 'Caddie is building it', tone: 'neutral' };
 	else if (phase === 'blocked') steps.build = { text: 'Needs your help', tone: 'needs' };
 	else if (phase === 'ready') steps.build = { text: 'Ready to try', tone: 'done' };
@@ -63,11 +63,23 @@ export function workflowSteps(
 	} else if (phase === 'ready') {
 		steps.check = { text: 'Ready when you are', tone: 'neutral' };
 	} else {
-		steps.check = { text: 'Not started yet', tone: 'neutral' };
+		steps.check = { text: opts?.personal ? 'After it’s built' : 'Before you submit', tone: 'neutral' };
 	}
 	// Share / Submit
 	steps.submission = opts?.personal
 		? { text: 'Optional', tone: 'neutral' }
 		: { text: 'Hand in when ready', tone: 'neutral' };
 	return steps;
+}
+
+/**
+ * The step the WORK is on (distinct from the tab being viewed): Plan while
+ * Caddie plans or waits for review, Build while building or blocked, Check
+ * once the app is ready. Unknown phase (no workflow yet) → none highlighted.
+ */
+export function activeStep(phase: WorkflowPhase | null): ProjectStepId | null {
+	if (phase === 'planning' || phase === 'review') return 'plan';
+	if (phase === 'building' || phase === 'blocked') return 'build';
+	if (phase === 'ready') return 'check';
+	return null;
 }
