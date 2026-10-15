@@ -154,9 +154,10 @@ export const MODEL_ROLES = {
 	 *  (execution-ledger P05), so its tool-calling here is not new ground. */
 	ideation: 'nemotron-3-ultra',
 	/** Planning specialists (product, designer, tech-lead — the catalog's
-	 *  `planning` skill): the PRD, design and plan of record, where deep
-	 *  reasoning pays. With ideation, the only roles that run on Ultra. */
-	plan: 'nemotron-3-ultra',
+	 *  `planning` skill): the PRD, design and plan of record. Kept as its own
+	 *  role so planning can be re-routed in one line; it shares the build route
+	 *  today (owner decision 2026-10-15), leaving Ultra for ideation only. */
+	plan: 'glm-5.3-flash',
 	/** Implementation + QA specialists (frontend, backend, mobile, qa). Moved off
 	 *  Ultra ($0.50/$2.20 per Mtok) to GLM-5.3-Flash ($0.15/$0.50): tool calling
 	 *  live-verified 2026-10-15, and Nebius's own agentic-coding cookbook

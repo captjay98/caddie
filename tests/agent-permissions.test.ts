@@ -113,13 +113,13 @@ describe('P05 permission matrix', () => {
 		}
 	});
 
-	test('planners run on the plan model (Ultra); implementation and QA on the build model', () => {
+	test('planners run on the plan role, implementation and QA on the build role (both GLM-5.3-Flash)', () => {
 		const context = stubContext();
 		const declarations = buildSpecialistDeclarations(context);
 		expect(declarations.map((d) => d.name)).toEqual(SPECIALIST_CATALOG.map((d) => d.name));
 		const plan = findModelRouteForRole('plan');
 		const build = findModelRouteForRole('build');
-		expect(plan.id).toBe('nemotron-3-ultra');
+		expect(plan.id).toBe('glm-5.3-flash');
 		expect(build.id).toBe('glm-5.3-flash');
 		const modelByName = Object.fromEntries(declarations.map((d) => [d.name, d.model]));
 		for (const name of ['product', 'designer', 'tech-lead']) expect(modelByName[name]).toBe(plan.specifier);

@@ -123,7 +123,8 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
  * Each delegate declares its own model (MODEL_ROLES in providers.ts is still
  * the one place that assigns models): the planners — the catalog entries that
  * carry the `planning` skill (product, designer, tech-lead) — run on the
- * `plan` role (Ultra); implementation and QA run on the cheaper `build` role.
+ * `plan` role; implementation and QA run on the `build` role (both are
+ * GLM-5.3-Flash today; providers.ts decides).
  * Without an override a delegate would inherit the coordinator's chat turn.
  */
 export function specialistModelRole(descriptor: { skills: readonly string[] }): 'plan' | 'build' {

@@ -54,7 +54,7 @@ describe('model registry (providers.ts)', () => {
 	test('chat routes to Super (fast/cheap); build to the frontier Ultra; helper to the cheap Nano', () => {
 		expect(findModelRouteForRole('chat').id).toBe('nemotron-3-super');
 		expect(findModelRouteForRole('build').id).toBe('glm-5.3-flash');
-		expect(findModelRouteForRole('plan').id).toBe('nemotron-3-ultra');
+		expect(findModelRouteForRole('plan').id).toBe('glm-5.3-flash');
 		expect(findModelRouteForRole('helper').id).toBe('nemotron-3-nano');
 		// the helper really is cheaper than the chat model (per-output rate).
 		expect(findModelRouteForRole('helper').outputPriceMinorUnits)
