@@ -5900,6 +5900,97 @@ body.conv-resizing * {
 
 /* --- U08: settings tabs + project settings ----------------------------------- */
 
+/* --- Settings redesign: grouped rail + one page header + plain sections ------
+   No card inside a card: sections are rows on the page surface; the only
+   header is .settings-head (label + section title + one-line intro). */
+.settings-layout {
+	display: grid;
+	grid-template-columns: 200px minmax(0, 1fr);
+	gap: 28px;
+	align-items: start;
+	width: 100%;
+	min-width: 0;
+}
+.settings-rail {
+	position: sticky;
+	top: 12px;
+	display: grid;
+	gap: 14px;
+	border: 0;
+}
+.settings-rail-group { display: grid; gap: 2px; }
+.settings-rail-label {
+	margin: 0 0 4px 10px;
+	font-size: 11px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--color-muted);
+}
+.settings-rail .settings-tab {
+	justify-content: flex-start;
+	height: 34px;
+	padding: 0 10px;
+	border-radius: 7px;
+	font-weight: 500;
+	text-align: left;
+}
+.settings-rail .settings-tab[aria-current='page'] {
+	background: color-mix(in srgb, var(--color-action) 12%, transparent);
+	color: var(--color-bright);
+	font-weight: 600;
+}
+.settings-rail .settings-tab[aria-current='page']::after { display: none; }
+.settings-content { display: grid; gap: 18px; min-width: 0; }
+.settings-head { display: grid; gap: 4px; }
+.settings-head .kicker { margin: 0; }
+.settings-head .page-title, .settings-head .page-lede { margin: 0; }
+.settings-section-body { display: grid; gap: 20px; min-width: 0; }
+.settings-fields-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.settings-field { display: grid; gap: 6px; font-size: 13px; align-content: start; }
+.settings-field-label { font-weight: 600; }
+.settings-field small { color: var(--color-muted); font-size: 12px; line-height: 1.45; }
+.settings-section-body .segment-options[data-count='4'] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.settings-rows { display: grid; margin: 0; padding: 0; list-style: none; }
+.settings-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 12px 0;
+	border-top: 1px solid var(--color-line-soft);
+}
+.settings-rows > .settings-row:last-child { border-bottom: 1px solid var(--color-line-soft); }
+.settings-row-main { display: grid; gap: 2px; min-width: 0; }
+.settings-row-title { font-size: 14px; font-weight: 600; color: var(--color-bright); }
+.settings-row-detail { font-size: 12.5px; line-height: 1.45; color: var(--color-muted); overflow-wrap: anywhere; }
+.settings-save { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.settings-save .form-error { flex-basis: 100%; margin: 0; }
+.settings-saved { font-size: 13px; color: var(--color-ok, var(--color-action)); font-weight: 600; }
+.settings-subhead { margin: 4px 0 0; font-size: 14px; font-weight: 600; color: var(--color-bright); }
+.settings-details { font-size: 13px; }
+.settings-details summary { cursor: pointer; color: var(--color-muted); padding: 4px 0; }
+.settings-details[open] summary { margin-bottom: 4px; }
+@media (max-width: 720px) {
+	.settings-layout { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+	/* One scrolling row of sections; group labels are dropped to keep it short. */
+	.settings-rail {
+		position: static;
+		display: flex;
+		gap: 4px;
+		overflow-x: auto;
+		scrollbar-width: none;
+		margin: 0 -2px;
+		padding: 0 2px 6px;
+		border-bottom: 1px solid var(--color-line-soft);
+	}
+	.settings-rail::-webkit-scrollbar { display: none; }
+	.settings-rail-group { display: contents; }
+	.settings-rail-label { display: none; }
+	.settings-rail .settings-tab { flex: none; height: 34px; }
+	.settings-fields-2 { grid-template-columns: minmax(0, 1fr); }
+	.settings-section-body .segment-options[data-count='4'] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .settings-tabs {
 	display: flex;
 	flex-wrap: wrap;

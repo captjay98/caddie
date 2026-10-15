@@ -37,7 +37,12 @@ interface MemoryListResponse {
 	facts: MemoryFact[];
 }
 
-export function Memory(): ReactElement {
+/**
+ * `embedded`: rendered under a page that already names the section (Settings
+ * → "What Caddie knows"), so the panel drops its own card, label and heading
+ * instead of repeating them inside a box.
+ */
+export function Memory({ embedded = false }: { embedded?: boolean } = {}): ReactElement {
 	const actor = useSessionActor(true);
 	const queryClient = useQueryClient();
 	const [projectId, setProjectId] = useState<string>('');
@@ -91,13 +96,17 @@ export function Memory(): ReactElement {
 	const history = facts.filter((fact) => fact.status === 'retracted');
 
 	return (
-		<section className="card-surface settings-panel" data-testid="memory-panel" id="memory-panel">
-			<p className="kicker" data-tone="action">
-				MEMORY
-			</p>
-			<h3 className="state-title">What Caddie remembers</h3>
+		<section className={embedded ? 'settings-section-body' : 'card-surface settings-panel'} data-testid="memory-panel" id="memory-panel">
+			{embedded ? null : (
+				<>
+					<p className="kicker" data-tone="action">
+						MEMORY
+					</p>
+					<h3 className="state-title">What Caddie remembers</h3>
+				</>
+			)}
 			<label className="row" htmlFor="memory-scope">
-				<span className="kicker">SCOPE</span>
+				<span className="kicker">{embedded ? 'Showing' : 'SCOPE'}</span>
 				<select
 					className="input"
 					id="memory-scope"

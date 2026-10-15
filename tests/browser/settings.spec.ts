@@ -61,6 +61,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 let profileSaved = false;
 let profileSaveShouldFail = false;
+let profileBodies: Record<string, unknown>[] = [];
 let facts: MemoryFact[] = [];
 
 const INITIAL_FACTS: MemoryFact[] = [
@@ -136,7 +137,8 @@ function json(body: unknown, status = 200): Promise<Response> {
 async function stubApi(request: Request): Promise<Response> {
 	const url = new URL(request.url);
 	const path = url.pathname;
-	if (path === '/api/auth/get-session') return json({ user: { id: 'user-1' } });
+	if (path === '/api/auth/get-session') return json({ user: { id: 'user-1', email: 'builder@example.com' } });
+	if (path === '/api/auth/list-accounts') return json([{ providerId: 'google', accountId: 'g-1' }]);
 	if (path === '/api/profile' && request.method === 'GET') {
 		return json({
 			profile: profileSaved
@@ -158,6 +160,7 @@ async function stubApi(request: Request): Promise<Response> {
 		}
 		profileSaved = true;
 		const body = (await request.json()) as { country?: string };
+		profileBodies.push(body as Record<string, unknown>);
 		if (body.country && body.country !== 'CL') {
 			return json({ error: 'invalid_input', message: 'unexpected country' }, 400);
 		}
@@ -299,6 +302,7 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 		// per-test isolation: fresh stubbed server state
 		profileSaved = false;
 		profileSaveShouldFail = false;
+		profileBodies = [];
 		facts = INITIAL_FACTS.map((fact) => ({ ...fact }));
 	});
 
@@ -322,34 +326,61 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 		});
 	});
 
-	test('settings render: profile editor, honest integration health, enabled stacks', async ({ page }) => {
+	test('settings render: one header, grouped rail, profile choices, plain build tools, honest accounts', async ({ page }) => {
 		await page.goto(`${BASE}/`);
 		await expect(page.getByTestId('settings-screen')).toBeVisible();
 
-		// profile editor fields (all optional — no wall before useful work)
+		// One page header: label + the section's title (no repeated section name inside).
+		await expect(page.getByTestId('settings-title')).toHaveText('Profile');
+		await expect(page.getByTestId('settings-screen').locator('h1')).toHaveCount(1);
+		await expect(page.locator('.settings-content .card-surface')).toHaveCount(0);
+		// The rail is grouped: You / Caddie / Account.
+		for (const group of ['You', 'Caddie', 'Account']) {
+			await expect(page.getByTestId('settings-tabs').getByRole('group', { name: group })).toBeVisible();
+		}
+
+		// Profile uses the same choices as onboarding (all optional).
 		await expect(page.getByTestId('profile-editor')).toBeVisible();
 		await expect(page.getByTestId('profile-country')).toBeVisible();
 		await expect(page.getByTestId('profile-timezone')).toBeVisible();
-		await expect(page.getByTestId('profile-experience')).toBeVisible();
+		await expect(page.getByTestId('profile-experience').getByRole('radio', { name: 'Experienced' })).toBeVisible();
+		await expect(page.getByTestId('profile-format').getByRole('radio', { name: 'In person' })).toBeVisible();
+		await expect(page.getByTestId('profile-weekly-hours').getByRole('radio', { name: '20+' })).toBeVisible();
 
-		// v2 tabs: Build tools and Connected accounts live behind their tabs.
+		// Build tools: plain names; "Available" only where the server says enabled.
 		await page.getByTestId('settings-tab-tools').click();
-		// v2 wording: enabled = "Being proven first"; planned = "Later" — the
-		// labels never run ahead of the feature ledger.
-		await expect(page.getByTestId('stack-react-hono')).toContainText('Being proven first');
-		await expect(page.getByTestId('stack-tanstack-start')).toContainText('Later');
-		await expect(page.getByTestId('stack-flutter')).toContainText('Later');
+		await expect(page.getByTestId('settings-title')).toHaveText('Build tools');
+		await expect(page.getByTestId('stack-react-hono')).toContainText('React + Hono');
+		await expect(page.getByTestId('stack-react-hono')).toContainText('Available');
+		await expect(page.getByTestId('stack-tanstack-start')).toContainText('Coming later');
+		await expect(page.getByTestId('stack-flutter')).toContainText('Coming later');
 
+		// Connected accounts: the user's own accounts first…
 		await page.getByTestId('settings-tab-accounts').click();
-		// integration health is honest: nothing configured in this deployment
+		await expect(page.getByTestId('account-google')).toContainText('Signed in as builder@example.com');
+		await expect(page.getByTestId('account-google')).toContainText('Connected');
+		await expect(page.getByTestId('service-status')).toContainText('Needs setup');
+		// …and the server's configuration stays honest in the details (names, never values).
 		await expect(page.getByTestId('integration-auth-google')).toContainText('not configured');
 		await expect(page.getByTestId('integration-auth-github')).toContainText('not configured');
 		await expect(page.getByTestId('integration-sandbox')).toContainText('not configured');
 		await expect(page.getByTestId('integration-sandbox')).toContainText('CONTREE_BASE_URL');
+		// no fake buttons in the health details (labels only, no action styled as working)
+		expect(await page.getByTestId('integrations-health').getByRole('button').count()).toBe(0);
+	});
 
-		// no fake buttons in the health panel (labels only, no action styled as working)
-		const healthButtons = await page.getByTestId('integrations-health').getByRole('button').count();
-		expect(healthButtons).toBe(0);
+	test('interests: the shared picker and skills save together, without touching the profile fields', async ({ page }) => {
+		await page.goto(`${BASE}/?tab=interests`);
+		await expect(page.getByTestId('settings-title')).toHaveText('Interests');
+		const picker = page.getByTestId('interests-picker');
+		await picker.getByRole('button', { name: 'Health', exact: true }).click();
+		await picker.getByTestId('interests-picker-search').fill('Race telemetry');
+		await picker.getByTestId('interests-picker-add').click();
+		await page.getByTestId('skills-field-input').fill('TypeScript');
+		await page.getByTestId('skills-field-input').press('Enter');
+		await page.getByTestId('interests-save').click();
+		await expect(page.getByTestId('interests-saved')).toBeVisible();
+		expect(profileBodies).toEqual([{ freeTextInterests: ['Health', 'Race telemetry'], skills: ['TypeScript'] }]);
 	});
 
 	test('memory: confirm a proposal, retract a fact, and the retracted entry moves to history', async ({ page }) => {
@@ -410,9 +441,9 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 
 	test('interrupted settings save preserves the draft and shows the error', async ({ page }) => {
 		await page.goto(`${BASE}/`);
-		await page.getByTestId('profile-country').fill('CL');
+		await page.getByTestId('profile-country').fill('Chile');
 		await page.getByTestId('profile-timezone').fill('America/Santiago');
-		await page.getByTestId('profile-weekly-hours').fill('12');
+		await page.getByTestId('profile-weekly-hours').getByRole('radio', { name: '10–20' }).click();
 
 		// first save fails server-side
 		profileSaveShouldFail = true;
@@ -420,14 +451,29 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 		await expect(page.getByTestId('profile-error')).toContainText('IANA');
 
 		// the draft is preserved after the failed save
-		await expect(page.getByTestId('profile-country')).toHaveValue('CL');
+		await expect(page.getByTestId('profile-country')).toHaveValue('Chile');
 		await expect(page.getByTestId('profile-timezone')).toHaveValue('America/Santiago');
-		await expect(page.getByTestId('profile-weekly-hours')).toHaveValue('12');
+		await expect(page.getByTestId('profile-weekly-hours')).toHaveAttribute('data-value', '10to20');
 
-		// second save succeeds
+		// second save succeeds — and carries ONLY the profile section's fields
 		profileSaveShouldFail = false;
 		await page.getByTestId('profile-save').click();
 		await expect(page.getByTestId('profile-saved')).toBeVisible();
 		expect(profileSaved).toBe(true);
+		expect(profileBodies.at(-1)).toEqual({
+			country: 'CL',
+			timezone: 'America/Santiago',
+			experienceLevel: null,
+			formatPreference: null,
+			weeklyHours: 15,
+		});
+	});
+
+	test('a country that is not on the list is refused before saving, and nothing is sent', async ({ page }) => {
+		await page.goto(`${BASE}/`);
+		await page.getByTestId('profile-country').fill('Atlantis');
+		await page.getByTestId('profile-save').click();
+		await expect(page.getByTestId('profile-error')).toContainText('Choose your country from the list');
+		expect(profileBodies).toHaveLength(0);
 	});
 });
