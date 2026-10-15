@@ -110,22 +110,25 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		maxTokens: 2048,
 	},
 	{
-		// VISION route (Stage 3 — image input). Token Factory serves vision-
-		// language models over the SAME OpenAI-compatible API (Qwen2.5-VL etc.);
-		// an image message routes here so Caddie can actually SEE an attachment.
-		// ⚠️ LIVE PROBE REQUIRED: the exact case-sensitive TF id is confirmed by a
-		// live probe the same way the Nemotron ids were (the marketing name is
-		// "Qwen2.5-VL-72B-Instruct"; the served id can differ). Pricing is the
-		// public Qwen-VL listing; re-verify on the probe. inputModalities marks
-		// this as the vision-capable route (ModelCapability contract).
-		id: 'qwen-vl',
-		specifier: 'nebius/Qwen/Qwen2.5-VL-72B-Instruct',
+		// VISION route — image input. LIVE VERIFIED 2026-10-15 against this
+		// account's GET /v1/models + a chat completion with an inline PNG: the
+		// earlier `Qwen/Qwen2.5-VL-72B-Instruct` id is NOT served on Token
+		// Factory; `google/gemma-3-27b-it` is, correctly named a solid red and a
+		// solid blue test image, and accepts a `tools` list (HTTP 200). The other
+		// served VLM, `openbmb/MiniCPM-V-4_5`, 400s on auto tool choice, so it
+		// cannot run the coordinator. CAVEAT (same probe): asked to save a fact,
+		// Gemma replied "I have remembered…" WITHOUT emitting the tool call —
+		// image turns are weaker at tools than the Nemotron routes.
+		// Pricing: public third-party listing for Nebius (FP8), conservative;
+		// re-verify against the Nebius price page.
+		id: 'gemma-3-vision',
+		specifier: 'nebius/google/gemma-3-27b-it',
 		providerId: 'nebius',
-		modelId: 'Qwen/Qwen2.5-VL-72B-Instruct',
+		modelId: 'google/gemma-3-27b-it',
 		pricingVersion: '2026-10-nemotron-tier',
-		unitPriceMinorUnits: 60, // output $0.60/Mtok (budget ceiling) — re-verify on probe
-		inputPriceMinorUnits: 25, // $0.25/Mtok — re-verify on probe
-		outputPriceMinorUnits: 60,
+		unitPriceMinorUnits: 30, // output ceiling $0.30/Mtok (conservative)
+		inputPriceMinorUnits: 10, // $0.10/Mtok
+		outputPriceMinorUnits: 30,
 		currency: 'usd',
 		contextWindow: 131072,
 		maxTokens: 4096,
@@ -159,7 +162,7 @@ export const MODEL_ROLES = {
 	/** Cheap bounded helper calls (query shaping, summarization). */
 	helper: 'nemotron-3-nano',
 	/** Image understanding (Stage 3) — a vision-language model that accepts image input. */
-	vision: 'qwen-vl',
+	vision: 'gemma-3-vision',
 } as const satisfies Record<string, string>;
 
 export type ModelRole = keyof typeof MODEL_ROLES;
@@ -194,7 +197,7 @@ export function coordinatorModelRole(input: { isHome: boolean; ideationTurnsLeft
 
 /** Route ids that accept image input (the vision-capable routes). The one place
  *  that marks a route as a VLM — the ModelCapability contract reads from here. */
-export const VISION_ROUTE_IDS: readonly string[] = ['qwen-vl'];
+export const VISION_ROUTE_IDS: readonly string[] = ['gemma-3-vision'];
 
 /** Whether a route accepts image input (used to pick a vision route for an
  *  image message, and to report the capability honestly). */
