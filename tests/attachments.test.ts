@@ -79,7 +79,7 @@ describe("ingestAttachments", () => {
 	test("an image sets needsVision and routes to the vision model", async () => {
 		const r = await ingestAttachments([img], noFetch);
 		expect(r.needsVision).toBe(true);
-		expect(r.modelRouteId).toBe("gemma-3-vision");
+		expect(r.modelRouteId).toBe("glm-5.3-flash-vision");
 		expect(r.accepted[0]!.kind).toBe("image");
 	});
 
@@ -99,7 +99,7 @@ describe("ingestAttachments", () => {
 	test("mixed image + text: vision route, both accepted", async () => {
 		const r = await ingestAttachments([img, txt], async () => bytesOf("x"));
 		expect(r.needsVision).toBe(true);
-		expect(r.modelRouteId).toBe("gemma-3-vision");
+		expect(r.modelRouteId).toBe("glm-5.3-flash-vision");
 		expect(r.accepted).toHaveLength(2);
 	});
 

@@ -110,27 +110,26 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		maxTokens: 2048,
 	},
 	{
-		// VISION route — image input. LIVE VERIFIED 2026-10-15 against this
-		// account's GET /v1/models + a chat completion with an inline PNG: the
-		// earlier `Qwen/Qwen2.5-VL-72B-Instruct` id is NOT served on Token
-		// Factory; `google/gemma-3-27b-it` is, correctly named a solid red and a
-		// solid blue test image, and accepts a `tools` list (HTTP 200). The other
-		// served VLM, `openbmb/MiniCPM-V-4_5`, 400s on auto tool choice, so it
-		// cannot run the coordinator. CAVEAT (same probe): asked to save a fact,
-		// Gemma replied "I have remembered…" WITHOUT emitting the tool call —
-		// image turns are weaker at tools than the Nemotron routes.
-		// Pricing: public third-party listing for Nebius (FP8), conservative;
-		// re-verify against the Nebius price page.
-		id: 'gemma-3-vision',
-		specifier: 'nebius/google/gemma-3-27b-it',
+		// VISION route — image input. LIVE VERIFIED 2026-10-15 on this account:
+		// GET /v1/models + one chat completion per served model with a split
+		// red/blue PNG and a `remember` tool. Nebius 400s image input on every
+		// Nemotron route ("This model does not support image input"), Qwen3.5 and
+		// GLM-5.3. GLM-5.3-Flash read both halves AND emitted the tool call
+		// (7.0s). Kimi-K3 also passed (faster) but is $3/$15 per Mtok; Gemma 3
+		// 27B claimed a save without calling the tool; MiniCPM-V rejects auto
+		// tool choice; the original Qwen2.5-VL id is not served at all.
+		// Pricing: Nebius cookbook listing $0.15 in / $0.50 out per Mtok
+		// (Sept 2026) — re-verify against the Nebius price page.
+		id: 'glm-5.3-flash-vision',
+		specifier: 'nebius/zai-org/GLM-5.3-Flash',
 		providerId: 'nebius',
-		modelId: 'google/gemma-3-27b-it',
+		modelId: 'zai-org/GLM-5.3-Flash',
 		pricingVersion: '2026-10-nemotron-tier',
-		unitPriceMinorUnits: 30, // output ceiling $0.30/Mtok (conservative)
-		inputPriceMinorUnits: 10, // $0.10/Mtok
-		outputPriceMinorUnits: 30,
+		unitPriceMinorUnits: 50, // output $0.50/Mtok (budget ceiling)
+		inputPriceMinorUnits: 15, // $0.15/Mtok
+		outputPriceMinorUnits: 50,
 		currency: 'usd',
-		contextWindow: 131072,
+		contextWindow: 1048576,
 		maxTokens: 4096,
 	},
 ];
@@ -162,7 +161,7 @@ export const MODEL_ROLES = {
 	/** Cheap bounded helper calls (query shaping, summarization). */
 	helper: 'nemotron-3-nano',
 	/** Image understanding (Stage 3) — a vision-language model that accepts image input. */
-	vision: 'gemma-3-vision',
+	vision: 'glm-5.3-flash-vision',
 } as const satisfies Record<string, string>;
 
 export type ModelRole = keyof typeof MODEL_ROLES;
@@ -197,7 +196,7 @@ export function coordinatorModelRole(input: { isHome: boolean; ideationTurnsLeft
 
 /** Route ids that accept image input (the vision-capable routes). The one place
  *  that marks a route as a VLM — the ModelCapability contract reads from here. */
-export const VISION_ROUTE_IDS: readonly string[] = ['gemma-3-vision'];
+export const VISION_ROUTE_IDS: readonly string[] = ['glm-5.3-flash-vision'];
 
 /** Whether a route accepts image input (used to pick a vision route for an
  *  image message, and to report the capability honestly). */
