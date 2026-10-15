@@ -120,7 +120,7 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		// tool choice; the original Qwen2.5-VL id is not served at all.
 		// Pricing: Nebius cookbook listing $0.15 in / $0.50 out per Mtok
 		// (Sept 2026) — re-verify against the Nebius price page.
-		id: 'glm-5.3-flash-vision',
+		id: 'glm-5.3-flash',
 		specifier: 'nebius/zai-org/GLM-5.3-Flash',
 		providerId: 'nebius',
 		modelId: 'zai-org/GLM-5.3-Flash',
@@ -153,15 +153,20 @@ export const MODEL_ROLES = {
 	 *  this same coordinator as the chat model before the switch to Super
 	 *  (execution-ledger P05), so its tool-calling here is not new ground. */
 	ideation: 'nemotron-3-ultra',
-	/** Heavy build/plan specialist reasoning — where Ultra's agentic strength pays.
-	 *  NOTE: today this is recorded on the project RUN BINDING only; the
-	 *  specialists are subagents that inherit the coordinator's turn model
-	 *  (specialists.ts), i.e. `chat`. */
-	build: 'nemotron-3-ultra',
+	/** Planning specialists (product, designer, tech-lead — the catalog's
+	 *  `planning` skill): the PRD, design and plan of record, where deep
+	 *  reasoning pays. With ideation, the only roles that run on Ultra. */
+	plan: 'nemotron-3-ultra',
+	/** Implementation + QA specialists (frontend, backend, mobile, qa). Moved off
+	 *  Ultra ($0.50/$2.20 per Mtok) to GLM-5.3-Flash ($0.15/$0.50): tool calling
+	 *  live-verified 2026-10-15, and Nebius's own agentic-coding cookbook
+	 *  finished a coding task on it in 4 calls. The project RUN BINDING also
+	 *  records this route. */
+	build: 'glm-5.3-flash',
 	/** Cheap bounded helper calls (query shaping, summarization). */
 	helper: 'nemotron-3-nano',
 	/** Image understanding (Stage 3) — a vision-language model that accepts image input. */
-	vision: 'glm-5.3-flash-vision',
+	vision: 'glm-5.3-flash',
 } as const satisfies Record<string, string>;
 
 export type ModelRole = keyof typeof MODEL_ROLES;
@@ -196,7 +201,7 @@ export function coordinatorModelRole(input: { isHome: boolean; ideationTurnsLeft
 
 /** Route ids that accept image input (the vision-capable routes). The one place
  *  that marks a route as a VLM — the ModelCapability contract reads from here. */
-export const VISION_ROUTE_IDS: readonly string[] = ['glm-5.3-flash-vision'];
+export const VISION_ROUTE_IDS: readonly string[] = ['glm-5.3-flash'];
 
 /** Whether a route accepts image input (used to pick a vision route for an
  *  image message, and to report the capability honestly). */

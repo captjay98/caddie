@@ -53,7 +53,8 @@ describe('model registry (providers.ts)', () => {
 
 	test('chat routes to Super (fast/cheap); build to the frontier Ultra; helper to the cheap Nano', () => {
 		expect(findModelRouteForRole('chat').id).toBe('nemotron-3-super');
-		expect(findModelRouteForRole('build').id).toBe('nemotron-3-ultra');
+		expect(findModelRouteForRole('build').id).toBe('glm-5.3-flash');
+		expect(findModelRouteForRole('plan').id).toBe('nemotron-3-ultra');
 		expect(findModelRouteForRole('helper').id).toBe('nemotron-3-nano');
 		// the helper really is cheaper than the chat model (per-output rate).
 		expect(findModelRouteForRole('helper').outputPriceMinorUnits)
@@ -78,7 +79,7 @@ describe('model registry (providers.ts)', () => {
 		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 0, hasImage: true })).toBe('vision');
 		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 5, hasImage: true })).toBe('vision');
 		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0, hasImage: true })).toBe('vision');
-		expect(findModelRouteForRole('vision').id).toBe('glm-5.3-flash-vision');
+		expect(findModelRouteForRole('vision').id).toBe('glm-5.3-flash');
 		expect(routeAcceptsImage(findModelRouteForRole('vision').id)).toBe(true);
 		// no image: unchanged
 		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0, hasImage: false })).toBe('chat');

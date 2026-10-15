@@ -113,17 +113,18 @@ describe('P05 permission matrix', () => {
 		}
 	});
 
-	test('specialist declarations carry the catalog name/description and run on the build-role model', () => {
+	test('planners run on the plan model (Ultra); implementation and QA on the build model', () => {
 		const context = stubContext();
 		const declarations = buildSpecialistDeclarations(context);
 		expect(declarations.map((d) => d.name)).toEqual(SPECIALIST_CATALOG.map((d) => d.name));
+		const plan = findModelRouteForRole('plan');
 		const build = findModelRouteForRole('build');
-		expect(build.id).toBe('nemotron-3-ultra');
-		for (const declaration of declarations) {
-			// delegates run on the build role, not the coordinator's cheaper chat turn
-			expect(declaration.model).toBe(build.specifier);
-			expect(declaration.description.length).toBeGreaterThan(10);
-		}
+		expect(plan.id).toBe('nemotron-3-ultra');
+		expect(build.id).toBe('glm-5.3-flash');
+		const modelByName = Object.fromEntries(declarations.map((d) => [d.name, d.model]));
+		for (const name of ['product', 'designer', 'tech-lead']) expect(modelByName[name]).toBe(plan.specifier);
+		for (const name of ['frontend', 'backend', 'mobile', 'qa']) expect(modelByName[name]).toBe(build.specifier);
+		for (const declaration of declarations) expect(declaration.description.length).toBeGreaterThan(10);
 	});
 });
 

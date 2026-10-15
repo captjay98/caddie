@@ -120,19 +120,22 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 
 /**
  * The seven delegate definitions for the coordinator's useSubagent calls.
- * Each delegate runs on the `build` role (MODEL_ROLES in providers.ts — still
- * the one place that assigns models): before this override they inherited the
- * coordinator's turn, i.e. the cheap `chat` model, while the project's run
- * binding already recorded `build`. The coordinator itself keeps orchestrating
- * on `chat`.
+ * Each delegate declares its own model (MODEL_ROLES in providers.ts is still
+ * the one place that assigns models): the planners — the catalog entries that
+ * carry the `planning` skill (product, designer, tech-lead) — run on the
+ * `plan` role (Ultra); implementation and QA run on the cheaper `build` role.
+ * Without an override a delegate would inherit the coordinator's chat turn.
  */
+export function specialistModelRole(descriptor: { skills: readonly string[] }): 'plan' | 'build' {
+	return descriptor.skills.includes('planning') ? 'plan' : 'build';
+}
+
 export function buildSpecialistDeclarations(context: SpecialistBuildContext) {
-	const model = findModelRouteForRole('build').specifier;
 	return SPECIALIST_CATALOG.map((descriptor) => ({
 		name: descriptor.name,
 		description: descriptor.description,
 		agent: buildSpecialist(descriptor.role, context),
-		model,
+		model: findModelRouteForRole(specialistModelRole(descriptor)).specifier,
 	}));
 }
 
