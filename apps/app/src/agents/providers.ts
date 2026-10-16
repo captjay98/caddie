@@ -181,9 +181,15 @@ export type ModelRole = keyof typeof MODEL_ROLES;
 /**
  * How many user turns a brainstorm keeps the deeper `ideation` model after it
  * is entered. A bound, so a conversation that drifts off ideas without a
- * proposal falls back to the fast chat model on its own.
+ * proposal falls back to the fast chat model on its own. Sized to outlast a
+ * real brainstorm (who-it's-for → problem → three ideas → narrow → confirm →
+ * propose is comfortably 15+ user turns): a window that expires MID-brainstorm
+ * drops the deeper model and the fast chat model is markedly worse at not
+ * re-asking answered questions — the "lost track" symptom. Any new brainstorm
+ * trigger re-arms it to the full window, so it only lapses once a conversation
+ * has genuinely moved off ideas.
  */
-export const IDEATION_TURN_WINDOW = 12;
+export const IDEATION_TURN_WINDOW = 30;
 
 /**
  * Which role drives THIS coordinator turn. Flue reads `useModel` when a
