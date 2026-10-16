@@ -47,44 +47,42 @@ import { settlementNotice } from './settlement-notice.ts';
 
 type ToolPart = Extract<FlueConversationPart, { type: 'dynamic-tool' }>;
 
-/** Render item after clustering: a single part, or a run of tool calls. */
-type PartCluster = { kind: 'single'; part: FlueConversationPart } | { kind: 'tools'; parts: ToolPart[] };
-
-function clusterParts(parts: FlueConversationPart[]): PartCluster[] {
-	const items: PartCluster[] = [];
-	for (const part of parts) {
-		if (part.type === 'dynamic-tool') {
-			const last = items[items.length - 1];
-			if (last && last.kind === 'tools') last.parts.push(part);
-			else items.push({ kind: 'tools', parts: [part] });
-		} else {
-			items.push({ kind: 'single', part });
-		}
-	}
-	return items;
-}
-
 /**
  * Consecutive assistant messages that carry ONLY tool calls merge into one
  * strip at the transcript level. A run emits a tool-per-message sequence
  * (1 call, 2 calls, …) that would otherwise render as a wall of one-line
  * strips with nothing readable between them.
  */
-type MessageGroup = { messages: FlueConversationMessage[]; toolsOnly: boolean };
+/**
+ * A TURN is the unit the transcript renders as one bubble: either a single
+ * user message, or a run of consecutive assistant messages (every message
+ * Caddie produced answering the user). Grouping by turn — not by individual
+ * model message — is what lets a turn's reasoning fold into ONE "Thought it
+ * through" and its tool calls into ONE drawer, instead of a stack of boxes.
+ */
+type Turn = { role: 'user'; message: FlueConversationMessage } | { role: 'assistant'; messages: FlueConversationMessage[] };
 
-function groupMessages(messages: readonly FlueConversationMessage[]): MessageGroup[] {
-	const groups: MessageGroup[] = [];
+function groupTurns(messages: readonly FlueConversationMessage[]): Turn[] {
+	const turns: Turn[] = [];
 	for (const message of messages) {
 		if (message.display === 'hidden') continue;
-		const toolsOnly =
-			message.role === 'assistant' &&
-			message.parts.length > 0 &&
-			message.parts.every((part) => part.type === 'dynamic-tool');
-		const last = groups[groups.length - 1];
-		if (toolsOnly && last && last.toolsOnly) last.messages.push(message);
-		else groups.push({ messages: [message], toolsOnly });
+		if (message.role === 'user') {
+			turns.push({ role: 'user', message });
+			continue;
+		}
+		if (message.role !== 'assistant') continue; // system advisories surface via settlements
+		// A diagnostic (specialist) message stays its OWN turn — it is a distinct
+		// foldable row, never merged into the normal answer bubble. Otherwise a
+		// run of consecutive assistant messages collapses into one turn.
+		const last = turns[turns.length - 1];
+		const canMerge =
+			message.display !== 'diagnostic' &&
+			last?.role === 'assistant' &&
+			last.messages.at(-1)?.display !== 'diagnostic';
+		if (canMerge && last?.role === 'assistant') last.messages.push(message);
+		else turns.push({ role: 'assistant', messages: [message] });
 	}
-	return groups;
+	return turns;
 }
 
 function turnClock(timestamp: string | undefined): string {
@@ -191,19 +189,6 @@ function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
 	);
 }
 
-/** A run of tool-only assistant messages rendered as ONE quiet strip. */
-function ToolGroup({ group, parts }: { group: readonly FlueConversationMessage[]; parts: ToolPart[] }): ReactElement {
-	const clock = turnClock(group[0]?.timestamp);
-	return (
-		<div className="msg assistant" data-testid="msg-tool-group" title={fullTime(group[0]?.timestamp)}>
-			<span className="sr-only">Caddie{clock ? ` at ${clock}` : ''}</span>
-			<div className="bubble">
-				<ToolStrip parts={parts} />
-			</div>
-		</div>
-	);
-}
-
 /** The reasoning part as the Channel receives it — accumulated text + stream state. */
 type ReasoningPart = Extract<FlueConversationPart, { type: 'reasoning' }>;
 
@@ -220,24 +205,38 @@ type ReasoningPart = Extract<FlueConversationPart, { type: 'reasoning' }>;
  * strips serialization fragments / nested tags. A redacted reasoning block
  * shows the marker only, never fabricated text.
  */
-function ReasoningView({ part }: { part: ReasoningPart }): ReactElement | null {
-	const streaming = part.state === 'streaming';
-	// Defensive: reasoning parts carry accumulated `text`; clean it the same way
-	// assistant text is cleaned so no serialization/tag noise leaks through.
-	const raw = typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : '';
-	const redacted = (part as { redacted?: unknown }).redacted === true;
-	const text = redacted ? '' : cleanAssistantText(raw).trim();
+/**
+ * Turn-level reasoning (one bubble, one disclosure). Every reasoning part the
+ * turn produced — the model may emit several passes — folds into ONE "Thought
+ * it through", instead of a stack of markers. OPEN while any pass is still
+ * streaming so the user watches it think in real time; COLLAPSES to the quiet
+ * one-liner when the turn settles (openable, never auto-expanded again).
+ *
+ * Threads the C7 hard constraint ("raw chain-of-thought never renders as a
+ * permanent human-facing block"): raw CoT shows ONLY transiently while
+ * streaming and behind an explicit disclosure afterwards — never settled
+ * prose, always through the same hygiene cleaner. A fully-redacted turn shows
+ * the marker only, never fabricated text.
+ */
+function TurnReasoning({ parts }: { parts: readonly ReasoningPart[] }): ReactElement | null {
+	const streaming = parts.some((part) => part.state === 'streaming');
+	const redactedOnly =
+		parts.length > 0 &&
+		parts.every((part) => (part as { redacted?: unknown }).redacted === true);
+	// Merge every pass's accumulated text into one block (blank line between
+	// passes), cleaned the same way assistant text is so no tag/serialization
+	// noise leaks through.
+	const text = parts
+		.filter((part) => (part as { redacted?: unknown }).redacted !== true)
+		.map((part) => (typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : ''))
+		.map((raw) => cleanAssistantText(raw).trim())
+		.filter(Boolean)
+		.join('\n\n');
 
-	// Hooks must run unconditionally and in a stable order on EVERY render —
-	// they come before any early return. A reasoning part can start empty (no
-	// text, not streaming) and later gain text/stream; returning null before
-	// these hooks changed the hook count between renders and crashed the tree
-	// with "Rendered more hooks than during the previous render".
+	// Hooks run unconditionally, before any early return (a reasoning part can
+	// start empty and later gain text/stream; a conditional hook count crashes
+	// the tree with "Rendered more hooks than during the previous render").
 	const ref = useRef<HTMLDivElement>(null);
-	// Autoscroll the streaming panel to the latest reasoning — but ONLY while
-	// the user is pinned to the bottom. If they scroll up to re-read earlier
-	// reasoning, respect that and stop yanking them back down (same contract as
-	// the main transcript). A fresh stream re-pins.
 	const reasoningPinned = useRef(true);
 	useEffect(() => {
 		if (streaming && ref.current && reasoningPinned.current) {
@@ -246,24 +245,21 @@ function ReasoningView({ part }: { part: ReasoningPart }): ReactElement | null {
 	}, [streaming, text]);
 
 	// Nothing to show and not streaming: render nothing (quiet by default).
-	// Safe to return after the hooks above have run.
-	if (!streaming && !text && !redacted) return null;
+	if (!streaming && !text && !redactedOnly) return null;
 
 	const summary = streaming
 		? 'Caddie is thinking…'
-		: redacted
+		: redactedOnly && !text
 			? 'Reasoning (hidden by the model)'
 			: 'Thought it through';
 
 	return (
-		<details className="reasoning-view" data-testid="reasoning-view" data-state={part.state} open={streaming}>
+		<details className="reasoning-view" data-testid="reasoning-view" data-state={streaming ? 'streaming' : 'done'} open={streaming}>
 			<summary className="reasoning-summary" role="status">
 				<Icon name={streaming ? 'play' : 'check'} title={streaming ? 'thinking' : 'done'} />{' '}
 				{summary}
 			</summary>
-			{redacted ? (
-				<p className="reasoning-redacted">The model kept this reasoning private.</p>
-			) : text ? (
+			{text ? (
 				<div
 					className="reasoning-body"
 					ref={ref}
@@ -275,6 +271,8 @@ function ReasoningView({ part }: { part: ReasoningPart }): ReactElement | null {
 				>
 					{text}
 				</div>
+			) : redactedOnly ? (
+				<p className="reasoning-redacted">The model kept this reasoning private.</p>
 			) : null}
 		</details>
 	);
@@ -288,10 +286,13 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 		return clean ? <Markdown text={clean} /> : null;
 	}
 		if (part.type === 'reasoning') {
-			return <ReasoningView part={part} />;
+			// Reasoning is hoisted to the TURN level (TurnReasoning) so every pass
+			// folds into one disclosure; never rendered per-part here.
+			return null;
 		}
 	if (part.type === 'dynamic-tool') {
-		return <ToolBanner part={part} />;
+		// Tool calls are hoisted to the TURN level (one drawer); not per-part.
+		return null;
 	}
 	if (part.type === 'file') {
 		return (
@@ -383,14 +384,16 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 }
 
 /** Transcript rows with day dividers (Today / Yesterday / short date between
- *  day groups); per-message clocks live in title tooltips only. */
-function buildTranscriptRows(groups: ReturnType<typeof groupMessages>): ReactElement[] {
+ *  day groups); per-message clocks live in title tooltips only. One row per
+ *  TURN — a user message, or an assistant turn as one bubble. */
+function buildTranscriptRows(turns: ReturnType<typeof groupTurns>): ReactElement[] {
 	const rows: ReactElement[] = [];
   // A handoff may mention the same project again. Keep one live workspace
   // at its latest mention so previews cannot diverge across duplicate frames.
   const latestCards = new Map<string, FlueConversationPart>();
-  for (const group of groups) for (const message of group.messages) {
-    for (const part of message.parts) {
+  for (const turn of turns) {
+    const messages = turn.role === 'user' ? [turn.message] : turn.messages;
+    for (const message of messages) for (const part of message.parts) {
       if (part.type !== 'data-projectWorkflow') continue;
       const data = part.data as { projectId?: unknown };
       if (typeof data?.projectId === 'string') latestCards.set(data.projectId, part);
@@ -398,112 +401,114 @@ function buildTranscriptRows(groups: ReturnType<typeof groupMessages>): ReactEle
   }
 	let lastDay: string | null = null;
 	let rowKey = 0;
-	// Author of the previously PUSHED transcript row ('user' | 'assistant' | null).
-	// Consecutive rows by the same author hug; a day divider resets it so the
+	// Author of the previously PUSHED turn ('user' | 'assistant' | null).
+	// Consecutive turns by the same author hug; a day divider resets it so the
 	// first bubble after a divider never hugs across the gap.
 	let prevAuthor: 'user' | 'assistant' | null = null;
-	for (const group of groups) {
-		if (group.toolsOnly) {
-			const day = dayLabel(group.messages[0]?.timestamp);
-			if (day !== null && day !== lastDay) {
-				rows.push(
-					<div className="day-divider" key={`day-${rowKey++}`}>
-						{day}
-					</div>,
-				);
-				lastDay = day;
-				prevAuthor = null;
-			}
-			rows.push(
-				<ToolGroup
-					key={`group-${rowKey++}`}
-					group={group.messages}
-					parts={group.messages.flatMap((message) =>
-						message.parts.filter((part): part is ToolPart => part.type === 'dynamic-tool'),
-					)}
-				/>,
-			);
-			prevAuthor = 'assistant';
-		} else {
-			for (const message of group.messages) {
-				if (message.display === 'hidden') continue;
-				const day = dayLabel(message.timestamp);
-				if (day !== null && day !== lastDay) {
-					rows.push(
-						<div className="day-divider" key={`day-${rowKey++}`}>
-							{day}
-						</div>,
-					);
-					lastDay = day;
-					prevAuthor = null;
-				}
-				const parts = message.parts.filter(part => {
-          if (part.type !== 'data-projectWorkflow') return true;
-          const data = part.data as { projectId?: unknown };
-          return typeof data?.projectId !== 'string' || latestCards.get(data.projectId) === part;
-        });
-        if (parts.length) {
-          const author = message.role === 'user' ? 'user' : 'assistant';
-          const followsSameAuthor = author === prevAuthor;
-          rows.push(<MessageRow key={message.id} message={{ ...message, parts }} followsSameAuthor={followsSameAuthor} />);
-          prevAuthor = author;
-        }
-			}
+	// Drop a workflow card that is not the latest mention of its project.
+	const keepPart = (part: FlueConversationPart) => {
+		if (part.type !== 'data-projectWorkflow') return true;
+		const data = part.data as { projectId?: unknown };
+		return typeof data?.projectId !== 'string' || latestCards.get(data.projectId) === part;
+	};
+	for (const turn of turns) {
+		const stamp = turn.role === 'user' ? turn.message.timestamp : turn.messages[0]?.timestamp;
+		const day = dayLabel(stamp);
+		if (day !== null && day !== lastDay) {
+			rows.push(<div className="day-divider" key={`day-${rowKey++}`}>{day}</div>);
+			lastDay = day;
+			prevAuthor = null;
 		}
+		if (turn.role === 'user') {
+			const followsSameAuthor = prevAuthor === 'user';
+			rows.push(<UserRow key={turn.message.id} message={turn.message} followsSameAuthor={followsSameAuthor} />);
+			prevAuthor = 'user';
+			continue;
+		}
+		// Assistant turn: filter stale workflow cards, then render ONE bubble.
+		const messages = turn.messages
+			.map((message) => ({ ...message, parts: message.parts.filter(keepPart) }))
+			.filter((message) => message.parts.length > 0 || message.display === 'diagnostic');
+		if (messages.length === 0) continue;
+		const followsSameAuthor = prevAuthor === 'assistant';
+		rows.push(<AssistantTurn key={messages[0]!.id} messages={messages} followsSameAuthor={followsSameAuthor} />);
+		prevAuthor = 'assistant';
 	}
 	return rows;
 }
 
-function MessageRow({ message, followsSameAuthor }: { message: FlueConversationMessage; followsSameAuthor?: boolean }): ReactElement | null {
-	if (message.display === 'hidden') return null;
+/** The user's own message — right-aligned bubble, attachments listed. */
+function UserRow({ message, followsSameAuthor }: { message: FlueConversationMessage; followsSameAuthor?: boolean }): ReactElement {
 	const clock = turnClock(message.timestamp);
-	if (message.role === 'user') {
-		const raw = message.parts
-			.filter((part): part is Extract<FlueConversationPart, { type: 'text' }> => part.type === 'text')
-			.map((part) => part.text)
-			.join('\n');
-		// Attached text files ride inside the message body for the model; the
-		// user's bubble shows what they typed plus the file names, not the dump.
-		const text = stripAttachedFileText(raw);
-		const files = attachedFileNames(raw);
-		return (
-			<div className="msg user" data-testid="msg-user" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(message.timestamp)}>
-				<span className="sr-only">You{clock ? ` at ${clock}` : ''}</span>
-				<div className="bubble">
-					{text}
-					{files.length ? (
-						<span className="bubble-files" data-testid="msg-user-files">
-							{text ? <br /> : null}
-							Attached: {files.join(', ')}
-						</span>
-					) : null}
-				</div>
+	const raw = message.parts
+		.filter((part): part is Extract<FlueConversationPart, { type: 'text' }> => part.type === 'text')
+		.map((part) => part.text)
+		.join('\n');
+	const text = stripAttachedFileText(raw);
+	const files = attachedFileNames(raw);
+	return (
+		<div className="msg user" data-testid="msg-user" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(message.timestamp)}>
+			<span className="sr-only">You{clock ? ` at ${clock}` : ''}</span>
+			<div className="bubble">
+				{text}
+				{files.length ? (
+					<span className="bubble-files" data-testid="msg-user-files">
+						{text ? <br /> : null}
+						Attached: {files.join(', ')}
+					</span>
+				) : null}
 			</div>
-		);
-	}
-	if (message.role !== 'assistant') return null; // system advisories surface via settlements
-	const diagnostic = message.display === 'diagnostic';
+		</div>
+	);
+}
+
+/**
+ * One assistant TURN as a single bubble (feature-ledger C7, redesigned): a
+ * fixed order of at most three layers —
+ *   1. ONE "Thought it through" disclosure merging every reasoning pass,
+ *   2. ONE tool drawer holding every tool call in the turn,
+ *   3. the answer (text + cards + files) across all the turn's messages, in
+ *      order, with a hairline rule separating it from the folded layers.
+ * A specialist DIAGNOSTIC turn renders as its own foldable row instead.
+ */
+function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversationMessage[]; followsSameAuthor?: boolean }): ReactElement | null {
+	const first = messages[0];
+	if (!first) return null;
+	const clock = turnClock(first.timestamp);
+	const allParts = messages.flatMap((message) => message.parts);
+	const reasoning = allParts.filter((part): part is ReasoningPart => part.type === 'reasoning');
+	const tools = allParts.filter((part): part is ToolPart => part.type === 'dynamic-tool');
+	// The answer: everything that is neither reasoning nor a tool call, in order
+	// (text, cards, files, data disclosures). AssistantPart returns null for the
+	// hoisted kinds, so filtering here keeps the key order clean.
+	const answer = allParts.filter((part) => part.type !== 'reasoning' && part.type !== 'dynamic-tool');
+	const hasFolded = reasoning.length > 0 || tools.length > 0;
+	const hasAnswer = answer.some((part) => part.type !== 'text' || cleanAssistantText(part.text).trim().length > 0);
+
 	const body = (
 		<>
-			{clusterParts(message.parts).map((item, index) =>
-				item.kind === 'tools' ? (
-					<ToolStrip key={index} parts={item.parts} />
-				) : (
-					<AssistantPart key={index} part={item.part} />
-				),
-			)}
+			{reasoning.length > 0 ? <TurnReasoning parts={reasoning} /> : null}
+			{tools.length > 0 ? <ToolStrip parts={tools} /> : null}
+			{hasAnswer ? (
+				<div className={hasFolded ? 'turn-answer has-folded' : 'turn-answer'}>
+					{answer.map((part, index) => (
+						<AssistantPart key={index} part={part} />
+					))}
+				</div>
+			) : null}
 		</>
 	);
-	if (diagnostic) {
+
+	if (first.display === 'diagnostic') {
 		return (
 			<details className="msg assistant" data-testid="msg-diagnostic" data-seq={followsSameAuthor ? 'cont' : 'first'}>
 				<summary className="msg-meta kicker">Caddie · specialist diagnostic</summary>
-				{body}
+				<div className="bubble">{body}</div>
 			</details>
 		);
 	}
 	return (
-		<div className="msg assistant" data-testid="msg-assistant" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(message.timestamp)}>
+		<div className="msg assistant" data-testid="msg-assistant" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(first.timestamp)}>
 			<span className="sr-only">Caddie{clock ? ` at ${clock}` : ''}</span>
 			<div className="bubble">{body}</div>
 		</div>
@@ -620,7 +625,7 @@ export function Channel(props: {
 	// whole conversation transcript in react-markdown (~8.5s blocking on long
 	// histories, measured).
 	const transcriptRows = useMemo(
-		() => buildTranscriptRows(groupMessages(source.messages)),
+		() => buildTranscriptRows(groupTurns(source.messages)),
 		[source.messages],
 	);
 

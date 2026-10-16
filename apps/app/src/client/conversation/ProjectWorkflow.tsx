@@ -10,6 +10,7 @@ import type { BuildWorkflow } from "../../server/build-workflow.ts";
 import { fetchJson, postJson } from "../api.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
 import { useProjectRepo } from "../queries.ts";
+import { Icon } from "../icons.tsx";
 import { InteractivePreview } from "../artifacts/InteractivePreview.tsx";
 import { BuildProgress } from "../project/BuildProgress.tsx";
 import { PlanFeatureList, SavedFeatures } from "../project/FeatureChecklist.tsx";
@@ -180,24 +181,18 @@ export function ProjectWorkflow({
             <Markdown text={splitFeatureBlock(plan.body).display} />
             <PlanFeatureList body={plan.body} />
           </div>
-          <p className="state-detail">
-            Approving starts a sandbox build of this plan. Deployments and
-            purchases need separate permission.
-          </p>
-          {!repoQuery.isPending && !linkedRepo ? (
-            <p className="state-detail workflow-repo-nudge" data-testid="workflow-repo-nudge">
-              No repo connected yet — GitHub is the home for this project&rsquo;s code. You can{" "}
-              <button
-                type="button"
-                className="r-link"
-                data-testid="workflow-connect-repo"
-                onClick={() => chrome.goProjectTab("/project/settings", { project: projectId })}
-              >
-                connect one in Code settings
-              </button>{" "}
-              now, or build first and save it after.
-            </p>
-          ) : null}
+          {/* Reassurance STRIP: the safety facts the host actually enforces
+              (sandbox build; deploy/spend gated behind a separate approval),
+              as glanceable chips instead of a grey paragraph the user must
+              read to feel safe. */}
+          <div className="workflow-assurance" data-testid="workflow-assurance">
+            <span className="workflow-chip workflow-chip-ok">
+              <Icon name="shield" title="" /> Runs in a sandbox
+            </span>
+            <span className="workflow-chip">No deploy</span>
+            <span className="workflow-chip">No spending</span>
+            <span className="workflow-assurance-note">— those need separate permission</span>
+          </div>
           <div className="row-actions">
             <button
               className="btn-key"
@@ -214,6 +209,23 @@ export function ProjectWorkflow({
               Suggest a change
             </button>
           </div>
+          {/* Repo connection is OPTIONAL housekeeping, not a warning about
+              approving: one quiet footnote BELOW the actions, never a
+              caution-coloured paragraph above the primary button. */}
+          {!repoQuery.isPending && !linkedRepo ? (
+            <p className="state-detail workflow-repo-nudge" data-testid="workflow-repo-nudge">
+              <Icon name="github" title="" /> Your code lives only in the sandbox for now.{" "}
+              <button
+                type="button"
+                className="r-link"
+                data-testid="workflow-connect-repo"
+                onClick={() => chrome.goProjectTab("/project/settings", { project: projectId })}
+              >
+                Connect a GitHub repo
+              </button>{" "}
+              to save it — now or after the build.
+            </p>
+          ) : null}
           {changes ? (
             <form
               onSubmit={(e) => {

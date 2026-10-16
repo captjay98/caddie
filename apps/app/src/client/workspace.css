@@ -1585,6 +1585,81 @@ a.btn-ghost.topbar-nav-link {
 	flex-wrap: wrap;
 }
 
+/* Plan-approval reassurance strip: the safety guarantees the host enforces
+   (sandbox build; deploy/spend need a separate approval) as glanceable chips
+   above the actions, so the user is reassured at a glance instead of reading a
+   grey paragraph. Theme tokens only; each tinted chip sets its own text colour. */
+.workflow-assurance {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
+	margin-top: 0.5rem;
+}
+.workflow-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	font-size: var(--r-meta);
+	padding: 0.2rem 0.55rem;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--color-muted) 12%, transparent);
+	color: var(--color-muted);
+	border: 1px solid color-mix(in srgb, var(--color-muted) 24%, transparent);
+	white-space: nowrap;
+}
+/* The one POSITIVE guarantee (it is sandboxed) carries the ok tint; the
+   "no deploy / no spending" chips stay neutral — they state a boundary, not a
+   warning, so they must not read as danger. */
+.workflow-chip-ok {
+	background: color-mix(in srgb, var(--color-ok) 13%, transparent);
+	color: var(--color-ok);
+	border-color: color-mix(in srgb, var(--color-ok) 26%, transparent);
+}
+.workflow-assurance-note {
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+	opacity: 0.85;
+}
+
+/* Repo connection is optional housekeeping, demoted to a quiet footnote BELOW
+   the actions (a hairline separates it) — never a paragraph above the primary
+   button that reads as a warning about approving. */
+.workflow-repo-nudge {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin-top: 0.6rem;
+	padding-top: 0.6rem;
+	border-top: 1px solid var(--color-line-soft);
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+}
+.workflow-repo-nudge .r-link {
+	white-space: nowrap;
+	/* Rendered as a <button> here, so strip the UA button chrome that otherwise
+	   draws a box around the text — it must read as an inline text link, not a
+	   chip. Accent-coloured + underlined so it is clearly the clickable part. */
+	appearance: none;
+	border: 0;
+	background: none;
+	padding: 0;
+	font: inherit;
+	font-weight: 600;
+	color: var(--color-action);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+.workflow-repo-nudge .r-link:hover {
+	color: var(--color-action-deep);
+}
+/* Keep the icon snug to the sentence and let the whole line wrap naturally
+   rather than breaking awkwardly before "now, or after the build." */
+.workflow-repo-nudge > :first-child {
+	flex: none;
+}
+
 .row-details {
 	margin-top: 0.45rem;
 	display: grid;
@@ -1893,6 +1968,31 @@ a.btn-ghost.topbar-nav-link {
 	font-size: var(--r-meta);
 	color: var(--color-muted);
 	font-style: italic;
+}
+
+/* One-bubble turn (redesign): the folded layers (reasoning, tool drawer) stack
+   tight at the top of the assistant bubble; the answer sits beneath them with
+   a hairline rule when any layer is present, so a turn reads as
+   thinking → tools → answer in one surface, not a stack of cards. The folded
+   layers lose their own top/bottom margins here — the turn controls spacing. */
+.msg.assistant .bubble > .reasoning-view,
+.msg.assistant .bubble > .tool-strip {
+	margin: 0 0 0.4rem;
+}
+.msg.assistant .bubble > .reasoning-view + .tool-strip {
+	margin-top: 0;
+}
+.turn-answer.has-folded {
+	border-top: 1px solid var(--color-line-soft);
+	padding-top: 0.6rem;
+	margin-top: 0.1rem;
+}
+/* The answer's own first/last block never adds extra margin against the rule. */
+.turn-answer > :first-child {
+	margin-top: 0;
+}
+.turn-answer > :last-child {
+	margin-bottom: 0;
 }
 
 /* Hackathon results (chat card + Discover list). ONE column at chat width:

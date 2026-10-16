@@ -198,6 +198,9 @@ test.describe('Stage 3/4 — image/file attach + voice dictation composer states
 		const page = await context.newPage();
 		await openProjectPage(page);
 
+		// Attach / mic / camera now live behind one "+" toggle; open it to reach
+		// the "Upload media" item, which triggers the hidden file input.
+		await page.getByTestId('composer-tools-toggle').click();
 		await expect(page.getByTestId('composer-attach')).toBeVisible();
 
 		// Set a small text file on the hidden input; the preview chip must appear
@@ -207,6 +210,10 @@ test.describe('Stage 3/4 — image/file attach + voice dictation composer states
 			mimeType: 'text/plain',
 			buffer: Buffer.from('my plan notes'),
 		});
+		// Close the "+" menu (in the real flow, picking "Upload media" closes it
+		// before the OS picker opens; the test sets the input directly, so close
+		// it explicitly) so its items don't overlap the chip's remove button.
+		await page.keyboard.press('Escape');
 		const chip = page.getByTestId('attachment-chip');
 		await expect(chip).toBeVisible();
 		await expect(chip).toHaveAttribute('data-kind', 'file');
@@ -273,14 +280,19 @@ test.describe('Stage 3/4 — image/file attach + voice dictation composer states
 		});
 		await openProjectPage(page);
 
+		// Mic lives in the "+" menu now. Open it, start dictation (the menu
+		// closes on pick), confirm the listening indicator, then reopen the menu
+		// and pick the mic item again to stop.
+		await page.getByTestId('composer-tools-toggle').click();
 		const mic = page.getByTestId('composer-mic');
 		await expect(mic).toBeVisible();
 		await expect(mic).toHaveAttribute('data-listening', 'false');
 		await mic.click();
-		await expect(mic).toHaveAttribute('data-listening', 'true');
 		await expect(page.getByTestId('composer-dictation')).toContainText(/listening/i);
-		await mic.click();
-		await expect(mic).toHaveAttribute('data-listening', 'false');
+		await page.getByTestId('composer-tools-toggle').click();
+		await expect(page.getByTestId('composer-mic')).toHaveAttribute('data-listening', 'true');
+		await page.getByTestId('composer-mic').click();
+		await expect(page.getByTestId('composer-dictation')).toHaveCount(0);
 		await context.close();
 	});
 
@@ -295,6 +307,9 @@ test.describe('Stage 3/4 — image/file attach + voice dictation composer states
 			delete (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
 		});
 		await openProjectPage(page);
+		// Open the "+" menu: Upload media is always there, but with no
+		// SpeechRecognition the Dictate (mic) item is not rendered.
+		await page.getByTestId('composer-tools-toggle').click();
 		await expect(page.getByTestId('composer-attach')).toBeVisible();
 		await expect(page.getByTestId('composer-mic')).toHaveCount(0);
 		await context.close();
@@ -316,9 +331,14 @@ test.describe('Stage 3/4 — image/file attach + voice dictation composer states
 			(window as unknown as { SpeechRecognition: unknown }).SpeechRecognition = FakeRecognition;
 		});
 		await openProjectPage(page);
+		// Start dictation through the "+" menu, then assert the live "Listening…"
+		// indicator's pulse is suppressed under reduced-motion (the dot carries
+		// the animation now that the mic is a menu item, not a pulsing button).
+		await page.getByTestId('composer-tools-toggle').click();
 		await page.getByTestId('composer-mic').click();
 		const animation = await page
-			.getByTestId('composer-mic')
+			.getByTestId('composer-dictation')
+			.locator('.composer-dictation-dot')
 			.evaluate((el) => getComputedStyle(el).animationName);
 		// Under reduced-motion the pulse keyframes are suppressed → 'none'.
 		expect(animation === 'none' || animation === '').toBeTruthy();
