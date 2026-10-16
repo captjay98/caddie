@@ -1,4 +1,5 @@
 import { recipe } from "./recipe.ts";
+import { SCAFFOLD_LOCKFILE } from "./scaffold-lock.ts";
 
 /**
  * The ONE generic scaffold + command set for the react-hono stack (R03).
@@ -10,11 +11,20 @@ import { recipe } from "./recipe.ts";
  * setups meant a green fixture journey proved nothing about freeform chat.
  *
  * This module is the single source both paths import. The scaffold is a
- * MINIMAL GENERIC React/Bun app skeleton — NOT a todo app and NOT any
- * acceptance assertions — so the model still implements the requested app and
- * the protected acceptance stays outside candidate reach. The commands come
- * from the frozen recipe, so "the identical recipe used by chat" is a code
- * fact, not a comment.
+ * GENERIC React/Bun app skeleton — NOT a todo app and NOT any acceptance
+ * assertions — so the model still implements the requested app and the
+ * protected acceptance stays outside candidate reach. The commands come from
+ * the frozen recipe, so "the identical recipe used by chat" is a code fact.
+ *
+ * Phase 0 (2026-10-16): the scaffold now ships a WORKING test environment.
+ * A real build (FarmLog AI) spent its run hand-writing jsdom/Testing Library
+ * preloads because the skeleton had none. Bun's test runner does not support
+ * jsdom; Bun's documented setup is happy-dom registered in its OWN preload
+ * file (imports are hoisted, so Testing Library must load after it), then
+ * Testing Library matchers + cleanup in a second preload. Both preloads and
+ * bunfig.toml are protected paths (agents/permissions.ts): the builder writes
+ * tests, never the harness. The example test lives OUTSIDE `src/`, so the
+ * host's `bun test src/` gate still needs tests the builder actually wrote.
  */
 
 /** Verify commands, sourced from the frozen recipe (never hand-copied). */
@@ -25,54 +35,156 @@ export const SCAFFOLD_COMMANDS = {
 	start: recipe.start,
 } as const;
 
-/**
- * The generic scaffold files written into a fresh sandbox workspace. Keyed by
- * path relative to the project root. Pinned dependency versions match the
- * recipe's frozen setup; scripts match the recipe commands so `bun run test` /
- * `bun run build` resolve.
- */
-export const SCAFFOLD_FILES: Readonly<Record<string, string>> = {
-	"package.json": JSON.stringify(
-		{
-			name: "caddie-project",
-			private: true,
-			type: "module",
-			scripts: {
-				test: "bun test src/",
-				build: "bun build src/main.tsx --outdir dist --target browser",
-				start: "bun run src/server.ts",
-			},
-			dependencies: {
-				react: "19.2.0",
-				"react-dom": "19.2.0",
-				hono: "4.12.32",
-			},
-			devDependencies: {
-				"@types/bun": "^1.2.0",
-			},
-		},
-		null,
-		2,
-	),
-	"tsconfig.json": JSON.stringify(
+/** Exact versions the scaffold (and its lockfile) were verified with. */
+export const SCAFFOLD_PACKAGE = {
+	name: "caddie-project",
+	private: true,
+	type: "module",
+	scripts: {
+		test: "bun test src/",
+		build: "bun build src/main.tsx --outdir dist --target browser",
+		start: "bun run src/server.ts",
+	},
+	dependencies: {
+		react: "19.2.0",
+		"react-dom": "19.2.0",
+		hono: "4.12.32",
+	},
+	devDependencies: {
+		"@happy-dom/global-registrator": "21.0.3",
+		"@testing-library/dom": "10.4.2",
+		"@testing-library/jest-dom": "7.0.1",
+		"@testing-library/react": "16.3.3",
+		"@types/bun": "1.4.3",
+	},
+} as const;
+
+/** The test-harness files the builder must never edit (see PROTECTED_PATH_PREFIXES). */
+export const SCAFFOLD_TEST_HARNESS = ["bunfig.toml", "test/setup/"] as const;
+
+const BASE_FILES: Readonly<Record<string, string>> = {
+	"package.json": `${JSON.stringify(SCAFFOLD_PACKAGE, null, 2)}\n`,
+	"tsconfig.json": `${JSON.stringify(
 		{
 			compilerOptions: {
 				target: "ES2022",
 				module: "ESNext",
 				moduleResolution: "bundler",
 				jsx: "react-jsx",
+				lib: ["ES2022", "DOM", "DOM.Iterable"],
+				types: ["bun"],
 				strict: true,
+				skipLibCheck: true,
 				noEmit: true,
 			},
-			include: ["src"],
+			include: ["src", "test"],
 		},
 		null,
 		2,
-	),
-	"src/main.tsx":
-		"import React from 'react';\nimport { createRoot } from 'react-dom/client';\nimport './styles.css';\ncreateRoot(document.getElementById('root')!).render(<main><h1>Your app</h1></main>);\n",
-	"src/styles.css": "body{margin:0;font-family:system-ui,sans-serif}",
+	)}\n`,
+	"bunfig.toml": [
+		"# Caddie test setup. Do not edit: the host runs `bun test src/` with these.",
+		"# happy-dom must register BEFORE Testing Library loads, so they are two files.",
+		"[test]",
+		'preload = ["./test/setup/happydom.ts", "./test/setup/testing-library.ts"]',
+		"",
+	].join("\n"),
+	"test/setup/happydom.ts": [
+		"// Gives bun test a browser-like DOM: window, document, localStorage, events.",
+		"// Its own file on purpose: imports are hoisted, and Testing Library must",
+		"// load only after the DOM exists (see bunfig.toml).",
+		'import { GlobalRegistrator } from "@happy-dom/global-registrator";',
+		"",
+		'GlobalRegistrator.register({ url: "http://localhost/" });',
+		"",
+	].join("\n"),
+	"test/setup/testing-library.ts": [
+		"// Testing Library for bun test: jest-dom matchers, React act() mode, and a",
+		"// clean DOM + storage between tests.",
+		'import { afterEach, expect } from "bun:test";',
+		'import { cleanup } from "@testing-library/react";',
+		'import * as matchers from "@testing-library/jest-dom/matchers";',
+		"",
+		"(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;",
+		"expect.extend(matchers);",
+		"",
+		"afterEach(() => {",
+		"  cleanup();",
+		"  localStorage.clear();",
+		"});",
+		"",
+	].join("\n"),
+	"test/setup/matchers.d.ts": [
+		'import type { TestingLibraryMatchers } from "@testing-library/jest-dom/matchers";',
+		"",
+		'declare module "bun:test" {',
+		"  interface Matchers<T> extends TestingLibraryMatchers<typeof expect.stringContaining, T> {}",
+		"  interface AsymmetricMatchers extends TestingLibraryMatchers {}",
+		"}",
+		"",
+	].join("\n"),
+	// A working pattern to copy. NOT under src/, so the host's `bun test src/`
+	// gate never counts it: the builder's own tests must make that gate pass.
+	"test/examples/app.example.test.tsx": [
+		"// Example behavior tests. Put the app's real tests in src/*.test.tsx,",
+		"// next to the code they check — the host runs `bun test src/`.",
+		'import { describe, expect, test } from "bun:test";',
+		'import { useState } from "react";',
+		'import { fireEvent, render, screen } from "@testing-library/react";',
+		'import { App } from "../../src/App";',
+		"",
+		"function Counter() {",
+		"  const [clicks, setClicks] = useState(0);",
+		"  return <button onClick={() => setClicks(clicks + 1)}>Clicked {clicks}</button>;",
+		"}",
+		"",
+		'describe("examples", () => {',
+		'  test("renders the starter heading", () => {',
+		"    render(<App />);",
+		'    expect(screen.getByRole("heading", { name: "Your app" })).toBeInTheDocument();',
+		"  });",
+		"",
+		'  test("updates after a click", () => {',
+		"    render(<Counter />);",
+		'    fireEvent.click(screen.getByRole("button"));',
+		'    expect(screen.getByRole("button")).toHaveTextContent("Clicked 1");',
+		"  });",
+		"});",
+		"",
+	].join("\n"),
+	"src/App.tsx": [
+		"export function App() {",
+		"  return (",
+		"    <main>",
+		"      <h1>Your app</h1>",
+		"    </main>",
+		"  );",
+		"}",
+		"",
+	].join("\n"),
+	"src/main.tsx": [
+		'import { createRoot } from "react-dom/client";',
+		'import { App } from "./App";',
+		'import "./styles.css";',
+		"",
+		'createRoot(document.getElementById("root")!).render(<App />);',
+		"",
+	].join("\n"),
+	"src/styles.css": "body{margin:0;font-family:system-ui,sans-serif}\n",
 };
+
+/**
+ * The generic scaffold files written into a fresh sandbox workspace. Keyed by
+ * path relative to the project root. `bun.lock` comes from the generated
+ * scaffold-lock.ts (scripts/refresh-scaffold-lock.ts) so the recipe's
+ * `bun install --frozen-lockfile` installs exactly the verified versions.
+ */
+export const SCAFFOLD_FILES: Readonly<Record<string, string>> = SCAFFOLD_LOCKFILE
+	? { ...BASE_FILES, "bun.lock": SCAFFOLD_LOCKFILE }
+	: BASE_FILES;
+
+/** The scaffold without its lockfile — the refresh script's install input. */
+export const SCAFFOLD_BASE_FILES = BASE_FILES;
 
 /** The recipe version this scaffold is bound to (recorded on receipts). */
 export const SCAFFOLD_RECIPE_VERSION = recipe.version;

@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
-import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS } from "../stacks/react-hono/scaffold.ts";
+import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS, SCAFFOLD_PACKAGE, SCAFFOLD_TEST_HARNESS } from "../stacks/react-hono/scaffold.ts";
 import { recipe } from "../stacks/react-hono/recipe.ts";
+import { PROTECTED_PATH_PREFIXES, isProtectedPath } from "../apps/app/src/agents/permissions.ts";
 
 /**
  * R03 LOCAL VERIFIED: the real chat scaffold and the evaluation journey use
@@ -41,13 +42,22 @@ describe("R03 single recipe — chat build uses the shared recipe", () => {
   });
 
   test("the generic scaffold is a non-app-specific skeleton (no todo, no acceptance)", () => {
+    // A smoke skeleton: it must NOT bake in the requested app's domain.
     const blob = JSON.stringify(SCAFFOLD_FILES).toLowerCase();
-    // A smoke skeleton: it must NOT bake in the requested app's domain or any
-    // acceptance assertions — the model implements the app, the protected
-    // harness judges it.
     expect(blob).not.toContain("todo");
-    expect(blob).not.toContain("expect(");
-    expect(blob).not.toContain("test(");
+    // The host's behavior-test gate is `bun test src/`. Nothing the scaffold
+    // puts under src/ may be a test or contain assertions, so the gate passes
+    // only on tests the builder wrote. (The runnable example lives under
+    // test/examples/, outside the gate; scripts/refresh-scaffold-lock.ts
+    // proves `bun test src/` FAILS on the bare scaffold.)
+    const srcFiles = Object.entries(SCAFFOLD_FILES).filter(([path]) => path.startsWith("src/"));
+    expect(srcFiles.length).toBeGreaterThan(0);
+    for (const [path, text] of srcFiles) {
+      expect(path).not.toMatch(/\.(test|spec)\.[jt]sx?$/);
+      expect(text).not.toContain("expect(");
+      expect(text).not.toContain("test(");
+    }
+    expect(Object.keys(SCAFFOLD_FILES).some((path) => path.startsWith("test/examples/"))).toBe(true);
     // But it IS a runnable React/Bun skeleton with the recipe's script names.
     const pkg = JSON.parse(SCAFFOLD_FILES["package.json"]!) as {
       scripts: Record<string, string>;
@@ -56,6 +66,29 @@ describe("R03 single recipe — chat build uses the shared recipe", () => {
     expect(pkg.scripts.test).toBeTruthy();
     expect(pkg.scripts.build).toBeTruthy();
     expect(pkg.dependencies.react).toBeTruthy();
+  });
+
+  test("the scaffold ships a working, protected test harness and a matching lockfile", () => {
+    // Two preload files in this order: happy-dom must register before Testing
+    // Library loads (imports are hoisted) — Bun's documented setup.
+    expect(SCAFFOLD_FILES["bunfig.toml"]).toContain(
+      'preload = ["./test/setup/happydom.ts", "./test/setup/testing-library.ts"]',
+    );
+    expect(SCAFFOLD_FILES["test/setup/happydom.ts"]).toContain("GlobalRegistrator.register(");
+    expect(SCAFFOLD_FILES["test/setup/happydom.ts"]).not.toContain("@testing-library");
+    expect(SCAFFOLD_FILES["test/setup/testing-library.ts"]).toContain("expect.extend(matchers)");
+    expect(JSON.stringify(SCAFFOLD_FILES)).not.toContain("jsdom");
+    // The builder writes tests, never the harness that runs them.
+    for (const path of SCAFFOLD_TEST_HARNESS) expect(PROTECTED_PATH_PREFIXES).toContain(path);
+    for (const path of ["bunfig.toml", "test/setup/happydom.ts", "/workspace/proj_x/test/setup/testing-library.ts"])
+      expect(isProtectedPath(path)).toBe(true);
+    expect(isProtectedPath("test/examples/app.example.test.tsx")).toBe(false);
+    expect(isProtectedPath("src/App.test.tsx")).toBe(false);
+    // `bun install --frozen-lockfile` needs a lockfile that pins every declared dependency.
+    const lock = SCAFFOLD_FILES["bun.lock"];
+    expect(lock).toBeTruthy();
+    for (const [name, version] of Object.entries({ ...SCAFFOLD_PACKAGE.dependencies, ...SCAFFOLD_PACKAGE.devDependencies }))
+      expect(lock).toContain(`"${name}@${version}"`);
   });
 });
 

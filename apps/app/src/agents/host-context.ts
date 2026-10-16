@@ -90,6 +90,14 @@ export function scopedCoordinatorContext(
     remember: async (input) => (await resolve()).remember(input),
     inspectRepository: async () => (await resolve()).inspectRepository(),
     verifyBuild: async (key, signal) => (await resolve()).verifyBuild(key, signal),
+    buildNextFeature: async () => (await resolve()).buildNextFeature(),
+    finishFeature: async (featureId, key, signal) => (await resolve()).finishFeature(featureId, key, signal),
+    featureProgress: async () => (await resolve()).featureProgress(),
+    runChecks: async (key, signal) => {
+      const host = await resolve();
+      if (!host.runChecks) throw new Error("Host checks are not configured.");
+      return host.runChecks(key, signal);
+    },
     blockBuild: async (reason) => (await resolve()).blockBuild(reason),
     requestApproval: async (input) => (await resolve()).requestApproval(input),
     readPlanNote: async (kind) => (await resolve()).readPlanNote(kind),

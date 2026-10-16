@@ -130,7 +130,13 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		outputPriceMinorUnits: 50,
 		currency: 'usd',
 		contextWindow: 1048576,
-		maxTokens: 4096,
+		// A plan revision is ~3.5k reasoning tokens + the whole PRD inside the
+		// write_plan_note call. LIVE VERIFIED 2026-10-15: at 4096 the FarmLog AI
+		// revision stopped at finish=length before the tool call (nothing saved,
+		// six attempts, "task completed with no text"); at 16384 the same request
+		// finished with the call (8231 tokens, 18910-char PRD). 32768 leaves room
+		// for longer plans. This is a cap, not a spend: billing is per token used.
+		maxTokens: 32768,
 	},
 ];
 

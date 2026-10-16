@@ -295,7 +295,7 @@ export async function decideWorkflow(
     const phase = input.decision === "approved" ? "building" : "planning";
     const message =
       input.decision === "approved"
-        ? `The authenticated review controls approved plan ${plan.id}. Re-read the latest plan and durable approval. Delegate implementation and QA, then call verify_build. Stop honestly on blockers.`
+        ? `The authenticated review controls approved plan ${plan.id}. Re-read the latest plan and durable approval. Build it feature by feature: call build_next_feature, delegate exactly that feature, then finish_feature; when every feature has passed, run QA with verify_build. Stop honestly on blockers.`
         : `Revise plan ${plan.id} using the user's feedback below. Write a NEW prd revision, then wait for review; no building.\n\n${note}`;
     await db
       .prepare(
@@ -360,6 +360,78 @@ export async function setWorkflowBlocker(
     .bind("blocked", detail.slice(0, 2000), now(), scope.projectId)
     .run();
 }
+/**
+ * A `building` run with no recorded progress for this long is stopped
+ * honestly. Longer than the sandbox's 15-minute command cap
+ * (coordinator-host.ts quotas), so one slow command never trips it.
+ */
+export const BUILD_STALL_MS = 20 * 60_000;
+
+/** Newest evidence the build is moving: workflow write, sandbox action or repair round. */
+async function lastBuildProgressAt(db: D1Database, workflow: BuildWorkflow): Promise<number> {
+  const times = [Date.parse(workflow.updatedAt)];
+  for (const sql of [
+    'select max("finishedAt") as "t" from "build_activity" where "runId" = ?',
+    'select max("createdAt") as "t" from "run_rounds" where "runId" = ?',
+  ]) {
+    try {
+      const found = await rows(db, sql, workflow.runId);
+      if (found[0]?.t) times.push(Date.parse(String(found[0].t)));
+    } catch (error) {
+      if (!String(error).includes("no such table")) throw error;
+    }
+  }
+  return Math.max(...times.filter(Number.isFinite));
+}
+
+/**
+ * The stall watchdog. A build that stops making progress — the coordinator's
+ * request timed out or failed, a dispatch never arrived, a model stopped
+ * calling tools — used to sit in `building` forever while the progress card
+ * said "working" (FarmLog AI, 2026-10-15: 6 actions, then 80 silent minutes).
+ * This turns that silence into the same honest, retryable stop the Stop
+ * button produces. System-level (no scope) so the cron sweep can call it;
+ * scoped readers verify membership first. Returns true when it stopped one.
+ */
+export async function reconcileStalledBuild(
+  db: D1Database,
+  projectId: string,
+  nowMs: number = Date.now(),
+): Promise<boolean> {
+  const found = await rows(db, "select * from build_workflows where projectId = ?", projectId);
+  const workflow = (found[0] ?? null) as unknown as BuildWorkflow | null;
+  if (!workflow || workflow.phase !== "building") return false;
+  const idleMs = nowMs - (await lastBuildProgressAt(db, workflow));
+  if (idleMs < BUILD_STALL_MS) return false;
+  const minutes = Math.floor(idleMs / 60_000);
+  const detail = `Caddie stopped making progress on the build for ${minutes} minutes, so it was paused. Your plan and files are saved. Press Retry to continue from here.`;
+  // Conditional on the row we read: a concurrent stop, retry or publish wins.
+  const result = await db
+    .prepare(
+      "update build_workflows set phase='blocked',pendingKey=null,pendingBody=null,detail=?,updatedAt=? where projectId=? and phase='building' and updatedAt=?",
+    )
+    .bind(detail, new Date(nowMs).toISOString(), projectId, workflow.updatedAt)
+    .run();
+  return Number((result as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
+}
+
+/** Cron sweep: stop every stalled build. Returns how many were stopped. */
+export async function sweepStalledBuilds(db: D1Database, nowMs: number = Date.now()): Promise<number> {
+  let building: Record<string, unknown>[];
+  try {
+    building = await rows(db, "select projectId from build_workflows where phase = 'building'");
+  } catch (error) {
+    // A database without the workflow table (an old local DB) has nothing to sweep.
+    if (String(error).includes("no such table")) return 0;
+    throw error;
+  }
+  let stopped = 0;
+  for (const row of building) {
+    if (await reconcileStalledBuild(db, String(row.projectId), nowMs)) stopped += 1;
+  }
+  return stopped;
+}
+
 /** Stop effects immediately; Flue's abort acknowledgment is separate from settlement. */
 export async function stopWorkflow(db: D1Database, scope: Scope) {
   const { workflow } = await workflowSnapshot(db, scope);
@@ -485,6 +557,72 @@ export async function workflowRepairPause(db: D1Database, runId: string) {
     issue: result[0] ? String(result[0].issue) : null,
   };
 }
+/**
+ * True when the CURRENT plan revision was EVER approved — still approved, or
+ * approved and since revoked/expired. Only a plan that was never approved is a
+ * stuck PLAN; a revoked or expired approval must reach the build-retry path so
+ * checkApprovalForEffect denies it with APPROVAL_REVOKED / APPROVAL_EXPIRED
+ * instead of being quietly re-routed into planning.
+ */
+async function planWasApproved(db: D1Database, scope: Scope, planId: string | null): Promise<boolean> {
+  if (!planId) return false;
+  const approved = await rows(
+    db,
+    "select id from approvals where projectId = ? and resourceId = ? and action = 'design' and status in ('approved', 'revoked', 'expired') limit 1",
+    scope.projectId,
+    planId,
+  );
+  return approved.length > 0;
+}
+
+/**
+ * Resume a plan that got stuck before approval: back to `planning` with the
+ * request it needs — the user's latest "changes" feedback on the current
+ * revision (or the original brief when no revision exists), plus any message
+ * that was parked while the project was blocked. Idempotent on `key`.
+ */
+async function resumePlanning(
+  db: D1Database,
+  scope: Scope,
+  workflow: BuildWorkflow,
+  planId: string | null,
+  key: string,
+  request?: string,
+) {
+  const previous = await rows(db, "select id from workflow_resumes where projectId=? and id=?", scope.projectId, key);
+  if (previous.length) return workflowSnapshot(db, scope);
+  const feedback = planId
+    ? await rows(
+        db,
+        "select note from plan_decisions where projectId = ? and planRevisionId = ? and decision = 'changes' order by createdAt desc limit 1",
+        scope.projectId,
+        planId,
+      )
+    : [];
+  const note = typeof feedback[0]?.note === "string" ? (feedback[0].note as string) : "";
+  const base =
+    planId && note
+      ? `Revise plan ${planId} using the user's feedback below. Write a NEW prd revision, then wait for review; no building.\n\n${note}`
+      : `Prepare a clear plan for this request. Do not build until the plan is approved using the review controls.\n\n${workflow.brief}`;
+  // A message parked while blocked (continueProjectFromChat) is carried, not dropped.
+  const parked = workflow.pendingKey?.startsWith("continue:") && workflow.pendingBody ? workflow.pendingBody : null;
+  const extras = [parked, request].filter((text): text is string => Boolean(text && text.trim()));
+  const body = extras.length ? `${base}\n\nThe user also said:\n${extras.join("\n")}` : base;
+  await db.batch([
+    db
+      .prepare(
+        "insert or ignore into workflow_resumes (id,projectId,runId,actorId,afterRoundRowId,createdAt) values (?,?,?,?,coalesce((select max(rowid) from run_rounds where runId=?),0),?)",
+      )
+      .bind(key, scope.projectId, workflow.runId, scope.actorId, workflow.runId, now()),
+    db
+      .prepare(
+        "update build_workflows set phase='planning',pendingKey=?,pendingBody=?,detail=null,updatedAt=? where projectId=? and phase='blocked'",
+      )
+      .bind(`replan:${key}`, body, now(), scope.projectId),
+  ]);
+  return workflowSnapshot(db, scope);
+}
+
 export async function retryWorkflow(db: D1Database, scope: Scope, key: string, request?: string) {
   if (typeof key !== "string" || !/^[a-zA-Z0-9:_-]{8,160}$/.test(key))
     throw new ScopeError(
@@ -493,7 +631,15 @@ export async function retryWorkflow(db: D1Database, scope: Scope, key: string, r
       "An idempotent recovery key is required.",
     );
   const { workflow, plan } = await workflowSnapshot(db, scope);
-  if (!workflow || !plan)
+  if (!workflow)
+    throw new ScopeError(409, "NO_PLAN", "Prepare a plan before continuing.");
+  // A project blocked BEFORE its plan was approved (e.g. a plan revision that
+  // never got saved) resumes PLANNING — never building. Retrying used to
+  // require an approved plan and resume the build, so a stuck plan had no way
+  // back at all (FarmLog AI, 2026-10-15).
+  if (workflow.phase === "blocked" && !(await planWasApproved(db, scope, plan?.id ?? null)))
+    return resumePlanning(db, scope, workflow, plan?.id ?? null, key, request);
+  if (!plan)
     throw new ScopeError(409, "NO_PLAN", "Prepare a plan before continuing.");
   await checkApprovalForEffect(db, {
     actorId: scope.actorId,
@@ -531,7 +677,7 @@ export async function retryWorkflow(db: D1Database, scope: Scope, key: string, r
       )
       .bind(
         `retry:${key}`,
-        `The authenticated user asked to retry approved plan ${plan.id}. Inspect the saved files and previous failing checks; repair the blocker, then verify_build. Do not discard prior work.${request ? "\n\nUser request: " + request : ""}`,
+        `The authenticated user asked to retry approved plan ${plan.id}. Features that already passed are saved; call build_next_feature to continue from the first unfinished one, repair its blocker, then finish_feature. Do not discard prior work.${request ? "\n\nUser request: " + request : ""}`,
         now(),
         scope.projectId,
         plan.id,

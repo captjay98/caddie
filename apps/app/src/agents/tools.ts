@@ -122,7 +122,7 @@ export function makeWritePlanNote(deps: {
 				body: ctx.data.body,
 				planRevision: ctx.data.planRevision,
 			});
-			return { output: `plan note ${ctx.data.kind} recorded` };
+			return { output: `SAVED: plan note ${ctx.data.kind} recorded by the host as a new immutable revision.` };
 		},
 	});
 }
@@ -365,6 +365,25 @@ export function makeListStacks(deps: {
 /** QA executes the host-owned checks; no caller supplies pass flags or evidence. */
 export function makeVerifyBuild(deps: {verify:(operationKey:string, signal?:AbortSignal)=>Promise<unknown>}) {
  return defineTool({name:'verify_build',description:'Run the host-owned test and bundle checks against the approved current plan, record actual sandbox receipts and produce an isolated preview if they pass.',input:v.object({}),async run(ctx){return {output:JSON.stringify(await deps.verify(ctx.toolCallId, ctx.signal))};}});
+}
+
+/**
+ * Build roles: run the SAME host-owned checks as verify_build (install,
+ * `bun test src/`, browser build) without publishing a preview. The only way
+ * a builder runs tests — shell test commands are refused by the host — so
+ * every test run produces a real receipt and every failure counts toward the
+ * repair pause.
+ */
+export function makeRunChecks(deps: { run: (operationKey: string, signal?: AbortSignal) => Promise<unknown> }) {
+	return defineTool({
+		name: 'run_checks',
+		description:
+			"Run the project's checks exactly as the host verifies them: install dependencies, run the behavior tests (`bun test src/`), then build the browser bundle. This is the ONLY way to run tests; shell test commands are refused. Every failing run counts toward this build's repair limit, so read the failure output and fix the cause before running it again. It does not publish a preview (QA's verify_build does).",
+		input: v.object({}),
+		async run(ctx) {
+			return { output: JSON.stringify(await deps.run(ctx.toolCallId, ctx.signal)) };
+		},
+	});
 }
 
 // --- "Caddie learns you" capture tools (feature: capture → infer → surface) ---

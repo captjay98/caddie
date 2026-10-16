@@ -11,8 +11,9 @@ import {
 	ROLE_TOOL_POLICY,
 	SPECIALIST_ROLES,
 	isProtectedPath,
+	isShellTestCommand,
 } from '../apps/app/src/agents/permissions';
-import { SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
+import { BUILD_RECIPE_INSTRUCTION, SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
 import { findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
 import {
 	makeRecordAcceptance,
@@ -102,6 +103,49 @@ describe('P05 permission matrix', () => {
 			expect(tool.startsWith('sandbox_')).toBe(false);
 			expect(tool).not.toBe('write_sandbox_file');
 		}
+	});
+
+	test('build roles test only through run_checks; planners and QA do not hold it', () => {
+		for (const role of ['frontend', 'backend', 'mobile', 'tech-lead'] as const) {
+			expect(ROLE_TOOL_POLICY[role]).toContain('run_checks');
+		}
+		for (const role of ['product', 'designer', 'qa'] as const) {
+			expect(ROLE_TOOL_POLICY[role]).not.toContain('run_checks');
+		}
+	});
+
+	test('shell test commands are detected however they are wrapped; installs and builds are not', () => {
+		for (const command of [
+			'bun test',
+			'bun test src/diag.test.ts 2>&1 | head -14',
+			'cd /workspace/p && bun run test',
+			'npm test',
+			'pnpm run test',
+			'npx vitest run',
+			'bunx jest --watch',
+			'TMPDIR=/tmp jest',
+			'echo start; vitest',
+			'sh -c "bun test src"',
+		]) {
+			expect(isShellTestCommand(command), command).toBe(true);
+		}
+		for (const command of [
+			'bun install',
+			'bun add -d @testing-library/jest-dom',
+			'bun run build',
+			'cat src/App.test.tsx',
+			'ls test/examples',
+			'bun run src/server.ts',
+		]) {
+			expect(isShellTestCommand(command), command).toBe(false);
+		}
+	});
+
+	test('the build recipe points at the pre-wired harness, not hand-built DOM setup', () => {
+		expect(BUILD_RECIPE_INSTRUCTION).toContain('run_checks');
+		expect(BUILD_RECIPE_INSTRUCTION).toContain('test/setup/');
+		expect(BUILD_RECIPE_INSTRUCTION).not.toContain('global-jsdom');
+		expect(BUILD_RECIPE_INSTRUCTION).not.toContain('initialize jsdom');
 	});
 
 	test('every tool name in every policy is a known tool', () => {
@@ -230,6 +274,18 @@ describe('P05 protected acceptance surfaces', () => {
 		expect(mentionsProtectedPath("echo hacked > tests/acceptance/manifest.json")).toBe(true);
 		expect(mentionsProtectedPath("cat scripts/verify-packet.ts")).toBe(true);
 		expect(mentionsProtectedPath('bun test src/')).toBe(false);
+	});
+
+	test('mentionsProtectedPath catches a protected DIRECTORY with no trailing slash (bypass regression)', () => {
+		// The prefixes carry a trailing slash; a plain includes() let a bare
+		// directory target slip through and destroy the whole protected tree.
+		expect(mentionsProtectedPath('rm -rf tests/acceptance')).toBe(true);
+		expect(mentionsProtectedPath('mv tests/fixtures/forge-task-tracker /tmp/x')).toBe(true);
+		expect(mentionsProtectedPath('rm -rf ./tests/acceptance')).toBe(true);
+		expect(mentionsProtectedPath('rm .caddie/gates')).toBe(true);
+		// A different path that merely SHARES the prefix text is not a false hit.
+		expect(mentionsProtectedPath('cat tests/acceptance-notes.md')).toBe(false);
+		expect(mentionsProtectedPath('cat tests/unit/app.test.ts')).toBe(false);
 	});
 
 	test('assertNotProtectedPath blocks the gate directory for regular agents', () => {

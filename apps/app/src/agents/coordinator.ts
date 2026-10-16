@@ -23,7 +23,7 @@ import {
   useTool,
 } from "@flue/runtime";
 import * as v from "valibot";
-import { HackathonResultsCardSchema } from "@caddie/contracts";
+import { FEATURE_BLOCK_GUIDE, HackathonResultsCardSchema } from "@caddie/contracts";
 import { buildHackathonReference, buildHackathonResultsCard, type DiscoveryResultForCard } from "../server/hackathon-card.ts";
 import {
   FIND_HACKATHONS_DESCRIPTION,
@@ -34,7 +34,8 @@ import {
   RESEARCH_DESCRIPTION,
 } from "./hackathon-prompts.ts";
 import { coordinatorModelRole, findModelRouteForRole, IDEATION_TURN_WINDOW } from "./providers.ts";
-import { makeListStacks, makeVerifyBuild, makeUpdateProfile, makeRememberFact, makeInspectRepository } from "./tools.ts";
+import { COORDINATOR_DURABILITY } from "./permissions.ts";
+import { makeListStacks, makeVerifyBuild, makeUpdateProfile, makeRememberFact, makeInspectRepository, makeWritePlanNote, makeReadProjectContext } from "./tools.ts";
 import {
   buildSpecialistDeclarations,
   type SpecialistBuildContext,
@@ -106,6 +107,16 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     notes: { content: string; kind: string }[];
   }>;
   verifyBuild: (operationKey: string, signal?: AbortSignal) => Promise<unknown>;
+  /** The host's next feature to build (marks it building). */
+  buildNextFeature: () => Promise<unknown>;
+  /** Finish the current feature: host checks + new tests + save point. */
+  finishFeature: (featureId: string, operationKey: string, signal?: AbortSignal) => Promise<unknown>;
+  /** Feature-loop position for the finish hook; null before a build has features. */
+  featureProgress: () => Promise<{
+    total: number;
+    passed: number;
+    current: { id: string; title: string; position: number } | null;
+  } | null>;
   blockBuild: (reason: string) => Promise<void>;
   /**
    * B06: create a PENDING approval on the server (the agent-facing request
@@ -158,6 +169,8 @@ export function Coordinator({ id }: AgentProps) {
     "build-continuations",
     0,
   );
+  // Which feature the continuation budget is being spent on (per-feature reset).
+  const [continuationFocus, setContinuationFocus] = usePersistentState("build-continuation-focus", "");
   const writeProject = useDataWriter("projectWorkflow", {
     schema: v.object({ projectId: v.string(), name: v.string() }),
   });
@@ -193,7 +206,38 @@ export function Coordinator({ id }: AgentProps) {
   if (!snapshot || context.homeOverview === null) {
     for (const declaration of buildSpecialistDeclarations({ ...context, currentRequest: delivery.kind === "user" ? delivery.body : lastUserRequest }))
       useSubagent(declaration);
+    // The coordinator can read the current plan and SAVE a PRD revision
+    // itself. The product/designer delegates remain the normal authoring path,
+    // but a delegate that returns "(task completed with no text)" leaves
+    // NOTHING saved — and the host then nudges forever while the model
+    // (falsely) tells the user the plan was saved (FarmLog AI, 2026-10-15: six
+    // empty delegations in one turn, three "saved / in review" claims, zero new
+    // revisions). Mounting write_plan_note here lets the coordinator write the
+    // revision directly when a delegate stalls, so the save actually lands in
+    // ONE round instead of burning the turn budget on empty hand-offs.
+    useTool(makeReadProjectContext({ readPlanNote: context.readPlanNote }));
+    useTool(makeWritePlanNote({ writePlanNote: context.writePlanNote }));
     useTool(makeVerifyBuild({ verify: context.verifyBuild }));
+    // The host-driven feature loop: the host says which feature is next and
+    // decides when it is done (green checks + new passing tests + save point).
+    useTool({
+      name: "build_next_feature",
+      description:
+        "During an approved build, get the ONE feature to build next (its id, title and doneWhen checks) from the host. Features are built one at a time in plan order; call this before delegating any implementation.",
+      input: v.object({}),
+      async run() {
+        return { output: JSON.stringify(await context.buildNextFeature()) };
+      },
+    });
+    useTool({
+      name: "finish_feature",
+      description:
+        "Ask the host to finish the current feature: it runs the project checks, requires new passing tests for this feature, and saves a checkpoint the user can roll back to. Only the feature build_next_feature returned can be finished.",
+      input: v.object({ featureId: v.pipe(v.string(), v.minLength(1), v.maxLength(48)) }),
+      async run(ctx) {
+        return { output: JSON.stringify(await context.finishFeature(ctx.data.featureId, ctx.toolCallId, ctx.signal)) };
+      },
+    });
     useTool({
       name: "report_blocker",
       description:
@@ -439,22 +483,32 @@ export function Coordinator({ id }: AgentProps) {
         return;
       }
       setContinuations((n) => n + 1);
-      ctx.append({ kind: "signal", type: "plan_incomplete", body: "Planning is unfinished: no new PRD has been saved. Use the task tool to delegate product to read the full brief and feedback and WRITE a new prd revision using write_plan_note. A PRD printed in chat does not count. The server-backed review controls appear only after the revision is saved. Do not ask for a conversational Approved or claim a plan is ready until the workflow phase is review. If a real prerequisite is missing, report_blocker." });
+      ctx.append({ kind: "signal", type: "plan_incomplete", body: "Planning is unfinished: the host has NOT received a new PRD revision — nothing was saved, and the workflow phase is still 'planning', NOT 'review'. Do NOT tell the user a plan or revision was saved, written, updated or is awaiting review; that is FALSE right now and must not be said. A delegate result of \"(task completed with no text)\" means the specialist stopped WITHOUT saving — it is not a save, so never re-delegate the same empty hand-off expecting a different result. Instead, call write_plan_note yourself with kind:'prd' and the full revised PRD body (incorporate the user's feedback and the current brief), then STOP. write_plan_note returns a line beginning 'SAVED:' only when the host actually recorded the revision; only after you see that, and the next coordinator_context shows phase 'review', may you tell the user the plan is ready. If a real prerequisite is missing, call report_blocker. Until you have the 'SAVED:' confirmation, say Caddie is still working on the plan — never that it is saved or ready." });
       return;
     }
     // Review, ready and blocked may settle; readiness comes only from the host.
     if (state.phase !== "building") return;
-    if (continuations >= 2) {
+    // The host owns the feature order. The nudge budget is PER FEATURE: a
+    // feature that passed is progress, so the next one starts a fresh budget.
+    const progress = await authority.featureProgress();
+    const focus = progress?.current ? `feature:${progress.current.id}` : "verify";
+    const used = focus === continuationFocus ? continuations : 0;
+    if (used >= 2) {
       await authority.blockBuild(
-        "The build did not produce passing checks and a preview. Continue with Caddie to diagnose it.",
+        progress?.current
+          ? `Caddie could not finish “${progress.current.title}” (feature ${progress.current.position} of ${progress.total}). The features before it are saved; retry to continue from this one.`
+          : "The build did not produce passing checks and a preview. Continue with Caddie to diagnose it.",
       );
       return;
     }
-    setContinuations((n) => n + 1);
+    setContinuationFocus(focus);
+    setContinuations(used + 1);
     ctx.append({
       kind: "signal",
       type: "build_incomplete",
-      body: "Work is not verified. Delegate implementation/repair, then call verify_build. If a prerequisite is unavailable call report_blocker; never claim completion.",
+      body: progress?.current
+        ? `The build is not finished: feature ${progress.current.position} of ${progress.total}, “${progress.current.title}”, is next. Call build_next_feature, delegate exactly that feature with its doneWhen checks, then call finish_feature. If a prerequisite is unavailable call report_blocker; never claim completion.`
+        : "Work is not verified. Call build_next_feature to see what remains; when every feature has passed, run QA with verify_build. If a prerequisite is unavailable call report_blocker; never claim completion.",
     });
   });
   useInstruction(context.actorContext);
@@ -473,7 +527,12 @@ export function Coordinator({ id }: AgentProps) {
   if (context.homeOverview) {
     useInstruction("Your final role is Home intake and handoff. You MUST use continue_project for requested work on a named existing project, passing the full request to its actual id in Home context. That project's coordinator has frontend, QA and the sandbox. You do not execute specialist work here and MUST NOT report those tools as unavailable. If the user asks for technical repairs, forward those requirements intact to the project coordinator; do not evaluate local Home tools as project capabilities.");
   } else {
-    useInstruction("For project work: read project context, delegate product and designer work, write one cohesive PRD with user-facing scope, concrete visual direction and behavior checks, then stop for authenticated review. A PRD uses the React/Hono recipe; no arbitrary unsupported stacks or IE11 requirement. After approval, delegate frontend/backend only as needed; include meaningful behavioral tests, run QA with verify_build, and surface a usable preview. There is no native shell environment: use the specialists' scoped tools.");
+    useInstruction("For project work: read project context, delegate product and designer work, write one cohesive PRD with user-facing scope, concrete visual direction and behavior checks, then stop for authenticated review. A PRD uses the React/Hono recipe; no arbitrary unsupported stacks or IE11 requirement. After approval, build feature by feature: call build_next_feature, delegate exactly that feature with its doneWhen checks to the implementation specialist, then call finish_feature; repeat until the host says every feature passed, then run QA with verify_build to publish a usable preview. There is no native shell environment: use the specialists' scoped tools. If a product/designer delegate returns \"(task completed with no text)\" or otherwise does not save, do NOT re-delegate the same empty hand-off: call write_plan_note yourself with kind:'prd' and the full PRD body to save the revision directly.");
+    useInstruction("SAVED MEANS SAVED: a plan, revision or file exists only when the host CONFIRMS it — write_plan_note returning a line that begins 'SAVED:', AND the workflow phase in coordinator_context being 'review' (not 'planning'). A specialist describing what it saved, a PRD you printed in chat, or a task result of \"(task completed with no text)\", is NOT proof; never tell the user something was saved, written, updated or is ready for review on that basis. While the phase is still 'planning' the plan is NOT saved — say Caddie is still working on it, never that it is ready. Only after you have the 'SAVED:' confirmation and the phase has moved to 'review' may you say the plan is ready to review.");
+    useInstruction(`FEATURE LIST: every PRD you save must list what will be built, so the user approves exactly that list and the host builds it one feature at a time. ${FEATURE_BLOCK_GUIDE} Order features so each builds on the last; keep each one small enough to finish and test on its own; write doneWhen checks as behaviors a person could see. write_plan_note refuses a PRD without a valid list.`);
   }
   return "Caddie helps solo builders discover, plan, build, verify and share software through one continuous conversation.";
 }
+// Explicit submission bound (see COORDINATOR_DURABILITY): Flue aborts and
+// settles a submission past timeoutMs; the app's stall watchdog reports it.
+Coordinator.durability = { ...COORDINATOR_DURABILITY };

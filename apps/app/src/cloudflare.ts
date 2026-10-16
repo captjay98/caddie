@@ -20,6 +20,7 @@
 
 import type { AuthEnv } from './server/auth.ts';
 import { dispatchDueSchedules } from './server/schedules.ts';
+import { sweepStalledBuilds } from './server/build-workflow.ts';
 
 /** Structural handler types (this module stays free of extra type deps). */
 interface CronController {
@@ -38,6 +39,18 @@ export default {
 					console.log(`[schedules] cron ${controller.cron} dispatched ${fired} occurrence(s)`);
 				}
 			}),
+		);
+		// Stall watchdog: a build with no progress for BUILD_STALL_MS is stopped
+		// honestly even when no one has the project open. Independent of the
+		// schedule dispatch above: a failed sweep is logged, never fails the tick.
+		ctx.waitUntil(
+			sweepStalledBuilds(env.DB, Date.now())
+				.then((stopped) => {
+					if (stopped > 0) console.log(`[builds] cron ${controller.cron} stopped ${stopped} stalled build(s)`);
+				})
+				.catch((error: unknown) => {
+					console.error('[builds] stall sweep failed', error instanceof Error ? error.message : error);
+				}),
 		);
 	},
 };

@@ -3,18 +3,21 @@ import type { AuthEnv } from "../auth.ts";
 import { ScopeError, requireProjectScope } from "../scope.ts";
 import {
   workflowSnapshot,
+  reconcileStalledBuild,
   decideWorkflow,
   acknowledgeDispatch,
   readBuildOutput,
   retryWorkflow,
   stopWorkflow,
 } from "../build-workflow.ts";
+import { rollbackToFeature } from "../build-features.ts";
 import {
   dispatchPendingWorkflow,
   workerSelfDeliver,
   type CoordinatorDeliver,
 } from "../workflow-dispatch.ts";
 import { projectExperience, approvePlan } from "../project-experience.ts";
+import { buildActivity } from "../build-activity.ts";
 import { acceptProposal, dismissProposal, getProposal } from "../project-proposals.ts";
 import { projectHackathon } from "../project-hackathon.ts";
 import { ApprovePlanCommandSchema } from "@caddie/contracts";
@@ -70,7 +73,21 @@ export function createBuildWorkflowRouter(
       c.req.raw.headers,
       c.req.param("projectId"),
     );
+    await reconcileStalledBuild(c.env.DB, scope.projectId);
     return c.json(await workflowSnapshot(c.env.DB, scope));
+  });
+
+  // Build activity: the honest "what is Caddie doing right now?" read while a
+  // project is building/checking — ordered steps + the real run_rounds history.
+  // Derived, read-only; the preview still only appears via the workflow phase.
+  router.get("/projects/:projectId/activity", async (c) => {
+    const scope = await requireProjectScope(
+      c.env.DB,
+      c.env,
+      c.req.raw.headers,
+      c.req.param("projectId"),
+    );
+    return c.json(await buildActivity(c.env.DB, scope));
   });
 
   // R01/R06: the shared ProjectExperience projection — the ONE source chat
@@ -186,6 +203,20 @@ export function createBuildWorkflowRouter(
   router.post("/projects/:projectId/workflow/stop", async (c) => {
     const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
     return c.json(await stopWorkflow(c.env.DB, scope));
+  });
+  // Roll a settled build back to a feature's save point (owner-only, idempotent
+  // on key). Nothing runs here: the next build step starts from that image.
+  router.post("/projects/:projectId/workflow/rollback", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    let input: { featureId?: unknown; key?: unknown };
+    try {
+      input = await c.req.json();
+    } catch {
+      throw new ScopeError(400, "invalid_input", "Expected JSON.");
+    }
+    if (typeof input.featureId !== "string" || typeof input.key !== "string")
+      throw new ScopeError(400, "invalid_input", "A featureId and an idempotency key are required.");
+    return c.json(await rollbackToFeature(c.env.DB, scope, { featureId: input.featureId, key: input.key }));
   });
   router.post("/projects/:projectId/workflow/ack", async (c) => {
     const scope = await requireProjectScope(

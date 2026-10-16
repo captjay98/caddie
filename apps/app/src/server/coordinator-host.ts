@@ -30,8 +30,63 @@ import {
   continueProjectFromChat,
 } from "./build-workflow.ts";
 import { STACK_CATALOG } from "./stacks.ts";
+import { recordBuildActivity } from "./build-activity.ts";
 import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS } from "../../../../stacks/react-hono/scaffold.ts";
 import { projectScopeForUser, ScopeError } from "./scope.ts";
+import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
+import {
+  buildSessionOverride,
+  currentFeature,
+  ensureBuildFeatures,
+  listBuildFeatures,
+  markFeatureBuilding,
+  recordFeatureAttempt,
+  recordFeaturePassed,
+  testsBaseline,
+} from "./build-features.ts";
+import { parseTestCounts } from "./build-timeline.ts";
+import { FEATURE_BLOCK_GUIDE, parsePlanFeatures } from "@caddie/contracts";
+
+const NO_SUCH_TABLE = (error: unknown) => String(error).includes("no such table");
+
+/** Sandbox actions spent in the current build window (since the last user retry). */
+async function buildWindowActionCount(db: CoordinatorEnvironment["DB"], runId: string): Promise<number> {
+  try {
+    const result = await db
+      .prepare(
+        `select count(*) as "n" from "build_activity"
+         where "runId" = ? and "kind" in ('command','file','check')
+         and "startedAt" > coalesce((select max("createdAt") from "workflow_resumes" where "runId" = ?), '')`,
+      )
+      .bind(runId, runId)
+      .all();
+    return Number((result.results[0] as { n?: number } | undefined)?.n ?? 0);
+  } catch (error) {
+    if (NO_SUCH_TABLE(error)) return 0;
+    throw error;
+  }
+}
+
+/** The most recent sandbox actions, newest first. */
+async function recentActions(db: CoordinatorEnvironment["DB"], runId: string, limit: number) {
+  try {
+    const result = await db
+      .prepare(
+        `select "id","kind","subject","bytes" from "build_activity"
+         where "runId" = ? and "kind" in ('command','file','check')
+         order by "startedAt" desc, "id" desc limit ?`,
+      )
+      .bind(runId, limit)
+      .all();
+    return result.results as { id: string; kind: string; subject: string; bytes: number | null }[];
+  } catch (error) {
+    if (NO_SUCH_TABLE(error)) return [];
+    throw error;
+  }
+}
+
+const tail = (text: string | undefined, limit = 4000) =>
+  !text ? "" : text.length > limit ? `…${text.slice(-limit)}` : text;
 export interface CoordinatorEnvironment {
   DB: AuthEnv["DB"];
   /** Tavily search key — the required PRIMARY discovery source + research tool (see AuthEnv). */
@@ -128,13 +183,17 @@ export async function createCoordinatorContext(
       },
       new D1SandboxPersistence(env.DB),
     );
-    sessionReady ??= driver
-      .ensureSession({
-        sessionKey: sessionId,
-        image: env.CONTREE_IMAGE ?? "tag:tt-base:1",
-        projectId: scope.projectId,
-        runId,
-      })
+    // A rollback points the build at a fresh session that starts from a
+    // feature's save point; otherwise the run's own session.
+    sessionReady ??= buildSessionOverride(env.DB, scope.projectId, runId)
+      .then((override) =>
+        driver!.ensureSession({
+          sessionKey: override?.sessionKey ?? sessionId,
+          image: override?.image ?? env.CONTREE_IMAGE ?? "tag:tt-base:1",
+          projectId: scope.projectId,
+          runId,
+        }),
+      )
       .then((s) => s.sessionId);
     const id = await sessionReady;
     return { driver, id };
@@ -148,6 +207,7 @@ export async function createCoordinatorContext(
     (scaffoldReady ??= (async () => {
       const { driver, id } = await ensureSession();
       if (await driver.pathExists(id, `${root}/package.json`)) return;
+      const setupStarted = new Date().toISOString();
       await driver.uploadFiles(
         id,
         Object.entries(SCAFFOLD_FILES).map(([path, text]) => ({
@@ -155,38 +215,99 @@ export async function createCoordinatorContext(
           contentBase64: bytesToBase64(new TextEncoder().encode(text)),
         })),
       );
+      await recordBuildActivity(env.DB, {
+        projectId: scope.projectId, runId, kind: "setup",
+        subject: `react-hono scaffold (${Object.keys(SCAFFOLD_FILES).length} files)`,
+        outcome: "ok", startedAt: setupStarted, finishedAt: new Date().toISOString(),
+        key: "setup:scaffold",
+      });
     })());
+  // Bounds on builder actions. The host context is rebuilt for every tool
+  // call (host-context.ts resolve()), so both guards read the persisted
+  // build_activity rows, never in-memory counters. They read row COUNTS and
+  // subjects only; a dropped activity insert can only make a guard more
+  // lenient, never refuse wrongly.
+  const budgetMessage =
+    `Caddie used this build's ${BUILD_ACTION_BUDGET}-step budget without getting the checks to pass, so the build was paused. Your plan and files are saved. Retry to continue with a fresh budget.`;
+  const guardBudget = async () => {
+    if ((await buildWindowActionCount(env.DB, runId)) < BUILD_ACTION_BUDGET) return;
+    await setWorkflowBlocker(env.DB, scope, budgetMessage);
+    throw new SandboxError(429, "BUILD_BUDGET_EXHAUSTED", budgetMessage);
+  };
+  const guardAction = async (action: { kind: "command" | "file"; subject: string; bytes?: number }) => {
+    await guardBudget();
+    const recent = await recentActions(env.DB, runId, REPEATED_ACTION_LIMIT);
+    const subject = action.subject.slice(0, 500);
+    const repeated =
+      recent.length >= REPEATED_ACTION_LIMIT &&
+      recent.every((row) =>
+        row.kind === action.kind &&
+        row.subject === subject &&
+        (action.kind === "command" || row.bytes === (action.bytes ?? null)),
+      );
+    if (repeated)
+      throw new SandboxError(
+        409,
+        "REPEATED_ACTION",
+        action.kind === "command"
+          ? `This exact command already ran ${REPEATED_ACTION_LIMIT} times in a row with nothing changed in between. Running it again will not change the result: change the code, try a different approach, or report the blocker.`
+          : `${action.subject} was already written ${REPEATED_ACTION_LIMIT} times in a row with the same content. Writing it again changes nothing: try a different fix, or report the blocker.`,
+      );
+  };
+  /** A recovered (replayed) command already has its activity row; never refuse a replay. */
+  const isReplay = async (operationKey: string) => {
+    try {
+      const found = await env.DB.prepare('select 1 from "build_activity" where "id" = ?')
+        .bind(`act:${runId}:${operationKey}`)
+        .all();
+      return found.results.length > 0;
+    } catch (error) {
+      if (NO_SUCH_TABLE(error)) return false;
+      throw error;
+    }
+  };
   const deps: SandboxToolDeps = {
     execute: async (input) => {
       input.signal?.throwIfAborted();
+      // Tests run ONLY through run_checks: a shell test run escaped the repair
+      // counter (FarmLog AI: `bun test … | head -14` recorded head's exit 0).
+      if (isShellTestCommand(input.command))
+        throw new SandboxError(
+          400,
+          "TEST_COMMAND_REFUSED",
+          "Shell test commands are not run here. Use run_checks: it runs the project's tests and build exactly as the host verifies them and returns the failures.",
+        );
       await scaffold();
       const { driver, id } = await ensureSession();
       const operationKey = `exec:${runId}:${input.operationKey}`;
-      const result = await driver.execute({
-        sessionId: id,
-        command: input.command,
-        operationKey,
-        signal: input.signal,
-        timeoutMs: input.timeoutMs,
-        cwd: root,
-        env: runtimeEnv,
-      });
-      // Specialists often test before QA. Those real failed attempts must share
-      // the repair boundary, including replay after Durable Object recovery.
-      if (/(?:^|[;&|\n])\s*bun\s+(?:test|run\s+test)\b/.test(input.command)) {
-        const receipt = await driver.getOperationReceipt(operationKey);
-        if (receipt?.projectId === scope.projectId && receipt.runId === runId &&
-            receipt.command === input.command && receipt.exitCode !== null && receipt.exitCode !== 0) {
-          await recordRepairRound(env.DB, scope, runId, {
-            issue: "behavior-tests", round: "repair_attempt", outcome: "failed",
-            operationKey, detail: JSON.stringify(receipt),
-          });
-          if ((await workflowRepairPause(env.DB, runId)).paused) {
-            await setWorkflowBlocker(env.DB, scope,
-              "Caddie could not get the app checks passing after three attempts. Your plan and files are saved. The app is not ready to try yet.");
-          }
-        }
+      if (!(await isReplay(operationKey)))
+        await guardAction({ kind: "command", subject: input.command });
+      const execStarted = new Date().toISOString();
+      let result: Awaited<ReturnType<typeof driver.execute>>;
+      try {
+        result = await driver.execute({
+          sessionId: id,
+          command: input.command,
+          operationKey,
+          signal: input.signal,
+          timeoutMs: input.timeoutMs,
+          cwd: root,
+          env: runtimeEnv,
+        });
+      } catch (error) {
+        await recordBuildActivity(env.DB, {
+          projectId: scope.projectId, runId, kind: "command", subject: input.command,
+          outcome: input.signal?.aborted ? "cancelled" : "failed",
+          startedAt: execStarted, finishedAt: new Date().toISOString(), key: operationKey,
+        });
+        throw error;
       }
+      await recordBuildActivity(env.DB, {
+        projectId: scope.projectId, runId, kind: "command", subject: input.command,
+        outcome: result.exitCode === 0 ? "ok" : "failed", exitCode: result.exitCode,
+        output: `${result.stdout}\n${result.stderr}`,
+        startedAt: execStarted, finishedAt: new Date().toISOString(), key: operationKey,
+      });
       return result;
     },
     readFile: async (input) => {
@@ -199,17 +320,39 @@ export async function createCoordinatorContext(
     writeFile: async (input) => {
       await scaffold();
       const { driver, id } = await ensureSession();
+      const bytes = new TextEncoder().encode(input.content);
+      await guardAction({ kind: "file", subject: input.path, bytes: bytes.length });
+      const writeStarted = new Date().toISOString();
       await driver.writeFile(
         id,
         input.path,
-        bytesToBase64(new TextEncoder().encode(input.content)),
+        bytesToBase64(bytes),
       );
+      // Path + size only — file contents never enter the activity ledger.
+      await recordBuildActivity(env.DB, {
+        projectId: scope.projectId, runId, kind: "file", subject: input.path,
+        outcome: "ok", bytes: bytes.length,
+        startedAt: writeStarted, finishedAt: new Date().toISOString(),
+      });
     },
   };
-  const verifyBuild = async (attempt: string, signal?: AbortSignal) => {
+  /**
+   * The host-owned checks: install, behavior tests, browser bundle — fixed
+   * recipe commands, real receipts, one repair_attempt per failed check.
+   * `mode` keeps run_checks and verify_build receipts apart (distinct
+   * operation keys) while sharing every rule; only verify_build publishes.
+   */
+  const runHostChecks = async (
+    mode: "checks" | "verify" | "feature",
+    attempt: string,
+    signal?: AbortSignal,
+    /** Feature id: failures count toward THAT feature's repair limit. */
+    issuePrefix?: string,
+  ) => {
     signal?.throwIfAborted();
     const { workflow, plan } = await requireBuildApproval(env.DB, scope);
     await scaffold();
+    await guardBudget();
     const { driver, id } = await ensureSession();
     const commands = [
       { check: "dependencies", command: SCAFFOLD_COMMANDS.install.join(" && ") },
@@ -218,8 +361,9 @@ export async function createCoordinatorContext(
     ];
     const receipts = [];
     for (const check of commands) {
-      const operationKey = `verify:${runId}:${plan.id}:${attempt}:${check.check}`;
+      const operationKey = `${mode}:${runId}:${plan.id}:${attempt}:${check.check}`;
       await requireBuildApproval(env.DB, scope);
+      const checkStarted = new Date().toISOString();
       const result = await driver.execute({
         sessionId: id,
         command: check.command,
@@ -249,17 +393,25 @@ export async function createCoordinatorContext(
         evidence: JSON.stringify(receipt),
         planRevision: plan.id,
       });
+      await recordBuildActivity(env.DB, {
+        projectId: scope.projectId, runId: workflow.runId, kind: "check", subject: check.check,
+        outcome: passed ? "ok" : "failed", exitCode: result.exitCode,
+        output: `${result.stdout}\n${result.stderr}`,
+        startedAt: checkStarted, finishedAt: new Date().toISOString(), key: operationKey,
+      });
+      // The full receipt is the stored evidence; the model sees the tail of
+      // the output, where test runners and bundlers print the failure.
       receipts.push({
         check: check.check,
         passed,
         exitCode: result.exitCode,
-        stdout: result.stdout,
-        stderr: result.stderr,
+        stdout: tail(result.stdout),
+        stderr: tail(result.stderr),
         operationKey,
       });
       if (!passed) {
         await recordRepairRound(env.DB, scope, workflow.runId, {
-          issue: check.check,
+          issue: issuePrefix ? `${issuePrefix}:${check.check}` : check.check,
           operationKey,
           round: "repair_attempt",
           outcome: "failed",
@@ -273,14 +425,151 @@ export async function createCoordinatorContext(
             scope,
             "Caddie could not get the app checks passing after three attempts. Your plan and files are saved. The app is not ready to try yet.",
           );
-        return {
-          passed: false,
-          paused,
-          receipts,
-          next: "Delegate a focused repair for the failing check, then run verify_build again.",
-        };
+        return { passed: false as const, paused, receipts, workflow, plan, driver, id };
       }
     }
+    return { passed: true as const, paused: false, receipts, workflow, plan, driver, id };
+  };
+  const runChecks = async (attempt: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    const { plan } = await requireBuildApproval(env.DB, scope);
+    // Failures count toward the feature being built, not one build-wide bucket.
+    const current = currentFeature(await ensureBuildFeatures(env.DB, scope, runId, plan));
+    const outcome = await runHostChecks("checks", attempt, signal, current?.featureId);
+    if (!outcome.passed)
+      return {
+        passed: false,
+        paused: outcome.paused,
+        receipts: outcome.receipts,
+        next: outcome.paused
+          ? "The build is paused after repeated failures. Stop and report what is failing."
+          : "Read the failing check's output above, fix its cause, then run run_checks again.",
+      };
+    return {
+      passed: true,
+      receipts: outcome.receipts,
+      next: "All checks pass. Report back so the coordinator can finish this feature.",
+    };
+  };
+  /** The host decides what is built next: the first feature that has not passed. */
+  const buildNextFeature = async () => {
+    const { plan } = await requireBuildApproval(env.DB, scope);
+    const rows = await ensureBuildFeatures(env.DB, scope, runId, plan);
+    const current = currentFeature(rows);
+    if (!current)
+      return { done: true, next: "Every feature passed. Ask QA to run verify_build to publish the preview." };
+    await markFeatureBuilding(env.DB, current);
+    return {
+      done: false,
+      feature: { id: current.featureId, title: current.title, doneWhen: current.doneWhen },
+      position: current.position,
+      total: rows.length,
+      alreadyBuilt: rows.filter((row) => row.status === "passed").map((row) => row.title),
+      next: `Delegate ONLY this feature to the implementation specialist, with its doneWhen checks: build it, add at least one test in src/*.test.tsx for each check, and get run_checks green. Then call finish_feature with featureId "${current.featureId}". Do not start another feature.`,
+    };
+  };
+  /**
+   * Finish the CURRENT feature: green host checks AND more passing tests than
+   * the last green feature left, then a save point. Anything else is a failed
+   * attempt on this feature (the 3-strike pause applies per feature).
+   */
+  const finishFeature = async (featureId: string, attempt: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    const { plan } = await requireBuildApproval(env.DB, scope);
+    const rows = await ensureBuildFeatures(env.DB, scope, runId, plan);
+    const current = currentFeature(rows);
+    if (!current)
+      return { passed: true, done: true, next: "Every feature passed. Ask QA to run verify_build to publish the preview." };
+    if (current.featureId !== featureId)
+      throw new ScopeError(
+        409,
+        "NOT_CURRENT_FEATURE",
+        `"${featureId}" is not the feature being built. Finish “${current.title}” (featureId "${current.featureId}") first; the host builds features in order.`,
+      );
+    const outcome = await runHostChecks("feature", `${featureId}:${attempt}`, signal, current.featureId);
+    if (!outcome.passed) {
+      await recordFeatureAttempt(env.DB, current, outcome.paused);
+      return {
+        passed: false,
+        paused: outcome.paused,
+        receipts: outcome.receipts,
+        next: outcome.paused
+          ? `“${current.title}” failed its checks three times, so the build is paused. Report what is failing.`
+          : "Delegate a focused repair for the failing check, then call finish_feature again.",
+      };
+    }
+    const tests = outcome.receipts.find((receipt) => receipt.check === "behavior-tests");
+    const passing = parseTestCounts(`${tests?.stdout ?? ""}\n${tests?.stderr ?? ""}`)?.passed ?? 0;
+    const baseline = testsBaseline(rows);
+    if (passing <= baseline) {
+      const round = await recordRepairRound(env.DB, scope, runId, {
+        issue: `${current.featureId}:new-tests`,
+        operationKey: `feature:${runId}:${plan.id}:${featureId}:${attempt}:new-tests`,
+        round: "repair_attempt",
+        outcome: "failed",
+        detail: JSON.stringify({ passing, baseline }),
+      });
+      await recordFeatureAttempt(env.DB, current, round.paused);
+      if (round.paused)
+        await setWorkflowBlocker(
+          env.DB,
+          scope,
+          `Caddie could not add working tests for “${current.title}” after three attempts. The features before it are saved. The app is not ready to try yet.`,
+        );
+      return {
+        passed: false,
+        paused: round.paused,
+        next: `The checks pass, but this feature added no new passing tests (${passing} passing now, ${baseline} before it). Add tests in src/*.test.tsx for each doneWhen check, then call finish_feature again.`,
+      };
+    }
+    const { checkpointRef } = await outcome.driver.checkpoint(outcome.id);
+    await recordFeaturePassed(env.DB, current, { checkpointRef, testsPassed: passing });
+    const after = currentFeature(await listBuildFeatures(env.DB, scope.projectId, plan.id));
+    return {
+      passed: true,
+      feature: current.title,
+      testsPassed: passing,
+      next: after
+        ? `Saved. Feature ${after.position} of ${rows.length}, “${after.title}”, is next: call build_next_feature.`
+        : "Every feature passed. Ask QA to run verify_build to publish the preview.",
+    };
+  };
+  /** Where the feature loop stands, for the coordinator's finish hook. */
+  const featureProgress = async () => {
+    const { workflow, plan } = await workflowSnapshot(env.DB, scope);
+    if (!workflow || !plan) return null;
+    const rows = await listBuildFeatures(env.DB, scope.projectId, plan.id);
+    if (rows.length === 0) return null;
+    const current = currentFeature(rows);
+    return {
+      total: rows.length,
+      passed: rows.filter((row) => row.status === "passed").length,
+      current: current ? { id: current.featureId, title: current.title, position: current.position } : null,
+    };
+  };
+  const verifyBuild = async (attempt: string, signal?: AbortSignal) => {
+    signal?.throwIfAborted();
+    {
+      // The preview is published only after every planned feature has passed.
+      const { plan } = await requireBuildApproval(env.DB, scope);
+      const rows = await ensureBuildFeatures(env.DB, scope, runId, plan);
+      const pending = currentFeature(rows);
+      if (pending)
+        return {
+          passed: false,
+          receipts: [],
+          next: `Not every feature is built yet: feature ${pending.position} of ${rows.length}, “${pending.title}”, is next. Build the remaining features with build_next_feature and finish_feature; verify_build publishes the preview only after all of them pass.`,
+        };
+    }
+    const outcome = await runHostChecks("verify", attempt, signal);
+    if (!outcome.passed)
+      return {
+        passed: false,
+        paused: outcome.paused,
+        receipts: outcome.receipts,
+        next: "Delegate a focused repair for the failing check, then run verify_build again.",
+      };
+    const { workflow, plan, driver, id, receipts } = outcome;
     signal?.throwIfAborted();
     const final = await driver.getOperationReceipt(
       `verify:${runId}:${plan.id}:${attempt}:browser-bundle`,
@@ -454,6 +743,10 @@ export async function createCoordinatorContext(
       return { id: record.id, expiresAt: record.expiresAt };
     },
     verifyBuild,
+    runChecks,
+    buildNextFeature,
+    finishFeature,
+    featureProgress,
     readPlanNote: async (kind) => {
       if (kind === "feedback" || kind === "profile")
         return (await actorContext(env.DB, scope)).text;
@@ -469,6 +762,13 @@ export async function createCoordinatorContext(
       if (isHome)
         throw new SandboxError(409, "HOME_NO_PLAN", "Create a project first.");
       await ensureWorkflow(env.DB, scope);
+      if (input.kind === "prd") {
+        // The approval binds to this revision's hash, so the feature list the
+        // host will build must be inside it, valid, before it is saved.
+        const features = parsePlanFeatures(input.body);
+        if (!features.ok)
+          throw new Error(`PLAN_FEATURES_INVALID: not saved — ${features.error}. ${FEATURE_BLOCK_GUIDE}`);
+      }
       const revision = await createPlanDocRevision(env.DB, scope, {
         kind: input.kind as "prd",
         body: input.body,

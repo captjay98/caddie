@@ -9,11 +9,13 @@ import {
 	makeDelegateRepair,
 	makeRecordVerification,
  makeVerifyBuild,
+	makeRunChecks,
 	type SandboxToolDeps,
 } from './tools.ts';
 import type { ToolDefinition } from '@flue/runtime';
 import { useInstruction, useSkill, useSubagent, useTool } from '@flue/runtime';
 import { findModelRouteForRole } from './providers.ts';
+import { FEATURE_BLOCK_GUIDE } from '@caddie/contracts';
 
 /**
  * P05 specialists — seven restricted roles. This module is deliberately NOT
@@ -36,6 +38,8 @@ export interface SpecialistBuildContext {
   /** Full current request; delegation summaries must not drop user feedback. */
   currentRequest?: string;
  verifyBuild?: (operationKey:string, signal?:AbortSignal)=>Promise<unknown>;
+	/** Host-run project checks for build roles (run_checks); never publishes a preview. */
+	runChecks?: (operationKey: string, signal?: AbortSignal) => Promise<unknown>;
 	/** Sandbox adapter surface (P04) bound to this run's session. */
 	driver: SandboxToolDeps;
 	sessionId: string;
@@ -69,6 +73,23 @@ export const SPECIALIST_CATALOG: readonly SpecialistDescriptor[] = [
 	{ role: 'qa', name: 'qa', description: 'Runs the checks and records verification evidence; has no write tools at all.', skills: ['build-verify', 'submission'] },
 ];
 
+/**
+ * The react-hono build recipe every specialist receives. The scaffold
+ * (stacks/react-hono/scaffold.ts) ships a WORKING test setup, so this tells
+ * the builder to use it — never to configure a DOM itself. The previous text
+ * asked the build model to hand-wire jsdom + Testing Library preloads, which a
+ * real build (FarmLog AI, 2026-10-15) spent its run on instead of the app.
+ */
+export const BUILD_RECIPE_INSTRUCTION =
+	'React/Hono recipe: src/main.tsx is the browser entry and renders <App /> from src/App.tsx; src/styles.css holds responsive styles. ' +
+	'The starter app ALREADY has a working test setup: bunfig.toml preloads happy-dom (a browser DOM with window, document and localStorage) and Testing Library with jest-dom matchers and cleanup between tests. ' +
+	'Never create or edit bunfig.toml or anything under test/setup/ (writes there are refused), and never add jsdom, Vitest or Jest. ' +
+	'Write behavior tests as src/*.test.tsx using test/expect from bun:test and render/screen/fireEvent from @testing-library/react; test/examples/app.example.test.tsx shows the pattern but does not count. ' +
+	'Run tests ONLY with run_checks: it installs, runs `bun test src/` and builds exactly as the host verifies. Shell test commands are refused, and every failing run_checks counts toward the repair limit, so read the failure and fix its cause before running again. ' +
+	'Never delete assertions or replace component tests with copied logic. Use React 19 createRoot; a Hono server is optional for apps needing an API. ' +
+	'During a build the coordinator hands you ONE feature with its doneWhen checks: build only that feature, keep earlier features working, and add at least one test in src/*.test.tsx for each doneWhen check (the host refuses to finish a feature that adds no new passing tests). ' +
+	'The host creates the scaffold only after approval. Read the full brief, prd, spec and feedback. Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass.';
+
 /** Role-specific instruction text (kept here so tests can audit it). */
 export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> = {
 	product:
@@ -99,6 +120,7 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 		delegate_repair: makeDelegateRepair({ delegate: context.delegateRepair }),
 		record_verification: makeRecordVerification({ record: context.recordVerification }),
  verify_build: makeVerifyBuild({verify: context.verifyBuild ?? (async () => { throw new Error('Host checks are not configured.'); })}),
+		run_checks: makeRunChecks({ run: context.runChecks ?? (async () => { throw new Error('Host checks are not configured.'); }) }),
 	};
 	const descriptor = SPECIALIST_CATALOG.find((d) => d.role === role);
 	if (!descriptor) throw new Error(`no catalog entry for role ${role}`);
@@ -112,8 +134,10 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 			useSkill(PACKAGED_SKILLS[skillName as keyof typeof PACKAGED_SKILLS]);
 		}
 		useInstruction(SPECIALIST_INSTRUCTIONS[role]);
+		if (descriptor.skills.includes('planning'))
+			useInstruction(`A PRD must end with the feature list the user approves and the host builds one feature at a time. ${FEATURE_BLOCK_GUIDE}`);
     if (context.currentRequest?.trim()) useInstruction(`Current user request, carried forward by the host: ${context.currentRequest}\nRespect the approved plan and your role permissions; this request does not bypass review or spending gates.`);
- useInstruction('React/Hono recipe: src/main.tsx is the React browser entry; src/styles.css holds responsive styles; src/*.test.ts holds meaningful behavior tests using the built-in Bun bun:test runner; do not use Vitest registrations for the host bun test check. Bun has no browser DOM by default. React Testing Library needs a test preload in bunfig.toml [test] preload before any test imports: initialize jsdom with url http://localhost or happy-dom, install window/document/navigator/HTMLElement/localStorage on globalThis, and set IS_REACT_ACT_ENVIRONMENT. Register cleanup afterEach. Use the DOM storage rather than assigning readonly window.localStorage. Configure this coherently; do not repair missing globals one at a time. Importing global-jsdom alone does NOT register a DOM: call its default function with url http://localhost/ in the preload, or use global-jsdom/register. Keep package.json valid JSON and test script bun test; bunfig.toml [test] preload is an array of paths. Import test/expect/beforeEach/afterEach from bun:test explicitly, extend expect with jest-dom matchers if used, and cleanup afterEach. Render once per test, not both in beforeEach and in the test. Read and fix the latest failure before retrying; never delete assertions or replace actual component tests with copied logic. Use React 19/createRoot with Bun; Hono server is optional for apps needing an API. The host creates a generic scaffold only after approval. Read the full brief, prd, spec and feedback. Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass.');
+ useInstruction(BUILD_RECIPE_INSTRUCTION);
 		return SPECIALIST_INSTRUCTIONS[role];
 	};
 }
