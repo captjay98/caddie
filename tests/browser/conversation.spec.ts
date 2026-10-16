@@ -69,7 +69,7 @@ test.describe('P05/P06 conversation surface', () => {
 		const page = await context.newPage();
 		await openProjectPage(page);
 		// No transport is wired yet: an explicit standby, never fake messages.
-		await expect(page.getByTestId('channel-transcript')).toContainText(/your first message starts a run/i);
+		await expect(page.getByTestId('channel-transcript')).toContainText(/what would you like to do next\?/i);
 		await expect(page.locator('[data-testid="msg-user"], [data-testid="msg-assistant"]')).toHaveCount(0);
 		await context.close();
 	});

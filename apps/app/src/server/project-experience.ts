@@ -35,12 +35,14 @@ function versionOf(workflow: BuildWorkflow | null): number {
 }
 
 /**
- * Map the coarse server phase (+ detail sentinel) to the richer user-facing
- * stage. `blocked` splits into `stopped` (user) vs `blocked` (repair/limit/
- * infra); `building` stays the umbrella (the UI narrates checking/repairing
- * from detail/preview, but the deterministic stage is `building`).
+ * Map the coarse server phase (+ detail sentinel + approval) to the richer
+ * user-facing stage. `blocked` splits into `stopped` (user), `planning_blocked`
+ * (blocked before the plan was ever approved — a stuck plan, nothing built to
+ * retry) vs `blocked` (an approved build hit a repair/limit/infra wall).
+ * `building` stays the umbrella (the UI narrates checking/repairing from
+ * detail/preview, but the deterministic stage is `building`).
  */
-function stageOf(workflow: BuildWorkflow | null): ProjectExperience['stage'] {
+function stageOf(workflow: BuildWorkflow | null, planApproved: boolean): ProjectExperience['stage'] {
 	if (!workflow) return 'planning';
 	switch (workflow.phase) {
 		case 'planning':
@@ -52,7 +54,9 @@ function stageOf(workflow: BuildWorkflow | null): ProjectExperience['stage'] {
 		case 'ready':
 			return 'ready';
 		case 'blocked':
-			return workflow.detail?.startsWith(STOP_SENTINEL) ? 'stopped' : 'blocked';
+			if (workflow.detail?.startsWith(STOP_SENTINEL)) return 'stopped';
+			// A block before any approved plan is a stuck PLAN, not a stuck build.
+			return planApproved ? 'blocked' : 'planning_blocked';
 		default:
 			return 'planning';
 	}
@@ -79,6 +83,8 @@ function messageOf(
 			return workflow?.detail?.trim()
 				? workflow.detail.trim()
 				: 'This project needs your input before Caddie can continue.';
+		case 'planning_blocked':
+			return "Caddie couldn't finish writing your plan. Nothing has been built yet — tell Caddie to continue and it will pick up your request and feedback.";
 		case 'stopped':
 			return 'Work stopped. Your plan and files are retained; retry when you are ready.';
 		default:
@@ -122,6 +128,10 @@ function actionsOf(
 			];
 		case 'blocked':
 			return [{ kind: 'retry', label: 'Review next step', enabled: true, primary: true }];
+		case 'planning_blocked':
+			// Nothing is built — the one action resumes PLANNING (retryWorkflow
+			// routes a pre-approval block back to planning), worded honestly.
+			return [{ kind: 'retry', label: 'Continue the plan', enabled: true, primary: true }];
 		case 'stopped':
 			return [{ kind: 'retry', label: 'Resume', enabled: true, primary: true }];
 		default:
@@ -133,7 +143,12 @@ function actionsOf(
 export async function projectExperience(db: D1Database, scope: Scope): Promise<ProjectExperience> {
 	const { workflow, plan, approval } = await workflowSnapshot(db, scope);
 	const planApproved = approval?.status === 'approved';
-	const stage = stageOf(workflow);
+	// A block is a stuck PLAN only when this revision was never approved. A
+	// revoked/expired approval is a stopped BUILD (retry is then denied by the
+	// approval gate) — the same rule retryWorkflow uses.
+	const planEverApproved =
+		approval?.status === 'approved' || approval?.status === 'revoked' || approval?.status === 'expired';
+	const stage = stageOf(workflow, planEverApproved);
 	const hasPlan = Boolean(plan);
 	const previewId = workflow?.previewId ?? null;
 	const hasPreview = Boolean(previewId);

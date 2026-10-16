@@ -21,8 +21,10 @@ type Phase = 'planning' | 'review' | 'building' | 'blocked' | 'ready';
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean } = {}) {
-	let currentPlan = plan(1);
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean } = {}) {
+	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
+	let features = options.features ?? [];
+	const rollbacks: Record<string, unknown>[] = [];
 	let failedAdmissions = options.failAdmission ?? 0;
 	let failedPreviews = options.failPreview ?? 0;
 	const workflow = {
@@ -38,7 +40,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 	const acks: Record<string, unknown>[] = [];
   const stops: string[] = [];
 	let previewReads = 0;
-	const snapshot = () => ({ workflow: { ...workflow }, plan: currentPlan, approval: null });
+	const snapshot = () => ({ workflow: { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null });
 	await context.route('**/api/**', async route => {
 		const request = route.request(), path = new URL(request.url()).pathname;
 		if (path === '/api/auth/status') return json(route, 200, { authenticated: true });
@@ -50,6 +52,21 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		if (path === '/api/brief') return json(route, 200, { cards: [], unseenCount: 0, projects: [HOME, PROJECT], asOf: NOW });
 		if (path.endsWith('/brief/read')) return json(route, 200, { marked: 0 });
 		if (path === '/api/usage') return json(route, 200, { payer: { payerId: 'actor-workflow', limitMinorUnits: 50000, currency: 'USD' }, totals: { reservedMinorUnits: 0, settledMinorUnits: 0, reservations: 0 } });
+		if (path.endsWith('/workflow/rollback')) {
+			const body = request.postDataJSON() as Record<string, unknown>;
+			rollbacks.push(body);
+			const target = features.find((f) => f.id === body.featureId) as { position: number; title: string } | undefined;
+			features = features.map((f) => (Number(f.position) > (target?.position ?? 0)
+				? { ...f, status: 'pending', testsPassed: null, passedAt: null, canRollBack: false }
+				: { ...f, canRollBack: false }));
+			workflow.phase = 'blocked'; workflow.previewId = null;
+			workflow.detail = `Rolled back to just after “${target?.title}”. The app's files are exactly as they were when it passed; 1 later feature will be built again when you press Retry.`;
+			return json(route, 200, snapshot());
+		}
+		if (path.endsWith('/activity')) return json(route, 200, {
+			projectId: PROJECT.id, phase: workflow.phase, building: workflow.phase === 'building', steps: [], rounds: [], openIssues: 0, features,
+			timeline: { phase: workflow.phase, startedAt: NOW, lastActivityAt: NOW, elapsedMs: 60_000, idleMs: 5_000, quiet: false, summary: 'Caddie is writing the app.', stages: [], scope: [], files: [], fileAreas: { app: 0, test: 0, style: 0, config: 0, server: 0 }, commands: [], tests: null, checks: [] },
+		});
 		if (path.endsWith('/workflow/stop')) {
       stops.push(path); workflow.phase = 'blocked'; workflow.pendingKey = null; workflow.pendingBody = null;
       workflow.detail = 'Stop requested. Your plan and files are retained.';
@@ -109,7 +126,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		return route.fulfill({ contentType: 'application/json', headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' }, body: JSON.stringify({ v: 1, conversationId, offset: OFFSET, messages: options.repeatHandoff ? [...messages, ...messages.map(m => ({...m, id: m.id + '-continued'}))] : messages, settlements: [] }) });
 	});
 	return {
-		workflow, decisions, admissions, acks, stops,
+		workflow, decisions, admissions, acks, stops, rollbacks,
 		get previewReads() { return previewReads; },
 		revise() { currentPlan = plan(currentPlan.revision + 1); workflow.planId = currentPlan.id; workflow.phase = 'review'; workflow.pendingKey = null; workflow.pendingBody = null; },
 		ready() { workflow.phase = 'ready'; workflow.previewId = 'output-workflow'; workflow.pendingKey = null; workflow.pendingBody = null; },
@@ -117,6 +134,62 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 }
 
 test.beforeEach(async ({ page }) => { await page.setViewportSize({ width: 1440, height: 1000 }); });
+
+const FEATURE_PLAN = [
+	'# Farm log', '', 'Log feed and see it on a dashboard.', '',
+	'```caddie-features',
+	JSON.stringify([
+		{ id: 'log-feed', title: 'Log daily feed', doneWhen: ['Saving 12 kg shows 12 kg in today’s list', 'The entry is still there after a reload'] },
+		{ id: 'view-dashboard', title: 'See the feed dashboard', doneWhen: ['The dashboard totals this week’s feed'] },
+	]),
+	'```',
+].join('\n');
+const featureView = (id: string, title: string, position: number, extra: Record<string, unknown> = {}) =>
+	({ id, title, doneWhen: ['check'], position, status: 'passed', attempts: 0, testsPassed: position, passedAt: NOW, canRollBack: false, ...extra });
+
+test('the plan review lists what will be built as a checklist, never as raw JSON', async ({ page, context }) => {
+	await fixture(context, { planBody: FEATURE_PLAN });
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'review');
+	const list = card.getByTestId('plan-features');
+	await expect(list.getByRole('heading', { name: 'What Caddie will build · 2' })).toBeVisible();
+	await expect(list.locator('.plan-feature-title')).toHaveText(['Log daily feed', 'See the feed dashboard']);
+	await expect(card.getByTestId('plan-feature-log-feed').locator('li')).toHaveText(['Saving 12 kg shows 12 kg in today’s list', 'The entry is still there after a reload']);
+	await expect(card).not.toContainText('caddie-features');
+	await expect(card).not.toContainText('"doneWhen"');
+});
+
+test('a finished build shows each feature and rolls back to a save point in two clicks', async ({ page, context }) => {
+	const state = await fixture(context, {
+		phase: 'ready',
+		approved: true,
+		planBody: FEATURE_PLAN,
+		features: [
+			featureView('log-feed', 'Log daily feed', 1, { canRollBack: true }),
+			featureView('view-dashboard', 'See the feed dashboard', 2),
+		],
+	});
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	const features = card.getByTestId('build-features');
+	await expect(features.getByRole('heading', { name: 'Features · 2 of 2 done' })).toBeVisible();
+	await expect(card.getByTestId('build-feature-log-feed')).toContainText('Done · 1 test passing');
+	await expect(card.getByTestId('rollback-view-dashboard')).toHaveCount(0);
+	await card.getByTestId('rollback-log-feed').click();
+	// The first click only explains what will be undone; nothing is sent yet.
+	await expect(card.getByTestId('build-feature-log-feed')).toContainText('Undo everything after this? 1 later feature goes back to the list');
+	expect(state.rollbacks).toHaveLength(0);
+	await card.getByTestId('rollback-confirm-log-feed').click();
+	await expect(card).toHaveAttribute('data-phase', 'blocked');
+	expect(state.rollbacks).toHaveLength(1);
+	expect(state.rollbacks[0]?.featureId).toBe('log-feed');
+	expect(String(state.rollbacks[0]?.key)).toMatch(/^rollback:log-feed:[0-9a-f-]{36}$/);
+	await expect(card).toContainText('Rolled back to just after “Log daily feed”');
+	await expect(card.getByRole('button', { name: 'Retry build' })).toBeVisible();
+	await expect(card.getByTestId('build-feature-view-dashboard')).toHaveAttribute('data-status', 'pending');
+});
 
 test('Home chat shows a readable project plan; approval admits the correct build and acknowledges its durable key', async ({ page, context }) => {
 	const state = await fixture(context);

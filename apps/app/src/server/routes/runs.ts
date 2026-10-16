@@ -193,6 +193,17 @@ export function conversationGuard(): Hono<{ Bindings: Env }> {
     await next();
   });
 
+  // The P00 scaffold agent (/agents/hello) proves the DO + router wiring. It
+  // has no bound conversation to membership-check, but it must NOT be an
+  // unauthenticated LLM endpoint — require a verified session before it is
+  // reached. Any other non-coordinator agent path is likewise gated.
+  guard.all("/hello/*", async (c, next) => {
+    const userId = await sessionUserId(c.env, c.req.raw.headers);
+    if (!userId)
+      throw new ScopeError(401, "unauthenticated", "a verified session is required");
+    await next();
+  });
+
   guard.onError((error, c) => {
     if (error instanceof ScopeError) {
       return c.json(

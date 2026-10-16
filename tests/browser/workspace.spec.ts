@@ -275,7 +275,7 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await expect(page.getByTestId('project-row-home-1')).toHaveCount(0);
 
 		// Opening a project routes to its Overview keeping the ?project= binding.
-		await page.getByTestId('project-row-proj-b').getByRole('button').click();
+		await page.getByTestId('project-row-proj-b').getByRole('button', { name: 'Telemetry' }).click();
 		await expect(page).toHaveURL(/\/app\/project\?project=proj-b$/);
 		await context.close();
 	});
@@ -348,6 +348,9 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await expect(page.getByTestId('run-row')).toHaveCount(1);
 		await expect(page.getByTestId('run-row')).toContainText('react-hono');
 		await page.getByTestId('run-detail-toggle').click();
+		await expect(page.getByTestId('run-details')).toContainText('Built with');
+		// Raw record ids live in the developer fold inside the details.
+		await page.getByTestId('run-details').locator('summary', { hasText: 'For developers' }).click();
 		await expect(page.getByTestId('run-details')).toContainText('conv-01HZX');
 		await page.getByTestId('build-tab-files').click();
 		await expect(page).toHaveURL(/tab=files/);

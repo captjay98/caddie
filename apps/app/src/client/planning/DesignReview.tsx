@@ -2,10 +2,13 @@ import { resumeWorkflow } from "../conversation/workflow-dispatch.ts";
 import { useState } from "react";
 import { Markdown } from "@caddie/ui/Markdown";
 import type { ApprovalRecord } from "@caddie/contracts";
+import { splitFeatureBlock } from "@caddie/contracts";
+import { PlanFeatureList } from "../project/FeatureChecklist.tsx";
 import type { ReactElement } from "react";
 import { formatTimeAgo } from "@caddie/ui/time";
 import { postJson } from "../api.ts";
 import { StatePanel, failureKind } from "../states.tsx";
+import { Icon } from "../icons.tsx";
 import { CopyableId } from "../copyable.tsx";
 
 /**
@@ -520,7 +523,8 @@ export function DesignReview(props: {
           <p className="state-detail">This revision carries no plan text.</p>
         ) : (
           <div className="plan-body" data-testid="plan-body-content">
-            <Markdown text={latest.body} />
+            <Markdown text={splitFeatureBlock(latest.body).display} />
+            <PlanFeatureList body={latest.body} />
           </div>
         )}
       </section>
@@ -529,60 +533,68 @@ export function DesignReview(props: {
         className="card-surface settings-panel plan-review-details"
         data-testid="design-review-scope"
       >
-        <summary className="ev-head">Approval details</summary>
-        <div className="ev-field">
-          <span className="fk">authorises</span>
-          <span className="fv">
-            building against this plan revision inside the sandbox. The approval
-            is bound to the exact revision hash below. A changed plan needs a
-            new decision.
-          </span>
+        <summary className="ev-head">What approving means</summary>
+        <div className="approval-scope" data-testid="approval-scope">
+          <div className="approval-scope-row" data-tone="ok">
+            <span className="approval-scope-mark" aria-hidden="true"><Icon name="check" title="" /></span>
+            <div>
+              <b>What it allows</b>
+              <p>Caddie builds exactly this version of the plan in a private sandbox. If the plan changes, Caddie comes back for a fresh OK before building again.</p>
+            </div>
+          </div>
+          <div className="approval-scope-row" data-tone="danger">
+            <span className="approval-scope-mark" aria-hidden="true"><Icon name="x" title="" /></span>
+            <div>
+              <b>What it never does</b>
+              <p>No publishing live, no changes to a real database, no merging into your repository. Each of those asks you separately, every time.</p>
+            </div>
+          </div>
         </div>
-        <div className="ev-field">
-          <span className="fk">does not authorise</span>
-          <span className="fv">
-            deploy to production · a destructive database change · merge to the
-            default branch. Each stays behind its own separate gate.
-          </span>
-        </div>
-        <div className="ev-field">
-          <span className="fk">revision hash</span>
-          <CopyableId value={latest.bodyHash} label="revision hash" />
-        </div>
+        <details className="ev-devdetail">
+          <summary className="kicker">For developers — exact revision hash</summary>
+          <div className="ev-field">
+            <span className="fk">revision hash</span>
+            <CopyableId value={latest.bodyHash} label="revision hash" />
+          </div>
+        </details>
       </details>
 
       {/* Earlier versions fold (§4 anchor #earlier): history stays reachable
-			    without competing with the decision for the current version. */}
-      <section
-        className="card-surface settings-panel"
-        id="earlier"
-        data-testid="design-review-earlier"
-      >
-        <details>
-          <summary className="ev-head">
-            Earlier versions · {props.planRevisions.length - 1}
-          </summary>
-          <div className="row-list">
-            {props.planRevisions.slice(1).map((revision) => (
-              <div
-                className="inspector-row"
-                data-testid="design-review-row"
-                data-latest="false"
-                key={revision.id}
-              >
-                <div className="row-main">
-                  <span className="row-title">
-                    version <span className="mono-id">{revision.revision}</span>
-                  </span>
-                  <span className="mono-id">
-                    {formatTimeAgo(revision.createdAt)}
-                  </span>
+				    without competing with the decision for the current version. Hidden
+				    entirely when there is nothing earlier — an empty "Earlier versions · 0"
+				    fold is noise (owner steering, 2026-10-15). */}
+      {props.planRevisions.length > 1 ? (
+        <section
+          className="card-surface settings-panel"
+          id="earlier"
+          data-testid="design-review-earlier"
+        >
+          <details>
+            <summary className="ev-head">
+              Earlier versions · {props.planRevisions.length - 1}
+            </summary>
+            <div className="row-list">
+              {props.planRevisions.slice(1).map((revision) => (
+                <div
+                  className="inspector-row"
+                  data-testid="design-review-row"
+                  data-latest="false"
+                  key={revision.id}
+                >
+                  <div className="row-main">
+                    <span className="row-title">
+                      Version <span className="mono-id">{revision.revision}</span> — replaced
+                    </span>
+                    <span className="mono-id">
+                      {formatTimeAgo(revision.createdAt)}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </details>
-      </section>
+              ))}
+            </div>
+          </details>
+        </section>
+      ) : null}
 
       {records.length > 0 ? (
         <details

@@ -35,6 +35,7 @@ describe('Now panel model', () => {
 			repairing: 'Caddie is fixing a problem it found',
 			ready: 'Your app is ready to try',
 			blocked: 'Caddie needs something from you',
+			planning_blocked: "Caddie couldn't finish your plan",
 			stopped: 'Work on this project is paused',
 		};
 		for (const [stage, title] of Object.entries(titles) as [ExperienceStage, string][]) {
@@ -48,7 +49,7 @@ describe('Now panel model', () => {
 	test('the live indicator shows only while Caddie is working', () => {
 		const working = (stage: ExperienceStage) => nowPanelModel(experience(stage), NOW)!.working;
 		for (const stage of ['planning', 'building', 'checking', 'repairing'] as const) expect(working(stage)).toBe(true);
-		for (const stage of ['review', 'ready', 'blocked', 'stopped'] as const) expect(working(stage)).toBe(false);
+		for (const stage of ['review', 'ready', 'blocked', 'planning_blocked', 'stopped'] as const) expect(working(stage)).toBe(false);
 	});
 
 	test('buttons keep server labels, put the primary first and route to the real control', () => {

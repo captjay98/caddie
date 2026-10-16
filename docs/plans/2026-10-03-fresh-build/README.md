@@ -8,7 +8,9 @@
 
 **Tech Stack:** Bun workspace tooling; TypeScript/React/Vite; Flue; Hono; Cloudflare Workers/DO/D1; Astro static; private object storage proposed as R2; Playwright and runtime-appropriate tests. Google and GitHub social sign-in, separate GitHub App repository access.
 
-**Status:** PLAN ONLY. No app scaffolding, provider resource, deployment, repository fork, paid operation or data migration has been performed. Target folder `/Users/captjay98/projects/caddie-forge`. No deadline was supplied: gates determine ordering, not invented delivery dates.
+**Status:** EXECUTED — LOCAL VERIFIED build, no deployment. The 21 packets (P00–P17) are implemented and integrated on `main`; a composed Workers assets tree builds green (`bun run build`), typecheck is clean, and the app runs locally at `:5176`. Twenty-two D1 migrations exist (`0001`–`0022`). On top of the packets, several owner-directed waves landed: a full UI/UX overhaul (board phases 0–4), the Caddie v2 redesign wave (U01–U10 + B01–B06), and a 2026-10-07..15 run of discovery/model/chat/project-page work (see the feature ledger's dated sections and the execution ledger). What remains BLOCKED is strictly owner-gated and live-only: real OAuth callbacks on hosted origins, live stack journeys for Laravel/FastAPI/Flutter (toolchains), a real GitHub App, production Resend domain, R2/preview origin, and deployment authorization itself — none of these can be an agent decision. No production deployment, repository fork, or data migration has been performed; `.dev.vars`/`.env` stay gitignored. Target folder `/Users/captjay98/projects/caddie-forge`. No deadline was supplied: gates determine ordering, not invented delivery dates.
+
+> Classifications remain exact (LOCAL VERIFIED, LIVE VERIFIED, SIMULATED, DOCUMENTATION ONLY, BLOCKED, FAILED). A mocked or local-only pass is never LIVE VERIFIED. The release roll-up a reviewer reads is `docs/release-evidence.md`; per-packet command receipts live in `execution-ledger.md`.
 
 ## Authority and decisions
 

@@ -273,11 +273,12 @@ test.describe('Check page (U07)', () => {
 		);
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/evidence?project=proj-a`);
-		const proof = page.getByTestId('check-proof');
-		await expect(proof).toBeVisible();
-		// The drawer opens and shows the claims surface (honest empty here).
-		await proof.locator('summary').click();
-		await expect(proof.locator('summary')).toContainText('Proof');
+		// The drawer renders directly on the page (no fold-in-a-fold): its own
+		// header names it, and with nothing read it shows ONE honest intro.
+		const drawer = page.getByTestId('evidence-drawer');
+		await expect(drawer).toBeVisible();
+		await expect(drawer).toContainText('What Caddie saw');
+		await expect(drawer).toContainText("Nothing yet — Caddie hasn't read anything for this project");
 		await context.close();
 	});
 });

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchJson, postJson } from '../api.ts';
-import { failureKind, StatePanel } from '../states.tsx';
+import { failureKind, StatePanel, TeachingEmpty } from '../states.tsx';
 import { useProjects, useSessionActor } from '../queries.ts';
 
 /**
@@ -125,16 +125,25 @@ export function Memory({ embedded = false }: { embedded?: boolean } = {}): React
 						))}
 				</select>
 			</label>
-			<p className={embedded ? 'settings-row-detail' : 'state-detail'}>
+			<p className={embedded ? 'settings-row-detail memory-explainer' : 'state-detail'}>
 				{embedded
-					? 'Removed facts are never used again. They stay listed below so you can see what changed.'
+					? 'Facts Caddie picked up while working with you — how you like things done, corrections you made. It reuses them so you never repeat yourself, and only keeps what you confirmed. Edit or remove any of them at any time.'
 					: 'Personal facts belong to you alone. Retracting removes a fact from every future use — it is never silently deleted, the retracted entry stays in history.'}
 			</p>
 
 			{active.length === 0 ? (
-				<p className="state-detail" data-testid="memory-empty">
-					{embedded ? 'Caddie hasn’t learned anything about you yet.' : 'Nothing remembered yet.'}
-				</p>
+				embedded ? (
+					<TeachingEmpty
+						testid="memory-empty"
+						icon="memory"
+						title="Nothing learned yet"
+						detail="As you work, Caddie remembers facts about this project — your stack, your decisions, how you like things done. It proposes each one and only keeps it once you confirm, so nothing is saved behind your back."
+					/>
+				) : (
+					<p className="state-detail" data-testid="memory-empty">
+						Nothing remembered yet.
+					</p>
+				)
 			) : embedded ? (
 				<ul className="settings-rows" data-testid="memory-list">
 					{active.map((fact) => (
@@ -169,6 +178,7 @@ export function Memory({ embedded = false }: { embedded?: boolean } = {}): React
 			{history.length > 0 && embedded ? (
 				<div data-testid="memory-history" className="settings-group">
 					<h2 className="settings-subhead">Removed</h2>
+					<p className="settings-row-detail">Removed facts are never used again. They stay listed so you can see what changed.</p>
 					<ul className="settings-rows">
 						{history.map((fact) => (
 							<li className="settings-row memory-row-removed" key={fact.id} data-testid="memory-retracted">

@@ -1578,15 +1578,34 @@ export async function evaluateCandidateEligibility(
 	profile: EligibilityProfile,
 ): Promise<EligibilityEvaluation> {
 	await assertProjectScope(db, scope);
-	// Only THIS event's quoted rules decide its eligibility — the same scoping
-	// the hackathon card uses (belongsToCandidate over authoritative sources).
-	// Using every claim in the project let one event's rule (another event's
-	// age minimum or country list) leak into a different event's detail pane.
-	const [all, sources] = await Promise.all([listClaims(db, scope), listSources(db, scope)]);
+	// Only THIS event's quoted rules decide its eligibility. Using every claim
+	// in the project let one event's rule (another event's age minimum or
+	// country list) leak into a different event's detail pane.
+	const [all, sources, candidates] = await Promise.all([listClaims(db, scope), listSources(db, scope), listCandidates(db, scope)]);
 	const sourceUrls = authoritativeSourceUrls(sources);
+	// A claim decides THIS event's eligibility when it comes from an
+	// authoritative rules source (binding_rules / organizer_message / official_*)
+	// AND that source's URL is scoped to this candidate — either it belongs to
+	// the candidate's own page tree (same origin + /rules|/faq subpage), OR it
+	// belongs to NO candidate in the project at all. The second case covers an
+	// authoritative rules page hosted on a SEPARATE domain (e.g. rules.example):
+	// since claims are project-scoped and that host maps to no event here, it
+	// can only be describing this project's work, so it applies rather than
+	// being silently dropped. A same-origin /design/rules page that DOES belong
+	// to the "Design" candidate is therefore NOT applied to the "Education"
+	// candidate — which is the cross-event isolation the detail pane relies on.
+	const authoritativeSourceIds = new Set(sourceUrls.keys());
+	const candidateUrls = candidates.map((c) => c.url);
+	const appliesHere = (claim: { readonly sourceId: string }): boolean => {
+		if (!authoritativeSourceIds.has(claim.sourceId)) return false;
+		const sourceUrl = sourceUrls.get(claim.sourceId) ?? '';
+		if (belongsToCandidate(sourceUrl, candidate.url)) return true;
+		// A standalone rules host belongs to no candidate's page tree.
+		return !candidateUrls.some((url) => belongsToCandidate(sourceUrl, url));
+	};
 	const ruleClaims: EligibilityRuleClaim[] = all
 		.filter((claim) => claim.status === 'active' && claim.claimType.startsWith('eligibility.'))
-		.filter((claim) => belongsToCandidate(sourceUrls.get(claim.sourceId) ?? '', candidate.url))
+		.filter(appliesHere)
 		.map((claim) => ({
 			claimId: claim.id,
 			claimType: claim.claimType,

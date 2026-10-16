@@ -284,8 +284,8 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 					</p>
 					<h2 className="ev-title">Submit</h2>
 					<p className="page-lede">
-						Prepare here, submit elsewhere — this tool never submits anywhere. The package is checked
-						against the rules before you send it.
+						Get everything ready to hand in. Caddie checks the package against the contest's rules —
+						you do the actual submitting on the contest site. This tool never submits anywhere.
 					</p>
 				</div>
 				<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
@@ -302,9 +302,11 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 
 			{record === null ? (
 				<div className="submission-empty">
+					<h3 className="state-title">Start the hand-in checklist</h3>
 					<p className="state-detail">
-						No package yet. The title comes from THIS project; the checklist derives only from cited
-						requirement claims — with none on record it stays empty.
+						The checklist lists exactly what the contest rules require, each line with its proof. It is
+						built only from rules Caddie has actually read — with none on record it stays empty, and
+						nothing (video, repo, licence) is assumed for you.
 					</p>
 					<label className="stack-toggle">
 						<input
@@ -313,11 +315,12 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 							checked={reuseRequired}
 							onChange={(event) => setReuseRequired(event.target.checked)}
 						/>{' '}
-						submitting requires a reuse disclosure
+						this contest requires a reuse disclosure
 					</label>
+					<p className="state-detail">If it's ticked, Caddie asks you — a person — to confirm the disclosure before anything can be exported.</p>
 					<div>
 						<button type="button" className="btn-key" onClick={() => void createPackage()} disabled={busy}>
-							Create package
+							{busy ? 'Starting…' : 'Start the package'}
 						</button>
 					</div>
 				</div>

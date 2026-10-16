@@ -22,10 +22,12 @@ import * as v from 'valibot';
 /**
  * The user-facing stage. A SUPERSET refinement of the server's coarse
  * WorkflowPhase (planning|review|building|blocked|ready): `blocked` splits
- * into `stopped` (user asked to stop) vs `blocked` (repair/limit/infra), and
- * `building` is the umbrella the UI narrates as building/checking/repairing
- * from the workflow detail. Kept small — the UI reads one field, not a table
- * per sub-state.
+ * into `stopped` (user asked to stop), `planning_blocked` (a plan got stuck
+ * BEFORE approval — there is nothing built to retry, Caddie must finish the
+ * plan) vs `blocked` (a build with an approved plan hit a repair/limit/infra
+ * wall). `building` is the umbrella the UI narrates as building/checking/
+ * repairing from the workflow detail. Kept small — the UI reads one field,
+ * not a table per sub-state.
  */
 export const ExperienceStage = v.union([
 	v.literal('planning'),
@@ -35,6 +37,7 @@ export const ExperienceStage = v.union([
 	v.literal('repairing'),
 	v.literal('ready'),
 	v.literal('blocked'),
+	v.literal('planning_blocked'),
 	v.literal('stopped'),
 ]);
 export type ExperienceStage = v.InferOutput<typeof ExperienceStage>;

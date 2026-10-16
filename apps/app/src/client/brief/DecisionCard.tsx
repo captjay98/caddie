@@ -29,6 +29,29 @@ const KIND_LABEL: Record<DecisionCardType['kind'], string> = {
 	result: 'Result · Verified output',
 };
 
+/**
+ * Plain-language pill text, by card kind + status. The raw contract status
+ * (`needs-you`, `changed`, `handled`, `blocked`) is machine vocabulary and must
+ * never reach the user — an approval that needs a decision reads "Plan ready",
+ * not "needs-you". Falls back to a readable generic per status.
+ */
+export function statusLabel(card: DecisionCardType): string {
+	if (card.status === 'blocked') return 'Needs attention';
+	if (card.status === 'handled') return 'Done';
+	if (card.status === 'changed') return 'Changes to review';
+	// needs-you — word it for what the card is about.
+	switch (card.kind) {
+		case 'approval':
+			return 'Plan ready';
+		case 'deadline':
+			return 'Deadline';
+		case 'result':
+			return 'Ready to try';
+		default:
+			return 'Needs you';
+	}
+}
+
 export function DecisionCardView(props: {
 	card: DecisionCardType;
 	now?: Date;
@@ -56,7 +79,7 @@ export function DecisionCardView(props: {
 					{KIND_LABEL[card.kind]}
 				</p>
 				<span className="pill status-pill" data-status={card.status}>
-					{card.status}
+					{statusLabel(card)}
 				</span>
 				{props.seen === false ? (
 					<span className="pill status-pill" data-status="unseen" data-testid="card-unseen">
@@ -67,11 +90,6 @@ export function DecisionCardView(props: {
 			<h3>{card.headline}</h3>
 			<p className="summary">{card.summary}</p>
 			<div className="card-meta" data-testid="card-meta">
-				{card.runId ? <span className="mono-id">run {card.runId}</span> : null}
-				<span className="mono-id">
-					evidence {card.evidenceIds.length > 0 ? card.evidenceIds.slice(0, 3).join(' · ') : 'none attached'}
-					{card.evidenceIds.length > 3 ? ` · +${card.evidenceIds.length - 3} more` : ''}
-				</span>
 				<span className="mono-id">updated {formatTimeAgo(card.updatedAt, props.now)}</span>
 			</div>
 			<div className="actions">
@@ -96,6 +114,11 @@ export function DecisionCardView(props: {
 			</div>
 			{detailOpen ? (
 				<div className="card-details" data-testid="card-details">
+					{card.runId ? <span className="mono-id">run {card.runId}</span> : null}
+					<span className="mono-id">
+						evidence {card.evidenceIds.length > 0 ? card.evidenceIds.slice(0, 3).join(' · ') : 'none attached'}
+						{card.evidenceIds.length > 3 ? ` · +${card.evidenceIds.length - 3} more` : ''}
+					</span>
 					<span className="mono-id">card {card.id}</span>
 					<span className="mono-id">project {card.projectId}</span>
 					<span className="mono-id">

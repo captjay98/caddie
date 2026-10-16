@@ -165,6 +165,35 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     expect(exp.message).toContain("sandbox");
   });
 
+  test("planning_blocked: a block BEFORE approval is a stuck plan, not a stuck build", async () => {
+    const w = await world();
+    const item = await planned(w); // plan exists, in review, NOT approved
+    // Simulate the FarmLog failure: the planning continuation loop blocked the
+    // workflow before any approval (useAgentFinish -> blockBuild).
+    await setWorkflowBlocker(w.db, item.scope, "The plan revision was not saved. Ask Caddie to continue planning; your request and feedback are retained.");
+    const exp = await projectExperience(w.db, item.scope);
+    // Honest status: NOT the generic build-blocked state.
+    expect(exp.stage).toBe("planning_blocked");
+    expect(exp.plan!.approved).toBe(false);
+    // Message tells the truth: nothing was built.
+    expect(exp.message.toLowerCase()).toContain("nothing has been built");
+    // The single action resumes PLANNING, worded for a plan — never "retry build".
+    const primary = exp.actions.find((a) => a.primary)!;
+    expect(primary.kind).toBe("retry");
+    expect(primary.label).toBe("Continue the plan");
+    expect(exp.actions.filter((a) => a.primary)).toHaveLength(1);
+  });
+
+  test("a stop before approval still reads as stopped, not planning_blocked", async () => {
+    const w = await world();
+    const item = await planned(w);
+    // The STOP sentinel wins even when the plan is unapproved: an explicit user
+    // stop is distinct from a plan that silently failed to save.
+    await setWorkflowBlocker(w.db, item.scope, "Stop requested. Your plan and files are retained.");
+    const exp = await projectExperience(w.db, item.scope);
+    expect(exp.stage).toBe("stopped");
+  });
+
   test("every stage offers exactly one primary action", async () => {
     const w = await world();
     const item = await planned(w);

@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import { formatTimeAgo } from '@caddie/ui/time';
 import { fetchJson } from '../api.ts';
+import { TeachingEmpty } from '../states.tsx';
 
 /**
  * Tasks — project-scoped human task list over the REAL P12 routes
  * (server/routes/tasks.ts, server/tasks.ts): create, complete, cancel,
  * reopen. Every mutation failure is named in-row — a refused action is never
  * silent (audit F12/S25).
+ *
+ * Presentation (owner steering, 2026-10-15): the section says in plain words
+ * what a to-do is FOR (jobs a person does outside Caddie), rows read like a
+ * checklist — a tick circle, the job, a human due date — instead of status
+ * pills and raw ISO stamps, and `embedded` renders bare (no own card) so the
+ * Overview fold doesn't nest a card inside a card.
  */
 
 export interface TaskRow {
@@ -28,7 +34,19 @@ type LoadState =
 	| { readonly kind: 'denied' }
 	| { readonly kind: 'error'; readonly message: string };
 
-export function Tasks(props: { projectId: string | null; /** Overview embed: the create form hides behind an "Add a to-do" button (the v2 add-task window). */ embedded?: boolean }): ReactElement {
+/** "due Fri 18 Oct" from a YYYY-MM-DD (or ISO) stamp — never a raw ISO line. */
+export function dueLabel(dueAt: string): string {
+	const date = new Date(dueAt.length === 10 ? `${dueAt}T12:00:00` : dueAt);
+	if (!Number.isFinite(date.getTime())) return `due ${dueAt}`;
+	const label = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' }).format(date);
+	return `due ${label}`;
+}
+
+export function Tasks(props: {
+	projectId: string | null;
+	/** Overview embed: no own card/heading (the fold names it), form behind "Add a to-do". */
+	embedded?: boolean;
+}): ReactElement {
 	const [state, setState] = useState<LoadState>({ kind: 'loading' });
 	const [addOpen, setAddOpen] = useState(false);
 	const [busyId, setBusyId] = useState<string | null>(null);
@@ -108,6 +126,151 @@ export function Tasks(props: { projectId: string | null; /** Overview embed: the
 		}
 	};
 
+	// `inner` is built eagerly but only ever RENDERED in the ready branch (the
+	// loading/denied/error states return earlier). TypeScript cannot narrow a
+	// const across those guards, so derive the list once with a narrowing it can
+	// follow — an empty list in every non-ready state, which `inner` never shows.
+	const tasks = state.kind === 'ready' ? state.tasks : [];
+
+	const inner = (
+		<>
+			<p className="page-lede" data-testid="tasks-lede">
+				Jobs a person still does outside Caddie — record the demo video, try the app on your phone,
+				sign up for the contest. Yours to tick off; Caddie's specialists can add their own here too.
+			</p>
+			{props.embedded && !addOpen ? null : (
+			<form className="task-create" onSubmit={create} data-testid="task-create">
+				<input
+					type="text"
+					className="input"
+					placeholder="New to-do — e.g. “record the demo video”"
+					aria-label="New task title"
+					data-testid="task-title"
+					value={title}
+					onChange={(event) => setTitle(event.target.value)}
+				/>
+				<input
+					type="date"
+					className="input"
+					aria-label="Due date (optional)"
+					data-testid="task-due"
+					value={dueAt}
+					onChange={(event) => setDueAt(event.target.value)}
+				/>
+				<button type="submit" className="btn-key" disabled={creating || title.trim() === ''} data-testid="task-add">
+					{creating ? 'Adding…' : 'Add to-do'}
+				</button>
+			</form>
+			)}
+			{createError ? (
+				<div role="alert" className="row-error" data-testid="task-create-error">
+					<b>The to-do was not added.</b> {createError}
+				</div>
+			) : null}
+			{tasks.length === 0 ? (
+				<TeachingEmpty
+					testid="tasks-empty"
+					icon="sparkCheck"
+					title="No to-dos yet"
+					detail="Jobs a person still does outside Caddie — record the demo video, try the app on your phone, register for the contest. Yours to tick off; Caddie's specialists can add their own here too."
+					action={
+						props.embedded
+							? { label: 'Add the first to-do', onClick: () => setAddOpen(true), testid: 'tasks-empty-add' }
+							: undefined
+					}
+				/>
+			) : (
+				<div data-testid="tasks-list">
+					{tasks.map((task) => (
+						<div className="task-row" key={task.id} data-testid="task-row" data-status={task.status}>
+							{task.status === 'open' ? (
+								<button
+									type="button"
+									className="task-tick"
+									aria-label={`Mark done: ${task.title}`}
+									disabled={busyId === task.id}
+									data-testid={`task-done-${task.id}`}
+									onClick={() => void act(task.id, 'done')}
+								/>
+							) : (
+								<button
+									type="button"
+									className="task-tick"
+									aria-label={`Reopen: ${task.title}`}
+									data-testid={`task-reopen-${task.id}`}
+									disabled={busyId === task.id}
+									onClick={() => void act(task.id, 'open')}
+								>
+									✓
+								</button>
+							)}
+							<div className="task-main">
+								<span className="task-title">{task.title}</span>
+								<span className="task-meta">
+									{task.dueAt ? dueLabel(task.dueAt) : 'no due date'}
+									{task.status === 'cancelled' ? ' · cancelled' : ''}
+								</span>
+							</div>
+							{task.status === 'open' ? (
+								<button
+									type="button"
+									className="detail-toggle"
+									disabled={busyId === task.id}
+									data-testid={`task-cancel-${task.id}`}
+									onClick={() => void act(task.id, 'cancelled')}
+								>
+									Dismiss
+								</button>
+							) : null}
+							{actionError && actionError.taskId === task.id ? (
+								<div role="alert" className="row-error" data-testid={`task-error-${task.id}`}>
+									<b>The action was refused.</b> {actionError.message}
+								</div>
+							) : null}
+						</div>
+					))}
+				</div>
+			)}
+		</>
+	);
+
+	if (props.embedded) {
+		// Inside the Overview fold: the fold carries the card and the heading;
+		// this renders only content (state panels stay bare too).
+		if (state.kind === 'denied') {
+			return (
+				<div data-testid="tasks-panel" className="state-detail">
+					Your account isn't a member of this project's workspace, so its to-dos can't be shown.
+				</div>
+			);
+		}
+		if (state.kind === 'error') {
+			return (
+				<div data-testid="tasks-panel" role="alert" className="state-detail">
+					The to-do list could not be loaded: {state.message}
+				</div>
+			);
+		}
+		if (state.kind === 'loading') {
+			return (
+				<div data-testid="tasks-panel" className="state-detail">
+					Loading to-dos…
+				</div>
+			);
+		}
+		return (
+			<div data-testid="tasks-panel" className="tasks-embedded">
+				<div className="r-section-head">
+					<h3 className="state-title">To-dos</h3>
+					<button type="button" className="btn-ghost" data-testid="add-task-open" onClick={() => setAddOpen((value) => !value)}>
+						{addOpen ? 'Close' : 'Add a to-do'}
+					</button>
+				</div>
+				{inner}
+			</div>
+		);
+	}
+
 	if (state.kind === 'denied') {
 		return (
 			<section className="state-panel card-surface" data-testid="tasks-panel">
@@ -130,7 +293,7 @@ export function Tasks(props: { projectId: string | null; /** Overview embed: the
 		return (
 			<section className="state-panel card-surface" data-testid="tasks-panel">
 				<p className="kicker">BUILD</p>
-				<p className="state-detail">Loading tasks…</p>
+				<p className="state-detail">Loading to-dos…</p>
 			</section>
 		);
 	}
@@ -138,113 +301,12 @@ export function Tasks(props: { projectId: string | null; /** Overview embed: the
 	return (
 		<section className="state-panel card-surface" data-testid="tasks-panel">
 			<p className="kicker" data-tone="action">
-				{props.embedded ? 'THIS BUILD' : 'BUILD'}
+				BUILD
 			</p>
 			<div className="r-section-head">
 				<h3 className="state-title">To-dos</h3>
-				{props.embedded ? (
-					<button type="button" className="btn-ghost" data-testid="add-task-open" onClick={() => setAddOpen((value) => !value)}>
-						{addOpen ? 'Close' : 'Add a to-do'}
-					</button>
-				) : null}
 			</div>
-			<p className="page-lede">
-				Human to-dos on this build — yours and the specialists', kept next to the runs that produced them.
-			</p>
-			{props.embedded && !addOpen ? null : (
-			<form className="task-create" onSubmit={create} data-testid="task-create">
-				<input
-					type="text"
-					className="input"
-					placeholder="New task — e.g. “record the demo video”"
-					aria-label="New task title"
-					data-testid="task-title"
-					value={title}
-					onChange={(event) => setTitle(event.target.value)}
-				/>
-				<input
-					type="date"
-					className="input"
-					aria-label="Due date (optional)"
-					data-testid="task-due"
-					value={dueAt}
-					onChange={(event) => setDueAt(event.target.value)}
-				/>
-				<button type="submit" className="btn-key" disabled={creating || title.trim() === ''} data-testid="task-add">
-					{creating ? 'Adding…' : 'Add to-do'}
-				</button>
-			</form>
-			)}
-			{createError ? (
-				<div role="alert" className="row-error" data-testid="task-create-error">
-					<b>The task was not created.</b> {createError}
-				</div>
-			) : null}
-			{state.tasks.length === 0 ? (
-				<p className="state-detail" data-testid="tasks-empty">
-					No tasks in this project yet. Add the first one above.
-				</p>
-			) : (
-				<div data-testid="tasks-list">
-					{state.tasks.map((task) => (
-						<div className="inspector-row" key={task.id} data-testid="task-row" data-status={task.status}>
-							<div className="row-main">
-								<span className="row-title">{task.title}</span>
-								<span className="row-status" data-status={task.status}>
-									{task.status}
-								</span>
-							</div>
-							<div className="row-main">
-								<span className="mono-id">
-									{task.dueAt ? `due ${formatTimeAgo(task.dueAt)} · ${task.dueAt}` : 'no due date'}
-								</span>
-								{task.linkedRunId ? (
-									<span className="mono-id">bound to run {task.linkedRunId.slice(0, 14)}…</span>
-								) : null}
-							</div>
-							<div className="row-actions">
-								{task.status === 'open' ? (
-									<>
-										<button
-											type="button"
-											className="btn-ghost"
-											disabled={busyId === task.id}
-											data-testid={`task-done-${task.id}`}
-											onClick={() => void act(task.id, 'done')}
-										>
-											Done
-										</button>
-										<button
-											type="button"
-											className="detail-toggle"
-											disabled={busyId === task.id}
-											data-testid={`task-cancel-${task.id}`}
-											onClick={() => void act(task.id, 'cancelled')}
-										>
-											Cancel
-										</button>
-									</>
-								) : (
-									<button
-										type="button"
-										className="detail-toggle"
-										disabled={busyId === task.id}
-										data-testid={`task-reopen-${task.id}`}
-										onClick={() => void act(task.id, 'open')}
-									>
-										Reopen
-									</button>
-								)}
-							</div>
-							{actionError && actionError.taskId === task.id ? (
-								<div role="alert" className="row-error" data-testid={`task-error-${task.id}`}>
-									<b>The action was refused.</b> {actionError.message}
-								</div>
-							) : null}
-						</div>
-					))}
-				</div>
-			)}
+			{inner}
 		</section>
 	);
 }

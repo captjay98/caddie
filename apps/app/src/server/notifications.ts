@@ -291,23 +291,29 @@ export const noopMailer: Mailer = {
 
 /**
  * Resend Mailer: real transactional email through api.resend.com (the same
- * provider the old caddie used). LIVE VERIFIED with the owner's key —
- * see the P12-live-email evidence record in the execution ledger.
+ * provider the old caddie used).
+ *
+ * The API key is passed IN by the caller (from the Worker `env` binding), not
+ * read from `process.env`: on Cloudflare, bindings only reach `process.env`
+ * with `nodejs_compat_populate_process_env`, which wrangler.jsonc does NOT set
+ * — so a `process.env.RESEND_API_KEY` read is empty in production even though
+ * the secret is configured. Threading the key through `env` is the posture
+ * AGENTS.md warns to keep.
  */
-export const resendMailer: Mailer = {
-	name: 'resend',
-	send: async (message) => {
-		const key = process.env.RESEND_API_KEY;
-		if (!key) return { ok: false, error: 'RESEND_API_KEY not configured' };
-		try {
-			const res = await fetch('https://api.resend.com/emails', {
-				method: 'POST',
-				headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-				body: JSON.stringify({
-					from: message.from,
-					to: [message.to],
-					subject: message.subject,
-					text: message.textBody,
+export function makeResendMailer(apiKey: string): Mailer {
+	return {
+		name: 'resend',
+		send: async (message) => {
+			if (!apiKey) return { ok: false, error: 'RESEND_API_KEY not configured' };
+			try {
+				const res = await fetch('https://api.resend.com/emails', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json', authorization: `Bearer ${apiKey}` },
+					body: JSON.stringify({
+						from: message.from,
+						to: [message.to],
+						subject: message.subject,
+						text: message.textBody,
 				}),
 			});
 			if (!res.ok) {
@@ -316,16 +322,20 @@ export const resendMailer: Mailer = {
 			}
 			const body = (await res.json()) as { id?: string };
 			return { ok: true, id: body.id };
-		} catch (error) {
-			return { ok: false, error: String(error instanceof Error ? error.message : error).slice(0, 200) };
-		}
-	},
-};
+			} catch (error) {
+				return { ok: false, error: String(error instanceof Error ? error.message : error).slice(0, 200) };
+			}
+		},
+	};
+}
 
 /**
  * Select the mailer for this deployment: Resend when RESEND_API_KEY +
- * RESEND_FROM are configured (LIVE VERIFIED), otherwise the noop mailer —
- * whose failed receipts stay visible for retry, never a faked pass.
+ * RESEND_FROM are configured, otherwise the noop mailer — whose failed
+ * receipts stay visible for retry, never a faked pass. The key is read from
+ * the Worker `env` binding (falling back to process.env only for local Node
+ * tooling), and THREADED into the mailer so the send never depends on
+ * process.env being populated.
  */
 export function mailerFromEnv(env?: Record<string, unknown>): Mailer {
 	const get = (key: string): string | undefined =>
@@ -333,10 +343,10 @@ export function mailerFromEnv(env?: Record<string, unknown>): Mailer {
 	const key = get('RESEND_API_KEY');
 	const from = get('RESEND_FROM');
 	if (key && from) {
+		const resend = makeResendMailer(key);
 		return {
 			name: 'resend',
-			send: async (message) =>
-				resendMailer.send({ ...message, from: `Caddie <${from}>` }),
+			send: async (message) => resend.send({ ...message, from: `Caddie <${from}>` }),
 		};
 	}
 	return noopMailer;
@@ -367,6 +377,25 @@ function validateRecipient(to: unknown): string {
 		fail(400, 'invalid_input', 'to must be an email address');
 	}
 	return to.trim();
+}
+
+/**
+ * The authenticated user's OWN verified email. Email is only ever sent to the
+ * account that owns the notification — never a request-supplied address — so
+ * the recipient is resolved from the session user id here, server-side. An
+ * unverified or missing email fails closed (no send to an unproven address).
+ */
+export async function ownerEmail(db: D1Database, userId: string): Promise<string> {
+	const rows = await queryAll(db, 'select "email", "emailVerified" from "user" where "id" = ?', userId);
+	const row = rows[0];
+	if (!row || typeof row['email'] !== 'string' || !row['email'].trim()) {
+		fail(404, 'no_email', 'your account has no email address on file');
+	}
+	// emailVerified is 0/1 (SQLite); a falsy value is unverified.
+	if (!row['emailVerified']) {
+		fail(403, 'email_unverified', 'your account email is not verified — verify it before Caddie can email you');
+	}
+	return (row['email'] as string).trim();
 }
 
 function receiptFromRow(row: Record<string, unknown>): MailReceipt {

@@ -106,6 +106,7 @@ function SectionStates(props: {
 	if (props.error) {
 		return (
 			<StatePanel
+				flat
 				kind="error"
 				title="This section failed to load"
 				detail={props.error instanceof Error ? props.error.message : undefined}
@@ -115,10 +116,10 @@ function SectionStates(props: {
 		);
 	}
 	if (props.pending) {
-		return <StatePanel kind="loading" title="Reading this section…" />;
+		return <StatePanel flat kind="loading" title="Reading this section…" />;
 	}
 	if (props.empty) {
-		return <StatePanel kind="empty" title={props.emptyTitle} detail={props.emptyDetail} />;
+		return <StatePanel flat kind="empty" title={props.emptyTitle} detail={props.emptyDetail} />;
 	}
 	return props.children;
 }
@@ -149,6 +150,17 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 	const claimsById = new Map(claimList.map((claim) => [claim.id, claim]));
 	const activeClaims = claimList.filter((claim) => claim.status !== 'superseded');
 	const historyClaims = claimList.filter((claim) => claim.status === 'superseded');
+	// Caddie has read nothing at all: one honest intro instead of three empty
+	// cards stacked in cards (owner steering, 2026-10-15).
+	const sectionsSettled = !sources.isPending && !claims.isPending && !surveys.isPending;
+	const nothingAtAll =
+		sectionsSettled &&
+		!sources.error &&
+		!claims.error &&
+		!surveys.error &&
+		sourceList.length === 0 &&
+		claimList.length === 0 &&
+		surveyList.length === 0;
 
 	function retry(section: 'sources' | 'claims' | 'surveys') {
 		const key =
@@ -175,9 +187,22 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 				</span>
 			</div>
 
-			<section className="card-surface settings-panel" data-testid="evidence-conflicts-section">
-				<h3 className="ev-head">Still unsettled — Caddie found two answers and won't pick one for you</h3>
-				<SectionStates
+			{nothingAtAll ? (
+				<StatePanel
+					flat
+					kind="empty"
+					title="Nothing yet — Caddie hasn't read anything for this project"
+					detail="As soon as Caddie reads a hackathon's rules page, your repo, or any page it builds on, it shows up here: the facts it found, the pages it read, and whether each page opened cleanly — each with a link back to the exact source, so nothing is a guess."
+				/>
+			) : (
+				<>
+				<section className="evidence-section" data-testid="evidence-conflicts-section">
+					<h3 className="ev-head">Still unsettled</h3>
+					<p className="state-detail">
+						Two sources Caddie trusts equally said different things. It keeps both instead of quietly
+						picking one — resolve it in the chat when it matters.
+					</p>
+					<SectionStates
 					pending={surveys.isPending}
 					empty={conflicts.length === 0 && winners.length === 0}
 					emptyTitle="Nothing read yet"
@@ -222,7 +247,7 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 				</SectionStates>
 			</section>
 
-			<section className="card-surface settings-panel" data-testid="evidence-claims-section">
+			<section className="evidence-section" data-testid="evidence-claims-section">
 				<h3 className="ev-head">What Caddie found</h3>
 				<SectionStates
 					pending={claims.isPending}
@@ -258,7 +283,7 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 				</SectionStates>
 			</section>
 
-			<section className="card-surface settings-panel" data-testid="evidence-sources-section">
+			<section className="evidence-section" data-testid="evidence-sources-section">
 				<h3 className="ev-head">Pages Caddie read — and whether they still open</h3>
 				<SectionStates
 					pending={sources.isPending}
@@ -295,8 +320,10 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 							</div>
 						))}
 					</div>
-				</SectionStates>
+					</SectionStates>
 			</section>
+				</>
+			)}
 		</section>
 	);
 }

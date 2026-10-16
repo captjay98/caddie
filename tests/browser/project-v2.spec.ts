@@ -203,7 +203,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await expect(page.getByTestId('project-tab-plan')).toContainText('Caddie is drafting it');
 		await expect(page.getByTestId('project-tab-build')).toContainText('After you approve');
 		await expect(page.getByTestId('project-steps-compact')).toBeHidden();
-		await expect(page.getByTestId('overview-brief')).toContainText('Read the full brief');
+		await expect(page.getByTestId('overview-brief-open')).toContainText('Read the full brief');
 		await desktop.close();
 
 		const phone = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -349,8 +349,8 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
         await expect(page.getByTestId('design-review-scope')).not.toHaveAttribute('open');
         await page.screenshot({ path: '/tmp/caddie-plan-review.png' });
 
-		// Earlier versions fold under #earlier.
-		await expect(page.getByTestId('design-review-earlier')).toBeAttached();
+		// No earlier versions → no "Earlier versions · 0" noise fold.
+		await expect(page.getByTestId('design-review-earlier')).toHaveCount(0);
 		await context.close();
 	});
 

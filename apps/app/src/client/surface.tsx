@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import * as v from 'valibot';
+import { ProjectExperienceSchema } from '@caddie/contracts';
 import type { ApprovalRecord, DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
 import { SignInPanel } from './auth.ts';
 import { Mascot } from '@caddie/ui/Mascot';
+import { Markdown } from '@caddie/ui/Markdown';
 import { failureKind, StatePanel } from './states.tsx';
 import { formatMinorUnits, formatNextRun } from './settings/settings-model.ts';
 import { DiscoveryResults, type DiscoveryCandidateRecord } from './discovery/Results.tsx';
@@ -26,14 +29,16 @@ import {
 	useWorkflowBrief,
 	useCreateProject,
 	usePlanDocRevisions,
+	useProjectExperience,
 	useRunBindings,
 } from './queries.ts';
 import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from './api.ts';
 import { useWorkspaceChrome } from './workspace/Chrome.tsx';
 import { NowPanel } from './project/NowPanel.tsx';
+import { relativeUpdated } from './project/now-panel.ts';
 import { ProjectTabs } from './workspace/ProjectTabs.tsx';
-import { projectStatus } from './workspace/project-status.ts';
+import { projectCardFromExperience, projectStatus } from './workspace/project-status.ts';
 
 /**
  * The routed surfaces for the discovery-first shell.
@@ -603,37 +608,10 @@ function ProjectList(): ReactElement {
             {brief.error ? <StatePanel kind={failureKind(brief.error)} title="Project updates are unavailable" detail="You can still open a project. Retry to load its latest decisions and progress." onRetry={() => void brief.refetch()} /> : null}
 			<ul className="project-list">
 				{active.map((project) => {
-					const state = brief.isPending || brief.error
+					const fallback = brief.isPending || brief.error
                         ? { label: brief.error ? 'Updates unavailable' : 'Loading updates…', detail: brief.error ? 'Open your project or retry loading its updates.' : 'Checking the latest decisions and progress.', next: null }
                         : projectStatus(cardsByProject.get(project.id) ?? []);
-					return (
-						<li key={project.id} className="project-row card-surface" data-testid={`project-row-${project.id}`}>
-							<div className="project-row-main">
-								<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
-									{project.name}
-								</button>
-								<span className="project-row-purpose">
-									{project.description ?? (project.contestUrl ? 'For the linked hackathon' : 'A personal project')}
-								</span>
-							</div>
-							<div className="project-row-meta">
-                                <span className="badge" data-tone={state.next?.status === 'blocked' ? 'danger' : state.next ? 'warn' : undefined} data-testid={`project-step-text-${project.id}`}>
-                                    {state.label}
-                                </span>
-                                <p className="project-row-doing">{state.detail}</p>
-                            </div>
-                            <div className="row-actions project-row-actions">
-                                {state.next ? (
-                                    <Link className="btn-key" to={onCardRoute(state.next, project.id).to as never} search={onCardRoute(state.next, project.id).search as never} data-testid={`project-next-${project.id}`}>
-                                        {state.next.primaryAction.label}
-                                    </Link>
-                                ) : null}
-                                <button type="button" className={state.next ? 'btn-ghost' : 'btn-key'} onClick={() => chrome.openProject(project.id, true)} data-testid={`project-continue-${project.id}`}>
-                                    Continue with Caddie
-                                </button>
-                            </div>
-						</li>
-					);
+					return <ProjectCard key={project.id} project={project} fallback={fallback} />;
 				})}
 			</ul>
 			{archived.length > 0 ? (
@@ -660,6 +638,80 @@ function whenIso(iso: string): string {
 	return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : 'unknown';
 }
 
+/**
+ * One Projects-list card: name, a short purpose (clamped — never the whole
+ * intake brief), a TRUTHFUL state pill, one plain line, "Updated N ago" and ONE
+ * action. State comes from the project's ProjectExperience (the same truth as
+ * its Now panel); only a project with no workflow yet falls back to its
+ * Brief-card summary. No run/evidence ids on the card face.
+ */
+function ProjectCard(props: {
+	project: Project;
+	fallback: { label: string; detail: string; next: DecisionCardType | null };
+}): ReactElement {
+	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const experience = useProjectExperience(actor, props.project.id);
+	const { project, fallback } = props;
+	const parsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
+	const card = parsed?.success ? projectCardFromExperience(parsed.output) : null;
+	const purpose = project.description?.trim() || (project.contestUrl ? 'For the linked hackathon' : 'A personal project');
+	const updatedMs = card && parsed?.success ? parsed.output.version : Date.parse(project.updatedAt);
+	const updated = relativeUpdated(updatedMs, Date.now());
+
+	return (
+		<li className="project-row project-card card-surface" data-testid={`project-row-${project.id}`} data-working={card?.working ? 'true' : 'false'}>
+			<div className="project-card-head">
+				<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
+					{project.name}
+				</button>
+				<span
+					className="badge project-card-pill"
+					data-tone={card ? card.tone : fallback.next?.status === 'blocked' ? 'danger' : fallback.next ? 'warn' : 'neutral'}
+					data-testid={`project-step-text-${project.id}`}
+				>
+					{card?.working ? <span className="project-card-live" aria-hidden="true" /> : null}
+					{card ? card.label : fallback.label}
+				</span>
+			</div>
+			<p className="project-card-purpose" title={purpose}>
+				{purpose}
+			</p>
+			<p className="project-card-detail">{card ? card.detail : fallback.detail}</p>
+			<div className="project-card-foot">
+				<span className="project-card-updated">{updated ?? ''}</span>
+				{card ? (
+					card.action.target === 'plan' ? (
+						<Link className="btn-key" to="/design-review" search={{ project: project.id } as never} data-testid={`project-next-${project.id}`}>
+							{card.action.label}
+						</Link>
+					) : (
+						<button
+							type="button"
+							className="btn-key"
+							data-testid={card.action.target === 'chat' ? `project-continue-${project.id}` : `project-next-${project.id}`}
+							onClick={() => chrome.openProject(project.id, card.action.target === 'chat')}
+						>
+							{card.action.label}
+						</button>
+					)
+				) : (
+					<span className="row-actions project-row-actions">
+						{fallback.next ? (
+							<Link className="btn-key" to={onCardRoute(fallback.next, project.id).to as never} search={onCardRoute(fallback.next, project.id).search as never} data-testid={`project-next-${project.id}`}>
+								{fallback.next.primaryAction.label}
+							</Link>
+						) : null}
+						<button type="button" className={fallback.next ? 'btn-ghost' : 'btn-key'} onClick={() => chrome.openProject(project.id, true)} data-testid={`project-continue-${project.id}`}>
+							Continue with Caddie
+						</button>
+					</span>
+				)}
+			</div>
+		</li>
+	);
+}
+
 // --- PROJECT OVERVIEW ------------------------------------------------------------
 
 export function ProjectOverviewPage(): ReactElement {
@@ -680,7 +732,17 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const brief = useBriefCards(actor, props.projectId);
 	const workflowBrief = useWorkflowBrief(actor, props.projectId);
+	// The same ProjectExperience the Now panel reads, so the idea/brief cards
+	// can say honestly that Caddie is acting on this project right now.
+	const experience = useProjectExperience(actor, props.projectId);
+	const experienceParsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
+	const experienceStage = experienceParsed?.success ? experienceParsed.output.stage : null;
+	const workingStages: readonly string[] = ['planning', 'building', 'checking', 'repairing'];
+	const working = experienceStage !== null && workingStages.includes(experienceStage);
 	const navigate = useNavigate();
+	// The full brief opens in a modal, NOT an inline <details>, so revealing it
+	// never shifts the Overview layout (user steering, 2026-10-15).
+	const [briefOpen, setBriefOpen] = useState(false);
 
 	// "Your app so far" (§4): the project's real preview state from the P07
 	// previews API (metadata only — the secret token is never re-readable).
@@ -796,17 +858,29 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 					</div>
 
 					<aside className="overview-side">
-					{/* Your idea: the one-line idea, with the brief Caddie wrote one click away. */}
+					{/* Your idea: the one-line idea, with the brief Caddie wrote one click away.
+					    While Caddie is acting on this project the card says so — the brief
+					    never sits silent while a build runs (owner steering, 2026-10-15). */}
 					<section className="card-surface settings-panel" data-testid="overview-idea">
 						<p className="kicker">Your idea</p>
 						<p className="overview-idea-line">
 							{chrome.selectedProject?.description || 'Tell Caddie what you want to make and the idea appears here.'}
 						</p>
 						{workflowBrief.data ? (
-							<details className="overview-brief" data-testid="overview-brief">
-								<summary>Read the full brief</summary>
-								<p className="overview-brief-text">{workflowBrief.data}</p>
-							</details>
+							<button
+								type="button"
+								className="r-link overview-brief-open"
+								data-testid="overview-brief-open"
+								onClick={() => setBriefOpen(true)}
+							>
+								Read the full brief
+							</button>
+						) : null}
+						{working ? (
+							<p className="overview-build-note" data-testid="overview-brief-building">
+								<span className="now-live" aria-hidden="true" />
+								Caddie is working on this right now — its status is in “Now” above.
+							</p>
 						) : null}
 					</section>
 
@@ -835,7 +909,7 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 					</div>
 
 					<details className="card-surface settings-panel" data-testid="overview-todo" id="todo">
-                        <summary className="ev-head">Project tasks</summary>
+                        <summary className="ev-head">To-dos</summary>
 						<Tasks projectId={props.projectId} embedded />
 					</details>
 
@@ -850,6 +924,42 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 								))}
 							</ul>
 						</details>
+					) : null}
+
+					{briefOpen && workflowBrief.data ? (
+						<div
+							className="modal-backdrop"
+							data-testid="overview-brief-backdrop"
+							onMouseDown={() => setBriefOpen(false)}
+						>
+							<div
+								className="commit-panel card-surface overview-brief-modal"
+								role="dialog"
+								aria-modal="true"
+								aria-label="Full project brief"
+								data-testid="overview-brief-modal"
+								onMouseDown={(e) => e.stopPropagation()}
+							>
+								<div className="r-section-head">
+									<p className="kicker" data-tone="action">The full brief</p>
+									<button type="button" className="btn-ghost" data-testid="overview-brief-close" onClick={() => setBriefOpen(false)}>
+										Close
+									</button>
+								</div>
+								{working ? (
+									<p className="overview-brief-status" data-testid="overview-brief-status">
+										<span className="now-live" aria-hidden="true" />
+										Caddie is acting on this brief right now — progress is in “Now” on the project page.
+									</p>
+								) : null}
+								{/* The brief is stored as plain prose; it renders as paragraphs
+								    (the same Markdown the plan body gets) instead of one collapsed
+								    wall of text. */}
+								<div className="overview-brief-text" data-testid="overview-brief-text">
+									<Markdown text={workflowBrief.data} />
+								</div>
+							</div>
+						</div>
 					) : null}
 				</>
 			)}
@@ -954,10 +1064,18 @@ function RunsBody(props: { projectId: string }): ReactElement {
 	return (
 		<div className="settings-stack">
 			{buildLive ? (
-				<p className="state-detail" data-testid="build-status" role="status">
-					Building now — Caddie is working in this project's chat. It will show you the result here when
-					it's done.
-				</p>
+				<section className="card-surface settings-panel build-live" data-testid="build-status" role="status">
+					<p className="now-head">
+						<span className="now-live" aria-hidden="true" />
+						<span className="kicker" data-tone="action">
+							Building now
+						</span>
+					</p>
+					<p className="page-lede">
+						Caddie is building your app in this project's chat. Step-by-step progress lives in “Now” on
+						the project home — when it finishes, the result shows up in the list below.
+					</p>
+				</section>
 			) : null}
 			<div className="r-section-head">
 				<div>
@@ -967,7 +1085,9 @@ function RunsBody(props: { projectId: string }): ReactElement {
 					<h2 className="ev-title">{tab === 'files' ? 'Code — for developers' : 'What Caddie has built'}</h2>
 					{tab === 'files' ? null : (
 						<p className="page-lede">
-							Every build Caddie runs, newest first. Approve a plan in the chat and the build starts here.
+							Every build Caddie runs for this project, newest first — so you can reopen a working
+							version, see what it built, or ask for a change. Approve a plan in the chat and the
+							next build appears here.
 						</p>
 					)}
 				</div>
@@ -1124,21 +1244,21 @@ export function SubmissionPage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="submission" />
-					<nav className="row-actions" data-testid="submission-related" aria-label="Related surfaces">
-						<ProjectGateSoft>
-							{(projectId) => (
-								<>
-									<Link to="/evidence" className="btn-ghost" data-testid="submission-evidence-link" search={{ project: projectId }}>
-										See what Caddie checked
-									</Link>
-									<Link to="/judge" className="btn-ghost" data-testid="submission-judge-link" search={{ project: projectId }}>
-										What judges look for
-									</Link>
-								</>
-							)}
-						</ProjectGateSoft>
-					</nav>
 					<ProjectGate>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectGate>
+					<ProjectGateSoft>
+						{(projectId) => (
+							<nav className="submission-related" data-testid="submission-related" aria-label="Related surfaces">
+								<Link to="/evidence" className="related-card card-surface" data-testid="submission-evidence-link" search={{ project: projectId }}>
+									<b>See what Caddie checked</b>
+									<span>The rules it read and the proof behind every line of the checklist.</span>
+								</Link>
+								<Link to="/judge" className="related-card card-surface" data-testid="submission-judge-link" search={{ project: projectId }}>
+									<b>What judges look for</b>
+									<span>Caddie's honest read of each criterion — never a predicted score.</span>
+								</Link>
+							</nav>
+						)}
+					</ProjectGateSoft>
 				</div>
 			</div>
 		</>
@@ -1286,11 +1406,10 @@ function CheckBody(props: { projectId: string; openScore: boolean; focusClaimTyp
 				</section>
 			)}
 
-			{/* Proof: the evidence claims behind the readiness lines. */}
-			<details className="card-surface settings-panel" data-testid="check-proof" open={Boolean(props.focusClaimType)}>
-				<summary className="ev-head">Proof — the evidence behind each line</summary>
-				<EvidenceDrawer projectId={props.projectId} focusClaimType={props.focusClaimType} />
-			</details>
+			{/* Proof: the evidence behind the readiness lines. The drawer owns its
+			    own header and sections — wrapping it in another fold made cards
+			    three deep (owner steering, 2026-10-15), so it renders directly. */}
+			<EvidenceDrawer projectId={props.projectId} focusClaimType={props.focusClaimType} />
 		</div>
 	);
 }

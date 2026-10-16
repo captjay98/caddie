@@ -12,6 +12,7 @@ import {
 	signIn,
 	freePort,
 } from './controls-harness.ts';
+import { allMigrationPaths } from './migrations.ts';
 
 /**
  * P11 test-side harness: reuses the shared P03 harness primitives (free
@@ -24,20 +25,15 @@ import {
 
 const DISCOVERY_FIXTURE_ENTRY = join(import.meta.dir, 'discovery.ts');
 
+/**
+ * Migrations for the P11 discovery/planning fixture. Derived from the
+ * migrations directory (fixtures/migrations.ts), not hand-listed: the old list
+ * had drifted (missing later migrations the eligibility/claims reads depend
+ * on), which surfaced as eligibility.rules coming back empty. The full ordered
+ * set can never miss a committed migration.
+ */
 export function discoveryMigrationPaths(): string[] {
-	const root = join(import.meta.dir, '..', '..');
-	return [
-		join(root, 'apps', 'app', 'migrations', '0001_product.sql'),
-		join(root, 'apps', 'app', 'migrations', '0004_evidence.sql'),
-		// P11 discovery reads the actor's P14 profile for personal eligibility.
-		join(root, 'apps', 'app', 'migrations', '0008_profile.sql'),
-		join(root, 'apps', 'app', 'migrations', '0009_discovery.sql'),
-		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
-		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
-		join(root, 'apps', 'app', 'migrations', '0013_discovery_saved.sql'),
-		join(root, 'apps', 'app', 'migrations', '0014_stack_notify.sql'),
-		join(root, 'apps', 'app', 'migrations', '0015_plan_decisions.sql'),
-	];
+	return allMigrationPaths();
 }
 
 function wranglerCliPath(repoRoot: string): string {

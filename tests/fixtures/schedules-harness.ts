@@ -10,6 +10,7 @@ import {
 } from './controls-harness.ts';
 import type { Scope } from '@caddie/contracts';
 import type { D1Database } from '../../apps/app/src/server/auth.ts';
+import { allMigrationPaths } from './migrations.ts';
 
 /**
  * P12 test-side harness: reuses the shared P03 harness primitives (free
@@ -27,22 +28,15 @@ import type { D1Database } from '../../apps/app/src/server/auth.ts';
 
 const SCHEDULES_FIXTURE_ENTRY = join(import.meta.dir, 'schedules.ts');
 
-/** Migrations for the workerd fixture (0006 is the GitHub packet's slot; unused here). */
+/**
+ * Migrations for the workerd fixture. Derived from the migrations directory
+ * (see fixtures/migrations.ts) rather than hand-listed: the old hand-kept list
+ * had drifted and was missing 0018_build_workflow.sql, so the runs route's
+ * read of build_workflows failed with "no such table". The full ordered set
+ * can never miss a committed migration.
+ */
 export function schedulesMigrationPaths(): string[] {
-	const root = join(import.meta.dir, '..', '..');
-	return [
-		join(root, 'apps', 'app', 'migrations', '0001_product.sql'),
-		join(root, 'apps', 'app', 'migrations', '0002_controls.sql'),
-		join(root, 'apps', 'app', 'migrations', '0004_evidence.sql'),
-		join(root, 'apps', 'app', 'migrations', '0005_runs.sql'),
-		join(root, 'apps', 'app', 'migrations', '0007_schedules.sql'),
-		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
-		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
-		join(root, 'apps', 'app', 'migrations', '0009_discovery.sql'),
-		join(root, 'apps', 'app', 'migrations', '0013_discovery_saved.sql'),
-		join(root, 'apps', 'app', 'migrations', '0014_stack_notify.sql'),
-		join(root, 'apps', 'app', 'migrations', '0015_plan_decisions.sql'),
-	];
+	return allMigrationPaths();
 }
 
 /** Migrations for the in-memory unit world: product + evidence + P12 tables. */

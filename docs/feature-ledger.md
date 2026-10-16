@@ -18,6 +18,22 @@ amendments); ADJ = `nebius-forge-eval/adjudication/ADJUDICATION.md` +
 `evidence/*` (live/local verification of Flue behaviors); LOCAL P00 = this
 repository's P00 verification.
 
+> **Availability reconciliation (2026-10-16).** The `Availability` column in the
+> two inventory tables below (C1–C22, H1–H21) is the state **as imported at P00
+> on 2026-10-03** and is now largely stale: a row reading `planned` there whose
+> owning packet is LOCAL/LIVE VERIFIED in
+> `docs/plans/2026-10-03-fresh-build/execution-ledger.md` is **available today**.
+> All 21 packets (P00–P17) are implemented and integrated; the authoritative,
+> current availability is the per-packet status table in the execution ledger
+> plus the dated wave sections lower in this file. Concretely, every row whose
+> packet is one of P01/P02/P03/P05/P06/P07/P08/P10/P11/P12/P13/P14/P16 is
+> **available (LOCAL VERIFIED)**; P09 stack #1 is **available (LIVE VERIFIED)**;
+> rows marked DROP/OPTIONAL keep that disposition. The original `planned`
+> labels are retained below only as P00-import provenance — do not read them as
+> current. The dated sections ("Caddie v2 redesign wave", "UI overhaul waves"
+> via the execution ledger, and "2026-10-07..15 discovery/model/chat/project
+> wave" below) carry the real evidence.
+
 ## Caddie inventory rows
 
 | # | Area | Disposition | Destination | Packet | Evidence | Availability |
@@ -139,3 +155,47 @@ the product surface, all LOCAL VERIFIED:
 
 Migrations added (append-only, every harness + inline test list updated):
 0013_discovery_saved, 0014_stack_notify, 0015_plan_decisions.
+
+## 2026-10-07..15 — discovery / model / chat / project waves
+
+Owner-directed work after the v2 redesign wave, on `main`. All LOCAL VERIFIED
+(typecheck 0, build 0 collisions, named test receipts) unless marked; no deploys
+and no paid calls beyond the already-recorded guarded live probes. The appended
+D1 migrations (append-only; every fixture harness now derives its list from the
+filesystem via `tests/fixtures/migrations.ts`, so no harness can drift again):
+
+| # | Migration | What it backs |
+|---|-----------|---------------|
+| 0016 | `0016_onboarding.sql` | onboarding capture (minimal first-run) |
+| 0017 | `0017_profile_preferences.sql` | profile preferences (CL1–CL4 "Caddie learns you") |
+| 0018 | `0018_build_workflow.sql` | build workflow + brief column read by the Build/runs surface |
+| 0019 | `0019_github_project_repo.sql` | linked project repo + join-progress |
+| 0020 | `0020_discovery_digest_cache.sql` | cached per-candidate AI digest (rules-first detail pane) |
+| 0021 | `0021_project_proposals.sql` | propose-then-confirm project proposals |
+| 0022 | `0022_build_activity.sql` | build activity feed (project page "what Caddie is doing now") |
+
+| Capability | Status | Evidence |
+|---|---|---|
+| Tavily as the REQUIRED PRIMARY discovery source + NVIDIA Nemotron model tiers | LIVE VERIFIED | execution ledger P11 (guarded Tavily/Devpost probe, 15 real contests); commit `3c431cf8` |
+| Devpost API primary + quoted-rule eligibility + AI fit | LOCAL VERIFIED | commit `23c1cc9e` |
+| Image attachments + voice input; image turns routed to the served Token Factory VLM (gemma-3-27b-it) | LIVE VERIFIED (model id confirmed served via GET /v1/models + probe) | commits `889ac36e`, `fa5a2876`, `e2f8bb32`; lesson in learned-corrections |
+| Text-file attachments delivered to Caddie as fenced blocks | LOCAL VERIFIED | commit `6b4be7bf` |
+| Model routing: planning on ultra, building moved to glm-5.3-flash, vision on glm-5.3-flash | LOCAL VERIFIED | commits `ba15c745`, `d3ed14f4`, `96fe6771`, `3ae3eee5` |
+| Hackathon results card + rules-first detail pane with cached AI digest; follow-ups read the stored checked detail | LOCAL VERIFIED | commits `fb1c43d4`, `400e3582`, `f07fd45a` |
+| Discovery returns results without waiting for the digest pre-warm (237s → 38s) | LOCAL VERIFIED | commit `e0fa53c1` |
+| Persistent adaptive home header; theme picker (palettes + light/dark) | LOCAL VERIFIED | commits `a98b6c70`, `47e0287e` |
+| Shared InterestPicker (open to anything); settings redesign (one header, grouped sections) | LOCAL VERIFIED | commits `6475a333`, `8f389f64` |
+| Slower ideation on ultra; project page non-technical users understand; project page redesigned around "what Caddie is doing now" | LOCAL VERIFIED | commits `3cf1387e`, `421f218d`, `bb6b16eb` |
+| Server-side coordinator dispatch forwards worker bindings; coordinator message posted in Flue's flat wire shape | LOCAL VERIFIED | commits `215f6710`, `61de8c3e` |
+| Bound search-path requests + explain stopped turns in chat | LOCAL VERIFIED | commit `5a22b64b` |
+
+Security/correctness pass (2026-10-16, independent review): four P1s fixed —
+Resend key threaded from the Worker `env` (was `process.env`, dead in prod);
+email recipient resolved from the session user's own verified address (open mail
+relay closed); `/agents/hello` guarded + off the hardcoded Anthropic model;
+`mentionsProtectedPath` matches a path with or without a trailing slash. Two red
+mapped tests (P12 schedules, P11 eligibility) fixed at root — fixture migration
+lists now derive from the filesystem. Pre-existing `coordinator-context` test
+("CHECKED verdict / rulesRead") fixed by scoping an authoritative eligibility
+claim to its own candidate (or a standalone rules host) rather than every
+candidate in the project. Full unit suite **1054 pass / 0 fail**.

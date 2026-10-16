@@ -7,6 +7,7 @@ import {
 import type {
 	AccountBriefPayload,
 	ArtifactRevision,
+	BuildFeatureView,
 	DecisionCard,
 	PlanDocRevision,
 	Project,
@@ -157,6 +158,96 @@ export function useWorkflowPhase(actor: ActorScope, projectId: string | null) {
 	});
 }
 
+/** One deterministic build step (mirrors server BuildStep). */
+export interface BuildStepView {
+	key: 'scaffold' | 'implement' | 'check' | 'preview';
+	label: string;
+	state: 'done' | 'active' | 'pending';
+}
+/** One real run_rounds entry (mirrors server BuildRound). */
+export interface BuildRoundView {
+	issue: string;
+	round: string;
+	outcome: string;
+	detail: string | null;
+	at: string;
+}
+/** The derived timeline (mirrors server BuildTimeline in build-timeline.ts). */
+export type TimelinePhaseView = 'planning' | 'review' | 'building' | 'blocked' | 'ready';
+export type TimelineStageKey = 'setup' | 'write' | 'test' | 'check' | 'preview';
+export type TimelineStageState = 'done' | 'active' | 'pending' | 'failed';
+export type TimelineFileArea = 'app' | 'test' | 'style' | 'config' | 'server';
+
+export interface TimelineStageView {
+	key: TimelineStageKey;
+	label: string;
+	state: TimelineStageState;
+	startedAt: string | null;
+	endedAt: string | null;
+	durationMs: number | null;
+	detail: string | null;
+}
+export interface TimelineFileView {
+	path: string;
+	area: TimelineFileArea;
+	writes: number;
+	lastAt: string;
+	bytes: number | null;
+	role: string | null;
+}
+export interface TimelineCommandView {
+	command: string;
+	outcome: 'ok' | 'failed' | 'cancelled';
+	exitCode: number | null;
+	testsPassed: number | null;
+	testsFailed: number | null;
+	at: string;
+	durationMs: number;
+	role: string | null;
+}
+export interface BuildTimelineView {
+	phase: TimelinePhaseView;
+	startedAt: string | null;
+	lastActivityAt: string | null;
+	elapsedMs: number | null;
+	idleMs: number | null;
+	quiet: boolean;
+	summary: string;
+	stages: TimelineStageView[];
+	scope: string[];
+	files: TimelineFileView[];
+	fileAreas: Record<TimelineFileArea, number>;
+	commands: TimelineCommandView[];
+	tests: { passed: number; failed: number; at: string } | null;
+	checks: { name: string; label: string; passed: boolean; at: string; durationMs: number }[];
+}
+export interface BuildActivityView {
+	projectId: string;
+	phase: WorkflowPhase;
+	building: boolean;
+	/** The plan's features and where each stands (server: build-features.ts). */
+	features: BuildFeatureView[];
+	steps: BuildStepView[];
+	rounds: BuildRoundView[];
+	openIssues: number;
+	timeline: BuildTimelineView;
+}
+
+/**
+ * The honest build-activity read (server-derived from run_rounds + the
+ * workflow phase): ordered steps + the real repair/verification history, so
+ * the workspace can show WHAT is being built instead of one frozen sentence.
+ * Polls while mounted so the steps follow a live build.
+ */
+export function useBuildActivity(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['build-activity', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () => fetchJson<BuildActivityView>(`/api/projects/${encodeURIComponent(projectId ?? '')}/activity`),
+		enabled: actor.actorId !== null && projectId !== null,
+		refetchInterval: 3000,
+	});
+}
+
 /**
  * The brief the project was started with, from the SAME cached /workflow query
  * (same key, different select), so the overview's "Your idea" card adds no
@@ -196,6 +287,33 @@ export function useGithubImports(actor: ActorScope, projectId: string | null) {
 		queryFn: () =>
 			fetchJson<{ imports: { id: string; repoFullName: string; ref: string; commitSha: string }[] }>(
 				`/api/projects/${encodeURIComponent(projectId ?? '')}/github/imports`,
+			),
+		enabled: actor.actorId !== null && projectId !== null,
+	});
+}
+
+/** The project's linked GitHub repo (mirrors server ProjectRepoView), or null. */
+export interface ProjectRepoView {
+	projectId: string;
+	installationId: string;
+	repoFullName: string;
+	visibility: 'private' | 'public';
+	origin: 'created' | 'adopted' | 'connected';
+	htmlUrl: string;
+}
+
+/**
+ * The ONE repo that is this project's home for its code (create-new,
+ * connect-existing or adopted all land here). null = no repo yet. Real server
+ * state — the Code settings section and the "repo before first build" gate
+ * both read it, never a client flag.
+ */
+export function useProjectRepo(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['project-repo', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () =>
+			fetchJson<{ repo: ProjectRepoView | null }>(
+				`/api/projects/${encodeURIComponent(projectId ?? '')}/github/repo`,
 			),
 		enabled: actor.actorId !== null && projectId !== null,
 	});

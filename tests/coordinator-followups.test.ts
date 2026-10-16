@@ -126,3 +126,39 @@ describe('coordinator ideation model + tightened rules', () => {
 		expect(source).toContain('call start_brainstorm once');
 	});
 });
+
+/**
+ * Guard for the plan-rewrite save honesty fix (chat-33, 2026-10-15 FarmLog AI).
+ *
+ * Replay: a "changes requested on v1" rewrite turn delegated to product six
+ * times, every delegate returned "(task completed with no text)", NO new PRD
+ * revision was ever written, the host nudged twice and blocked the project —
+ * yet Caddie told the user three times the PRD "has been saved / written via
+ * write_plan_note / is now in review". All false. Fix: the coordinator can save
+ * a PRD revision DIRECTLY (write_plan_note mounted on the project coordinator,
+ * not only on delegates), the plan_incomplete nudge tells it to author directly
+ * instead of re-delegating an empty hand-off, and the honesty rule ties any
+ * "saved/ready" claim to the host's 'SAVED:' confirmation AND phase === review.
+ */
+const coordinatorSource = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
+
+describe('coordinator plan-save honesty (FarmLog AI rewrite fix)', () => {
+	test('the project coordinator can save a PRD revision directly, not only via delegates', () => {
+		expect(coordinatorSource).toContain('makeWritePlanNote');
+		expect(coordinatorSource).toContain('makeReadProjectContext');
+		expect(coordinatorSource).toContain('useTool(makeWritePlanNote({ writePlanNote: context.writePlanNote }));');
+		expect(coordinatorSource).toContain('useTool(makeReadProjectContext({ readPlanNote: context.readPlanNote }));');
+	});
+
+	test('the plan_incomplete nudge directs direct authoring, not another empty hand-off', () => {
+		expect(coordinatorSource).toContain('never re-delegate the same empty hand-off expecting a different result');
+		expect(coordinatorSource).toContain("call write_plan_note yourself with kind:'prd'");
+		expect(coordinatorSource).toContain("workflow phase is still 'planning', NOT 'review'");
+	});
+
+	test('a "saved/ready" claim requires the host SAVED: confirmation and phase === review', () => {
+		expect(coordinatorSource).toContain("write_plan_note returning a line that begins 'SAVED:'");
+		expect(coordinatorSource).toContain("the workflow phase in coordinator_context being 'review' (not 'planning')");
+		expect(coordinatorSource).toContain("While the phase is still 'planning' the plan is NOT saved");
+	});
+});

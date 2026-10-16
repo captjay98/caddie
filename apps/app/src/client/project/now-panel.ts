@@ -40,6 +40,7 @@ const TITLES: Readonly<Record<ExperienceStage, string>> = {
 	repairing: 'Caddie is fixing a problem it found',
 	ready: 'Your app is ready to try',
 	blocked: 'Caddie needs something from you',
+	planning_blocked: "Caddie couldn't finish your plan",
 	stopped: 'Work on this project is paused',
 };
 

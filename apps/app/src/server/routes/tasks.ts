@@ -20,6 +20,7 @@ import {
 	listNotifications,
 	mailerFromEnv,
 	markNotificationRead,
+	ownerEmail,
 } from '../notifications.ts';
 import { listSentinelResults } from '../sentinel.ts';
 
@@ -223,11 +224,16 @@ export function createTasksRouter(): Hono<{ Bindings: Env }> {
 		// ownership check BEFORE any delivery attempt
 		await getNotification(c.env.DB, userId, c.req.param('notificationId'));
 		const body = await parseJsonBody(c.req.raw);
+		// SECURITY: the recipient is the authenticated user's OWN verified email,
+		// resolved server-side — never the request body. A caller-supplied `to`
+		// would be an open mail relay (send-on-behalf to any address). We ignore
+		// body.to entirely; priorDeliveryId (retry) is still honoured.
+		const to = await ownerEmail(c.env.DB, userId);
 		const delivery = await attemptEmailDelivery(
 			c.env.DB,
 			{
 				notificationId: c.req.param('notificationId'),
-				to: String(body.to ?? ''),
+				to,
 				origin: new URL(c.req.url).origin,
 				priorDeliveryId: body.priorDeliveryId as string | undefined,
 			},

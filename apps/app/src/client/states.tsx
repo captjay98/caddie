@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { ApiError, type FailureKind } from './api.ts';
+import { Icon, type IconName } from './icons.tsx';
 import { Mascot } from '@caddie/ui/Mascot';
 
 /**
@@ -49,6 +50,9 @@ export function StatePanel(props: {
 	onRetry?: () => void;
 	retryLabel?: string;
 	busy?: boolean;
+	/** Bare variant for use INSIDE another card: no own card surface, so a
+	    section never renders a card inside a card (owner steering, 2026-10-15). */
+	flat?: boolean;
 }): ReactElement {
 	const { kind } = props;
 	const copy = COPY[kind];
@@ -56,7 +60,7 @@ export function StatePanel(props: {
 	const mood = stateMood(kind);
 	return (
 		<section
-			className="state-panel card-surface"
+			className={props.flat ? 'state-panel state-panel-flat' : 'state-panel card-surface'}
 			data-state={kind}
 			data-testid={`state-${kind}`}
 			aria-busy={kind === 'loading' || props.busy ? true : undefined}
@@ -125,6 +129,41 @@ function AskCaddieWhatHappened(): ReactElement {
 		>
 			Ask Caddie what happened
 		</button>
+	);
+}
+
+/**
+ * TeachingEmpty — a rich, non-dead-end empty state: an icon, a title, one
+ * plain sentence explaining what the section is FOR, and an optional action.
+ * Used where "nothing yet" should still teach and offer the way in (Tasks,
+ * Routines, What Caddie knows) instead of a bare grey line. Flat by default so
+ * it sits inside a section without nesting a card in a card.
+ */
+export function TeachingEmpty(props: {
+	icon: IconName;
+	title: string;
+	detail: string;
+	action?: { label: string; onClick: () => void; testid?: string };
+	testid?: string;
+}): ReactElement {
+	return (
+		<div className="teaching-empty" data-testid={props.testid}>
+			<span className="teaching-empty-icon" aria-hidden="true">
+				<Icon name={props.icon} title="" />
+			</span>
+			<p className="teaching-empty-title">{props.title}</p>
+			<p className="teaching-empty-detail">{props.detail}</p>
+			{props.action ? (
+				<button
+					type="button"
+					className="btn-key"
+					data-testid={props.action.testid}
+					onClick={props.action.onClick}
+				>
+					{props.action.label}
+				</button>
+			) : null}
+		</div>
 	);
 }
 

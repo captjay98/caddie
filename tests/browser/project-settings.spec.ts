@@ -141,12 +141,17 @@ test.describe('Project settings (U08)', () => {
 		await stubAccount(context);
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/project/settings?project=proj-a`);
+		// The rail shows one section at a time; each tab opens its section.
 		await expect(page.getByTestId('ps-general')).toBeVisible();
-		await expect(page.getByTestId('ps-code')).toBeVisible();
-		await expect(page.getByTestId('ps-routines')).toBeVisible();
-		await expect(page.getByTestId('ps-knows')).toBeVisible();
-		await expect(page.getByTestId('ps-archive')).toBeVisible();
 		await expect(page.getByTestId('ps-description')).toContainText('Track pit wall strategy');
+		await page.getByTestId('ps-tab-code').click();
+		await expect(page.getByTestId('ps-code')).toBeVisible();
+		await page.getByTestId('ps-tab-routines').click();
+		await expect(page.getByTestId('ps-routines')).toBeVisible();
+		await page.getByTestId('ps-tab-knows').click();
+		await expect(page.getByTestId('ps-knows')).toBeVisible();
+		await page.getByTestId('ps-tab-archive').click();
+		await expect(page.getByTestId('ps-archive')).toBeVisible();
 		await context.close();
 	});
 
@@ -180,7 +185,7 @@ test.describe('Project settings (U08)', () => {
 		await context.close();
 	});
 
-	test('connect-repo uses the real installations API and imports read-only', async ({ browser }) => {
+	test('connect-repo uses the real installations API and connects read-only', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubAccount(context);
 		await context.route('**/api/github/installations**', (route) =>
@@ -193,21 +198,30 @@ test.describe('Project settings (U08)', () => {
 		await context.route('**/api/github/installations/inst-1/repos', (route) =>
 			json(route, 200, { repositories: [{ repoFullName: 'octo/pit-wall', status: 'selected' }] }),
 		);
-		let imported = false;
-		await context.route('**/api/projects/proj-a/github/imports', (route) => {
-			imported = true;
-			return json(route, 201, { import: { id: 'imp-1' } });
+		// The Code section reads the ONE linked repo live; before connecting
+		// there is none, after connecting this project's repo is shown.
+		let repoLinked = false;
+		const repo = { projectId: 'proj-a', installationId: 'inst-1', repoFullName: 'octo/pit-wall', visibility: 'private', origin: 'connected', htmlUrl: 'https://github.com/octo/pit-wall' };
+		await context.route('**/api/projects/proj-a/github/repo', (route) =>
+			json(route, 200, { repo: repoLinked ? repo : null }),
+		);
+		let connected: Record<string, unknown> | null = null;
+		await context.route('**/api/projects/proj-a/github/repo/connect', (route) => {
+			connected = route.request().postDataJSON() as Record<string, unknown>;
+			repoLinked = true;
+			return json(route, 200, { repo });
 		});
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/project/settings?project=proj-a`);
-		await page.getByTestId('connect-repo-open').click();
-		const win = page.getByTestId('connect-repo-window');
-		await expect(win).toBeVisible();
-		await win.getByRole('button', { name: 'Show repositories' }).click();
-		await win.getByTestId('pick-repo-octo/pit-wall').click();
-		await win.getByRole('button', { name: 'Connect' }).click();
-		await expect(win).toHaveCount(0);
-		expect(imported).toBe(true);
+		await page.getByTestId('ps-tab-code').click();
+		await expect(page.getByTestId('ps-code-empty')).toBeVisible();
+		await page.getByTestId('ps-code-connect').click();
+		await page.getByRole('button', { name: 'Show repositories' }).click();
+		await page.getByTestId('pick-repo-octo/pit-wall').click();
+		// Picking a repo connects it for THIS project; the section then shows it.
+		await expect(page.getByTestId('ps-code-connected')).toBeVisible();
+		await expect(page.getByTestId('ps-repo-link')).toContainText('octo/pit-wall');
+		expect(connected).toEqual({ installationId: 'inst-1', repoFullName: 'octo/pit-wall' });
 		await context.close();
 	});
 
@@ -221,6 +235,7 @@ test.describe('Project settings (U08)', () => {
 		});
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/project/settings?project=proj-a`);
+		await page.getByTestId('ps-tab-archive').click();
 		// The window is labelled "Archive project" — no pretend delete.
 		await expect(page.getByTestId('ps-archive')).toContainText('Nothing is permanently deleted today');
 		await page.getByTestId('archive-open').click();

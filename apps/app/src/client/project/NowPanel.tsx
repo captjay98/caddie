@@ -6,6 +6,8 @@ import { postJson } from '../api.ts';
 import { useProjectExperience } from '../queries.ts';
 import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
 import { nowPanelModel, type NowButton } from './now-panel.ts';
+import { BuildProgress } from './BuildProgress.tsx';
+import { SavedFeatures } from './FeatureChecklist.tsx';
 
 /**
  * The project page's "Now" panel: what Caddie is doing on this project right
@@ -85,6 +87,12 @@ export function NowPanel(props: { projectId: string; fallback: ReactElement }): 
 			<p className="page-lede" data-testid="overview-now-message" role="status">
 				{model.message}
 			</p>
+			{stage === 'building' || stage === 'checking' || stage === 'repairing' ? (
+				<BuildProgress actorId={chrome.actorId} projectId={props.projectId} />
+			) : null}
+			{(stage === 'ready' || stage === 'blocked' || stage === 'stopped') && chrome.actorId ? (
+				<SavedFeatures actorId={chrome.actorId} projectId={props.projectId} />
+			) : null}
 			{model.buttons.length ? (
 				<div className="row-actions">
 					{model.buttons.map((button) => (

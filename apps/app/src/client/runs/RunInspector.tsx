@@ -2,12 +2,18 @@ import { useState } from 'react';
 import type { ReactElement } from 'react';
 import { formatTimeAgo } from '@caddie/ui/time';
 import { StatePanel, StaleChip, failureKind } from '../states.tsx';
+import { CopyableId } from '../copyable.tsx';
 
 /**
  * RunInspector — the Build tab's Activity list (v2, HANDOFF §4): past builds
- * as sentences, each opening a detail fold (the run drawer), with "Ask for a
- * change" opening the change-request window (which drafts the ask in the
- * project's chat — the chat is where Caddie takes the request).
+ * as sentences, each opening a detail fold, with "Ask for a change" opening
+ * the change-request window (which drafts the ask in the project's chat — the
+ * chat is where Caddie takes the request).
+ *
+ * Details fold (owner steering, 2026-10-15): a build's record is shown as
+ * labelled facts first (stack, when, plan version); the raw record ids move
+ * into a "For developers" fold inside it — exact and copyable, but no longer
+ * an unreadable wall of hex for a non-technical reader.
  *
  * Row status is typed metadata only: 'recorded' comes from the stored binding;
  * 'running' | 'completed' | 'failed' | 'cancelled' arrive (P05) through the
@@ -16,10 +22,6 @@ import { StatePanel, StaleChip, failureKind } from '../states.tsx';
  */
 
 export type RunStatus = 'recorded' | 'running' | 'completed' | 'failed' | 'cancelled';
-
-function shortId(id: string, keep = 12): string {
-	return id.length > keep ? `${id.slice(0, keep)}…` : id;
-}
 
 /** The past build as one sentence (§4). Statuses come from real data only. */
 function buildSentence(status: RunStatus, stackId: string, when: string): string {
@@ -48,10 +50,12 @@ function RunRow(props: {
 	now: Date;
 }): ReactElement {
 	const [open, setOpen] = useState(false);
+	const [devOpen, setDevOpen] = useState(false);
+	const when = formatTimeAgo(props.createdAt, props.now);
 	return (
 		<div className="inspector-row" data-testid="run-row" data-status={props.status}>
 			<div className="row-main">
-				<span className="row-title">{buildSentence(props.status, props.stackId, formatTimeAgo(props.createdAt, props.now))}</span>
+				<span className="row-title">{buildSentence(props.status, props.stackId, when)}</span>
 				<button
 					type="button"
 					className="detail-toggle"
@@ -63,13 +67,38 @@ function RunRow(props: {
 				</button>
 			</div>
 			{open ? (
-				<div className="row-details" data-testid="run-details">
-					<span className="mono-id">run {props.runId}</span>
-					<span className="mono-id">conversation {props.conversationId}</span>
-					<span className="mono-id">submission {props.submissionId}</span>
-					<span className="mono-id">plan revision {props.planRevision}</span>
-					<span className="mono-id">stack {props.stackId}</span>
-					<span className="mono-id">recorded {formatTimeAgo(props.createdAt, props.now)}</span>
+				<div className="row-details run-details" data-testid="run-details">
+					<span className="run-fact">
+						<span className="fk">Built with</span>
+						<span className="fv">{props.stackId}</span>
+					</span>
+					<span className="run-fact">
+						<span className="fk">When</span>
+						<span className="fv">{when}</span>
+					</span>
+					<span className="run-fact">
+						<span className="fk">Plan</span>
+						<CopyableId value={props.planRevision} label="plan revision id" />
+					</span>
+					<details
+						className="run-devdetail"
+						open={devOpen}
+						onToggle={(event) => setDevOpen((event.target as HTMLDetailsElement).open)}
+					>
+						<summary className="kicker">For developers — record ids</summary>
+						<span className="run-fact">
+							<span className="fk">run</span>
+							<CopyableId value={props.runId} label="run id" />
+						</span>
+						<span className="run-fact">
+							<span className="fk">conversation</span>
+							<CopyableId value={props.conversationId} label="conversation id" />
+						</span>
+						<span className="run-fact">
+							<span className="fk">submission</span>
+							<CopyableId value={props.submissionId} label="submission id" />
+						</span>
+					</details>
 				</div>
 			) : null}
 		</div>

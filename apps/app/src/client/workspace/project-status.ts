@@ -1,5 +1,47 @@
-import type { DecisionCard } from '@caddie/contracts';
+import type { DecisionCard, ProjectExperience } from '@caddie/contracts';
 import type { ProjectStepId, StepStatus } from './ProjectTabs.tsx';
+
+/** Where a Projects-card action goes. */
+export type ProjectCardTarget = 'chat' | 'project' | 'plan';
+
+/** The Projects-list card, derived from the project's REAL workflow state. */
+export interface ProjectCardState {
+	readonly label: string;
+	readonly tone: 'neutral' | 'action' | 'warn' | 'ok' | 'danger';
+	/** True while Caddie is actively working (live dot). */
+	readonly working: boolean;
+	readonly detail: string;
+	readonly action: { readonly label: string; readonly target: ProjectCardTarget };
+}
+
+/**
+ * The Projects card from the shared ProjectExperience projection — the same
+ * truth the project's Now panel reads — so the list can never say "No updates
+ * yet" while Caddie is building. Returns null when the project has no workflow
+ * (version 0); the caller then falls back to its Brief-card summary.
+ */
+export function projectCardFromExperience(experience: ProjectExperience): ProjectCardState | null {
+	if (experience.version === 0) return null;
+	switch (experience.stage) {
+		case 'planning':
+			return { label: 'Writing the plan', tone: 'action', working: true, detail: 'Caddie is drafting a plan for you to review. Nothing is built before you approve it.', action: { label: 'Continue with Caddie', target: 'chat' } };
+		case 'review':
+			return { label: 'Plan ready', tone: 'warn', working: false, detail: 'A plan is ready. Review it before anything is built.', action: { label: 'Review plan', target: 'plan' } };
+		case 'building':
+		case 'checking':
+			return { label: 'Building', tone: 'action', working: true, detail: 'Caddie is building your app and running its checks.', action: { label: 'See progress', target: 'project' } };
+		case 'repairing':
+			return { label: 'Fixing a problem', tone: 'action', working: true, detail: 'A check failed and Caddie is trying a fix.', action: { label: 'See progress', target: 'project' } };
+		case 'ready':
+			return { label: 'Ready to try', tone: 'ok', working: false, detail: 'Passed the required checks. Try it and tell Caddie what to change.', action: { label: 'Try app', target: 'project' } };
+		case 'blocked':
+			return { label: 'Needs attention', tone: 'danger', working: false, detail: experience.message, action: { label: 'Review next step', target: 'project' } };
+		case 'planning_blocked':
+			return { label: 'Plan needs another pass', tone: 'warn', working: false, detail: 'Caddie didn’t finish the plan. Nothing was built — continue and it picks up your feedback.', action: { label: 'Continue the plan', target: 'project' } };
+		case 'stopped':
+			return { label: 'Paused', tone: 'neutral', working: false, detail: 'Work is paused. Your plan and files are kept.', action: { label: 'Resume', target: 'project' } };
+	}
+}
 
 const PRIORITY = { 'needs-you': 0, blocked: 1, changed: 2, handled: 3 };
 
@@ -44,9 +86,12 @@ export function workflowSteps(
 	opts?: { personal?: boolean; checkReady?: { verified: number; total: number } | null },
 ): Partial<Record<ProjectStepId, StepStatus>> {
 	const steps: Partial<Record<ProjectStepId, StepStatus>> = {};
-	// Plan
+	// Plan. `blocked` is ambiguous at the coarse-phase level (a stuck plan vs a
+	// build that paused after approval), so it must NOT claim "Approved" — only
+	// a genuinely post-approval phase (building/ready) earns the green check.
 	if (phase === 'planning') steps.plan = { text: 'Caddie is drafting it', tone: 'neutral' };
 	else if (phase === 'review') steps.plan = { text: 'Ready for you to review', tone: 'needs' };
+	else if (phase === 'blocked') steps.plan = { text: 'Paused — check with Caddie', tone: 'needs' };
 	else if (phase) steps.plan = { text: 'Approved', tone: 'done' };
 	// Build
 	if (phase === 'planning' || phase === 'review') steps.build = { text: 'After you approve', tone: 'neutral' };
