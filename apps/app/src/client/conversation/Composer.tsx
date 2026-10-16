@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactElement, KeyboardEvent } from 'react';
 import { Icon } from '../icons.tsx';
 import { COMPOSER_PLACEHOLDER } from '../copy.ts';
@@ -71,6 +71,28 @@ export function Composer(props: {
 	const [picked, setPicked] = useState<PickedAttachment[]>([]);
 	const [attachError, setAttachError] = useState<string | null>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
+	const cameraRef = useRef<HTMLInputElement>(null);
+	// The attach/mic/camera actions collapse behind one "+" toggle so they stop
+	// eating two button slots before the user has typed. The menu opens on
+	// click, closes on pick, on Escape, and on an outside click.
+	const [menuOpen, setMenuOpen] = useState(false);
+	const menuRef = useRef<HTMLDivElement>(null);
+
+	useEffect(() => {
+		if (!menuOpen) return;
+		function onDocPointer(event: PointerEvent) {
+			if (menuRef.current && !menuRef.current.contains(event.target as Node)) setMenuOpen(false);
+		}
+		function onDocKey(event: globalThis.KeyboardEvent) {
+			if (event.key === 'Escape') setMenuOpen(false);
+		}
+		document.addEventListener('pointerdown', onDocPointer);
+		document.addEventListener('keydown', onDocKey);
+		return () => {
+			document.removeEventListener('pointerdown', onDocPointer);
+			document.removeEventListener('keydown', onDocKey);
+		};
+	}, [menuOpen]);
 
 	// Stage 4 — local voice dictation. Each committed phrase is appended to the
 	// composer text (editable before send); voice NEVER auto-sends. Hidden
@@ -198,32 +220,87 @@ export function Composer(props: {
 						event.target.value = ''; // allow re-picking the same file
 					}}
 				/>
-				<button
-					type="button"
-					className="composer-attach"
-					disabled={disabled}
-					aria-label="Attach image or file"
-					title="Attach an image or a text file"
-					data-testid="composer-attach"
-					onClick={() => fileRef.current?.click()}
-				>
-					<Icon name="paperclip" title="attach" />
-				</button>
-				{speech.supported ? (
+				{/* Camera capture — same validation path, but asks the device for its
+				    camera (environment-facing). Falls back to a normal image picker on
+				    a desktop that has no camera-capture support. */}
+				<input
+					ref={cameraRef}
+					type="file"
+					className="composer-file-input"
+					accept={IMAGE_TYPES.join(',')}
+					capture="environment"
+					hidden
+					data-testid="composer-camera-input"
+					onChange={(event) => {
+						addFiles(event.target.files);
+						event.target.value = '';
+					}}
+				/>
+				{/* One "+" toggle in place of the old attach + mic pair. It opens a
+				    small menu with the available input options (dictate, camera,
+				    media upload). */}
+				<div className="composer-tools" ref={menuRef}>
 					<button
 						type="button"
-						className={speech.listening ? 'composer-mic listening' : 'composer-mic'}
+						className={menuOpen ? 'composer-tools-toggle open' : 'composer-tools-toggle'}
 						disabled={disabled}
-						aria-label={speech.listening ? 'Stop dictation' : 'Dictate your message'}
-						aria-pressed={speech.listening}
-						title={speech.listening ? 'Listening — click to stop' : 'Dictate (speech to text)'}
-						data-testid="composer-mic"
-						data-listening={speech.listening}
-						onClick={toggleDictation}
+						aria-label="Add to message"
+						aria-haspopup="menu"
+						aria-expanded={menuOpen}
+						title="Add — camera, media, or dictation"
+						data-testid="composer-tools-toggle"
+						onClick={() => setMenuOpen((open) => !open)}
 					>
-						<Icon name="mic" title={speech.listening ? 'listening' : 'dictate'} />
+						<Icon name="plus" title="add" />
 					</button>
-				) : null}
+					{menuOpen ? (
+						<div className="composer-tools-menu" role="menu" data-testid="composer-tools-menu">
+							{speech.supported ? (
+								<button
+									type="button"
+									role="menuitem"
+									className={speech.listening ? 'composer-tool-item listening' : 'composer-tool-item'}
+									data-testid="composer-mic"
+									data-listening={speech.listening}
+									aria-pressed={speech.listening}
+									onClick={() => {
+										setMenuOpen(false);
+										toggleDictation();
+									}}
+								>
+									<Icon name="mic" title="" />
+									<span>{speech.listening ? 'Stop dictation' : 'Dictate'}</span>
+								</button>
+							) : null}
+							<button
+								type="button"
+								role="menuitem"
+								className="composer-tool-item"
+								data-testid="composer-camera"
+								onClick={() => {
+									setMenuOpen(false);
+									cameraRef.current?.click();
+								}}
+							>
+								<Icon name="camera" title="" />
+								<span>Camera</span>
+							</button>
+							<button
+								type="button"
+								role="menuitem"
+								className="composer-tool-item"
+								data-testid="composer-attach"
+								onClick={() => {
+									setMenuOpen(false);
+									fileRef.current?.click();
+								}}
+							>
+								<Icon name="image" title="" />
+								<span>Upload media</span>
+							</button>
+						</div>
+					) : null}
+				</div>
 				<textarea
 					value={value}
 					onChange={(event) => setValue(event.target.value)}
@@ -247,7 +324,7 @@ export function Composer(props: {
 				</button>
 			</form>
 			<p className={props.draftNote ? 'composer-hint draft-note' : 'composer-hint'}>
-				{props.draftNote ?? 'Enter to send · Shift + Enter for a new line · attach an image or text file'}
+				{props.draftNote ?? 'Enter to send · Shift + Enter for a new line'}
 			</p>
 		</div>
 	);

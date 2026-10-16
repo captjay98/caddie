@@ -970,15 +970,8 @@ a.btn-ghost.topbar-nav-link {
 	}
 	.bottom-nav-composer .composer textarea {
 		min-height: 2.1rem;
-		padding: 0.5rem 0.6rem;
+		padding: 0.5rem 0.3rem;
 		font-size: 14px;
-		background: transparent;
-		border-color: transparent;
-		border-radius: 13px;
-	}
-	.bottom-nav-composer .composer textarea:focus {
-		border-color: transparent;
-		box-shadow: none;
 	}
 	/* The AskBar (Brief / Discover / Projects tabs) is the pill interior too —
 	   strip its own border/background/shadow so it reads edge-to-edge like the
@@ -992,6 +985,11 @@ a.btn-ghost.topbar-nav-link {
 		min-height: 2.4rem;
 	}
 	.bottom-nav-composer .composer-send {
+		width: 2.3rem;
+		height: 2.3rem;
+		border-radius: 13px;
+	}
+	.bottom-nav-composer .composer-tools-toggle {
 		width: 2.3rem;
 		height: 2.3rem;
 		border-radius: 13px;
@@ -1618,6 +1616,21 @@ a.btn-ghost.topbar-nav-link {
 	position: relative;
 }
 
+/* Turn grouping: the transcript's 1.1rem gap separates AUTHOR turns (you ↔
+   Caddie). Consecutive bubbles by the SAME author hug — a continuation row
+   pulls up most of that gap so a multi-bubble turn reads as one unit — and the
+   continuation drops the pointed "beak" corner for an even radius, so only the
+   first bubble of a turn points at its author. */
+.msg[data-seq='cont'] {
+	margin-top: calc(-1.1rem + 0.28rem);
+}
+.msg.assistant[data-seq='cont'] .bubble {
+	border-top-left-radius: 14px;
+}
+.msg.user[data-seq='cont'] {
+	border-top-right-radius: 14px;
+}
+
 /* The transcript reads by alignment alone: user bubbles right, assistant
    left — authorship labels are gone, and day dividers carry the date
    (Today / Yesterday / short date) instead of per-message clocks. Message
@@ -1891,22 +1904,29 @@ a.btn-ghost.topbar-nav-link {
 	display: flex;
 	flex-direction: column;
 	gap: 0.35rem;
-	max-width: 34rem;
+	max-width: 44rem;
 	min-width: 0;
+	/* The featured card reflows by its OWN width, not the viewport — a
+	   container query here lets the two-column header collapse whether the card
+	   is narrow because it's on a phone or because a right rail squeezed it. */
+	container-type: inline-size;
+	container-name: hk-card;
 }
+/* The featured card is CONTENT of the assistant bubble, not a card floating in
+   a card: no own panel background / border / shadow (that was the box-in-box).
+   Structure comes from spacing and the stat row alone. */
 .hk-feature {
-	border: 1px solid var(--color-line-soft);
-	border-radius: 12px;
-	background: var(--color-panel);
 	color: var(--color-bright);
-	padding: 0.75rem 0.85rem;
 	display: flex;
 	flex-direction: column;
-	gap: 0.45rem;
+	gap: 0.6rem;
 	min-width: 0;
 }
+/* A top pick gets a thin accent rule on its left edge instead of a full border
+   box, so it still reads as singled-out without re-introducing a nested card. */
 .hk-feature[data-top-pick='true'] {
-	border-color: color-mix(in srgb, var(--color-action) 40%, var(--color-line-soft));
+	padding-left: 0.7rem;
+	border-left: 2px solid color-mix(in srgb, var(--color-action) 55%, transparent);
 }
 .hk-toppick-ribbon {
 	display: inline-flex;
@@ -1917,10 +1937,37 @@ a.btn-ghost.topbar-nav-link {
 	letter-spacing: 0.02em;
 	color: var(--color-action);
 }
+/* Two-column header: identity grows on the left, verdict + action anchor
+   top-right so the card uses its full width (fixes the dead right column).
+   The @container rule below stacks this to one column on a narrow card. */
+.hk-feature-head {
+	display: flex;
+	gap: 1rem;
+	align-items: flex-start;
+	justify-content: space-between;
+}
+.hk-feature-ident {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+.hk-feature-actions {
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	align-items: flex-end;
+	/* Pull the actions column up so the eligibility chip's cap-height lines up
+	   with the title's first line, not its padded top edge — otherwise the
+	   padded pill reads as floating above the title. */
+	margin-top: 0.1rem;
+}
 .hk-feature-title {
 	margin: 0;
-	font-size: 0.95rem;
-	line-height: 1.3;
+	font-size: 1.0625rem;
+	font-weight: 650;
+	line-height: 1.25;
 	color: var(--color-bright);
 	overflow-wrap: break-word;
 	display: -webkit-box;
@@ -1949,43 +1996,55 @@ a.btn-ghost.topbar-nav-link {
 	display: inline;
 }
 .hk-feature-sub {
-	margin: -0.25rem 0 0;
+	margin: 0;
 	font-size: var(--r-meta);
 	color: var(--color-muted);
 }
+/* Number-primary stats spread across the FULL card width on their own row
+   (equal columns), with a hairline rule separating them from the header. Big
+   value on top, small uppercase caption beneath (source order is value→label,
+   so no flex-reverse). The @container rule wraps these 2×2 on a narrow card. */
 .hk-stats {
-	margin: 0.1rem 0;
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
-	gap: 0.4rem;
+	margin: 0.15rem 0 0;
+	display: flex;
+	gap: 0.5rem;
+	border-top: 1px solid var(--color-line-soft);
+	padding-top: 0.6rem;
 }
 .hk-stat {
-	background: var(--color-raised);
-	color: var(--color-bright);
-	border-radius: 8px;
-	padding: 0.35rem 0.55rem;
+	flex: 1 1 0;
 	display: flex;
-	flex-direction: column-reverse;
+	flex-direction: column;
+	gap: 0.1rem;
 	min-width: 0;
 }
 .hk-stat dd {
 	margin: 0;
-	font-size: 0.95rem;
-	font-weight: 600;
+	font-size: 1.25rem;
+	font-weight: 700;
+	line-height: 1;
 	color: var(--color-bright);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.hk-stat dt {
-	font-size: var(--r-label);
+/* The deadline is the time-sensitive number — tint it with the accent. */
+.hk-stat[data-stat='deadline'] dd {
+	color: var(--color-action);
+}
+/* AI fit reads as a verdict word: colour it by its own meaning (strong = ok,
+   weak = muted), never as another number. */
+.hk-stat[data-stat='fit'] dd {
+	color: var(--color-ok);
+}
+.hk-feature[data-ai-fit='weak'] .hk-stat[data-stat='fit'] dd {
 	color: var(--color-muted);
 }
-.hk-card-badges {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.3rem;
-	align-items: center;
+.hk-stat dt {
+	font-size: var(--r-label);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--color-muted);
 }
 .hk-chip {
 	display: inline-flex;
@@ -2024,16 +2083,6 @@ a.btn-ghost.topbar-nav-link {
 	color: var(--color-warn);
 	border-color: color-mix(in srgb, var(--color-warn) 30%, transparent);
 }
-.hk-chip-fit {
-	background: color-mix(in srgb, var(--color-action) 14%, transparent);
-	color: var(--color-action);
-	border-color: color-mix(in srgb, var(--color-action) 28%, transparent);
-}
-.hk-chip-fit[data-ai-fit='weak'] {
-	background: color-mix(in srgb, var(--color-muted) 12%, transparent);
-	color: var(--color-muted);
-	border-color: color-mix(in srgb, var(--color-muted) 24%, transparent);
-}
 /* A web-search backup result: its open status could not be confirmed. */
 .hk-chip-unverified {
 	background: color-mix(in srgb, var(--color-warn) 12%, transparent);
@@ -2051,6 +2100,70 @@ a.btn-ghost.topbar-nav-link {
 .hk-why {
 	font-size: var(--r-meta);
 	color: var(--color-muted);
+}
+/* ONE eligibility object: the chip is the <summary>, with a quiet "why"
+   affordance beside it; clicking either reveals the quoted rule. No separate
+   "Why you can enter" fold. */
+.hk-elig-disclosure {
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+}
+.hk-elig-summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	cursor: pointer;
+	list-style: none;
+	width: fit-content;
+}
+.hk-elig-summary::-webkit-details-marker {
+	display: none;
+}
+/* The "why" affordance sits on the chip's own baseline: same meta size so the
+   row has one centre line, muted, with a light rotating caret instead of a
+   heavy triangle glyph. QUIET BY DEFAULT: it fades in only when you hover or
+   keyboard-focus the chip, or while the rule is open — so the resting card is
+   just the verdict, not verdict-plus-chrome. It stays laid out (opacity, not
+   display) so revealing it never shifts the row. */
+.hk-elig-why {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2rem;
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+	letter-spacing: 0.01em;
+	opacity: 0;
+	transition: opacity 0.12s ease;
+}
+.hk-elig-summary:hover .hk-elig-why,
+.hk-elig-summary:focus-visible .hk-elig-why,
+.hk-elig-disclosure[open] .hk-elig-why {
+	opacity: 1;
+}
+/* Touch devices have no hover — keep "why" visible there so the affordance is
+   never undiscoverable on a phone. */
+@media (hover: none) {
+	.hk-elig-why {
+		opacity: 1;
+	}
+}
+.hk-elig-why::before {
+	content: '';
+	width: 0;
+	height: 0;
+	border-top: 3px solid transparent;
+	border-bottom: 3px solid transparent;
+	border-left: 4px solid currentColor;
+	transition: transform 0.12s ease;
+}
+.hk-elig-disclosure[open] .hk-elig-why::before {
+	transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+	.hk-elig-why,
+	.hk-elig-why::before {
+		transition: none;
+	}
 }
 .hk-why summary {
 	cursor: pointer;
@@ -2071,20 +2184,50 @@ a.btn-ghost.topbar-nav-link {
 	white-space: nowrap;
 }
 .hk-open {
-	align-self: flex-start;
 	display: inline-flex;
 	align-items: center;
 	gap: 0.35rem;
 	font-size: var(--r-meta);
 	font-weight: 600;
-	padding: 0.3rem 0.7rem;
+	padding: 0.35rem 0.75rem;
 	border-radius: 8px;
 	background: var(--color-action);
 	color: var(--color-ink);
 	text-decoration: none;
+	white-space: nowrap;
 }
 .hk-open:hover {
 	background: var(--color-action-deep);
+}
+/* Narrow card (phone, or a squeezed rail): the two-column header stacks to a
+   single column, the verdict + action rejoin the flow under the identity, the
+   action becomes a full-width footer button (thumb-reach), and the stat row
+   wraps 2×2 instead of a cramped 4-across. Driven by the CARD's own width via
+   the container query on .hk-results, not the viewport. */
+@container hk-card (max-width: 30rem) {
+	.hk-feature-head {
+		flex-direction: column;
+		gap: 0.6rem;
+	}
+	.hk-feature-actions {
+		align-items: stretch;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.hk-elig-summary {
+		align-self: flex-start;
+	}
+	.hk-open {
+		justify-content: center;
+		padding: 0.55rem 0.75rem;
+	}
+	.hk-stats {
+		flex-wrap: wrap;
+		gap: 0.75rem 0.5rem;
+	}
+	.hk-stat {
+		flex: 1 1 calc(50% - 0.25rem);
+	}
 }
 .hk-section-label {
 	margin: 0.5rem 0 0;
@@ -2236,7 +2379,10 @@ a.btn-ghost.topbar-nav-link {
 .composer-wrap {
 	border-top: 1px solid var(--color-line-soft);
 	background: var(--color-panel);
-	padding: 0.7rem 1rem calc(0.55rem + env(safe-area-inset-bottom));
+	/* End-to-end: the field row spans the full width with no redundant outer
+	   inset — the controls' own footprint carries the edge spacing, so the
+	   textarea is not a bordered box inside a padded box. */
+	padding: 0.55rem 0.55rem calc(0.4rem + env(safe-area-inset-bottom));
 	display: grid;
 	gap: 0.3rem;
 }
@@ -2253,10 +2399,13 @@ a.btn-ghost.topbar-nav-link {
 	max-height: 9rem;
 	min-height: 2.5rem;
 	resize: none;
-	background: var(--color-raised);
-	border: 1px solid var(--color-line);
+	/* End-to-end: the field is not a bordered pill inside the composer card —
+	   it is transparent and flush, so the composer reads as ONE surface with
+	   the controls on it, not a box inside a box. */
+	background: transparent;
+	border: 1px solid transparent;
 	border-radius: 12px;
-	padding: 0.55rem 0.8rem;
+	padding: 0.55rem 0.3rem;
 	color: var(--color-bright);
 	font-size: 15px;
 	line-height: 1.5;
@@ -2264,9 +2413,14 @@ a.btn-ghost.topbar-nav-link {
 }
 
 .composer textarea:focus {
-	border-color: var(--color-action);
-	box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-action) 18%, transparent);
+	border-color: transparent;
+	box-shadow: none;
 	outline: none;
+}
+/* Borderless field — dim the placeholder a touch so it reads as a hint on the
+   open surface, not as entered text. */
+.composer textarea::placeholder {
+	color: color-mix(in srgb, var(--color-muted) 70%, transparent);
 }
 
 /* Round send key — one clear action, icon-carried, action-blue. */
@@ -2293,13 +2447,17 @@ a.btn-ghost.topbar-nav-link {
 	cursor: default;
 }
 
-/* Stage 3 — attach button + attachment chips. Theme variables only (readable
-   light + dark); the attach button mirrors the send key's footprint so the
-   composer row stays balanced. */
-.composer-attach {
+/* One "+" toggle replaces the old attach + mic pair so the resting composer is
+   just the toggle, the field, and send — the camera / media / dictation options
+   live in a popover it opens. Theme variables only (readable light + dark); the
+   toggle mirrors the send key's footprint so the composer row stays balanced. */
+.composer-tools {
+	position: relative;
+	flex: none;
+}
+.composer-tools-toggle {
 	width: 2.5rem;
 	height: 2.5rem;
-	flex: none;
 	display: grid;
 	place-items: center;
 	border: 1px solid var(--color-line);
@@ -2307,54 +2465,91 @@ a.btn-ghost.topbar-nav-link {
 	background: var(--color-raised);
 	color: var(--color-muted);
 	cursor: pointer;
-	transition: color 0.15s ease, border-color 0.15s ease;
+	transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
-.composer-attach:hover:not(:disabled) {
+.composer-tools-toggle:hover:not(:disabled) {
 	color: var(--color-action);
 	border-color: var(--color-action);
 }
-.composer-attach:disabled {
+.composer-tools-toggle:disabled {
 	opacity: 0.45;
 	cursor: default;
 }
-
-/* Mic button — mirrors the attach button; turns action-colored while listening,
-   with a soft pulse that respects reduced-motion. */
-.composer-mic {
-	width: 2.5rem;
-	height: 2.5rem;
-	flex: none;
-	display: grid;
-	place-items: center;
-	border: 1px solid var(--color-line);
-	border-radius: 12px;
-	background: var(--color-raised);
-	color: var(--color-muted);
-	cursor: pointer;
-	transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-.composer-mic:hover:not(:disabled) {
+/* Open: tint it like an active control and rotate the "+" into an "×" cue. */
+.composer-tools-toggle.open {
 	color: var(--color-action);
 	border-color: var(--color-action);
-}
-.composer-mic:disabled {
-	opacity: 0.45;
-	cursor: default;
-}
-.composer-mic.listening {
-	color: var(--color-ink);
-	background: var(--color-action);
-	border-color: var(--color-action);
-	animation: mic-pulse 1.4s ease-in-out infinite;
-}
-@keyframes mic-pulse {
-	0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-action) 45%, transparent); }
-	50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-action) 0%, transparent); }
+	transform: rotate(45deg);
 }
 @media (prefers-reduced-motion: reduce) {
-	.composer-mic.listening {
+	.composer-tools-toggle {
+		transition: color 0.15s ease, border-color 0.15s ease;
+	}
+	.composer-tools-toggle.open {
+		transform: none;
+	}
+}
+
+/* The popover: a small menu anchored above the toggle, opening upward because
+   the composer sits at the foot of the viewport. */
+.composer-tools-menu {
+	position: absolute;
+	bottom: calc(100% + 0.4rem);
+	left: 0;
+	z-index: 20;
+	min-width: 11rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+	padding: 0.3rem;
+	border: 1px solid var(--color-line);
+	border-radius: 12px;
+	background: var(--color-panel);
+	box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 55%, transparent);
+	animation: composer-menu-in 0.12s ease;
+}
+@keyframes composer-menu-in {
+	from { opacity: 0; transform: translateY(4px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.composer-tools-menu {
 		animation: none;
 	}
+}
+.composer-tool-item {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	width: 100%;
+	padding: 0.5rem 0.6rem;
+	border: 0;
+	border-radius: 8px;
+	background: none;
+	color: var(--color-bright);
+	font-size: var(--r-meta);
+	text-align: left;
+	cursor: pointer;
+	transition: background 0.12s ease, color 0.12s ease;
+}
+.composer-tool-item :first-child {
+	flex: none;
+	color: var(--color-muted);
+}
+.composer-tool-item:hover,
+.composer-tool-item:focus-visible {
+	background: color-mix(in srgb, var(--color-action) 12%, transparent);
+	color: var(--color-action);
+	outline: none;
+}
+.composer-tool-item:hover :first-child,
+.composer-tool-item:focus-visible :first-child {
+	color: var(--color-action);
+}
+/* While dictation is live, the mic menu item reads as the active control. */
+.composer-tool-item.listening,
+.composer-tool-item.listening :first-child {
+	color: var(--color-action);
 }
 
 .composer-dictation {

@@ -398,6 +398,10 @@ function buildTranscriptRows(groups: ReturnType<typeof groupMessages>): ReactEle
   }
 	let lastDay: string | null = null;
 	let rowKey = 0;
+	// Author of the previously PUSHED transcript row ('user' | 'assistant' | null).
+	// Consecutive rows by the same author hug; a day divider resets it so the
+	// first bubble after a divider never hugs across the gap.
+	let prevAuthor: 'user' | 'assistant' | null = null;
 	for (const group of groups) {
 		if (group.toolsOnly) {
 			const day = dayLabel(group.messages[0]?.timestamp);
@@ -408,6 +412,7 @@ function buildTranscriptRows(groups: ReturnType<typeof groupMessages>): ReactEle
 					</div>,
 				);
 				lastDay = day;
+				prevAuthor = null;
 			}
 			rows.push(
 				<ToolGroup
@@ -418,6 +423,7 @@ function buildTranscriptRows(groups: ReturnType<typeof groupMessages>): ReactEle
 					)}
 				/>,
 			);
+			prevAuthor = 'assistant';
 		} else {
 			for (const message of group.messages) {
 				if (message.display === 'hidden') continue;
@@ -429,20 +435,26 @@ function buildTranscriptRows(groups: ReturnType<typeof groupMessages>): ReactEle
 						</div>,
 					);
 					lastDay = day;
+					prevAuthor = null;
 				}
 				const parts = message.parts.filter(part => {
           if (part.type !== 'data-projectWorkflow') return true;
           const data = part.data as { projectId?: unknown };
           return typeof data?.projectId !== 'string' || latestCards.get(data.projectId) === part;
         });
-        if (parts.length) rows.push(<MessageRow key={message.id} message={{ ...message, parts }} />);
+        if (parts.length) {
+          const author = message.role === 'user' ? 'user' : 'assistant';
+          const followsSameAuthor = author === prevAuthor;
+          rows.push(<MessageRow key={message.id} message={{ ...message, parts }} followsSameAuthor={followsSameAuthor} />);
+          prevAuthor = author;
+        }
 			}
 		}
 	}
 	return rows;
 }
 
-function MessageRow({ message }: { message: FlueConversationMessage }): ReactElement | null {
+function MessageRow({ message, followsSameAuthor }: { message: FlueConversationMessage; followsSameAuthor?: boolean }): ReactElement | null {
 	if (message.display === 'hidden') return null;
 	const clock = turnClock(message.timestamp);
 	if (message.role === 'user') {
@@ -455,7 +467,7 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 		const text = stripAttachedFileText(raw);
 		const files = attachedFileNames(raw);
 		return (
-			<div className="msg user" data-testid="msg-user" title={fullTime(message.timestamp)}>
+			<div className="msg user" data-testid="msg-user" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(message.timestamp)}>
 				<span className="sr-only">You{clock ? ` at ${clock}` : ''}</span>
 				<div className="bubble">
 					{text}
@@ -484,14 +496,14 @@ function MessageRow({ message }: { message: FlueConversationMessage }): ReactEle
 	);
 	if (diagnostic) {
 		return (
-			<details className="msg assistant" data-testid="msg-diagnostic">
+			<details className="msg assistant" data-testid="msg-diagnostic" data-seq={followsSameAuthor ? 'cont' : 'first'}>
 				<summary className="msg-meta kicker">Caddie · specialist diagnostic</summary>
 				{body}
 			</details>
 		);
 	}
 	return (
-		<div className="msg assistant" data-testid="msg-assistant" title={fullTime(message.timestamp)}>
+		<div className="msg assistant" data-testid="msg-assistant" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(message.timestamp)}>
 			<span className="sr-only">Caddie{clock ? ` at ${clock}` : ''}</span>
 			<div className="bubble">{body}</div>
 		</div>

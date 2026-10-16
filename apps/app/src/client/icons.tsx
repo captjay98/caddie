@@ -48,6 +48,7 @@ export type IconName =
 	| 'file'
 	| 'paperclip'
 	| 'mic'
+	| 'camera'
 	| 'chevronDown'
 	| 'expand'
 	| 'collapse';
@@ -222,6 +223,12 @@ const PATHS: Record<IconName, ReactElement> = {
 		<>
 			<rect x="6" y="2" width="4" height="7" rx="2" fill="none" stroke="currentColor" />
 			<path d="M4 7.5a4 4 0 0 0 8 0M8 11.5v2M6 13.5h4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
+	),
+	camera: (
+		<>
+			<path d="M2.5 5.5h2l1-1.5h5l1 1.5h2v7h-11v-7z" fill="none" stroke="currentColor" strokeLinejoin="round" />
+			<circle cx="8" cy="9" r="2.3" fill="none" stroke="currentColor" />
 		</>
 	),
 	send: <path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
