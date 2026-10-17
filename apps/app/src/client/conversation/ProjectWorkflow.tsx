@@ -5,13 +5,14 @@ import { createFlueClient } from "@flue/sdk";
 import { useFlueAgent } from "@flue/react";
 import { Markdown } from "@caddie/ui/Markdown";
 import type { PlanDocRevision, ApprovalRecord } from "@caddie/contracts";
-import { splitFeatureBlock } from "@caddie/contracts";
-import type { BuildWorkflow } from "../../server/build-workflow.ts";
+import { splitFeatureBlock, splitDesignMocks } from "@caddie/contracts";
+import type { BuildWorkflow, WorkflowPhase } from "../../server/build-workflow.ts";
 import { fetchJson, postJson } from "../api.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
 import { useProjectRepo } from "../queries.ts";
 import { Icon } from "../icons.tsx";
 import { InteractivePreview } from "../artifacts/InteractivePreview.tsx";
+import { DesignMockPreview } from "../artifacts/DesignMockPreview.tsx";
 import { BuildProgress } from "../project/BuildProgress.tsx";
 import { PlanFeatureList, SavedFeatures } from "../project/FeatureChecklist.tsx";
 
@@ -19,10 +20,14 @@ interface Snapshot {
   workflow: BuildWorkflow | null;
   plan: PlanDocRevision | null;
   approval: ApprovalRecord | null;
+  design: PlanDocRevision | null;
+  designApproval: ApprovalRecord | null;
 }
-const LABEL = {
+const LABEL: Record<WorkflowPhase, string> = {
   planning: "Planning your app",
   review: "Your plan is ready",
+  design: "Designing your app",
+  "design-review": "Your design is ready",
   building: "Building your app",
   blocked: "Needs attention",
   ready: "Your app is ready to try",
@@ -81,6 +86,35 @@ export function ProjectWorkflow({
         `/api/projects/${encodeURIComponent(projectId)}/workflow/decision`,
         {
           planId: state.data.plan.id,
+          decision,
+          note: decision === "rejected" ? note : undefined,
+        },
+      );
+      setChanges(false);
+      setNote("");
+      chrome.refreshAll();
+      await state.refetch();
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Caddie could not save your decision.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  // The DESIGN-brief gate (parallel to decide, which gates the PRD): approve ->
+  // building, request changes -> re-author the brief.
+  async function decideDesignBrief(decision: "approved" | "rejected") {
+    if (!state.data?.design) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await postJson(
+        `/api/projects/${encodeURIComponent(projectId)}/workflow/design-decision`,
+        {
+          designId: state.data.design.id,
           decision,
           note: decision === "rejected" ? note : undefined,
         },
@@ -238,6 +272,76 @@ export function ProjectWorkflow({
               </label>
               <textarea
                 id={`change-${projectId}`}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                maxLength={2000}
+                rows={3}
+              />
+              <button className="btn-key" disabled={busy || !note.trim()}>
+                {busy ? "Saving…" : "Send feedback"}
+              </button>
+            </form>
+          ) : null}
+        </>
+      ) : null}
+      {workflow.phase === "design" ? (
+        <p className="state-detail">
+          Caddie is turning the approved plan into a design — the screens, the
+          states and the look. You’ll review it before building starts.
+        </p>
+      ) : null}
+      {workflow.phase === "design-review" && state.data?.design ? (
+        <>
+          {(() => {
+            const { display, mocks } = splitDesignMocks(state.data.design.body);
+            return (
+              <>
+                {mocks.length > 0 ? <DesignMockPreview mocks={mocks} /> : null}
+                <div className="workflow-plan" data-testid="workflow-design-brief">
+                  <Markdown text={display} />
+                </div>
+              </>
+            );
+          })()}
+          {/* Same reassurance the plan review carries — approving the design is
+              the gate to a sandbox build, and deploy/spend stay separate. */}
+          <div className="workflow-assurance" data-testid="workflow-design-assurance">
+            <span className="workflow-chip workflow-chip-ok">
+              <Icon name="shield" title="" /> Runs in a sandbox
+            </span>
+            <span className="workflow-chip">No deploy</span>
+            <span className="workflow-chip">No spending</span>
+            <span className="workflow-assurance-note">— those need separate permission</span>
+          </div>
+          <div className="row-actions">
+            <button
+              className="btn-key"
+              disabled={busy}
+              data-testid="workflow-approve-design"
+              onClick={() => void decideDesignBrief("approved")}
+            >
+              {busy ? "Saving…" : "Looks good — build it"}
+            </button>
+            <button
+              className="btn-ghost"
+              disabled={busy}
+              onClick={() => setChanges(!changes)}
+            >
+              Suggest a change
+            </button>
+          </div>
+          {changes ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void decideDesignBrief("rejected");
+              }}
+            >
+              <label htmlFor={`design-change-${projectId}`} className="state-detail">
+                What should change about the design?
+              </label>
+              <textarea
+                id={`design-change-${projectId}`}
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 maxLength={2000}

@@ -17,11 +17,11 @@ function render() { document.querySelector('ul').replaceChildren(...todos.map(fu
 document.querySelector('form').addEventListener('submit', function(event) { event.preventDefault(); todos.push(document.querySelector('input').value); localStorage.setItem('todos', JSON.stringify(todos)); document.querySelector('input').value = ''; render(); }); render();
 </script></body></html>`;
 
-type Phase = 'planning' | 'review' | 'building' | 'blocked' | 'ready';
+type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | 'blocked' | 'ready';
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -40,7 +40,10 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 	const acks: Record<string, unknown>[] = [];
   const stops: string[] = [];
 	let previewReads = 0;
-	const snapshot = () => ({ workflow: { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null });
+	const design = options.designBody
+		? { id: 'design-1', projectId: PROJECT.id, kind: 'design', revision: 2, bodyHash: 'sha256-design-1', body: options.designBody, createdBy: 'actor-workflow', createdAt: NOW }
+		: null;
+	const snapshot = () => ({ workflow: { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null, design, designApproval: null });
 	await context.route('**/api/**', async route => {
 		const request = route.request(), path = new URL(request.url()).pathname;
 		if (path === '/api/auth/status') return json(route, 200, { authenticated: true });
@@ -72,6 +75,12 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
       workflow.detail = 'Stop requested. Your plan and files are retained.';
       return json(route, 200, snapshot());
     }
+    if (path.endsWith('/workflow/design-decision')) {
+			const body = request.postDataJSON() as Record<string, unknown>;
+			decisions.push(body);
+			workflow.phase = body.decision === 'approved' ? 'building' : 'design';
+			return json(route, 200, snapshot());
+		}
     if (path.endsWith('/workflow/decision')) {
 			const body = request.postDataJSON() as Record<string, unknown>;
 			decisions.push(body);
@@ -146,6 +155,95 @@ const FEATURE_PLAN = [
 ].join('\n');
 const featureView = (id: string, title: string, position: number, extra: Record<string, unknown> = {}) =>
 	({ id, title, doneWhen: ['check'], position, status: 'passed', attempts: 0, testsPassed: position, passedAt: NOW, canRollBack: false, ...extra });
+
+const mockScreen = (heading: string, inner: string) =>
+	`<main style="display:grid;gap:12px;padding:16px;max-width:880px;margin:0 auto"><h1 style="margin:0;font-size:20px">${heading}</h1>${inner}</main>`;
+const DESIGN_BRIEF = [
+	'# Farm log design', '', '## Screen inventory', '', '- Today (home) · History · Add entry', '',
+	'```html-mock Today',
+	mockScreen('Today', '<section style="background:var(--color-panel);color:var(--color-bright);border:1px solid var(--color-line);border-radius:12px;padding:12px">Morning feed · 12 kg</section><button style="background:var(--color-action);color:var(--color-ink);border:0;border-radius:9px;padding:10px 14px">Log feed</button>'),
+	'```', '',
+	'```html-mock Today · empty',
+	mockScreen('Today', '<p style="color:var(--color-muted)">Nothing logged yet</p><script>document.body.dataset.ran = "yes"</script>'),
+	'```', '',
+	'```html-mock Add entry · error',
+	mockScreen('Add entry', '<p role="alert" style="color:var(--color-danger)">Enter the weight as a number, like 12.</p>'),
+	'```', '', '## Accessibility', '', 'Every control is reachable by keyboard.',
+].join('\n');
+
+test('design review shows each mocked screen at phone and desktop width, script-free, then approves the build', async ({ page, context }) => {
+	const state = await fixture(context, { phase: 'design-review', approved: true, designBody: DESIGN_BRIEF });
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'design-review');
+	await expect(card.getByRole('heading', { name: 'Your design is ready' })).toBeVisible();
+	// The prose renders without the raw mock fences.
+	await expect(card.getByTestId('workflow-design-brief').getByRole('heading', { name: 'Accessibility' })).toBeVisible();
+	await expect(card).not.toContainText('html-mock');
+
+	const preview = card.getByTestId('design-mock-preview');
+	await expect(preview.getByTestId('design-mock-screens').getByRole('button')).toHaveText(['Today', 'Today · empty', 'Add entry · error']);
+	const iframe = preview.getByTestId('design-mock-frame').locator('iframe');
+	// The frame runs no scripts: empty sandbox + a script-forbidding CSP.
+	await expect(iframe).toHaveAttribute('sandbox', '');
+	await expect(iframe).toHaveAttribute('srcdoc', /script-src 'none'/);
+	const frame = preview.getByTestId('design-mock-frame').frameLocator('iframe');
+	await expect(frame.getByText('Morning feed · 12 kg')).toBeVisible();
+	await expect(frame.getByRole('button', { name: 'Log feed' })).toBeVisible();
+	// The mock paints with the app's REAL tokens (Caddie dark: action #4d9fff on page #090b10).
+	await expect(frame.getByRole('button', { name: 'Log feed' })).toHaveCSS('background-color', 'rgb(77, 159, 255)');
+	await expect(frame.locator('body')).toHaveCSS('background-color', 'rgb(9, 11, 16)');
+	if (process.env.DESIGN_MOCK_SHOTS) await preview.screenshot({ path: `${process.env.DESIGN_MOCK_SHOTS}/design-mock-desktop-phone.png` });
+
+	// Phone is the default: the mock lays out at 390px.
+	await expect(preview).toHaveAttribute('data-device', 'phone');
+	await expect(iframe).toHaveCSS('width', '390px');
+
+	// Switching screens swaps the frame; a script inside a mock never runs.
+	await preview.getByTestId('design-mock-screen-1').click();
+	await expect(preview.getByTestId('design-mock-screen-1')).toHaveAttribute('aria-pressed', 'true');
+	await expect(frame.getByText('Nothing logged yet')).toBeVisible();
+	await expect(frame.locator('body')).not.toHaveAttribute('data-ran', 'yes');
+	await preview.getByTestId('design-mock-screen-2').click();
+	await expect(frame.getByRole('alert')).toHaveText('Enter the weight as a number, like 12.');
+
+	// Desktop lays out at 1280px and scales down to fit the card.
+	await preview.getByTestId('design-mock-desktop').click();
+	await expect(preview).toHaveAttribute('data-device', 'desktop');
+	await expect(iframe).toHaveCSS('width', '1280px');
+	await expect(iframe).toHaveAttribute('style', /scale\(0\.\d+\)/);
+	const cardBox = await card.boundingBox();
+	await expect.poll(async () => (await preview.getByTestId('design-mock-frame').boundingBox())?.width ?? Infinity).toBeLessThanOrEqual(cardBox?.width ?? 0);
+	if (process.env.DESIGN_MOCK_SHOTS) await preview.screenshot({ path: `${process.env.DESIGN_MOCK_SHOTS}/design-mock-desktop-desktop.png` });
+
+	// "View full size" opens a modal dialog where the desktop layout reads at 1:1.
+	await preview.getByTestId('design-mock-full').click();
+	const dialog = page.getByTestId('design-mock-dialog');
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByTestId('design-mock-full-desktop')).toHaveAttribute('aria-pressed', 'true');
+	const fullIframe = dialog.locator('iframe');
+	await expect(fullIframe).toHaveCSS('width', '1280px');
+	await expect(fullIframe).not.toHaveAttribute('style', /scale\(/);
+	await expect(dialog.frameLocator('iframe').getByRole('alert')).toHaveText('Enter the weight as a number, like 12.');
+	if (process.env.DESIGN_MOCK_SHOTS) await page.screenshot({ path: `${process.env.DESIGN_MOCK_SHOTS}/design-mock-full-size.png` });
+	await page.keyboard.press('Escape');
+	await expect(dialog).toBeHidden();
+
+	// On a phone-sized screen the phone mock still fits without overflow.
+	await page.setViewportSize({ width: 390, height: 844 });
+	await preview.getByTestId('design-mock-phone').click();
+	await preview.getByTestId('design-mock-screen-0').click();
+	await expect.poll(async () => {
+		const narrow = await preview.getByTestId('design-mock-frame').boundingBox();
+		return narrow && narrow.x >= 0 ? narrow.x + narrow.width : Infinity;
+	}).toBeLessThanOrEqual(390);
+	await expect(frame.getByText('Morning feed · 12 kg')).toBeVisible();
+	if (process.env.DESIGN_MOCK_SHOTS) await card.screenshot({ path: `${process.env.DESIGN_MOCK_SHOTS}/design-mock-mobile.png` });
+
+	await card.getByTestId('workflow-approve-design').click();
+	await expect(card).toHaveAttribute('data-phase', 'building');
+	expect(state.decisions).toEqual([{ designId: 'design-1', decision: 'approved' }]);
+});
 
 test('the plan review lists what will be built as a checklist, never as raw JSON', async ({ page, context }) => {
 	await fixture(context, { planBody: FEATURE_PLAN });

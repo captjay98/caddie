@@ -782,6 +782,11 @@ export async function createCoordinatorContext(
         planRevision = revision.id;
         await workflowSnapshot(env.DB, scope);
       }
+      // A saved design brief advances design -> design-review (the snapshot
+      // auto-advance picks up the new, not-yet-decided revision).
+      if (input.kind === "design") {
+        await workflowSnapshot(env.DB, scope);
+      }
     },
     delegateRepair: async (input) => {
       await requireBuildApproval(env.DB, scope);

@@ -68,6 +68,7 @@ async function world() {
     "0011_home_project.sql",
     "0015_plan_decisions.sql",
     "0018_build_workflow.sql",
+    "0024_design_phase.sql",
   ]) {
     const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), "utf8");
     for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);

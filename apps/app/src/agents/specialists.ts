@@ -65,7 +65,7 @@ export interface SpecialistDescriptor {
 
 export const SPECIALIST_CATALOG: readonly SpecialistDescriptor[] = [
 	{ role: 'product', name: 'product', description: 'Shapes scope, PRD and acceptance intent from the brief and evidence; no execution tools.', skills: ['planning'] },
-	{ role: 'designer', name: 'designer', description: 'Designs the interface and interaction boundary; reads the sandbox, writes plan notes only.', skills: ['planning'] },
+	{ role: 'designer', name: 'designer', description: 'Designs the interface and interaction boundary; reads the sandbox, writes plan notes only.', skills: ['planning', 'design'] },
 	{ role: 'tech-lead', name: 'tech-lead', description: 'Owns the plan of record, delegates work and repairs, keeps the build honest.', skills: ['planning', 'build-verify'] },
 	{ role: 'frontend', name: 'frontend', description: 'Implements client-side behavior in the sandbox.', skills: ['build-verify'] },
 	{ role: 'backend', name: 'backend', description: 'Implements server-side behavior in the sandbox.', skills: ['build-verify'] },
@@ -95,7 +95,8 @@ export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> =
 	product:
 		'You shape the product: scope, PRD and acceptance intent. Work only from the brief and pinned evidence; cite sources. You have no execution tools — write plan notes instead of running commands.',
 	designer:
-		'You design the interface and interaction boundary. Read the current code from the sandbox for context, but express decisions as plan notes; implementation belongs to build roles.',
+		'You design the interface and interaction boundary. Read the current code from the sandbox for context, but express decisions as plan notes; implementation belongs to build roles. ' +
+		'After the PRD is approved the project enters the DESIGN step: author ONE design brief and save it with write_plan_note kind:\'design\' (same planRevision), then STOP for the design review — never build or scaffold. The brief covers: a SCREEN INVENTORY (every screen the app needs); for each key screen its LAYOUT (the regions and what sits where, described so a builder can lay it out) and the key COMPONENTS; the TOKEN/COMPONENT choices (which theme tokens, which shared components, the interaction pattern for each input — a form, a segmented picker, a list); and the EMPTY, LOADING and ERROR state for anything that loads or saves. Ground it in the design system the app uses; keep it concrete, not a restatement of the PRD. Where the PRD leaves a visual choice open, pick a sensible default and label it \'assumption:\'.',
 	'tech-lead':
 		'You own the plan of record. Delegate build and repair work with precise tasks, review results honestly, and keep the last good checkpoint visible. Never claim success without machine-checked evidence.',
 	frontend: 'You implement client-side behavior in the sandbox. Follow the plan of record; run the project checks; report exact commands and outcomes.',
@@ -134,8 +135,15 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 			useSkill(PACKAGED_SKILLS[skillName as keyof typeof PACKAGED_SKILLS]);
 		}
 		useInstruction(SPECIALIST_INSTRUCTIONS[role]);
-		if (descriptor.skills.includes('planning'))
+		// The feature-list block belongs to the PRD, authored by product/tech-lead.
+		// The designer carries `planning` only to READ the PRD — its own output is a
+		// design brief with NO feature block, so it must not get this instruction.
+		if (descriptor.skills.includes('planning') && !descriptor.skills.includes('design'))
 			useInstruction(`A PRD must end with the feature list the user approves and the host builds one feature at a time. ${FEATURE_BLOCK_GUIDE}`);
+		if (descriptor.skills.includes('design'))
+			useInstruction(
+				'After the PRD is approved you author ONE design brief (write_plan_note kind:"design"), then STOP for review — never build. The brief carries NO caddie-features block, covers every section the design skill lists, and includes one titled `html-mock` fenced block per key screen and state (the key screen, its empty state, its error state), static and styled only with design-system tokens, so the review card can show each one.',
+			);
     if (context.currentRequest?.trim()) useInstruction(`Current user request, carried forward by the host: ${context.currentRequest}\nRespect the approved plan and your role permissions; this request does not bypass review or spending gates.`);
  useInstruction(BUILD_RECIPE_INSTRUCTION);
 		return SPECIALIST_INSTRUCTIONS[role];

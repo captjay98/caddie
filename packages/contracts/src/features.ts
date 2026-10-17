@@ -59,6 +59,49 @@ export function splitFeatureBlock(body: string): { display: string; raw: string 
 	return { display, raw: match[2] ?? '' };
 }
 
+/** The info string the designer uses to mark a renderable mockup in a design brief. */
+export const DESIGN_MOCK_INFO = 'html-mock';
+
+/** Longest screen title shown on the review card's screen picker. */
+export const MAX_DESIGN_MOCK_TITLE = 60;
+
+/** One mocked screen: the title from the fence's info string, and its static HTML. */
+export interface DesignMock {
+	title: string;
+	html: string;
+}
+
+// ```html-mock Today · empty   <- the optional title follows the info string
+const DESIGN_MOCK_FENCES = new RegExp(
+	'^(`{3,}|~{3,})[ \\t]*' +
+		DESIGN_MOCK_INFO +
+		'(?:[ \\t]+([^\\r\\n]*?))?[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n\\1[ \\t]*$',
+	'gm',
+);
+
+/**
+ * Split a DESIGN brief into the prose a person reads and its mocked screens.
+ * The designer embeds one titled ```html-mock block per screen or state (the
+ * key screen, then its empty / error states); the review card shows each in a
+ * locked-down sandbox. A brief with no mockup degrades to prose-only, an empty
+ * block counts as absent, and an untitled block is named "Screen N".
+ */
+export function splitDesignMocks(body: string): { display: string; mocks: DesignMock[] } {
+	const mocks: DesignMock[] = [];
+	const display = body
+		.replace(DESIGN_MOCK_FENCES, (_whole: string, _fence: string, title: string | undefined, html: string | undefined) => {
+			const markup = (html ?? '').trim();
+			if (markup) {
+				const named = (title ?? '').trim().slice(0, MAX_DESIGN_MOCK_TITLE);
+				mocks.push({ title: named || `Screen ${mocks.length + 1}`, html: markup });
+			}
+			return '';
+		})
+		.replace(/\n{3,}/g, '\n\n')
+		.trim();
+	return { display, mocks };
+}
+
 export type FeatureParse = { ok: true; features: PlanFeature[] } | { ok: false; error: string };
 
 /** Parse and validate the PRD's feature block. Never throws. */

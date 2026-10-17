@@ -5,7 +5,13 @@
 			"name": "planning",
 			"version": "1.0.0",
 			"path": "planning/SKILL.md",
-			"sha256": "01ae4031d6144266275120d0d368e47513006f4ad093c071cee0962b148ed927"
+			"sha256": "d36236e0821daa503ac2f936e5a10fc80ac9f6d8c562a17598b10b1828bbe98e"
+		},
+		{
+			"name": "design",
+			"version": "1.0.0",
+			"path": "design/SKILL.md",
+			"sha256": "d19cf5a1a6fe58b114732266ddba6a536e0418fd6aa439d2eb841eae3d7aacc3"
 		},
 		{
 			"name": "build-verify",

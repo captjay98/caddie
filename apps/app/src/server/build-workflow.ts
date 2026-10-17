@@ -23,7 +23,7 @@ import { createD1ContentStore } from "./artifacts.ts";
 import { findModelRouteForRole } from "../agents/providers.ts";
 
 export type WorkflowPhase =
-  "planning" | "review" | "building" | "blocked" | "ready";
+  "planning" | "review" | "design" | "design-review" | "building" | "blocked" | "ready";
 export interface BuildWorkflow {
   projectId: string;
   runId: string;
@@ -218,6 +218,16 @@ export const planIntent = (projectId: string, plan: PlanDocRevision) => ({
   revisionHash: plan.bodyHash,
   policyVersion: "v1",
 });
+/** The DESIGN-BRIEF approval, distinct from the PRD's planIntent: approving the
+ *  plan does not approve the design, and vice versa. Keyed to the design
+ *  revision's own hash so the user's go-ahead binds to exactly what they saw. */
+export const designIntent = (projectId: string, design: PlanDocRevision) => ({
+  projectId,
+  action: "design" as const,
+  resourceId: design.id,
+  revisionHash: design.bodyHash,
+  policyVersion: "v1",
+});
 export async function workflowSnapshot(db: D1Database, scope: Scope) {
   let workflow = await readWorkflow(db, scope);
   const plan = (await listPlanDocRevisions(db, scope, "prd"))[0] ?? null;
@@ -230,6 +240,32 @@ export async function workflowSnapshot(db: D1Database, scope: Scope) {
       .run();
     workflow = (await readWorkflow(db, scope))!;
   }
+  // The latest design brief (if any) and its approval — surfaced so the card
+  // can render the design-review state and the coordinator can read it.
+  const design = (await listPlanDocRevisions(db, scope, "design"))[0] ?? null;
+  // Auto-advance design -> design-review once a NOT-YET-DECIDED brief is saved:
+  // the designer writes the 'design' revision and stops; an undecided revision
+  // while the phase is still 'design' means the brief is ready for review.
+  // (Mirrors the planning -> review advance a new PRD triggers above.) A
+  // rejected brief stays in 'design' — it already has a decision — until the
+  // re-authored NEW revision (no decision yet) supersedes it and advances.
+  if (workflow && workflow.phase === "design" && design) {
+    const decided = await rows(
+      db,
+      "select 1 from plan_decisions where projectId = ? and planRevisionId = ? limit 1",
+      scope.projectId,
+      design.id,
+    );
+    if (!decided.length) {
+      await db
+        .prepare(
+          "update build_workflows set phase = ?, updatedAt = ? where projectId = ? and phase = 'design'",
+        )
+        .bind("design-review", now(), scope.projectId)
+        .run();
+      workflow = (await readWorkflow(db, scope))!;
+    }
+  }
   const approval = plan
     ? await getApprovalForIntent(
         db,
@@ -237,7 +273,14 @@ export async function workflowSnapshot(db: D1Database, scope: Scope) {
         planIntent(scope.projectId, plan),
       )
     : null;
-  return { workflow, plan, approval };
+  const designApproval = design
+    ? await getApprovalForIntent(
+        db,
+        scope.actorId,
+        designIntent(scope.projectId, design),
+      )
+    : null;
+  return { workflow, plan, approval, design, designApproval };
 }
 export async function decideWorkflow(
   db: D1Database,
@@ -292,10 +335,10 @@ export async function decideWorkflow(
       input.decision === "rejected" &&
       !decisions.length)
   ) {
-    const phase = input.decision === "approved" ? "building" : "planning";
+    const phase = input.decision === "approved" ? "design" : "planning";
     const message =
       input.decision === "approved"
-        ? `The authenticated review controls approved plan ${plan.id}. Re-read the latest plan and durable approval. Build it feature by feature: call build_next_feature, delegate exactly that feature, then finish_feature; when every feature has passed, run QA with verify_build. Stop honestly on blockers.`
+        ? `The authenticated review controls approved plan ${plan.id}. Now DESIGN before building: delegate the designer to author ONE design brief (screen inventory; each key screen's layout; the token/component choices; the empty, loading and error state for anything that loads or saves), save it with write_plan_note kind:'design' and the same planRevision, then STOP for the authenticated design review. Do NOT build or scaffold yet — building is gated until the design brief is approved.`
         : `Revise plan ${plan.id} using the user's feedback below. Write a NEW prd revision, then wait for review; no building.\n\n${note}`;
     await db
       .prepare(
@@ -309,6 +352,76 @@ export async function decideWorkflow(
         scope.projectId,
         plan.id,
       )
+      .run();
+  }
+  return workflowSnapshot(db, scope);
+}
+/**
+ * Approve or revise the DESIGN BRIEF — the gate between design-review and
+ * building. Mirrors decideWorkflow but binds to the design revision's own
+ * approval (designIntent): approving the plan never approves the design, so
+ * building stays gated until the brief the user actually saw is approved.
+ *   approved -> building (the feature loop may now run)
+ *   rejected -> design   (re-author the brief with the feedback; no building)
+ */
+export async function decideDesign(
+  db: D1Database,
+  scope: Scope,
+  input: { designId: string; decision: "approved" | "rejected"; note?: string },
+) {
+  await ensureWorkflow(db, scope);
+  const { workflow, design } = await workflowSnapshot(db, scope);
+  if (!design || design.id !== input.designId)
+    throw new ScopeError(
+      409,
+      "STALE_DESIGN",
+      "The design brief changed. Review the latest version.",
+    );
+  if (input.decision !== "approved" && input.decision !== "rejected")
+    throw new ScopeError(
+      400,
+      "invalid_decision",
+      "Choose approve or request changes.",
+    );
+  const note = input.note?.trim() ?? "";
+  if (input.decision === "rejected" && (!note || note.length > 2000))
+    throw new ScopeError(
+      400,
+      "feedback_required",
+      "Describe the change in 2000 characters or fewer.",
+    );
+  const approval = await recordDecision(db, scope.actorId, {
+    intent: designIntent(scope.projectId, design),
+    decision: input.decision,
+  });
+  const decisions = await rows(
+    db,
+    "select id from plan_decisions where projectId = ? and planRevisionId = ? and approvalId = ? and decidedBy = ?",
+    scope.projectId,
+    design.id,
+    approval.id,
+    scope.actorId,
+  );
+  if (!decisions.length)
+    await recordPlanDecision(db, scope, {
+      planRevisionId: design.id,
+      decision: input.decision === "approved" ? "approved" : "changes",
+      note,
+      approvalId: approval.id,
+    });
+  // Only act from design-review (a retried click can't restart a running build
+  // or re-queue a design pass).
+  if (workflow!.phase === "design-review" && !decisions.length) {
+    const phase = input.decision === "approved" ? "building" : "design";
+    const message =
+      input.decision === "approved"
+        ? `The authenticated design review approved the design brief ${design.id}. Build the approved plan feature by feature, implementing it to match the design brief: call build_next_feature, delegate exactly that feature with its doneWhen checks, then finish_feature; when every feature has passed, run QA with verify_build. Stop honestly on blockers.`
+        : `Revise the design brief ${design.id} using the user's feedback below. Write a NEW design revision (write_plan_note kind:'design'), then wait for the design review; no building.\n\n${note}`;
+    await db
+      .prepare(
+        "update build_workflows set phase = ?, pendingKey = ?, pendingBody = ?, detail = null, updatedAt = ? where projectId = ?",
+      )
+      .bind(phase, `design-decision:${approval.id}`, message, now(), scope.projectId)
       .run();
   }
   return workflowSnapshot(db, scope);

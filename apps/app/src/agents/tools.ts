@@ -33,7 +33,7 @@ const ReadProjectContextInput = v.object({
 	paths: v.array(v.string()),
 });
 const WritePlanNoteInput = v.object({
-	kind: v.picklist(['kernel', 'scope', 'prd', 'spec', 'note']),
+	kind: v.picklist(['kernel', 'scope', 'prd', 'design', 'spec', 'note']),
 	body: v.string(),
 	planRevision: v.string(),
 });

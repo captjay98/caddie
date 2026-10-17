@@ -27,6 +27,7 @@ import {
   readWorkflow,
   workflowSnapshot,
   decideWorkflow,
+  decideDesign,
   acknowledgeDispatch,
   requireBuildApproval,
   storeBuildOutput,
@@ -34,6 +35,7 @@ import {
   setWorkflowBlocker,
   stopWorkflow,
   planIntent,
+  designIntent,
   retryWorkflow,
   workflowRepairPause,
   continueProjectFromChat,
@@ -113,6 +115,7 @@ async function world() {
     "0018_build_workflow.sql",
     "0022_build_activity.sql",
     "0023_build_features.sql",
+    "0024_design_phase.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -186,11 +189,40 @@ async function planned(w: Awaited<ReturnType<typeof world>>) {
 }
 async function approved(w: Awaited<ReturnType<typeof world>>) {
   const item = await planned(w);
-  const snapshot = await decideWorkflow(w.db, item.scope, {
+  // Approving the PRD now enters the DESIGN step, not building. To keep the
+  // downstream build tests exercising a 'building' workflow, this helper
+  // carries through: PRD approved -> design, save the design brief ->
+  // design-review, approve the design -> building. A test that wants to assert
+  // the intermediate phases uses planned()/designReady() directly.
+  await decideWorkflow(w.db, item.scope, {
     planId: item.plan.id,
     decision: "approved",
   });
-  return { ...item, snapshot };
+  const design = await createPlanDocRevision(w.db, item.scope, {
+    kind: "design",
+    body: "# Design brief\n\nOne screen: a feed-log form and a totals dashboard. Loading, empty and error states defined.",
+  });
+  await workflowSnapshot(w.db, item.scope);
+  const snapshot = await decideDesign(w.db, item.scope, {
+    designId: design.id,
+    decision: "approved",
+  });
+  return { ...item, design, snapshot };
+}
+/** Through PRD approval into the DESIGN phase, with the brief saved and awaiting
+ *  review — the state the design-review tests assert against. */
+async function designReady(w: Awaited<ReturnType<typeof world>>) {
+  const item = await planned(w);
+  await decideWorkflow(w.db, item.scope, {
+    planId: item.plan.id,
+    decision: "approved",
+  });
+  const design = await createPlanDocRevision(w.db, item.scope, {
+    kind: "design",
+    body: "# Design brief\n\nScreens, states and token choices for the todo app.",
+  });
+  const snapshot = await workflowSnapshot(w.db, item.scope);
+  return { ...item, design, snapshot };
 }
 
 describe("durable chat intake", () => {
@@ -417,33 +449,34 @@ describe("plan review and durable build approval", () => {
     }
   });
 
-  test("authenticated approval queues one build and replay after dispatch acknowledgment cannot restart it", async () => {
+  test("authenticated design approval queues one build and replay after dispatch acknowledgment cannot restart it", async () => {
     const w = await world();
     try {
       const item = await approved(w);
       const queued = item.snapshot.workflow!;
       expect(queued.phase).toBe("building");
-      expect(queued.pendingKey).toBe(`decision:${item.snapshot.approval!.id}`);
-      expect(queued.pendingBody).toContain(item.plan.id);
-      expect(item.snapshot.approval?.decidedBy).toBe("alice");
+      expect(queued.pendingKey).toBe(`design-decision:${item.snapshot.designApproval!.id}`);
+      expect(item.snapshot.designApproval?.decidedBy).toBe("alice");
       expect((await requireBuildApproval(w.db, item.scope)).plan.id).toBe(
         item.plan.id,
       );
-      const doubleClick = await decideWorkflow(w.db, item.scope, {
-        planId: item.plan.id,
+      const doubleClick = await decideDesign(w.db, item.scope, {
+        designId: item.design.id,
         decision: "approved",
       });
       expect(doubleClick.workflow?.pendingKey).toBe(queued.pendingKey);
-      expect(w.count("plan_decisions")).toBe(1);
+      // One plan decision (PRD) + one design decision; the double-click adds neither.
+      expect(w.count("plan_decisions")).toBe(2);
       await acknowledgeDispatch(w.db, item.scope, queued.pendingKey!);
-      const replay = await decideWorkflow(w.db, item.scope, {
-        planId: item.plan.id,
+      const replay = await decideDesign(w.db, item.scope, {
+        designId: item.design.id,
         decision: "approved",
       });
       expect(replay.workflow?.phase).toBe("building");
       expect(replay.workflow?.pendingKey).toBeNull();
-      expect(w.count("approvals")).toBe(1);
-      expect(w.count("plan_decisions")).toBe(1);
+      // One PRD approval + one design approval = two approvals total.
+      expect(w.count("approvals")).toBe(2);
+      expect(w.count("plan_decisions")).toBe(2);
     } finally {
       w.sqlite.close();
     }
@@ -631,6 +664,14 @@ describe("plan review and durable build approval", () => {
         decision: "approved",
       });
       expect(accepted.approval?.id).not.toBe(rejection.approval?.id);
+      // The revised PRD's approval enters design; approve the design brief to
+      // reach the build gate.
+      const design = await createPlanDocRevision(w.db, item.scope, {
+        kind: "design",
+        body: "# Design brief\n\nCalm palette, keyboard shortcuts, states defined.",
+      });
+      await workflowSnapshot(w.db, item.scope);
+      await decideDesign(w.db, item.scope, { designId: design.id, decision: "approved" });
       expect((await requireBuildApproval(w.db, item.scope)).plan.id).toBe(
         next.id,
       );
@@ -650,6 +691,95 @@ describe("plan review and durable build approval", () => {
           outcome: "failed",
         });
       await rejectsCode(requireBuildApproval(w.db, item.scope), "RUN_PAUSED");
+    } finally {
+      w.sqlite.close();
+    }
+  });
+});
+
+describe("design review and the build gate", () => {
+  test("approving the PRD enters design, not building; building stays gated until the design brief is approved", async () => {
+    const w = await world();
+    try {
+      const item = await planned(w);
+      const afterPlan = await decideWorkflow(w.db, item.scope, {
+        planId: item.plan.id,
+        decision: "approved",
+      });
+      // PRD approval goes to design, NOT building — and building is refused.
+      expect(afterPlan.workflow?.phase).toBe("design");
+      expect(afterPlan.workflow?.pendingBody).toContain("DESIGN");
+      await rejectsCode(requireBuildApproval(w.db, item.scope), "BUILD_NOT_APPROVED");
+      // Saving the design brief advances design -> design-review.
+      const design = await createPlanDocRevision(w.db, item.scope, {
+        kind: "design",
+        body: "# Design brief\n\nScreens, states and tokens.",
+      });
+      const review = await workflowSnapshot(w.db, item.scope);
+      expect(review.workflow?.phase).toBe("design-review");
+      expect(review.design?.id).toBe(design.id);
+      expect(review.designApproval).toBeNull();
+      await rejectsCode(requireBuildApproval(w.db, item.scope), "BUILD_NOT_APPROVED");
+      // Approving the design brief is the gate to building.
+      const built = await decideDesign(w.db, item.scope, {
+        designId: design.id,
+        decision: "approved",
+      });
+      expect(built.workflow?.phase).toBe("building");
+      expect(built.workflow?.pendingKey).toBe(`design-decision:${built.designApproval!.id}`);
+      expect((await requireBuildApproval(w.db, item.scope)).plan.id).toBe(item.plan.id);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("rejecting the design brief returns to design with durable feedback and does not advance until a NEW revision", async () => {
+    const w = await world();
+    try {
+      const item = await designReady(w);
+      expect(item.snapshot.workflow?.phase).toBe("design-review");
+      await rejectsCode(
+        decideDesign(w.db, item.scope, { designId: item.design.id, decision: "rejected", note: " " }),
+        "feedback_required",
+      );
+      const feedback = "Use a warmer palette and bigger tap targets";
+      const rejected = await decideDesign(w.db, item.scope, {
+        designId: item.design.id,
+        decision: "rejected",
+        note: feedback,
+      });
+      expect(rejected.workflow?.phase).toBe("design");
+      expect(rejected.workflow?.pendingBody).toContain(feedback);
+      // The rejected brief does NOT re-advance to review on its own — it is decided.
+      const stillDesign = await workflowSnapshot(w.db, item.scope);
+      expect(stillDesign.workflow?.phase).toBe("design");
+      await rejectsCode(requireBuildApproval(w.db, item.scope), "BUILD_NOT_APPROVED");
+      // A new design revision supersedes it and advances to design-review again.
+      const revised = await createPlanDocRevision(w.db, item.scope, {
+        kind: "design",
+        body: `# Design brief v2\n\n${feedback}`,
+      });
+      const back = await workflowSnapshot(w.db, item.scope);
+      expect(back.workflow?.phase).toBe("design-review");
+      expect(back.design?.id).toBe(revised.id);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a design decision cannot act from the wrong phase or against a stale design id", async () => {
+    const w = await world();
+    try {
+      const item = await designReady(w);
+      await rejectsCode(
+        decideDesign(w.db, item.scope, { designId: "not-the-design", decision: "approved" }),
+        "STALE_DESIGN",
+      );
+      const other = { ...item.scope, actorId: "bob" };
+      await rejectsCode(
+        decideDesign(w.db, other, { designId: item.design.id, decision: "approved" }),
+        "not_a_member",
+      );
     } finally {
       w.sqlite.close();
     }
@@ -719,6 +849,14 @@ describe("approved output and preview identity", () => {
         planId: item.plan.id,
         decision: "approved",
       });
+      // PRD approval enters design; carry through to building so the output
+      // guards below (which require phase 'building') are what is tested.
+      const design = await createPlanDocRevision(w.db, item.scope, {
+        kind: "design",
+        body: "# Design brief\n\nScreens and states for the todo app.",
+      });
+      await workflowSnapshot(w.db, item.scope);
+      await decideDesign(w.db, item.scope, { designId: design.id, decision: "approved" });
       await rejectsCode(
         storeBuildOutput(w.db, item.scope, {
           ...payload,
@@ -1326,8 +1464,16 @@ describe("host-driven feature loop", () => {
     const started = await w.start();
     const plan = await createPlanDocRevision(w.db, started.scope, { kind: "prd", body });
     await workflowSnapshot(w.db, started.scope);
-    const snapshot = await decideWorkflow(w.db, started.scope, { planId: plan.id, decision: "approved" });
-    return { ...started, plan, snapshot };
+    // PRD approval -> design; carry through the design step so the feature loop
+    // runs against a 'building' workflow (the loop itself is what these tests exercise).
+    await decideWorkflow(w.db, started.scope, { planId: plan.id, decision: "approved" });
+    const design = await createPlanDocRevision(w.db, started.scope, {
+      kind: "design",
+      body: "# Design brief\n\nFeed-log form + totals dashboard; states defined.",
+    });
+    await workflowSnapshot(w.db, started.scope);
+    const snapshot = await decideDesign(w.db, started.scope, { designId: design.id, decision: "approved" });
+    return { ...started, plan, design, snapshot };
   }
   const env = (w: Awaited<ReturnType<typeof world>>, stub: SandboxStub) => ({
     DB: w.db, CONTREE_BASE_URL: stub.url, CONTREE_API_TOKEN: "local-feature-token", CONTREE_PROJECT_ID: "local-project", CONTREE_IMAGE: "tag:feature:1",

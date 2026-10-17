@@ -3268,6 +3268,105 @@ a.btn-ghost.topbar-nav-link {
 	flex-wrap: wrap;
 }
 
+/* --- design-step mockup preview (design-review card) -------------------------
+   One framed surface: the stage only centres the frame, it draws no box of its
+   own. The frame drags taller; the mock inside lays out at its real width and
+   is scaled to fit. Pickers reuse the .disc-seg segmented control. */
+.design-mock {
+	margin: 0 0 0.9rem;
+	display: grid;
+	gap: 0.55rem;
+}
+.design-mock__bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+}
+.design-mock__screens {
+	max-width: 100%;
+	overflow-x: auto;
+	scrollbar-width: thin;
+}
+.design-mock__screens button {
+	white-space: nowrap;
+}
+.design-mock__title {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--color-bright);
+}
+.design-mock__expand {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+.design-mock__stage {
+	display: flex;
+	justify-content: center;
+	min-width: 0;
+}
+.design-mock__frame {
+	height: 560px;
+	min-height: 240px;
+	max-height: 1600px;
+	max-width: 100%;
+	overflow: hidden;
+	resize: vertical;
+	border: 1px solid var(--color-line);
+	border-radius: 10px;
+	background: var(--color-ink);
+	color: var(--color-bright);
+}
+.design-mock[data-device='phone'] .design-mock__frame,
+.design-mock__dialog[data-device='phone'] .design-mock__frame {
+	border-radius: 22px;
+}
+.design-mock[data-device='desktop'] .design-mock__frame {
+	height: 380px;
+}
+/* (0,2,1) so the card's generic `.project-workflow iframe` rule (its own
+   border, radius, min-height and white fill) never doubles up on the mock. */
+.design-mock .design-mock__frame iframe {
+	display: block;
+	border: 0;
+	border-radius: 0;
+	min-height: 0;
+	transform-origin: 0 0;
+	background: var(--color-ink);
+}
+.design-mock__dialog {
+	width: min(96vw, 1360px);
+	height: min(92vh, 1000px);
+	max-width: none;
+	max-height: none;
+	padding: 1rem;
+	border: 1px solid var(--color-line);
+	border-radius: 14px;
+	background: var(--color-panel);
+	color: var(--color-bright);
+}
+.design-mock__dialog::backdrop {
+	background: color-mix(in srgb, var(--color-ink) 72%, transparent);
+}
+.design-mock__dialog-body {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+	gap: 0.75rem;
+	height: 100%;
+}
+.design-mock__dialog .design-mock__stage {
+	min-height: 0;
+	height: 100%;
+}
+/* (0,3,0), after the desktop-height rule, so the dialog frame always fills it. */
+.design-mock .design-mock__dialog .design-mock__frame--full {
+	height: 100%;
+	max-height: none;
+	resize: none;
+}
+
 .repository-picker__bind {
 	display: grid;
 	gap: 0.55rem;

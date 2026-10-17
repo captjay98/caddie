@@ -299,6 +299,7 @@ describe('P05 packaged skills', () => {
 	test('every packaged skill is exported via the flue mechanism', () => {
 		const names = Object.keys(PACKAGED_SKILLS);
 		expect(names).toContain('planning');
+		expect(names).toContain('design'); // the design-step skill (design brief + visual mockup)
 		expect(names).toContain('build-verify');
 		expect(names).toContain('delivery-checklist');
 		expect(names).toContain('submission'); // P13 — judge coaching + submission prep
@@ -310,8 +311,8 @@ describe('P05 packaged skills', () => {
 
 	test('unknown skill lookup is type-unsafe by design (compile-time union)', () => {
 		// PackagedSkillName is a union of the known names — a typo fails at
-		// compile time, not runtime. (Four since P13 added `submission`.)
-		expect(Object.keys(PACKAGED_SKILLS)).toHaveLength(4);
+		// compile time, not runtime. (Five since the design-step skill was added.)
+		expect(Object.keys(PACKAGED_SKILLS)).toHaveLength(5);
 	});
 });
 
