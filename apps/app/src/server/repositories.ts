@@ -1517,3 +1517,90 @@ export async function deliverPatch(
 		operation: settled,
 	});
 }
+
+export interface PullRequestCloseView {
+	projectId: string;
+	repoFullName: string;
+	pullRequestNumber: number;
+	state: 'closed';
+	htmlUrl: string | null;
+}
+
+/**
+ * Close a pull request Caddie opened for THIS project. An explicit user action
+ * with the same fail-closed rules as delivery:
+ *
+ *   - only a PR recorded in this project's `pull-request` deliveries can be
+ *     closed — never an arbitrary PR on the user's repo;
+ *   - the installation must still be active and bound, and the repo selected
+ *     (a revoked installation denies this like every other operation);
+ *   - read-before-write: a PR that is already closed reconciles with NO
+ *     provider write; a MERGED PR is a typed 409 (its changes are on the base
+ *     branch — closing cannot undo that and is never attempted).
+ *
+ * Closing is reversible on GitHub (reopen) and never deletes the head branch,
+ * so it needs no default-branch approval. Provider state is the idempotency
+ * source of truth, so a PR the user reopened can be closed again.
+ */
+export async function closeDeliveredPullRequest(
+	db: D1Database,
+	client: GithubRestClient,
+	scope: Scope,
+	input: unknown,
+): Promise<{ pullRequest: PullRequestCloseView; reconciled: boolean }> {
+	const verified = await assertProjectScope(db, scope);
+	const raw = asRecord(input);
+	const repoFullName = normalizeRepoFullName(raw['repoFullName']);
+	const pullRequestNumber = Number(raw['pullRequestNumber']);
+	if (!Number.isInteger(pullRequestNumber) || pullRequestNumber <= 0) {
+		throw new ScopeError(400, 'invalid_request', 'pullRequestNumber must be a positive integer');
+	}
+
+	const delivered = await queryAll(
+		db,
+		'select "installationId" from "github_deliveries" where "projectId" = ? and "repoFullName" = ? and "mode" = ? and "pullRequestNumber" = ? order by "createdAt" desc limit 1',
+		verified.projectId,
+		repoFullName,
+		'pull-request',
+		pullRequestNumber,
+	);
+	if (!delivered[0]) {
+		throw new ScopeError(
+			404,
+			'pull_request_not_delivered',
+			`pull request #${pullRequestNumber} on ${repoFullName} was not opened by Caddie for this project`,
+		);
+	}
+
+	const installation = await requireActiveInstallation(db, verified, String(delivered[0]['installationId']));
+	await requireSelectedRepo(db, installation.installationId, repoFullName);
+
+	const view = (htmlUrl: string): PullRequestCloseView => ({
+		projectId: verified.projectId,
+		repoFullName,
+		pullRequestNumber,
+		state: 'closed',
+		htmlUrl: htmlUrl || null,
+	});
+
+	const current = await client.getPullRequest(installation.installationId, repoFullName, pullRequestNumber);
+	if (current.merged) {
+		throw new ScopeError(
+			409,
+			'pull_request_merged',
+			`pull request #${pullRequestNumber} is already merged — its changes are on ${current.base || 'the base branch'}, so it cannot be closed`,
+		);
+	}
+	if (current.state === 'closed') return { pullRequest: view(current.htmlUrl), reconciled: true };
+
+	const closed = await client.closePullRequest(installation.installationId, repoFullName, pullRequestNumber);
+	if (closed.state !== 'closed') {
+		// Never report a close the provider did not confirm.
+		throw new GithubError(
+			502,
+			'GITHUB_PROVIDER_ERROR',
+			`github did not confirm pull request #${pullRequestNumber} closed (state ${closed.state})`,
+		);
+	}
+	return { pullRequest: view(closed.htmlUrl), reconciled: false };
+}

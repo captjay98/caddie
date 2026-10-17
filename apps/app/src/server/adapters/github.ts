@@ -38,9 +38,28 @@ export interface GithubEnv extends AuthEnv {
 	GITHUB_WEBHOOK_SECRET?: string;
 	/** API base override (local test stub). Defaults to https://api.github.com. */
 	GITHUB_API_BASE_URL?: string;
+	/**
+	 * The GitHub App's public slug (the `/apps/<slug>` segment). OPTIONAL and
+	 * decorative: used only to build the "Install on GitHub" link so the user
+	 * can reach the App's own install page instead of pasting an installation
+	 * id. Absent -> no link is offered (never a fabricated URL); binding still
+	 * works via the id. The slug is not a credential.
+	 */
+	GITHUB_APP_SLUG?: string;
 }
 
 export const DEFAULT_GITHUB_API_BASE = 'https://api.github.com';
+
+/**
+ * The public install URL for the configured GitHub App, or null when no slug is
+ * configured. Honesty rule: we never fabricate a slug — an unconfigured slug
+ * returns null and the UI falls back to the explicit install-then-paste path.
+ */
+export function githubInstallUrl(env: Partial<GithubEnv>): string | null {
+	const slug = (env.GITHUB_APP_SLUG ?? '').trim();
+	if (!slug || !/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(slug)) return null;
+	return `https://github.com/apps/${slug}/installations/new`;
+}
 
 /** Typed GitHub failure. `code` is a bounded vocabulary, never raw transport text. */
 export class GithubError extends Error {
@@ -715,6 +734,56 @@ export class GithubRestClient {
 			return { pr: match, reconciled: true };
 		}
 	}
+
+	/** Read one PR's live state — the read half of read-before-write for close. */
+	async getPullRequest(installationId: string, fullName: string, number: number): Promise<GithubPullRequestStatus> {
+		const body = await this.request('GET', `/repos/${fullName}/pulls/${number}`, {
+			auth: { installationId },
+		});
+		return pullRequestStatusFrom(body, number);
+	}
+
+	/**
+	 * Close an open PR (PATCH state=closed). Closing is REVERSIBLE — the PR can
+	 * be reopened on GitHub — and never deletes the head branch or its commits.
+	 * Callers read first (getPullRequest) so a merged or already-closed PR is
+	 * never written to.
+	 */
+	async closePullRequest(installationId: string, fullName: string, number: number): Promise<GithubPullRequestStatus> {
+		const body = await this.request('PATCH', `/repos/${fullName}/pulls/${number}`, {
+			auth: { installationId },
+			body: { state: 'closed' },
+		});
+		return pullRequestStatusFrom(body, number);
+	}
+}
+
+/** A PR plus its lifecycle state, as GitHub reports it. */
+export interface GithubPullRequestStatus extends GithubPullRequestInfo {
+	state: 'open' | 'closed';
+	merged: boolean;
+}
+
+function pullRequestStatusFrom(raw: unknown, fallbackNumber: number): GithubPullRequestStatus {
+	const pr = (raw ?? {}) as {
+		number?: unknown;
+		state?: unknown;
+		merged?: unknown;
+		merged_at?: unknown;
+		head?: { ref?: unknown; sha?: unknown };
+		base?: { ref?: unknown };
+		html_url?: unknown;
+	};
+	return {
+		number: Number(pr.number ?? fallbackNumber),
+		state: pr.state === 'closed' ? 'closed' : 'open',
+		// GitHub sets merged:true and merged_at on a merged PR (state is then 'closed').
+		merged: pr.merged === true || typeof pr.merged_at === 'string',
+		head: String(pr.head?.ref ?? ''),
+		base: String(pr.base?.ref ?? ''),
+		headSha: String(pr.head?.sha ?? ''),
+		htmlUrl: typeof pr.html_url === 'string' ? pr.html_url : '',
+	};
 }
 
 function classificationStatus(code: GithubError['code']): number {

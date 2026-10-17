@@ -3268,6 +3268,40 @@ a.btn-ghost.topbar-nav-link {
 	flex-wrap: wrap;
 }
 
+.repository-picker__connect {
+	display: grid;
+	gap: 0.7rem;
+	max-width: 560px;
+}
+
+.repository-picker__install {
+	display: grid;
+	gap: 0.4rem;
+	margin: 0;
+}
+
+.repository-picker__install .btn-key {
+	justify-self: start;
+	text-decoration: none;
+}
+
+.repository-picker__bind-fallback > summary {
+	cursor: pointer;
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--color-muted);
+	padding: 0.3rem 0;
+	list-style: revert;
+}
+
+.repository-picker__bind-fallback > summary:hover {
+	color: var(--color-bright);
+}
+
+.repository-picker__bind-fallback .repository-picker__bind {
+	margin-top: 0.5rem;
+}
+
 /* --- design-step mockup preview (design-review card) -------------------------
    One framed surface: the stage only centres the frame, it draws no box of its
    own. The frame drags taller; the mock inside lays out at its real width and

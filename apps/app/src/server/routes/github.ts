@@ -3,10 +3,11 @@ import { createAuthRouter } from './auth.ts';
 import { createProjectsRouter } from './projects.ts';
 import { createApprovalsRouter } from './approvals.ts';
 import { ScopeError, requireProjectScope, requireWorkspaceScope, sessionUserId } from '../scope.ts';
-import { GithubError, verifyWebhookSignature, type GithubEnv } from '../adapters/github.ts';
+import { GithubError, githubInstallUrl, verifyWebhookSignature, type GithubEnv } from '../adapters/github.ts';
 import {
 	DeliveryGateError,
 	bindInstallation,
+	closeDeliveredPullRequest,
 	connectAndLinkRepo,
 	createAndLinkRepo,
 	deliverPatch,
@@ -95,6 +96,13 @@ function requireNonEmptyString(value: unknown, field: string): string {
 	return value.trim();
 }
 
+function asObject(value: unknown): Record<string, unknown> {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		throw new ScopeError(400, 'invalid_input', 'body must be a JSON object');
+	}
+	return value as Record<string, unknown>;
+}
+
 export function createGithubRouter(): Hono<{ Bindings: Env }> {
 	const router = new Hono<{ Bindings: Env }>();
 
@@ -126,6 +134,13 @@ export function createGithubRouter(): Hono<{ Bindings: Env }> {
 		}
 		const result = await processGithubWebhook(c.env.DB, { event, deliveryId, payload });
 		return c.json({ result }, 202);
+	});
+
+	// --- app metadata (public, non-credential): where to install the App -------------
+	router.get('/github/app', async (c) => {
+		await requireSessionActorId(c.env, c.req.raw.headers);
+		// The slug is public; the install URL is null when unconfigured (never guessed).
+		return c.json({ installUrl: githubInstallUrl(c.env) });
 	});
 
 	// --- installation binding (explicit user action) ----------------------------------
@@ -216,6 +231,18 @@ export function createGithubRouter(): Hono<{ Bindings: Env }> {
 		const client = githubClientFromEnv(c.env);
 		const result = await deliverPatch(c.env.DB, client, scope, await readJson(c.req.raw));
 		return c.json(result, result.reconciled ? 200 : 201);
+	});
+
+	// Close a PR Caddie opened for this project (reversible; read-before-write).
+	router.post('/projects/:projectId/github/pulls/:number/close', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		const client = githubClientFromEnv(c.env);
+		const body = asObject(await readJson(c.req.raw));
+		const result = await closeDeliveredPullRequest(c.env.DB, client, scope, {
+			repoFullName: body['repoFullName'],
+			pullRequestNumber: Number(c.req.param('number')),
+		});
+		return c.json(result, 200);
 	});
 
 	return router;

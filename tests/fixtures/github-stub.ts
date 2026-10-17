@@ -22,6 +22,8 @@ import { createHash, createVerify, randomBytes } from 'node:crypto';
  *   POST /repos/{owner}/{repo}/git/commits
  *   POST /repos/{owner}/{repo}/pulls                  PR (422 when head PR exists)
  *   GET  /repos/{owner}/{repo}/pulls                  open PR lookup by head
+ *   GET  /repos/{owner}/{repo}/pulls/{n}              one PR (state + merged)
+ *   PATCH /repos/{owner}/{repo}/pulls/{n}             state change (422 once merged)
  *
  * Behavioral guarantees the tests rely on:
  *   - every request is recorded (method, path, auth kind) so "no mutating call
@@ -99,7 +101,9 @@ export interface StubPullRequest {
 	head: string;
 	base: string;
 	headSha: string;
-	state: 'open';
+	state: 'open' | 'closed';
+	/** Merged PRs are closed with merged:true (GitHub's shape); set via markPullRequestMerged. */
+	merged: boolean;
 	htmlUrl: string;
 }
 
@@ -173,6 +177,8 @@ function serializePullRequest(pr: StubPullRequest): Record<string, unknown> {
 		title: pr.title,
 		body: pr.body,
 		state: pr.state,
+		merged: pr.merged,
+		merged_at: pr.merged ? '2026-01-01T00:00:00Z' : null,
 		head: { ref: pr.head, sha: pr.headSha },
 		base: { ref: pr.base },
 		html_url: pr.htmlUrl,
@@ -295,6 +301,19 @@ export class GithubStub {
 			if (pr.head === headBranch && pr.state === 'open') return pr;
 		}
 		return undefined;
+	}
+
+	/** Any PR by number (open or closed). */
+	pullRequest(fullName: string, number: number): StubPullRequest | undefined {
+		return this.repos.get(fullName)?.pullRequests.get(`pr-${number}`);
+	}
+
+	/** Test-side: simulate a maintainer merging the PR on GitHub. */
+	markPullRequestMerged(fullName: string, number: number): void {
+		const pr = this.pullRequest(fullName, number);
+		if (!pr) throw new Error(`stub: no PR #${number} on ${fullName}`);
+		pr.state = 'closed';
+		pr.merged = true;
 	}
 
 	/** Requests that would have mutated provider state (token minting excluded). */
@@ -641,6 +660,7 @@ export class GithubStub {
 					base: String(payload.base ?? ''),
 					headSha,
 					state: 'open',
+					merged: false,
 					htmlUrl: `https://github.example/${fullName}/pull/${number}`,
 				};
 				repo.pullRequests.set(`pr-${number}`, pr);
@@ -656,6 +676,24 @@ export class GithubStub {
 					(pr) => pr.head === headBranch && (state === 'all' || pr.state === state),
 				);
 				return this.json(res, 200, list.map(serializePullRequest));
+			}
+
+			const pullMatch = sub.match(/^\/pulls\/(\d+)$/);
+			if (pullMatch && (method === 'GET' || method === 'PATCH')) {
+				const pr = repo.pullRequests.get(`pr-${pullMatch[1]}`);
+				if (!pr) return this.json(res, 404, { message: 'Not Found' });
+				if (method === 'GET') return this.json(res, 200, serializePullRequest(pr));
+				const payload = (body ?? {}) as { state?: string };
+				if (payload.state === 'closed' || payload.state === 'open') {
+					if (pr.merged) {
+						return this.json(res, 422, {
+							message: 'Validation Failed',
+							errors: [{ message: 'state cannot be changed. The pull request has been merged.' }],
+						});
+					}
+					pr.state = payload.state;
+				}
+				return this.json(res, 200, serializePullRequest(pr));
 			}
 
 			return this.json(res, 404, { message: `stub: no route for ${method} ${path}` });
