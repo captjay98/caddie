@@ -490,6 +490,19 @@ test('Stop build sends durable abort and retains the stopped project', async ({ 
   await page.getByRole('button', { name: 'Stop build', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Needs attention' })).toBeVisible();
   await expect(page.getByTestId('project-workflow')).toContainText('Your plan and files are retained');
+  // A user stop is a stopped BUILD (same rule as the server projection), never "the plan needs another pass".
+  await expect(page.getByTestId('project-workflow').getByRole('button', { name: 'Retry build' })).toBeVisible();
+  await expect(page.getByTestId('project-workflow').getByRole('button', { name: 'Continue the plan' })).toHaveCount(0);
   expect(fx.stops).toEqual(['/agents/coordinator/conv-project-workflow/abort', '/api/projects/proj-workflow/workflow/stop']);
   expect(fx.admissions).toHaveLength(0);
+});
+
+test('a plan stuck before approval reads as a plan to continue, never as a failed build', async ({ context, page }) => {
+  await fixture(context, { phase: 'blocked' });
+  await page.goto('/app/?pane=channel');
+  const card = page.getByTestId('project-workflow');
+  await expect(card.getByRole('heading', { name: 'Plan needs another pass' })).toBeVisible();
+  await expect(card).toContainText("Caddie didn't finish the plan");
+  await expect(card.getByRole('button', { name: 'Continue the plan' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Retry build' })).toHaveCount(0);
 });

@@ -32,6 +32,10 @@ const LABEL: Record<WorkflowPhase, string> = {
   blocked: "Needs attention",
   ready: "Your app is ready to try",
 };
+/** The detail stopWorkflow writes; marks a user stop (server: project-experience STOP_SENTINEL). */
+const STOP_SENTINEL = "Stop requested.";
+/** Approval statuses that mean the plan was approved at some point (server: planWasApproved). */
+const PLAN_EVER_APPROVED: ReadonlySet<string> = new Set(["approved", "revoked", "expired"]);
 /** A server-backed workspace inside the conversation, never model-markdown actions. */
 export function ProjectWorkflow({
   projectId,
@@ -53,7 +57,6 @@ export function ProjectWorkflow({
     refetchInterval: 2000,
   });
   const workflow = state.data?.workflow;
-  const planApproved = state.data?.approval?.status === "approved";
   const repoQuery = useProjectRepo(
     { actorId: chrome.actorId },
     chrome.homeProject?.id === projectId ? null : projectId,
@@ -61,7 +64,13 @@ export function ProjectWorkflow({
   const linkedRepo = repoQuery.data?.repo ?? null;
   // A block BEFORE any approved plan is a stuck plan, not a stuck build:
   // there is nothing built to "retry". Tell the truth and resume planning.
-  const planningBlocked = workflow?.phase === "blocked" && !planApproved;
+  // Same rule as the server (project-experience stageOf + retryWorkflow): a
+  // user stop is always a stopped build (stopWorkflow only stops a build),
+  // and a plan whose approval later expired or was revoked was still
+  // approved, so its retry resumes the build, not planning.
+  const stopped = workflow?.phase === "blocked" && Boolean(workflow.detail?.startsWith(STOP_SENTINEL));
+  const planEverApproved = PLAN_EVER_APPROVED.has(state.data?.approval?.status ?? "");
+  const planningBlocked = workflow?.phase === "blocked" && !stopped && !planEverApproved;
   const agent = useFlueAgent({
     url:
       workflow && showTranscript
