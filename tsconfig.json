@@ -31,6 +31,7 @@
 		"apps/app/src/cloudflare-workers.d.ts"
 	],
 	"exclude": [
-		"tests/fixtures/forge-task-tracker"
+		"tests/fixtures/forge-task-tracker",
+		"tests/fixtures/preview-app"
 	]
 }
