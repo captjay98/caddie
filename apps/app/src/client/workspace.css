@@ -6478,6 +6478,21 @@ body.conv-resizing * {
 
 /* Save to GitHub + repo-before-build nudge (ProjectWorkflow). */
 .save-github { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.save-github .state-detail, .save-github-meta { margin: 0; }
+.save-github-meta { font-size: var(--r-meta); color: var(--color-muted); overflow-wrap: anywhere; }
+.save-github-state { display: inline-flex; align-items: center; gap: 6px; }
+.save-github-state[data-state='merged'] svg { color: var(--color-ok); }
+.save-github-confirm {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	padding-top: 0.45rem;
+	border-top: 1px solid var(--color-line);
+}
+.save-github-confirm-text { flex: 1 1 100%; font-size: var(--r-meta); color: var(--color-bright); }
+.save-github-confirm-text code { font-size: 0.95em; }
+.save-github-error { color: var(--color-danger); }
 .workflow-repo-nudge { color: var(--color-muted); }
 
 /* Code (§4): the connected-repo state + create/connect forms. */

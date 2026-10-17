@@ -177,10 +177,25 @@ export interface GithubInstallationInfo {
 	suspended: boolean;
 }
 
+export type GithubMergeMethod = 'merge' | 'squash' | 'rebase';
+
 export interface GithubRepoInfo {
 	fullName: string;
 	defaultBranch: string;
+	/**
+	 * Merge methods the repo allows, or null when GitHub did not say (the
+	 * allow_* flags are only returned to callers with push access).
+	 */
+	mergeMethods: Record<GithubMergeMethod, boolean> | null;
 }
+
+/** GitHub's answer to a merge request. Every other response is a thrown GithubError. */
+export type GithubMergeOutcome =
+	| { outcome: 'merged'; sha: string }
+	/** 409: the head moved past the commit the merge was pinned to. */
+	| { outcome: 'head-moved'; message: string }
+	/** 405: GitHub will not merge (conflicts, branch protection, method not allowed). */
+	| { outcome: 'not-mergeable'; message: string };
 
 export interface GithubRepoCreated {
 	fullName: string;
@@ -452,10 +467,20 @@ export class GithubRestClient {
 	async getRepo(installationId: string, fullName: string): Promise<GithubRepoInfo> {
 		const body = (await this.request('GET', `/repos/${fullName}`, {
 			auth: { installationId },
-		})) as { full_name?: unknown; default_branch?: unknown };
+		})) as {
+			full_name?: unknown;
+			default_branch?: unknown;
+			allow_merge_commit?: unknown;
+			allow_squash_merge?: unknown;
+			allow_rebase_merge?: unknown;
+		};
+		const flags = [body.allow_merge_commit, body.allow_squash_merge, body.allow_rebase_merge];
 		return {
 			fullName: typeof body.full_name === 'string' ? body.full_name : fullName,
 			defaultBranch: typeof body.default_branch === 'string' ? body.default_branch : 'main',
+			mergeMethods: flags.every((flag) => typeof flag === 'boolean')
+				? { merge: flags[0] === true, squash: flags[1] === true, rebase: flags[2] === true }
+				: null,
 		};
 	}
 
@@ -630,11 +655,16 @@ export class GithubRestClient {
 		return String(body.sha ?? '');
 	}
 
+	/**
+	 * Create a tree on top of `baseTreeSha`. An entry with `sha: null` removes
+	 * that path from the base tree (GitHub's documented delete form); callers
+	 * only pass paths they confirmed exist in the base tree.
+	 */
 	async createTree(
 		installationId: string,
 		fullName: string,
 		baseTreeSha: string | null,
-		entries: Array<{ path: string; sha: string }>,
+		entries: Array<{ path: string; sha: string | null }>,
 	): Promise<string> {
 		const body = (await this.request('POST', `/repos/${fullName}/git/trees`, {
 			auth: { installationId },
@@ -756,12 +786,58 @@ export class GithubRestClient {
 		});
 		return pullRequestStatusFrom(body, number);
 	}
+
+	/**
+	 * Merge a PR, pinned to `sha`: GitHub itself refuses (409) when the head
+	 * moved past the commit the caller approved, so a push that lands after
+	 * the approval is never merged. Callers read the PR first and hold an
+	 * exact approval; this method only maps GitHub's answer.
+	 */
+	async mergePullRequest(
+		installationId: string,
+		fullName: string,
+		number: number,
+		input: { sha: string; method: GithubMergeMethod; commitTitle?: string },
+	): Promise<GithubMergeOutcome> {
+		const path = `/repos/${fullName}/pulls/${number}/merge`;
+		const res = await this.requestRaw('PUT', path, {
+			auth: { installationId },
+			body: {
+				sha: input.sha,
+				merge_method: input.method,
+				// Omitted: GitHub's own default title ("<PR title> (#n)" for squash).
+				...(input.commitTitle ? { commit_title: input.commitTitle } : {}),
+			},
+		});
+		const body = (await parseBody(res)) as { sha?: unknown; merged?: unknown; message?: unknown } | null;
+		const message =
+			body && typeof body.message === 'string' ? body.message : snippet(JSON.stringify(body ?? null));
+		if (res.status === 200 && body?.merged === true && typeof body.sha === 'string' && body.sha) {
+			return { outcome: 'merged', sha: body.sha };
+		}
+		if (res.status === 409) return { outcome: 'head-moved', message };
+		if (res.status === 405) return { outcome: 'not-mergeable', message };
+		if (res.status >= 200 && res.status < 300) {
+			// Never report a merge GitHub did not confirm.
+			throw new GithubError(
+				502,
+				'GITHUB_PROVIDER_ERROR',
+				`github did not confirm the merge of pull request #${number}: ${message}`,
+			);
+		}
+		const code = classificationFor(res.status);
+		throw new GithubError(classificationStatus(code), code, `github PUT ${path} -> HTTP ${res.status}: ${message}`);
+	}
 }
 
 /** A PR plus its lifecycle state, as GitHub reports it. */
 export interface GithubPullRequestStatus extends GithubPullRequestInfo {
 	state: 'open' | 'closed';
 	merged: boolean;
+	/** GitHub's mergeability check: null while GitHub is still computing it. */
+	mergeable: boolean | null;
+	/** The commit a merge produced; null unless merged. */
+	mergeCommitSha: string | null;
 }
 
 function pullRequestStatusFrom(raw: unknown, fallbackNumber: number): GithubPullRequestStatus {
@@ -770,15 +846,21 @@ function pullRequestStatusFrom(raw: unknown, fallbackNumber: number): GithubPull
 		state?: unknown;
 		merged?: unknown;
 		merged_at?: unknown;
+		mergeable?: unknown;
+		merge_commit_sha?: unknown;
 		head?: { ref?: unknown; sha?: unknown };
 		base?: { ref?: unknown };
 		html_url?: unknown;
 	};
+	// GitHub sets merged:true and merged_at on a merged PR (state is then 'closed').
+	const merged = pr.merged === true || typeof pr.merged_at === 'string';
 	return {
 		number: Number(pr.number ?? fallbackNumber),
 		state: pr.state === 'closed' ? 'closed' : 'open',
-		// GitHub sets merged:true and merged_at on a merged PR (state is then 'closed').
-		merged: pr.merged === true || typeof pr.merged_at === 'string',
+		merged,
+		mergeable: typeof pr.mergeable === 'boolean' ? pr.mergeable : null,
+		// merge_commit_sha is a TEST merge commit while the PR is open; only a merged PR's is real.
+		mergeCommitSha: merged && typeof pr.merge_commit_sha === 'string' && pr.merge_commit_sha ? pr.merge_commit_sha : null,
 		head: String(pr.head?.ref ?? ''),
 		base: String(pr.base?.ref ?? ''),
 		headSha: String(pr.head?.sha ?? ''),

@@ -802,6 +802,26 @@ export class SandboxDriver {
 		return listing.files.map((item) => item.path);
 	}
 
+	/**
+	 * One directory level with each entry's kind and size (the same inspect
+	 * list call as listDir), so a tree walk needs one request per directory
+	 * instead of one stat per entry.
+	 */
+	async listEntries(
+		sessionId: string,
+		path: string,
+	): Promise<Array<{ name: string; isDir: boolean; isFile: boolean; isSymlink: boolean; size: number }>> {
+		const { image, absolutePath } = await this.requireSessionForRead(sessionId, path);
+		const listing = await this.requireListing(image, absolutePath, path);
+		return listing.files.map((item) => ({
+			name: item.path,
+			isDir: item.isDir,
+			isFile: item.isRegular && !item.isDir,
+			isSymlink: item.isSymlink,
+			size: item.size,
+		}));
+	}
+
 	/** Stat-based existence: typed FILE_NOT_FOUND maps to false, other errors rethrow. */
 	async pathExists(sessionId: string, path: string): Promise<boolean> {
 		try {

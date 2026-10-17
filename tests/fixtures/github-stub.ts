@@ -22,8 +22,13 @@ import { createHash, createVerify, randomBytes } from 'node:crypto';
  *   POST /repos/{owner}/{repo}/git/commits
  *   POST /repos/{owner}/{repo}/pulls                  PR (422 when head PR exists)
  *   GET  /repos/{owner}/{repo}/pulls                  open PR lookup by head
- *   GET  /repos/{owner}/{repo}/pulls/{n}              one PR (state + merged)
+ *   GET  /repos/{owner}/{repo}/pulls/{n}              one PR (state + merged + mergeable)
  *   PATCH /repos/{owner}/{repo}/pulls/{n}             state change (422 once merged)
+ *   PUT  /repos/{owner}/{repo}/pulls/{n}/merge        merge pinned to `sha` (409 when
+ *                                                     the head moved, 405 when not
+ *                                                     mergeable); the result tree is
+ *                                                     the head's tree (stub shortcut:
+ *                                                     tests branch PRs off the current base)
  *
  * Behavioral guarantees the tests rely on:
  *   - every request is recorded (method, path, auth kind) so "no mutating call
@@ -104,6 +109,9 @@ export interface StubPullRequest {
 	state: 'open' | 'closed';
 	/** Merged PRs are closed with merged:true (GitHub's shape); set via markPullRequestMerged. */
 	merged: boolean;
+	/** GitHub's mergeability answer (null = still computing); tests flip it with setPullRequestMergeable. */
+	mergeable: boolean | null;
+	mergeCommitSha: string | null;
 	htmlUrl: string;
 }
 
@@ -179,6 +187,8 @@ function serializePullRequest(pr: StubPullRequest): Record<string, unknown> {
 		state: pr.state,
 		merged: pr.merged,
 		merged_at: pr.merged ? '2026-01-01T00:00:00Z' : null,
+		mergeable: pr.merged ? null : pr.mergeable,
+		merge_commit_sha: pr.mergeCommitSha,
 		head: { ref: pr.head, sha: pr.headSha },
 		base: { ref: pr.base },
 		html_url: pr.htmlUrl,
@@ -191,6 +201,8 @@ export class GithubStub {
 	readonly refUpdates: Array<{ repo: string; branch: string; force: boolean; accepted: boolean }> = [];
 	/** Count of force:true update attempts (must stay 0 in every suite). */
 	forceViolations = 0;
+	/** Every merge ATTEMPT (PUT /pulls/{n}/merge), accepted or refused. */
+	readonly merges: Array<{ repo: string; number: number; sha: string | null; method: string }> = [];
 	url = '';
 
 	private server: Server | undefined;
@@ -217,7 +229,9 @@ export class GithubStub {
 		this.installations.set(String(input.installationId), {
 			installationId: String(input.installationId),
 			accountLogin: input.accountLogin,
-			permissions: input.permissions ?? { contents: 'read', pull_requests: 'write' },
+			// GitHub requires Contents write for every git-data write and merge;
+			// tests that need a read-only App pass permissions explicitly.
+			permissions: input.permissions ?? { contents: 'write', pull_requests: 'write' },
 			appSlug: input.appSlug ?? 'caddie-forge-app',
 			suspended: false,
 		});
@@ -316,6 +330,46 @@ export class GithubStub {
 		pr.merged = true;
 	}
 
+	/** Test-side: GitHub's mergeability answer for a PR (false = conflicts). */
+	setPullRequestMergeable(fullName: string, number: number, mergeable: boolean | null): void {
+		const pr = this.pullRequest(fullName, number);
+		if (!pr) throw new Error(`stub: no PR #${number} on ${fullName}`);
+		pr.mergeable = mergeable;
+	}
+
+	/** Test-side: someone else pushes one commit onto a branch (moves a PR head). */
+	pushToBranch(fullName: string, branch: string, files: Record<string, string>): string {
+		const repo = this.repos.get(fullName);
+		const head = repo?.branches.get(branch);
+		if (!repo || !head) throw new Error(`stub: no branch ${branch} on ${fullName}`);
+		const parent = repo.commits.get(head.sha);
+		const entries: StubTreeEntry[] = Object.entries(files).map(([path, content]) => {
+			const bytes = Buffer.from(content, 'utf8');
+			const sha = sha1Hex(bytes);
+			repo.blobs.set(sha, { sha, content: bytes });
+			return { path, mode: '100644', type: 'blob', sha, size: bytes.length };
+		});
+		const tree = this.buildTree(repo, parent?.tree, entries, []);
+		const sha = `p${(repo.nextCommitNumber += 1)}-${sha1Hex(`${branch}:${tree.sha}:${this.now()}`)}`;
+		repo.commits.set(sha, { sha, message: 'outside push', tree: tree.sha, parents: [head.sha] });
+		head.sha = sha;
+		return sha;
+	}
+
+	/** Paths in a branch head's tree (what the repo would show on GitHub). */
+	branchFiles(fullName: string, branch: string): Map<string, Buffer> {
+		const repo = this.repos.get(fullName);
+		const head = repo?.branches.get(branch);
+		const commit = head ? repo?.commits.get(head.sha) : undefined;
+		const tree = commit ? repo?.trees.get(commit.tree) : undefined;
+		const files = new Map<string, Buffer>();
+		for (const entry of tree?.entries ?? []) {
+			const blob = repo?.blobs.get(entry.sha);
+			if (entry.type === 'blob' && blob) files.set(entry.path, blob.content);
+		}
+		return files;
+	}
+
 	/** Requests that would have mutated provider state (token minting excluded). */
 	mutatingRequests(): StubRequest[] {
 		return this.requests.filter((r) => {
@@ -387,11 +441,17 @@ export class GithubStub {
 		return repo.commits.get(refOrSha) ?? null;
 	}
 
-	private buildTree(repo: StubRepo, baseTreeSha: string | undefined, entries: StubTreeEntry[]): StubTree {
+	private buildTree(
+		repo: StubRepo,
+		baseTreeSha: string | undefined,
+		entries: StubTreeEntry[],
+		deletions: string[],
+	): StubTree {
 		const merged = new Map<string, StubTreeEntry>();
 		const baseTree = baseTreeSha ? repo.trees.get(baseTreeSha) : undefined;
 		if (baseTree) for (const entry of baseTree.entries) merged.set(entry.path, { ...entry });
 		for (const entry of entries) merged.set(entry.path, { ...entry });
+		for (const path of deletions) merged.delete(path);
 		const list = [...merged.values()].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 		const sha = `tree-${sha1Hex(list.map((e) => `${e.mode} ${e.type} ${e.sha} ${e.path}`).join('\n') + this.now())}`;
 		const tree = { sha, entries: list };
@@ -512,6 +572,9 @@ export class GithubStub {
 					owner: { login: repo.owner },
 					default_branch: repo.defaultBranch,
 					html_url: `https://github.example/${fullName}`,
+					allow_merge_commit: true,
+					allow_squash_merge: true,
+					allow_rebase_merge: true,
 				});
 			}
 
@@ -603,10 +666,22 @@ export class GithubStub {
 			if (method === 'POST' && sub === '/git/trees') {
 				const payload = (body ?? {}) as {
 					base_tree?: string;
-					tree?: Array<{ path: string; sha: string; mode?: string }>;
+					tree?: Array<{ path: string; sha: string | null; mode?: string }>;
 				};
 				const provided: StubTreeEntry[] = [];
+				const deletions: string[] = [];
+				const baseEntries = new Set(
+					(payload.base_tree ? repo.trees.get(payload.base_tree)?.entries ?? [] : []).map((e) => e.path),
+				);
 				for (const item of payload.tree ?? []) {
+					if (item.sha === null) {
+						// GitHub's delete form; deleting a path the base tree lacks is a 422.
+						if (!baseEntries.has(String(item.path))) {
+							return this.json(res, 422, { message: `GitRPC::BadObjectState: ${item.path} is not in the base tree` });
+						}
+						deletions.push(String(item.path));
+						continue;
+					}
 					const blob = item.sha ? repo.blobs.get(item.sha) : undefined;
 					provided.push({
 						path: String(item.path),
@@ -616,7 +691,7 @@ export class GithubStub {
 						size: blob?.content.length ?? 0,
 					});
 				}
-				const tree = this.buildTree(repo, payload.base_tree, provided);
+				const tree = this.buildTree(repo, payload.base_tree, provided, deletions);
 				return this.json(res, 201, { sha: tree.sha });
 			}
 
@@ -661,6 +736,8 @@ export class GithubStub {
 					headSha,
 					state: 'open',
 					merged: false,
+					mergeable: true,
+					mergeCommitSha: null,
 					htmlUrl: `https://github.example/${fullName}/pull/${number}`,
 				};
 				repo.pullRequests.set(`pr-${number}`, pr);
@@ -682,6 +759,8 @@ export class GithubStub {
 			if (pullMatch && (method === 'GET' || method === 'PATCH')) {
 				const pr = repo.pullRequests.get(`pr-${pullMatch[1]}`);
 				if (!pr) return this.json(res, 404, { message: 'Not Found' });
+				// An open PR's head follows its branch, like GitHub's.
+				if (pr.state === 'open') pr.headSha = repo.branches.get(pr.head)?.sha ?? pr.headSha;
 				if (method === 'GET') return this.json(res, 200, serializePullRequest(pr));
 				const payload = (body ?? {}) as { state?: string };
 				if (payload.state === 'closed' || payload.state === 'open') {
@@ -696,7 +775,39 @@ export class GithubStub {
 				return this.json(res, 200, serializePullRequest(pr));
 			}
 
-			return this.json(res, 404, { message: `stub: no route for ${method} ${path}` });
+			const mergeMatch = sub.match(/^\/pulls\/(\d+)\/merge$/);
+			if (mergeMatch && method === 'PUT') {
+				const pr = repo.pullRequests.get(`pr-${mergeMatch[1]}`);
+				if (!pr) return this.json(res, 404, { message: 'Not Found' });
+				const payload = (body ?? {}) as { sha?: string; merge_method?: string; commit_title?: string };
+				const head = repo.branches.get(pr.head)?.sha ?? pr.headSha;
+				this.merges.push({ repo: fullName, number: pr.number, sha: payload.sha ?? null, method: payload.merge_method ?? 'merge' });
+				if (pr.merged || pr.state !== 'open') return this.json(res, 405, { message: 'Pull Request is not mergeable' });
+				if (payload.sha && payload.sha !== head) {
+					return this.json(res, 409, { message: 'Head branch was modified. Review and try the merge again.' });
+				}
+				if (pr.mergeable === false) return this.json(res, 405, { message: 'Pull Request is not mergeable' });
+				const mergeMethod = payload.merge_method ?? 'merge';
+				if (!['merge', 'squash', 'rebase'].includes(mergeMethod)) {
+					return this.json(res, 422, { message: `Invalid merge_method: ${mergeMethod}` });
+				}
+				const base = repo.branches.get(pr.base);
+				const headCommit = repo.commits.get(head);
+				if (!base || !headCommit) return this.json(res, 422, { message: 'Validation Failed' });
+				const sha = `m${(repo.nextCommitNumber += 1)}-${sha1Hex(`${mergeMethod}:${head}:${base.sha}:${this.now()}`)}`;
+				repo.commits.set(sha, {
+					sha,
+					message: payload.commit_title ?? `${pr.title} (#${pr.number})`,
+					tree: headCommit.tree,
+					parents: mergeMethod === 'merge' ? [base.sha, head] : [base.sha],
+				});
+				base.sha = sha;
+				pr.state = 'closed';
+				pr.merged = true;
+				pr.headSha = head;
+				pr.mergeCommitSha = sha;
+				return this.json(res, 200, { sha, merged: true, message: 'Pull Request successfully merged' });
+			}
 		} catch (error) {
 			return this.json(res, 500, { message: `stub error: ${String(error)}` });
 		}

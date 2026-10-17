@@ -9,7 +9,7 @@ import { splitFeatureBlock, splitDesignMocks } from "@caddie/contracts";
 import type { BuildWorkflow, WorkflowPhase } from "../../server/build-workflow.ts";
 import { fetchJson, postJson } from "../api.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
-import { useProjectRepo } from "../queries.ts";
+import { useProjectRepo, useSourceSave, type ProjectRepoView, type SourceSaveView } from "../queries.ts";
 import { Icon } from "../icons.tsx";
 import { InteractivePreview } from "../artifacts/InteractivePreview.tsx";
 import { DesignMockPreview } from "../artifacts/DesignMockPreview.tsx";
@@ -448,8 +448,8 @@ export function ProjectWorkflow({
             contentUrl={`/api/projects/${encodeURIComponent(projectId)}/workflow/preview/${encodeURIComponent(workflow.previewId)}`}
           />
           <SaveToGithub
+            actorId={chrome.actorId}
             projectId={projectId}
-            runId={workflow.runId}
             previewId={workflow.previewId}
             repo={linkedRepo}
             onConnect={() => chrome.goProjectTab("/project/settings", { project: projectId })}
@@ -482,70 +482,51 @@ export function ProjectWorkflow({
   );
 }
 
+/** "42 files · left out node_modules/, dist/, .env" — what the save carried, in one line. */
+function sourceSummary(save: SourceSaveView): string {
+  const leftOut = save.skipped.filter((skip) => skip.reason !== "noise").map((skip) => skip.path);
+  const parts = [`${save.fileCount} ${save.fileCount === 1 ? "file" : "files"}`];
+  if (leftOut.length > 0)
+    parts.push(`left out ${leftOut.slice(0, 3).join(", ")}${leftOut.length > 3 ? ` and ${leftOut.length - 3} more` : ""}`);
+  if (save.deleted.length > 0)
+    parts.push(`removes ${save.deleted.length} deleted ${save.deleted.length === 1 ? "file" : "files"}`);
+  return parts.join(" · ");
+}
+
 /**
- * Save to GitHub (v2 "GitHub is the home for each project's code"): pushes the
- * built app's HTML to the project's linked repo as `index.html`, over the real
- * delivery route (mode: merge-default-branch). Writing the default branch runs
- * behind the P03 approval gate — a gate refusal is surfaced honestly as "this
- * needs your approval", never silently retried. When no repo is linked yet, it
- * points the user at Code settings instead of pretending it can push.
+ * Save the code to GitHub. The SERVER reads the checked build's source from
+ * its sandbox image and opens a pull request on its own branch, never the
+ * default branch, so saving needs no approval. The live pull request then
+ * offers Merge, which records an approval for exactly its head commit before
+ * the merge runs, and Close. With no repo linked yet it points at Code
+ * settings instead of pretending it can save.
  */
 function SaveToGithub(props: {
+  actorId: string;
   projectId: string;
-  runId: string;
-  previewId: string | null;
-  repo: import("../queries.ts").ProjectRepoView | null;
+  previewId: string;
+  repo: ProjectRepoView | null;
   onConnect: () => void;
 }): ReactElement {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState<{ htmlUrl: string | null; reconciled: boolean } | null>(null);
-  const [needsApproval, setNeedsApproval] = useState(false);
-
   const repo = props.repo;
+  const status = useSourceSave({ actorId: props.actorId }, repo ? props.projectId : null);
+  const [busy, setBusy] = useState<"save" | "merge" | "close" | null>(null);
+  const [confirmMerge, setConfirmMerge] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const githubPath = `/api/projects/${encodeURIComponent(props.projectId)}/github`;
 
-  async function save() {
-    if (busy || !repo || !props.previewId) return;
-    setBusy(true);
+  async function act(kind: "save" | "merge" | "close", run: () => Promise<unknown>) {
+    if (busy) return;
+    setBusy(kind);
     setError(null);
-    setNeedsApproval(false);
     try {
-      // The built app is served as one HTML document; save it as index.html.
-      const html = await fetch(
-        `/api/projects/${encodeURIComponent(props.projectId)}/workflow/preview/${encodeURIComponent(props.previewId)}`,
-      ).then((r) => {
-        if (!r.ok) throw new Error("The built app could not be read.");
-        return r.text();
-      });
-      const result = await postJson<{ delivery: { htmlUrl: string | null }; reconciled: boolean }>(
-        `/api/projects/${encodeURIComponent(props.projectId)}/github/deliveries`,
-        {
-          mode: "merge-default-branch",
-          runId: props.runId,
-          installationId: repo.installationId,
-          repoFullName: repo.repoFullName,
-          title: "Save built app from Caddie",
-          body: "The current built app, saved from Caddie.",
-          files: [{ path: "index.html", content: html }],
-        },
-      );
-      setSaved({ htmlUrl: result.delivery.htmlUrl, reconciled: result.reconciled });
+      await run();
+      setConfirmMerge(false);
     } catch (cause) {
-      // The P03 gate refuses an unapproved default-branch write — that is the
-      // expected, honest path, not a failure to hide.
-      const code = (cause as { kind?: string; code?: string }).kind ?? (cause as { code?: string }).code;
-      const message = cause instanceof Error ? cause.message : String(cause);
-      if (
-        code === "approval_required" ||
-        code === "effect_requires_approval" ||
-        /approv/i.test(message)
-      ) {
-        setNeedsApproval(true);
-      } else {
-        setError(message);
-      }
+      setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setBusy(false);
+      setBusy(null);
+      void status.refetch();
     }
   }
 
@@ -563,46 +544,136 @@ function SaveToGithub(props: {
     );
   }
 
+  const save = status.data?.save ?? null;
+  const pr = status.data?.pullRequest ?? null;
+  const mergeIntent = status.data?.mergeIntent ?? null;
+  const savedThisBuild = save !== null && save.outputId === props.previewId && save.pullRequestNumber !== null;
+  const base = pr?.baseBranch || "main";
+  const prLink = (label: string, url: string | null) =>
+    url ? (
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        {label}
+      </a>
+    ) : (
+      label
+    );
+
   return (
     <div className="save-github" data-testid="save-github">
-      {saved ? (
-        <p className="state-detail" data-testid="save-github-done">
-          Saved to{" "}
-          {saved.htmlUrl ? (
-            <a href={saved.htmlUrl} target="_blank" rel="noopener noreferrer">
-              {repo.repoFullName}
-            </a>
-          ) : (
-            repo.repoFullName
-          )}
-          {saved.reconciled ? " (already up to date)." : "."}
-        </p>
-      ) : needsApproval ? (
-        <p className="state-detail" role="status" data-testid="save-github-approval">
-          Saving to <b>{repo.repoFullName}</b> writes its default branch, so it needs your approval
-          first. Review and approve the change with Caddie, then save again.
-        </p>
-      ) : (
+      {!savedThisBuild ? (
         <>
           <p className="state-detail">
-            Save the built app to <b>{repo.repoFullName}</b>. Writing the repo runs behind your approval —
-            Caddie never pushes on its own.
+            Save this app&rsquo;s code to <b>{repo.repoFullName}</b> as a pull request. Nothing changes in the
+            repo until you merge it.
           </p>
+          {save?.pullRequestNumber ? (
+            <p className="save-github-meta" data-testid="save-github-earlier">
+              An earlier build is saved as {prLink(`pull request #${save.pullRequestNumber}`, save.htmlUrl)}.
+            </p>
+          ) : null}
           <div className="row-actions">
             <button
               type="button"
               className="btn-key"
               data-testid="save-github-save"
-              disabled={busy || !props.previewId}
-              onClick={() => void save()}
+              disabled={busy !== null || status.isPending}
+              onClick={() => void act("save", () => postJson(`${githubPath}/source`, { outputId: props.previewId }))}
             >
-              {busy ? "Saving…" : "Save to GitHub"}
+              <Icon name="github" title="" /> {busy === "save" ? "Saving…" : "Save code to GitHub"}
             </button>
           </div>
         </>
+      ) : (
+        <>
+          <p className="state-detail" data-testid="save-github-pr">
+            Saved as {prLink(`pull request #${save.pullRequestNumber}`, pr?.htmlUrl ?? save.htmlUrl)} on{" "}
+            <b>{repo.repoFullName}</b>.
+          </p>
+          <p className="save-github-meta">{sourceSummary(save)}</p>
+          {status.data?.pullRequestError ? (
+            <p className="save-github-meta" role="status">
+              Couldn&rsquo;t check the pull request on GitHub: {status.data.pullRequestError}{" "}
+              <button type="button" className="r-link" onClick={() => void status.refetch()}>
+                Check again
+              </button>
+            </p>
+          ) : pr?.state === "merged" ? (
+            <p className="state-detail save-github-state" data-state="merged" data-testid="save-github-merged">
+              <Icon name="check" title="" />
+              <span>
+                Merged into <b>{base}</b>.
+              </span>
+            </p>
+          ) : pr?.state === "closed" ? (
+            <p className="state-detail" data-testid="save-github-closed">
+              Closed without merging. {prLink("Reopen it on GitHub", pr.htmlUrl)} to merge it.
+            </p>
+          ) : pr?.state === "open" && confirmMerge ? (
+            <div className="save-github-confirm" role="group" aria-label={`Merge pull request #${pr.number}`}>
+              <span className="save-github-confirm-text">
+                Merge pull request #{pr.number} into <b>{base}</b>? Caddie merges exactly commit{" "}
+                <code>{pr.headSha.slice(0, 7)}</code>. A merge can&rsquo;t be undone from Caddie.
+              </span>
+              <button
+                type="button"
+                className="btn-key"
+                data-testid="save-github-merge-confirm"
+                disabled={busy !== null || !mergeIntent}
+                onClick={() =>
+                  void act("merge", async () => {
+                    // The approval is for this PR at this exact commit; the server
+                    // re-checks it and pins the merge to the same commit.
+                    await postJson("/api/approvals", { intent: mergeIntent, decision: "approved" });
+                    await postJson(`${githubPath}/pulls/${pr.number}/merge`, {
+                      repoFullName: save.repoFullName,
+                      headSha: pr.headSha,
+                    });
+                  })
+                }
+              >
+                {busy === "merge" ? "Merging…" : "Approve and merge"}
+              </button>
+              <button type="button" className="btn-ghost" disabled={busy !== null} onClick={() => setConfirmMerge(false)}>
+                Cancel
+              </button>
+            </div>
+          ) : pr?.state === "open" ? (
+            <>
+              {pr.mergeable === false ? (
+                <p className="save-github-meta" role="status" data-testid="save-github-conflict">
+                  GitHub reports a conflict with <b>{base}</b>. Resolve it on GitHub, then merge.
+                </p>
+              ) : null}
+              <div className="row-actions">
+                <button
+                  type="button"
+                  className="btn-key"
+                  data-testid="save-github-merge"
+                  disabled={busy !== null || pr.mergeable === false || !mergeIntent}
+                  onClick={() => setConfirmMerge(true)}
+                >
+                  Merge into {base}
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  data-testid="save-github-close"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    void act("close", () =>
+                      postJson(`${githubPath}/pulls/${pr.number}/close`, { repoFullName: save.repoFullName }),
+                    )
+                  }
+                >
+                  {busy === "close" ? "Closing…" : "Close pull request"}
+                </button>
+              </div>
+            </>
+          ) : null}
+        </>
       )}
       {error ? (
-        <div role="alert" className="state-detail" data-testid="save-github-error">
+        <div role="alert" className="state-detail save-github-error" data-testid="save-github-error">
           {error}
         </div>
       ) : null}

@@ -392,7 +392,8 @@ describe('P08 slice 1 — installation binding', () => {
 		expect(body.installation.installationId).toBe(GITHUB_APP_INSTALLATION_A);
 		expect(body.installation.accountLogin).toBe(GITHUB_ACCOUNT_A);
 		expect(body.installation.status).toBe('active');
-		expect(body.installation.permissions['contents']).toBe('read');
+		// resolved live from the App API: the stub's default grant (Contents write, which every git write needs)
+		expect(body.installation.permissions['contents']).toBe('write');
 		// only a redacted fingerprint of the private key may ever be echoed
 		expect(body.installation.fingerprint).toMatch(/^sha256-[0-9a-f]{16}$/);
 		const rows = await d1Rows(
@@ -1080,6 +1081,83 @@ describe('P08 slice 2 — import + receipt-backed export', () => {
 		expect(((await deniedClose.json()) as { error?: string }).error).toBe('installation_revoked');
 		expect(stub.requests.filter((r) => r.method === 'PATCH').length).toBe(patchesBefore);
 		expect(stub.pullRequest('octocat-c/c-repo', prOnCNumber)?.state).toBe('open');
+
+		// A revoked installation blocks merging too, before GitHub is asked.
+		const mergesBefore = stub.merges.length;
+		const deniedMerge = await worker(ALICE, `/api/projects/${aliceProjectId}/github/pulls/${prOnCNumber}/merge`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				repoFullName: 'octocat-c/c-repo',
+				headSha: stub.pullRequest('octocat-c/c-repo', prOnCNumber)?.headSha,
+			}),
+		});
+		expect(deniedMerge.status).toBe(403);
+		expect(((await deniedMerge.json()) as { error?: string }).error).toBe('installation_revoked');
+		expect(stub.merges.length).toBe(mergesBefore);
+	});
+
+	test('merge route: refused with the exact intent until approved through /api/approvals, then one pinned merge', async () => {
+		const delivered = await worker(ALICE, `/api/projects/${aliceProjectId}/github/deliveries`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				runId: 'run_p08_merge_route',
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: FORGE_REPO,
+				headBranch: 'caddie/merge-route-1',
+				title: 'Merge through the route',
+				files: [{ path: 'src/merge-route.ts', content: 'export const viaRoute = true;\n' }],
+				mode: 'pull-request',
+			}),
+		});
+		expect(delivered.status).toBe(201);
+		const { delivery } = (await delivered.json()) as { delivery: { pullRequestNumber: number; headSha: string } };
+		const merge = (jar: Jar, projectId = aliceProjectId) =>
+			worker(jar, `/api/projects/${projectId}/github/pulls/${delivery.pullRequestNumber}/merge`, {
+				method: 'POST',
+				headers: jsonHeaders,
+				body: JSON.stringify({ repoFullName: FORGE_REPO, headSha: delivery.headSha }),
+			});
+		const mergesBefore = stub.merges.length;
+
+		const refused = await merge(ALICE);
+		expect(refused.status).toBe(403);
+		const gate = (await refused.json()) as { error?: string; intent?: Record<string, unknown> };
+		expect(gate.error).toBe('STALE_APPROVAL');
+		expect(gate.intent).toEqual({
+			projectId: aliceProjectId,
+			action: 'merge-default-branch',
+			resourceId: `${FORGE_REPO}#${delivery.pullRequestNumber}`,
+			revisionHash: delivery.headSha,
+			policyVersion: GITHUB_POLICY_VERSION,
+		});
+		// Bob cannot reach Alice's project at all.
+		expect((await merge(BOB)).status).toBeGreaterThanOrEqual(403);
+		expect(stub.merges.length).toBe(mergesBefore);
+
+		const approve = await worker(ALICE, '/api/approvals', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ intent: gate.intent, decision: 'approved' }),
+		});
+		expect(approve.status).toBe(200);
+		const merged = await merge(ALICE);
+		expect(merged.status).toBe(200);
+		const body = (await merged.json()) as {
+			pullRequest: { merged: boolean; mergeCommitSha: string | null };
+			reconciled: boolean;
+		};
+		expect(body.reconciled).toBe(false);
+		expect(body.pullRequest.merged).toBe(true);
+		expect(stub.merges.slice(mergesBefore)).toEqual([
+			{ repo: FORGE_REPO, number: delivery.pullRequestNumber, sha: delivery.headSha, method: 'squash' },
+		]);
+		expect(stub.branchHead(FORGE_REPO, 'main')).toBe(body.pullRequest.mergeCommitSha);
+		const ledger = await d1Rows(
+			`select "status" from external_operations where "operationKey" like 'github:merge-pull-request:%#${delivery.pullRequestNumber}:%'`,
+		);
+		expect(ledger.map((row) => row['status'])).toEqual(['succeeded']);
 	});
 
 	test('across the whole suite the provider never received a force-push', () => {

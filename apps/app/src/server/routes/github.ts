@@ -3,9 +3,17 @@ import { createAuthRouter } from './auth.ts';
 import { createProjectsRouter } from './projects.ts';
 import { createApprovalsRouter } from './approvals.ts';
 import { ScopeError, requireProjectScope, requireWorkspaceScope, sessionUserId } from '../scope.ts';
-import { GithubError, githubInstallUrl, verifyWebhookSignature, type GithubEnv } from '../adapters/github.ts';
+import {
+	GithubError,
+	githubInstallUrl,
+	verifyWebhookSignature,
+	type GithubEnv,
+	type GithubRestClient,
+} from '../adapters/github.ts';
+import { SandboxError } from '../adapters/sandbox.ts';
 import {
 	DeliveryGateError,
+	MergeGateError,
 	bindInstallation,
 	closeDeliveredPullRequest,
 	connectAndLinkRepo,
@@ -18,8 +26,15 @@ import {
 	listImports,
 	listInstallations,
 	listSelectedRepos,
+	mergeDeliveredPullRequest,
 	processGithubWebhook,
 } from '../repositories.ts';
+import {
+	readSourceSave,
+	saveSourceAsPullRequest,
+	sourceDriverFromEnv,
+	type SourceSandboxEnv,
+} from '../source-save.ts';
 
 /**
  * P08 github router — the GitHub App surface.
@@ -37,7 +52,15 @@ import {
  *   GET  /api/github/installations              installations of the scoped workspace
  *   GET  /api/github/installations/:id/repos    selected repositories (owning-workspace members only)
  *
- * Project-scoped import/delivery routes are appended in slice 2.
+ * Project-scoped routes (scope derived server-side from the session):
+ *   imports, repo create/connect/read, deliveries, and
+ *   POST /api/projects/:id/github/source          save the checked build's
+ *                                                 source as a pull request
+ *   GET  /api/projects/:id/github/source          latest save + live PR state
+ *                                                 + the exact merge approval
+ *   POST /api/projects/:id/github/pulls/:n/close  close a Caddie PR
+ *   POST /api/projects/:id/github/pulls/:n/merge  merge a Caddie PR (exact
+ *                                                 approval for its head commit)
  *
  * Exports:
  *   - createGithubRouter(): the /api-mounted github routes (app.ts composes
@@ -47,11 +70,22 @@ import {
  *     workerd fixture and tests.
  */
 
-type Env = GithubEnv;
+type Env = GithubEnv & Omit<SourceSandboxEnv, 'DB'>;
 
-function errorJson(error: unknown): { status: number; body: { error: string; message?: string; operationKey?: string; revisionHash?: string } } {
+function errorJson(error: unknown): {
+	status: number;
+	body: { error: string; message?: string; operationKey?: string; revisionHash?: string; intent?: unknown };
+} {
 	if (error instanceof ScopeError) {
 		return { status: error.status, body: { error: error.code, message: error.message } };
+	}
+	if (error instanceof MergeGateError) {
+		// the merge gate refused: hand back the EXACT intent (PR + head commit)
+		// the user must approve; the browser never builds one itself
+		return {
+			status: error.gate.status,
+			body: { error: error.gate.code, message: error.gate.message, intent: error.intent },
+		};
 	}
 	if (error instanceof DeliveryGateError) {
 		// the approval gate refused: surface the EXACT intent so the user can
@@ -67,6 +101,9 @@ function errorJson(error: unknown): { status: number; body: { error: string; mes
 		};
 	}
 	if (error instanceof GithubError) {
+		return { status: error.status, body: { error: error.code, message: error.message } };
+	}
+	if (error instanceof SandboxError) {
 		return { status: error.status, body: { error: error.code, message: error.message } };
 	}
 	console.error('unhandled github route error:', error);
@@ -241,6 +278,41 @@ export function createGithubRouter(): Hono<{ Bindings: Env }> {
 		const result = await closeDeliveredPullRequest(c.env.DB, client, scope, {
 			repoFullName: body['repoFullName'],
 			pullRequestNumber: Number(c.req.param('number')),
+		});
+		return c.json(result, 200);
+	});
+
+	// Save the checked build's SOURCE as a pull request on its own branch.
+	// Never writes the default branch, so it needs no approval; merging does.
+	router.post('/projects/:projectId/github/source', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		const client = githubClientFromEnv(c.env);
+		const driver = sourceDriverFromEnv(c.env);
+		const result = await saveSourceAsPullRequest(c.env.DB, client, driver, scope, await readJson(c.req.raw));
+		return c.json(result, result.reconciled ? 200 : 201);
+	});
+
+	// The latest save, its PR's live state, and the exact merge approval it needs.
+	router.get('/projects/:projectId/github/source', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		let client: GithubRestClient | null = null;
+		try {
+			client = githubClientFromEnv(c.env);
+		} catch (error) {
+			if (!(error instanceof GithubError)) throw error;
+		}
+		return c.json(await readSourceSave(c.env.DB, client, scope));
+	});
+
+	// Merge a PR Caddie opened for this project: exact approval for its head commit.
+	router.post('/projects/:projectId/github/pulls/:number/merge', async (c) => {
+		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
+		const client = githubClientFromEnv(c.env);
+		const body = asObject(await readJson(c.req.raw));
+		const result = await mergeDeliveredPullRequest(c.env.DB, client, scope, {
+			repoFullName: body['repoFullName'],
+			pullRequestNumber: Number(c.req.param('number')),
+			headSha: body['headSha'],
 		});
 		return c.json(result, 200);
 	});

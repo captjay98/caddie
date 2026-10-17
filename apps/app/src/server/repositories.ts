@@ -1,4 +1,4 @@
-import type { Scope } from '@caddie/contracts';
+import type { ApprovalIntent, Scope } from '@caddie/contracts';
 import type { ExternalOperation } from '@caddie/contracts';
 import type { AuthEnv, D1Database } from './auth.ts';
 import { ScopeError, assertProjectScope, assertWorkspaceScope, sessionUserId, workspaceScopeForUser } from './scope.ts';
@@ -16,6 +16,9 @@ import {
 	privateKeyFingerprint,
 	readGithubConfig,
 	type GithubEnv,
+	type GithubMergeMethod,
+	type GithubMergeOutcome,
+	type GithubPullRequestStatus,
 } from './adapters/github.ts';
 import type { WorkspaceScope } from './scope.ts';
 
@@ -1121,12 +1124,45 @@ async function upsertDeliveryRow(
 	}
 }
 
-/** Canonical JSON over sorted file entries — the delivery intent's revision hash. */
-async function deliveryContentHash(files: Array<{ path: string; content: string }>): Promise<string> {
-	const canonical = JSON.stringify(
-		[...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
-	);
+/** A delivery file: UTF-8 text, or base64 bytes for binary content (images, lockfiles). */
+interface DeliveryFile {
+	path: string;
+	content: string;
+	encoding: 'utf-8' | 'base64';
+	/** Decoded bytes (what the blob carries); never part of the content hash. */
+	bytes: Uint8Array;
+}
+
+/**
+ * Canonical JSON over sorted file entries — the delivery intent's revision
+ * hash. Text-only deliveries without deletions hash exactly as they always
+ * did; a base64 file carries its encoding and deletions ride alongside.
+ */
+export async function deliveryContentHash(
+	files: ReadonlyArray<{ path: string; content: string; encoding?: 'utf-8' | 'base64' }>,
+	deletePaths: readonly string[] = [],
+): Promise<string> {
+	const sorted = [...files]
+		.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+		.map((file) =>
+			file.encoding === 'base64'
+				? { path: file.path, content: file.content, encoding: 'base64' }
+				: { path: file.path, content: file.content },
+		);
+	const canonical =
+		deletePaths.length === 0 ? JSON.stringify(sorted) : JSON.stringify({ files: sorted, delete: [...deletePaths].sort() });
 	return sha256Hex(new TextEncoder().encode(canonical));
+}
+
+function decodeDeliveryBytes(path: string, content: string, encoding: 'utf-8' | 'base64'): Uint8Array {
+	if (encoding === 'utf-8') return new TextEncoder().encode(content);
+	if (!/^[A-Za-z0-9+/]*={0,2}$/.test(content) || content.length % 4 !== 0) {
+		throw new ScopeError(400, 'invalid_input', `files[${path}].content is not valid base64`);
+	}
+	const binary = atob(content);
+	const bytes = new Uint8Array(binary.length);
+	for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+	return bytes;
 }
 
 function parseDeliveryInput(input: unknown): {
@@ -1137,7 +1173,8 @@ function parseDeliveryInput(input: unknown): {
 	baseBranch: string | null;
 	title: string;
 	body: string;
-	files: Array<{ path: string; content: string }>;
+	files: DeliveryFile[];
+	deletePaths: string[];
 	mode: DeliveryMode;
 } {
 	const raw = asRecord(input);
@@ -1166,7 +1203,8 @@ function parseDeliveryInput(input: unknown): {
 		throw new ScopeError(400, 'invalid_input', `files exceeds ${DEFAULT_IMPORT_CAPS.maxFiles} entries`);
 	}
 	const seen = new Set<string>();
-	const files = rawFiles.map((rawFile) => {
+	let totalBytes = 0;
+	const files = rawFiles.map((rawFile): DeliveryFile => {
 		const file = asRecord(rawFile);
 		const path = normalizeImportPath(file['path'], 'files[].path');
 		if (seen.has(path)) throw new ScopeError(400, 'invalid_input', `duplicate file path: ${path}`);
@@ -1174,15 +1212,102 @@ function parseDeliveryInput(input: unknown): {
 		if (typeof file['content'] !== 'string') {
 			throw new ScopeError(400, 'invalid_input', `files[${path}].content must be a string`);
 		}
-		if (file['content'].length > DEFAULT_IMPORT_CAPS.maxFileBytes) {
+		const rawEncoding = file['encoding'];
+		if (rawEncoding !== undefined && rawEncoding !== 'utf-8' && rawEncoding !== 'base64') {
+			throw new ScopeError(400, 'invalid_input', `files[${path}].encoding must be utf-8 or base64`);
+		}
+		const encoding = rawEncoding === 'base64' ? 'base64' : 'utf-8';
+		const bytes = decodeDeliveryBytes(path, file['content'], encoding);
+		if (bytes.byteLength > DEFAULT_IMPORT_CAPS.maxFileBytes) {
 			throw new ScopeError(400, 'invalid_input', `files[${path}] exceeds the per-file size cap`);
 		}
-		return { path, content: file['content'] };
+		totalBytes += bytes.byteLength;
+		return { path, content: file['content'], encoding, bytes };
 	});
+	if (totalBytes > DEFAULT_IMPORT_CAPS.maxTotalBytes) {
+		throw new ScopeError(400, 'invalid_input', 'files exceed the total size cap');
+	}
+	const rawDeletes = raw['deletePaths'] ?? [];
+	if (!Array.isArray(rawDeletes)) {
+		throw new ScopeError(400, 'invalid_input', 'deletePaths must be an array of paths');
+	}
+	if (rawDeletes.length > DEFAULT_IMPORT_CAPS.maxFiles) {
+		throw new ScopeError(400, 'invalid_input', `deletePaths exceeds ${DEFAULT_IMPORT_CAPS.maxFiles} entries`);
+	}
+	const deletePaths = [...new Set(rawDeletes.map((path) => normalizeImportPath(path, 'deletePaths[]')))].sort();
+	for (const path of deletePaths) {
+		if (seen.has(path)) throw new ScopeError(400, 'invalid_input', `deletePaths overlaps files: ${path}`);
+	}
 	if (mode === 'pull-request' && !headBranch) {
 		throw new ScopeError(400, 'invalid_input', 'headBranch is required for pull-request delivery');
 	}
-	return { runId, installationId, repoFullName, headBranch, baseBranch, title, body, files, mode };
+	return { runId, installationId, repoFullName, headBranch, baseBranch, title, body, files, deletePaths, mode };
+}
+
+/**
+ * Every git-data write (blob, tree, commit, branch) and every merge needs the
+ * App's "Contents: Read and write" permission (GitHub's documented rule; pull
+ * request write alone is not enough). Read LIVE from the App API, as repo
+ * creation does for administration, so an owner who just granted it is never
+ * refused from a stale record, and a missing grant is a clear refusal before
+ * any write instead of an opaque 403 halfway through.
+ */
+async function requireContentsWrite(client: GithubRestClient, installationId: string, purpose: string): Promise<void> {
+	const live = await client.getInstallation(installationId);
+	if ((live.permissions['contents'] ?? '') !== 'write') {
+		throw new ScopeError(
+			403,
+			'github_contents_write_required',
+			`the Caddie GitHub App needs the "Contents: Read and write" permission to ${purpose}. Grant it in the App's settings, accept the new permission on the installation, then try again.`,
+		);
+	}
+}
+
+/**
+ * The subset of `deletePaths` that exists in `treeSha` — GitHub rejects a
+ * delete of a path the base tree does not have, and a path Caddie never saw
+ * is never touched. A truncated listing (a very large repo) deletes nothing.
+ */
+async function deletionsPresentIn(
+	client: GithubRestClient,
+	installationId: string,
+	fullName: string,
+	treeSha: string,
+	deletePaths: readonly string[],
+): Promise<string[]> {
+	if (deletePaths.length === 0) return [];
+	const tree = await client.getTree(installationId, fullName, treeSha);
+	if (tree.truncated) return [];
+	const present = new Set(tree.entries.filter((entry) => entry.type === 'blob').map((entry) => entry.path));
+	return deletePaths.filter((path) => present.has(path));
+}
+
+/**
+ * Blobs (deduplicated by content) + one tree on top of `baseTreeSha`, with
+ * the confirmed deletions. Returns the tree and the paths it removed.
+ */
+async function writeDeliveryTree(
+	client: GithubRestClient,
+	installationId: string,
+	fullName: string,
+	baseTreeSha: string,
+	files: readonly DeliveryFile[],
+	deletePaths: readonly string[],
+): Promise<{ treeSha: string; deleted: string[] }> {
+	const blobShas = new Map<string, string>();
+	const fileHashes = new Map<string, string>();
+	for (const file of files) {
+		const fileHash = await sha256Hex(file.bytes);
+		fileHashes.set(file.path, fileHash);
+		if (blobShas.has(fileHash)) continue;
+		blobShas.set(fileHash, await client.createBlob(installationId, fullName, file.bytes));
+	}
+	const deleted = await deletionsPresentIn(client, installationId, fullName, baseTreeSha, deletePaths);
+	const treeSha = await client.createTree(installationId, fullName, baseTreeSha, [
+		...files.map((file) => ({ path: file.path, sha: blobShas.get(fileHashes.get(file.path)!)! })),
+		...deleted.map((path) => ({ path, sha: null })),
+	]);
+	return { treeSha, deleted };
 }
 
 /**
@@ -1227,7 +1352,7 @@ export async function deliverPatch(
 	client: GithubRestClient,
 	scope: Scope,
 	input: unknown,
-): Promise<{ delivery: DeliveryView; reconciled: boolean }> {
+): Promise<{ delivery: DeliveryView; reconciled: boolean; operation?: ExternalOperation; deleted?: string[] }> {
 	const verified = await assertProjectScope(db, scope);
 	const parsed = parseDeliveryInput(input);
 	const installation = await requireActiveInstallation(db, verified, parsed.installationId);
@@ -1238,7 +1363,7 @@ export async function deliverPatch(
 	const baseBranch =
 		parsed.mode === 'merge-default-branch' ? repo.defaultBranch : parsed.baseBranch ?? repo.defaultBranch;
 	const headBranch = parsed.mode === 'merge-default-branch' ? repo.defaultBranch : parsed.headBranch;
-	const contentHash = await deliveryContentHash(parsed.files);
+	const contentHash = await deliveryContentHash(parsed.files, parsed.deletePaths);
 	const operationKey = `github:${parsed.mode}:${verified.projectId}:${fullName}:${headBranch}:${contentHash}`;
 
 	// Elect/adopt the dispatcher for this logical delivery.
@@ -1318,6 +1443,8 @@ export async function deliverPatch(
 	}
 
 	const commitMessage = `${parsed.title}\n\n${parsed.body}`.trim();
+	// Fail closed before the first write (a replay above never writes).
+	await requireContentsWrite(client, installation.installationId, 'save files to the repo');
 
 	if (parsed.mode === 'merge-default-branch') {
 		const defaultHead = await client.getBranchHead(installation.installationId, fullName, repo.defaultBranch);
@@ -1352,23 +1479,13 @@ export async function deliverPatch(
 			);
 		}
 
-		const encoder = new TextEncoder();
-		const blobShas = new Map<string, string>();
-		const fileHashes = new Map<string, string>();
-		for (const file of parsed.files) {
-			const fileHash = await sha256Hex(encoder.encode(file.content));
-			fileHashes.set(file.path, fileHash);
-			if (blobShas.has(fileHash)) continue;
-			blobShas.set(
-				fileHash,
-				await client.createBlob(installation.installationId, fullName, encoder.encode(file.content)),
-			);
-		}
-		const treeSha = await client.createTree(
+		const { treeSha, deleted: deletedOnDefault } = await writeDeliveryTree(
+			client,
 			installation.installationId,
 			fullName,
 			defaultCommit.treeSha,
-			parsed.files.map((file) => ({ path: file.path, sha: blobShas.get(fileHashes.get(file.path)!)! })),
+			parsed.files,
+			parsed.deletePaths,
 		);
 		const commitSha = await client.createCommit(installation.installationId, fullName, {
 			message: commitMessage,
@@ -1396,7 +1513,7 @@ export async function deliverPatch(
 			outcome: 'succeeded',
 			remoteId: commitSha,
 		});
-		return view({ headSha: commitSha, operation: settled });
+		return { ...view({ headSha: commitSha, operation: settled }), deleted: deletedOnDefault };
 	}
 
 	// --- pull-request mode ------------------------------------------------------------
@@ -1422,6 +1539,8 @@ export async function deliverPatch(
 	}
 
 	let wasDispatchedByUs = operation.status === 'dispatched';
+	/** Paths this call removed from the branch; undefined on a resume or replay. */
+	let deleted: string[] | undefined;
 	if (operation.status === 'prepared') {
 		// Divergence pre-flight: the branch must not exist, or its head must be
 		// exactly the last head WE recorded for it. Anything else is a foreign
@@ -1444,27 +1563,18 @@ export async function deliverPatch(
 		if (providerHead === null) {
 			await client.createBranch(installation.installationId, fullName, headBranch, baseHead);
 		}
-		const encoder = new TextEncoder();
-		const blobShas = new Map<string, string>();
-		const fileHashes = new Map<string, string>();
-		for (const file of parsed.files) {
-			const fileHash = await sha256Hex(encoder.encode(file.content));
-			fileHashes.set(file.path, fileHash);
-			if (blobShas.has(fileHash)) continue;
-			blobShas.set(fileHash, await client.createBlob(installation.installationId, fullName, encoder.encode(file.content)));
-		}
-		const treeSha = await client.createTree(
+		const written = await writeDeliveryTree(
+			client,
 			installation.installationId,
 			fullName,
 			parentCommit.treeSha,
-			parsed.files.map((file) => ({
-				path: file.path,
-				sha: blobShas.get(fileHashes.get(file.path)!)!,
-			})),
+			parsed.files,
+			parsed.deletePaths,
 		);
+		deleted = written.deleted;
 		const commitSha = await client.createCommit(installation.installationId, fullName, {
 			message: commitMessage,
-			tree: treeSha,
+			tree: written.treeSha,
 			parents: [providerHead ?? baseHead],
 		});
 		await client.updateBranchHead(installation.installationId, fullName, headBranch, commitSha);
@@ -1509,13 +1619,16 @@ export async function deliverPatch(
 		pullRequestNumber: pr.number,
 		createdBy: verified.actorId,
 	});
-	return view({
-		reconciled: prReconciled || wasDispatchedByUs,
-		pullRequestNumber: pr.number,
-		headSha: pr.headSha,
-		htmlUrl: pr.htmlUrl,
-		operation: settled,
-	});
+	return {
+		...view({
+			reconciled: prReconciled || wasDispatchedByUs,
+			pullRequestNumber: pr.number,
+			headSha: pr.headSha,
+			htmlUrl: pr.htmlUrl,
+			operation: settled,
+		}),
+		...(deleted !== undefined ? { deleted } : {}),
+	};
 }
 
 export interface PullRequestCloseView {
@@ -1603,4 +1716,240 @@ export async function closeDeliveredPullRequest(
 		);
 	}
 	return { pullRequest: view(closed.htmlUrl), reconciled: false };
+}
+
+export interface PullRequestMergeView {
+	projectId: string;
+	repoFullName: string;
+	pullRequestNumber: number;
+	merged: true;
+	/** The commit the merge produced on the base branch (null when GitHub did not say). */
+	mergeCommitSha: string | null;
+	baseBranch: string;
+	htmlUrl: string | null;
+}
+
+/**
+ * The exact approval a merge of PR `number` at commit `headSha` needs. One
+ * helper, so the status read the UI approves and the gate the merge checks
+ * can never disagree. It reuses the `merge-default-branch` action; the
+ * resource is the PR (`owner/repo#12`), so a direct-write approval (resource
+ * `owner/repo`, revision = content hash) can never stand in for a merge.
+ */
+export function pullRequestMergeIntent(
+	projectId: string,
+	repoFullName: string,
+	pullRequestNumber: number,
+	headSha: string,
+): ApprovalIntent {
+	return {
+		projectId,
+		action: 'merge-default-branch',
+		resourceId: `${repoFullName}#${pullRequestNumber}`,
+		revisionHash: headSha,
+		policyVersion: GITHUB_POLICY_VERSION,
+	};
+}
+
+/** The approval gate refused a merge; carries the EXACT intent the user must approve. */
+export class MergeGateError extends Error {
+	constructor(
+		readonly gate: ScopeError,
+		readonly intent: ApprovalIntent,
+	) {
+		super(gate.message);
+		this.name = 'MergeGateError';
+	}
+}
+
+function pickMergeMethod(methods: Record<GithubMergeMethod, boolean> | null): GithubMergeMethod {
+	// Squash keeps the user's main history one commit per save; fall back to
+	// what the repo allows. Unknown settings try squash (GitHub's default allows it).
+	if (!methods || methods.squash) return 'squash';
+	if (methods.merge) return 'merge';
+	if (methods.rebase) return 'rebase';
+	return 'squash';
+}
+
+function shortSha(sha: string): string {
+	return sha.slice(0, 7);
+}
+
+/**
+ * Merge a pull request Caddie opened for THIS project into its base branch.
+ * Writing the default branch is the one GitHub effect that cannot be undone
+ * from Caddie, so:
+ *
+ *   - only a PR recorded in this project's `pull-request` deliveries, under an
+ *     active installation and a selected repo (same rules as close);
+ *   - read first: an already-merged PR reconciles with NO write (and settles
+ *     a ledger row whose answer was lost); a closed PR, a head that moved
+ *     past the reviewed commit, or a PR GitHub reports as conflicting is a
+ *     typed 409 before anything is written;
+ *   - THE gate: an exact human approval for this PR at this commit
+ *     (pullRequestMergeIntent), checked on every attempt;
+ *   - the merge call is pinned to the approved commit, so GitHub itself
+ *     refuses (409) when anyone pushed after the approval;
+ *   - the effect goes through the external-operations ledger: prepared ->
+ *     dispatched -> succeeded with the merge commit as receipt. A refusal
+ *     GitHub states leaves the row retryable (nothing merged); an answer that
+ *     never arrived lands in reconciliation-required, and the next attempt
+ *     reads the PR before it tries anything.
+ */
+export async function mergeDeliveredPullRequest(
+	db: D1Database,
+	client: GithubRestClient,
+	scope: Scope,
+	input: unknown,
+): Promise<{ pullRequest: PullRequestMergeView; reconciled: boolean }> {
+	const verified = await assertProjectScope(db, scope);
+	const raw = asRecord(input);
+	const repoFullName = normalizeRepoFullName(raw['repoFullName']);
+	const pullRequestNumber = Number(raw['pullRequestNumber']);
+	if (!Number.isInteger(pullRequestNumber) || pullRequestNumber <= 0) {
+		throw new ScopeError(400, 'invalid_request', 'pullRequestNumber must be a positive integer');
+	}
+	const headSha = requireNonEmpty(raw['headSha'], 'headSha');
+	if (!/^[0-9A-Za-z-]{7,80}$/.test(headSha)) {
+		throw new ScopeError(400, 'invalid_request', 'headSha must be a commit id');
+	}
+
+	const delivered = await queryAll(
+		db,
+		'select "installationId", "operationKey" from "github_deliveries" where "projectId" = ? and "repoFullName" = ? and "mode" = ? and "pullRequestNumber" = ? order by "createdAt" desc limit 1',
+		verified.projectId,
+		repoFullName,
+		'pull-request',
+		pullRequestNumber,
+	);
+	if (!delivered[0]) {
+		throw new ScopeError(
+			404,
+			'pull_request_not_delivered',
+			`pull request #${pullRequestNumber} on ${repoFullName} was not opened by Caddie for this project`,
+		);
+	}
+	const installation = await requireActiveInstallation(db, verified, String(delivered[0]['installationId']));
+	await requireSelectedRepo(db, installation.installationId, repoFullName);
+
+	const intent = pullRequestMergeIntent(verified.projectId, repoFullName, pullRequestNumber, headSha);
+	const operationKey = `github:merge-pull-request:${verified.projectId}:${repoFullName}#${pullRequestNumber}:${headSha}`;
+	const view = (current: GithubPullRequestStatus, mergeCommitSha: string | null): PullRequestMergeView => ({
+		projectId: verified.projectId,
+		repoFullName,
+		pullRequestNumber,
+		merged: true,
+		mergeCommitSha,
+		baseBranch: current.base,
+		htmlUrl: current.htmlUrl || null,
+	});
+
+	const current = await client.getPullRequest(installation.installationId, repoFullName, pullRequestNumber);
+	if (current.merged) {
+		// A merge we dispatched whose answer was lost settles here, from GitHub's own state.
+		const recorded = await getOperation(db, operationKey);
+		if (recorded && (recorded.status === 'dispatched' || recorded.status === 'reconciliation-required')) {
+			const remoteId = current.mergeCommitSha ?? headSha;
+			await recordReceipt(db, operationKey, { receiptId: `merge-pr:${remoteId}`, outcome: 'succeeded', remoteId });
+		}
+		return { pullRequest: view(current, current.mergeCommitSha), reconciled: true };
+	}
+	if (current.state === 'closed') {
+		throw new ScopeError(
+			409,
+			'pull_request_closed',
+			`pull request #${pullRequestNumber} was closed without merging — reopen it on GitHub to merge it`,
+		);
+	}
+	if (current.headSha !== headSha) {
+		throw new ScopeError(
+			409,
+			'pull_request_head_moved',
+			`pull request #${pullRequestNumber} moved to ${shortSha(current.headSha)} after ${shortSha(headSha)} was reviewed — review the new commit and approve again`,
+		);
+	}
+	if (current.mergeable === false) {
+		throw new ScopeError(
+			409,
+			'pull_request_not_mergeable',
+			`GitHub reports that pull request #${pullRequestNumber} conflicts with ${current.base || 'its base branch'} — resolve the conflict on GitHub, then merge`,
+		);
+	}
+
+	// THE gate: an exact human approval for this PR at this commit, on every attempt.
+	try {
+		await checkApprovalForEffect(db, {
+			actorId: verified.actorId,
+			projectId: verified.projectId,
+			action: intent.action,
+			resourceId: intent.resourceId,
+			revisionHash: intent.revisionHash,
+			policyVersion: intent.policyVersion,
+		});
+	} catch (error) {
+		if (error instanceof ScopeError) throw new MergeGateError(error, intent);
+		throw error;
+	}
+
+	const origin = await getOperation(db, String(delivered[0]['operationKey']));
+	await requireContentsWrite(client, installation.installationId, 'merge pull requests');
+	const operation = await electOrAdoptOperation(db, {
+		projectId: verified.projectId,
+		runId: origin?.runId ?? `github-pull-request-${pullRequestNumber}`,
+		provider: GITHUB_PROVIDER,
+		operationKey,
+	});
+	if (operation.status === 'succeeded' || operation.status === 'failed' || operation.status === 'cancelled' || operation.status === 'cancel-requested') {
+		throw new ScopeError(
+			409,
+			'operation_settled',
+			`this merge already settled as ${operation.status}, but GitHub reports pull request #${pullRequestNumber} open — reconcile it on GitHub`,
+		);
+	}
+	// From dispatched / reconciliation-required: GitHub just said the PR is open
+	// and unmerged at the approved commit, and the merge is pinned to that
+	// commit, so sending it again cannot merge twice.
+	if (operation.status === 'prepared') {
+		await markDispatched(db, operationKey, `pr:${pullRequestNumber}@${headSha}`);
+	}
+
+	const repo = await client.getRepo(installation.installationId, repoFullName);
+	let outcome: GithubMergeOutcome;
+	try {
+		outcome = await client.mergePullRequest(installation.installationId, repoFullName, pullRequestNumber, {
+			sha: headSha,
+			method: pickMergeMethod(repo.mergeMethods),
+		});
+	} catch (error) {
+		if (error instanceof GithubError && error.code === 'GITHUB_PROVIDER_ERROR') {
+			// No clear answer: the merge may or may not have happened. Never retried blindly.
+			await markReconciliationRequired(db, operationKey);
+			throw new ScopeError(
+				503,
+				'merge_outcome_unknown',
+				`GitHub did not answer clearly whether pull request #${pullRequestNumber} merged. Check again: Caddie reads the pull request before it tries anything else.`,
+			);
+		}
+		throw error; // GitHub refused outright (auth, permissions, validation): nothing merged.
+	}
+	if (outcome.outcome === 'head-moved') {
+		throw new ScopeError(
+			409,
+			'pull_request_head_moved',
+			`pull request #${pullRequestNumber} changed after ${shortSha(headSha)} was approved (GitHub: ${outcome.message}) — review the new commit and approve again`,
+		);
+	}
+	if (outcome.outcome === 'not-mergeable') {
+		throw new ScopeError(
+			409,
+			'pull_request_not_mergeable',
+			`GitHub would not merge pull request #${pullRequestNumber}: ${outcome.message}`,
+		);
+	}
+	await recordReceipt(db, operationKey, {
+		receiptId: `merge-pr:${outcome.sha}`,
+		outcome: 'succeeded',
+		remoteId: outcome.sha,
+	});
+	return { pullRequest: view(current, outcome.sha), reconciled: false };
 }

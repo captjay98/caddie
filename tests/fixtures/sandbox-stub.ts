@@ -39,6 +39,8 @@ export interface StubBehavior {
 export interface StubRequestLog {
 	method: string;
 	path: string;
+	/** The raw query string (`?path=...`), so tests can tell which file a read asked for. */
+	query?: string;
 	body: unknown;
 	hasAuthorization: boolean;
 	authorizationMatched: boolean;
@@ -116,6 +118,38 @@ export class SandboxStub {
 		this.goneImages.add(imageUuid);
 	}
 
+	/**
+	 * Test-side: an image that already holds these files (absolute paths), as
+	 * a finished build's checkpoint would. Returns the image uuid.
+	 */
+	seedImageWithFiles(files: Record<string, string | Uint8Array>): string {
+		const imageUuid = crypto.randomUUID();
+		const stored = new Map<string, StubFile>();
+		for (const [path, content] of Object.entries(files)) {
+			stored.set(this.normalize(path), {
+				bytes: typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content),
+				mode: 0o100644,
+				mtime: 1_760_000_000,
+			});
+		}
+		this.images.set(imageUuid, { imageUuid, files: stored, dirs: new Set() });
+		return imageUuid;
+	}
+
+	/** Every path an inspect read was requested for (proves what was, and was not, read). */
+	downloadedPaths(): string[] {
+		return this.requests
+			.filter((r) => r.method === 'GET' && /\/inspect\/[^/]+\/download$/.test(r.path))
+			.map((r) => new URLSearchParams(r.query ?? '').get('path') ?? '');
+	}
+
+	/** Every directory an inspect listing was requested for. */
+	listedPaths(): string[] {
+		return this.requests
+			.filter((r) => r.method === 'GET' && /\/inspect\/[^/]+\/list$/.test(r.path))
+			.map((r) => new URLSearchParams(r.query ?? '').get('path') ?? '');
+	}
+
 	spawnRequestCount(): number {
 		return this.requests.filter((r) => r.method === 'POST' && r.path === '/v1/instances').length;
 	}
@@ -181,6 +215,7 @@ export class SandboxStub {
 		const entry: StubRequestLog = {
 			method: req.method ?? '',
 			path: new URL(req.url ?? '/', 'http://127.0.0.1').pathname,
+			query: new URL(req.url ?? '/', 'http://127.0.0.1').search,
 			body,
 			hasAuthorization: typeof authorization === 'string' && authorization.length > 0,
 			authorizationMatched:

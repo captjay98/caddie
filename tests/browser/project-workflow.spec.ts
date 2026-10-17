@@ -21,7 +21,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -44,8 +44,53 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		? { id: 'design-1', projectId: PROJECT.id, kind: 'design', revision: 2, bodyHash: 'sha256-design-1', body: options.designBody, createdBy: 'actor-workflow', createdAt: NOW }
 		: null;
 	const snapshot = () => ({ workflow: { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null, design, designApproval: null });
+	// "Save the code to GitHub": a linked repo, the server-side save, and the
+	// merge that only runs once an approval for the exact head commit exists.
+	const repo = { projectId: PROJECT.id, installationId: '6100001', repoFullName: 'octo/todoer', visibility: 'private', origin: 'connected', htmlUrl: 'https://github.com/octo/todoer' };
+	const HEAD = 'abc1234def5678abc1234def5678abc1234def56';
+	const mergeIntent = { projectId: PROJECT.id, action: 'merge-default-branch', resourceId: 'octo/todoer#12', revisionHash: HEAD, policyVersion: 'policies/2026-10-05' };
+	const github = {
+		calls: [] as string[],
+		saves: [] as Record<string, unknown>[],
+		approvals: [] as Record<string, unknown>[],
+		merges: [] as Record<string, unknown>[],
+		status: { save: null, pullRequest: null, pullRequestError: null, mergeIntent: null } as Record<string, unknown>,
+	};
+	const githubRoute = (route: Route, method: string, path: string): Promise<void> | null => {
+		if (!options.github) return null;
+		const request = route.request();
+		if (path.endsWith('/github/repo')) return json(route, 200, { repo });
+		if (path.endsWith('/github/source') && method === 'GET') return json(route, 200, github.status);
+		if (path.endsWith('/github/source') && method === 'POST') {
+			github.calls.push('source');
+			github.saves.push(request.postDataJSON() as Record<string, unknown>);
+			const save = {
+				outputId: 'output-workflow', repoFullName: repo.repoFullName, headBranch: 'caddie/source-0123456789ab', pullRequestNumber: 12,
+				htmlUrl: 'https://github.com/octo/todoer/pull/12', fileCount: 5, deleted: [], createdAt: NOW,
+				skipped: [{ path: 'node_modules/', reason: 'dependencies' }, { path: 'dist/', reason: 'build-output' }, { path: '.env', reason: 'secret' }, { path: '.DS_Store', reason: 'noise' }],
+			};
+			github.status = { save, pullRequest: { number: 12, state: 'open', mergeable: true, headSha: HEAD, baseBranch: 'main', htmlUrl: save.htmlUrl }, pullRequestError: null, mergeIntent };
+			return json(route, 201, { save, reconciled: false });
+		}
+		if (path === '/api/approvals' && method === 'POST') {
+			github.calls.push('approval');
+			github.approvals.push(request.postDataJSON() as Record<string, unknown>);
+			return json(route, 200, { approval: { status: 'approved' } });
+		}
+		if (path.endsWith('/github/pulls/12/merge')) {
+			github.calls.push('merge');
+			github.merges.push(request.postDataJSON() as Record<string, unknown>);
+			const approved = github.approvals.some((a) => JSON.stringify(a['intent']) === JSON.stringify(mergeIntent) && a['decision'] === 'approved');
+			if (!approved) return json(route, 403, { error: 'STALE_APPROVAL', message: 'no approved record covers this exact intent', intent: mergeIntent });
+			github.status = { ...github.status, pullRequest: { ...(github.status['pullRequest'] as object), state: 'merged' }, mergeIntent: null };
+			return json(route, 200, { pullRequest: { merged: true, mergeCommitSha: 'm1', baseBranch: 'main' }, reconciled: false });
+		}
+		return null;
+	};
 	await context.route('**/api/**', async route => {
 		const request = route.request(), path = new URL(request.url()).pathname;
+		const githubReply = githubRoute(route, request.method(), path);
+		if (githubReply) return githubReply;
 		if (path === '/api/auth/status') return json(route, 200, { authenticated: true });
 		if (path === '/api/onboarding') return json(route, 200, { completedAt: NOW });
 		if (path === '/api/auth/get-session') return json(route, 200, { session: { userId: 'actor-workflow' }, user: { id: 'actor-workflow', name: 'Ada', email: 'ada@example.test' } });
@@ -135,7 +180,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		return route.fulfill({ contentType: 'application/json', headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' }, body: JSON.stringify({ v: 1, conversationId, offset: OFFSET, messages: options.repeatHandoff ? [...messages, ...messages.map(m => ({...m, id: m.id + '-continued'}))] : messages, settlements: [] }) });
 	});
 	return {
-		workflow, decisions, admissions, acks, stops, rollbacks,
+		workflow, decisions, admissions, acks, stops, rollbacks, github,
 		get previewReads() { return previewReads; },
 		revise() { currentPlan = plan(currentPlan.revision + 1); workflow.planId = currentPlan.id; workflow.phase = 'review'; workflow.pendingKey = null; workflow.pendingBody = null; },
 		ready() { workflow.phase = 'ready'; workflow.previewId = 'output-workflow'; workflow.pendingKey = null; workflow.pendingBody = null; },
@@ -367,6 +412,55 @@ test('ready app remains inside Home chat, has access-error retry, and persists g
 	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
 	expect(state.admissions).toHaveLength(0);
 	expect(state.previewReads).toBe(3);
+});
+
+test('a finished build saves its code as a pull request and merges it only after an explicit approval', async ({ page, context }) => {
+	const state = await fixture(context, { phase: 'ready', github: true });
+	// Evidence only: CADDIE_SHOTS=<dir> saves each panel state; CADDIE_SHOTS_MOBILE=1 runs at 390px.
+	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
+	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	const panel = card.getByTestId('save-github');
+	const shot = async (name: string) => {
+		const dir = process.env.CADDIE_SHOTS;
+		if (!dir) return;
+		// Centre it first: a bottom-edge scroll leaves it under the fixed composer on mobile.
+		await panel.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		await panel.screenshot({ path: `${dir}/save-github-${mobile ? 'mobile-' : ''}${name}.png` });
+	};
+	await expect(panel).toContainText('Nothing changes in the repo until you merge it.');
+	await shot('1-save');
+	await panel.getByTestId('save-github-save').click();
+	const saved = panel.getByTestId('save-github-pr');
+	await expect(saved).toContainText('Saved as pull request #12 on octo/todoer');
+	await expect(saved.getByRole('link', { name: 'pull request #12' })).toHaveAttribute('href', 'https://github.com/octo/todoer/pull/12');
+	await expect(panel).toContainText('5 files · left out node_modules/, dist/, .env');
+	expect(state.github.saves).toEqual([{ outputId: 'output-workflow' }]);
+	await shot('2-open');
+
+	// Opening the confirmation records nothing; Cancel leaves no trace.
+	await panel.getByTestId('save-github-merge').click();
+	const confirm = panel.getByRole('group', { name: 'Merge pull request #12' });
+	await expect(confirm).toContainText('Caddie merges exactly commit abc1234');
+	await expect(confirm).toContainText('can’t be undone from Caddie');
+	await shot('3-confirm');
+	await confirm.getByRole('button', { name: 'Cancel' }).click();
+	await expect(confirm).toHaveCount(0);
+	expect(state.github.calls).toEqual(['source']);
+
+	// Only the explicit click approves the exact head commit, and the merge follows it.
+	await panel.getByTestId('save-github-merge').click();
+	await panel.getByTestId('save-github-merge-confirm').click();
+	await expect(panel.getByTestId('save-github-merged')).toContainText('Merged into main');
+	await shot('4-merged');
+	expect(state.github.calls).toEqual(['source', 'approval', 'merge']);
+	expect(state.github.approvals).toEqual([{
+		intent: { projectId: 'proj-workflow', action: 'merge-default-branch', resourceId: 'octo/todoer#12', revisionHash: 'abc1234def5678abc1234def5678abc1234def56', policyVersion: 'policies/2026-10-05' },
+		decision: 'approved',
+	}]);
+	expect(state.github.merges).toEqual([{ repoFullName: 'octo/todoer', headSha: 'abc1234def5678abc1234def5678abc1234def56' }]);
 });
 
 test('mobile Home chat retains the embedded workflow and opens its explicit project only when requested', async ({ page, context }) => {
