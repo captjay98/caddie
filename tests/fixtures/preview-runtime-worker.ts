@@ -1,0 +1,43 @@
+// Fixture Worker for tests/preview-runtime.integration.test.ts: the REAL
+// preview runtime (Worker Loader + PreviewDatabase Durable Object + gateway)
+// under real workerd via `wrangler dev`. Test-only; never deployed.
+import { bridgeRequestToRequest, checkServerStarts, runPreviewApp, type WorkerLoaderLike } from '../../apps/app/src/server/preview-runtime.ts';
+import { previewDatabaseFor, type PreviewDatabaseEnv } from '../../apps/app/src/server/preview-database.ts';
+
+export { PreviewDatabase, PreviewDatabaseGateway } from '../../apps/app/src/server/preview-database.ts';
+
+type Env = PreviewDatabaseEnv & { LOADER: WorkerLoaderLike };
+type Ctx = { exports: { PreviewDatabaseGateway(options: { props: { projectId: string } }): unknown } };
+
+export default {
+	async fetch(request: Request, env: Env, ctx: Ctx): Promise<Response> {
+		const url = new URL(request.url);
+		if (url.pathname === '/__test/health') return Response.json({ ok: true, loader: Boolean(env.LOADER), db: Boolean(env.PREVIEW_DB) });
+		const body = (await request.json()) as Record<string, any>;
+		try {
+			if (url.pathname === '/check') return Response.json(await checkServerStarts(env.LOADER, body.serverSource));
+			if (url.pathname === '/reset') {
+				await previewDatabaseFor(env, body.projectId).reset();
+				return Response.json({ ok: true });
+			}
+			if (url.pathname === '/run') {
+				const db = previewDatabaseFor(env, body.projectId);
+				const migrations = body.migrations ? await db.applyMigrations(body.migrations) : { applied: [] };
+				const relayed = await runPreviewApp({
+					loader: env.LOADER,
+					projectId: body.projectId,
+					outputId: body.outputId,
+					serverSource: body.serverSource,
+					vars: body.vars ?? {},
+					database: ctx.exports.PreviewDatabaseGateway({ props: { projectId: body.projectId } }),
+					globalOutbound: null,
+					request: bridgeRequestToRequest(body.request),
+				});
+				return Response.json({ migrations, relayed });
+			}
+		} catch (error) {
+			return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+		}
+		return new Response('not found', { status: 404 });
+	},
+};

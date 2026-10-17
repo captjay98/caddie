@@ -13,7 +13,14 @@
 	// (Hello -> FlueHelloAgent), and Cloudflare requires a migration entry
 	// for each one. Append a new tag when you add an agent:
 	// https://flueframework.com/docs/guide/cloudflare-target/#managing-migrations
-	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["FlueHelloAgent"] }, { "tag": "v2", "new_sqlite_classes": ["FlueCoordinatorAgent"] }],
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["FlueHelloAgent"] }, { "tag": "v2", "new_sqlite_classes": ["FlueCoordinatorAgent"] }, { "tag": "v3", "new_sqlite_classes": ["PreviewDatabase"] }],
+	// Backend previews (docs/plans/2026-10-17-publish): an app's server bundle
+	// runs in a Worker Loader isolate; its test data lives in a per-project
+	// PreviewDatabase Durable Object (classes exported from src/cloudflare.ts).
+	"worker_loaders": [{ "binding": "LOADER" }],
+	"durable_objects": {
+		"bindings": [{ "name": "PREVIEW_DB", "class_name": "PreviewDatabase" }]
+	},
 	// Product state (P02 owns migrations/0001_product.sql onward; migration
 	// numbering is integration-lead-owned). database_id is a local-dev
 	// placeholder — a real id is a setup input before any deployment (P17).

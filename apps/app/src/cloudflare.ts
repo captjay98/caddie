@@ -22,6 +22,10 @@ import type { AuthEnv } from './server/auth.ts';
 import { dispatchDueSchedules } from './server/schedules.ts';
 import { sweepStalledBuilds } from './server/build-workflow.ts';
 
+// Backend previews (docs/plans/2026-10-17-publish): the per-project preview
+// database and the RPC gateway an app's preview isolate reaches it through.
+export { PreviewDatabase, PreviewDatabaseGateway } from './server/preview-database.ts';
+
 /** Structural handler types (this module stays free of extra type deps). */
 interface CronController {
 	// The cron pattern that fired (the wrangler.jsonc trigger, e.g. a
