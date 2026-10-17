@@ -21,17 +21,21 @@ import * as v from 'valibot';
 
 /**
  * The user-facing stage. A SUPERSET refinement of the server's coarse
- * WorkflowPhase (planning|review|building|blocked|ready): `blocked` splits
- * into `stopped` (user asked to stop), `planning_blocked` (a plan got stuck
- * BEFORE approval — there is nothing built to retry, Caddie must finish the
- * plan) vs `blocked` (a build with an approved plan hit a repair/limit/infra
- * wall). `building` is the umbrella the UI narrates as building/checking/
- * repairing from the workflow detail. Kept small — the UI reads one field,
- * not a table per sub-state.
+ * WorkflowPhase (planning|review|design|design-review|building|blocked|ready):
+ * `blocked` splits into `stopped` (user asked to stop), `planning_blocked` (a
+ * plan got stuck BEFORE approval — there is nothing built to retry, Caddie
+ * must finish the plan) vs `blocked` (a build with an approved plan hit a
+ * repair/limit/infra wall). `design` is Caddie writing the design brief after
+ * the plan was approved; `design_review` is that brief waiting for the user.
+ * `building` is the umbrella the UI narrates as building/checking/repairing
+ * from the workflow detail. Kept small — the UI reads one field, not a table
+ * per sub-state.
  */
 export const ExperienceStage = v.union([
 	v.literal('planning'),
 	v.literal('review'),
+	v.literal('design'),
+	v.literal('design_review'),
 	v.literal('building'),
 	v.literal('checking'),
 	v.literal('repairing'),
@@ -48,6 +52,7 @@ export type ExperienceStage = v.InferOutput<typeof ExperienceStage>;
 export const ExperienceActionKind = v.union([
 	v.literal('review_plan'),
 	v.literal('approve_plan'),
+	v.literal('review_design'),
 	v.literal('suggest_change'),
 	v.literal('stop'),
 	v.literal('retry'),

@@ -27,6 +27,10 @@ export function projectCardFromExperience(experience: ProjectExperience): Projec
 			return { label: 'Writing the plan', tone: 'action', working: true, detail: 'Caddie is drafting a plan for you to review. Nothing is built before you approve it.', action: { label: 'Continue with Caddie', target: 'chat' } };
 		case 'review':
 			return { label: 'Plan ready', tone: 'warn', working: false, detail: 'A plan is ready. Review it before anything is built.', action: { label: 'Review plan', target: 'plan' } };
+		case 'design':
+			return { label: 'Designing', tone: 'action', working: true, detail: 'Caddie is designing the screens. You review the design before anything is built.', action: { label: 'Continue with Caddie', target: 'chat' } };
+		case 'design_review':
+			return { label: 'Design ready', tone: 'warn', working: false, detail: 'A design is ready. Review it before anything is built.', action: { label: 'Review design', target: 'chat' } };
 		case 'building':
 		case 'checking':
 			return { label: 'Building', tone: 'action', working: true, detail: 'Caddie is building your app and running its checks.', action: { label: 'See progress', target: 'project' } };

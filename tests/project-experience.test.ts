@@ -11,6 +11,7 @@ import { createRun } from "../apps/app/src/server/runs.ts";
 import {
   startProjectFromChat,
   decideWorkflow,
+  decideDesign,
   workflowSnapshot,
   stopWorkflow,
   setWorkflowBlocker,
@@ -71,6 +72,7 @@ async function world() {
     "0011_home_project.sql",
     "0015_plan_decisions.sql",
     "0018_build_workflow.sql",
+    "0024_design_phase.sql",
   ]) {
     const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), "utf8");
     for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);
@@ -110,6 +112,25 @@ async function planned(w: Awaited<ReturnType<typeof world>>) {
   return { ...started, plan };
 }
 
+type Planned = Awaited<ReturnType<typeof planned>>;
+
+/** Plan approved -> design; the brief saved -> design-review (snapshot auto-advance). */
+async function designSaved(w: Awaited<ReturnType<typeof world>>, item: Planned) {
+  await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+  const design = await createPlanDocRevision(w.db, item.scope, {
+    kind: "design",
+    body: "# Design brief\n\nOne screen: the task list, with empty, loading and error states.",
+  });
+  await workflowSnapshot(w.db, item.scope);
+  return design;
+}
+
+/** Carry an approved plan through the design step into building. */
+async function building(w: Awaited<ReturnType<typeof world>>, item: Planned) {
+  const design = await designSaved(w, item);
+  await decideDesign(w.db, item.scope, { designId: design.id, decision: "approved" });
+}
+
 describe("ProjectExperience projection — stage mapping (table-driven)", () => {
   test("planning: no plan yet -> stage planning, single continue action", async () => {
     const w = await world();
@@ -135,10 +156,34 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     expect(primary.enabled).toBe(true);
   });
 
-  test("building: approved plan -> stage building, stop is the primary", async () => {
+  test("design: an approved plan enters the design step, Caddie is working, continue is the primary", async () => {
     const w = await world();
     const item = await planned(w);
     await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    const exp = await projectExperience(w.db, item.scope);
+    expect(exp.stage).toBe("design");
+    expect(exp.plan!.approved).toBe(true);
+    expect(exp.message).toContain("designing");
+    expect(exp.actions.filter((a) => a.primary).map((a) => a.kind)).toEqual(["suggest_change"]);
+  });
+
+  test("design_review: a saved design brief waits for the user, review_design is the primary", async () => {
+    const w = await world();
+    const item = await planned(w);
+    await designSaved(w, item);
+    const exp = await projectExperience(w.db, item.scope);
+    expect(exp.stage).toBe("design_review");
+    expect(exp.message).toContain("Nothing is built until you approve it");
+    expect(exp.actions.map((a) => [a.kind, a.primary])).toEqual([
+      ["review_design", true],
+      ["suggest_change", false],
+    ]);
+  });
+
+  test("building: approved plan and design -> stage building, stop is the primary", async () => {
+    const w = await world();
+    const item = await planned(w);
+    await building(w, item);
     const exp = await projectExperience(w.db, item.scope);
     expect(exp.stage).toBe("building");
     expect(exp.plan!.approved).toBe(true);
@@ -148,7 +193,7 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
   test("stopped: user stop -> stage stopped (distinct from blocked), resume primary", async () => {
     const w = await world();
     const item = await planned(w);
-    await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    await building(w, item);
     await stopWorkflow(w.db, item.scope);
     const exp = await projectExperience(w.db, item.scope);
     expect(exp.stage).toBe("stopped");
@@ -158,7 +203,7 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
   test("blocked: repair/infra block -> stage blocked (not stopped)", async () => {
     const w = await world();
     const item = await planned(w);
-    await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    await building(w, item);
     await setWorkflowBlocker(w.db, item.scope, "The build sandbox is not configured. Your plan is saved.");
     const exp = await projectExperience(w.db, item.scope);
     expect(exp.stage).toBe("blocked");
@@ -200,13 +245,20 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     // review
     expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(1);
     await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    // design
+    expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(1);
+    const design = await createPlanDocRevision(w.db, item.scope, { kind: "design", body: "# Design brief\n\nScreens and states." });
+    await workflowSnapshot(w.db, item.scope);
+    // design_review
+    expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(1);
+    await decideDesign(w.db, item.scope, { designId: design.id, decision: "approved" });
     // building
     expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(1);
   });
 });
 
 describe("approvePlan command — versioned + idempotent", () => {
-  test("applied: correct version + revision approves and moves to building", async () => {
+  test("applied: correct version + revision approves and moves to the design step", async () => {
     const w = await world();
     const item = await planned(w);
     const before = await projectExperience(w.db, item.scope);
@@ -217,7 +269,7 @@ describe("approvePlan command — versioned + idempotent", () => {
       idempotencyKey: "approve-key-0001",
     });
     expect(result.outcome).toBe("applied");
-    expect(result.experience.stage).toBe("building");
+    expect(result.experience.stage).toBe("design");
     expect(result.experience.plan!.approved).toBe(true);
   });
 

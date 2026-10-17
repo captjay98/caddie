@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { DecisionCard } from '@caddie/contracts';
-import { projectStatus } from '../apps/app/src/client/workspace/project-status.ts';
+import type { DecisionCard, ExperienceStage, ProjectExperience } from '@caddie/contracts';
+import { projectCardFromExperience, projectStatus } from '../apps/app/src/client/workspace/project-status.ts';
 
 function card(id: string, kind: DecisionCard['kind'], status: DecisionCard['status'], updatedAt = '2026-10-11T12:00:00Z'): DecisionCard {
  return { id, projectId: 'project-a', kind, status, headline: id, summary: id + ' details', evidenceIds: [], updatedAt, primaryAction: { label: 'Review', kind: 'review', targetId: id } };
@@ -23,5 +23,13 @@ describe('Project summaries from real brief events', () => {
  });
  test('empty history reports no invented activity or progress', () => {
   expect(projectStatus([])).toEqual({ label: 'No updates yet', detail: 'Tell Caddie what you would like to build or change.', next: null });
+ });
+});
+
+describe('Projects card from the shared projection', () => {
+ const experience = (stage: ExperienceStage): ProjectExperience => ({ projectId: 'project-a', version: 1, stage, plan: null, preview: null, message: 'm', actions: [] });
+ test('the design step reads as designing, then as a design waiting for review — never as still planning', () => {
+  expect(projectCardFromExperience(experience('design'))).toMatchObject({ label: 'Designing', working: true, action: { target: 'chat' } });
+  expect(projectCardFromExperience(experience('design_review'))).toMatchObject({ label: 'Design ready', working: false, action: { label: 'Review design', target: 'chat' } });
  });
 });

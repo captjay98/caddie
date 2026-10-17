@@ -49,6 +49,10 @@ function stageOf(workflow: BuildWorkflow | null, planApproved: boolean): Project
 			return 'planning';
 		case 'review':
 			return 'review';
+		case 'design':
+			return 'design';
+		case 'design-review':
+			return 'design_review';
 		case 'building':
 			return 'building';
 		case 'ready':
@@ -73,6 +77,10 @@ function messageOf(
 			return 'Caddie is preparing a plan for this project.';
 		case 'review':
 			return 'A plan is ready for your review.';
+		case 'design':
+			return 'Caddie is designing the screens. You review the design before anything is built.';
+		case 'design_review':
+			return 'A design is ready for your review. Nothing is built until you approve it.';
 		case 'building':
 			return planApproved
 				? 'Caddie is building and checking your app.'
@@ -110,6 +118,13 @@ function actionsOf(
 				{ kind: 'approve_plan', label: 'Approve plan', enabled: hasPlan, primary: true,
 					...(hasPlan ? {} : { reason: 'No plan revision is ready yet.' }) },
 				{ kind: 'suggest_change', label: 'Request a change', enabled: hasPlan, primary: false },
+			];
+		case 'design':
+			return [{ kind: 'suggest_change', label: 'Continue the conversation', enabled: true, primary: true }];
+		case 'design_review':
+			return [
+				{ kind: 'review_design', label: 'Review design', enabled: true, primary: true },
+				{ kind: 'suggest_change', label: 'Request a change', enabled: true, primary: false },
 			];
 		case 'building':
 		case 'checking':
