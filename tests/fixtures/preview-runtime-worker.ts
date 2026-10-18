@@ -10,13 +10,21 @@ import { PreviewOutbound } from '../../apps/app/src/server/preview-outbound.ts';
 export { PreviewDatabase, PreviewDatabaseGateway } from '../../apps/app/src/server/preview-database.ts';
 
 /**
- * A stand-in for AppPlatform with the same shape (props-bound projectId, an
- * ai(request) RPC method) and no model call, so the test proves the plumbing:
- * a ctx.exports stub in the isolate's env, called over RPC by the app.
+ * A stand-in for AppPlatform with the same shape (props-bound projectId, ai()
+ * and signInCode() RPC methods) and no model call or email, so the test proves
+ * the plumbing: a ctx.exports stub in the isolate's env, called over RPC by
+ * the app. Codes it was asked to send are kept for the test to read (/codes).
  */
+const sentCodes = new Map<string, string>();
+
 export class TestPlatform extends WorkerEntrypoint<Record<string, never>, { projectId: string }> {
 	async ai(request: { messages?: { content?: string }[] }) {
 		return { ok: true, text: `${this.ctx.props.projectId} asked: ${request.messages?.at(-1)?.content ?? ''}` };
+	}
+
+	async signInCode(request: { email?: string; code?: string }) {
+		sentCodes.set(`${this.ctx.props.projectId}:${request.email ?? ''}`, request.code ?? '');
+		return { ok: true };
 	}
 }
 
@@ -47,6 +55,7 @@ export default {
 		const body = (await request.json()) as Record<string, any>;
 		try {
 			if (url.pathname === '/check') return Response.json(await checkServerStarts(env.LOADER, body.serverSource));
+			if (url.pathname === '/codes') return Response.json({ code: sentCodes.get(`${body.projectId}:${body.email}`) ?? null });
 			if (url.pathname === '/reset') {
 				await previewDatabaseFor(env, body.projectId).reset();
 				return Response.json({ ok: true });

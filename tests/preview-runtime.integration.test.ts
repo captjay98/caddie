@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { freePort } from './fixtures/controls-harness.ts';
+import { AUTH_FILES } from '../stacks/react-hono/auth-files.ts';
+import { SERVER_FILES } from '../stacks/react-hono/server-files.ts';
 
 /**
  * Backend previews under REAL workerd (`wrangler dev`, local mode): the app's
@@ -21,6 +23,7 @@ let port = 0;
 let base = '';
 let tmp = '';
 let serverSource = '';
+let signInSource = '';
 
 async function bundle(entry: string): Promise<string> {
 	const result = await Bun.build({
@@ -28,19 +31,45 @@ async function bundle(entry: string): Promise<string> {
 		target: 'browser',
 		format: 'esm',
 		conditions: ['workerd', 'worker', 'browser'],
-		external: ['cloudflare:*'],
+		// Same as the template's server build: node: built-ins come from nodejs_compat.
+		external: ['cloudflare:*', 'node:*'],
 		plugins: [
 			{
-				// The fixture lives under tests/, outside apps/app's node_modules.
+				// The fixtures live outside apps/app's node_modules.
 				name: 'resolve-from-app',
 				setup(build) {
-					build.onResolve({ filter: /^hono(\/.*)?$/ }, (args) => ({ path: Bun.resolveSync(args.path, appDir) }));
+					build.onResolve({ filter: /^(hono|better-auth)(\/.*)?$/ }, (args) => ({ path: Bun.resolveSync(args.path, appDir) }));
 				},
 			},
 		],
 	});
 	if (!result.success) throw new Error(result.logs.map(String).join('\n'));
 	return result.outputs[0]!.text();
+}
+
+/** A server made from the template's real sign-in files (caddie/*.ts), as a generated app would mount them. */
+async function signInServer(dir: string): Promise<string> {
+	const files: Record<string, string> = {
+		'caddie/d1.ts': SERVER_FILES['caddie/d1.ts']!,
+		'caddie/ai.ts': SERVER_FILES['caddie/ai.ts']!,
+		'caddie/platform.ts': AUTH_FILES['caddie/platform.ts']!,
+		'caddie/auth.ts': AUTH_FILES['caddie/auth.ts']!,
+		'server.ts': [
+			'import { Hono } from "hono";',
+			'import { mountSignIn, requireUser } from "./caddie/auth";',
+			'const app = new Hono<{ Bindings: any }>().basePath("/api");',
+			'mountSignIn(app);',
+			'app.get("/health", (c) => c.json({ ok: true }));',
+			'app.get("/mine", async (c) => c.json({ email: (await requireUser(c)).email }));',
+			'export default app;',
+			'',
+		].join('\n'),
+	};
+	for (const [path, text] of Object.entries(files)) {
+		mkdirSync(dirname(join(dir, path)), { recursive: true });
+		writeFileSync(join(dir, path), text);
+	}
+	return bundle(join(dir, 'server.ts'));
 }
 
 async function call(path: string, body: unknown): Promise<any> {
@@ -56,6 +85,7 @@ beforeAll(async () => {
 	port = await freePort();
 	base = `http://127.0.0.1:${port}`;
 	tmp = mkdtempSync(join(tmpdir(), 'caddie-preview-rt-'));
+	signInSource = await signInServer(join(tmp, 'sign-in-app'));
 	const config = {
 		name: 'caddie-preview-runtime-fixture',
 		main: join(import.meta.dir, 'fixtures', 'preview-runtime-worker.ts'),
@@ -178,6 +208,35 @@ describe('backend preview runtime under workerd', () => {
 		expect(JSON.parse(atob(asked.relayed.body))).toEqual({ ok: true, text: 'proj-a asked: soup?' });
 		const without = await run({ method: 'GET', path: '/api/ask?q=soup%3F' });
 		expect(JSON.parse(atob(without.relayed.body))).toEqual({ ok: false, reason: 'no_platform' });
+	});
+
+	test("the template's sign-in works in Cloudflare's runtime: a code, a session cookie, the signed-in user, sign-out", async () => {
+		const migrations = [{ name: '0000_caddie_auth.sql', sql: AUTH_FILES['migrations/0000_caddie_auth.sql']! }];
+		const vars = { CADDIE_AUTH_SECRET: 'workerd-test-only-secret-0123456789abcdef' };
+		const app = (request: Record<string, unknown>) =>
+			call('/run', { outputId: 'out-auth', projectId: 'proj-auth', serverSource: signInSource, vars, platform: true, migrations, request: { headers: [], body: null, ...request } });
+		const json = (body: unknown, headers: [string, string][] = []) => ({ headers: [['content-type', 'application/json'], ...headers], body: btoa(JSON.stringify(body)) });
+		// A server with sign-in still passes the check every build runs.
+		expect(await call('/check', { serverSource: signInSource })).toEqual({ ok: true });
+
+		const asked = await app({ method: 'POST', path: '/api/auth/code', ...json({ email: 'ada@example.com' }) });
+		expect(asked.relayed.status).toBe(200);
+		const { code } = await call('/codes', { projectId: 'proj-auth', email: 'ada@example.com' });
+		expect(code).toMatch(/^\d{6}$/);
+		const wrong = await app({ method: 'POST', path: '/api/auth/sign-in', ...json({ email: 'ada@example.com', code: code === '000000' ? '111111' : '000000' }) });
+		expect(wrong.relayed.status).toBe(400);
+
+		const signed = await app({ method: 'POST', path: '/api/auth/sign-in', ...json({ email: 'ada@example.com', code }) });
+		expect(signed.relayed.status).toBe(200);
+		const cookies = (signed.relayed.headers as [string, string][]).filter(([name]) => name === 'set-cookie').map(([, value]) => value);
+		expect(cookies.some((value) => value.startsWith('__Secure-app.session_token=') && /HttpOnly/i.test(value) && /SameSite=Lax/i.test(value))).toBe(true);
+		const cookie = cookies.map((value) => value.split(';')[0]).join('; ');
+
+		const mine = await app({ method: 'GET', path: '/api/mine', headers: [['cookie', cookie]] });
+		expect(JSON.parse(atob(mine.relayed.body))).toEqual({ email: 'ada@example.com' });
+		expect((await app({ method: 'GET', path: '/api/mine' })).relayed.status).toBe(401);
+		await app({ method: 'POST', path: '/api/auth/sign-out', ...json({}, [['cookie', cookie]]) });
+		expect((await app({ method: 'GET', path: '/api/mine', headers: [['cookie', cookie]] })).relayed.status).toBe(401);
 	});
 
 	test('every Set-Cookie survives the relay', async () => {
