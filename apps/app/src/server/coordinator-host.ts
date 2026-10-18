@@ -2,8 +2,9 @@ import type { AuthEnv } from "./auth.ts";
 import type { RunBindingRecord } from "@caddie/contracts";
 import type { CoordinatorHostContext } from "../agents/coordinator.ts";
 import type { SandboxToolDeps } from "../agents/tools.ts";
-import { D1SandboxPersistence } from "./adapters/sandbox-persistence.ts";
-import { SandboxDriver, SandboxError } from "./adapters/sandbox.ts";
+import { BUILD_RUNTIME_ENV, DEFAULT_BASE_IMAGE, buildSandboxFromEnv } from "./build-sandbox.ts";
+import { previewDocument, readBuiltApp } from "./built-app.ts";
+import { type SandboxDriver, SandboxError } from "./adapters/sandbox.ts";
 import { bytesToBase64, base64ToBytes } from "./adapters/contree.ts";
 import {
   lookupRunByConversation,
@@ -31,11 +32,12 @@ import {
 } from "./build-workflow.ts";
 import { STACK_CATALOG } from "./stacks.ts";
 import { recordBuildActivity } from "./build-activity.ts";
+import { checkServerStarts, type WorkerLoaderLike } from "./preview-runtime.ts";
 import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS } from "../../../../stacks/react-hono/scaffold.ts";
 import { projectScopeForUser, ScopeError } from "./scope.ts";
+import { requestAppSecret } from "./app-secrets.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
 import {
-  buildSessionOverride,
   currentFeature,
   ensureBuildFeatures,
   listBuildFeatures,
@@ -44,8 +46,22 @@ import {
   recordFeaturePassed,
   testsBaseline,
 } from "./build-features.ts";
+import { openWorkingCopy } from "./working-copy.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { FEATURE_BLOCK_GUIDE, parsePlanFeatures } from "@caddie/contracts";
+import { collectSourceSnapshot } from "./source-export.ts";
+import { recordCodeVersion } from "./code-versions.ts";
+import { codeStoreFor } from "./code-store-env.ts";
+import { CODE_STORE_CAPS } from "./code-store.ts";
+import type { ArtifactsBinding } from "./adapters/cloudflare-artifacts.ts";
+
+/** A version snapshot must fit both the source walker's and the code store's limits. */
+const VERSION_SOURCE_CAPS = {
+  maxFiles: Math.min(300, CODE_STORE_CAPS.maxFiles),
+  maxFileBytes: Math.min(512 * 1024, CODE_STORE_CAPS.maxFileBytes),
+  maxTotalBytes: Math.min(8 * 1024 * 1024, CODE_STORE_CAPS.maxSnapshotBytes),
+  maxDirectories: 400,
+};
 
 const NO_SUCH_TABLE = (error: unknown) => String(error).includes("no such table");
 
@@ -89,6 +105,8 @@ const tail = (text: string | undefined, limit = 4000) =>
   !text ? "" : text.length > limit ? `…${text.slice(-limit)}` : text;
 export interface CoordinatorEnvironment {
   DB: AuthEnv["DB"];
+  /** Cloudflare Artifacts (owner input): app versions live there when bound, in D1 otherwise. */
+  ARTIFACTS?: ArtifactsBinding;
   /** Tavily search key — the required PRIMARY discovery source + research tool (see AuthEnv). */
   TAVILY_API_KEY?: string;
   /** Nebius model key — powers AI fit inspection of discovery candidates (fail-soft when unset). */
@@ -97,6 +115,8 @@ export interface CoordinatorEnvironment {
   CONTREE_API_TOKEN?: string;
   CONTREE_PROJECT_ID?: string;
   CONTREE_IMAGE?: string;
+  /** Worker Loader (backend previews + the runs-on-Cloudflare check). Absent: the check is skipped honestly. */
+  LOADER?: WorkerLoaderLike;
 }
 /** Called inside the owning DO, including alarms/recovery; no HTTP module globals. */
 export async function resolveCoordinatorContext(
@@ -142,9 +162,7 @@ export async function createCoordinatorContext(
   let planRevision = run.planRevision;
   const sessionId = `session:${runId}`;
   const root = `/workspace/${scope.projectId}`;
-  // tt-base installs Bun outside the non-login shell's default PATH.
-  // Only runtime locations enter the sandbox, never the Worker's environment.
-  const runtimeEnv = { PATH: "/root/.bun/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin" };
+  const runtimeEnv = BUILD_RUNTIME_ENV;
   let driver: SandboxDriver | null = null;
   let sessionReady: Promise<string> | null = null;
   const ensureSession = async () => {
@@ -167,34 +185,25 @@ export async function createCoordinatorContext(
         "The build sandbox is not configured. Planning remains available.",
       );
     }
-    driver ??= new SandboxDriver(
-      {
-        contree: {
-          baseUrl: env.CONTREE_BASE_URL,
-          apiToken: env.CONTREE_API_TOKEN,
-          platformProjectId: env.CONTREE_PROJECT_ID,
-        },
-        quotas: {
-          maxCommandTimeoutMs: 15 * 60_000,
-          maxOutputBytes: 5 * 1024 * 1024,
-          maxUploadBytes: 20 * 1024 * 1024,
-        },
-        workspaceRoot: "/workspace",
-      },
-      new D1SandboxPersistence(env.DB),
-    );
-    // A rollback points the build at a fresh session that starts from a
-    // feature's save point; otherwise the run's own session.
-    sessionReady ??= buildSessionOverride(env.DB, scope.projectId, runId)
-      .then((override) =>
-        driver!.ensureSession({
-          sessionKey: override?.sessionKey ?? sessionId,
-          image: override?.image ?? env.CONTREE_IMAGE ?? "tag:tt-base:1",
-          projectId: scope.projectId,
-          runId,
-        }),
-      )
-      .then((s) => s.sessionId);
+    driver ??= buildSandboxFromEnv(env)!;
+    // A rollback or Restore points the build at another session; a working
+    // copy the sandbox no longer keeps is started again from the saved code.
+    // A failed open is not cached, so the next call in this context retries.
+    sessionReady ??= openWorkingCopy({
+      db: env.DB,
+      store: codeStoreFor(env),
+      driver,
+      scope,
+      runId,
+      sessionKey: sessionId,
+      baseImage: env.CONTREE_IMAGE ?? DEFAULT_BASE_IMAGE,
+      root,
+      installCommand: SCAFFOLD_COMMANDS.install.join(" && "),
+      env: runtimeEnv,
+    }).catch((error: unknown) => {
+      sessionReady = null;
+      throw error;
+    });
     const id = await sessionReady;
     return { driver, id };
   };
@@ -221,7 +230,10 @@ export async function createCoordinatorContext(
         outcome: "ok", startedAt: setupStarted, finishedAt: new Date().toISOString(),
         key: "setup:scaffold",
       });
-    })());
+    })().catch((error: unknown) => {
+      scaffoldReady = null;
+      throw error;
+    }));
   // Bounds on builder actions. The host context is rebuilt for every tool
   // call (host-context.ts resolve()), so both guards read the persisted
   // build_activity rows, never in-memory counters. They read row COUNTS and
@@ -583,18 +595,25 @@ export async function createCoordinatorContext(
         "STALE_BUILD",
         "Files changed after the build. Run checks again.",
       );
-    const js = new TextDecoder().decode(
-      base64ToBytes(
-        (await driver.readFile(id, `${root}/dist/main.js`)).contentBase64,
-      ),
-    );
-    let css = "";
-    if (await driver.pathExists(id, `${root}/dist/main.css`))
-      css = new TextDecoder().decode(
-        base64ToBytes(
-          (await driver.readFile(id, `${root}/dist/main.css`)).contentBase64,
-        ),
+    // Backend apps: the server bundle and the migrations travel with the
+    // checked output (previews and publishing read them from there).
+    const { js, css, server, migrations } = await readBuiltApp(driver, id, root);
+    // The version history: the app's source as checked (same skip rules as the
+    // GitHub save — no dependencies, build output or secrets). Never fails the
+    // build: a version that can't be saved is logged and the preview still lands.
+    let source: Awaited<ReturnType<typeof collectSourceSnapshot>> | null = null;
+    try {
+      source = await collectSourceSnapshot(
+        {
+          list: (path) => driver.listEntries(id, path),
+          read: async (path) => base64ToBytes((await driver.readFile(id, path)).contentBase64),
+        },
+        root,
+        VERSION_SOURCE_CAPS,
       );
+    } catch (error) {
+      console.error("verify_build: version snapshot skipped:", error instanceof Error ? error.message : error);
+    }
     const after = await driver.checkpoint(id);
     if (after.checkpointRef !== final.resultImage)
       throw new ScopeError(
@@ -602,19 +621,79 @@ export async function createCoordinatorContext(
         "STALE_BUILD",
         "Files changed while preparing the preview. Run checks again.",
       );
-    const html =
-      '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your app</title><style>' +
-      css.replace(/<\/style/gi, "<\\/style") +
-      '</style></head><body><div id="root"></div><script type="module">' +
-      js.replace(/<\/script/gi, "<\\/script") +
-      "</script></body></html>";
+    // The runs-on-Cloudflare check: the server must start in the Workers
+    // runtime, not just under Bun in the sandbox.
+    if (server !== null && env.LOADER) {
+      const started = new Date().toISOString();
+      const startup = await checkServerStarts(env.LOADER, server);
+      const operationKey = `verify:${runId}:${plan.id}:${attempt}:server-starts`;
+      await recordVerification(env.DB, scope, workflow.runId, {
+        check: "server-starts",
+        passed: startup.ok,
+        evidence: JSON.stringify(startup.ok ? { ok: true } : { ok: false, reason: startup.reason }),
+        planRevision: plan.id,
+      });
+      await recordBuildActivity(env.DB, {
+        projectId: scope.projectId, runId: workflow.runId, kind: "check", subject: "server-starts",
+        outcome: startup.ok ? "ok" : "failed", exitCode: startup.ok ? 0 : 1,
+        output: startup.ok ? "GET /api/health answered 200 on the Workers runtime" : startup.reason,
+        startedAt: started, finishedAt: new Date().toISOString(), key: operationKey,
+      });
+      if (!startup.ok) {
+        const receipt = { check: "server-starts", passed: false, exitCode: 1, stdout: "", stderr: startup.reason, operationKey };
+        await recordRepairRound(env.DB, scope, workflow.runId, {
+          issue: "server-starts",
+          operationKey,
+          round: "repair_attempt",
+          outcome: "failed",
+          detail: JSON.stringify(receipt),
+        });
+        const paused = (await workflowRepairPause(env.DB, workflow.runId)).paused;
+        if (paused)
+          await setWorkflowBlocker(
+            env.DB,
+            scope,
+            "Caddie could not get the app's server starting on Cloudflare after three attempts. Your plan and files are saved. The app is not ready to try yet.",
+          );
+        return {
+          passed: false,
+          paused,
+          receipts: [...receipts, receipt],
+          next: `The app's server does not start on Cloudflare's runtime: ${startup.reason}. Fix src/server.ts so it uses only Web APIs and env.DB (GET /api/health must answer 200), then run verify_build again.`,
+        };
+      }
+    }
+    const html = previewDocument({ js, css });
     signal?.throwIfAborted();
     const output = await storeBuildOutput(env.DB, scope, {
       html,
       image: final.resultImage,
       planId: plan.id,
       runId: workflow.runId,
+      bundle: { server, migrations, client: { js, css } },
     });
+    if (source) {
+      try {
+        const features = await listBuildFeatures(env.DB, scope.projectId, plan.id);
+        const titles = features.filter((f) => f.status === "passed").map((f) => f.title);
+        const title = titles.length > 0 ? titles.join(", ").slice(0, 160) : "Checked build";
+        await recordCodeVersion(env.DB, codeStoreFor(env), scope, {
+          kind: "build",
+          title,
+          files: source.files.map((file) => ({
+            path: file.path,
+            contentBase64: file.encoding === "base64" ? file.content : bytesToBase64(new TextEncoder().encode(file.content)),
+          })),
+          skipped: source.skipped,
+          planId: plan.id,
+          image: final.resultImage,
+          outputId: output.outputId,
+          actorId: scope.actorId,
+        });
+      } catch (error) {
+        console.error("verify_build: version not saved:", error instanceof Error ? error.message : error);
+      }
+    }
     return {
       passed: true,
       receipts,
@@ -744,6 +823,11 @@ export async function createCoordinatorContext(
     },
     verifyBuild,
     runChecks,
+    requestAppKey: async (input) => {
+      await requireBuildApproval(env.DB, scope);
+      const key = await requestAppSecret(env.DB, scope, input);
+      return { name: key.name, status: key.status };
+    },
     buildNextFeature,
     finishFeature,
     featureProgress,
@@ -780,6 +864,11 @@ export async function createCoordinatorContext(
           .bind(revision.id, runId, scope.projectId)
           .run();
         planRevision = revision.id;
+        await workflowSnapshot(env.DB, scope);
+      }
+      // A saved design brief advances design -> design-review (the snapshot
+      // auto-advance picks up the new, not-yet-decided revision).
+      if (input.kind === "design") {
         await workflowSnapshot(env.DB, scope);
       }
     },

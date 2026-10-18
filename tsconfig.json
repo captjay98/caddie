@@ -27,9 +27,12 @@
 		"scripts/**/*.ts",
 		"tests/**/*.ts",
 		"packages/contracts/src/**/*.ts",
-		"apps/app/src/vite-env.d.ts"
+		"workers/**/*.ts",
+		"apps/app/src/vite-env.d.ts",
+		"apps/app/src/cloudflare-workers.d.ts"
 	],
 	"exclude": [
-		"tests/fixtures/forge-task-tracker"
+		"tests/fixtures/forge-task-tracker",
+		"tests/fixtures/preview-app"
 	]
 }

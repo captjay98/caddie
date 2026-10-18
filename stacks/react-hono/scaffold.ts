@@ -1,5 +1,7 @@
 import { recipe } from "./recipe.ts";
 import { SCAFFOLD_LOCKFILE } from "./scaffold-lock.ts";
+import { SERVER_FILES } from "./server-files.ts";
+import { AUTH_FILES } from "./auth-files.ts";
 
 /**
  * The ONE generic scaffold + command set for the react-hono stack (R03).
@@ -42,13 +44,23 @@ export const SCAFFOLD_PACKAGE = {
 	type: "module",
 	scripts: {
 		test: "bun test src/",
-		build: "bun build src/main.tsx --outdir dist --target browser",
+		// 1) the React client bundle (dist/main.js + dist/main.css, read by the host);
+		// 2) the app's server for Cloudflare Workers (dist/server.js); node: built-ins
+		//    stay imports — the Workers runtime provides them (nodejs_compat), and the
+		//    check below still refuses the ones it can't run;
+		// 3) Caddie's check that the server uses nothing Workers lacks.
+		build:
+			"bun build src/main.tsx --outdir dist --target browser && " +
+			"bun build src/server.ts --outfile dist/server.js --target browser --format esm --conditions workerd --external 'cloudflare:*' --external 'node:*' && " +
+			"bun run caddie/check-server.ts",
 		start: "bun run src/server.ts",
 	},
 	dependencies: {
 		react: "19.2.0",
 		"react-dom": "19.2.0",
 		hono: "4.12.32",
+		// Sign-in for the app's users (caddie/auth.ts, stacks/react-hono/auth-files.ts).
+		"better-auth": "1.7.10",
 	},
 	devDependencies: {
 		"@happy-dom/global-registrator": "21.0.3",
@@ -61,6 +73,9 @@ export const SCAFFOLD_PACKAGE = {
 
 /** The test-harness files the builder must never edit (see PROTECTED_PATH_PREFIXES). */
 export const SCAFFOLD_TEST_HARNESS = ["bunfig.toml", "test/setup/"] as const;
+
+/** Caddie-owned runtime files in every app (D1 types, the Workers check). Protected too. */
+export const SCAFFOLD_RUNTIME_DIR = "caddie/" as const;
 
 const BASE_FILES: Readonly<Record<string, string>> = {
 	"package.json": `${JSON.stringify(SCAFFOLD_PACKAGE, null, 2)}\n`,
@@ -77,7 +92,7 @@ const BASE_FILES: Readonly<Record<string, string>> = {
 				skipLibCheck: true,
 				noEmit: true,
 			},
-			include: ["src", "test"],
+			include: ["src", "test", "caddie"],
 		},
 		null,
 		2,
@@ -95,7 +110,11 @@ const BASE_FILES: Readonly<Record<string, string>> = {
 		"// load only after the DOM exists (see bunfig.toml).",
 		'import { GlobalRegistrator } from "@happy-dom/global-registrator";',
 		"",
+		"// The server's tests need the runtime's own fetch classes: happy-dom's",
+		"// browser Response drops Set-Cookie, which sign-in cookies travel in.",
+		"const runtime = { fetch, Request, Response, Headers, FormData };",
 		'GlobalRegistrator.register({ url: "http://localhost/" });',
+		"Object.assign(globalThis, runtime);",
 		"",
 	].join("\n"),
 	"test/setup/testing-library.ts": [
@@ -171,6 +190,10 @@ const BASE_FILES: Readonly<Record<string, string>> = {
 		"",
 	].join("\n"),
 	"src/styles.css": "body{margin:0;font-family:system-ui,sans-serif}\n",
+	// Backend-ready from the start (stacks/react-hono/server-files.ts).
+	...SERVER_FILES,
+	// Sign-in for the app's own users (stacks/react-hono/auth-files.ts).
+	...AUTH_FILES,
 };
 
 /**

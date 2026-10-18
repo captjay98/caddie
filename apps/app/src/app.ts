@@ -17,6 +17,12 @@ import { createJudgeRouter } from './server/routes/judge.ts';
 import { createProfileRouter } from './server/routes/profile.ts';
 import { createArtifactsRouter } from './server/routes/artifacts.ts';
 import { createPreviewsRouter } from './server/routes/previews.ts';
+import { createAppKeysRouter } from './server/routes/app-keys.ts';
+import { createPublishRouter } from './server/routes/publish.ts';
+import { createVersionsRouter } from './server/routes/versions.ts';
+import { createAppAiRouter } from './server/routes/app-ai.ts';
+import { createReportRouter } from './server/routes/report.ts';
+import { createOperatorRouter } from './server/routes/operator.ts';
 import { SandboxError } from './server/adapters/sandbox.ts';
 import { ScopeError } from './server/scope.ts';
 import type { AuthEnv } from './server/auth.ts';
@@ -63,6 +69,22 @@ type Env = {
 	 *  absent → the noop mailer's honest BLOCKED receipt, never a faked send. */
 	RESEND_API_KEY?: string;
 	RESEND_FROM?: string;
+	/** Keyring sealing app keys at rest: "kid:base64-32-bytes[,kid:...]", first seals (owner input). */
+	APP_SECRETS_KEYS?: string;
+	/** Publishing (owner inputs; all of them, or publishing reports "not set up"). */
+	APPS_DOMAIN?: string;
+	CLOUDFLARE_API_BASE?: string;
+	CLOUDFLARE_API_TOKEN?: string;
+	CLOUDFLARE_ACCOUNT_ID?: string;
+	CLOUDFLARE_DISPATCH_NAMESPACE?: string;
+	CLOUDFLARE_ROUTES_KV_ID?: string;
+	CLOUDFLARE_APPS_ZONE_ID?: string;
+	/** Safety (owner inputs): the monitored abuse inbox, who may review reports and take apps down, Web Risk. */
+	ABUSE_INBOX?: string;
+	OPERATOR_EMAILS?: string;
+	WEB_RISK_API_KEY?: string;
+	/** AI inside apps: each project's monthly allowance in US cents (default 100). Uses NEBIUS_API_KEY. */
+	APP_AI_MONTHLY_LIMIT_CENTS?: string;
 };
 
 registerNebiusProvider();
@@ -85,6 +107,10 @@ api.route('/', createGithubRouter());
 api.route('/', createDiscoveryRouter());
 api.route('/', createJudgeRouter());
 api.route('/', createBriefRouter());
+api.route('/', createAppKeysRouter());
+api.route('/', createPublishRouter());
+api.route('/', createVersionsRouter());
+api.route('/', createAppAiRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------
@@ -96,6 +122,11 @@ app.route('/agents/coordinator', createAgentRouter(Coordinator));
 app.route('/agents/hello', createAgentRouter(Hello));
 
 // --- SPA under /app --------------------------------------------------------
+// The public "Report an app" page every published app links to, and the
+// operator's page for answering reports (OPERATOR_EMAILS only).
+app.route('/', createReportRouter());
+app.route('/', createOperatorRouter());
+
 app.get('/app', (c) => c.redirect('/app/', 307));
 app.get('/app/*', async (c) => {
 	const assets = c.env?.ASSETS;

@@ -147,3 +147,54 @@ describe("R03 protected acceptance cannot be weakened or faked", () => {
     expect(digest).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 });
+
+describe("backend-ready from the start (Publish stage 2)", () => {
+  test("every app ships a Hono server under /api with a health route", () => {
+    const server = SCAFFOLD_FILES["src/server.ts"];
+    expect(server).toContain('basePath("/api")');
+    expect(server).toContain('app.get("/health"');
+    expect(server).toContain("export default app");
+    expect(server).toContain("DB: D1Database");
+  });
+
+  test("the build makes the client bundle, a Workers server bundle, then the compatibility check", () => {
+    const build = SCAFFOLD_PACKAGE.scripts.build;
+    expect(build).toContain("bun build src/main.tsx --outdir dist --target browser");
+    expect(build).toContain("--outfile dist/server.js");
+    expect(build).toContain("--external 'cloudflare:*'");
+    expect(build).toContain("--external 'node:*'");
+    expect(build.endsWith("bun run caddie/check-server.ts")).toBe(true);
+  });
+
+  test("sign-in ships with every app: Better Auth pinned, its files and tables protected", () => {
+    expect(SCAFFOLD_PACKAGE.dependencies["better-auth"]).toBe("1.7.10");
+    for (const path of ["caddie/auth.ts", "caddie/sign-in.tsx", "caddie/platform.ts", "migrations/0000_caddie_auth.sql", "test/setup/auth.ts", "test/setup/caddie.ts"]) {
+      expect(SCAFFOLD_FILES[path]).toBeDefined();
+      expect(isProtectedPath(path)).toBe(true);
+    }
+    expect(isProtectedPath("migrations/0001_init.sql")).toBe(false);
+    expect(SCAFFOLD_FILES["caddie/auth.ts"]).toContain("export function mountSignIn");
+  });
+
+  test("Caddie's runtime files and the test database are protected", () => {
+    expect(PROTECTED_PATH_PREFIXES).toContain("caddie/");
+    for (const path of ["caddie/d1.ts", "caddie/check-server.ts", "test/setup/d1.ts"]) {
+      expect(Object.keys(SCAFFOLD_FILES)).toContain(path);
+      expect(isProtectedPath(path)).toBe(true);
+    }
+    expect(isProtectedPath("src/server.ts")).toBe(false);
+    expect(isProtectedPath("migrations/0001_init.sql")).toBe(false);
+  });
+
+  test("the server example lives outside src/ so it never satisfies the host gate", () => {
+    expect(Object.keys(SCAFFOLD_FILES)).toContain("test/examples/server.example.test.ts");
+    expect(Object.keys(SCAFFOLD_FILES).some((path) => path.startsWith("src/") && /\.test\./.test(path))).toBe(false);
+  });
+
+  test("the builder is told how to use the server, env.DB and migrations", async () => {
+    const { BUILD_RECIPE_INSTRUCTION } = await import("../apps/app/src/agents/specialists.ts");
+    for (const phrase of ["src/server.ts", "/api", "env.DB", "migrations/NNNN_name.sql", "createTestEnv()", "never Bun.*", "caddie/"]) {
+      expect(BUILD_RECIPE_INSTRUCTION).toContain(phrase);
+    }
+  });
+});

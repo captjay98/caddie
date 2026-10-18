@@ -50,10 +50,33 @@ Recorded 2026-10-06 on branch `p15-p17-completion`, with the owner's
 | P17 | Hosted acceptance smoke | BLOCKED | `tests/live/release.spec.ts`: needs `CADDIE_LIVE_AUTHORIZED=1` + `CADDIE_RELEASE_URL` (a deployed base URL). The LOCAL half runs green above |
 
 Intentionally-absent live specs stay honest holes, not fake passes:
-`tests/live/sandbox.spec.ts` (P04) is authored during the owner-authorized
-live probe (parallel workstream; `test:live -- P04` fails loudly until it
-lands), and `tests/live/preview.spec.ts` (P07) awaits the isolated preview
-origin (docs/setup/previews.md).
+`tests/live/github.spec.ts` (P08) is authored only against a real registered
+GitHub App (owner-gated; docs/setup/github-app.md), so it stays out of the P08
+live map rather than promising a spec that cannot run. The two earlier holes
+are closed: `tests/live/sandbox.spec.ts` (P04) and
+`tests/live/preview.spec.ts` (P07) now exist and are mapped.
+
+## Verification net (S01, 2026-10-18)
+
+The 2026-10-06 gate above is kept as a dated receipt; this is the net that
+keeps it honest. Recorded on `feat/publish-on-cloudflare` at `8333c185` + S01,
+no deploy and no paid call.
+
+| Check | Classification | Receipt |
+|---|---|---|
+| `bun run verify:packet --all` | LOCAL VERIFIED | 43 packets — 37 PASS, 0 FAIL, 6 NOT APPLICABLE (named, not faked) in 67s |
+| `tests/packet-completeness.test.ts` (packet NET) | LOCAL VERIFIED | 6/6 pass; proved to fail when one file is unmapped and when a mapping names a file that does not exist |
+| `bun run test` | LOCAL VERIFIED | 1,339 pass, 0 fail, 104 files |
+| `bun run typecheck`, `bun run build` | LOCAL VERIFIED | exit 0 both |
+| `bun scripts/refresh-scaffold-lock.ts --check` | LOCAL VERIFIED | exit 0 — lockfile current |
+| `bun scripts/release-check.ts` | LOCAL VERIFIED | 45 PASS, 0 FAIL, 1 BLOCKED (deployment authorization, by design), 4 PROVISIONED — credentials present but no live run recorded, so never counted as PASS |
+| `tests/browser/project-workflow.spec.ts` (P16/BUILD) | LOCAL VERIFIED | 28 passed against the composed build |
+
+The 82 files that ran in no packet now run: 76 `tests/*.test.ts` and 6 specs,
+regrouped into PUBLISH, KEYS, VERSIONS, APPS, BUILD and existing packets. Live
+gates turn PASS only via a receipt in `docs/live-receipts.json`, which
+`bun run test:live -- Pxx` writes after every mapped live spec of that packet
+passes (the round-trip was proven directly; no live run has been made yet).
 
 ## Stack availability (frozen scope, feature-ledger)
 

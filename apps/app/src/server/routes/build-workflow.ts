@@ -1,15 +1,28 @@
 import { Hono } from "hono";
 import type { AuthEnv } from "../auth.ts";
 import { ScopeError, requireProjectScope } from "../scope.ts";
+import { resolveAppSecrets } from "../app-secrets.ts";
+import { SecretBoxError, keyringFromEnv } from "../secret-box.ts";
+import { appAuthSecret, clearTestInbox, listTestInbox } from "../app-sign-in.ts";
 import {
   workflowSnapshot,
   reconcileStalledBuild,
   decideWorkflow,
+  decideDesign,
   acknowledgeDispatch,
   readBuildOutput,
+  readBuildBundle,
   retryWorkflow,
   stopWorkflow,
 } from "../build-workflow.ts";
+import {
+  PreviewRuntimeError,
+  bridgeRequestToRequest,
+  previewDatabaseFor,
+  runPreviewApp,
+  type PreviewDatabaseEnv,
+  type WorkerLoaderLike,
+} from "../preview-runtime.ts";
 import { rollbackToFeature } from "../build-features.ts";
 import {
   dispatchPendingWorkflow,
@@ -18,6 +31,7 @@ import {
 } from "../workflow-dispatch.ts";
 import { projectExperience, approvePlan } from "../project-experience.ts";
 import { buildActivity } from "../build-activity.ts";
+import { checkImportedApp, importPreviewDepsFromEnv, readImportPreview, type ImportPreviewEnv } from "../import-preview.ts";
 import { acceptProposal, dismissProposal, getProposal } from "../project-proposals.ts";
 import { projectHackathon } from "../project-hackathon.ts";
 import { ApprovePlanCommandSchema } from "@caddie/contracts";
@@ -74,7 +88,23 @@ export function createBuildWorkflowRouter(
       c.req.param("projectId"),
     );
     await reconcileStalledBuild(c.env.DB, scope.projectId);
-    return c.json(await workflowSnapshot(c.env.DB, scope));
+    const snapshot = await workflowSnapshot(c.env.DB, scope);
+    const previewId = snapshot.workflow?.previewId ?? null;
+    const previewHasServer = previewId ? (await readBuildBundle(c.env.DB, scope, previewId).catch(() => null)) !== null : false;
+    // "Start from my GitHub repo": the copied app, shown until the first build has a preview of its own.
+    const importPreview = await readImportPreview(c.env.DB, scope);
+    return c.json({ ...snapshot, previewHasServer, importPreview });
+  });
+
+  // Carry the copied app's build forward (import-preview.ts). The card calls
+  // this while it shows "checking"; it may run for minutes (install + build)
+  // or answer "checking" at once when the sandbox is busy with the same work.
+  router.post("/projects/:projectId/import-preview/check", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const env = c.env as typeof c.env & ImportPreviewEnv;
+    const importPreview = await checkImportedApp(importPreviewDepsFromEnv(env), scope);
+    if (!importPreview) throw new ScopeError(404, "no_import_preview", "This project didn't start from GitHub.");
+    return c.json({ importPreview });
   });
 
   // Build activity: the honest "what is Caddie doing right now?" read while a
@@ -160,6 +190,27 @@ export function createBuildWorkflowRouter(
     // Server-owned dispatch (R02): deliver the pending coordinator message now,
     // from the server, so an approved build starts even if the browser closes.
     // The DO's own onStart drain owns re-delivery after a crash.
+    const deliver = deliverFor(c);
+    if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
+    return c.json(snapshot);
+  });
+  router.post("/projects/:projectId/workflow/design-decision", async (c) => {
+    const scope = await requireProjectScope(
+      c.env.DB,
+      c.env,
+      c.req.raw.headers,
+      c.req.param("projectId"),
+    );
+    let input;
+    try {
+      input = await c.req.json();
+    } catch {
+      throw new ScopeError(400, "invalid_input", "Expected JSON.");
+    }
+    // The DESIGN-brief gate: approve -> building (feature loop), reject ->
+    // design (re-author). Same server-owned dispatch as the plan decision so an
+    // approved build starts even if the browser closes.
+    const snapshot = await decideDesign(c.env.DB, scope, input);
     const deliver = deliverFor(c);
     if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
     return c.json(snapshot);
@@ -253,5 +304,113 @@ export function createBuildWorkflowRouter(
       },
     });
   });
+
+  // Backend previews: the preview frame relays its fetch('/api/…') calls here
+  // (it has no network of its own). The app's server bundle runs in a Worker
+  // Loader isolate with this project's preview database, the app's own keys,
+  // Caddie's platform (env.CADDIE: AI) for this project, and outside requests
+  // only through Caddie's egress gate.
+  router.post("/projects/:projectId/workflow/preview/:outputId/app", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const env = c.env as AuthEnv & PreviewRuntimeBindings;
+    const exportsOf = previewExports(c);
+    if (!env.LOADER || !env.PREVIEW_DB || !exportsOf?.PreviewDatabaseGateway)
+      throw new ScopeError(
+        503,
+        "PREVIEW_RUNTIME_UNAVAILABLE",
+        "Trying apps with a server needs Cloudflare's Worker Loader, which isn't available here.",
+      );
+    const outputId = c.req.param("outputId");
+    const bundle = await readBuildBundle(c.env.DB, scope, outputId);
+    if (!bundle) throw new ScopeError(409, "PREVIEW_HAS_NO_SERVER", "This version of the app has no server.");
+    let request: Request;
+    try {
+      request = bridgeRequestToRequest(await c.req.json());
+    } catch (error) {
+      if (error instanceof PreviewRuntimeError) throw new ScopeError(error.status, error.code, error.message);
+      throw new ScopeError(400, "invalid_request", "The preview sent a request Caddie could not read.");
+    }
+    try {
+      await previewDatabaseFor(env, scope.projectId).applyMigrations(bundle.migrations);
+      const relayed = await runPreviewApp({
+        loader: env.LOADER,
+        projectId: scope.projectId,
+        outputId,
+        serverSource: bundle.server,
+        vars: await previewVars(env, scope.projectId),
+        database: exportsOf.PreviewDatabaseGateway({ props: { projectId: scope.projectId } }),
+        platform: exportsOf.AppPlatform ? exportsOf.AppPlatform({ props: { projectId: scope.projectId } }) : undefined,
+        globalOutbound: exportsOf.PreviewOutbound ? exportsOf.PreviewOutbound({ props: { projectId: scope.projectId } }) : null,
+        request,
+      });
+      return c.json(relayed);
+    } catch (error) {
+      if (error instanceof PreviewRuntimeError) throw new ScopeError(error.status, error.code, error.message);
+      const message = error instanceof Error ? error.message : String(error);
+      // The app's own failure (a thrown error in its server) is the app's answer, not Caddie's.
+      return c.json({
+        status: 500,
+        headers: [["content-type", "text/plain; charset=utf-8"]],
+        body: btoa(unescape(encodeURIComponent(`The app's server failed: ${message.slice(0, 500)}`))),
+      });
+    }
+  });
+
+  // "Reset test data": empty this project's preview database (and its test inbox).
+  router.post("/projects/:projectId/workflow/preview-data/reset", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const env = c.env as AuthEnv & PreviewRuntimeBindings;
+    if (!env.PREVIEW_DB) throw new ScopeError(503, "PREVIEW_RUNTIME_UNAVAILABLE", "The preview database isn't available here.");
+    await previewDatabaseFor(env, scope.projectId).reset();
+    await clearTestInbox(c.env.DB, scope.projectId);
+    return c.json({ reset: true });
+  });
+
+  // The preview's test inbox: sign-in codes the app sent while you tried it.
+  router.get("/projects/:projectId/workflow/test-inbox", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    return c.json({ messages: await listTestInbox(c.env.DB, scope) }, 200, { "cache-control": "no-store" });
+  });
   return router;
+}
+
+type PreviewRuntimeBindings = { LOADER?: WorkerLoaderLike; APP_SECRETS_KEYS?: string } & PreviewDatabaseEnv;
+type PreviewExports = {
+  PreviewDatabaseGateway?(options: { props: { projectId: string } }): unknown;
+  PreviewOutbound?(options: { props: { projectId: string } }): unknown;
+  AppPlatform?(options: { props: { projectId: string } }): unknown;
+};
+
+/** The Worker's own entrypoints (ctx.exports). Hono's executionCtx getter throws when there is none (tests, Bun). */
+function previewExports(c: { executionCtx: unknown }): PreviewExports | undefined {
+  try {
+    return (c.executionCtx as { exports?: PreviewExports } | undefined)?.exports;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The app's own keys for its preview, opened server-side. A server without a
+ * keyring has no keys to give (the preview still runs); a key that can no
+ * longer be opened is left out, and the Keys card says to paste it again.
+ */
+async function previewKeys(env: PreviewRuntimeBindings & { DB: AuthEnv["DB"] }, projectId: string): Promise<Record<string, string>> {
+  if (!(env.APP_SECRETS_KEYS ?? "").trim()) return {};
+  try {
+    return (await resolveAppSecrets(env.DB, await keyringFromEnv(env), projectId)).values;
+  } catch (error) {
+    if (error instanceof SecretBoxError) {
+      console.error("preview: app keys unavailable:", error.code);
+      return {};
+    }
+    throw error;
+  }
+}
+
+/** Everything the preview's env carries as text: the app's keys and its sign-in secret. */
+async function previewVars(env: PreviewRuntimeBindings & { DB: AuthEnv["DB"]; BETTER_AUTH_SECRET?: string }, projectId: string): Promise<Record<string, string>> {
+  const vars = await previewKeys(env, projectId);
+  const authSecret = await appAuthSecret(env.BETTER_AUTH_SECRET, projectId, "preview");
+  return authSecret ? { ...vars, CADDIE_AUTH_SECRET: authSecret } : vars;
 }

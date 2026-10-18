@@ -1,4 +1,5 @@
 import planningSkill from './skills/planning/SKILL.md';
+import designSkill from './skills/design/SKILL.md';
 import buildVerifySkill from './skills/build-verify/SKILL.md';
 import deliveryChecklistSkill from './skills/delivery-checklist/SKILL.md';
 import submissionSkill from './skills/submission/SKILL.md';
@@ -24,6 +25,7 @@ export interface VersionedSkill {
 // typed by the flue plugin — pass them directly to useSkill.
 export const PACKAGED_SKILLS = {
 	planning: planningSkill,
+	design: designSkill,
 	'build-verify': buildVerifySkill,
 	'delivery-checklist': deliveryChecklistSkill,
 	submission: submissionSkill,

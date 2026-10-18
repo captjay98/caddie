@@ -11,6 +11,7 @@ import { createRun } from "../apps/app/src/server/runs.ts";
 import {
   startProjectFromChat,
   decideWorkflow,
+  decideDesign,
   workflowSnapshot,
   setWorkflowBlocker,
 } from "../apps/app/src/server/build-workflow.ts";
@@ -68,6 +69,7 @@ async function world() {
     "0015_plan_decisions.sql",
     "0018_build_workflow.sql",
     "0022_build_activity.sql",
+    "0024_design_phase.sql",
   ]) {
     const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), "utf8");
     for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);
@@ -99,7 +101,19 @@ async function world() {
     await workflowSnapshot(db, scope); // planning -> review
     return { scope, plan, workflow: started.workflow };
   }
-  return { db, planned };
+  // PRD approval now enters the design step; this carries a planned project all
+  // the way to 'building' (approve PRD -> design -> save brief -> approve design)
+  // for the build-progress tests, which are about the building phase itself.
+  async function toBuilding(scope: Awaited<ReturnType<typeof planned>>["scope"], planId: string) {
+    await decideWorkflow(db, scope, { planId, decision: "approved" });
+    const design = await createPlanDocRevision(db, scope, {
+      kind: "design",
+      body: "# Design brief\n\nScreens and states for the todo app.",
+    });
+    await workflowSnapshot(db, scope);
+    await decideDesign(db, scope, { designId: design.id, decision: "approved" });
+  }
+  return { db, planned, toBuilding };
 }
 
 describe("buildActivity — honest build-progress projection", () => {
@@ -116,7 +130,7 @@ describe("buildActivity — honest build-progress projection", () => {
   test("building with no rounds yet: implement is active, check is pending", async () => {
     const w = await world();
     const item = await w.planned();
-    await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    await w.toBuilding(item.scope, item.plan.id);
     const activity = await buildActivity(w.db, item.scope);
     expect(activity.phase).toBe("building");
     expect(activity.building).toBe(true);
@@ -130,7 +144,7 @@ describe("buildActivity — honest build-progress projection", () => {
   test("building after a verification round: the check step becomes active and history is real", async () => {
     const w = await world();
     const item = await w.planned();
-    await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    await w.toBuilding(item.scope, item.plan.id);
     const snap = await workflowSnapshot(w.db, item.scope);
     await recordRepairRound(w.db, item.scope, snap.workflow!.runId, {
       issue: "saved-tasks",
@@ -151,7 +165,7 @@ describe("buildActivity — honest build-progress projection", () => {
   test("blocked mid-build: check is where it stuck, preview never shown", async () => {
     const w = await world();
     const item = await w.planned();
-    await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    await w.toBuilding(item.scope, item.plan.id);
     await setWorkflowBlocker(w.db, item.scope, "The saved-task check still fails after three attempts.");
     const activity = await buildActivity(w.db, item.scope);
     const byKey = Object.fromEntries(activity.steps.map((s) => [s.key, s.state]));
@@ -162,7 +176,7 @@ describe("buildActivity — honest build-progress projection", () => {
   test("recorded sandbox actions become the timeline: files, real test counts, plan scope; replays are deduplicated", async () => {
     const w = await world();
     const item = await w.planned();
-    await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    await w.toBuilding(item.scope, item.plan.id);
     const runId = (await workflowSnapshot(w.db, item.scope)).workflow!.runId;
     const base = { projectId: item.scope.projectId, runId };
     await recordBuildActivity(w.db, { ...base, kind: "file", subject: `/workspace/${item.scope.projectId}/src/App.tsx`, outcome: "ok", bytes: 1200, startedAt: "2026-10-15T19:12:00.000Z", finishedAt: "2026-10-15T19:12:01.000Z" });

@@ -481,6 +481,42 @@ export class SandboxDriver {
 	}
 
 	/**
+	 * Whether the working copy a session key stands for can still be used:
+	 * the session's current image (or, before the session exists, the image
+	 * it would start from) is still kept by the sandbox. Images are not kept
+	 * forever, so a build that resumes after a long pause must check.
+	 *
+	 * - A session used within `recheckAfterMs` is trusted without a probe.
+	 * - Tag references (the base image) are never probed.
+	 * - An empty image means there is no working copy to start from.
+	 * - Only a definite "not there" answers false; transport errors throw, so
+	 *   a flaky network never discards a working copy.
+	 */
+	async workingCopyAvailable(input: { sessionKey: string; image: string; recheckAfterMs: number }): Promise<boolean> {
+		const record = await this.persistence.load(`session:${requireNonEmpty(input.sessionKey, 'sessionKey')}`);
+		let image = input.image;
+		if (record?.kind === 'session') {
+			// Disposed or still-creating sessions keep their existing handling.
+			if (record.state !== 'active' || !record.image) return true;
+			if (Date.now() - Date.parse(record.updatedAt) < input.recheckAfterMs) return true;
+			image = record.image;
+		}
+		if (image === '') return false;
+		if (!isImageUuid(image)) return true;
+		try {
+			return (await this.contree.inspectList(image, '/', AbortSignal.timeout(this.dispatchTimeoutMs))) !== null;
+		} catch (error) {
+			throw this.mapContreeError(error, 'IMAGE_CHECK_FAILED', `checking image ${image} failed`);
+		}
+	}
+
+	/** Whether a working copy (a session record that isn't disposed) exists under this key. */
+	async hasSession(sessionKey: string): Promise<boolean> {
+		const record = await this.persistence.load(`session:${requireNonEmpty(sessionKey, 'sessionKey')}`);
+		return record?.kind === 'session' && record.state !== 'disposed';
+	}
+
+	/**
 	 * Named-session creation with the derived logical key (kept for callers
 	 * that think in project/run pairs). Same bookkeeping as ensureSession.
 	 */
@@ -800,6 +836,26 @@ export class SandboxDriver {
 		const { image, absolutePath } = await this.requireSessionForRead(sessionId, path);
 		const listing = await this.requireListing(image, absolutePath, path);
 		return listing.files.map((item) => item.path);
+	}
+
+	/**
+	 * One directory level with each entry's kind and size (the same inspect
+	 * list call as listDir), so a tree walk needs one request per directory
+	 * instead of one stat per entry.
+	 */
+	async listEntries(
+		sessionId: string,
+		path: string,
+	): Promise<Array<{ name: string; isDir: boolean; isFile: boolean; isSymlink: boolean; size: number }>> {
+		const { image, absolutePath } = await this.requireSessionForRead(sessionId, path);
+		const listing = await this.requireListing(image, absolutePath, path);
+		return listing.files.map((item) => ({
+			name: item.path,
+			isDir: item.isDir,
+			isFile: item.isRegular && !item.isDir,
+			isSymlink: item.isSymlink,
+			size: item.size,
+		}));
 	}
 
 	/** Stat-based existence: typed FILE_NOT_FOUND maps to false, other errors rethrow. */

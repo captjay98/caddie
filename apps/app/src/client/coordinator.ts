@@ -28,7 +28,7 @@ import { standbySource, type ChannelSource } from './conversation/channel-store.
 // pi-ai deps), so this literal mirrors it; the server re-verifies the route id
 // against the frozen registry (findModelRoute throws on a mismatch), so a drift
 // here fails closed rather than silently mis-pricing a run.
-const COORDINATOR_MODEL_ROUTE = 'nemotron-3-super';
+const COORDINATOR_MODEL_ROUTE = 'nemotron-3.5-super-vl';
 
 export interface CoordinatorTransport {
 	/** Live agent snapshot; `standbySource` until the project has a run. */

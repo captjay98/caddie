@@ -81,7 +81,7 @@ function requireScopeObject<K extends string>(
  */
 export async function sessionUserId(env: AuthEnv, headers: Headers): Promise<string | null> {
 	try {
-		// Structural view of better-auth 1.7.7's getSession result at the adapter
+		// Structural view of better-auth 1.7.x's getSession result at the adapter
 		// edge (its deep plugin generics do not expose `session.userId` cleanly);
 		// the shape is proven by the P01/P02 integration suites.
 		const session = (await getAuth(env).api.getSession({ headers })) as {
@@ -204,6 +204,27 @@ export async function assertWorkspaceScope(
 		fail(403, 'not_a_member', 'actor has no membership in this workspace');
 	}
 	return { actorId: fields.actorId, workspaceId: fields.workspaceId };
+}
+
+/**
+ * Owner-only actions (setting an app's keys, publishing it): the scope must
+ * verify AND the actor's membership in the project's workspace must carry the
+ * 'owner' role. Every membership Caddie creates today is its creator's own
+ * 'owner' row, so this changes nothing for current users; it keeps any future
+ * non-owner member from changing keys or what the public sees.
+ */
+export async function assertProjectOwner(db: D1Database, scope: unknown): Promise<Scope> {
+	const verified = await assertProjectScope(db, scope);
+	const rows = await queryAll(
+		db,
+		'select "role" from "workspace_memberships" where "workspaceId" = ? and "userId" = ?',
+		verified.workspaceId,
+		verified.actorId,
+	);
+	if (!rows.some((row) => row['role'] === 'owner')) {
+		fail(403, 'not_project_owner', 'only the project owner can do this');
+	}
+	return verified;
 }
 
 /**

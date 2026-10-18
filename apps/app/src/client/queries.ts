@@ -319,6 +319,43 @@ export function useProjectRepo(actor: ActorScope, projectId: string | null) {
 	});
 }
 
+/** One "save the code to GitHub" (mirrors server SourceSaveView). */
+export interface SourceSaveView {
+	outputId: string;
+	repoFullName: string;
+	headBranch: string;
+	pullRequestNumber: number | null;
+	htmlUrl: string | null;
+	fileCount: number;
+	skipped: Array<{ path: string; reason: 'dependencies' | 'build-output' | 'secret' | 'symlink' | 'noise' }>;
+	deleted: string[];
+	createdAt: string;
+}
+
+/** The latest save, its pull request's live state, and the exact merge approval (server readSourceSave). */
+export interface SourceSaveStatus {
+	save: SourceSaveView | null;
+	pullRequest: {
+		number: number;
+		state: 'open' | 'closed' | 'merged';
+		mergeable: boolean | null;
+		headSha: string;
+		baseBranch: string;
+		htmlUrl: string | null;
+	} | null;
+	pullRequestError: string | null;
+	mergeIntent: import('@caddie/contracts').ApprovalIntent | null;
+}
+
+export function useSourceSave(actor: ActorScope, projectId: string | null) {
+	return useQuery({
+		queryKey: ['source-save', actor.actorId ?? 'pending', projectId ?? 'none'],
+		queryFn: () =>
+			fetchJson<SourceSaveStatus>(`/api/projects/${encodeURIComponent(projectId ?? '')}/github/source`),
+		enabled: actor.actorId !== null && projectId !== null,
+	});
+}
+
 /**
  * UI review board phase 2 — the brief feed: the project's real decisions
  * (pending approvals, retained conflicts, stale artifacts, failed rounds,

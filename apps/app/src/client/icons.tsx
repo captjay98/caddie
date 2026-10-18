@@ -48,9 +48,13 @@ export type IconName =
 	| 'file'
 	| 'paperclip'
 	| 'mic'
+	| 'camera'
 	| 'chevronDown'
 	| 'expand'
-	| 'collapse';
+	| 'collapse'
+	| 'key'
+	| 'sparkle'
+	| 'mail';
 
 interface IconProps {
 	name: IconName;
@@ -224,6 +228,12 @@ const PATHS: Record<IconName, ReactElement> = {
 			<path d="M4 7.5a4 4 0 0 0 8 0M8 11.5v2M6 13.5h4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
 		</>
 	),
+	camera: (
+		<>
+			<path d="M2.5 5.5h2l1-1.5h5l1 1.5h2v7h-11v-7z" fill="none" stroke="currentColor" strokeLinejoin="round" />
+			<circle cx="8" cy="9" r="2.3" fill="none" stroke="currentColor" />
+		</>
+	),
 	send: <path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
 	chat: (
 		<path
@@ -254,6 +264,24 @@ const PATHS: Record<IconName, ReactElement> = {
 		</>
 	),
 	chevronDown: <path d="M4 6.5 8 10.5l4-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
+	key: (
+		<>
+			<circle cx="5.5" cy="10.5" r="3" fill="none" stroke="currentColor" />
+			<path d="M7.6 8.4 13.5 2.5M11.5 4.5l1.5 1.5M10 6l1.2 1.2" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
+	),
+	sparkle: (
+		<>
+			<path d="M7 2c.5 2.8 1.7 4 4.5 4.5C8.7 7 7.5 8.2 7 11c-.5-2.8-1.7-4-4.5-4.5C5.3 6 6.5 4.8 7 2z" fill="none" stroke="currentColor" strokeLinejoin="round" />
+			<path d="M12.2 10.2c.2 1 .6 1.4 1.6 1.6-1 .2-1.4.6-1.6 1.6-.2-1-.6-1.4-1.6-1.6 1-.2 1.4-.6 1.6-1.6z" fill="none" stroke="currentColor" strokeLinejoin="round" />
+		</>
+	),
+	mail: (
+		<>
+			<rect x="2" y="3.5" width="12" height="9" rx="1.5" fill="none" stroke="currentColor" />
+			<path d="M2.5 4.5 8 9l5.5-4.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
+	),
 };
 
 export function Icon({ name, title, className }: IconProps): ReactElement {

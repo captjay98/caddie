@@ -970,15 +970,8 @@ a.btn-ghost.topbar-nav-link {
 	}
 	.bottom-nav-composer .composer textarea {
 		min-height: 2.1rem;
-		padding: 0.5rem 0.6rem;
+		padding: 0.5rem 0.3rem;
 		font-size: 14px;
-		background: transparent;
-		border-color: transparent;
-		border-radius: 13px;
-	}
-	.bottom-nav-composer .composer textarea:focus {
-		border-color: transparent;
-		box-shadow: none;
 	}
 	/* The AskBar (Brief / Discover / Projects tabs) is the pill interior too —
 	   strip its own border/background/shadow so it reads edge-to-edge like the
@@ -992,6 +985,11 @@ a.btn-ghost.topbar-nav-link {
 		min-height: 2.4rem;
 	}
 	.bottom-nav-composer .composer-send {
+		width: 2.3rem;
+		height: 2.3rem;
+		border-radius: 13px;
+	}
+	.bottom-nav-composer .composer-tools-toggle {
 		width: 2.3rem;
 		height: 2.3rem;
 		border-radius: 13px;
@@ -1587,6 +1585,81 @@ a.btn-ghost.topbar-nav-link {
 	flex-wrap: wrap;
 }
 
+/* Plan-approval reassurance strip: the safety guarantees the host enforces
+   (sandbox build; deploy/spend need a separate approval) as glanceable chips
+   above the actions, so the user is reassured at a glance instead of reading a
+   grey paragraph. Theme tokens only; each tinted chip sets its own text colour. */
+.workflow-assurance {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
+	margin-top: 0.5rem;
+}
+.workflow-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	font-size: var(--r-meta);
+	padding: 0.2rem 0.55rem;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--color-muted) 12%, transparent);
+	color: var(--color-muted);
+	border: 1px solid color-mix(in srgb, var(--color-muted) 24%, transparent);
+	white-space: nowrap;
+}
+/* The one POSITIVE guarantee (it is sandboxed) carries the ok tint; the
+   "no deploy / no spending" chips stay neutral — they state a boundary, not a
+   warning, so they must not read as danger. */
+.workflow-chip-ok {
+	background: color-mix(in srgb, var(--color-ok) 13%, transparent);
+	color: var(--color-ok);
+	border-color: color-mix(in srgb, var(--color-ok) 26%, transparent);
+}
+.workflow-assurance-note {
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+	opacity: 0.85;
+}
+
+/* Repo connection is optional housekeeping, demoted to a quiet footnote BELOW
+   the actions (a hairline separates it) — never a paragraph above the primary
+   button that reads as a warning about approving. */
+.workflow-repo-nudge {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	margin-top: 0.6rem;
+	padding-top: 0.6rem;
+	border-top: 1px solid var(--color-line-soft);
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+}
+.workflow-repo-nudge .r-link {
+	white-space: nowrap;
+	/* Rendered as a <button> here, so strip the UA button chrome that otherwise
+	   draws a box around the text — it must read as an inline text link, not a
+	   chip. Accent-coloured + underlined so it is clearly the clickable part. */
+	appearance: none;
+	border: 0;
+	background: none;
+	padding: 0;
+	font: inherit;
+	font-weight: 600;
+	color: var(--color-action);
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	cursor: pointer;
+}
+.workflow-repo-nudge .r-link:hover {
+	color: var(--color-action-deep);
+}
+/* Keep the icon snug to the sentence and let the whole line wrap naturally
+   rather than breaking awkwardly before "now, or after the build." */
+.workflow-repo-nudge > :first-child {
+	flex: none;
+}
+
 .row-details {
 	margin-top: 0.45rem;
 	display: grid;
@@ -1616,6 +1689,21 @@ a.btn-ghost.topbar-nav-link {
 	   absolute labels land against the document and inflate the page height
 	   (the desktop shell lost its independent-scroll behaviour). */
 	position: relative;
+}
+
+/* Turn grouping: the transcript's 1.1rem gap separates AUTHOR turns (you ↔
+   Caddie). Consecutive bubbles by the SAME author hug — a continuation row
+   pulls up most of that gap so a multi-bubble turn reads as one unit — and the
+   continuation drops the pointed "beak" corner for an even radius, so only the
+   first bubble of a turn points at its author. */
+.msg[data-seq='cont'] {
+	margin-top: calc(-1.1rem + 0.28rem);
+}
+.msg.assistant[data-seq='cont'] .bubble {
+	border-top-left-radius: 14px;
+}
+.msg.user[data-seq='cont'] {
+	border-top-right-radius: 14px;
 }
 
 /* The transcript reads by alignment alone: user bubbles right, assistant
@@ -1882,6 +1970,31 @@ a.btn-ghost.topbar-nav-link {
 	font-style: italic;
 }
 
+/* One-bubble turn (redesign): the folded layers (reasoning, tool drawer) stack
+   tight at the top of the assistant bubble; the answer sits beneath them with
+   a hairline rule when any layer is present, so a turn reads as
+   thinking → tools → answer in one surface, not a stack of cards. The folded
+   layers lose their own top/bottom margins here — the turn controls spacing. */
+.msg.assistant .bubble > .reasoning-view,
+.msg.assistant .bubble > .tool-strip {
+	margin: 0 0 0.4rem;
+}
+.msg.assistant .bubble > .reasoning-view + .tool-strip {
+	margin-top: 0;
+}
+.turn-answer.has-folded {
+	border-top: 1px solid var(--color-line-soft);
+	padding-top: 0.6rem;
+	margin-top: 0.1rem;
+}
+/* The answer's own first/last block never adds extra margin against the rule. */
+.turn-answer > :first-child {
+	margin-top: 0;
+}
+.turn-answer > :last-child {
+	margin-bottom: 0;
+}
+
 /* Hackathon results (chat card + Discover list). ONE column at chat width:
    a compact featured card for the first event, one-line rows for the rest.
    Theme tokens only, every tinted surface sets its own text colour, and
@@ -1891,22 +2004,29 @@ a.btn-ghost.topbar-nav-link {
 	display: flex;
 	flex-direction: column;
 	gap: 0.35rem;
-	max-width: 34rem;
+	max-width: 44rem;
 	min-width: 0;
+	/* The featured card reflows by its OWN width, not the viewport — a
+	   container query here lets the two-column header collapse whether the card
+	   is narrow because it's on a phone or because a right rail squeezed it. */
+	container-type: inline-size;
+	container-name: hk-card;
 }
+/* The featured card is CONTENT of the assistant bubble, not a card floating in
+   a card: no own panel background / border / shadow (that was the box-in-box).
+   Structure comes from spacing and the stat row alone. */
 .hk-feature {
-	border: 1px solid var(--color-line-soft);
-	border-radius: 12px;
-	background: var(--color-panel);
 	color: var(--color-bright);
-	padding: 0.75rem 0.85rem;
 	display: flex;
 	flex-direction: column;
-	gap: 0.45rem;
+	gap: 0.6rem;
 	min-width: 0;
 }
+/* A top pick gets a thin accent rule on its left edge instead of a full border
+   box, so it still reads as singled-out without re-introducing a nested card. */
 .hk-feature[data-top-pick='true'] {
-	border-color: color-mix(in srgb, var(--color-action) 40%, var(--color-line-soft));
+	padding-left: 0.7rem;
+	border-left: 2px solid color-mix(in srgb, var(--color-action) 55%, transparent);
 }
 .hk-toppick-ribbon {
 	display: inline-flex;
@@ -1917,10 +2037,37 @@ a.btn-ghost.topbar-nav-link {
 	letter-spacing: 0.02em;
 	color: var(--color-action);
 }
+/* Two-column header: identity grows on the left, verdict + action anchor
+   top-right so the card uses its full width (fixes the dead right column).
+   The @container rule below stacks this to one column on a narrow card. */
+.hk-feature-head {
+	display: flex;
+	gap: 1rem;
+	align-items: flex-start;
+	justify-content: space-between;
+}
+.hk-feature-ident {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+.hk-feature-actions {
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	align-items: flex-end;
+	/* Pull the actions column up so the eligibility chip's cap-height lines up
+	   with the title's first line, not its padded top edge — otherwise the
+	   padded pill reads as floating above the title. */
+	margin-top: 0.1rem;
+}
 .hk-feature-title {
 	margin: 0;
-	font-size: 0.95rem;
-	line-height: 1.3;
+	font-size: 1.0625rem;
+	font-weight: 650;
+	line-height: 1.25;
 	color: var(--color-bright);
 	overflow-wrap: break-word;
 	display: -webkit-box;
@@ -1949,43 +2096,55 @@ a.btn-ghost.topbar-nav-link {
 	display: inline;
 }
 .hk-feature-sub {
-	margin: -0.25rem 0 0;
+	margin: 0;
 	font-size: var(--r-meta);
 	color: var(--color-muted);
 }
+/* Number-primary stats spread across the FULL card width on their own row
+   (equal columns), with a hairline rule separating them from the header. Big
+   value on top, small uppercase caption beneath (source order is value→label,
+   so no flex-reverse). The @container rule wraps these 2×2 on a narrow card. */
 .hk-stats {
-	margin: 0.1rem 0;
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
-	gap: 0.4rem;
+	margin: 0.15rem 0 0;
+	display: flex;
+	gap: 0.5rem;
+	border-top: 1px solid var(--color-line-soft);
+	padding-top: 0.6rem;
 }
 .hk-stat {
-	background: var(--color-raised);
-	color: var(--color-bright);
-	border-radius: 8px;
-	padding: 0.35rem 0.55rem;
+	flex: 1 1 0;
 	display: flex;
-	flex-direction: column-reverse;
+	flex-direction: column;
+	gap: 0.1rem;
 	min-width: 0;
 }
 .hk-stat dd {
 	margin: 0;
-	font-size: 0.95rem;
-	font-weight: 600;
+	font-size: 1.25rem;
+	font-weight: 700;
+	line-height: 1;
 	color: var(--color-bright);
 	white-space: nowrap;
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.hk-stat dt {
-	font-size: var(--r-label);
+/* The deadline is the time-sensitive number — tint it with the accent. */
+.hk-stat[data-stat='deadline'] dd {
+	color: var(--color-action);
+}
+/* AI fit reads as a verdict word: colour it by its own meaning (strong = ok,
+   weak = muted), never as another number. */
+.hk-stat[data-stat='fit'] dd {
+	color: var(--color-ok);
+}
+.hk-feature[data-ai-fit='weak'] .hk-stat[data-stat='fit'] dd {
 	color: var(--color-muted);
 }
-.hk-card-badges {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.3rem;
-	align-items: center;
+.hk-stat dt {
+	font-size: var(--r-label);
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--color-muted);
 }
 .hk-chip {
 	display: inline-flex;
@@ -2024,16 +2183,6 @@ a.btn-ghost.topbar-nav-link {
 	color: var(--color-warn);
 	border-color: color-mix(in srgb, var(--color-warn) 30%, transparent);
 }
-.hk-chip-fit {
-	background: color-mix(in srgb, var(--color-action) 14%, transparent);
-	color: var(--color-action);
-	border-color: color-mix(in srgb, var(--color-action) 28%, transparent);
-}
-.hk-chip-fit[data-ai-fit='weak'] {
-	background: color-mix(in srgb, var(--color-muted) 12%, transparent);
-	color: var(--color-muted);
-	border-color: color-mix(in srgb, var(--color-muted) 24%, transparent);
-}
 /* A web-search backup result: its open status could not be confirmed. */
 .hk-chip-unverified {
 	background: color-mix(in srgb, var(--color-warn) 12%, transparent);
@@ -2051,6 +2200,70 @@ a.btn-ghost.topbar-nav-link {
 .hk-why {
 	font-size: var(--r-meta);
 	color: var(--color-muted);
+}
+/* ONE eligibility object: the chip is the <summary>, with a quiet "why"
+   affordance beside it; clicking either reveals the quoted rule. No separate
+   "Why you can enter" fold. */
+.hk-elig-disclosure {
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+}
+.hk-elig-summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	cursor: pointer;
+	list-style: none;
+	width: fit-content;
+}
+.hk-elig-summary::-webkit-details-marker {
+	display: none;
+}
+/* The "why" affordance sits on the chip's own baseline: same meta size so the
+   row has one centre line, muted, with a light rotating caret instead of a
+   heavy triangle glyph. QUIET BY DEFAULT: it fades in only when you hover or
+   keyboard-focus the chip, or while the rule is open — so the resting card is
+   just the verdict, not verdict-plus-chrome. It stays laid out (opacity, not
+   display) so revealing it never shifts the row. */
+.hk-elig-why {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2rem;
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+	letter-spacing: 0.01em;
+	opacity: 0;
+	transition: opacity 0.12s ease;
+}
+.hk-elig-summary:hover .hk-elig-why,
+.hk-elig-summary:focus-visible .hk-elig-why,
+.hk-elig-disclosure[open] .hk-elig-why {
+	opacity: 1;
+}
+/* Touch devices have no hover — keep "why" visible there so the affordance is
+   never undiscoverable on a phone. */
+@media (hover: none) {
+	.hk-elig-why {
+		opacity: 1;
+	}
+}
+.hk-elig-why::before {
+	content: '';
+	width: 0;
+	height: 0;
+	border-top: 3px solid transparent;
+	border-bottom: 3px solid transparent;
+	border-left: 4px solid currentColor;
+	transition: transform 0.12s ease;
+}
+.hk-elig-disclosure[open] .hk-elig-why::before {
+	transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+	.hk-elig-why,
+	.hk-elig-why::before {
+		transition: none;
+	}
 }
 .hk-why summary {
 	cursor: pointer;
@@ -2071,20 +2284,50 @@ a.btn-ghost.topbar-nav-link {
 	white-space: nowrap;
 }
 .hk-open {
-	align-self: flex-start;
 	display: inline-flex;
 	align-items: center;
 	gap: 0.35rem;
 	font-size: var(--r-meta);
 	font-weight: 600;
-	padding: 0.3rem 0.7rem;
+	padding: 0.35rem 0.75rem;
 	border-radius: 8px;
 	background: var(--color-action);
 	color: var(--color-ink);
 	text-decoration: none;
+	white-space: nowrap;
 }
 .hk-open:hover {
 	background: var(--color-action-deep);
+}
+/* Narrow card (phone, or a squeezed rail): the two-column header stacks to a
+   single column, the verdict + action rejoin the flow under the identity, the
+   action becomes a full-width footer button (thumb-reach), and the stat row
+   wraps 2×2 instead of a cramped 4-across. Driven by the CARD's own width via
+   the container query on .hk-results, not the viewport. */
+@container hk-card (max-width: 30rem) {
+	.hk-feature-head {
+		flex-direction: column;
+		gap: 0.6rem;
+	}
+	.hk-feature-actions {
+		align-items: stretch;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.hk-elig-summary {
+		align-self: flex-start;
+	}
+	.hk-open {
+		justify-content: center;
+		padding: 0.55rem 0.75rem;
+	}
+	.hk-stats {
+		flex-wrap: wrap;
+		gap: 0.75rem 0.5rem;
+	}
+	.hk-stat {
+		flex: 1 1 calc(50% - 0.25rem);
+	}
 }
 .hk-section-label {
 	margin: 0.5rem 0 0;
@@ -2236,7 +2479,10 @@ a.btn-ghost.topbar-nav-link {
 .composer-wrap {
 	border-top: 1px solid var(--color-line-soft);
 	background: var(--color-panel);
-	padding: 0.7rem 1rem calc(0.55rem + env(safe-area-inset-bottom));
+	/* End-to-end: the field row spans the full width with no redundant outer
+	   inset — the controls' own footprint carries the edge spacing, so the
+	   textarea is not a bordered box inside a padded box. */
+	padding: 0.55rem 0.55rem calc(0.4rem + env(safe-area-inset-bottom));
 	display: grid;
 	gap: 0.3rem;
 }
@@ -2253,10 +2499,13 @@ a.btn-ghost.topbar-nav-link {
 	max-height: 9rem;
 	min-height: 2.5rem;
 	resize: none;
-	background: var(--color-raised);
-	border: 1px solid var(--color-line);
+	/* End-to-end: the field is not a bordered pill inside the composer card —
+	   it is transparent and flush, so the composer reads as ONE surface with
+	   the controls on it, not a box inside a box. */
+	background: transparent;
+	border: 1px solid transparent;
 	border-radius: 12px;
-	padding: 0.55rem 0.8rem;
+	padding: 0.55rem 0.3rem;
 	color: var(--color-bright);
 	font-size: 15px;
 	line-height: 1.5;
@@ -2264,9 +2513,14 @@ a.btn-ghost.topbar-nav-link {
 }
 
 .composer textarea:focus {
-	border-color: var(--color-action);
-	box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-action) 18%, transparent);
+	border-color: transparent;
+	box-shadow: none;
 	outline: none;
+}
+/* Borderless field — dim the placeholder a touch so it reads as a hint on the
+   open surface, not as entered text. */
+.composer textarea::placeholder {
+	color: color-mix(in srgb, var(--color-muted) 70%, transparent);
 }
 
 /* Round send key — one clear action, icon-carried, action-blue. */
@@ -2293,13 +2547,17 @@ a.btn-ghost.topbar-nav-link {
 	cursor: default;
 }
 
-/* Stage 3 — attach button + attachment chips. Theme variables only (readable
-   light + dark); the attach button mirrors the send key's footprint so the
-   composer row stays balanced. */
-.composer-attach {
+/* One "+" toggle replaces the old attach + mic pair so the resting composer is
+   just the toggle, the field, and send — the camera / media / dictation options
+   live in a popover it opens. Theme variables only (readable light + dark); the
+   toggle mirrors the send key's footprint so the composer row stays balanced. */
+.composer-tools {
+	position: relative;
+	flex: none;
+}
+.composer-tools-toggle {
 	width: 2.5rem;
 	height: 2.5rem;
-	flex: none;
 	display: grid;
 	place-items: center;
 	border: 1px solid var(--color-line);
@@ -2307,54 +2565,91 @@ a.btn-ghost.topbar-nav-link {
 	background: var(--color-raised);
 	color: var(--color-muted);
 	cursor: pointer;
-	transition: color 0.15s ease, border-color 0.15s ease;
+	transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
-.composer-attach:hover:not(:disabled) {
+.composer-tools-toggle:hover:not(:disabled) {
 	color: var(--color-action);
 	border-color: var(--color-action);
 }
-.composer-attach:disabled {
+.composer-tools-toggle:disabled {
 	opacity: 0.45;
 	cursor: default;
 }
-
-/* Mic button — mirrors the attach button; turns action-colored while listening,
-   with a soft pulse that respects reduced-motion. */
-.composer-mic {
-	width: 2.5rem;
-	height: 2.5rem;
-	flex: none;
-	display: grid;
-	place-items: center;
-	border: 1px solid var(--color-line);
-	border-radius: 12px;
-	background: var(--color-raised);
-	color: var(--color-muted);
-	cursor: pointer;
-	transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
-}
-.composer-mic:hover:not(:disabled) {
+/* Open: tint it like an active control and rotate the "+" into an "×" cue. */
+.composer-tools-toggle.open {
 	color: var(--color-action);
 	border-color: var(--color-action);
-}
-.composer-mic:disabled {
-	opacity: 0.45;
-	cursor: default;
-}
-.composer-mic.listening {
-	color: var(--color-ink);
-	background: var(--color-action);
-	border-color: var(--color-action);
-	animation: mic-pulse 1.4s ease-in-out infinite;
-}
-@keyframes mic-pulse {
-	0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-action) 45%, transparent); }
-	50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-action) 0%, transparent); }
+	transform: rotate(45deg);
 }
 @media (prefers-reduced-motion: reduce) {
-	.composer-mic.listening {
+	.composer-tools-toggle {
+		transition: color 0.15s ease, border-color 0.15s ease;
+	}
+	.composer-tools-toggle.open {
+		transform: none;
+	}
+}
+
+/* The popover: a small menu anchored above the toggle, opening upward because
+   the composer sits at the foot of the viewport. */
+.composer-tools-menu {
+	position: absolute;
+	bottom: calc(100% + 0.4rem);
+	left: 0;
+	z-index: 20;
+	min-width: 11rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+	padding: 0.3rem;
+	border: 1px solid var(--color-line);
+	border-radius: 12px;
+	background: var(--color-panel);
+	box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ink) 55%, transparent);
+	animation: composer-menu-in 0.12s ease;
+}
+@keyframes composer-menu-in {
+	from { opacity: 0; transform: translateY(4px); }
+	to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.composer-tools-menu {
 		animation: none;
 	}
+}
+.composer-tool-item {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	width: 100%;
+	padding: 0.5rem 0.6rem;
+	border: 0;
+	border-radius: 8px;
+	background: none;
+	color: var(--color-bright);
+	font-size: var(--r-meta);
+	text-align: left;
+	cursor: pointer;
+	transition: background 0.12s ease, color 0.12s ease;
+}
+.composer-tool-item :first-child {
+	flex: none;
+	color: var(--color-muted);
+}
+.composer-tool-item:hover,
+.composer-tool-item:focus-visible {
+	background: color-mix(in srgb, var(--color-action) 12%, transparent);
+	color: var(--color-action);
+	outline: none;
+}
+.composer-tool-item:hover :first-child,
+.composer-tool-item:focus-visible :first-child {
+	color: var(--color-action);
+}
+/* While dictation is live, the mic menu item reads as the active control. */
+.composer-tool-item.listening,
+.composer-tool-item.listening :first-child {
+	color: var(--color-action);
 }
 
 .composer-dictation {
@@ -2971,6 +3266,139 @@ a.btn-ghost.topbar-nav-link {
 	align-items: center;
 	gap: 0.5rem;
 	flex-wrap: wrap;
+}
+
+.repository-picker__connect {
+	display: grid;
+	gap: 0.7rem;
+	max-width: 560px;
+}
+
+.repository-picker__install {
+	display: grid;
+	gap: 0.4rem;
+	margin: 0;
+}
+
+.repository-picker__install .btn-key {
+	justify-self: start;
+	text-decoration: none;
+}
+
+.repository-picker__bind-fallback > summary {
+	cursor: pointer;
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--color-muted);
+	padding: 0.3rem 0;
+	list-style: revert;
+}
+
+.repository-picker__bind-fallback > summary:hover {
+	color: var(--color-bright);
+}
+
+.repository-picker__bind-fallback .repository-picker__bind {
+	margin-top: 0.5rem;
+}
+
+/* --- design-step mockup preview (design-review card) -------------------------
+   One framed surface: the stage only centres the frame, it draws no box of its
+   own. The frame drags taller; the mock inside lays out at its real width and
+   is scaled to fit. Pickers reuse the .disc-seg segmented control. */
+.design-mock {
+	margin: 0 0 0.9rem;
+	display: grid;
+	gap: 0.55rem;
+}
+.design-mock__bar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+}
+.design-mock__screens {
+	max-width: 100%;
+	overflow-x: auto;
+	scrollbar-width: thin;
+}
+.design-mock__screens button {
+	white-space: nowrap;
+}
+.design-mock__title {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--color-bright);
+}
+.design-mock__expand {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+.design-mock__stage {
+	display: flex;
+	justify-content: center;
+	min-width: 0;
+}
+.design-mock__frame {
+	height: 560px;
+	min-height: 240px;
+	max-height: 1600px;
+	max-width: 100%;
+	overflow: hidden;
+	resize: vertical;
+	border: 1px solid var(--color-line);
+	border-radius: 10px;
+	background: var(--color-ink);
+	color: var(--color-bright);
+}
+.design-mock[data-device='phone'] .design-mock__frame,
+.design-mock__dialog[data-device='phone'] .design-mock__frame {
+	border-radius: 22px;
+}
+.design-mock[data-device='desktop'] .design-mock__frame {
+	height: 380px;
+}
+/* (0,2,1) so the card's generic `.project-workflow iframe` rule (its own
+   border, radius, min-height and white fill) never doubles up on the mock. */
+.design-mock .design-mock__frame iframe {
+	display: block;
+	border: 0;
+	border-radius: 0;
+	min-height: 0;
+	transform-origin: 0 0;
+	background: var(--color-ink);
+}
+.design-mock__dialog {
+	width: min(96vw, 1360px);
+	height: min(92vh, 1000px);
+	max-width: none;
+	max-height: none;
+	padding: 1rem;
+	border: 1px solid var(--color-line);
+	border-radius: 14px;
+	background: var(--color-panel);
+	color: var(--color-bright);
+}
+.design-mock__dialog::backdrop {
+	background: color-mix(in srgb, var(--color-ink) 72%, transparent);
+}
+.design-mock__dialog-body {
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr);
+	gap: 0.75rem;
+	height: 100%;
+}
+.design-mock__dialog .design-mock__stage {
+	min-height: 0;
+	height: 100%;
+}
+/* (0,3,0), after the desktop-height rule, so the dialog frame always fills it. */
+.design-mock .design-mock__dialog .design-mock__frame--full {
+	height: 100%;
+	max-height: none;
+	resize: none;
 }
 
 .repository-picker__bind {
@@ -6050,6 +6478,136 @@ body.conv-resizing * {
 
 /* Save to GitHub + repo-before-build nudge (ProjectWorkflow). */
 .save-github { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.save-github .state-detail, .save-github-meta { margin: 0; }
+.save-github-meta { font-size: var(--r-meta); color: var(--color-muted); overflow-wrap: anywhere; }
+.save-github-state { display: inline-flex; align-items: center; gap: 6px; }
+.save-github-state[data-state='merged'] svg { color: var(--color-ok); }
+.save-github-confirm {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.5rem;
+	padding-top: 0.45rem;
+	border-top: 1px solid var(--color-line);
+}
+.save-github-confirm-text { flex: 1 1 100%; font-size: var(--r-meta); color: var(--color-bright); }
+.save-github-confirm-text code { font-size: 0.95em; }
+.save-github-error { color: var(--color-danger); }
+
+/* Keys for outside services (Publish stage 8): one list, rows separated by rules, no nested boxes. */
+.app-keys { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.app-keys-head { display: flex; align-items: center; gap: 8px; }
+.app-keys-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.app-keys-head > svg { color: var(--color-muted); flex: none; }
+.app-keys-intro, .app-keys-empty { margin: 0; }
+.app-keys-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.app-keys-row { display: grid; gap: 8px; padding: 10px 0; border-top: 1px solid var(--color-line-soft); }
+.app-keys-row:first-child { border-top: 0; padding-top: 2px; }
+.app-keys-what { display: grid; gap: 4px; min-width: 0; }
+.app-keys-desc { color: var(--color-bright); font-size: 14px; overflow-wrap: anywhere; }
+.app-keys-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--r-meta); color: var(--color-muted); }
+.app-keys-meta code { font-size: 0.95em; overflow-wrap: anywhere; }
+.app-keys-meta .badge svg { width: 12px; height: 12px; }
+.app-keys-help { font-size: var(--r-meta); overflow-wrap: anywhere; justify-self: start; }
+.app-keys-form { display: grid; gap: 6px; max-width: 420px; }
+.app-keys-label, .app-keys-hint { font-size: var(--r-meta); color: var(--color-muted); }
+.app-keys-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: var(--r-meta); color: var(--color-bright); }
+.app-keys-error { margin: 0; color: var(--color-danger); font-size: var(--r-meta); }
+.app-keys-add { justify-self: start; display: inline-flex; align-items: center; gap: 6px; }
+/* .r-link on a <button>: drop the browser's default button box so it reads as a link. */
+.app-keys button.r-link { background: none; border: 0; padding: 2px 0; font-family: inherit; cursor: pointer; }
+.app-keys button.r-link:disabled { opacity: 0.5; cursor: default; }
+.app-keys button.r-link:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; border-radius: 4px; }
+@media (min-width: 640px) {
+	.app-keys-row { grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: 16px; }
+	.app-keys-row > .app-keys-form, .app-keys-row > .app-keys-confirm, .app-keys-row > .app-keys-error { grid-column: 1 / -1; }
+}
+
+/* Versions (Publish stage 1): a collapsed list under Publish; rows separated by rules. */
+.app-versions { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); display: grid; gap: 8px; }
+.app-versions > summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--color-bright); display: flex; align-items: center; gap: 8px; }
+.app-versions-count { font-size: var(--r-meta); color: var(--color-muted); font-weight: 600; }
+.app-versions > summary { list-style: none; }
+.app-versions > summary::-webkit-details-marker { display: none; }
+.app-versions-chevron { color: var(--color-muted); transition: transform 0.15s ease; }
+.app-versions[open] .app-versions-chevron { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .app-versions-chevron { transition: none; } }
+.app-versions-intro { margin: 0; }
+.app-versions-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.app-versions-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; padding: 8px 0; border-top: 1px solid var(--color-line-soft); }
+.app-versions-row:first-child { border-top: 0; }
+.app-versions-what { display: grid; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.app-versions-name { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--color-bright); }
+.app-versions-title { font-size: 13px; color: var(--color-bright); overflow-wrap: anywhere; }
+.app-versions-meta { font-size: var(--r-meta); color: var(--color-muted); }
+.app-versions button.r-link { background: none; border: 0; padding: 2px 0; font-family: inherit; cursor: pointer; }
+.app-versions button.r-link:disabled { opacity: 0.5; cursor: default; }
+.app-versions button.r-link:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; border-radius: 4px; }
+
+/* Test inbox (Publish stage 7): the preview's sign-in codes, same rhythm as Keys; rows separated by rules. */
+.test-inbox { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.test-inbox-head { display: flex; align-items: center; gap: 8px; }
+.test-inbox-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.test-inbox-head > svg { color: var(--color-muted); flex: none; }
+.test-inbox-intro { margin: 0; }
+.test-inbox-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.test-inbox-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--color-line-soft); }
+.test-inbox-row:first-child { border-top: 0; padding-top: 2px; }
+.test-inbox-to { font-size: 13px; color: var(--color-bright); overflow-wrap: anywhere; }
+.test-inbox-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 600; letter-spacing: 0.12em; color: var(--color-bright); }
+.test-inbox-when { font-size: var(--r-meta); color: var(--color-muted); white-space: nowrap; }
+@media (max-width: 480px) {
+  .test-inbox-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .test-inbox-when { grid-column: 1 / -1; }
+}
+
+/* AI in the app (Publish stage 9): same rhythm as Keys; one row and a thin bar, no nested boxes. */
+.app-ai { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.app-ai-head { display: flex; align-items: center; gap: 8px; }
+.app-ai-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.app-ai-head > svg { color: var(--color-muted); flex: none; }
+.app-ai-intro, .app-ai-paused { margin: 0; }
+.app-ai-row { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 4px 12px; }
+.app-ai-what { font-size: 13px; color: var(--color-bright); }
+.app-ai-meta { font-size: var(--r-meta); color: var(--color-muted); text-align: right; }
+.app-ai-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--color-line-soft); overflow: hidden; }
+.app-ai-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--color-ok); }
+.app-ai-bar > span[data-tone="warn"] { background: var(--color-warn); }
+
+/* Publish (Publish stage 4): same rhythm as Keys; one list of facts and actions, no nested boxes. */
+.publish-app { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+/* "Start from my GitHub repo": the copied app, before the first build (ImportedApp.tsx). */
+.imported-app { display: grid; gap: 10px; }
+.imported-app[data-titled] { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.imported-app-head { display: flex; align-items: center; gap: 8px; }
+.imported-app-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.imported-app-head > svg { color: var(--color-muted); flex: none; }
+.imported-app > .state-detail { margin: 0; }
+.publish-head { display: flex; align-items: center; gap: 8px; }
+.publish-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.publish-head > svg { color: var(--color-muted); flex: none; }
+.publish-app .state-detail { margin: 0; }
+.publish-live a { font-weight: 600; overflow-wrap: anywhere; }
+.publish-meta { font-size: var(--r-meta); color: var(--color-muted); }
+.publish-address { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 13px; color: var(--color-bright); overflow-wrap: anywhere; }
+.publish-slug-form { display: grid; gap: 6px; max-width: 460px; }
+.publish-slug-field { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.publish-slug-field .input { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); }
+.publish-slug-domain { font-family: var(--font-mono); font-size: 13px; color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+.publish-label, .publish-hint { font-size: var(--r-meta); color: var(--color-muted); }
+.publish-needs { color: var(--color-warn); }
+.publish-checking { color: var(--color-bright); }
+.publish-blocked { display: grid; gap: 4px; }
+.publish-blocked p { margin: 0; }
+.publish-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: var(--r-meta); color: var(--color-bright); }
+.publish-confirm > span { flex: 1 1 100%; }
+.publish-error { margin: 0; color: var(--color-danger); font-size: var(--r-meta); }
+.publish-versions summary { cursor: pointer; font-size: var(--r-meta); color: var(--color-muted); }
+.publish-versions ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; }
+.publish-versions li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--color-line-soft); font-size: var(--r-meta); color: var(--color-bright); }
+.publish-app button.r-link { background: none; border: 0; padding: 2px 0; font-family: inherit; cursor: pointer; }
+.publish-app button.r-link:disabled { opacity: 0.5; cursor: default; }
+.publish-app button.r-link:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; border-radius: 4px; }
 .workflow-repo-nudge { color: var(--color-muted); }
 
 /* Code (§4): the connected-repo state + create/connect forms. */

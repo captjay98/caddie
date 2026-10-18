@@ -26,7 +26,7 @@ import {
 	type StartedGithubFixtureWorker,
 } from './fixtures/github-harness.ts';
 import { GithubStub } from './fixtures/github-stub.ts';
-import { readGithubConfig, verifyWebhookSignature } from '../apps/app/src/server/adapters/github.ts';
+import { githubInstallUrl, readGithubConfig, verifyWebhookSignature } from '../apps/app/src/server/adapters/github.ts';
 
 /**
  * P08 — GitHub App import and receipt-backed delivery, executed against a real
@@ -227,6 +227,18 @@ describe('P08 slice 1 — App credentials fail closed', () => {
 		expect(await verifyWebhookSignature(null, new TextEncoder().encode('{}'), 'sha256=abc')).toBe(false);
 	});
 
+	test('install URL: built from a configured slug, null when absent, never fabricated from a bad slug', () => {
+		expect(githubInstallUrl({ GITHUB_APP_SLUG: 'caddie-forge' })).toBe(
+			'https://github.com/apps/caddie-forge/installations/new',
+		);
+		// Unconfigured -> no link offered (the UI falls back to install-then-paste).
+		expect(githubInstallUrl({})).toBeNull();
+		expect(githubInstallUrl({ GITHUB_APP_SLUG: '   ' })).toBeNull();
+		// A malformed slug is refused rather than interpolated into a URL.
+		expect(githubInstallUrl({ GITHUB_APP_SLUG: 'bad slug/with spaces' })).toBeNull();
+		expect(githubInstallUrl({ GITHUB_APP_SLUG: '../evil' })).toBeNull();
+	});
+
 	test('webhook signature: valid passes, tampered payload and wrong secret fail, constant-time compare', async () => {
 		const payload = new TextEncoder().encode('{"hello":"world"}');
 		expect(await verifyWebhookSignature(GITHUB_WEBHOOK_SECRET, payload, webhookSignature(GITHUB_WEBHOOK_SECRET, payload))).toBe(true);
@@ -380,7 +392,8 @@ describe('P08 slice 1 — installation binding', () => {
 		expect(body.installation.installationId).toBe(GITHUB_APP_INSTALLATION_A);
 		expect(body.installation.accountLogin).toBe(GITHUB_ACCOUNT_A);
 		expect(body.installation.status).toBe('active');
-		expect(body.installation.permissions['contents']).toBe('read');
+		// resolved live from the App API: the stub's default grant (Contents write, which every git write needs)
+		expect(body.installation.permissions['contents']).toBe('write');
 		// only a redacted fingerprint of the private key may ever be echoed
 		expect(body.installation.fingerprint).toMatch(/^sha256-[0-9a-f]{16}$/);
 		const rows = await d1Rows(
@@ -432,6 +445,18 @@ describe('P08 slice 1 — installation binding', () => {
 		expect(body.repositories[0]?.repoFullName).toBe(`${GITHUB_ACCOUNT_A}/forge-app`);
 		const bobRes = await worker(BOB, `/api/github/installations/${GITHUB_APP_INSTALLATION_A}/repos`);
 		expect(bobRes.status).toBe(403);
+	});
+
+	test('GET /github/app exposes the install URL (session-gated; null when the slug is unconfigured in this env)', async () => {
+		// A verified session is required (the connect flow is a logged-in action).
+		const anon = await fetch(`${WORKER_BASE}/api/github/app`);
+		expect(anon.status).toBe(401);
+		const res = await worker(ALICE, '/api/github/app');
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { installUrl: string | null };
+		// The fixture sets no GITHUB_APP_SLUG, so the endpoint fails soft to null
+		// rather than fabricating a URL — the id-paste fallback stays usable.
+		expect(body.installUrl).toBeNull();
 	});
 });
 
@@ -762,6 +787,87 @@ describe('P08 slice 2 — import + receipt-backed export', () => {
 		expect(pullsAfter).toBe(pullsBefore); // no second creation call even attempted
 	});
 
+	const closePr = (jar: Jar, projectId: string, number: number | string, payload: unknown = { repoFullName: FORGE_REPO }) =>
+		worker(jar, `/api/projects/${projectId}/github/pulls/${number}/close`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify(payload),
+		});
+
+	test('closing a Caddie-opened PR reads first, makes exactly one PATCH, and keeps the branch', async () => {
+		const path = `/repos/${FORGE_REPO}/pulls/${firstPullRequestNumber}`;
+		const headBefore = stub.branchHead(FORGE_REPO, prBranch);
+		const before = stub.requests.length;
+		const res = await closePr(ALICE, aliceProjectId, firstPullRequestNumber);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			pullRequest: { pullRequestNumber: number; state: string; repoFullName: string };
+			reconciled: boolean;
+		};
+		expect(body.pullRequest.pullRequestNumber).toBe(firstPullRequestNumber);
+		expect(body.pullRequest.repoFullName).toBe(FORGE_REPO);
+		expect(body.pullRequest.state).toBe('closed');
+		expect(body.reconciled).toBe(false);
+		expect(stub.pullRequest(FORGE_REPO, firstPullRequestNumber)?.state).toBe('closed');
+		// read-before-write: one GET of this PR, then exactly one PATCH state=closed
+		const calls = stub.requests.slice(before).filter((r) => r.path === path);
+		expect(calls.map((r) => r.method)).toEqual(['GET', 'PATCH']);
+		expect((calls[1]?.body as { state?: string } | undefined)?.state).toBe('closed');
+		// closing never deletes or moves the head branch (reversible on GitHub)
+		expect(stub.branchHead(FORGE_REPO, prBranch)).toBe(headBefore);
+	});
+
+	test('closing it again reconciles to the closed PR with no second provider write', async () => {
+		const path = `/repos/${FORGE_REPO}/pulls/${firstPullRequestNumber}`;
+		const patchesBefore = stub.requests.filter((r) => r.method === 'PATCH' && r.path === path).length;
+		const res = await closePr(ALICE, aliceProjectId, firstPullRequestNumber);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { pullRequest: { state: string }; reconciled: boolean };
+		expect(body.pullRequest.state).toBe('closed');
+		expect(body.reconciled).toBe(true);
+		expect(stub.requests.filter((r) => r.method === 'PATCH' && r.path === path).length).toBe(patchesBefore);
+	});
+
+	test('only PRs Caddie opened for THIS project can be closed — refused before GitHub is asked', async () => {
+		const before = stub.requests.length;
+		// Bob's project never delivered this PR: same number, same repo, typed 404
+		const bob = await closePr(BOB, bobProjectId, firstPullRequestNumber);
+		expect(bob.status).toBe(404);
+		expect(((await bob.json()) as { error?: string }).error).toBe('pull_request_not_delivered');
+		// a PR number Caddie never opened, on Alice's own project
+		const unknown = await closePr(ALICE, aliceProjectId, 99999);
+		expect(unknown.status).toBe(404);
+		// malformed number and a missing repo are 400s
+		expect((await closePr(ALICE, aliceProjectId, 'abc')).status).toBe(400);
+		expect((await closePr(ALICE, aliceProjectId, firstPullRequestNumber, {})).status).toBe(400);
+		expect(stub.requests.length).toBe(before); // nothing reached the provider
+	});
+
+	test('a merged PR is a typed 409 and is never written to', async () => {
+		const res = await worker(ALICE, `/api/projects/${aliceProjectId}/github/deliveries`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				runId: 'run_p08_merged_probe',
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: FORGE_REPO,
+				headBranch: 'caddie/merged-probe',
+				title: 'Merged probe',
+				body: 'probe',
+				files: [{ path: 'src/probe.ts', content: 'export const probe = 1;\n' }],
+				mode: 'pull-request',
+			}),
+		});
+		expect(res.status).toBe(201);
+		const number = ((await res.json()) as { delivery: { pullRequestNumber: number } }).delivery.pullRequestNumber;
+		stub.markPullRequestMerged(FORGE_REPO, number); // a maintainer merged it on GitHub
+		const close = await closePr(ALICE, aliceProjectId, number);
+		expect(close.status).toBe(409);
+		expect(((await close.json()) as { error?: string }).error).toBe('pull_request_merged');
+		const path = `/repos/${FORGE_REPO}/pulls/${number}`;
+		expect(stub.requests.filter((r) => r.method === 'PATCH' && r.path === path)).toHaveLength(0);
+	});
+
 	test('existing-branch divergence is a typed conflict, never an overwrite', async () => {
 		// Simulate an external committer moving the feature branch (test-side
 		// stub state, NOT through the adapter): a hostile fast-forward commit.
@@ -918,6 +1024,22 @@ describe('P08 slice 2 — import + receipt-backed export', () => {
 			body: JSON.stringify({ installationId: C, repoFullName: 'octocat-c/c-repo', ref: 'main' }),
 		});
 		expect(importOk.status).toBe(201);
+		// A PR delivered BEFORE revocation — closing it afterwards must be denied too.
+		const prOnC = await worker(ALICE, `/api/projects/${aliceProjectId}/github/deliveries`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				runId: 'run_p08_pre_revoke',
+				installationId: C,
+				repoFullName: 'octocat-c/c-repo',
+				headBranch: 'caddie/c-pr',
+				title: 'c pr',
+				files: [{ path: 'c.txt', content: 'c\n' }],
+				mode: 'pull-request',
+			}),
+		});
+		expect(prOnC.status).toBe(201);
+		const prOnCNumber = ((await prOnC.json()) as { delivery: { pullRequestNumber: number } }).delivery.pullRequestNumber;
 
 		const revoked = await postWebhook(
 			installationEventBody('deleted', C, 'octocat-c'),
@@ -948,6 +1070,94 @@ describe('P08 slice 2 — import + receipt-backed export', () => {
 			}),
 		});
 		expect(deniedDelivery.status).toBe(403);
+
+		const patchesBefore = stub.requests.filter((r) => r.method === 'PATCH').length;
+		const deniedClose = await worker(ALICE, `/api/projects/${aliceProjectId}/github/pulls/${prOnCNumber}/close`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ repoFullName: 'octocat-c/c-repo' }),
+		});
+		expect(deniedClose.status).toBe(403);
+		expect(((await deniedClose.json()) as { error?: string }).error).toBe('installation_revoked');
+		expect(stub.requests.filter((r) => r.method === 'PATCH').length).toBe(patchesBefore);
+		expect(stub.pullRequest('octocat-c/c-repo', prOnCNumber)?.state).toBe('open');
+
+		// A revoked installation blocks merging too, before GitHub is asked.
+		const mergesBefore = stub.merges.length;
+		const deniedMerge = await worker(ALICE, `/api/projects/${aliceProjectId}/github/pulls/${prOnCNumber}/merge`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				repoFullName: 'octocat-c/c-repo',
+				headSha: stub.pullRequest('octocat-c/c-repo', prOnCNumber)?.headSha,
+			}),
+		});
+		expect(deniedMerge.status).toBe(403);
+		expect(((await deniedMerge.json()) as { error?: string }).error).toBe('installation_revoked');
+		expect(stub.merges.length).toBe(mergesBefore);
+	});
+
+	test('merge route: refused with the exact intent until approved through /api/approvals, then one pinned merge', async () => {
+		const delivered = await worker(ALICE, `/api/projects/${aliceProjectId}/github/deliveries`, {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				runId: 'run_p08_merge_route',
+				installationId: GITHUB_APP_INSTALLATION_A,
+				repoFullName: FORGE_REPO,
+				headBranch: 'caddie/merge-route-1',
+				title: 'Merge through the route',
+				files: [{ path: 'src/merge-route.ts', content: 'export const viaRoute = true;\n' }],
+				mode: 'pull-request',
+			}),
+		});
+		expect(delivered.status).toBe(201);
+		const { delivery } = (await delivered.json()) as { delivery: { pullRequestNumber: number; headSha: string } };
+		const merge = (jar: Jar, projectId = aliceProjectId) =>
+			worker(jar, `/api/projects/${projectId}/github/pulls/${delivery.pullRequestNumber}/merge`, {
+				method: 'POST',
+				headers: jsonHeaders,
+				body: JSON.stringify({ repoFullName: FORGE_REPO, headSha: delivery.headSha }),
+			});
+		const mergesBefore = stub.merges.length;
+
+		const refused = await merge(ALICE);
+		expect(refused.status).toBe(403);
+		const gate = (await refused.json()) as { error?: string; intent?: Record<string, unknown> };
+		expect(gate.error).toBe('STALE_APPROVAL');
+		expect(gate.intent).toEqual({
+			projectId: aliceProjectId,
+			action: 'merge-default-branch',
+			resourceId: `${FORGE_REPO}#${delivery.pullRequestNumber}`,
+			revisionHash: delivery.headSha,
+			policyVersion: GITHUB_POLICY_VERSION,
+		});
+		// Bob cannot reach Alice's project at all.
+		expect((await merge(BOB)).status).toBeGreaterThanOrEqual(403);
+		expect(stub.merges.length).toBe(mergesBefore);
+
+		const approve = await worker(ALICE, '/api/approvals', {
+			method: 'POST',
+			headers: jsonHeaders,
+			body: JSON.stringify({ intent: gate.intent, decision: 'approved' }),
+		});
+		expect(approve.status).toBe(200);
+		const merged = await merge(ALICE);
+		expect(merged.status).toBe(200);
+		const body = (await merged.json()) as {
+			pullRequest: { merged: boolean; mergeCommitSha: string | null };
+			reconciled: boolean;
+		};
+		expect(body.reconciled).toBe(false);
+		expect(body.pullRequest.merged).toBe(true);
+		expect(stub.merges.slice(mergesBefore)).toEqual([
+			{ repo: FORGE_REPO, number: delivery.pullRequestNumber, sha: delivery.headSha, method: 'squash' },
+		]);
+		expect(stub.branchHead(FORGE_REPO, 'main')).toBe(body.pullRequest.mergeCommitSha);
+		const ledger = await d1Rows(
+			`select "status" from external_operations where "operationKey" like 'github:merge-pull-request:%#${delivery.pullRequestNumber}:%'`,
+		);
+		expect(ledger.map((row) => row['status'])).toEqual(['succeeded']);
 	});
 
 	test('across the whole suite the provider never received a force-push', () => {

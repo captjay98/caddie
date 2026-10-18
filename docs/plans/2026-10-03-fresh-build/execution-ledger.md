@@ -1024,3 +1024,146 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+## 2026-10-18 — Hackathon submission build (S01–S13)
+
+```json
+{
+  "packet": "S01 verification net (plan: docs/plans/2026-10-18-submission-build-plan.md, remediation R01)",
+  "status": "LOCAL VERIFIED",
+  "owner": "Integration lead, with four parallel workers: packet-mapping classifier, completeness-test author, doc-count auditor, S02 implementer (subagent sessions)",
+  "commands": [
+    {"command": "bun scripts/verify-packet.ts --all", "exitCode": 0, "receipt": "43 packets — 37 PASS, 0 FAIL, 6 NOT APPLICABLE (named, not faked); 67s wall"},
+    {"command": "bun test tests/packet-completeness.test.ts", "exitCode": 0, "receipt": "6 pass, 0 fail"},
+    {"command": "negative proof r1: unmap tests/theme-state.test.ts from U01", "exitCode": 1, "receipt": "rule 1 fails, naming exactly tests/theme-state.test.ts; restored, 6 pass"},
+    {"command": "negative proof r2: map tests/live/github.spec.ts into P08 live", "exitCode": 1, "receipt": "rule 2 fails, naming exactly tests/live/github.spec.ts (the stale mapping §1 flagged); restored, 6 pass"},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1339 pass, 0 fail, 6332 expect() calls, 104 files (1,330/103 before S01+S02)"},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "root tsc + apps/app check:types clean"},
+    {"command": "bun run build", "exitCode": 0, "receipt": "Astro + Vite + composed Workers assets tree"},
+    {"command": "bun scripts/refresh-scaffold-lock.ts --check", "exitCode": 0, "receipt": "OK: scaffold lockfile is current (no template change in this packet)"},
+    {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "45 PASS, 0 FAIL, 1 BLOCKED (deployment authorization), 4 PROVISIONED — acceptance: credential-only live gates now report PROVISIONED, never PASS"},
+    {"command": "bun x playwright test tests/browser/project-workflow.spec.ts", "exitCode": 0, "receipt": "28 passed (26.6s) against the composed build — the plan's 'project-card spec 28/28 incl. Stop build' claim verified"},
+    {"command": "bun -e 'recordLiveReceipt -> readLiveReceipts round trip'", "exitCode": 0, "receipt": "roundtrip-ok true; docs/live-receipts.json removed after the proof"}
+  ],
+  "artifacts": [
+    {"path": "scripts/packet-list.ts", "note": "NEW — PACKET_MAP + PACKET_KEYS, the single source of truth (43 packets incl. new PUBLISH, KEYS, VERSIONS, APPS, BUILD, NET). No literal packet list remains in .github/scripts; the only other P15d token is a vestigial comment in scripts/capture-android.ts"},
+    {"path": "scripts/verify-packet.ts", "note": "reads packet-list.ts; adds --all (per-packet summary, failures listed); writes a live receipt only after a whole packet's live specs pass"},
+    {"path": "scripts/live-receipts.ts", "note": "NEW — read/record docs/live-receipts.json (packet, files, passed, at); no secret content"},
+    {"path": "scripts/release-check.ts", "note": "reads PACKET_KEYS (no hardcoded list); adds PROVISIONED status; live PASS now requires a recorded receipt"},
+    {"path": ".github/workflows/ci.yml", "note": "packet loop replaced by `bun run verify:packet --all` (U/B/PUBLISH/KEYS/VERSIONS/APPS/BUILD/NET now run in CI)"},
+    {"path": "tests/packet-completeness.test.ts", "note": "NEW (NET) — 6 rules: every candidate mapped (at least one packet), every mapped path exists, category matches directory+extension, no duplicates inside a packet+category, PACKET_KEYS mirrors PACKET_MAP, the net maps itself"},
+    {"path": "docs/plans/2026-10-03-fresh-build/README.md", "note": "migration count 22 -> 32 (read off apps/app/migrations)"},
+    {"path": "docs/plans/2026-10-03-fresh-build/RESCUE-NOTE.md", "note": "same count fix"},
+    {"path": "docs/feature-ledger.md", "note": "stale spec counts corrected: shell-v2 10->13, discovery 12->11, projects-v2 3->6, project-v2 6->13, settings+project-settings 11->13"},
+    {"path": "docs/release-evidence.md", "note": "intentionally-absent list refreshed (github.spec.ts added; sandbox/preview specs already exist); new dated 'Verification net (S01)' receipt section"},
+    {"path": "docs/plans/2026-10-18-submission-build-plan.md", "note": "four audit corrections applied in place + an audit note (80->76 unmapped, repair cap is per issue, the P15d grep also matches capture-android.ts, 'exactly one packet' -> 'at least one')"}
+  ],
+  "environment": "local only: bun 1.4.0, per-file bun test runner, Playwright chromium against the composed build, wrangler preview; .dev.vars loaded but never printed",
+  "providerCalls": "none — no model, sandbox, email or deploy call in this packet",
+  "specReview": "PENDING independent review (self-reviewed diffs by the integration lead; subagent outputs were verified by rerunning every gate)",
+  "qualityReview": "self-reviewed; integration-lead files (packet table, verifier, release check, CI, ledgers) edited serially by one actor",
+  "limitations": [
+    "Completeness is 'in at least one packet', not the plan's 'exactly one': 10 files hold 23 memberships (auth, workspace, conversation, artifacts, discovery, submission, search-isolation, settings, landing, shell-v2 specs are evidence for two packets each). Deduplicating would silently drop coverage, so the rule was relaxed in the table with a comment rather than removing mappings",
+    "tests/live/github.spec.ts stays un-authored (needs a registered GitHub App, owner-gated). Its P08 live mapping is removed; the missing-spec state is now caught by rule 2 instead of tolerated",
+    "The live-receipt WRITE path is proven only by a direct round-trip probe; verify-packet's live branch first executes at S11",
+    "`--all` spawns one bun process per file: 67s for 43 packets locally. Acceptable for CI, worth watching as the suite grows",
+    "Deferred doc corrections found during the audit but out of S01 scope: feature-ledger's 0022-terminated migration table (0023-0032 missing), release-evidence's dated 2026-10-06 gate table counts, the two dated execution-ledger receipt notes, and stale counts inside the two untracked draft plans (which this plan forbids editing)"
+  ]
+}
+```
+
+```json
+{
+  "packet": "S02 report rate-limit key (one slice of remediation R06)",
+  "status": "LOCAL VERIFIED",
+  "owner": "S02 implementer (subagent); integrated and committed by the lead",
+  "commands": [
+    {"command": "bun test tests/report-page.test.ts", "exitCode": 1, "receipt": "test-first: SyntaxError: Export named 'reportRateLimitKey' not found in apps/app/src/server/routes/report.ts — 0 pass, 1 fail, 1 error"},
+    {"command": "bun test tests/report-page.test.ts", "exitCode": 0, "receipt": "7 pass, 0 fail, 52 expect() calls"},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "exit 0"},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1339 pass, 0 fail (suite ran after the change)"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/routes/report.ts", "note": "NEW reportRateLimitKey(masterSecret, label='caddie-report-ratelimit:v1') — HMAC-SHA256, null below 16 chars, mirroring appAuthSecret; the 'caddie-report' literal fallback is GONE; POST /report answers 503 (plain words, nothing stored) when no key can be derived"},
+    {"path": "tests/report-page.test.ts", "note": "3 cases: key is purpose-bound (and a different label differs); same IP+day hashes equal, different IP differs; missing/short secret answers 503 and stores no row"}
+  ],
+  "environment": "local bun test + sqlite D1 fixture",
+  "providerCalls": "none",
+  "specReview": "PENDING independent review",
+  "qualityReview": "diff read by the lead; honeypot/same-origin/size-check ordering deliberately unchanged",
+  "limitations": [
+    "The 503 branch is unit-tested through the real router; no browser spec covers the report page's error state (it has none today)",
+    "REPORT_RATE_LIMIT_LABEL is exported for the test; no other route consumes it yet — S06's judge rate limit should reuse this derivation with its own label"
+  ]
+}
+```
+
+```json
+{
+  "packet": "S03 model registry from the live listing (G1 probe; plan docs/plans/2026-10-18-submission-build-plan.md)",
+  "status": "LIVE VERIFIED (the listing and three probes, against Nebius) + LOCAL VERIFIED (registry, callers and tests)",
+  "owner": "G1 probe authored and run by a subagent; registry change, caller updates and tests by the integration lead",
+  "commands": [
+    {"command": "bun scripts/probe-models.ts (no CADDIE_LIVE_AUTHORIZED)", "exitCode": 1, "receipt": "BLOCKED — live model calls require explicit authorization; no spend, proven before the live run"},
+    {"command": "CADDIE_LIVE_AUTHORIZED=1 bun scripts/probe-models.ts", "exitCode": 0, "receipt": "GET /v1/models?verbose=true: 200, 992ms, 28 models, 9 Nemotron/GLM. text nvidia/Nemotron-3.5-Super-VL: 200, 934ms, 439/112 tokens, tool call `remember` — PASS. image same route + split red/blue PNG: 200, 1267ms, 711/260, both colours named AND tool call — PASS. json nvidia/Nemotron-3_5-Lightning: 200, 1942ms, 323/512, NOT parseable as {\"claims\":[...]} — FAIL (output hit the probe's own 512-token cap)"},
+    {"command": "bun test tests/providers.test.ts tests/attachments.test.ts tests/image-attachments.test.ts tests/multimodal-contract.test.ts tests/agent-permissions.test.ts tests/ai-behavior.test.ts tests/home-chat-tools.test.ts", "exitCode": 0, "receipt": "test-first: 6 failures naming the old chat/vision route ids; after the change 107 pass, 0 fail"},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1340 pass, 0 fail, 6358 expect() calls, 104 files"},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "root tsc + apps/app check:types clean (the new appSuper role is covered by the role-to-route test)"},
+    {"command": "bun run build", "exitCode": 0, "receipt": "exit 0; composed 1 relocated SPA + 98 SPA + 99 landing files, 0 collisions"},
+    {"command": "bun scripts/refresh-scaffold-lock.ts --check", "exitCode": 0, "receipt": "OK: lockfile is current (no template change in this packet)"}
+  ],
+  "artifacts": [
+    {"path": "scripts/probe-models.ts", "note": "NEW — the reusable G1/D3 probe: refuses without live authorization, loads NEBIUS_API_KEY from .dev.vars without printing it, prints only status/latency/token counts/tool-call names/assertions"},
+    {"path": "apps/app/src/agents/providers.ts", "note": "NEW routes nemotron-3.5-super-vl (nvidia/Nemotron-3.5-Super-VL, $0.30/$0.90, ctx 1,048,576, maxTokens 8192) and nemotron-3.5-lightning (nvidia/Nemotron-3_5-Lightning, $0.06/$0.24, ctx 1,048,576, maxTokens 4096) with the listing's exact id spelling (dot vs underscore); Ultra context 262,144 -> 1,048,576; roles chat -> super-vl, helper/app -> lightning, NEW appSuper -> super-vl, vision -> super-vl; VISION_ROUTE_IDS = [super-vl, glm-5.3-flash]"},
+    {"path": "apps/app/src/client/coordinator.ts", "note": "COORDINATOR_MODEL_ROUTE = nemotron-3.5-super-vl, still mirroring MODEL_ROLES.chat as the comment requires"},
+    {"path": "apps/app/src/server/candidate-inspection.ts", "note": "design comment no longer names Nano as the helper route"},
+    {"path": "tests/providers.test.ts", "note": "exact 3.5 id spellings pinned; role table updated; new appSuper = 3.75 x app output price; chat is cheaper than ideation; GLM stays listed as image-capable"},
+    {"path": "tests/attachments.test.ts", "note": "vision turns now expect nemotron-3.5-super-vl (image, text and mixed cases)"}
+  ],
+  "environment": "local + Nebius Token Factory (https://api.tokenfactory.nebius.com/v1) with the owner's .dev.vars key; no deploy",
+  "providerCalls": "1 free GET /v1/models?verbose=true + 3 chat completions = 1,473 in / 884 out tokens, approx $0.00082 (Super-VL text + Super-VL image + Lightning json). Budget ceiling for G1 was $0.01",
+  "specReview": "PENDING independent review",
+  "qualityReview": "self-reviewed; the probe's own assertions, not the model's prose, are what the receipts rest on",
+  "limitations": [
+    "The Lightning JSON probe FAILED: 323 in / 512 out with no parseable claims object — its output hit the probe's own 512-token cap. This is the same failure mode the Nano entry documents, so the new route ships with maxTokens 4096 and the helper prompt is unchanged; the model was not judged, the cap was",
+    "G2 (the <$0.10 build-model screen) has NOT run. It screens candidates for a decision (D3) that belongs to the live-build packet, so no registry value depends on it yet. Run it when S11 or D3 needs it, with the owner awake to the spend",
+    "The legacy routes' PRICES are stale against the same listing: nemotron-3-ultra 50/220 vs 100/300, nemotron-3-super 8/45 vs 30/90, nemotron-3-nano 5/20 vs 6/24, and GLM-5.3-Flash's context is 1,048,576 in code vs 1,024,000 in the listing. NOT changed: they are budget ceilings for routes that reserve nothing today, and a re-price changes what pricingVersion '2026-10-nemotron-tier' means, which is an owner decision. Recorded on each entry's comment and flagged here",
+    "VISION_ROUTE_IDS holds two entries, not exactly the vision role's route: GLM-5.3-Flash also passed the 2026-10-15 image+tool probe, and removing it would assert that a model we verified can see images cannot. The vision ROLE is the preference; the capability list is the fact",
+    "Vision coverage is one model, one image, one run each (2026-10-15 GLM, 2026-10-18 Super VL). Enough to move the role, not enough to claim photographic breadth"
+  ]
+}
+```
+
+```json
+{
+  "packet": "S04 fast and deep AI for apps (plan docs/plans/2026-10-18-submission-build-plan.md)",
+  "status": "LOCAL VERIFIED",
+  "owner": "app-ai and builder-guidance half by a subagent; template type and scaffold-lock regeneration by the integration lead (serial, lockfile-owned)",
+  "commands": [
+    {"command": "bun test tests/app-ai.test.ts (test-first, source unchanged)", "exitCode": 1, "receipt": "3 fail: a super call sent nvidia/Nemotron-3_5-Lightning instead of Super-VL; an unknown tier answered ok:true instead of the refusal; the super reservation ratio was 1.0, not ~3.75"},
+    {"command": "bun test tests/app-ai.test.ts", "exitCode": 0, "receipt": "14 pass, 0 fail, 82 expect() calls"},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "both tsc projects clean"},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1344 pass, 0 fail, 6374 expect() calls, 104 files"},
+    {"command": "bun scripts/refresh-scaffold-lock.ts", "exitCode": 0, "receipt": "wrote stacks/react-hono/scaffold-lock.ts (15,469 bytes); install, example tests, gate refusal and build verified"},
+    {"command": "bun scripts/refresh-scaffold-lock.ts --check", "exitCode": 0, "receipt": "OK: scaffold lockfile is current"},
+    {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "45 PASS, 0 FAIL, 1 BLOCKED (deployment authorization), 4 PROVISIONED — this run includes typecheck, build and all 43 packets, so it doubles as the S05 gate"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/app-ai.ts", "note": "readRequest accepts tier 'fast'|'super' and refuses anything else with the exact wording before any cost; runAppAi resolves appSuper vs app; APP_AI_LIMITS.maxOutputTokens = 4096 caps both the outgoing request and the reserved worst case; usage rows record the route actually used (the insert already bound the per-call route)"},
+    {"path": "apps/app/src/agents/specialists.ts", "note": "builder guidance: leave tier out for everyday replies, use tier: \"super\" when a feature needs deeper reasoning"},
+    {"path": "tests/app-ai.test.ts", "note": "4 cases: default and fast stay on the cheap tier; super calls Super-VL with max_tokens 4096 and records nemotron-3.5-super-vl; a bad tier is refused with the exact message and no model call and no usage row; a super call reserves ~3.75x (98,406 vs 369,150 micro-cents with the same prompt)"},
+    {"path": "stacks/react-hono/server-files.ts", "note": "CaddieAiRequest gains tier?: \"fast\" | \"super\" with a one-line comment; the runtime (app-platform.ts) hands the app's request object to runAppAi verbatim, so no other template change is needed"},
+    {"path": "stacks/react-hono/scaffold-lock.ts", "note": "regenerated in the same packet, as the plan requires"}
+  ],
+  "environment": "local: bun test with an injected fetch stub and the sqlite D1 fixture; no network, no deploy",
+  "providerCalls": "none — every tier path was exercised through the injected provider stub, so the 3.75x drain is arithmetic on the listing's prices, not a live billing observation",
+  "specReview": "PENDING independent review",
+  "qualityReview": "self-reviewed; fail-closed allowance semantics (reserve at worst case, settle at reported tokens, settle 0 on refusal) untouched and still covered by the pre-existing cases in the same file",
+  "limitations": [
+    "The regenerated scaffold lock also picked up bun 1.4.0's current resolution shape beyond this packet's template edit (lockfileVersion 1 -> 2 and a bun-types/undici-types entry). The --check gate (frozen install, example tests, gate refusal, Workers build) passes with it, and CI pins bun-version 1.4.0; flagged because the diff is larger than the one-line type change implies",
+    "The scaffold's own example tests never pass a tier, so the template's new field is type-verified but not exercised end-to-end by the scaffold suite; the seam is app-platform.ts handing the request through unchanged",
+    "A generated app can now drain its monthly allowance ~3.75x faster by asking for super. That is the intended trade (deeper reasoning for more of the allowance) and it is documented in caddie/ai.ts, but there is no extra owner-facing warning and no per-call tier display in the app-usage card",
+    "Tier selection is the app builder's judgement (prompt guidance), not a host-enforced policy: an app may ask for super on every call"
+  ]
+}
+```

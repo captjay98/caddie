@@ -34,11 +34,15 @@ export interface StubBehavior {
 	exitCode?: number;
 	stdout?: string;
 	stderr?: string;
+	/** Files the command leaves in its result image (absolute path -> text), e.g. a build's dist/. */
+	writes?: Record<string, string>;
 }
 
 export interface StubRequestLog {
 	method: string;
 	path: string;
+	/** The raw query string (`?path=...`), so tests can tell which file a read asked for. */
+	query?: string;
 	body: unknown;
 	hasAuthorization: boolean;
 	authorizationMatched: boolean;
@@ -116,6 +120,57 @@ export class SandboxStub {
 		this.goneImages.add(imageUuid);
 	}
 
+	/** Test-side: drop every image builds made, as after a long pause; tagged base images stay. Returns how many. */
+	loseBuiltImages(): number {
+		const tagged = new Set(this.tags.values());
+		let lost = 0;
+		for (const imageUuid of this.images.keys()) {
+			if (tagged.has(imageUuid) || this.goneImages.has(imageUuid)) continue;
+			this.goneImages.add(imageUuid);
+			lost += 1;
+		}
+		return lost;
+	}
+
+	/** Every command the instances were asked to run, in order. */
+	spawnedCommands(): string[] {
+		return this.requests
+			.filter((r) => r.method === 'POST' && r.path === '/v1/instances')
+			.map((r) => String((r.body as { command?: unknown } | null)?.command ?? ''));
+	}
+
+	/**
+	 * Test-side: an image that already holds these files (absolute paths), as
+	 * a finished build's checkpoint would. Returns the image uuid.
+	 */
+	seedImageWithFiles(files: Record<string, string | Uint8Array>): string {
+		const imageUuid = crypto.randomUUID();
+		const stored = new Map<string, StubFile>();
+		for (const [path, content] of Object.entries(files)) {
+			stored.set(this.normalize(path), {
+				bytes: typeof content === 'string' ? Buffer.from(content, 'utf8') : Buffer.from(content),
+				mode: 0o100644,
+				mtime: 1_760_000_000,
+			});
+		}
+		this.images.set(imageUuid, { imageUuid, files: stored, dirs: new Set() });
+		return imageUuid;
+	}
+
+	/** Every path an inspect read was requested for (proves what was, and was not, read). */
+	downloadedPaths(): string[] {
+		return this.requests
+			.filter((r) => r.method === 'GET' && /\/inspect\/[^/]+\/download$/.test(r.path))
+			.map((r) => new URLSearchParams(r.query ?? '').get('path') ?? '');
+	}
+
+	/** Every directory an inspect listing was requested for. */
+	listedPaths(): string[] {
+		return this.requests
+			.filter((r) => r.method === 'GET' && /\/inspect\/[^/]+\/list$/.test(r.path))
+			.map((r) => new URLSearchParams(r.query ?? '').get('path') ?? '');
+	}
+
 	spawnRequestCount(): number {
 		return this.requests.filter((r) => r.method === 'POST' && r.path === '/v1/instances').length;
 	}
@@ -181,6 +236,7 @@ export class SandboxStub {
 		const entry: StubRequestLog = {
 			method: req.method ?? '',
 			path: new URL(req.url ?? '/', 'http://127.0.0.1').pathname,
+			query: new URL(req.url ?? '/', 'http://127.0.0.1').search,
 			body,
 			hasAuthorization: typeof authorization === 'string' && authorization.length > 0,
 			authorizationMatched:
@@ -494,6 +550,11 @@ export class SandboxStub {
 					};
 					for (const [absPath, record] of attachedFiles) {
 						clone.files.set(absPath, record);
+						this.addParentDirs(clone, absPath);
+					}
+					for (const [path, text] of Object.entries(behavior?.writes ?? {})) {
+						const absPath = this.normalize(path);
+						clone.files.set(absPath, { bytes: Buffer.from(text, 'utf8'), mode: 0o100644, mtime: 1_760_000_000 });
 						this.addParentDirs(clone, absPath);
 					}
 					const outcome = behavior

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 /**
- * P01 — Better Auth 1.7.7 on Cloudflare Workers + D1, executed against a real
+ * P01 — Better Auth 1.7.10 on Cloudflare Workers + D1, executed against a real
  * local workerd (`wrangler dev` = miniflare/workerd with a real local SQLite
  * D1 database) and a stub OAuth provider running in this test process.
  *
@@ -840,5 +840,41 @@ describe('P01 slice 2: invite allowlist, provider-subject identity, sessions', (
 				.filter((line) => /^\s*(create|drop|alter)\b/i.test(line))
 				.map((line) => line.trim());
 		expect(statements(identitySection)).toEqual(statements(fixture));
+	});
+
+	test('the installed Better Auth needs no new identity tables or columns', async () => {
+		// The drift test above compares two files in this repo; this one asks
+		// the INSTALLED library. After a Better Auth upgrade, its own migrator
+		// must find nothing to create or add against the fixture schema, or
+		// production D1 would be missing columns the new version writes.
+		const { createAuth } = await import('../apps/app/src/server/auth.ts');
+		// Better Auth is installed under apps/app, not the repo root.
+		const { getMigrations } = (await import(
+			Bun.resolveSync('better-auth/db/migration', join(REPO_ROOT, 'apps', 'app'))
+		)) as {
+			getMigrations: (options: unknown) => Promise<{
+				toBeCreated: { table: string }[];
+				toBeAdded: { table: string; fields: Record<string, unknown> }[];
+			}>;
+		};
+		const { Database } = await import('bun:sqlite');
+		const db = new Database(':memory:');
+		db.exec(readFileSync(DDL_PATH, 'utf8'));
+		const auth = createAuth(
+			{
+				DB: db as unknown as import('../apps/app/src/server/auth.ts').D1Database,
+				BETTER_AUTH_SECRET: 'probe-secret-0123456789abcdef0123456789abcdef',
+				BETTER_AUTH_URL: 'http://127.0.0.1:1',
+				GOOGLE_CLIENT_ID: 'probe-google-id',
+				GOOGLE_CLIENT_SECRET: 'probe-google-secret',
+				GITHUB_CLIENT_ID: 'probe-github-id',
+				GITHUB_CLIENT_SECRET: 'probe-github-secret',
+			} as never,
+			{ database: db },
+		);
+		const { toBeCreated, toBeAdded } = await getMigrations(auth.options);
+		expect(toBeCreated.map((table) => table.table)).toEqual([]);
+		expect(toBeAdded.map((table) => ({ table: table.table, fields: Object.keys(table.fields) }))).toEqual([]);
+		db.close();
 	});
 });

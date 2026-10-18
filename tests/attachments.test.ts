@@ -79,14 +79,14 @@ describe("ingestAttachments", () => {
 	test("an image sets needsVision and routes to the vision model", async () => {
 		const r = await ingestAttachments([img], noFetch);
 		expect(r.needsVision).toBe(true);
-		expect(r.modelRouteId).toBe("glm-5.3-flash");
+		expect(r.modelRouteId).toBe("nemotron-3.5-super-vl");
 		expect(r.accepted[0]!.kind).toBe("image");
 	});
 
 	test("a text file is decoded; no vision needed; chat route", async () => {
 		const r = await ingestAttachments([txt], async () => bytesOf("plan contents"));
 		expect(r.needsVision).toBe(false);
-		expect(r.modelRouteId).toBe("nemotron-3-super");
+		expect(r.modelRouteId).toBe("nemotron-3.5-super-vl");
 		expect(r.accepted[0]!.kind).toBe("file-text");
 	});
 
@@ -99,7 +99,7 @@ describe("ingestAttachments", () => {
 	test("mixed image + text: vision route, both accepted", async () => {
 		const r = await ingestAttachments([img, txt], async () => bytesOf("x"));
 		expect(r.needsVision).toBe(true);
-		expect(r.modelRouteId).toBe("glm-5.3-flash");
+		expect(r.modelRouteId).toBe("nemotron-3.5-super-vl");
 		expect(r.accepted).toHaveLength(2);
 	});
 

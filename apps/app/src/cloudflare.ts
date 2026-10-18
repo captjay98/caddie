@@ -21,6 +21,17 @@
 import type { AuthEnv } from './server/auth.ts';
 import { dispatchDueSchedules } from './server/schedules.ts';
 import { sweepStalledBuilds } from './server/build-workflow.ts';
+import { advanceSafetyChecks, recheckLiveApps } from './server/publish.ts';
+import { publishDepsFromEnv, type PublishEnv } from './server/publish-env.ts';
+import { createWebRisk } from './server/adapters/web-risk.ts';
+import { advanceImportPreviews, importPreviewDepsFromEnv, type ImportPreviewEnv } from './server/import-preview.ts';
+
+// Backend previews (docs/plans/2026-10-17-publish): the per-project preview
+// database and the RPC gateway an app's preview isolate reaches it through,
+// and the outbound gate every fetch the preview's server makes goes through.
+export { PreviewDatabase, PreviewDatabaseGateway } from './server/preview-database.ts';
+export { PreviewOutbound } from './server/preview-outbound.ts';
+export { AppPlatform, PublishedAppPlatform } from './server/app-platform.ts';
 
 /** Structural handler types (this module stays free of extra type deps). */
 interface CronController {
@@ -32,7 +43,7 @@ interface CronController {
 }
 
 export default {
-	async scheduled(controller: CronController, env: Pick<AuthEnv, 'DB'>, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<void> {
+	async scheduled(controller: CronController, env: Pick<AuthEnv, 'DB'> & PublishEnv & ImportPreviewEnv & { WEB_RISK_API_KEY?: string }, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<void> {
 		ctx.waitUntil(
 			dispatchDueSchedules(env.DB, Date.now()).then((fired) => {
 				if (fired > 0) {
@@ -51,6 +62,38 @@ export default {
 				.catch((error: unknown) => {
 					console.error('[builds] stall sweep failed', error instanceof Error ? error.message : error);
 				}),
+		);
+		// "Start from my GitHub repo": finish building copied apps whose card
+		// nobody has open (the tab was closed right after the copy).
+		ctx.waitUntil(
+			advanceImportPreviews(importPreviewDepsFromEnv(env))
+				.then((settled) => {
+					if (settled > 0) console.log(`[import-preview] cron ${controller.cron} settled ${settled} copied app(s)`);
+				})
+				.catch((error: unknown) => {
+					console.error('[import-preview] sweep failed', error instanceof Error ? error.message : error);
+				}),
+		);
+		// Published apps (only when publishing is set up): finish safety scans that
+		// outlasted the publish request, and recheck live apps against Web Risk once
+		// a day. Each failure is logged; neither ever fails the tick.
+		ctx.waitUntil(
+			(async () => {
+				const deps = await publishDepsFromEnv(env);
+				if (!deps) return;
+				const settled = await advanceSafetyChecks(env.DB, deps).catch((error: unknown) => {
+					console.error('[publish] safety-check sweep failed', error instanceof Error ? error.message : error);
+					return 0;
+				});
+				if (settled > 0) console.log(`[publish] cron ${controller.cron} settled ${settled} safety check(s)`);
+				const key = (env.WEB_RISK_API_KEY ?? '').trim();
+				if (!key) return;
+				const recheck = await recheckLiveApps(env.DB, deps, createWebRisk({ apiKey: key })).catch((error: unknown) => {
+					console.error('[publish] web risk recheck failed', error instanceof Error ? error.message : error);
+					return null;
+				});
+				if (recheck && (recheck.flagged > 0 || recheck.failed > 0)) console.log(`[publish] recheck: ${recheck.checked} checked, ${recheck.flagged} taken down, ${recheck.failed} failed`);
+			})().catch((error: unknown) => console.error('[publish] cron failed', error instanceof Error ? error.message : error)),
 		);
 	},
 };

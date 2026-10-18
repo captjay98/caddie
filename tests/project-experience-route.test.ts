@@ -52,7 +52,7 @@ async function world() {
   for (const m of [
     "0001_product.sql", "0002_controls.sql", "0003_artifacts.sql", "0005_runs.sql",
     "0008_profile.sql", "0017_profile_preferences.sql", "0011_home_project.sql",
-    "0015_plan_decisions.sql", "0018_build_workflow.sql",
+    "0015_plan_decisions.sql", "0018_build_workflow.sql", "0024_design_phase.sql",
   ]) {
     sqlite.exec(readFileSync(new URL(`../apps/app/migrations/${m}`, import.meta.url), "utf8"));
   }
@@ -88,7 +88,7 @@ describe("R06 one-source project experience consumption", () => {
     expect(exp.plan!.approved).toBe(false);
   });
 
-  test("approve-plan command advances the SAME projection to building", async () => {
+  test("approve-plan command advances the SAME projection to the design step", async () => {
     const w = await world();
     const { scope } = await w.reviewReady();
     const before = await projectExperience(w.db, scope);
@@ -99,10 +99,10 @@ describe("R06 one-source project experience consumption", () => {
       idempotencyKey: "r06-approve-0001",
     });
     expect(result.outcome).toBe("applied");
-    expect(result.experience.stage).toBe("building");
+    expect(result.experience.stage).toBe("design");
     // A re-read sees the same truth the command returned (one source).
     const reread = await projectExperience(w.db, scope);
-    expect(reread.stage).toBe("building");
+    expect(reread.stage).toBe("design");
     expect(reread.plan!.approved).toBe(true);
   });
 

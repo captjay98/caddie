@@ -278,16 +278,54 @@ test.describe('Projects v2 (U05)', () => {
 			created.push(body);
 			return json(route, 201, { project: project('proj-imported', String(body.name ?? 'New'), 'standard') });
 		});
-		let imported = false;
+		let imported: Record<string, unknown> | null = null;
 		await context.route('**/api/projects/proj-imported/github/imports', (route) => {
-			imported = true;
-			return json(route, 201, { import: { id: 'imp-1' } });
+			imported = route.request().postDataJSON() as Record<string, unknown>;
+			return json(route, 201, { import: { id: 'imp-1' }, start: { ok: true, repoFullName: 'octo-org/pit-wall', version: { commitId: 'c1', seq: 1, fileCount: 24 } } });
 		});
 		await page.getByTestId('import-repo-confirm').click();
 		await expect(page).toHaveURL(/project=proj-imported/);
 		expect(created).toHaveLength(1);
 		expect(created[0]).toMatchObject({ name: 'pit-wall' });
-		expect(imported).toBe(true);
+		expect(imported).toMatchObject({ installationId: 'inst-1', repoFullName: 'octo-org/pit-wall', start: true });
+		await context.close();
+	});
+
+	test('a repo Caddie cannot build on is explained before opening the new project', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context);
+		await context.route('**/api/github/installations**', (route) =>
+			json(route, 200, { installations: [{ installationId: 'inst-1', accountLogin: 'octo-org', status: 'active', appSlug: 'caddie', permissions: { contents: 'read' }, workspaceId: 'ws-1' }] }),
+		);
+		await context.route('**/api/github/installations/inst-1/repos', (route) => json(route, 200, { repositories: [{ repoFullName: 'octo-org/vite-site', status: 'selected' }] }));
+		await context.route('**/api/workspaces', (route) => json(route, 201, { workspace: { id: 'ws-1', name: 'Home', createdAt: NOW } }));
+		await context.unroute('**/api/projects');
+		await context.route('**/api/projects', (route) =>
+			route.request().method() !== 'POST' ? json(route, 200, { projects: [HOME, PROJ_A] }) : json(route, 201, { project: project('proj-vite', 'vite-site', 'standard') }),
+		);
+		await context.route('**/api/projects/proj-vite/github/imports', (route) =>
+			json(route, 201, {
+				import: { id: 'imp-2' },
+				start: { ok: false, reason: 'not_caddie_app', message: "Caddie can continue apps that were made with Caddie and saved to GitHub. This repo was made another way, so Caddie can't build on it yet." },
+			}),
+		);
+		const page = await context.newPage();
+		if (process.env.CADDIE_SHOTS_MOBILE) await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto(`${BASE}/app/projects`);
+		await page.getByTestId('import-repo-project').click();
+		const win = page.getByTestId('import-repo-window');
+		await win.getByRole('button', { name: 'Show repositories' }).click();
+		await win.getByTestId('pick-repo-octo-org/vite-site').click();
+		await expect(win).toContainText('copies the app’s code into a new project and builds on it');
+		await page.getByTestId('import-repo-confirm').click();
+		const notice = win.getByTestId('import-repo-notice');
+		await expect(notice).toContainText('Caddie will start a new app instead.');
+		await expect(notice).toContainText('made with Caddie and saved to GitHub');
+		await expect(page).not.toHaveURL(/project=proj-vite/);
+		const dir = process.env.CADDIE_SHOTS;
+		if (dir) await win.screenshot({ path: `${dir}/import-${process.env.CADDIE_SHOTS_MOBILE ? 'mobile-' : ''}refused.png` });
+		await notice.getByTestId('import-repo-open').click();
+		await expect(page).toHaveURL(/project=proj-vite/);
 		await context.close();
 	});
 });

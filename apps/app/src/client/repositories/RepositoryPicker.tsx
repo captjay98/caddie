@@ -52,6 +52,11 @@ export function RepositoryPicker(props: {
 	const [bindBusy, setBindBusy] = useState(false);
 	const [bindMessage, setBindMessage] = useState<string | null>(null);
 
+	// The App's own install page (null when the slug isn't configured — we never
+	// fabricate a URL). When present it leads the connect flow so the user
+	// authorizes on GitHub and comes back, instead of pasting an id blind.
+	const [installUrl, setInstallUrl] = useState<string | null>(null);
+
 	const [openInstallation, setOpenInstallation] = useState<string | null>(null);
 	const [repos, setRepos] = useState<RepoSelectionView[] | null>(null);
 	const [reposError, setReposError] = useState<Error | null>(null);
@@ -73,6 +78,23 @@ export function RepositoryPicker(props: {
 		setInstallations(null);
 		void load();
 	}, [load, reloadKey]);
+
+	// Best-effort: learn the App's install URL so we can lead with an Install
+	// button. A failure (or an unconfigured slug) just leaves installUrl null —
+	// the id-paste fallback below still works.
+	useEffect(() => {
+		let live = true;
+		void fetchJson<{ installUrl: string | null }>('/api/github/app')
+			.then((body) => {
+				if (live) setInstallUrl(body.installUrl);
+			})
+			.catch(() => {
+				if (live) setInstallUrl(null);
+			});
+		return () => {
+			live = false;
+		};
+	}, []);
 
 	const openRepos = useCallback(async (installationId: string): Promise<void> => {
 		setOpenInstallation(installationId);
@@ -165,7 +187,7 @@ export function RepositoryPicker(props: {
 				<StatePanel
 					kind="empty"
 					title="No GitHub App installation is bound to this workspace"
-					detail="Install the Caddie GitHub App on your account, paste the installation id below, then bind it here."
+					detail="Install the Caddie GitHub App on your account below, then come back and bind it — Caddie reads only what you grant."
 				/>
 			) : (
 				<ul className="repository-picker__installations" data-testid="installation-list">
@@ -273,30 +295,61 @@ export function RepositoryPicker(props: {
 				</ul>
 			)}
 
-			<form
-				className="repository-picker__bind"
-				onSubmit={(event) => {
-					event.preventDefault();
-					void bind();
-				}}
-			>
-				<p className="kicker">bind an installation · explicit human action · typed conflicts, never a silent success</p>
-				<label>
-					<span>Bind an installation by id</span>
-					<input
-						className="input"
-						value={bindId}
-						onChange={(event) => setBindId(event.target.value)}
-						placeholder="GitHub App installation id"
-						inputMode="numeric"
-						disabled={bindBusy}
-					/>
-				</label>
-				<button type="submit" className="btn-key" disabled={bindBusy || bindId.trim() === ''}>
-					{bindBusy ? 'Binding…' : 'Bind installation'}
-				</button>
-				{bindMessage ? <p data-testid="bind-message">{bindMessage}</p> : null}
-			</form>
+			<div className="repository-picker__connect" data-testid="repository-picker-connect">
+				<p className="kicker" data-tone="action">
+					connect an account · you authorize on GitHub · Caddie never guesses access
+				</p>
+				{installUrl ? (
+					<p className="repository-picker__install">
+						<a
+							className="btn-key"
+							data-testid="github-install-link"
+							href={installUrl}
+							target="_blank"
+							rel="noreferrer noopener"
+						>
+							Install the Caddie GitHub App on GitHub
+						</a>
+						<span className="repository-picker__meta">
+							Opens GitHub in a new tab. Choose the account and repositories to grant, then come
+							back and reload — the installation appears above.
+						</span>
+					</p>
+				) : (
+					<p className="repository-picker__meta" data-testid="github-install-unconfigured">
+						Install the Caddie GitHub App on your account from GitHub, then bind it below. (The
+						direct install link isn't configured in this environment.)
+					</p>
+				)}
+
+				<details className="repository-picker__bind-fallback">
+					<summary data-testid="bind-fallback-toggle">Already installed? Bind by installation id</summary>
+					<form
+						className="repository-picker__bind"
+						onSubmit={(event) => {
+							event.preventDefault();
+							void bind();
+						}}
+					>
+						<p className="kicker">explicit human action · typed conflicts, never a silent success</p>
+						<label>
+							<span>Installation id</span>
+							<input
+								className="input"
+								value={bindId}
+								onChange={(event) => setBindId(event.target.value)}
+								placeholder="GitHub App installation id"
+								inputMode="numeric"
+								disabled={bindBusy}
+							/>
+						</label>
+						<button type="submit" className="btn-key" disabled={bindBusy || bindId.trim() === ''}>
+							{bindBusy ? 'Binding…' : 'Bind installation'}
+						</button>
+						{bindMessage ? <p data-testid="bind-message">{bindMessage}</p> : null}
+					</form>
+				</details>
+			</div>
 		</div>
 	);
 }

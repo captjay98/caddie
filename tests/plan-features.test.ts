@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_PLAN_FEATURES, parsePlanFeatures, splitFeatureBlock } from "../packages/contracts/src/features.ts";
+import { MAX_DESIGN_MOCK_TITLE, MAX_PLAN_FEATURES, parsePlanFeatures, splitDesignMocks, splitFeatureBlock } from "../packages/contracts/src/features.ts";
 import { featuresForPlan } from "../apps/app/src/server/build-features.ts";
 
 /** The PRD's `caddie-features` block: what the user approves is what gets built. */
@@ -47,5 +47,54 @@ describe("plan feature list", () => {
   test("a plan without a list builds as one whole-plan feature", () => {
     expect(featuresForPlan("# Old plan").map((f) => f.id)).toEqual(["whole-plan"]);
     expect(featuresForPlan(block(one)).map((f) => f.id)).toEqual(["log-feed"]);
+  });
+});
+
+describe("design brief mockup extraction", () => {
+  const fenceBlock = (info: string, html: string, fence = "```") => `${fence}${info}\n${html}\n${fence}`;
+
+  test("extracts every titled html-mock block in order and returns the prose without them", () => {
+    const body = [
+      "# Design", "", "Screen inventory first.", "",
+      fenceBlock("html-mock Today", "<main>today</main>"), "",
+      "## States", "",
+      fenceBlock("html-mock Today · empty", "<main>empty</main>", "~~~"), "",
+      fenceBlock("html-mock   Add entry · error  ", "<main>error</main>"), "",
+      "Accessibility note.",
+    ].join("\n");
+    const { display, mocks } = splitDesignMocks(body);
+    expect(mocks).toEqual([
+      { title: "Today", html: "<main>today</main>" },
+      { title: "Today · empty", html: "<main>empty</main>" },
+      { title: "Add entry · error", html: "<main>error</main>" },
+    ]);
+    expect(display).toBe("# Design\n\nScreen inventory first.\n\n## States\n\nAccessibility note.");
+  });
+
+  test("an untitled block is named by position, an empty block counts as absent", () => {
+    const body = [fenceBlock("html-mock", "<b>a</b>"), fenceBlock("html-mock Blank", "   "), fenceBlock("html-mock", "<b>c</b>")].join("\n\n");
+    expect(splitDesignMocks(body).mocks).toEqual([
+      { title: "Screen 1", html: "<b>a</b>" },
+      { title: "Screen 2", html: "<b>c</b>" },
+    ]);
+  });
+
+  test("a brief with no mockup degrades to prose-only (never errors)", () => {
+    const prose = "# Design\n\nAll words, no mock.";
+    expect(splitDesignMocks(prose)).toEqual({ display: prose, mocks: [] });
+  });
+
+  test("look-alike fences are not mockups and stay in the prose", () => {
+    for (const info of ["html", "html-mockup Today", "caddie-features"]) {
+      const body = fenceBlock(info, "<b>x</b>");
+      const { display, mocks } = splitDesignMocks(body);
+      expect(mocks).toEqual([]);
+      expect(display).toBe(body);
+    }
+  });
+
+  test("an overlong title is cut to the picker's limit", () => {
+    const { mocks } = splitDesignMocks(fenceBlock(`html-mock ${"x".repeat(200)}`, "<b>x</b>"));
+    expect(mocks[0]?.title).toHaveLength(MAX_DESIGN_MOCK_TITLE);
   });
 });

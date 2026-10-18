@@ -23,7 +23,7 @@ import { createD1ContentStore } from "./artifacts.ts";
 import { findModelRouteForRole } from "../agents/providers.ts";
 
 export type WorkflowPhase =
-  "planning" | "review" | "building" | "blocked" | "ready";
+  "planning" | "review" | "design" | "design-review" | "building" | "blocked" | "ready";
 export interface BuildWorkflow {
   projectId: string;
   runId: string;
@@ -218,6 +218,16 @@ export const planIntent = (projectId: string, plan: PlanDocRevision) => ({
   revisionHash: plan.bodyHash,
   policyVersion: "v1",
 });
+/** The DESIGN-BRIEF approval, distinct from the PRD's planIntent: approving the
+ *  plan does not approve the design, and vice versa. Keyed to the design
+ *  revision's own hash so the user's go-ahead binds to exactly what they saw. */
+export const designIntent = (projectId: string, design: PlanDocRevision) => ({
+  projectId,
+  action: "design" as const,
+  resourceId: design.id,
+  revisionHash: design.bodyHash,
+  policyVersion: "v1",
+});
 export async function workflowSnapshot(db: D1Database, scope: Scope) {
   let workflow = await readWorkflow(db, scope);
   const plan = (await listPlanDocRevisions(db, scope, "prd"))[0] ?? null;
@@ -230,6 +240,32 @@ export async function workflowSnapshot(db: D1Database, scope: Scope) {
       .run();
     workflow = (await readWorkflow(db, scope))!;
   }
+  // The latest design brief (if any) and its approval — surfaced so the card
+  // can render the design-review state and the coordinator can read it.
+  const design = (await listPlanDocRevisions(db, scope, "design"))[0] ?? null;
+  // Auto-advance design -> design-review once a NOT-YET-DECIDED brief is saved:
+  // the designer writes the 'design' revision and stops; an undecided revision
+  // while the phase is still 'design' means the brief is ready for review.
+  // (Mirrors the planning -> review advance a new PRD triggers above.) A
+  // rejected brief stays in 'design' — it already has a decision — until the
+  // re-authored NEW revision (no decision yet) supersedes it and advances.
+  if (workflow && workflow.phase === "design" && design) {
+    const decided = await rows(
+      db,
+      "select 1 from plan_decisions where projectId = ? and planRevisionId = ? limit 1",
+      scope.projectId,
+      design.id,
+    );
+    if (!decided.length) {
+      await db
+        .prepare(
+          "update build_workflows set phase = ?, updatedAt = ? where projectId = ? and phase = 'design'",
+        )
+        .bind("design-review", now(), scope.projectId)
+        .run();
+      workflow = (await readWorkflow(db, scope))!;
+    }
+  }
   const approval = plan
     ? await getApprovalForIntent(
         db,
@@ -237,7 +273,14 @@ export async function workflowSnapshot(db: D1Database, scope: Scope) {
         planIntent(scope.projectId, plan),
       )
     : null;
-  return { workflow, plan, approval };
+  const designApproval = design
+    ? await getApprovalForIntent(
+        db,
+        scope.actorId,
+        designIntent(scope.projectId, design),
+      )
+    : null;
+  return { workflow, plan, approval, design, designApproval };
 }
 export async function decideWorkflow(
   db: D1Database,
@@ -292,10 +335,10 @@ export async function decideWorkflow(
       input.decision === "rejected" &&
       !decisions.length)
   ) {
-    const phase = input.decision === "approved" ? "building" : "planning";
+    const phase = input.decision === "approved" ? "design" : "planning";
     const message =
       input.decision === "approved"
-        ? `The authenticated review controls approved plan ${plan.id}. Re-read the latest plan and durable approval. Build it feature by feature: call build_next_feature, delegate exactly that feature, then finish_feature; when every feature has passed, run QA with verify_build. Stop honestly on blockers.`
+        ? `The authenticated review controls approved plan ${plan.id}. Now DESIGN before building: delegate the designer to author ONE design brief (screen inventory; each key screen's layout; the token/component choices; the empty, loading and error state for anything that loads or saves), save it with write_plan_note kind:'design' and the same planRevision, then STOP for the authenticated design review. Do NOT build or scaffold yet — building is gated until the design brief is approved.`
         : `Revise plan ${plan.id} using the user's feedback below. Write a NEW prd revision, then wait for review; no building.\n\n${note}`;
     await db
       .prepare(
@@ -309,6 +352,76 @@ export async function decideWorkflow(
         scope.projectId,
         plan.id,
       )
+      .run();
+  }
+  return workflowSnapshot(db, scope);
+}
+/**
+ * Approve or revise the DESIGN BRIEF — the gate between design-review and
+ * building. Mirrors decideWorkflow but binds to the design revision's own
+ * approval (designIntent): approving the plan never approves the design, so
+ * building stays gated until the brief the user actually saw is approved.
+ *   approved -> building (the feature loop may now run)
+ *   rejected -> design   (re-author the brief with the feedback; no building)
+ */
+export async function decideDesign(
+  db: D1Database,
+  scope: Scope,
+  input: { designId: string; decision: "approved" | "rejected"; note?: string },
+) {
+  await ensureWorkflow(db, scope);
+  const { workflow, design } = await workflowSnapshot(db, scope);
+  if (!design || design.id !== input.designId)
+    throw new ScopeError(
+      409,
+      "STALE_DESIGN",
+      "The design brief changed. Review the latest version.",
+    );
+  if (input.decision !== "approved" && input.decision !== "rejected")
+    throw new ScopeError(
+      400,
+      "invalid_decision",
+      "Choose approve or request changes.",
+    );
+  const note = input.note?.trim() ?? "";
+  if (input.decision === "rejected" && (!note || note.length > 2000))
+    throw new ScopeError(
+      400,
+      "feedback_required",
+      "Describe the change in 2000 characters or fewer.",
+    );
+  const approval = await recordDecision(db, scope.actorId, {
+    intent: designIntent(scope.projectId, design),
+    decision: input.decision,
+  });
+  const decisions = await rows(
+    db,
+    "select id from plan_decisions where projectId = ? and planRevisionId = ? and approvalId = ? and decidedBy = ?",
+    scope.projectId,
+    design.id,
+    approval.id,
+    scope.actorId,
+  );
+  if (!decisions.length)
+    await recordPlanDecision(db, scope, {
+      planRevisionId: design.id,
+      decision: input.decision === "approved" ? "approved" : "changes",
+      note,
+      approvalId: approval.id,
+    });
+  // Only act from design-review (a retried click can't restart a running build
+  // or re-queue a design pass).
+  if (workflow!.phase === "design-review" && !decisions.length) {
+    const phase = input.decision === "approved" ? "building" : "design";
+    const message =
+      input.decision === "approved"
+        ? `The authenticated design review approved the design brief ${design.id}. Build the approved plan feature by feature, implementing it to match the design brief: call build_next_feature, delegate exactly that feature with its doneWhen checks, then finish_feature; when every feature has passed, run QA with verify_build. Stop honestly on blockers.`
+        : `Revise the design brief ${design.id} using the user's feedback below. Write a NEW design revision (write_plan_note kind:'design'), then wait for the design review; no building.\n\n${note}`;
+    await db
+      .prepare(
+        "update build_workflows set phase = ?, pendingKey = ?, pendingBody = ?, detail = null, updatedAt = ? where projectId = ?",
+      )
+      .bind(phase, `design-decision:${approval.id}`, message, now(), scope.projectId)
       .run();
   }
   return workflowSnapshot(db, scope);
@@ -442,10 +555,67 @@ export async function stopWorkflow(db: D1Database, scope: Scope) {
     .bind("Stop requested. Your plan and files are retained. Wait for Caddie to stop before retrying.", now(), scope.projectId).run();
   return workflowSnapshot(db, scope);
 }
+/** What a checked build carries besides its preview page (manifest v1, stored by content hash). */
+export interface BuildBundleInput {
+  /** dist/server.js — the app's server for Cloudflare Workers, or null for a client-only build. */
+  server: string | null;
+  /** migrations/NNNN_name.sql files, in name order. */
+  migrations: { name: string; sql: string }[];
+  /**
+   * dist/main.js and dist/main.css as checked. The preview inlines them into
+   * one document; publishing serves them as files, because a published page
+   * may only run scripts from its own origin (the dispatch Worker's CSP).
+   */
+  client?: { js: string; css: string };
+}
+
+export interface BuildManifest {
+  v: 1;
+  server: { sha256: string; bytes: number } | null;
+  migrations: { name: string; sha256: string }[];
+  client?: { js: { sha256: string; bytes: number }; css: { sha256: string; bytes: number } };
+}
+
+const MAX_SERVER_BUNDLE_BYTES = 3 * 1024 * 1024;
+const MAX_MIGRATION_BYTES = 256 * 1024;
+const MAX_CLIENT_FILE_BYTES = 3 * 1024 * 1024;
+
+async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Promise<string> {
+  const store = createD1ContentStore(db);
+  let server: BuildManifest["server"] = null;
+  if (bundle.server !== null) {
+    const bytes = new TextEncoder().encode(bundle.server);
+    if (bytes.length > MAX_SERVER_BUNDLE_BYTES)
+      throw new ScopeError(422, "SERVER_TOO_LARGE", "The app's server bundle is larger than 3 MB.");
+    server = { sha256: (await store.put(bytes)).contentHash, bytes: bytes.length };
+  }
+  const migrations: BuildManifest["migrations"] = [];
+  for (const file of [...bundle.migrations].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    if (!/^\d{4}_[A-Za-z0-9_.-]+\.sql$/.test(file.name))
+      throw new ScopeError(422, "INVALID_MIGRATION", `${file.name} is not a NNNN_name.sql migration.`);
+    const bytes = new TextEncoder().encode(file.sql);
+    if (bytes.length > MAX_MIGRATION_BYTES)
+      throw new ScopeError(422, "INVALID_MIGRATION", `${file.name} is larger than 256 KB.`);
+    migrations.push({ name: file.name, sha256: (await store.put(bytes)).contentHash });
+  }
+  let client: BuildManifest["client"];
+  if (bundle.client) {
+    const part = async (text: string, label: string) => {
+      const bytes = new TextEncoder().encode(text);
+      if (bytes.length > MAX_CLIENT_FILE_BYTES)
+        throw new ScopeError(422, "CLIENT_TOO_LARGE", `The app's ${label} is larger than 3 MB.`);
+      return { sha256: (await store.put(bytes)).contentHash, bytes: bytes.length };
+    };
+    client = { js: await part(bundle.client.js, "script"), css: await part(bundle.client.css, "styles") };
+  }
+  const manifest: BuildManifest = { v: 1, server, migrations, ...(client ? { client } : {}) };
+  return (await store.put(new TextEncoder().encode(JSON.stringify(manifest)))).contentHash;
+}
+
 export async function storeBuildOutput(
   db: D1Database,
   scope: Scope,
-  input: { html: string; image: string; planId: string; runId: string },
+  input: { html: string; image: string; planId: string; runId: string; bundle?: BuildBundleInput },
 ) {
   const { workflow, plan } = await requireBuildApproval(db, scope);
   if (plan.id !== input.planId || workflow.runId !== input.runId)
@@ -454,19 +624,11 @@ export async function storeBuildOutput(
       "STALE_CHECK",
       "Checks no longer match the current plan.",
     );
-  const bytes = new TextEncoder().encode(input.html);
-  if (!input.html.toLowerCase().includes("<html") || bytes.length > 500_000)
-    throw new ScopeError(
-      422,
-      "INVALID_PREVIEW",
-      "A complete HTML preview of at most 500 KB is required.",
-    );
-  const content = await createD1ContentStore(db).put(bytes);
-  const id = `out_${hash(`${scope.projectId}:${plan.id}:${input.image}:${content.contentHash}`).slice(0, 32)}`;
+  const { id, contentHash, manifestSha256 } = await prepareOutput(db, scope.projectId, plan.id, input);
   await db.batch([
     db
       .prepare(
-        "insert or ignore into workflow_outputs (id,projectId,runId,planId,image,sha256,createdAt) values (?,?,?,?,?,?,?)",
+        "insert or ignore into workflow_outputs (id,projectId,runId,planId,image,sha256,manifestSha256,createdAt) values (?,?,?,?,?,?,?,?)",
       )
       .bind(
         id,
@@ -474,7 +636,8 @@ export async function storeBuildOutput(
         workflow.runId,
         plan.id,
         input.image,
-        content.contentHash,
+        contentHash,
+        manifestSha256,
         now(),
       ),
     db
@@ -512,8 +675,146 @@ export async function storeBuildOutput(
       "STALE_CHECK",
       "The plan or approval changed before publication. Run checks against the latest approved plan.",
     );
-  return { outputId: id, sha256: content.contentHash };
+  return { outputId: id, sha256: contentHash };
 }
+
+/** Validate and store a preview document (and its bundle); the output id follows from the content. */
+async function prepareOutput(
+  db: D1Database,
+  projectId: string,
+  planId: string,
+  input: { html: string; image: string; bundle?: BuildBundleInput },
+) {
+  const bytes = new TextEncoder().encode(input.html);
+  if (!input.html.toLowerCase().includes("<html") || bytes.length > 500_000)
+    throw new ScopeError(
+      422,
+      "INVALID_PREVIEW",
+      "A complete HTML preview of at most 500 KB is required.",
+    );
+  const content = await createD1ContentStore(db).put(bytes);
+  const manifestSha256 = input.bundle ? await storeBundleManifest(db, input.bundle) : null;
+  const id = `out_${hash(`${projectId}:${planId}:${input.image}:${content.contentHash}${manifestSha256 ? `:${manifestSha256}` : ""}`).slice(0, 32)}`;
+  return { id, contentHash: content.contentHash, manifestSha256 };
+}
+
+/**
+ * The copied app's preview ("Start from my GitHub repo", import-preview.ts):
+ * the same output record a checked build makes, tied to the imported version
+ * instead of a plan. It never moves the build workflow — the card shows it
+ * until the first build has a preview of its own.
+ */
+export async function storeImportedOutput(
+  db: D1Database,
+  scope: Scope,
+  input: { html: string; image: string; commitId: string; bundle: BuildBundleInput },
+) {
+  await assertProjectScope(db, scope);
+  const source = `import:${input.commitId}`;
+  const { id, contentHash, manifestSha256 } = await prepareOutput(db, scope.projectId, source, input);
+  await db
+    .prepare(
+      "insert or ignore into workflow_outputs (id,projectId,runId,planId,image,sha256,manifestSha256,createdAt) values (?,?,?,?,?,?,?,?)",
+    )
+    .bind(id, scope.projectId, source, source, input.image, contentHash, manifestSha256, now())
+    .run();
+  return { outputId: id, sha256: contentHash };
+}
+/** The checked build's server bundle and migrations, or null when it has no server. */
+export async function readBuildBundle(
+  db: D1Database,
+  scope: Scope,
+  id: string,
+): Promise<{ server: string; migrations: { name: string; sql: string }[] } | null> {
+  await assertProjectScope(db, scope);
+  const found = await rows(
+    db,
+    'select "manifestSha256" from workflow_outputs where id = ? and projectId = ?',
+    id,
+    scope.projectId,
+  );
+  if (!found[0]) throw new ScopeError(404, "preview_not_found", "No such preview in this project.");
+  const manifestHash = found[0].manifestSha256;
+  if (manifestHash === null || manifestHash === undefined) return null;
+  const store = createD1ContentStore(db);
+  const text = async (sha: string) => {
+    const bytes = await store.get(sha);
+    if (!bytes) throw new ScopeError(404, "preview_missing", "Part of this build is no longer available.");
+    return new TextDecoder().decode(bytes);
+  };
+  const manifest = JSON.parse(await text(String(manifestHash))) as BuildManifest;
+  if (manifest.v !== 1 || !manifest.server) return null;
+  const migrations = [];
+  for (const file of manifest.migrations) migrations.push({ name: file.name, sql: await text(file.sha256) });
+  return { server: await text(manifest.server.sha256), migrations };
+}
+
+export interface OutputManifestView {
+  manifestSha256: string;
+  publishable: boolean;
+  hasServer: boolean;
+  migrations: { name: string; sha256: string }[];
+}
+
+/** A checked output's manifest only (no file bodies): what status screens need. */
+export async function readOutputManifest(db: D1Database, scope: Scope, id: string): Promise<OutputManifestView | null> {
+  await assertProjectScope(db, scope);
+  const found = await rows(db, 'select "manifestSha256" from workflow_outputs where id = ? and projectId = ?', id, scope.projectId);
+  if (!found[0]) return null;
+  const manifestHash = found[0].manifestSha256;
+  if (manifestHash === null || manifestHash === undefined) return { manifestSha256: "", publishable: false, hasServer: false, migrations: [] };
+  const bytes = await createD1ContentStore(db).get(String(manifestHash));
+  if (!bytes) return null;
+  const manifest = JSON.parse(new TextDecoder().decode(bytes)) as BuildManifest;
+  return {
+    manifestSha256: String(manifestHash),
+    publishable: manifest.v === 1 && Boolean(manifest.client),
+    hasServer: manifest.server !== null,
+    migrations: manifest.migrations.map((m) => ({ name: m.name, sha256: m.sha256 })),
+  };
+}
+
+export interface PublishBundle {
+  /** The bundle manifest's hash: what this exact version is. */
+  manifestSha256: string;
+  js: string;
+  css: string;
+  server: string | null;
+  migrations: { name: string; sha256: string; sql: string }[];
+}
+
+/**
+ * Everything publishing needs from a checked build output, scoped to the
+ * project. A build checked before client files were kept has no `client`
+ * part; publishing it needs the checks to run again (REBUILD_TO_PUBLISH).
+ */
+export async function readPublishBundle(db: D1Database, scope: Scope, id: string): Promise<PublishBundle> {
+  await assertProjectScope(db, scope);
+  const found = await rows(db, 'select "manifestSha256" from workflow_outputs where id = ? and projectId = ?', id, scope.projectId);
+  if (!found[0]) throw new ScopeError(404, "preview_not_found", "No such version in this project.");
+  const manifestHash = found[0].manifestSha256;
+  const rebuild = () =>
+    new ScopeError(409, "REBUILD_TO_PUBLISH", "This version was checked before publishing was possible. Run the checks again, then publish.");
+  if (manifestHash === null || manifestHash === undefined) throw rebuild();
+  const store = createD1ContentStore(db);
+  const text = async (sha: string) => {
+    const bytes = await store.get(sha);
+    if (!bytes) throw new ScopeError(404, "preview_missing", "Part of this build is no longer available.");
+    return new TextDecoder().decode(bytes);
+  };
+  const manifest = JSON.parse(await text(String(manifestHash))) as BuildManifest;
+  if (manifest.v !== 1 || !manifest.client) throw rebuild();
+  const migrations = [];
+  for (const file of manifest.migrations) migrations.push({ name: file.name, sha256: file.sha256, sql: await text(file.sha256) });
+  return {
+    manifestSha256: String(manifestHash),
+    js: await text(manifest.client.js.sha256),
+    css: await text(manifest.client.css.sha256),
+    server: manifest.server ? await text(manifest.server.sha256) : null,
+    migrations,
+  };
+}
+
 export async function readBuildOutput(
   db: D1Database,
   scope: Scope,

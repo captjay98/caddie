@@ -10,9 +10,9 @@ import { DIGEST_CALL_TIMEOUT_MS, MODEL_CALL_TIMEOUT_MS, timeoutSignal } from './
  *
  * DESIGN:
  *   - ONE batched call scores every candidate (bounded N) — not N calls — to
- *     keep cost and latency small. Uses the `helper` model route
- *     (nemotron-3-nano: cheap, generous token cap) via the Nebius OpenAI-
- *     compatible /chat/completions endpoint.
+ *     keep cost and latency small. Uses the `helper` model route (the 3.5 cheap
+ *     tier, nemotron-3.5-lightning as of 2026-10-18: cheap, generous token cap)
+ *     via the Nebius OpenAI-compatible /chat/completions endpoint.
  *   - FAIL-SOFT, never load-bearing: no key, a failed request, or an
  *     unparseable reply all return an EMPTY result (plus an `error` reason for
  *     the caller to surface as a visible gap). Discovery still ranks by its

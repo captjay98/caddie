@@ -30,6 +30,8 @@ describe('Now panel model', () => {
 		const titles: Record<ExperienceStage, string> = {
 			planning: 'Caddie is writing your plan',
 			review: 'Your plan is ready to review',
+			design: 'Caddie is designing your app',
+			design_review: 'Your design is ready to review',
 			building: 'Caddie is building your app',
 			checking: 'Caddie is checking your app',
 			repairing: 'Caddie is fixing a problem it found',
@@ -48,8 +50,17 @@ describe('Now panel model', () => {
 
 	test('the live indicator shows only while Caddie is working', () => {
 		const working = (stage: ExperienceStage) => nowPanelModel(experience(stage), NOW)!.working;
-		for (const stage of ['planning', 'building', 'checking', 'repairing'] as const) expect(working(stage)).toBe(true);
-		for (const stage of ['review', 'ready', 'blocked', 'planning_blocked', 'stopped'] as const) expect(working(stage)).toBe(false);
+		for (const stage of ['planning', 'design', 'building', 'checking', 'repairing'] as const) expect(working(stage)).toBe(true);
+		for (const stage of ['review', 'design_review', 'ready', 'blocked', 'planning_blocked', 'stopped'] as const) expect(working(stage)).toBe(false);
+	});
+
+	test('reviewing a design opens the chat, where the design review card lives', () => {
+		const model = nowPanelModel(experience('design_review', [action('review_design', true), action('suggest_change')]), NOW)!;
+		expect(model.title).toBe('Your design is ready to review');
+		expect(model.buttons.map((b) => [b.kind, b.route])).toEqual([
+			['review_design', { kind: 'chat' }],
+			['suggest_change', { kind: 'chat' }],
+		]);
 	});
 
 	test('buttons keep server labels, put the primary first and route to the real control', () => {

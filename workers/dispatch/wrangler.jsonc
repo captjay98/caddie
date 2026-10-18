@@ -1,0 +1,40 @@
+// PROPOSED — NOT DEPLOYED. The dispatch Worker that serves published Caddie
+// apps. Every <PLACEHOLDER> is an owner input (docs/plans/2026-10-17-publish):
+// a Workers Paid account with Workers for Platforms, a separate apps domain
+// (on the Public Suffix List), the routing KV namespace and the dispatch
+// namespace. Deploying it is a live action and stays BLOCKED until the owner
+// gives a go-ahead and a budget.
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "caddie-dispatch",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-06-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"workers_dev": false,
+	"routes": [
+		// Every app on the apps domain: <slug>.<APPS_DOMAIN>
+		{ "pattern": "*.<APPS_DOMAIN>/*", "zone_name": "<APPS_DOMAIN>" }
+		// Owners' custom domains arrive through Cloudflare for SaaS with this
+		// Worker as the fallback origin (configured on the zone, not here).
+	],
+	"dispatch_namespaces": [
+		{
+			"binding": "DISPATCHER",
+			"namespace": "<DISPATCH_NAMESPACE>",
+			"outbound": {
+				"service": "caddie-dispatch-outbound",
+				"parameters": ["projectId", "slug"]
+			}
+		}
+	],
+	"kv_namespaces": [{ "binding": "ROUTES", "id": "<ROUTES_KV_NAMESPACE_ID>" }],
+	// Caddie's platform for published apps (AI): the main Caddie Worker's
+	// PublishedAppPlatform entrypoint. Apps never get this binding; each request
+	// gets a capability bound to its own project (AppPlatform in src/index.ts).
+	"services": [{ "binding": "CADDIE_PLATFORM", "service": "caddie-app", "entrypoint": "PublishedAppPlatform" }],
+	"vars": {
+		"CADDIE_ORIGIN": "https://<CADDIE_HOST>",
+		"APPS_DOMAIN": "<APPS_DOMAIN>"
+	},
+	"observability": { "enabled": true }
+}

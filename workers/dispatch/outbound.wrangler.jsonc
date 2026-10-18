@@ -1,0 +1,18 @@
+// PROPOSED — NOT DEPLOYED. Caddie's outbound Worker: every fetch() a
+// published app's server makes goes through src/outbound.ts (the same egress
+// policy the previews use). Referenced by the dispatch namespace binding in
+// wrangler.jsonc; deploy it first. BLOCKED until the owner's go-ahead.
+{
+	"$schema": "../../node_modules/wrangler/config-schema.json",
+	"name": "caddie-dispatch-outbound",
+	"main": "src/outbound.ts",
+	"compatibility_date": "2026-06-01",
+	"compatibility_flags": ["nodejs_compat"],
+	"workers_dev": false,
+	"vars": {
+		"CADDIE_ORIGIN": "https://<CADDIE_HOST>",
+		"APPS_DOMAIN": "<APPS_DOMAIN>",
+		"DENY_HOSTS": ""
+	},
+	"observability": { "enabled": true }
+}

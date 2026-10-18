@@ -33,11 +33,16 @@ describe('model registry (providers.ts)', () => {
 		}
 	});
 
-	test('the three verified Nemotron tiers are present with the exact (case-sensitive) ids', () => {
+	test('the verified Nemotron ids are present with the exact (case-sensitive) spelling', () => {
 		const byId = Object.fromEntries(MODEL_ROUTES.map((r) => [r.id, r]));
 		expect(byId['nemotron-3-ultra']?.modelId).toBe('nvidia/Nemotron-3-Ultra-550b-a55b');
 		expect(byId['nemotron-3-super']?.modelId).toBe('nvidia/nemotron-3-super-120b-a12b');
 		expect(byId['nemotron-3-nano']?.modelId).toBe('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B');
+		// The 3.5 tier (listing re-check 2026-10-18): Super VL carries a DOT in
+		// `3.5`, Lightning an UNDERSCORE in `3_5`. A "tidied" id is a 404 at
+		// request time, not a cosmetic difference.
+		expect(byId['nemotron-3.5-super-vl']?.modelId).toBe('nvidia/Nemotron-3.5-Super-VL');
+		expect(byId['nemotron-3.5-lightning']?.modelId).toBe('nvidia/Nemotron-3_5-Lightning');
 	});
 
 	test('findModelRoute throws on an unknown id (no silent fallback)', () => {
@@ -51,19 +56,33 @@ describe('model registry (providers.ts)', () => {
 		}
 	});
 
-	test('chat routes to Super (fast/cheap); build to the frontier Ultra; helper to the cheap Nano', () => {
-		expect(findModelRouteForRole('chat').id).toBe('nemotron-3-super');
+	test('chat routes to the 3.5 mid tier; build/plan to GLM; helper to the 3.5 cheap tier', () => {
+		expect(findModelRouteForRole('chat').id).toBe('nemotron-3.5-super-vl');
 		expect(findModelRouteForRole('build').id).toBe('glm-5.3-flash');
 		expect(findModelRouteForRole('plan').id).toBe('glm-5.3-flash');
-		expect(findModelRouteForRole('helper').id).toBe('nemotron-3-nano');
+		expect(findModelRouteForRole('helper').id).toBe('nemotron-3.5-lightning');
 		// the helper really is cheaper than the chat model (per-output rate).
 		expect(findModelRouteForRole('helper').outputPriceMinorUnits)
 			.toBeLessThan(findModelRouteForRole('chat').outputPriceMinorUnits);
 	});
 
-	test('ideation routes to Ultra; chat stays on Super', () => {
+	test('AI inside apps: the cheap tier by default, the deeper tier on request', () => {
+		expect(findModelRouteForRole('app').id).toBe('nemotron-3.5-lightning');
+		expect(findModelRouteForRole('appSuper').id).toBe('nemotron-3.5-super-vl');
+		// The deeper call is the chat route at exactly 3.75x the cheap tier's
+		// output rate, so a project's monthly allowance runs out sooner by that
+		// factor and nothing else changes (S04's contract).
+		expect(findModelRouteForRole('appSuper').outputPriceMinorUnits)
+			.toBe(findModelRouteForRole('app').outputPriceMinorUnits * 3.75);
+	});
+
+	test('ideation routes to Ultra; chat stays off it (the frontier model is for ideas only)', () => {
 		expect(findModelRouteForRole('ideation').id).toBe('nemotron-3-ultra');
-		expect(findModelRouteForRole('chat').id).toBe('nemotron-3-super');
+		expect(findModelRouteForRole('chat').id).toBe('nemotron-3.5-super-vl');
+		// the point of the split: a chat turn is materially cheaper than one
+		// ideation turn, so a drifted conversation falls back on its own.
+		expect(findModelRouteForRole('chat').outputPriceMinorUnits)
+			.toBeLessThan(findModelRouteForRole('ideation').outputPriceMinorUnits);
 	});
 
 	test('coordinatorModelRole: ideation only in Home with an open window; never in a project conversation', () => {
@@ -79,8 +98,12 @@ describe('model registry (providers.ts)', () => {
 		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 0, hasImage: true })).toBe('vision');
 		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 5, hasImage: true })).toBe('vision');
 		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0, hasImage: true })).toBe('vision');
-		expect(findModelRouteForRole('vision').id).toBe('glm-5.3-flash');
+		expect(findModelRouteForRole('vision').id).toBe('nemotron-3.5-super-vl');
 		expect(routeAcceptsImage(findModelRouteForRole('vision').id)).toBe(true);
+		// GLM-5.3-Flash stays LISTED as vision-capable: it passed the same
+		// image+tool probe on 2026-10-15. The vision role is a preference;
+		// routeAcceptsImage is a fact about the model.
+		expect(routeAcceptsImage('glm-5.3-flash')).toBe(true);
 		// no image: unchanged
 		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0, hasImage: false })).toBe('chat');
 	});

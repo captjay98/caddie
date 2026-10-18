@@ -43,6 +43,8 @@ export interface ActivityRow {
 
 export type TimelinePhase = 'planning' | 'review' | 'building' | 'blocked' | 'ready';
 export type StageKey = 'setup' | 'write' | 'test' | 'check' | 'preview';
+/** Setup rows written when a working copy is started again from the saved code. */
+const WORKING_COPY_NOTE = /^(Continued from version \d+|Started again from your plan|Started from your code on GitHub)/;
 export type StageState = 'done' | 'active' | 'pending' | 'failed';
 
 export interface TimelineStage {
@@ -363,6 +365,11 @@ export function buildTimeline(input: {
 			? Math.max(0, (state === 'active' ? nowMs : ms(endedAtStage!)) - ms(startedAtStage))
 			: null;
 		let detail: string | null = null;
+		// A working copy started again from the saved code says so (working-copy.ts workingCopyNote).
+		if (key === 'setup') {
+			const note = [...own].reverse().find((r) => WORKING_COPY_NOTE.test(r.subject));
+			if (note) detail = note.subject;
+		}
 		if (key === 'write' && files.length > 0) detail = `${files.length} file${files.length === 1 ? '' : 's'}`;
 		if (key === 'test') {
 			detail = tests

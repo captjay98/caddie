@@ -10,6 +10,7 @@ import {
 	makeRecordVerification,
  makeVerifyBuild,
 	makeRunChecks,
+	makeRequestAppKey,
 	type SandboxToolDeps,
 } from './tools.ts';
 import type { ToolDefinition } from '@flue/runtime';
@@ -40,6 +41,8 @@ export interface SpecialistBuildContext {
  verifyBuild?: (operationKey:string, signal?:AbortSignal)=>Promise<unknown>;
 	/** Host-run project checks for build roles (run_checks); never publishes a preview. */
 	runChecks?: (operationKey: string, signal?: AbortSignal) => Promise<unknown>;
+	/** Ask the owner for an app key (request_app_key). Returns status only, never a value. */
+	requestAppKey?: (input: { name: string; description: string; helpUrl?: string }) => Promise<{ name: string; status: 'requested' | 'set' }>;
 	/** Sandbox adapter surface (P04) bound to this run's session. */
 	driver: SandboxToolDeps;
 	sessionId: string;
@@ -65,7 +68,7 @@ export interface SpecialistDescriptor {
 
 export const SPECIALIST_CATALOG: readonly SpecialistDescriptor[] = [
 	{ role: 'product', name: 'product', description: 'Shapes scope, PRD and acceptance intent from the brief and evidence; no execution tools.', skills: ['planning'] },
-	{ role: 'designer', name: 'designer', description: 'Designs the interface and interaction boundary; reads the sandbox, writes plan notes only.', skills: ['planning'] },
+	{ role: 'designer', name: 'designer', description: 'Designs the interface and interaction boundary; reads the sandbox, writes plan notes only.', skills: ['planning', 'design'] },
 	{ role: 'tech-lead', name: 'tech-lead', description: 'Owns the plan of record, delegates work and repairs, keeps the build honest.', skills: ['planning', 'build-verify'] },
 	{ role: 'frontend', name: 'frontend', description: 'Implements client-side behavior in the sandbox.', skills: ['build-verify'] },
 	{ role: 'backend', name: 'backend', description: 'Implements server-side behavior in the sandbox.', skills: ['build-verify'] },
@@ -86,7 +89,16 @@ export const BUILD_RECIPE_INSTRUCTION =
 	'Never create or edit bunfig.toml or anything under test/setup/ (writes there are refused), and never add jsdom, Vitest or Jest. ' +
 	'Write behavior tests as src/*.test.tsx using test/expect from bun:test and render/screen/fireEvent from @testing-library/react; test/examples/app.example.test.tsx shows the pattern but does not count. ' +
 	'Run tests ONLY with run_checks: it installs, runs `bun test src/` and builds exactly as the host verifies. Shell test commands are refused, and every failing run_checks counts toward the repair limit, so read the failure and fix its cause before running again. ' +
-	'Never delete assertions or replace component tests with copied logic. Use React 19 createRoot; a Hono server is optional for apps needing an API. ' +
+	'Never delete assertions or replace component tests with copied logic. Use React 19 createRoot. ' +
+	'Every app also has a server, ready from the start: src/server.ts is a Hono app whose routes all live under /api (it already answers GET /api/health); call it from React with fetch("/api/..."). ' +
+	'Data the app must keep or share goes through the server and env.DB (Cloudflare D1: c.env.DB.prepare(sql).bind(...).all() / first() / run(), env.DB.batch([...])); use localStorage only for per-device preferences. ' +
+	'Create tables with a NEW migrations/NNNN_name.sql file (0001_init.sql, then 0002_..., plain SQLite) and never edit an existing migration. ' +
+	'Test server routes in src/*.test.ts with createTestEnv() from test/setup/d1.ts and app.request("/api/...", init, env); test/examples/server.example.test.ts shows the pattern. ' +
+	'In src/server.ts use only Web APIs (fetch, Request, Response, URL, crypto) — never Bun.* or Node fs/child_process/net — because the published app runs on Cloudflare Workers and the build refuses them. Never edit anything under caddie/. ' +
+	'When the app needs a key for an outside service, call request_app_key (UPPER_SNAKE name, one plain sentence on what it lets the app do, the https page where the owner gets it) and call that service ONLY from src/server.ts with c.env.<NAME>; never put a key in browser code, in a file, in a test or in a log, and never ask for one in chat. Until the owner saves it, a route that needs it answers 503 with a plain sentence; tests use createTestEnv({ NAME: "test-value" }) and never call the real service. ' +
+	"The published page may only run its own scripts, fetch its own /api routes and post forms to itself (Caddie's security policy blocks the rest), so every call to an outside service — with or without a key — goes through src/server.ts; images, fonts and styles may still load from https URLs. " +
+	'When a feature needs AI (summarise, suggest, answer, sort text), call c.env.CADDIE.ai({ messages: [{ role, content }], json? }) from src/server.ts: Caddie runs and pays for it, so there is no AI key — never request_app_key for one and never ask the owner for one. It returns { ok: true, text } or { ok: false, message }; when ok is false answer 503 with reply.message as it is. Leave tier out for everyday replies; use tier: "super" when a feature needs deeper reasoning. Call it when a person asks, not on every page load (each app has a monthly allowance), and test it with createTestEnv({ CADDIE: createTestAi("…") }) from test/setup/ai.ts; caddie/ai.ts shows the shapes. ' +
+	'When people need their own account (sign in, "my" lists, data only its owner sees), use Caddie\'s sign-in, never a password login of your own: call mountSignIn(app) once in src/server.ts and requireUser(c) in each route that needs someone signed in (store user.id on their rows), and in React use <SignIn /> and useUser() from caddie/sign-in.tsx. Caddie emails the 6-digit codes — no email service or key — and in the preview they show up in the project card\'s test inbox. Test those routes with signInForTest(app, env) from test/setup/auth.ts. ' +
 	'During a build the coordinator hands you ONE feature with its doneWhen checks: build only that feature, keep earlier features working, and add at least one test in src/*.test.tsx for each doneWhen check (the host refuses to finish a feature that adds no new passing tests). ' +
 	'The host creates the scaffold only after approval. Read the full brief, prd, spec and feedback. Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass.';
 
@@ -95,7 +107,8 @@ export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> =
 	product:
 		'You shape the product: scope, PRD and acceptance intent. Work only from the brief and pinned evidence; cite sources. You have no execution tools — write plan notes instead of running commands.',
 	designer:
-		'You design the interface and interaction boundary. Read the current code from the sandbox for context, but express decisions as plan notes; implementation belongs to build roles.',
+		'You design the interface and interaction boundary. Read the current code from the sandbox for context, but express decisions as plan notes; implementation belongs to build roles. ' +
+		'After the PRD is approved the project enters the DESIGN step: author ONE design brief and save it with write_plan_note kind:\'design\' (same planRevision), then STOP for the design review — never build or scaffold. The brief covers: a SCREEN INVENTORY (every screen the app needs); for each key screen its LAYOUT (the regions and what sits where, described so a builder can lay it out) and the key COMPONENTS; the TOKEN/COMPONENT choices (which theme tokens, which shared components, the interaction pattern for each input — a form, a segmented picker, a list); and the EMPTY, LOADING and ERROR state for anything that loads or saves. Ground it in the design system the app uses; keep it concrete, not a restatement of the PRD. Where the PRD leaves a visual choice open, pick a sensible default and label it \'assumption:\'.',
 	'tech-lead':
 		'You own the plan of record. Delegate build and repair work with precise tasks, review results honestly, and keep the last good checkpoint visible. Never claim success without machine-checked evidence.',
 	frontend: 'You implement client-side behavior in the sandbox. Follow the plan of record; run the project checks; report exact commands and outcomes.',
@@ -121,6 +134,7 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 		record_verification: makeRecordVerification({ record: context.recordVerification }),
  verify_build: makeVerifyBuild({verify: context.verifyBuild ?? (async () => { throw new Error('Host checks are not configured.'); })}),
 		run_checks: makeRunChecks({ run: context.runChecks ?? (async () => { throw new Error('Host checks are not configured.'); }) }),
+		request_app_key: makeRequestAppKey({ request: context.requestAppKey ?? (async () => { throw new Error('App keys are not available here.'); }) }),
 	};
 	const descriptor = SPECIALIST_CATALOG.find((d) => d.role === role);
 	if (!descriptor) throw new Error(`no catalog entry for role ${role}`);
@@ -134,8 +148,15 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 			useSkill(PACKAGED_SKILLS[skillName as keyof typeof PACKAGED_SKILLS]);
 		}
 		useInstruction(SPECIALIST_INSTRUCTIONS[role]);
-		if (descriptor.skills.includes('planning'))
+		// The feature-list block belongs to the PRD, authored by product/tech-lead.
+		// The designer carries `planning` only to READ the PRD — its own output is a
+		// design brief with NO feature block, so it must not get this instruction.
+		if (descriptor.skills.includes('planning') && !descriptor.skills.includes('design'))
 			useInstruction(`A PRD must end with the feature list the user approves and the host builds one feature at a time. ${FEATURE_BLOCK_GUIDE}`);
+		if (descriptor.skills.includes('design'))
+			useInstruction(
+				'After the PRD is approved you author ONE design brief (write_plan_note kind:"design"), then STOP for review — never build. The brief carries NO caddie-features block, covers every section the design skill lists, and includes one titled `html-mock` fenced block per key screen and state (the key screen, its empty state, its error state), static and styled only with design-system tokens, so the review card can show each one.',
+			);
     if (context.currentRequest?.trim()) useInstruction(`Current user request, carried forward by the host: ${context.currentRequest}\nRespect the approved plan and your role permissions; this request does not bypass review or spending gates.`);
  useInstruction(BUILD_RECIPE_INSTRUCTION);
 		return SPECIALIST_INSTRUCTIONS[role];

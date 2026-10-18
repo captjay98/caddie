@@ -1,0 +1,3 @@
+# Root test settings for `bun run test` (tests/ only; generated apps carry their own bunfig.toml).
+[test]
+preload = ["./tests/setup/cloudflare-workers.ts"]
