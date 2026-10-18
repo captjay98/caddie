@@ -61,7 +61,7 @@ try {
 	// 2. The DOM + Testing Library preloads really work, and so does the server
 	//    test harness (Hono app.request + the D1 test database).
 	const examples = run(dir, ["test", "test/examples"]);
-	if (examples.code !== 0 || !/\b4 pass\b/.test(examples.out)) fail("example tests did not pass through the preloads", examples.out);
+	if (examples.code !== 0 || !/\b5 pass\b/.test(examples.out)) fail("example tests did not pass through the preloads", examples.out);
 
 	// 3. The bare scaffold cannot satisfy the host's behavior-test gate.
 	const gate = run(dir, ["test", "src/"]);

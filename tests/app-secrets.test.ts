@@ -151,6 +151,16 @@ describe('app keys service', () => {
 		expect(await listAppSecrets(db, scope)).toEqual([]);
 	});
 
+	test("AI keys are never asked for: apps use Caddie's AI", async () => {
+		for (const name of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_KEY', 'GOOGLE_AI_API_KEY', 'NEBIUS_API_KEY', 'OPENROUTER_TOKEN', 'AI_API_KEY', 'HUGGINGFACE_TOKEN']) {
+			expect(await errorOf(() => requestAppSecret(db, scope, { name, description: 'Writes replies.' }))).toEqual({ status: 400, code: 'ai_key_not_needed' });
+		}
+		expect(await listAppSecrets(db, scope)).toEqual([]);
+		for (const name of ['WEATHER_API_KEY', 'MAILCHIMP_KEY', 'OPENWEATHER_KEY', 'STRIPE_SECRET']) {
+			expect((await requestAppSecret(db, scope, { name, description: 'An outside service.' })).name).toBe(name);
+		}
+	});
+
 	test('removing a requested key keeps the request; removing anything else deletes it', async () => {
 		await requestAppSecret(db, scope, { name: 'WEATHER_API_KEY', description: 'Forecast.' });
 		await setAppSecret(db, keyring, scope, { name: 'WEATHER_API_KEY', value: WEATHER });

@@ -49,6 +49,8 @@ const DESCRIPTION_MAX = 300;
 const HELP_URL_MAX = 500;
 /** Names the app's runtime already uses for Caddie's own bindings. */
 const RESERVED = new Set(['DB', 'ASSETS', 'CADDIE']);
+/** Keys for AI providers: never requested, because apps use Caddie's AI (env.CADDIE.ai, app-ai.ts). */
+const AI_PROVIDER_KEY = /^(OPENAI|AZURE_OPENAI|ANTHROPIC|CLAUDE|NEBIUS|GEMINI|GOOGLE_(AI|GEMINI|GENAI)|VERTEX|MISTRAL|COHERE|GROQ|TOGETHER|REPLICATE|HUGGING_?FACE|HF|OPENROUTER|DEEPSEEK|XAI|GROK|PERPLEXITY|FIREWORKS|AI|LLM)(_[A-Z0-9]+)*_(KEY|TOKEN|SECRET)$/;
 
 function invalid(message: string): never {
 	throw new ScopeError(400, 'invalid_input', message);
@@ -139,6 +141,9 @@ export async function requestAppSecret(
 ): Promise<AppSecretSummary> {
 	const verified = await assertProjectScope(db, scope);
 	const name = checkAppSecretName(input.name);
+	if (AI_PROVIDER_KEY.test(name)) {
+		throw new ScopeError(400, 'ai_key_not_needed', "Apps use Caddie's AI through env.CADDIE.ai() in src/server.ts, so no AI key is needed. Use that instead of asking the owner for a key.");
+	}
 	const description = checkDescription(input.description);
 	const helpUrl = checkHelpUrl(input.helpUrl);
 	const existing = await readRow(db, verified.projectId, name);
