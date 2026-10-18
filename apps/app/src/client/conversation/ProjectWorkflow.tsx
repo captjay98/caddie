@@ -16,6 +16,7 @@ import { DesignMockPreview } from "../artifacts/DesignMockPreview.tsx";
 import { BuildProgress } from "../project/BuildProgress.tsx";
 import { PlanFeatureList, SavedFeatures } from "../project/FeatureChecklist.tsx";
 import { AppKeys } from "../project/AppKeys.tsx";
+import { PublishApp } from "../project/PublishApp.tsx";
 
 interface Snapshot {
   workflow: BuildWorkflow | null;
@@ -468,6 +469,7 @@ export function ProjectWorkflow({
               : {})}
           />
           <AppKeys actorId={chrome.actorId} projectId={projectId} hasServer={Boolean(state.data?.previewHasServer)} />
+          <PublishApp actorId={chrome.actorId} projectId={projectId} />
           <SaveToGithub
             actorId={chrome.actorId}
             projectId={projectId}

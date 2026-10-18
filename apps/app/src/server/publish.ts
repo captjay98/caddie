@@ -555,6 +555,8 @@ export interface PublishRunView {
 export interface PublishStatus {
 	available: boolean;
 	reason: string | null;
+	/** Caddie's apps domain, so the card can show the full address before the first publish. */
+	appsDomain: string | null;
 	publication: {
 		slug: string;
 		url: string;
@@ -642,6 +644,7 @@ export async function getPublishStatus(
 	return {
 		available: config.available,
 		reason: config.available ? null : (config.reason ?? "Publishing isn't set up on this Caddie server yet."),
+		appsDomain: config.appsDomain,
 		publication:
 			publication && publication.publishedAt
 				? {

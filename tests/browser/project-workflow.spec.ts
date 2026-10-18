@@ -21,7 +21,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -78,6 +78,50 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		}
 		return json(route, 405, { error: 'method_not_allowed' });
 	};
+	// Publishing: the server's status shape; publish only after the exact intent was approved.
+	const intentFor = (n: number) => ({ projectId: PROJECT.id, action: 'deploy-production', resourceId: `app:${PROJECT.id}`, revisionHash: `sha-manifest#${n}`, policyVersion: 'publish/2026-10-18' });
+	const publish = {
+		calls: [] as string[],
+		approvals: [] as unknown[],
+		deployments: 1,
+		status: {
+			available: true, reason: null as string | null, appsDomain: 'caddieapps.test', publication: null as Record<string, unknown> | null,
+			current: { outputId: 'output-workflow', publishable: true, upToDate: false, intent: intentFor(1), destructive: [] },
+			suggestedSlug: 'todoer', missingKeys: [] as string[], runs: [] as unknown[], versions: [] as unknown[],
+		},
+	};
+	const publishRoute = (route: Route, method: string, path: string): Promise<void> | null => {
+		if (!options.publish) return null;
+		const request = route.request();
+		if (path === '/api/approvals' && method === 'POST') {
+			publish.calls.push('approval');
+			publish.approvals.push(request.postDataJSON());
+			return json(route, 200, { approval: { id: `apr-${publish.approvals.length}`, status: 'approved' } });
+		}
+		if (!path.endsWith('/publish') && !path.includes('/publish/')) return null;
+		if (method === 'GET') return json(route, 200, publish.status);
+		const approved = (intent: unknown) => publish.approvals.some((a) => JSON.stringify((a as { intent: unknown }).intent) === JSON.stringify(intent));
+		if (path.endsWith('/publish')) {
+			publish.calls.push('publish');
+			if (!approved(publish.status.current.intent)) return json(route, 403, { error: 'STALE_APPROVAL', message: 'no approved record covers this exact intent' });
+			const body = request.postDataJSON() as { outputId: string; slug?: string };
+			const slug = (publish.status.publication?.slug as string | undefined) ?? body.slug ?? 'todoer';
+			publish.deployments += 1;
+			publish.status.publication = { slug, url: `https://${slug}.caddieapps.test/`, status: 'live', outputId: body.outputId, publishedAt: NOW, hasServer: false };
+			publish.status.current = { ...publish.status.current, upToDate: true, intent: intentFor(publish.deployments) };
+			publish.status.runs = [{ id: 'pub-1', kind: 'publish', status: 'succeeded', error: null, steps: [], startedAt: NOW }];
+			publish.status.versions = [{ outputId: body.outputId, publishedAt: NOW, live: true, intent: intentFor(publish.deployments) }];
+			return json(route, 200, publish.status);
+		}
+		if (path.endsWith('/publish/unpublish')) {
+			publish.calls.push('unpublish');
+			publish.status.publication = { ...publish.status.publication!, status: 'paused' };
+			publish.status.current = { ...publish.status.current, upToDate: false };
+			publish.status.versions = (publish.status.versions as Record<string, unknown>[]).map((v) => ({ ...v, live: false }));
+			return json(route, 200, publish.status);
+		}
+		return json(route, 405, { error: 'method_not_allowed' });
+	};
 	// "Save the code to GitHub": a linked repo, the server-side save, and the
 	// merge that only runs once an approval for the exact head commit exists.
 	const repo = { projectId: PROJECT.id, installationId: '6100001', repoFullName: 'octo/todoer', visibility: 'private', origin: 'connected', htmlUrl: 'https://github.com/octo/todoer' };
@@ -127,6 +171,8 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		if (githubReply) return githubReply;
 		const keysReply = keysRoute(route, request.method(), path);
 		if (keysReply) return keysReply;
+		const publishReply = publishRoute(route, request.method(), path);
+		if (publishReply) return publishReply;
 		if (path === '/api/auth/status') return json(route, 200, { authenticated: true });
 		if (path === '/api/onboarding') return json(route, 200, { completedAt: NOW });
 		if (path === '/api/auth/get-session') return json(route, 200, { session: { userId: 'actor-workflow' }, user: { id: 'actor-workflow', name: 'Ada', email: 'ada@example.test' } });
@@ -216,7 +262,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		return route.fulfill({ contentType: 'application/json', headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' }, body: JSON.stringify({ v: 1, conversationId, offset: OFFSET, messages: options.repeatHandoff ? [...messages, ...messages.map(m => ({...m, id: m.id + '-continued'}))] : messages, settlements: [] }) });
 	});
 	return {
-		workflow, decisions, admissions, acks, stops, rollbacks, github, keys,
+		workflow, decisions, admissions, acks, stops, rollbacks, github, keys, publish,
 		get previewReads() { return previewReads; },
 		revise() { currentPlan = plan(currentPlan.revision + 1); workflow.planId = currentPlan.id; workflow.phase = 'review'; workflow.pendingKey = null; workflow.pendingBody = null; },
 		ready() { workflow.phase = 'ready'; workflow.previewId = 'output-workflow'; workflow.pendingKey = null; workflow.pendingBody = null; },
@@ -553,6 +599,72 @@ test('an app with a server lists the keys it needs; a key is pasted once and nev
 	await panel.getByTestId('app-key-remove-confirm-MAPS_KEY').click();
 	await expect(panel.getByTestId('app-key-MAPS_KEY')).toHaveCount(0);
 	expect(state.keys.writes.map((w) => `${w.method} ${w.name}`)).toEqual(['PUT WEATHER_API_KEY', 'PUT MAPS_KEY', 'DELETE WEATHER_API_KEY', 'DELETE MAPS_KEY']);
+});
+
+test('Publish puts the checked app on the web in one click, then unpublishes it on request', async ({ page, context }) => {
+	const state = await fixture(context, { phase: 'ready', publish: true });
+	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
+	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	const panel = card.getByTestId('publish-app');
+	const shot = async (name: string) => {
+		const dir = process.env.CADDIE_SHOTS;
+		if (!dir) return;
+		await panel.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		await panel.screenshot({ path: `${dir}/publish-${mobile ? 'mobile-' : ''}${name}.png` });
+	};
+
+	// Before: the address it will get, editable, and one button.
+	await expect(panel).toHaveAttribute('data-state', 'unpublished');
+	await expect(panel.getByTestId('publish-address')).toContainText('todoer.caddieapps.test');
+	await shot('1-ready');
+	await panel.getByTestId('publish-slug-change').click();
+	await panel.getByTestId('publish-slug-input').fill('Todo Board');
+	await expect(panel.getByTestId('publish-slug-input')).toHaveValue('todo-board');
+	await panel.getByRole('button', { name: 'Use this address' }).click();
+	await expect(panel.getByTestId('publish-address')).toContainText('todo-board.caddieapps.test');
+
+	// One click = the recorded approval for exactly this version, then the publish.
+	await panel.getByTestId('publish-go').click();
+	await expect(panel).toHaveAttribute('data-state', 'live');
+	const live = panel.getByTestId('publish-live');
+	await expect(live.getByRole('link', { name: 'todo-board.caddieapps.test' })).toHaveAttribute('href', 'https://todo-board.caddieapps.test/');
+	expect(state.publish.calls).toEqual(['approval', 'publish']);
+	expect(state.publish.approvals).toEqual([
+		{ intent: { projectId: 'proj-workflow', action: 'deploy-production', resourceId: 'app:proj-workflow', revisionHash: 'sha-manifest#1', policyVersion: 'publish/2026-10-18' }, decision: 'approved' },
+	]);
+	await expect(panel.getByTestId('publish-go')).toHaveCount(0); // nothing newer to publish
+	await shot('2-live');
+
+	// Unpublish asks first and keeps the data.
+	await panel.getByTestId('publish-unpublish').click();
+	const confirm = panel.getByRole('group', { name: 'Confirm unpublishing' });
+	await expect(confirm).toContainText('Its data is kept');
+	await shot('3-confirm-unpublish');
+	await confirm.getByRole('button', { name: 'Keep it live' }).click();
+	expect(state.publish.calls).toEqual(['approval', 'publish']);
+	await panel.getByTestId('publish-unpublish').click();
+	await panel.getByTestId('publish-unpublish-confirm').click();
+	await expect(panel).toHaveAttribute('data-state', 'paused');
+	await expect(panel.getByTestId('publish-paused')).toContainText('publish again to bring it back at todo-board.caddieapps.test');
+	await expect(panel.getByTestId('publish-go')).toHaveText('Publish again');
+	expect(state.publish.calls).toEqual(['approval', 'publish', 'unpublish']);
+});
+
+test('Publish waits for the keys the app needs, and says plainly when publishing is not set up', async ({ page, context }) => {
+	const state = await fixture(context, { phase: 'ready', publish: true });
+	state.publish.status.missingKeys = ['WEATHER_API_KEY'];
+	await page.goto(`${BASE}/app/`);
+	const panel = page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-app');
+	await expect(panel.getByTestId('publish-needs-keys')).toHaveText('Add the keys this app needs first: WEATHER_API_KEY.');
+	await expect(panel.getByTestId('publish-go')).toBeDisabled();
+
+	state.publish.status = { ...state.publish.status, available: false, reason: "Publishing isn't set up on this Caddie server yet." };
+	await page.reload();
+	await expect(page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-unavailable')).toHaveText("Publishing isn't set up on this Caddie server yet.");
+	await expect(page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-go')).toHaveCount(0);
 });
 
 test('a client-only app shows no Keys section', async ({ page, context }) => {

@@ -6522,6 +6522,31 @@ body.conv-resizing * {
 	.app-keys-row { grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: 16px; }
 	.app-keys-row > .app-keys-form, .app-keys-row > .app-keys-confirm, .app-keys-row > .app-keys-error { grid-column: 1 / -1; }
 }
+
+/* Publish (Publish stage 4): same rhythm as Keys; one list of facts and actions, no nested boxes. */
+.publish-app { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.publish-head { display: flex; align-items: center; gap: 8px; }
+.publish-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.publish-head > svg { color: var(--color-muted); flex: none; }
+.publish-app .state-detail { margin: 0; }
+.publish-live a { font-weight: 600; overflow-wrap: anywhere; }
+.publish-meta { font-size: var(--r-meta); color: var(--color-muted); }
+.publish-address { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 13px; color: var(--color-bright); overflow-wrap: anywhere; }
+.publish-slug-form { display: grid; gap: 6px; max-width: 460px; }
+.publish-slug-field { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.publish-slug-field .input { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); }
+.publish-slug-domain { font-family: var(--font-mono); font-size: 13px; color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+.publish-label, .publish-hint { font-size: var(--r-meta); color: var(--color-muted); }
+.publish-needs { color: var(--color-warn); }
+.publish-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: var(--r-meta); color: var(--color-bright); }
+.publish-confirm > span { flex: 1 1 100%; }
+.publish-error { margin: 0; color: var(--color-danger); font-size: var(--r-meta); }
+.publish-versions summary { cursor: pointer; font-size: var(--r-meta); color: var(--color-muted); }
+.publish-versions ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; }
+.publish-versions li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid var(--color-line-soft); font-size: var(--r-meta); color: var(--color-bright); }
+.publish-app button.r-link { background: none; border: 0; padding: 2px 0; font-family: inherit; cursor: pointer; }
+.publish-app button.r-link:disabled { opacity: 0.5; cursor: default; }
+.publish-app button.r-link:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; border-radius: 4px; }
 .workflow-repo-nudge { color: var(--color-muted); }
 
 /* Code (§4): the connected-repo state + create/connect forms. */

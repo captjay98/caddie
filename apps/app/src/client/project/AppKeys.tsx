@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent, ReactElement } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "../api.ts";
 import { Icon } from "../icons.tsx";
 
@@ -58,6 +58,7 @@ export function AppKeys(props: { actorId: string; projectId: string; hasServer: 
     queryKey: ["app-keys", props.actorId, props.projectId],
     queryFn: () => fetchJson<AppKeysResponse>(keysPath(props.projectId)),
   });
+  const queryClient = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -76,6 +77,8 @@ export function AppKeys(props: { actorId: string; projectId: string; hasServer: 
     try {
       await run();
       await keys.refetch();
+      // Publishing reads which keys are still missing.
+      void queryClient.invalidateQueries({ queryKey: ["publish", props.actorId, props.projectId] });
       return true;
     } catch (cause) {
       setError({ name, message: errorText(cause) });
