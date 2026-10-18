@@ -1,15 +1,16 @@
 import type { ApprovalIntent, AppRoute, Scope } from '@caddie/contracts';
 import { DEFAULT_APP_LIMITS } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
-import { AppHostError, type AppHost, type AppHostBinding, type AppHostFile } from './app-host.ts';
+import { AppHostError, type AppHost, type AppHostBinding, type AppHostFile, type ScanResult } from './app-host.ts';
 import { checkApprovalForEffect } from './approvals.ts';
 import { resolveAppSecrets } from './app-secrets.ts';
 import { readOutputManifest, readPublishBundle, readWorkflow, type PublishBundle } from './build-workflow.ts';
 import { createD1ContentStore } from './artifacts.ts';
 import { splitSqlScript } from './preview-runtime.ts';
 import { getProject } from './projects.ts';
-import { ScopeError, assertProjectOwner, assertProjectScope } from './scope.ts';
+import { ScopeError, assertProjectOwner, assertProjectScope, projectScopeForUser } from './scope.ts';
 import type { Keyring } from './secret-box.ts';
+import { fileAbuseReport, type OperatorNotifier } from './abuse-reports.ts';
 
 /**
  * Publish an app on Caddie's own Cloudflare account (Publish programme stage
@@ -35,8 +36,13 @@ import type { Keyring } from './secret-box.ts';
 
 export const PUBLISH_POLICY_VERSION = 'publish/2026-10-18';
 const COMPATIBILITY_DATE = '2026-06-01';
-const RUN_STALE_MS = 10 * 60_000;
+/** A run older than this with nothing waiting on it was interrupted. Longer than the scan timeout. */
+const RUN_STALE_MS = 20 * 60_000;
 const PROBE_BACKOFF_MS = [1000, 2000, 4000, 8000, 8000];
+/** Polls of the URL Scanner inside the publish request before handing over to the 5-minute sweep. */
+const SCAN_WAIT_MS = [2000, 3000, 5000, 8000, 10000, 12000];
+/** A scan still pending after this is treated as failed: the new version does not go live. */
+export const SCAN_TIMEOUT_MS = 15 * 60_000;
 
 export interface PublishDeps {
 	host: AppHost;
@@ -46,6 +52,8 @@ export interface PublishDeps {
 	keyring: Keyring | null;
 	/** GET a live URL; the HTTP status, or 0 when nothing answered. */
 	probe: (url: string) => Promise<number>;
+	/** The operator's abuse inbox (flagged apps are reported there). */
+	notifyOperator?: OperatorNotifier;
 	sleep?: (ms: number) => Promise<void>;
 	now?: () => string;
 }
@@ -103,8 +111,25 @@ function randomSuffix(): string {
 	return [...crypto.getRandomValues(new Uint8Array(3))].map((b) => b.toString(36).padStart(2, '0')).join('').slice(0, 5);
 }
 
-export function scriptNameFor(projectId: string): string {
-	return `app-${projectId.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`.slice(0, 63).replace(/-+$/g, '');
+/**
+ * Each deployment is its own user Worker, so a new version can be checked on
+ * a private address while visitors keep getting the current one; the public
+ * route switches scripts only after the check passes.
+ */
+export function scriptNameFor(projectId: string, deployment: number): string {
+	const base = `app-${projectId.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`.slice(0, 54).replace(/-+$/g, '');
+	return `${base}-${deployment}`;
+}
+
+/** The app's live D1 database name: one per project, created once. */
+export function databaseNameFor(projectId: string): string {
+	return `caddie-app-${projectId.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`.slice(0, 60).replace(/-+$/g, '');
+}
+
+/** The private address a new version is checked at. `--` never appears in an app address. */
+export function checkHostnameFor(appsDomain: string): string {
+	const token = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, '0')).join('');
+	return hostnameFor(`chk--${token}`, appsDomain);
 }
 
 export function hostnameFor(slug: string, appsDomain: string): string {
@@ -172,6 +197,11 @@ interface PublicationRow {
 	hasServer: boolean;
 	applied: Record<string, string>;
 	publishedAt: string | null;
+	candidateScript: string | null;
+	candidateOutputId: string | null;
+	candidateManifestSha256: string | null;
+	blockedReason: string | null;
+	blockedBy: string | null;
 }
 
 async function all(db: D1Database, sql: string, ...params: unknown[]): Promise<Row[]> {
@@ -187,17 +217,23 @@ async function readPublication(db: D1Database, projectId: string): Promise<Publi
 	} catch {
 		applied = {};
 	}
+	const text = (name: string) => (row[name] as string | null | undefined) ?? null;
 	return {
 		projectId: String(row['projectId']),
 		slug: String(row['slug']),
 		script: String(row['script']),
-		databaseId: (row['databaseId'] as string | null) ?? null,
+		databaseId: text('databaseId'),
 		status: row['status'] as PublicationRow['status'],
-		outputId: (row['outputId'] as string | null) ?? null,
-		manifestSha256: (row['manifestSha256'] as string | null) ?? null,
+		outputId: text('outputId'),
+		manifestSha256: text('manifestSha256'),
 		hasServer: Number(row['hasServer'] ?? 0) === 1,
 		applied,
-		publishedAt: (row['publishedAt'] as string | null) ?? null,
+		publishedAt: text('publishedAt'),
+		candidateScript: text('candidateScript'),
+		candidateOutputId: text('candidateOutputId'),
+		candidateManifestSha256: text('candidateManifestSha256'),
+		blockedReason: text('blockedReason'),
+		blockedBy: text('blockedBy'),
 	};
 }
 
@@ -205,7 +241,7 @@ async function readPublication(db: D1Database, projectId: string): Promise<Publi
 
 export interface PublishStep {
 	step: string;
-	outcome: 'ok' | 'failed' | 'skipped';
+	outcome: 'ok' | 'failed' | 'skipped' | 'waiting';
 	detail?: string;
 	at: string;
 }
@@ -227,6 +263,10 @@ class Run {
 			.prepare('update "app_publish_runs" set "status" = ?, "error" = ?, "finishedAt" = ? where "id" = ? and "status" = \'running\'')
 			.bind(status, error ?? null, this.now(), this.id)
 			.run();
+	}
+
+	async isRunning(): Promise<boolean> {
+		return (await all(this.db, 'select 1 from "app_publish_runs" where "id" = ? and "status" = \'running\'', this.id)).length > 0;
 	}
 }
 
@@ -380,7 +420,8 @@ async function deployOutput(
 	const pending = input.kind === 'publish' && bundle.server !== null ? bundle.migrations.filter((m) => applied[m.name] === undefined) : [];
 
 	// THE gate, immediately before any effect: the owner's confirm for this exact version and deployment.
-	const intent = publishIntent(scope.projectId, bundle.manifestSha256, await nextDeployment(db, scope.projectId));
+	const deployment = await nextDeployment(db, scope.projectId);
+	const intent = publishIntent(scope.projectId, bundle.manifestSha256, deployment);
 	const approval = await checkApprovalForEffect(db, { actorId: scope.actorId, ...intent });
 	for (const migration of pending.filter((m) => isDestructiveSql(m.sql))) {
 		try {
@@ -397,22 +438,22 @@ async function deployOutput(
 	let current = 'prepare';
 	try {
 		await run.step('approval', 'ok', `confirmed by the owner (${approval.id})`);
+		const candidateScript = scriptNameFor(scope.projectId, deployment);
 		if (!publication) {
 			const at = now();
 			await db
 				.prepare(
 					'insert into "app_publications" ("projectId","slug","script","databaseId","status","outputId","manifestSha256","hasServer","appliedMigrations","publishedBy","publishedAt","createdAt","updatedAt") values (?,?,?,null,\'paused\',null,null,?,\'{}\',null,null,?,?)',
 				)
-				.bind(scope.projectId, slug, scriptNameFor(scope.projectId), bundle.server !== null ? 1 : 0, at, at)
+				.bind(scope.projectId, slug, candidateScript, bundle.server !== null ? 1 : 0, at, at)
 				.run();
 			publication = (await readPublication(db, scope.projectId))!;
 		}
-		const hostname = hostnameFor(slug, deps.appsDomain);
 
 		current = 'database';
 		let databaseId = publication.databaseId;
 		if (bundle.server !== null && !databaseId) {
-			databaseId = (await deps.host.createDatabase(`caddie-${publication.script}`)).id;
+			databaseId = (await deps.host.createDatabase(databaseNameFor(scope.projectId))).id;
 			await db.prepare('update "app_publications" set "databaseId" = ?, "updatedAt" = ? where "projectId" = ?').bind(databaseId, now(), scope.projectId).run();
 			await run.step('database', 'ok', 'created the app’s database');
 		} else {
@@ -439,7 +480,7 @@ async function deployOutput(
 			...Object.entries(secrets).map(([name, text]) => ({ type: 'secret_text' as const, name, text })),
 		];
 		await deps.host.deploy({
-			script: publication.script,
+			script: candidateScript,
 			assets,
 			serverModule: bundle.server,
 			bindings,
@@ -449,31 +490,36 @@ async function deployOutput(
 		});
 		const keyCount = Object.keys(secrets).length;
 		await run.step('upload', 'ok', `${assets.length} files${bundle.server !== null ? ' and the server' : ''}${keyCount ? `, ${keyCount} key${keyCount === 1 ? '' : 's'}` : ''}`);
-
-		current = 'route';
-		const route: AppRoute = {
-			v: 1,
-			script: publication.script,
-			projectId: scope.projectId,
-			slug,
-			status: 'live',
-			limits: { ...DEFAULT_APP_LIMITS },
-			hasServer: bundle.server !== null,
-			updatedAt: now(),
-		};
-		await deps.host.putRoute(hostname, route);
-		await run.step('route', 'ok', hostname);
-
-		current = 'health';
-		const health = await probeLive(deps, hostname, bundle.server !== null);
-		await run.step('health', health.ok ? 'ok' : 'failed', health.detail);
-		const at = now();
 		await db
-			.prepare('update "app_publications" set "status" = \'live\', "outputId" = ?, "manifestSha256" = ?, "hasServer" = ?, "publishedBy" = ?, "publishedAt" = ?, "updatedAt" = ? where "projectId" = ?')
-			.bind(input.outputId, bundle.manifestSha256, bundle.server !== null ? 1 : 0, scope.actorId, at, at, scope.projectId)
+			.prepare('update "app_publications" set "candidateScript" = ?, "candidateOutputId" = ?, "candidateManifestSha256" = ?, "updatedAt" = ? where "projectId" = ?')
+			.bind(candidateScript, input.outputId, bundle.manifestSha256, now(), scope.projectId)
 			.run();
-		if (health.ok) await run.finish('succeeded');
-		else await run.finish('failed', `The app is published but didn't answer yet (${health.detail}). Open it in a minute, or roll back.`);
+
+		current = 'safety-check';
+		const candidate: Candidate = { script: candidateScript, outputId: input.outputId, manifestSha256: bundle.manifestSha256, hasServer: bundle.server !== null };
+		if (await passedCheckBefore(db, scope.projectId, bundle.manifestSha256)) {
+			await run.step('safety-check', 'skipped', 'this exact version passed the safety check before');
+			current = 'route';
+			await goLive(db, deps, { projectId: scope.projectId, actorId: scope.actorId, candidate, run, now });
+			return;
+		}
+		const checkHost = checkHostnameFor(deps.appsDomain);
+		await deps.host.putRoute(checkHost, routeRecord({ script: candidateScript, projectId: scope.projectId, slug, status: 'live', hasServer: candidate.hasServer, now }));
+		const { scanId } = await deps.host.scanUrl(`https://${checkHost}/`);
+		const checkId = `chk_${crypto.randomUUID()}`;
+		await db
+			.prepare(
+				'insert into "app_safety_checks" ("id","projectId","kind","manifestSha256","script","url","scanId","runId","status","categories","createdAt") values (?,?,\'url-scan\',?,?,?,?,?,\'pending\',\'[]\',?)',
+			)
+			.bind(checkId, scope.projectId, bundle.manifestSha256, candidateScript, `https://${checkHost}/`, scanId, run.id, now())
+			.run();
+		await run.step('safety-check', 'waiting', 'checking the new version before visitors see it');
+		// Wait a little inside this request; the 5-minute sweep finishes anything slower.
+		const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+		for (const ms of SCAN_WAIT_MS) {
+			await sleep(ms);
+			if (await settleCheck(db, deps, checkId)) return;
+		}
 	} catch (error) {
 		const message = plainHostFailure(error);
 		if (!(error instanceof ScopeError)) console.error(`publish: ${current} failed:`, error instanceof AppHostError ? `${error.code} ${error.message}` : error);
@@ -483,9 +529,282 @@ async function deployOutput(
 	}
 }
 
+// --- the safety gate -----------------------------------------------------------------------
+
+interface Candidate {
+	script: string;
+	outputId: string;
+	manifestSha256: string;
+	hasServer: boolean;
+}
+
+function routeRecord(input: { script: string; projectId: string; slug: string; status: AppRoute['status']; hasServer: boolean; now: () => string }): AppRoute {
+	return {
+		v: 1,
+		script: input.script,
+		projectId: input.projectId,
+		slug: input.slug,
+		status: input.status,
+		limits: { ...DEFAULT_APP_LIMITS },
+		hasServer: input.hasServer,
+		updatedAt: input.now(),
+	};
+}
+
+async function passedCheckBefore(db: D1Database, projectId: string, manifestSha256: string): Promise<boolean> {
+	const rows = await all(
+		db,
+		'select 1 from "app_safety_checks" where "projectId" = ? and "kind" = \'url-scan\' and "manifestSha256" = ? and "status" = \'clean\' limit 1',
+		projectId,
+		manifestSha256,
+	);
+	return rows.length > 0;
+}
+
+/** Switch the public address to the checked version, retire the previous one, confirm it answers. */
+async function goLive(
+	db: D1Database,
+	deps: PublishDeps,
+	input: { projectId: string; actorId: string; candidate: Candidate; run: Run; now: () => string },
+): Promise<void> {
+	const publication = (await readPublication(db, input.projectId))!;
+	const hostname = hostnameFor(publication.slug, deps.appsDomain);
+	const previous = publication.publishedAt ? publication.script : null;
+	await deps.host.putRoute(hostname, routeRecord({ script: input.candidate.script, projectId: input.projectId, slug: publication.slug, status: 'live', hasServer: input.candidate.hasServer, now: input.now }));
+	await input.run.step('route', 'ok', hostname);
+	const at = input.now();
+	await db
+		.prepare(
+			`update "app_publications" set "status" = 'live', "script" = ?, "outputId" = ?, "manifestSha256" = ?, "hasServer" = ?, "publishedBy" = ?, "publishedAt" = ?,
+			 "candidateScript" = null, "candidateOutputId" = null, "candidateManifestSha256" = null, "updatedAt" = ? where "projectId" = ?`,
+		)
+		.bind(input.candidate.script, input.candidate.outputId, input.candidate.manifestSha256, input.candidate.hasServer ? 1 : 0, input.actorId, at, at, input.projectId)
+		.run();
+	if (previous && previous !== input.candidate.script) {
+		try {
+			await deps.host.removeScript(previous);
+			await input.run.step('cleanup', 'ok', 'removed the previous version');
+		} catch (error) {
+			console.error('publish: removing the previous script failed:', error instanceof AppHostError ? error.code : error);
+			await input.run.step('cleanup', 'failed', 'the previous version could not be removed yet');
+		}
+	}
+	const health = await probeLive(deps, hostname, input.candidate.hasServer);
+	await input.run.step('health', health.ok ? 'ok' : 'failed', health.detail);
+	if (health.ok) await input.run.finish('succeeded');
+	else await input.run.finish('failed', `The app is published but didn't answer yet (${health.detail}). Open it in a minute, or roll back.`);
+}
+
+async function dropCandidate(db: D1Database, deps: PublishDeps, check: Row, now: () => string): Promise<void> {
+	const url = String(check['url'] ?? '');
+	try {
+		await deps.host.deleteRoute(new URL(url).hostname);
+	} catch (error) {
+		console.error('publish: removing the check address failed:', error instanceof AppHostError ? error.code : error);
+	}
+	const publication = await readPublication(db, String(check['projectId']));
+	const script = check['script'] ? String(check['script']) : null;
+	// Before the first go-live the publication row carries the candidate's name as a placeholder; only a
+	// script that is actually being served (published and current) is kept.
+	const servedScript = publication?.publishedAt ? publication.script : null;
+	if (script && script !== servedScript) {
+		await deps.host.removeScript(script).catch((error: unknown) => console.error('publish: removing an unchecked version failed:', error instanceof AppHostError ? error.code : error));
+	}
+	await db
+		.prepare('update "app_publications" set "candidateScript" = null, "candidateOutputId" = null, "candidateManifestSha256" = null, "updatedAt" = ? where "projectId" = ? and "candidateScript" = ?')
+		.bind(now(), String(check['projectId']), script)
+		.run();
+}
+
+function abuseCategoryFor(categories: string[]): 'phishing' | 'malware' | 'scam' | 'other' {
+	const text = categories.join(' ').toLowerCase();
+	if (text.includes('phish')) return 'phishing';
+	if (text.includes('malware') || text.includes('virus') || text.includes('trojan')) return 'malware';
+	if (text.includes('scam') || text.includes('fraud')) return 'scam';
+	return 'other';
+}
+
+/**
+ * Move one pending URL Scanner check forward. Returns true once the check is
+ * settled (clean -> the version goes live; flagged -> the app is taken down
+ * and reported; failed or timed out -> the new version is dropped and the
+ * current one stays).
+ */
+async function settleCheck(db: D1Database, deps: PublishDeps, checkId: string): Promise<boolean> {
+	const now = deps.now ?? (() => new Date().toISOString());
+	const check = (await all(db, 'select * from "app_safety_checks" where "id" = ?', checkId))[0];
+	if (!check || check['status'] !== 'pending') return true;
+	const run = new Run(db, String(check['runId']), now);
+	const finishCheck = (status: 'clean' | 'flagged' | 'error', extra: { categories?: string[]; reportUrl?: string | null; detail?: string } = {}) =>
+		db
+			.prepare('update "app_safety_checks" set "status" = ?, "categories" = ?, "reportUrl" = ?, "detail" = ?, "finishedAt" = ? where "id" = ? and "status" = \'pending\'')
+			.bind(status, JSON.stringify(extra.categories ?? []), extra.reportUrl ?? null, extra.detail ?? null, now(), checkId)
+			.run();
+	const failCheck = async (detail: string, message: string) => {
+		await finishCheck('error', { detail });
+		await dropCandidate(db, deps, check, now);
+		await run.step('safety-check', 'failed', detail);
+		await run.finish('failed', message);
+		return true;
+	};
+
+	if (!(await run.isRunning())) return failCheck('the publish attempt ended before the check finished', 'The safety check did not finish in time, so the new version is not on the web. Try publishing again.');
+	const age = Date.parse(now()) - Date.parse(String(check['createdAt']));
+	let result: ScanResult;
+	try {
+		result = await deps.host.scanResult(String(check['scanId']));
+	} catch (error) {
+		if (!(error instanceof AppHostError)) throw error;
+		if (age < SCAN_TIMEOUT_MS) return false;
+		return failCheck(`the scanner kept failing (${error.code})`, "The safety check couldn't finish, so the new version is not on the web. Try publishing again.");
+	}
+	if (result.state === 'pending') {
+		if (age < SCAN_TIMEOUT_MS) return false;
+		return failCheck('the scan did not finish within 15 minutes', 'The safety check did not finish in time, so the new version is not on the web. Try publishing again.');
+	}
+
+	const publication = await readPublication(db, String(check['projectId']));
+	if (!result.malicious) {
+		await finishCheck('clean', { categories: result.categories, reportUrl: result.reportUrl, detail: 'no problems found' });
+		await run.step('safety-check', 'ok', 'no problems found');
+		try {
+			await deps.host.deleteRoute(new URL(String(check['url'])).hostname);
+		} catch (error) {
+			console.error('publish: removing the check address failed:', error instanceof AppHostError ? error.code : error);
+		}
+		if (!publication?.candidateScript || publication.candidateScript !== check['script']) {
+			return failCheck('the version waiting to go live changed', 'Something changed while the safety check ran. Try publishing again.');
+		}
+		const runRow = (await all(db, 'select "actorId" from "app_publish_runs" where "id" = ?', String(check['runId'])))[0];
+		try {
+			await goLive(db, deps, {
+				projectId: publication.projectId,
+				actorId: String(runRow?.['actorId'] ?? ''),
+				candidate: {
+					script: publication.candidateScript,
+					outputId: publication.candidateOutputId ?? '',
+					manifestSha256: publication.candidateManifestSha256 ?? '',
+					hasServer: (await candidateHasServer(db, publication.projectId, String(runRow?.['actorId'] ?? ''), publication.candidateOutputId)) ?? publication.hasServer,
+				},
+				run,
+				now,
+			});
+		} catch (error) {
+			const message = plainHostFailure(error);
+			await run.step('route', 'failed', message).catch(() => undefined);
+			await run.finish('failed', message).catch(() => undefined);
+		}
+		return true;
+	}
+
+	// Flagged: the new version never goes live, and the whole app comes down until a person reviews it.
+	const categories = result.categories.length > 0 ? result.categories : ['malicious'];
+	await finishCheck('flagged', { categories, reportUrl: result.reportUrl, detail: 'flagged by the URL Scanner' });
+	await dropCandidate(db, deps, check, now);
+	await run.step('safety-check', 'failed', `flagged: ${categories.join(', ')}`);
+	await takeDownApp(db, deps, String(check['projectId']), { by: 'url-scan', reason: `Caddie's safety check flagged a new version (${categories.join(', ')}).` });
+	if (publication) {
+		await fileAbuseReport(
+			db,
+			{
+				slug: publication.slug,
+				source: 'url-scan',
+				category: abuseCategoryFor(categories),
+				details: `The URL Scanner flagged version ${String(check['manifestSha256']).slice(0, 12)} (${categories.join(', ')}).${result.reportUrl ? ` Scan: ${result.reportUrl}` : ''}`,
+			},
+			deps.notifyOperator,
+		);
+	}
+	await run.finish('failed', "Caddie's safety check flagged this version, so the app isn't on the web. Caddie's team will review it.");
+	return true;
+}
+
+async function candidateHasServer(db: D1Database, projectId: string, actorId: string, outputId: string | null): Promise<boolean | null> {
+	if (!outputId || !actorId) return null;
+	try {
+		const scope = await projectScopeForUser(db, actorId, projectId);
+		return (await readOutputManifest(db, scope, outputId))?.hasServer ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/** Move pending safety checks forward (the 5-minute cron, and the status read of one project). */
+export async function advanceSafetyChecks(db: D1Database, deps: PublishDeps, options: { projectId?: string; limit?: number } = {}): Promise<number> {
+	const limit = Math.max(1, Math.min(options.limit ?? 20, 100));
+	const rows = options.projectId
+		? await all(db, 'select "id" from "app_safety_checks" where "status" = \'pending\' and "kind" = \'url-scan\' and "projectId" = ? order by "createdAt" limit ?', options.projectId, limit)
+		: await all(db, 'select "id" from "app_safety_checks" where "status" = \'pending\' and "kind" = \'url-scan\' order by "createdAt" limit ?', limit);
+	let settled = 0;
+	for (const row of rows) {
+		try {
+			if (await settleCheck(db, deps, String(row['id']))) settled++;
+		} catch (error) {
+			console.error('publish: advancing a safety check failed:', error instanceof Error ? error.message : error);
+		}
+	}
+	return settled;
+}
+
+// --- taking an app down (and back) --------------------------------------------------------------------
+
+/**
+ * The off switch: the app's address answers with Caddie's 451 "taken down"
+ * page, and the owner cannot publish until a person reviews it. Used by the
+ * safety checks and by the operator.
+ */
+export async function takeDownApp(db: D1Database, deps: PublishDeps, projectId: string, input: { by: string; reason: string }): Promise<boolean> {
+	const now = deps.now ?? (() => new Date().toISOString());
+	const publication = await readPublication(db, projectId);
+	if (!publication) return false;
+	if (publication.publishedAt) {
+		await deps.host.putRoute(hostnameFor(publication.slug, deps.appsDomain), routeRecord({ script: publication.script, projectId, slug: publication.slug, status: 'blocked', hasServer: publication.hasServer, now }));
+	}
+	await db
+		.prepare('update "app_publications" set "status" = \'blocked\', "blockedReason" = ?, "blockedBy" = ?, "blockedAt" = ?, "updatedAt" = ? where "projectId" = ?')
+		.bind(input.reason.slice(0, 500), input.by, now(), now(), projectId)
+		.run();
+	return true;
+}
+
+/**
+ * Lift a takedown after review. The app comes back unpublished (its owner
+ * publishes again in one click); a version the scanner flagged is cleared, so
+ * that publish does not trip on the same false positive.
+ */
+export async function restoreTakenDownApp(db: D1Database, deps: PublishDeps, projectId: string, input: { by: string }): Promise<boolean> {
+	const now = deps.now ?? (() => new Date().toISOString());
+	const publication = await readPublication(db, projectId);
+	if (!publication || publication.status !== 'blocked') return false;
+	if (publication.publishedAt) {
+		await deps.host.putRoute(hostnameFor(publication.slug, deps.appsDomain), routeRecord({ script: publication.script, projectId, slug: publication.slug, status: 'paused', hasServer: publication.hasServer, now }));
+	}
+	await db
+		.prepare('update "app_safety_checks" set "status" = \'clean\', "detail" = ? where "projectId" = ? and "kind" = \'url-scan\' and "status" = \'flagged\'')
+		.bind(`cleared after review by ${input.by}`, projectId)
+		.run();
+	await db
+		.prepare('update "app_publications" set "status" = \'paused\', "blockedReason" = null, "blockedBy" = null, "blockedAt" = null, "updatedAt" = ? where "projectId" = ?')
+		.bind(now(), projectId)
+		.run();
+	return true;
+}
+
+async function requireVerifiedEmail(db: D1Database, actorId: string): Promise<void> {
+	const rows = await all(db, 'select "emailVerified" from "user" where "id" = ?', actorId);
+	if (Number(rows[0]?.['emailVerified'] ?? 0) !== 1) {
+		throw new ScopeError(
+			403,
+			'EMAIL_NOT_VERIFIED',
+			"Your sign-in account's email address isn't confirmed, so Caddie can't publish for you yet. Confirm it with Google or GitHub, then sign in again.",
+		);
+	}
+}
+
 /** Publish the project's current checked build (first publish or update). */
 export async function publishApp(db: D1Database, deps: PublishDeps, scope: Scope, input: { outputId: unknown; slug?: unknown }): Promise<void> {
 	const verified = await assertProjectOwner(db, scope);
+	await requireVerifiedEmail(db, verified.actorId);
 	if (typeof input.outputId !== 'string' || input.outputId.length === 0) throw new ScopeError(400, 'invalid_input', 'outputId is required');
 	if ((await currentReadyOutput(db, verified)) !== input.outputId) {
 		throw new ScopeError(409, 'NOT_CURRENT_BUILD', "Only the app's latest checked version can be published. Reload and try again.");
@@ -496,6 +815,7 @@ export async function publishApp(db: D1Database, deps: PublishDeps, scope: Scope
 /** Put an earlier published version back live (code only; data stays as it is). */
 export async function rollbackApp(db: D1Database, deps: PublishDeps, scope: Scope, input: { outputId: unknown }): Promise<void> {
 	const verified = await assertProjectOwner(db, scope);
+	await requireVerifiedEmail(db, verified.actorId);
 	if (typeof input.outputId !== 'string' || input.outputId.length === 0) throw new ScopeError(400, 'invalid_input', 'outputId is required');
 	const publication = await readPublication(db, verified.projectId);
 	if (!publication?.publishedAt) throw new ScopeError(409, 'NOT_PUBLISHED', "This app hasn't been published yet.");
@@ -557,6 +877,8 @@ export interface PublishStatus {
 	reason: string | null;
 	/** Caddie's apps domain, so the card can show the full address before the first publish. */
 	appsDomain: string | null;
+	/** A new version being checked before visitors see it. */
+	pendingCheck: { startedAt: string } | null;
 	publication: {
 		slug: string;
 		url: string;
@@ -564,6 +886,7 @@ export interface PublishStatus {
 		outputId: string | null;
 		publishedAt: string;
 		hasServer: boolean;
+		blockedReason: string | null;
 	} | null;
 	/** The latest checked build, and what publishing it needs. */
 	current: {
@@ -641,19 +964,23 @@ export async function getPublishStatus(
 		intent: row['manifestSha256'] ? publishIntent(verified.projectId, String(row['manifestSha256']), deployment) : null,
 	}));
 
+	const pending = (await all(db, 'select "createdAt" from "app_safety_checks" where "projectId" = ? and "kind" = \'url-scan\' and "status" = \'pending\' order by "createdAt" desc limit 1', verified.projectId))[0];
+
 	return {
 		available: config.available,
 		reason: config.available ? null : (config.reason ?? "Publishing isn't set up on this Caddie server yet."),
 		appsDomain: config.appsDomain,
+		pendingCheck: pending ? { startedAt: String(pending['createdAt']) } : null,
 		publication:
-			publication && publication.publishedAt
+			publication && (publication.publishedAt || publication.status === 'blocked')
 				? {
 						slug: publication.slug,
 						url: config.appsDomain ? `https://${hostnameFor(publication.slug, config.appsDomain)}/` : '',
 						status: publication.status,
 						outputId: publication.outputId,
-						publishedAt: publication.publishedAt,
+						publishedAt: publication.publishedAt ?? '',
 						hasServer: publication.hasServer,
+						blockedReason: publication.status === 'blocked' ? publication.blockedReason : null,
 					}
 				: null,
 		current,

@@ -110,6 +110,11 @@ export class CloudflareStub {
 		this.failRules.push({ pattern, status, remaining: times });
 	}
 
+	/** Drop every pending failure rule (between tests that share one stub). */
+	clearFailures(): void {
+		this.failRules = [];
+	}
+
 	scriptBindings(name: string): unknown[] {
 		return this.scripts.get(name)?.bindings ?? [];
 	}

@@ -1,11 +1,9 @@
 import { Hono } from 'hono';
 import type { Scope } from '@caddie/contracts';
 import type { AuthEnv } from '../auth.ts';
-import { CloudflareAppHost, readCloudflareConfig, type CloudflareEnv } from '../adapters/cloudflare.ts';
-import { AppHostError } from '../app-host.ts';
-import { getPublishStatus, publishApp, rollbackApp, unpublishApp, type PublishDeps } from '../publish.ts';
+import { advanceSafetyChecks, getPublishStatus, publishApp, rollbackApp, unpublishApp, type PublishDeps } from '../publish.ts';
+import { publishDepsFromEnv, type PublishEnv } from '../publish-env.ts';
 import { ScopeError, requireProjectScope } from '../scope.ts';
-import { SecretBoxError, keyringFromEnv, type Keyring } from '../secret-box.ts';
 
 /**
  * Publishing (Publish programme stage 4).
@@ -23,7 +21,7 @@ import { SecretBoxError, keyringFromEnv, type Keyring } from '../secret-box.ts';
  * status says so in plain words and every write is a 503.
  */
 
-type Env = AuthEnv & Partial<CloudflareEnv> & { APPS_DOMAIN?: string; APP_SECRETS_KEYS?: string };
+type Env = AuthEnv & PublishEnv;
 
 const NO_STORE = { 'cache-control': 'no-store' } as const;
 const NOT_SET_UP = "Publishing isn't set up on this Caddie server yet.";
@@ -36,50 +34,7 @@ export interface PublishRouterOptions {
 }
 
 const sessionScope = (env: Env, request: Request, projectId: string) => requireProjectScope(env.DB, env, request.headers, projectId);
-
-const APPS_DOMAIN = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
-
-function appsDomainOf(env: Env): string | null {
-	const domain = (env.APPS_DOMAIN ?? '').trim().toLowerCase().replace(/\.+$/, '');
-	return APPS_DOMAIN.test(domain) ? domain : null;
-}
-
-async function keyringOrNull(env: Env): Promise<Keyring | null> {
-	if (!(env.APP_SECRETS_KEYS ?? '').trim()) return null;
-	try {
-		return await keyringFromEnv(env);
-	} catch (error) {
-		if (error instanceof SecretBoxError) {
-			console.error('publish: APP_SECRETS_KEYS unusable:', error.code);
-			return null;
-		}
-		throw error;
-	}
-}
-
-/** GET a live URL from Caddie's Worker; the status, or 0 when nothing answered. */
-async function probe(url: string): Promise<number> {
-	try {
-		const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(5000), headers: { 'user-agent': 'Caddie publish check' } });
-		await response.body?.cancel().catch(() => undefined);
-		return response.status;
-	} catch {
-		return 0;
-	}
-}
-
-async function envDeps(env: Env): Promise<PublishDeps | null> {
-	const appsDomain = appsDomainOf(env);
-	if (!appsDomain) return null;
-	let host: CloudflareAppHost;
-	try {
-		host = new CloudflareAppHost(readCloudflareConfig(env));
-	} catch (error) {
-		if (error instanceof AppHostError && error.code === 'NOT_CONFIGURED') return null;
-		throw error;
-	}
-	return { host, appsDomain, keyring: await keyringOrNull(env), probe };
-}
+const envDeps = (env: Env) => publishDepsFromEnv(env);
 
 function errorJson(error: unknown): { status: number; body: { error: string; message?: string } } {
 	if (error instanceof ScopeError) return { status: error.status, body: { error: error.code, message: error.message } };
@@ -122,6 +77,8 @@ export function createPublishRouter(options: PublishRouterOptions = {}): Hono<{ 
 
 	async function status(env: Env, scope: Scope) {
 		const deps = await depsFor(env);
+		// A status read is also a nudge: settle this project's pending safety check if the scan is done.
+		if (deps) await advanceSafetyChecks(env.DB, deps, { projectId: scope.projectId, limit: 1 });
 		return getPublishStatus(env.DB, { appsDomain: deps?.appsDomain ?? null, available: deps !== null, reason: deps ? null : NOT_SET_UP }, scope);
 	}
 

@@ -8,16 +8,21 @@ import { recordDecision } from '../apps/app/src/server/approvals.ts';
 import { decideDesign, decideWorkflow, readPublishBundle, startProjectFromChat, storeBuildOutput, workflowSnapshot } from '../apps/app/src/server/build-workflow.ts';
 import { createPlanDocRevision, ensureHomeProject } from '../apps/app/src/server/projects.ts';
 import {
+	advanceSafetyChecks,
 	checkSlug,
 	destructiveMigrationIntent,
 	getPublishStatus,
 	isDestructiveSql,
 	publishApp,
+	restoreTakenDownApp,
 	rollbackApp,
+	scriptNameFor,
 	suggestSlug,
+	takeDownApp,
 	unpublishApp,
 	type PublishDeps,
 } from '../apps/app/src/server/publish.ts';
+import { listAbuseReports } from '../apps/app/src/server/abuse-reports.ts';
 import { createRun } from '../apps/app/src/server/runs.ts';
 import { createPublishRouter } from '../apps/app/src/server/routes/publish.ts';
 import { ScopeError, projectScopeForUser } from '../apps/app/src/server/scope.ts';
@@ -80,6 +85,7 @@ describe('publish service', () => {
 	let scope: Scope;
 	let keyring: Keyring;
 	let probes: string[];
+	let inbox: Array<{ subject: string; text: string }>;
 	let probeStatus: (url: string) => number;
 	let deps: PublishDeps;
 
@@ -135,6 +141,7 @@ describe('publish service', () => {
 		addUser(sqlite, 'bob', 'bob@example.com');
 		keyring = await parseKeyring(`k1:${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64')}`);
 		probes = [];
+		inbox = [];
 		probeStatus = () => 200;
 		deps = {
 			host,
@@ -144,6 +151,10 @@ describe('publish service', () => {
 				probes.push(url);
 				return probeStatus(url);
 			},
+			notifyOperator: async (subject, text) => {
+				inbox.push({ subject, text });
+				return true;
+			},
 			sleep: async () => undefined,
 		};
 		const ready = await readyProject();
@@ -151,7 +162,14 @@ describe('publish service', () => {
 		(globalThis as { __ready?: typeof ready }).__ready = ready;
 	});
 
-	afterEach(() => sqlite.close());
+	afterEach(() => {
+		sqlite.close();
+		// One stub serves every test: start each from an empty account.
+		stub.clearFailures();
+		stub.maliciousMarker = 'phishy';
+		stub.kv.clear();
+		stub.scripts.clear();
+	});
 
 	const ready = () => (globalThis as { __ready?: { scope: Scope; planId: string; runId: string } }).__ready!;
 
@@ -179,11 +197,11 @@ describe('publish service', () => {
 		expect(after.current!.upToDate).toBe(true);
 		const run = after.runs[0]!;
 		expect(run).toMatchObject({ kind: 'publish', status: 'succeeded', error: null });
-		expect(run.steps.map((s) => `${s.step}:${s.outcome}`)).toEqual(['approval:ok', 'database:ok', 'migration:ok', 'upload:ok', 'route:ok', 'health:ok']);
+		expect(run.steps.map((s) => `${s.step}:${s.outcome}`)).toEqual(['approval:ok', 'database:ok', 'migration:ok', 'upload:ok', 'safety-check:waiting', 'safety-check:ok', 'route:ok', 'health:ok']);
 		expect(run.steps.find((s) => s.step === 'upload')!.detail).toBe('3 files and the server, 1 key');
 
 		// What reached Cloudflare.
-		const script = stub.scripts.get(`app-${scope.projectId.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`)!;
+		const script = stub.scripts.get(scriptNameFor(scope.projectId, 1))!;
 		expect(script.hasModule).toBe(true);
 		const bindings = script.bindings as Array<Record<string, unknown>>;
 		expect(bindings.find((b) => b['name'] === 'DB')).toMatchObject({ type: 'd1' });
@@ -192,6 +210,10 @@ describe('publish service', () => {
 		expect(database.executedSql.join('\n')).toContain('create table notes');
 		expect(routeOf('farm-log')).toMatchObject({ v: 1, script: script.name, projectId: scope.projectId, slug: 'farm-log', status: 'live', hasServer: true, limits: { cpuMs: 50, subRequests: 50 } });
 		expect(probes).toEqual([`https://farm-log.${APPS}/`, `https://farm-log.${APPS}/api/health`]);
+		// The new version was scanned on a private check address, which is gone now.
+		const scanned = [...stub.scans.values()].at(-1)!;
+		expect(scanned.url).toMatch(new RegExp(`^https://chk--[0-9a-f]{16}\\.${APPS.replace('.', '\\.')}/$`));
+		expect(stub.kv.has(`route:${new URL(scanned.url).hostname}`)).toBe(false);
 
 		// The key's value is in the upload only — never in Caddie's log or status.
 		expect(JSON.stringify(after)).not.toContain('ow-live-secret-123');
@@ -205,7 +227,7 @@ describe('publish service', () => {
 		await approve((await status()).current!.intent);
 		await publishApp(db, deps, scope, { outputId });
 		const run = (await status()).runs[0]!;
-		expect(run.steps.map((s) => `${s.step}:${s.outcome}`)).toEqual(['approval:ok', 'database:skipped', 'migration:skipped', 'upload:ok', 'route:ok', 'health:ok']);
+		expect(run.steps.map((s) => `${s.step}:${s.outcome}`)).toEqual(['approval:ok', 'database:skipped', 'migration:skipped', 'upload:ok', 'safety-check:waiting', 'safety-check:ok', 'route:ok', 'health:ok']);
 		expect(probes).toEqual([`https://farm-log.${APPS}/`]);
 		expect(routeOf('farm-log').hasServer).toBe(false);
 	});
@@ -395,6 +417,103 @@ describe('publish service', () => {
 		);
 		expect(halfSet.status).toBe(503);
 		expect(await halfSet.json()).toEqual({ error: 'publishing_unavailable', message: "Publishing isn't set up on this Caddie server yet." });
+	});
+
+	test('a version the safety check flags never goes live: the app is taken down, reported, and comes back only after review', async () => {
+		const outputId = await checkedBuild(ready(), { server: null, migrations: [] }, 'sha256:img-flag');
+		await approve((await status()).current!.intent);
+		stub.maliciousMarker = 'chk--';
+		try {
+			await publishApp(db, deps, scope, { outputId });
+		} finally {
+			stub.maliciousMarker = 'phishy';
+		}
+		const after = await status();
+		expect(after.publication).toMatchObject({ slug: 'farm-log', status: 'blocked' });
+		expect(after.publication!.blockedReason).toContain("Caddie's safety check flagged a new version");
+		expect(after.runs[0]).toMatchObject({ status: 'failed', error: "Caddie's safety check flagged this version, so the app isn't on the web. Caddie's team will review it." });
+		expect(after.runs[0]!.steps.map((s) => `${s.step}:${s.outcome}`)).toEqual(['approval:ok', 'database:skipped', 'migration:skipped', 'upload:ok', 'safety-check:waiting', 'safety-check:failed']);
+		// Nothing of the flagged version is left serving.
+		expect(stub.scripts.has(scriptNameFor(scope.projectId, 1))).toBe(false);
+		expect([...stub.kv.keys()].filter((k) => k.includes('chk--'))).toEqual([]);
+		expect(routeOf('farm-log')).toBeNull();
+		// Reported to the operator's inbox, and in the reports queue.
+		expect(inbox.map((m) => m.subject)).toEqual(['[Caddie abuse] phishing report for farm-log (url-scan)']);
+		const reports = await listAbuseReports(db, { status: 'open' });
+		expect(reports.map((r) => [r.slug, r.source, r.app?.status])).toEqual([['farm-log', 'url-scan', 'blocked']]);
+		await rejects(publishApp(db, deps, scope, { outputId }), 'APP_BLOCKED');
+
+		// The operator reviews it and lifts the takedown; publishing again needs no second scan of the same version.
+		expect(await restoreTakenDownApp(db, deps, scope.projectId, { by: 'operator-1' })).toBe(true);
+		await approve((await status()).current!.intent);
+		await publishApp(db, deps, scope, { outputId });
+		const live = await status();
+		expect(live.publication!.status).toBe('live');
+		expect(live.runs[0]!.steps.map((s) => `${s.step}:${s.outcome}`)).toContain('safety-check:skipped');
+	});
+
+	test('while a new version is checked visitors keep the current one; a slow scan finishes in the sweep, a stuck one is dropped', async () => {
+		const first = await checkedBuild(ready(), { server: null, migrations: [] }, 'sha256:img-v1');
+		await approve((await status()).current!.intent);
+		await publishApp(db, deps, scope, { outputId: first });
+		const v1 = scriptNameFor(scope.projectId, 1);
+		expect(routeOf('farm-log')).toMatchObject({ status: 'live', script: v1 });
+
+		// v2: the scanner is slow, longer than the publish request waits.
+		const second = await checkedBuild(ready(), { server: null, migrations: [], js: 'console.log("v2")' }, 'sha256:img-v2');
+		await approve((await status()).current!.intent);
+		stub.failNext('GET /client/v4/accounts/acct-1/urlscanner/v2/result/', 404, 6);
+		await publishApp(db, deps, scope, { outputId: second });
+		const waiting = await status();
+		expect(waiting.pendingCheck).not.toBeNull();
+		expect(waiting.runs[0]!.status).toBe('running');
+		expect(routeOf('farm-log')).toMatchObject({ status: 'live', script: v1 }); // visitors still get v1
+		await rejects(unpublishApp(db, deps, scope), 'PUBLISH_IN_PROGRESS');
+
+		// The 5-minute sweep finishes it: v2 goes live, v1 is retired.
+		await advanceSafetyChecks(db, deps);
+		await advanceSafetyChecks(db, deps);
+		const done = await status();
+		expect(done.pendingCheck).toBeNull();
+		expect(done.runs[0]).toMatchObject({ status: 'succeeded' });
+		expect(done.runs[0]!.steps.map((s) => `${s.step}:${s.outcome}`)).toEqual(['approval:ok', 'database:skipped', 'migration:skipped', 'upload:ok', 'safety-check:waiting', 'safety-check:ok', 'route:ok', 'cleanup:ok', 'health:ok']);
+		const v2 = scriptNameFor(scope.projectId, 2);
+		expect(routeOf('farm-log')).toMatchObject({ status: 'live', script: v2 });
+		expect(stub.scripts.has(v1)).toBe(false);
+
+		// v3: the scan never finishes; after 15 minutes the new version is dropped and v2 stays.
+		const third = await checkedBuild(ready(), { server: null, migrations: [], js: 'console.log("v3")' }, 'sha256:img-v3');
+		await approve((await status()).current!.intent);
+		stub.failNext('GET /client/v4/accounts/acct-1/urlscanner/v2/result/', 404, 20);
+		await publishApp(db, deps, scope, { outputId: third });
+		expect((await status()).runs[0]!.status).toBe('running');
+		const later = { ...deps, now: () => new Date(Date.now() + 16 * 60_000).toISOString() };
+		await advanceSafetyChecks(db, later);
+		const dropped = await status();
+		expect(dropped.runs[0]).toMatchObject({ status: 'failed', error: 'The safety check did not finish in time, so the new version is not on the web. Try publishing again.' });
+		expect(routeOf('farm-log')).toMatchObject({ status: 'live', script: v2 });
+		expect(stub.scripts.has(scriptNameFor(scope.projectId, 3))).toBe(false);
+		expect([...stub.kv.keys()].filter((k) => k.includes('chk--'))).toEqual([]);
+	});
+
+	test('the off switch serves the takedown page at the app address; review brings it back unpublished', async () => {
+		const outputId = await checkedBuild(ready(), { server: null, migrations: [] }, 'sha256:img-off');
+		await approve((await status()).current!.intent);
+		await publishApp(db, deps, scope, { outputId });
+		expect(await takeDownApp(db, deps, scope.projectId, { by: 'operator-1', reason: 'Phishing page reported by visitors.' })).toBe(true);
+		expect(routeOf('farm-log').status).toBe('blocked');
+		expect((await status()).publication).toMatchObject({ status: 'blocked', blockedReason: 'Phishing page reported by visitors.' });
+		expect(await restoreTakenDownApp(db, deps, scope.projectId, { by: 'operator-1' })).toBe(true);
+		expect(routeOf('farm-log').status).toBe('paused');
+		expect((await status()).publication).toMatchObject({ status: 'paused', blockedReason: null });
+	});
+
+	test('publishing needs a confirmed email address', async () => {
+		const outputId = await checkedBuild(ready(), { server: null, migrations: [] }, 'sha256:img-email');
+		await approve((await status()).current!.intent);
+		sqlite.prepare('update "user" set "emailVerified" = 0 where "id" = ?').run('alice');
+		await rejects(publishApp(db, deps, scope, { outputId }), 'EMAIL_NOT_VERIFIED');
+		expect(stub.scripts.has(scriptNameFor(scope.projectId, 1))).toBe(false);
 	});
 
 	test('addresses: chosen once, checked for look-alikes, never shared', async () => {
