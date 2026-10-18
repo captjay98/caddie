@@ -172,6 +172,10 @@ export const MODEL_ROLES = {
 	build: 'glm-5.3-flash',
 	/** Cheap bounded helper calls (query shaping, summarization). */
 	helper: 'nemotron-3-nano',
+	/** AI inside generated apps (env.CADDIE.ai, app-ai.ts): a visitor waits on
+	 *  every reply, so the fast, cheap chat route — not a deep reasoning one.
+	 *  Caddie pays; each project has a monthly allowance. */
+	app: 'nemotron-3-super',
 	/** Image understanding (Stage 3) — a vision-language model that accepts image input. */
 	vision: 'glm-5.3-flash',
 } as const satisfies Record<string, string>;
