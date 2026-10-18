@@ -67,19 +67,21 @@ and 390px screenshots.
     unpublish.
 
 Reserved migration numbers: 0026 code versions, 0027 app secrets, 0028 app
-publishing (publications, databases, domains), 0029 abuse reports.
+publishing (publications, databases, domains), 0029 abuse reports, 0030 AI
+usage in apps.
 
 ## Status (2026-10-18, branch `feat/publish-on-cloudflare`, not pushed)
 
 | Stage | State | Evidence |
 |---|---|---|
-| 1. Code store | Port, Artifacts adapter, local D1 store, versions service; every checked build is a version (verify_build); Versions list + Restore in the project card. Not yet: feature-level commits (features keep their image save points), seeding a build from stored files when a version's working copy has expired, GitHub save from the store, "Start from my GitHub repo" | SIMULATED (Artifacts); LOCAL VERIFIED (local store, verify_build against the sandbox stub, Restore) |
+| 1. Code store | Port, Artifacts adapter, local D1 store, versions service; every checked build is a version (verify_build); Versions list + Restore in the project card; a build whose sandbox working copy is gone continues from the newest saved version (dependencies reinstalled, lost features re-queued; no version = start again from the plan). Not yet: feature-level commits (features keep their image save points), GitHub save from the store, "Start from my GitHub repo" | SIMULATED (Artifacts); LOCAL VERIFIED (local store, verify_build and working-copy restarts against the sandbox stand-in, Restore); the real sandbox's answer for an expired image is unverified |
 | 2. Backend-ready stack | Done | LOCAL VERIFIED (`scripts/refresh-scaffold-lock.ts --check`, local Bun 1.3.14); the sandbox's own Bun is unverified |
 | 3. Previews | Done: Worker Loader isolate, preview database, relay + fetch bridge, Reset test data, runs-on-Cloudflare check, egress gate | LOCAL VERIFIED under workerd (`wrangler dev`); live Worker Loader BLOCKED |
 | 4. Publish | Done: Cloudflare adapter, dispatch + outbound Worker (PROPOSED configs), publish service (0028), routes, Publish card | SIMULATED (real adapter against the local Cloudflare stub; dispatch handlers under Bun); live BLOCKED |
 | 5. Safety | Done: one Worker per deployment and a URL Scanner check on a private address before the public address switches (flagged = taken down + reported), daily Web Risk recheck, takedown/restore, public Report page, operator review page, abuse inbox email, confirmed email to publish, egress policy, CSP/headers/host-only cookies, Report link, 451 page, address rules, destructive-migration approval (0029) | SIMULATED (stubs for Cloudflare and Web Risk); live BLOCKED |
 | 8. App keys | Done: keyring, sealed `app_secrets` (0027), routes, Keys card, builder `request_app_key`, injection into previews and published Workers | LOCAL VERIFIED |
-| 6, 7, 9, 10 | Not started (10 is BLOCKED) | — |
+| 9. AI in apps | Done: `env.CADDIE.ai({ messages, json? })` on Caddie's Nebius route (role `app`), monthly allowance per project with reserve/settle usage records (0030), per-minute cap, live only while published; preview capability (`AppPlatform`, props-bound), published capability through the dispatch Worker (`props.CADDIE` → `PublishedAppPlatform`, PROPOSED); template types + `createTestAi`; builder guidance; AI-provider keys refused; "AI in your app" in the card | LOCAL VERIFIED (service on real migrations, RPC plumbing under workerd, template via `refresh-scaffold-lock --check`); SIMULATED (model provider, dispatch props); live BLOCKED |
+| 6, 7, 10 | Not started (10 is BLOCKED) | — |
 
 ## Owner inputs (BLOCKED until provided)
 
@@ -129,7 +131,9 @@ publishing (publications, databases, domains), 0029 abuse reports.
 
 - Artifacts private import (no credentials parameter) — server-side copy is the
   plan; confirm against the live service.
-- Whether WfP service bindings carry `props` (app identity) — otherwise a
-  per-app token identifies the app to the platform service.
+- Whether WfP service bindings carry `props` (app identity) — Cloudflare's
+  dynamic-dispatch docs (2026-09) describe `DISPATCHER.get(name, { props })`
+  and passing a `ctx.exports` capability in props; built that way, unverified
+  until the live check.
 - URL Scanner limits and price for our use.
 - How long sandbox images are retained (the code store makes this matter less).

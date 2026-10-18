@@ -21,6 +21,8 @@ is the checklist and the record.
 | Operators (`OPERATOR_EMAILS`, comma-separated sign-in emails) | `/operator/reports`: review reports, take apps down, restore them | not set — nobody can open the page |
 | Google Web Risk key (`WEB_RISK_API_KEY`, Lookup API; free up to 100,000 lookups a month, then paid — see Google's pricing page) | the daily recheck of live apps | optional — without it only the publish-time scan runs |
 | Cloudflare Artifacts binding (`ARTIFACTS`, Workers Paid, open beta) | app versions in a git repo per project | optional — without it versions live in Caddie's D1 |
+| AI inside apps: `NEBIUS_API_KEY` (already set for Caddie) plus the monthly allowance per app, `APP_AI_MONTHLY_LIMIT_CENTS` (US cents, default 100; Caddie pays — the provider bills per token, see Nebius's price page) | `env.CADDIE.ai()` in previews and published apps | allowance: owner decision; without the key apps' AI answers "not available" |
+| Dispatch Worker's `CADDIE_PLATFORM` service binding to Caddie's `PublishedAppPlatform` entrypoint (`workers/dispatch/wrangler.jsonc`, PROPOSED) | AI in published apps | BLOCKED with the rest of Publish |
 
 Secrets go directly into `.dev.vars` (gitignored). Never in chat, never in
 artifacts.
