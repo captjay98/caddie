@@ -790,6 +790,80 @@ export async function restoreTakenDownApp(db: D1Database, deps: PublishDeps, pro
 	return true;
 }
 
+// --- the daily recheck -------------------------------------------------------------------------------
+
+const RECHECK_EVERY_MS = 24 * 60 * 60_000;
+/** After a failed lookup, try that app again in about an hour rather than tomorrow. */
+const RECHECK_RETRY_MS = 60 * 60_000;
+
+function threatCategory(threats: string[]): 'phishing' | 'malware' | 'other' {
+	if (threats.includes('SOCIAL_ENGINEERING')) return 'phishing';
+	if (threats.includes('MALWARE') || threats.includes('UNWANTED_SOFTWARE')) return 'malware';
+	return 'other';
+}
+
+/**
+ * Once a day per live app (a bounded batch per 5-minute tick): ask Google Web
+ * Risk whether the app's address is on a known-bad list. A listed app is
+ * taken down and reported to the abuse inbox; a failed lookup is retried in
+ * about an hour. Every lookup is a row in app_safety_checks.
+ */
+export async function recheckLiveApps(
+	db: D1Database,
+	deps: PublishDeps,
+	webRisk: { lookup(url: string): Promise<{ threats: string[] }> },
+	options: { limit?: number } = {},
+): Promise<{ checked: number; flagged: number; failed: number }> {
+	const now = deps.now ?? (() => new Date().toISOString());
+	const at = now();
+	const due = new Date(Date.parse(at) - RECHECK_EVERY_MS).toISOString();
+	const limit = Math.max(1, Math.min(options.limit ?? 20, 100));
+	const rows = await all(
+		db,
+		'select "projectId" from "app_publications" where "status" = \'live\' and "publishedAt" is not null and ("checkedAt" is null or "checkedAt" < ?) order by coalesce("checkedAt", \'\') limit ?',
+		due,
+		limit,
+	);
+	const result = { checked: 0, flagged: 0, failed: 0 };
+	for (const row of rows) {
+		const publication = await readPublication(db, String(row['projectId']));
+		if (!publication || publication.status !== 'live') continue;
+		const url = `https://${hostnameFor(publication.slug, deps.appsDomain)}/`;
+		const record = (status: 'clean' | 'flagged' | 'error', categories: string[], detail: string) =>
+			db
+				.prepare(
+					'insert into "app_safety_checks" ("id","projectId","kind","manifestSha256","script","url","scanId","runId","status","categories","detail","createdAt","finishedAt") values (?,?,\'web-risk\',?,?,?,null,null,?,?,?,?,?)',
+				)
+				.bind(`chk_${crypto.randomUUID()}`, publication.projectId, publication.manifestSha256, publication.script, url, status, JSON.stringify(categories), detail, at, at)
+				.run();
+		let threats: string[];
+		try {
+			threats = (await webRisk.lookup(url)).threats;
+		} catch (error) {
+			result.failed++;
+			await record('error', [], error instanceof Error ? error.message.slice(0, 200) : 'lookup failed');
+			const retryAt = new Date(Date.parse(at) - RECHECK_EVERY_MS + RECHECK_RETRY_MS).toISOString();
+			await db.prepare('update "app_publications" set "checkedAt" = ? where "projectId" = ?').bind(retryAt, publication.projectId).run();
+			continue;
+		}
+		result.checked++;
+		await db.prepare('update "app_publications" set "checkedAt" = ? where "projectId" = ?').bind(at, publication.projectId).run();
+		if (threats.length === 0) {
+			await record('clean', [], 'on no Web Risk list');
+			continue;
+		}
+		result.flagged++;
+		await record('flagged', threats, 'listed by Google Web Risk');
+		await takeDownApp(db, deps, publication.projectId, { by: 'web-risk', reason: `Google Web Risk lists this address (${threats.join(', ')}).` });
+		await fileAbuseReport(
+			db,
+			{ slug: publication.slug, source: 'web-risk', category: threatCategory(threats), details: `Google Web Risk lists ${url} (${threats.join(', ')}). The app was taken down automatically.` },
+			deps.notifyOperator,
+		);
+	}
+	return result;
+}
+
 async function requireVerifiedEmail(db: D1Database, actorId: string): Promise<void> {
 	const rows = await all(db, 'select "emailVerified" from "user" where "id" = ?', actorId);
 	if (Number(rows[0]?.['emailVerified'] ?? 0) !== 1) {
