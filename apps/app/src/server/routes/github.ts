@@ -11,6 +11,9 @@ import {
 	type GithubRestClient,
 } from '../adapters/github.ts';
 import { SandboxError } from '../adapters/sandbox.ts';
+import { startFromImport } from '../repo-start.ts';
+import { codeStoreFor } from '../code-store-env.ts';
+import type { ArtifactsBinding } from '../adapters/cloudflare-artifacts.ts';
 import {
 	DeliveryGateError,
 	MergeGateError,
@@ -233,8 +236,15 @@ export function createGithubRouter(): Hono<{ Bindings: Env }> {
 		const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param('projectId'));
 		// githubClientFromEnv -> readGithubConfig fails closed (typed 503).
 		const client = githubClientFromEnv(c.env);
-		const imported = await importRepoSnapshot(c.env.DB, client, scope, await readJson(c.req.raw));
-		return c.json({ import: imported }, 201);
+		const body = await readJson(c.req.raw);
+		const imported = await importRepoSnapshot(c.env.DB, client, scope, body);
+		// "Start from my GitHub repo": when Caddie can build the copied app, its
+		// files become the project's first version and the first build starts there.
+		const start =
+			(body as { start?: unknown } | null)?.start === true
+				? await startFromImport(c.env.DB, codeStoreFor(c.env as typeof c.env & { ARTIFACTS?: ArtifactsBinding }), scope, { importId: imported.id })
+				: undefined;
+		return c.json({ import: imported, ...(start ? { start } : {}) }, 201);
 	});
 
 	router.get('/projects/:projectId/github/imports', async (c) => {

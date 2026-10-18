@@ -51,7 +51,7 @@ import { resolveCoordinatorContext } from "../apps/app/src/server/coordinator-ho
 import { listAppSecrets, setAppSecret } from "../apps/app/src/server/app-secrets.ts";
 import { parseKeyring } from "../apps/app/src/server/secret-box.ts";
 import { makeRequestAppKey } from "../apps/app/src/agents/tools.ts";
-import { LocalCodeStore, listCodeVersions, readVersionFiles } from "../apps/app/src/server/code-versions.ts";
+import { LocalCodeStore, listCodeVersions, readVersionFiles, recordCodeVersion } from "../apps/app/src/server/code-versions.ts";
 import { restoreVersion } from "../apps/app/src/server/version-restore.ts";
 import { SCAFFOLD_COMMANDS } from "../stacks/react-hono/scaffold.ts";
 import {
@@ -1797,6 +1797,32 @@ describe("host-driven feature loop", () => {
         await expect(later.driver.readFile({ sessionId: later.sessionId, path: `${root}/src/feed.ts` })).rejects.toMatchObject({ code: "UPSTREAM_UNREACHABLE" });
         expect(w.sqlite.query("select count(*) as n from build_sandbox_sessions").get()).toEqual({ n: 0 });
         expect(feature(w, "log-feed").status).toBe("passed");
+      } finally { await stub.stop(); w.sqlite.close(); }
+    });
+
+    test("a project's first build starts from the code copied from GitHub, not the empty template", async () => {
+      const w = await world();
+      const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+      stub.seedImage("tag:feature:1");
+      await stub.start();
+      try {
+        const item = await featureBuild(w);
+        const root = `/workspace/${item.scope.projectId}`;
+        const copied = { "package.json": '{ "name": "caddie-project" }\n', "src/App.tsx": "export const copied = 'from GitHub';\n" };
+        await recordCodeVersion(w.db, new LocalCodeStore(w.db), item.scope, {
+          kind: "import",
+          title: "Copied from octo-farm/farm-log",
+          files: Object.entries(copied).map(([path, text]) => ({ path, contentBase64: btoa(text) })),
+          actorId: item.scope.actorId,
+        });
+        const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+        await host.buildNextFeature();
+        expect(await host.driver.readFile({ sessionId: host.sessionId, path: `${root}/src/App.tsx` })).toBe(copied["src/App.tsx"]);
+        // The template was not laid over it, and nothing was "lost": the feature keeps going.
+        await expect(host.driver.readFile({ sessionId: host.sessionId, path: `${root}/test/examples/app.example.test.tsx` })).rejects.toMatchObject({ code: "FILE_NOT_FOUND" });
+        expect(feature(w, "log-feed").status).toBe("building");
+        expect(stub.spawnedCommands()).toContain(install);
+        expect(setupRows(w).map((r) => r.subject)).toEqual(["Started from your code on GitHub"]);
       } finally { await stub.stop(); w.sqlite.close(); }
     });
 

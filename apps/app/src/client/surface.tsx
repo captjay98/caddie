@@ -459,8 +459,15 @@ function ImportRepoWindow(props: { onClose: () => void }): ReactElement {
 	const [purpose, setPurpose] = useState<'improve' | 'contest'>('improve');
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	/** After the copy: why Caddie won't build on it (or couldn't copy it), with the new project to open. */
+	const [notice, setNotice] = useState<{ projectId: string; title: string; message: string } | null>(null);
 
 	const workspaceId = chrome.buildProjects[0]?.workspaceId;
+
+	function openProject(projectId: string) {
+		props.onClose();
+		void navigate({ to: '/project', search: { project: projectId } });
+	}
 
 	async function confirm() {
 		if (!picked || busy) return;
@@ -476,15 +483,25 @@ function ImportRepoWindow(props: { onClose: () => void }): ReactElement {
 						: 'Imported from GitHub to keep improving it.',
 				...(workspaceId ? { workspaceId } : {}),
 			});
-			// Bind the repo to the new project and pull a read-only snapshot.
-			await fetch(`/api/projects/${encodeURIComponent(result.project.id)}/github/imports`, {
+			// Copy the repo in; when Caddie can build it, its code becomes the app's first version.
+			const res = await fetch(`/api/projects/${encodeURIComponent(result.project.id)}/github/imports`, {
 				method: 'POST',
 				credentials: 'same-origin',
 				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ installationId: picked.installationId, repoFullName: picked.repoFullName }),
+				body: JSON.stringify({ installationId: picked.installationId, repoFullName: picked.repoFullName, start: true }),
 			});
-			props.onClose();
-			void navigate({ to: '/project', search: { project: result.project.id } });
+			const body = (await res.json().catch(() => ({}))) as { message?: string; start?: { ok: boolean; message?: string } };
+			if (!res.ok) {
+				setNotice({ projectId: result.project.id, title: "Caddie couldn't copy that repository.", message: body.message ?? 'Try again in a minute.' });
+				setBusy(false);
+				return;
+			}
+			if (body.start && !body.start.ok) {
+				setNotice({ projectId: result.project.id, title: 'Caddie will start a new app instead.', message: body.start.message ?? '' });
+				setBusy(false);
+				return;
+			}
+			openProject(result.project.id);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
 			setBusy(false);
@@ -515,12 +532,22 @@ function ImportRepoWindow(props: { onClose: () => void }): ReactElement {
 							</button>
 						</div>
 					</>
+				) : notice ? (
+					<div data-testid="import-repo-notice">
+						<h3 className="state-title">{notice.title}</h3>
+						<p className="state-detail">{notice.message}</p>
+						<div className="row-actions">
+							<button type="button" className="btn-key" data-testid="import-repo-open" onClick={() => openProject(notice.projectId)}>
+								Go to the project
+							</button>
+						</div>
+					</div>
 				) : (
 					<>
 						<h3 className="state-title">What is {picked.repoFullName} for?</h3>
 						<p className="state-detail">
-							Caddie reads it and drafts a plan from what it finds. Nothing changes in the repo without
-							your OK.
+							Caddie copies the app&rsquo;s code into a new project and builds on it. Nothing changes in the repo
+							without your OK.
 						</p>
 						<div className="row">
 							<label className="check">

@@ -44,7 +44,7 @@ export interface ActivityRow {
 export type TimelinePhase = 'planning' | 'review' | 'building' | 'blocked' | 'ready';
 export type StageKey = 'setup' | 'write' | 'test' | 'check' | 'preview';
 /** Setup rows written when a working copy is started again from the saved code. */
-const WORKING_COPY_NOTE = /^(Continued from version \d+|Started again from your plan)/;
+const WORKING_COPY_NOTE = /^(Continued from version \d+|Started again from your plan|Started from your code on GitHub)/;
 export type StageState = 'done' | 'active' | 'pending' | 'failed';
 
 export interface TimelineStage {

@@ -21,6 +21,7 @@ import {
 	type GithubPullRequestStatus,
 } from './adapters/github.ts';
 import type { WorkspaceScope } from './scope.ts';
+import { classifySourceDirectory, classifySourceFile, type SourceSkipReason } from './source-export.ts';
 
 /**
  * P08 repository services: GitHub App installation binding, webhook-driven
@@ -567,9 +568,23 @@ export interface ManifestEntry {
 }
 
 export interface SkippedEntry {
+	/** A file, or a folder ending in '/' whose whole contents were left out. */
 	path: string;
-	reason: 'submodule';
-	gitSha: string;
+	reason: 'submodule' | SourceSkipReason;
+	/** Submodules: the commit they point at. */
+	gitSha?: string;
+}
+
+/** The first skipped folder on a path (as 'folder/'), else the file's own skip reason, else null. */
+function sourceSkipFor(path: string): { path: string; reason: SourceSkipReason } | null {
+	const parts = path.split('/');
+	for (let i = 1; i < parts.length; i++) {
+		const folder = parts.slice(0, i).join('/');
+		const reason = classifySourceDirectory(folder);
+		if (reason) return { path: `${folder}/`, reason };
+	}
+	const reason = classifySourceFile(path);
+	return reason ? { path, reason } : null;
 }
 
 export interface ImportView {
@@ -682,6 +697,7 @@ export async function importRepoSnapshot(
 
 	const manifest: ManifestEntry[] = [];
 	const skipped: SkippedEntry[] = [];
+	const skippedFolders = new Set<string>();
 	let totalBytes = 0;
 	for (const entry of tree.entries) {
 		if (entry.type === 'commit') {
@@ -689,6 +705,20 @@ export async function importRepoSnapshot(
 			continue;
 		}
 		if (entry.type === 'tree') continue; // recursive listings are flat; ignore dirs defensively
+		// Dependencies, build output and secrets are never copied in — the same
+		// rules as saving to GitHub (source-export.ts). A link inside a skipped
+		// folder (node_modules/.bin) is skipped with it, not refused.
+		const inRoot = !root || entry.path === root || entry.path.startsWith(`${root}/`);
+		const relativePath = root ? entry.path.slice(root.length + 1) : entry.path;
+		const skip = inRoot && relativePath !== '' ? sourceSkipFor(relativePath) : null;
+		if (skip) {
+			if (!skip.path.endsWith('/')) skipped.push({ path: skip.path, reason: skip.reason });
+			else if (!skippedFolders.has(skip.path)) {
+				skippedFolders.add(skip.path);
+				skipped.push({ path: skip.path, reason: skip.reason });
+			}
+			continue;
+		}
 		if (entry.mode === '120000') {
 			throw new ScopeError(
 				422,
@@ -696,8 +726,8 @@ export async function importRepoSnapshot(
 				`${entry.path} is a symlink — symlinks are never followed or imported`,
 			);
 		}
-		if (root && entry.path !== root && !entry.path.startsWith(`${root}/`)) continue;
-		const relative = root ? entry.path.slice(root.length + 1) : entry.path;
+		if (!inRoot) continue;
+		const relative = relativePath;
 		if (relative === '') continue;
 		const safePath = normalizeImportPath(relative, 'manifest path');
 		if (entry.size > DEFAULT_IMPORT_CAPS.maxFileBytes) {

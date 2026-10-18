@@ -33,7 +33,7 @@ const FILLED = 'seeded:';
 export interface WorkingCopyContext {
 	db: D1Database;
 	store: CodeStore;
-	driver: Pick<SandboxDriver, 'workingCopyAvailable' | 'ensureSession' | 'uploadFiles' | 'execute'>;
+	driver: Pick<SandboxDriver, 'workingCopyAvailable' | 'hasSession' | 'ensureSession' | 'uploadFiles' | 'execute'>;
 	scope: Scope;
 	runId: string;
 	/** The run's own session key. */
@@ -47,6 +47,9 @@ export interface WorkingCopyContext {
 }
 
 const now = () => new Date().toISOString();
+
+/** The timeline line when a project's first build starts from code copied from GitHub. */
+export const IMPORT_NOTE = 'Started from your code on GitHub';
 
 /** The plain line the build timeline shows for a new working copy. */
 export function workingCopyNote(seq: number | null, rebuilt: number): string {
@@ -65,24 +68,30 @@ export async function openWorkingCopy(ctx: WorkingCopyContext): Promise<string> 
 	const { db, driver, scope, runId } = ctx;
 	const override = await buildSessionOverride(db, scope.projectId, runId);
 	if (override?.reason.startsWith(FILLING)) return fillWorkingCopy(ctx, override.sessionKey, override.reason);
+	// The first build of a project that already has saved code (copied from
+	// GitHub, repo-start.ts) starts from that code, not the empty template.
+	if (!override && !(await driver.hasSession(ctx.sessionKey)) && (await listCodeVersions(db, scope, 1)).length > 0) {
+		return startAgain(ctx, { fresh: true });
+	}
 	const target = { sessionKey: override?.sessionKey ?? ctx.sessionKey, image: override?.image ?? ctx.baseImage };
 	if (await driver.workingCopyAvailable({ ...target, recheckAfterMs: WORKING_COPY_RECHECK_MS })) {
 		return (await driver.ensureSession({ ...target, projectId: scope.projectId, runId })).sessionId;
 	}
-	return startAgain(ctx);
+	return startAgain(ctx, { fresh: false });
 }
 
-async function startAgain(ctx: WorkingCopyContext): Promise<string> {
+/** `fresh`: no working copy ever existed for this build, so nothing can have been lost. */
+async function startAgain(ctx: WorkingCopyContext, options: { fresh: boolean }): Promise<string> {
 	const { db, scope, runId } = ctx;
 	const workflow = await readWorkflow(db, scope);
 	const [version] = await listCodeVersions(db, scope, 1);
 	// Features whose code went with the old working copy.
-	const features = workflow?.planId ? await listBuildFeatures(db, scope.projectId, workflow.planId) : [];
+	const features = workflow?.planId && !options.fresh ? await listBuildFeatures(db, scope.projectId, workflow.planId) : [];
 	const lost = features.filter((row) => row.status !== 'pending' && (!version || row.passedAt === null || row.passedAt > version.createdAt));
 	const rebuilt = lost.filter((row) => row.status === 'passed').length;
 	const stamp = now();
 	const sessionKey = `seed:${runId}:${Date.now().toString(36)}`;
-	const reason = `${FILLING}${version?.commitId ?? 'none'}:${version?.seq ?? 0}:${rebuilt}:${lost.length}`;
+	const reason = `${FILLING}${version?.commitId ?? 'none'}:${version?.seq ?? 0}:${rebuilt}:${lost.length}:${version?.kind ?? 'none'}`;
 	await db.batch([
 		...lost.map((row) =>
 			db
@@ -101,7 +110,7 @@ async function startAgain(ctx: WorkingCopyContext): Promise<string> {
 /** Fill a new working copy from the saved version. Safe to repeat: an interrupted fill resumes on the next call. */
 async function fillWorkingCopy(ctx: WorkingCopyContext, sessionKey: string, reason: string): Promise<string> {
 	const { db, driver, scope, runId } = ctx;
-	const [commitId = 'none', seqText = '0', rebuiltText = '0', lostText = '0'] = reason.slice(FILLING.length).split(':');
+	const [commitId = 'none', seqText = '0', rebuiltText = '0', lostText = '0', kind = 'build'] = reason.slice(FILLING.length).split(':');
 	const seq = commitId === 'none' ? null : Number(seqText);
 	const rebuilt = Number(rebuiltText);
 	const started = now();
@@ -131,7 +140,7 @@ async function fillWorkingCopy(ctx: WorkingCopyContext, sessionKey: string, reas
 		projectId: scope.projectId,
 		runId,
 		kind: 'setup',
-		subject: workingCopyNote(seq, rebuilt),
+		subject: kind === 'import' && rebuilt === 0 ? IMPORT_NOTE : workingCopyNote(seq, rebuilt),
 		outcome: installed === false ? 'failed' : 'ok',
 		startedAt: started,
 		finishedAt: now(),

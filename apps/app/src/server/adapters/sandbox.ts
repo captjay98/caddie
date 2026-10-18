@@ -510,6 +510,12 @@ export class SandboxDriver {
 		}
 	}
 
+	/** Whether a working copy (a session record that isn't disposed) exists under this key. */
+	async hasSession(sessionKey: string): Promise<boolean> {
+		const record = await this.persistence.load(`session:${requireNonEmpty(sessionKey, 'sessionKey')}`);
+		return record?.kind === 'session' && record.state !== 'disposed';
+	}
+
 	/**
 	 * Named-session creation with the derived logical key (kept for callers
 	 * that think in project/run pairs). Same bookkeeping as ensureSession.
