@@ -20,6 +20,8 @@ import { PublishApp } from "../project/PublishApp.tsx";
 import { AppVersions } from "../project/AppVersions.tsx";
 import { AppAi } from "../project/AppAi.tsx";
 import { TestInbox } from "../project/TestInbox.tsx";
+import { ImportedApp, importedAppTitle } from "../project/ImportedApp.tsx";
+import type { ImportPreviewView } from "../../server/import-preview.ts";
 
 interface Snapshot {
   workflow: BuildWorkflow | null;
@@ -29,7 +31,11 @@ interface Snapshot {
   designApproval: ApprovalRecord | null;
   /** The checked build has a server (relay /api calls; offer Reset test data). */
   previewHasServer?: boolean;
+  /** "Start from my GitHub repo": the copied app, until the first build has its own preview. */
+  importPreview?: ImportPreviewView | null;
 }
+/** Phases before any build started: the copied app is still the one to try. */
+const BEFORE_BUILD = new Set<WorkflowPhase>(["planning", "review", "design", "design-review"]);
 const LABEL: Record<WorkflowPhase, string> = {
   planning: "Planning your app",
   review: "Your plan is ready",
@@ -165,7 +171,32 @@ export function ProjectWorkflow({
         </button>
       </div>
     );
-  if (!workflow) return null;
+  const importPreview = state.data?.importPreview ?? null;
+  if (!workflow) {
+    // Right after "Start from my GitHub repo", before anything is planned.
+    if (!importPreview || !chrome.actorId) return null;
+    return (
+      <section
+        className="project-workflow"
+        data-testid="project-workflow"
+        data-phase="imported"
+        aria-label={name ? `${name} project` : "Your project"}
+      >
+        <div className="workflow-heading">
+          <div>
+            <p className="kicker">{name ?? "YOUR PROJECT"}</p>
+            <h3>{importedAppTitle(importPreview)}</h3>
+          </div>
+        </div>
+        <ImportedApp
+          actorId={chrome.actorId}
+          projectId={projectId}
+          preview={importPreview}
+          onChange={() => void state.refetch()}
+        />
+      </section>
+    );
+  }
   const plan = state.data?.plan;
   const active = agent.status === "streaming" || agent.status === "submitted";
   const lastSettlement = agent.settlements.at(-1);
@@ -440,6 +471,15 @@ export function ProjectWorkflow({
       ) : null}
       {workflow.phase === "blocked" && !planningBlocked && chrome.actorId ? (
         <SavedFeatures actorId={chrome.actorId} projectId={projectId} />
+      ) : null}
+      {importPreview && chrome.actorId && (BEFORE_BUILD.has(workflow.phase) || planningBlocked) ? (
+        <ImportedApp
+          actorId={chrome.actorId}
+          projectId={projectId}
+          preview={importPreview}
+          onChange={() => void state.refetch()}
+          titled
+        />
       ) : null}
       {latestMessage && workflow.phase !== "review" ? (
         <details className="workflow-updates">

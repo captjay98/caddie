@@ -6576,6 +6576,13 @@ body.conv-resizing * {
 
 /* Publish (Publish stage 4): same rhythm as Keys; one list of facts and actions, no nested boxes. */
 .publish-app { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+/* "Start from my GitHub repo": the copied app, before the first build (ImportedApp.tsx). */
+.imported-app { display: grid; gap: 10px; }
+.imported-app[data-titled] { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.imported-app-head { display: flex; align-items: center; gap: 8px; }
+.imported-app-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.imported-app-head > svg { color: var(--color-muted); flex: none; }
+.imported-app > .state-detail { margin: 0; }
 .publish-head { display: flex; align-items: center; gap: 8px; }
 .publish-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
 .publish-head > svg { color: var(--color-muted); flex: none; }

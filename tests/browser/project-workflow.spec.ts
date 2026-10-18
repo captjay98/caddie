@@ -21,7 +21,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }> } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }>; imported?: { status: 'checking' | 'ready' | 'failed'; noWorkflow?: boolean; checksUntilReady?: number; message?: string } } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -40,10 +40,22 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 	const acks: Record<string, unknown>[] = [];
   const stops: string[] = [];
 	let previewReads = 0;
+	// "Start from my GitHub repo": the copied app's preview, in the server's shape.
+	const imported = options.imported
+		? {
+				status: options.imported.status,
+				versionSeq: 1,
+				repoFullName: 'octo-farm/farm-log',
+				outputId: options.imported.status === 'ready' ? 'output-imported' : (null as string | null),
+				hasServer: false,
+				message: options.imported.message ?? null,
+			}
+		: null;
+	const importChecks: string[] = [];
 	const design = options.designBody
 		? { id: 'design-1', projectId: PROJECT.id, kind: 'design', revision: 2, bodyHash: 'sha256-design-1', body: options.designBody, createdBy: 'actor-workflow', createdAt: NOW }
 		: null;
-	const snapshot = () => ({ workflow: { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null, design, designApproval: null, ...(options.keys || options.inbox ? { previewHasServer: true } : {}) });
+	const snapshot = () => ({ workflow: options.imported?.noWorkflow ? null : { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null, design, designApproval: null, ...(options.keys || options.inbox ? { previewHasServer: true } : {}), importPreview: imported });
 	// App keys for a backend app: names and status only, exactly like the server.
 	const keys = {
 		list: [
@@ -275,6 +287,14 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 			if (body.key === workflow.pendingKey) { workflow.pendingKey = null; workflow.pendingBody = null; }
 			return json(route, 200, { acknowledged: true });
 		}
+		if (path.endsWith('/import-preview/check') && request.method() === 'POST') {
+			importChecks.push(path);
+			if (imported && imported.status === 'checking' && importChecks.length >= (options.imported?.checksUntilReady ?? 1)) {
+				imported.status = 'ready';
+				imported.outputId = 'output-imported';
+			}
+			return json(route, 200, { importPreview: imported });
+		}
 		if (path.includes('/workflow/preview/')) {
 			previewReads++;
 			if (failedPreviews-- > 0) return json(route, 403, { error: 'preview_denied' });
@@ -311,7 +331,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		return route.fulfill({ contentType: 'application/json', headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' }, body: JSON.stringify({ v: 1, conversationId, offset: OFFSET, messages: options.repeatHandoff ? [...messages, ...messages.map(m => ({...m, id: m.id + '-continued'}))] : messages, settlements: [] }) });
 	});
 	return {
-		workflow, decisions, admissions, acks, stops, rollbacks, github, keys, publish, versions,
+		workflow, decisions, admissions, acks, stops, rollbacks, github, keys, publish, versions, imported, importChecks,
 		get previewReads() { return previewReads; },
 		revise() { currentPlan = plan(currentPlan.revision + 1); workflow.planId = currentPlan.id; workflow.phase = 'review'; workflow.pendingKey = null; workflow.pendingBody = null; },
 		ready() { workflow.phase = 'ready'; workflow.previewId = 'output-workflow'; workflow.pendingKey = null; workflow.pendingBody = null; },
@@ -936,4 +956,66 @@ test('a plan stuck before approval reads as a plan to continue, never as a faile
   await expect(card).toContainText("Caddie didn't finish the plan");
   await expect(card.getByRole('button', { name: 'Continue the plan' })).toBeVisible();
   await expect(card.getByRole('button', { name: 'Retry build' })).toHaveCount(0);
+});
+
+test('right after a GitHub import, the card builds the copied app and then shows it to try', async ({ page, context }) => {
+	const state = await fixture(context, { imported: { status: 'checking', noWorkflow: true, checksUntilReady: 2 } });
+	// Evidence only: CADDIE_SHOTS=<dir> saves each state; CADDIE_SHOTS_MOBILE=1 runs at 390px.
+	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
+	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	const shot = async (name: string) => {
+		const dir = process.env.CADDIE_SHOTS;
+		if (!dir) return;
+		await card.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		await card.screenshot({ path: `${dir}/imported-${mobile ? 'mobile-' : ''}${name}.png` });
+	};
+	// No plan yet: the card is the copied app, and Caddie is building it.
+	await expect(card).toHaveAttribute('data-phase', 'imported');
+	await expect(card.getByRole('heading', { name: 'Getting your app ready to try' })).toBeVisible();
+	await expect(card.getByTestId('imported-app-checking')).toHaveText('Caddie is building the app copied from octo-farm/farm-log so you can try it here.');
+	await shot('1-checking');
+	// The card keeps the build moving until it is ready, then shows the app.
+	await expect(card.getByRole('heading', { name: 'Your app from GitHub' })).toBeVisible({ timeout: 15_000 });
+	await expect(card.getByTestId('imported-app-ready')).toHaveText('This is octo-farm/farm-log as Caddie copied it (version 1). Try it, then tell Caddie what you’d like to change.');
+	const preview = card.frameLocator('iframe');
+	await preview.getByRole('textbox', { name: 'New task' }).fill('Feed the goats');
+	await preview.getByRole('button', { name: 'Add task' }).click();
+	await expect(preview.getByRole('listitem')).toHaveText('Feed the goats');
+	await shot('2-ready');
+	expect(state.importChecks.length).toBe(2);
+	// Ready: nothing keeps asking.
+	await page.waitForTimeout(3500);
+	expect(state.importChecks.length).toBe(2);
+});
+
+test('while Caddie plans, the copied app stays in the card under the plan', async ({ page, context }) => {
+	await fixture(context, { phase: 'review', imported: { status: 'ready' } });
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card.getByRole('heading', { name: 'Your plan is ready' })).toBeVisible();
+	const section = card.getByTestId('imported-app');
+	await expect(section.getByRole('heading', { name: 'Your app from GitHub' })).toBeVisible();
+	await expect(section.frameLocator('iframe').getByRole('textbox', { name: 'New task' })).toBeVisible();
+});
+
+test("once the first build has its own preview, the copied app's section is gone", async ({ page, context }) => {
+	await fixture(context, { phase: 'ready', imported: { status: 'ready' } });
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	await expect(card.getByTestId('workflow-ready-detail')).toBeVisible();
+	await expect(card.getByTestId('imported-app')).toHaveCount(0);
+});
+
+test("a copy Caddie couldn't build says why in plain words", async ({ page, context }) => {
+	const message = "Caddie couldn't build this app the way it was copied, so there's nothing to try yet. Your code is saved as version 1. Tell Caddie what you'd like, and it fixes the build first.";
+	const state = await fixture(context, { imported: { status: 'failed', noWorkflow: true, message } });
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card.getByRole('heading', { name: 'Your code is copied' })).toBeVisible();
+	await expect(card.getByTestId('imported-app-failed')).toHaveText(message);
+	await expect(card.locator('iframe')).toHaveCount(0);
+	expect(state.importChecks).toHaveLength(0);
 });
