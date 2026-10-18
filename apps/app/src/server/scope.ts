@@ -81,7 +81,7 @@ function requireScopeObject<K extends string>(
  */
 export async function sessionUserId(env: AuthEnv, headers: Headers): Promise<string | null> {
 	try {
-		// Structural view of better-auth 1.7.7's getSession result at the adapter
+		// Structural view of better-auth 1.7.x's getSession result at the adapter
 		// edge (its deep plugin generics do not expose `session.userId` cleanly);
 		// the shape is proven by the P01/P02 integration suites.
 		const session = (await getAuth(env).api.getSession({ headers })) as {

@@ -3,7 +3,7 @@ import type { BetterAuthOptions } from 'better-auth';
 import { genericOAuth } from 'better-auth/plugins';
 
 /**
- * P01 identity: Better Auth 1.7.7 on Cloudflare Workers + D1.
+ * P01 identity: Better Auth 1.7.10 on Cloudflare Workers + D1.
  *
  * SPIKE RESULT (P01 slice 1, LOCAL VERIFIED): Better Auth 1.7.7 accepts a D1
  * binding directly as `database` — its bundled Kysely adapter detects the
@@ -155,7 +155,7 @@ export function createAuth(env: AuthEnv, overrides: CreateAuthOverrides = {}) {
 	if (env.AUTH_STUB_BASE_URL) {
 		// Fixture-only seam: the same OAuth code paths against a stub provider
 		// so flows run fully local. Production never sets AUTH_STUB_BASE_URL.
-		// better-auth 1.7.7 option shape: `config` with `providerId` keys;
+		// better-auth 1.7.x option shape: `config` with `providerId` keys;
 		// PKCE S256 is the library default (`pkce ?? true`), matching Google.
 		// The subject resolver is explicit per provider — exactly the field the
 		// real provider uses for identity (Google: OIDC `sub`; GitHub: numeric
