@@ -37,7 +37,6 @@ import { projectScopeForUser, ScopeError } from "./scope.ts";
 import { requestAppSecret } from "./app-secrets.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
 import {
-  buildSessionOverride,
   currentFeature,
   ensureBuildFeatures,
   listBuildFeatures,
@@ -46,6 +45,7 @@ import {
   recordFeaturePassed,
   testsBaseline,
 } from "./build-features.ts";
+import { openWorkingCopy } from "./working-copy.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { FEATURE_BLOCK_GUIDE, parsePlanFeatures } from "@caddie/contracts";
 import { collectSourceSnapshot } from "./source-export.ts";
@@ -202,18 +202,24 @@ export async function createCoordinatorContext(
       },
       new D1SandboxPersistence(env.DB),
     );
-    // A rollback points the build at a fresh session that starts from a
-    // feature's save point; otherwise the run's own session.
-    sessionReady ??= buildSessionOverride(env.DB, scope.projectId, runId)
-      .then((override) =>
-        driver!.ensureSession({
-          sessionKey: override?.sessionKey ?? sessionId,
-          image: override?.image ?? env.CONTREE_IMAGE ?? "tag:tt-base:1",
-          projectId: scope.projectId,
-          runId,
-        }),
-      )
-      .then((s) => s.sessionId);
+    // A rollback or Restore points the build at another session; a working
+    // copy the sandbox no longer keeps is started again from the saved code.
+    // A failed open is not cached, so the next call in this context retries.
+    sessionReady ??= openWorkingCopy({
+      db: env.DB,
+      store: codeStoreFor(env),
+      driver,
+      scope,
+      runId,
+      sessionKey: sessionId,
+      baseImage: env.CONTREE_IMAGE ?? "tag:tt-base:1",
+      root,
+      installCommand: SCAFFOLD_COMMANDS.install.join(" && "),
+      env: runtimeEnv,
+    }).catch((error: unknown) => {
+      sessionReady = null;
+      throw error;
+    });
     const id = await sessionReady;
     return { driver, id };
   };
@@ -240,7 +246,10 @@ export async function createCoordinatorContext(
         outcome: "ok", startedAt: setupStarted, finishedAt: new Date().toISOString(),
         key: "setup:scaffold",
       });
-    })());
+    })().catch((error: unknown) => {
+      scaffoldReady = null;
+      throw error;
+    }));
   // Bounds on builder actions. The host context is rebuilt for every tool
   // call (host-context.ts resolve()), so both guards read the persisted
   // build_activity rows, never in-memory counters. They read row COUNTS and

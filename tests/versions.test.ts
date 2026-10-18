@@ -117,7 +117,7 @@ describe('versions and restore', () => {
 		expect(current.status).toBe(409);
 		expect(await current.json()).toEqual({ error: 'ALREADY_CURRENT', message: "This is the version you're looking at." });
 
-		await checkedBuild('img-2', [f('src/App.tsx', 'two')], 'Second');
+		const v2 = await checkedBuild('img-2', [f('src/App.tsx', 'two')], 'Second');
 		sqlite.prepare('update build_workflows set phase = ? where projectId = ?').run('building', scope.projectId);
 		const running = await call(`/projects/${scope.projectId}/versions/${v1.commitId}/restore`, { method: 'POST', body: JSON.stringify({ key: 'restore-running' }) });
 		expect(running.status).toBe(409);
@@ -125,10 +125,18 @@ describe('versions and restore', () => {
 		expect(((await (await call(`/projects/${scope.projectId}/versions`)).json()) as { blockedReason: string }).blockedReason).toBe('Restoring waits until the current build finishes.');
 		sqlite.prepare('update build_workflows set phase = ? where projectId = ?').run('ready', scope.projectId);
 
+		// Without its working copy a version is still restorable: the build starts from its saved files.
 		sqlite.prepare('update code_versions set image = null where commitId = ?').run(v1.commitId);
 		const noCopy = await call(`/projects/${scope.projectId}/versions/${v1.commitId}/restore`, { method: 'POST', body: JSON.stringify({ key: 'restore-no-copy' }) });
-		expect(noCopy.status).toBe(409);
-		expect(((await noCopy.json()) as { message: string }).message).toBe("This version can't be restored: its working copy is no longer kept.");
+		expect(noCopy.status).toBe(200);
+		expect(sqlite.prepare('select image, reason from build_sandbox_sessions').get()).toEqual({ image: '', reason: `restore:${v1.commitId}` });
+
+		// Without its checked preview it is not.
+		sqlite.prepare('update build_workflows set previewId = ? where projectId = ?').run(v2.outputId, scope.projectId);
+		sqlite.prepare('update code_versions set outputId = ? where commitId = ?').run('gone-output', v1.commitId);
+		const noPreview = await call(`/projects/${scope.projectId}/versions/${v1.commitId}/restore`, { method: 'POST', body: JSON.stringify({ key: 'restore-no-preview' }) });
+		expect(noPreview.status).toBe(409);
+		expect(((await noPreview.json()) as { message: string }).message).toBe("This version can't be restored: its checked preview is no longer kept.");
 
 		expect((await call(`/projects/${scope.projectId}/versions/${'0'.repeat(40)}/restore`, { method: 'POST', body: JSON.stringify({ key: 'restore-missing' }) })).status).toBe(404);
 		expect((await call(`/projects/${scope.projectId}/versions/${v1.commitId}/restore`, { method: 'POST', body: JSON.stringify({ key: 'x' }) })).status).toBe(400);

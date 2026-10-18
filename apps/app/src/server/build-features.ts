@@ -208,14 +208,14 @@ export async function buildSessionOverride(
 	db: D1Database,
 	projectId: string,
 	runId: string,
-): Promise<{ sessionKey: string; image: string } | null> {
+): Promise<{ sessionKey: string; image: string; reason: string } | null> {
 	try {
 		const result = await db
-			.prepare('select "sessionKey","image","runId" from "build_sandbox_sessions" where "projectId" = ?')
+			.prepare('select "sessionKey","image","runId","reason" from "build_sandbox_sessions" where "projectId" = ?')
 			.bind(projectId)
 			.all();
-		const row = result.results[0] as { sessionKey: string; image: string; runId: string } | undefined;
-		return row && row.runId === runId ? { sessionKey: row.sessionKey, image: row.image } : null;
+		const row = result.results[0] as { sessionKey: string; image: string; runId: string; reason: string } | undefined;
+		return row && row.runId === runId ? { sessionKey: row.sessionKey, image: row.image, reason: row.reason } : null;
 	} catch (error) {
 		if (NO_SUCH_TABLE(error)) return null;
 		throw error;

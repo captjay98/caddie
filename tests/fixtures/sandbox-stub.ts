@@ -120,6 +120,25 @@ export class SandboxStub {
 		this.goneImages.add(imageUuid);
 	}
 
+	/** Test-side: drop every image builds made, as after a long pause; tagged base images stay. Returns how many. */
+	loseBuiltImages(): number {
+		const tagged = new Set(this.tags.values());
+		let lost = 0;
+		for (const imageUuid of this.images.keys()) {
+			if (tagged.has(imageUuid) || this.goneImages.has(imageUuid)) continue;
+			this.goneImages.add(imageUuid);
+			lost += 1;
+		}
+		return lost;
+	}
+
+	/** Every command the instances were asked to run, in order. */
+	spawnedCommands(): string[] {
+		return this.requests
+			.filter((r) => r.method === 'POST' && r.path === '/v1/instances')
+			.map((r) => String((r.body as { command?: unknown } | null)?.command ?? ''));
+	}
+
 	/**
 	 * Test-side: an image that already holds these files (absolute paths), as
 	 * a finished build's checkpoint would. Returns the image uuid.

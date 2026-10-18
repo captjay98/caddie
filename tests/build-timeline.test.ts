@@ -133,6 +133,13 @@ describe("buildTimeline — stages, timing and honesty", () => {
     expect(t.stages.every((s) => s.state === "pending")).toBe(true);
   });
 
+  test("a working copy started again from a saved version says where it continued from", () => {
+    const setup = (rows: ActivityRow[]) => buildTimeline({ phase: "building", rows, nowMs: T0 + 30 * 60_000 }).stages.find((s) => s.key === "setup")!;
+    expect(setup(writing).detail).toBeNull();
+    const resumed = [...writing, row({ kind: "setup", subject: "Continued from version 3; 1 feature built again" }, 20)];
+    expect(setup(resumed).detail).toBe("Continued from version 3; 1 feature built again");
+  });
+
   test("while writing: files are de-duplicated, newest first, and the write stage is active with live time", () => {
     const now = T0 + 9 * 60_000;
     const t = buildTimeline({ phase: "building", rows: writing, nowMs: now });

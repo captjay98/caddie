@@ -52,6 +52,8 @@ import { listAppSecrets, setAppSecret } from "../apps/app/src/server/app-secrets
 import { parseKeyring } from "../apps/app/src/server/secret-box.ts";
 import { makeRequestAppKey } from "../apps/app/src/agents/tools.ts";
 import { LocalCodeStore, listCodeVersions, readVersionFiles } from "../apps/app/src/server/code-versions.ts";
+import { restoreVersion } from "../apps/app/src/server/version-restore.ts";
+import { SCAFFOLD_COMMANDS } from "../stacks/react-hono/scaffold.ts";
 import {
   checkedCoordinatorSnapshot,
   coordinatorSnapshot,
@@ -1668,6 +1670,158 @@ describe("host-driven feature loop", () => {
       expect(paths.some((p) => p.startsWith("node_modules/") || p.startsWith("dist/"))).toBe(false);
       expect(versions[0]!.skipped.map((s) => s.path)).toEqual(expect.arrayContaining(["dist/", "node_modules/"]));
     } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  describe("when the sandbox no longer keeps the working copy", () => {
+    const install = SCAFFOLD_COMMANDS.install.join(" && ");
+    /**
+     * A long pause, then the build runs again (a change request or Retry):
+     * every working copy is older than the recheck window and the sandbox dropped them.
+     */
+    const longPause = (w: Awaited<ReturnType<typeof world>>, stub: SandboxStub) => {
+      w.sqlite
+        .prepare("update sandbox_bindings set recordJson = json_set(recordJson, '$.updatedAt', ?) where kind = 'session'")
+        .run(new Date(Date.now() - 2 * 60 * 60_000).toISOString());
+      expect(stub.loseBuiltImages()).toBeGreaterThan(0);
+      w.sqlite.prepare("update build_workflows set phase = 'building'").run();
+    };
+    /** Two features built, a file of the app's own, and one checked version. */
+    async function checkedApp(w: Awaited<ReturnType<typeof world>>, stub: SandboxStub, saved = "export const feed = 'saved';") {
+      const item = await featureBuild(w);
+      const root = `/workspace/${item.scope.projectId}`;
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      await host.buildNextFeature();
+      await host.driver.writeFile({ sessionId: host.sessionId, path: `${root}/src/feed.ts`, content: saved });
+      expect(((await host.finishFeature("log-feed", "wc-finish-1")) as { passed: boolean }).passed).toBe(true);
+      await host.buildNextFeature();
+      stub.setBehavior("bun run test", { stdout: "3 pass\n0 fail" });
+      expect(((await host.finishFeature("view-dashboard", "wc-finish-2")) as { passed: boolean }).passed).toBe(true);
+      stub.setBehavior("bun run build", { stdout: "built", writes: { [`${root}/dist/main.js`]: "1", [`${root}/dist/main.css`]: "a{}" } });
+      expect(((await host.verifyBuild("wc-verify-1")) as { passed: boolean }).passed).toBe(true);
+      const [version] = await listCodeVersions(w.db, item.scope);
+      return { item, root, version: version! };
+    }
+    const setupRows = (w: Awaited<ReturnType<typeof world>>) =>
+      (w.sqlite.query("select subject, outcome from build_activity where kind = 'setup' order by startedAt").all() as { subject: string; outcome: string }[]);
+
+    test("a resumed build continues from the newest saved version; with nothing lost the builder never notices", async () => {
+      const w = await world();
+      const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+      stub.seedImage("tag:feature:1");
+      stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+      await stub.start();
+      try {
+        const { item, root, version } = await checkedApp(w, stub);
+        longPause(w, stub);
+        const spawnsBefore = stub.spawnedCommands().length;
+
+        const later = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+        expect(await later.driver.readFile({ sessionId: later.sessionId, path: `${root}/src/feed.ts` })).toBe("export const feed = 'saved';");
+        // The new working copy got its dependencies installed again (versions never keep them).
+        expect(stub.spawnedCommands().slice(spawnsBefore)).toContain(install);
+        expect(w.sqlite.query("select reason from build_sandbox_sessions").get()).toEqual({ reason: `seeded:${version.commitId}` });
+        expect(feature(w, "log-feed").status).toBe("passed");
+        expect(feature(w, "view-dashboard").status).toBe("passed");
+        expect(setupRows(w).at(-1)).toEqual({ subject: "Continued from version 1", outcome: "ok" });
+
+        // Later steps use the new working copy without checking again.
+        const spawnsAfter = stub.spawnedCommands().length;
+        const next = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+        expect(await next.driver.readFile({ sessionId: next.sessionId, path: `${root}/package.json` })).toContain('"name"');
+        expect(stub.spawnedCommands().length).toBe(spawnsAfter);
+        expect(setupRows(w).filter((r) => r.subject.startsWith("Continued"))).toHaveLength(1);
+      } finally { await stub.stop(); w.sqlite.close(); }
+    });
+
+    test("features whose code was not in the saved version are built again, and the builder is told once", async () => {
+      const w = await world();
+      const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+      stub.seedImage("tag:feature:1");
+      stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+      await stub.start();
+      try {
+        const { item, root } = await checkedApp(w, stub);
+        // Both features count as passed after the version was saved.
+        w.sqlite.prepare("update code_versions set createdAt = ?").run("2000-01-01T00:00:00.000Z");
+        longPause(w, stub);
+
+        const later = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+        await expect(later.driver.readFile({ sessionId: later.sessionId, path: `${root}/src/feed.ts` })).rejects.toMatchObject({ code: "WORKING_COPY_REPLACED" });
+        expect(feature(w, "log-feed")).toMatchObject({ status: "pending", checkpointRef: null, passedAt: null });
+        expect(feature(w, "view-dashboard").status).toBe("pending");
+        expect(setupRows(w).at(-1)?.subject).toBe("Continued from version 1; 2 features built again");
+        // Told once: the same context carries on with the saved files.
+        expect(await later.driver.readFile({ sessionId: later.sessionId, path: `${root}/src/feed.ts` })).toBe("export const feed = 'saved';");
+        expect(((await later.buildNextFeature()) as { feature: { id: string } }).feature.id).toBe("log-feed");
+      } finally { await stub.stop(); w.sqlite.close(); }
+    });
+
+    test("with no saved version the build starts again from the plan", async () => {
+      const w = await world();
+      const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+      stub.seedImage("tag:feature:1");
+      stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+      await stub.start();
+      try {
+        const item = await featureBuild(w);
+        const root = `/workspace/${item.scope.projectId}`;
+        const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+        await host.buildNextFeature();
+        expect(((await host.finishFeature("log-feed", "fresh-finish-1")) as { passed: boolean }).passed).toBe(true);
+        longPause(w, stub);
+
+        const later = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+        await expect(later.driver.readFile({ sessionId: later.sessionId, path: `${root}/package.json` })).rejects.toMatchObject({ code: "WORKING_COPY_REPLACED" });
+        expect(feature(w, "log-feed").status).toBe("pending");
+        expect(setupRows(w).at(-1)?.subject).toBe("Started again from your plan");
+        // The empty workspace gets the app's starting files again.
+        expect(await later.driver.readFile({ sessionId: later.sessionId, path: `${root}/package.json` })).toContain('"name"');
+      } finally { await stub.stop(); w.sqlite.close(); }
+    });
+
+    test("an unreachable sandbox never discards a working copy", async () => {
+      const w = await world();
+      const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+      stub.seedImage("tag:feature:1");
+      stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+      await stub.start();
+      try {
+        const { item, root } = await checkedApp(w, stub);
+        w.sqlite.prepare("update code_versions set createdAt = ?").run("2000-01-01T00:00:00.000Z");
+        w.sqlite
+          .prepare("update sandbox_bindings set recordJson = json_set(recordJson, '$.updatedAt', ?) where kind = 'session'")
+          .run(new Date(Date.now() - 2 * 60 * 60_000).toISOString());
+        w.sqlite.prepare("update build_workflows set phase = 'building'").run();
+        await stub.stop();
+        const later = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+        await expect(later.driver.readFile({ sessionId: later.sessionId, path: `${root}/src/feed.ts` })).rejects.toMatchObject({ code: "UPSTREAM_UNREACHABLE" });
+        expect(w.sqlite.query("select count(*) as n from build_sandbox_sessions").get()).toEqual({ n: 0 });
+        expect(feature(w, "log-feed").status).toBe("passed");
+      } finally { await stub.stop(); w.sqlite.close(); }
+    });
+
+    test("going back to a version whose working copy is gone starts from its saved files", async () => {
+      const w = await world();
+      const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+      stub.seedImage("tag:feature:1");
+      stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+      await stub.start();
+      try {
+        const { item, root, version: first } = await checkedApp(w, stub, "export const feed = 'first';");
+        const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+        w.sqlite.prepare("update build_workflows set phase = 'building'").run();
+        await host.driver.writeFile({ sessionId: host.sessionId, path: `${root}/src/feed.ts`, content: "export const feed = 'second';" });
+        expect(((await host.verifyBuild("wc-verify-2")) as { passed: boolean }).passed).toBe(true);
+        expect((await listCodeVersions(w.db, item.scope)).map((v) => v.seq)).toEqual([2, 1]);
+
+        await restoreVersion(w.db, new LocalCodeStore(w.db), item.scope, { commitId: first.commitId, key: "restore-after-pause" });
+        longPause(w, stub);
+        const later = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+        expect(await later.driver.readFile({ sessionId: later.sessionId, path: `${root}/src/feed.ts` })).toBe("export const feed = 'first';");
+        expect(setupRows(w).at(-1)?.subject).toBe("Continued from version 3");
+        expect(feature(w, "view-dashboard").status).toBe("passed");
+      } finally { await stub.stop(); w.sqlite.close(); }
+    });
   });
 
   test("a failed check counts toward that feature only", async () => {
