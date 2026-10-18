@@ -1167,3 +1167,33 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "S05 full gate and local merge (plan docs/plans/2026-10-18-submission-build-plan.md)",
+  "status": "LOCAL VERIFIED",
+  "owner": "integration lead — merging into main is a default-branch action, so it was not delegated",
+  "commands": [
+    {"command": "bun scripts/release-check.ts (pre-merge, on the branch tip a342ae6b)", "exitCode": 0, "receipt": "45 PASS, 0 FAIL, 1 BLOCKED, 4 PROVISIONED — acceptance for S05 is 'S01-S04 green', met before the merge; this run includes typecheck, build and all 43 packets"},
+    {"command": "git rev-list --count main..feat/publish-on-cloudflare / feat/publish-on-cloudflare..main", "exitCode": 0, "receipt": "63 / 0 — main held nothing the branch lacked, so the merge could not lose work"},
+    {"command": "git remote -v", "exitCode": 0, "receipt": "empty — there is no remote, so the merge is local by construction and nothing can have been pushed"},
+    {"command": "git merge --no-ff feat/publish-on-cloudflare", "exitCode": 0, "receipt": "d344feba 'merge: publish programme + hackathon submission build S01-S04' — no conflicts, --no-ff so the packet history stays readable"},
+    {"command": "bun run typecheck (post-merge, on main)", "exitCode": 0, "receipt": "both tsc projects clean"},
+    {"command": "bun run test (post-merge, on main)", "exitCode": 0, "receipt": "1344 pass, 0 fail, 6374 expect() calls, 104 files — re-verified on main rather than inferred from the branch"}
+  ],
+  "artifacts": [
+    {"path": "docs/plans/2026-10-17-publish/README.md", "note": "the stage table's `6, 10 | Not started` row now reads `6: not built; after the hackathon. 10: BLOCKED`, per the plan; and stage 9's row records the tier (env.CADDIE.ai({ messages, json?, tier? }), role appSuper for tier \"super\", ~3.75x faster allowance drain) so the row does not describe the pre-S04 surface"},
+    {"path": "main", "note": "d344feba — the merge commit; the feature branch is fully merged and left in place as the audit trail"}
+  ],
+  "environment": "local: bun test, tsc, and git only; no deploy, no push, no remote",
+  "providerCalls": "none",
+  "specReview": "PENDING independent review (the S01-S04 records in this ledger are the evidence trail this entry merges; independent review of the packets themselves is still outstanding)",
+  "qualityReview": "self-reviewed; the post-merge run repeats the suite on the merged tree rather than assuming the merge was inert",
+  "limitations": [
+    "The 1 BLOCKED and 4 PROVISIONED gates are untouched by the merge and remain the honest state of the account: PROVISIONED (P01 OAuth live callbacks, P04 sandbox live probes, P05 model round-trips, P10 live retrieval — credentials present, no receipt recorded) and BLOCKED (deployment authorization). None of them becomes PASS by merging",
+    "The merge commit's tree equals the branch tree (main contributed no commits), so the pre-merge gate was already valid; the post-merge run is confirmation, not new information",
+    "Further packets land on main from here, per the plan's sequencing; feat/publish-on-cloudflare should not be used as a base again or it will silently miss anything committed after this point",
+    "Known-open documentation debt from the audit, deliberately not folded into this packet: docs/feature-ledger.md's migration table stops at 0022 (0023-0032 are absent), docs/release-evidence.md carries a dated 2026-10-06 gate table, and two dated execution-ledger receipts predate the S01-S04 net"
+  ]
+}
+```
