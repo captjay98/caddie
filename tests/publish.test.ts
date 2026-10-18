@@ -19,6 +19,7 @@ import {
 	type PublishDeps,
 } from '../apps/app/src/server/publish.ts';
 import { createRun } from '../apps/app/src/server/runs.ts';
+import { createPublishRouter } from '../apps/app/src/server/routes/publish.ts';
 import { ScopeError, projectScopeForUser } from '../apps/app/src/server/scope.ts';
 import { parseKeyring, type Keyring } from '../apps/app/src/server/secret-box.ts';
 import { CloudflareStub } from './fixtures/cloudflare-stub.ts';
@@ -347,6 +348,53 @@ describe('publish service', () => {
 
 		sqlite.prepare("update app_publications set status = 'blocked' where projectId = ?").run(scope.projectId);
 		await rejects(publishApp(db, deps, scope, { outputId }), 'APP_BLOCKED');
+	});
+
+	test('over HTTP: status, the confirm gate, publish, unpublish; plain 503 when publishing is not set up', async () => {
+		const outputId = await checkedBuild(ready(), { server: SERVER, migrations: [INIT] }, 'sha256:img-http');
+		const scopeFor = async (env: { DB: D1Database }, request: Request, id: string) => {
+			const user = request.headers.get('x-test-user');
+			if (!user) throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
+			return projectScopeForUser(env.DB, user, id);
+		};
+		const router = createPublishRouter({ scopeFor, depsFor: async () => deps });
+		const call = (path: string, init: RequestInit = {}) =>
+			router.request(path, { ...init, headers: { 'x-test-user': 'alice', 'content-type': 'application/json', ...(init.headers ?? {}) } }, { DB: db } as never);
+		const base = `/projects/${scope.projectId}/publish`;
+
+		const first = await call(base);
+		expect(first.status).toBe(200);
+		expect(first.headers.get('cache-control')).toBe('no-store');
+		const body = (await first.json()) as { available: boolean; current: { outputId: string; intent: ApprovalIntent } };
+		expect(body.available).toBe(true);
+		expect(body.current.outputId).toBe(outputId);
+
+		const refused = await call(base, { method: 'POST', body: JSON.stringify({ outputId }) });
+		expect(refused.status).toBe(403);
+		expect(((await refused.json()) as { error: string }).error).toBe('STALE_APPROVAL');
+
+		await approve(body.current.intent);
+		const published = await call(base, { method: 'POST', body: JSON.stringify({ outputId, slug: 'farm-log' }) });
+		expect(published.status).toBe(200);
+		expect(((await published.json()) as { publication: { status: string } }).publication.status).toBe('live');
+
+		const form = await call(`${base}/unpublish`, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'x=1' });
+		expect(form.status).toBe(415);
+		const paused = await call(`${base}/unpublish`, { method: 'POST', body: '{}' });
+		expect(((await paused.json()) as { publication: { status: string } }).publication.status).toBe('paused');
+		expect((await call(base, { headers: { 'x-test-user': 'bob' } })).status).toBe(403);
+
+		// No owner inputs: the card says so plainly, and writes are refused.
+		const bare = createPublishRouter({ scopeFor });
+		const unset = await bare.request(base, { headers: { 'x-test-user': 'alice' } }, { DB: db } as never);
+		expect(await unset.json()).toMatchObject({ available: false, reason: "Publishing isn't set up on this Caddie server yet." });
+		const halfSet = await bare.request(
+			base,
+			{ method: 'POST', headers: { 'x-test-user': 'alice', 'content-type': 'application/json' }, body: JSON.stringify({ outputId }) },
+			{ DB: db, APPS_DOMAIN: 'caddieapps.test', CLOUDFLARE_API_TOKEN: 'only-this' } as never,
+		);
+		expect(halfSet.status).toBe(503);
+		expect(await halfSet.json()).toEqual({ error: 'publishing_unavailable', message: "Publishing isn't set up on this Caddie server yet." });
 	});
 
 	test('addresses: chosen once, checked for look-alikes, never shared', async () => {

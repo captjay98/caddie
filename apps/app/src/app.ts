@@ -18,6 +18,7 @@ import { createProfileRouter } from './server/routes/profile.ts';
 import { createArtifactsRouter } from './server/routes/artifacts.ts';
 import { createPreviewsRouter } from './server/routes/previews.ts';
 import { createAppKeysRouter } from './server/routes/app-keys.ts';
+import { createPublishRouter } from './server/routes/publish.ts';
 import { SandboxError } from './server/adapters/sandbox.ts';
 import { ScopeError } from './server/scope.ts';
 import type { AuthEnv } from './server/auth.ts';
@@ -66,6 +67,14 @@ type Env = {
 	RESEND_FROM?: string;
 	/** Keyring sealing app keys at rest: "kid:base64-32-bytes[,kid:...]", first seals (owner input). */
 	APP_SECRETS_KEYS?: string;
+	/** Publishing (owner inputs; all of them, or publishing reports "not set up"). */
+	APPS_DOMAIN?: string;
+	CLOUDFLARE_API_BASE?: string;
+	CLOUDFLARE_API_TOKEN?: string;
+	CLOUDFLARE_ACCOUNT_ID?: string;
+	CLOUDFLARE_DISPATCH_NAMESPACE?: string;
+	CLOUDFLARE_ROUTES_KV_ID?: string;
+	CLOUDFLARE_APPS_ZONE_ID?: string;
 };
 
 registerNebiusProvider();
@@ -89,6 +98,7 @@ api.route('/', createDiscoveryRouter());
 api.route('/', createJudgeRouter());
 api.route('/', createBriefRouter());
 api.route('/', createAppKeysRouter());
+api.route('/', createPublishRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------
