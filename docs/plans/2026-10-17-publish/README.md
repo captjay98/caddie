@@ -73,11 +73,11 @@ publishing (publications, databases, domains), 0029 abuse reports.
 
 | Stage | State | Evidence |
 |---|---|---|
-| 1. Code store | Port, Artifacts adapter, local D1 store and versions service done; not yet wired into the build loop or a Versions UI | SIMULATED (Artifacts, fake binding + git HTTP stub); LOCAL VERIFIED (local store) |
+| 1. Code store | Port, Artifacts adapter, local D1 store, versions service; every checked build is a version (verify_build); Versions list + Restore in the project card. Not yet: feature-level commits (features keep their image save points), seeding a build from stored files when a version's working copy has expired, GitHub save from the store, "Start from my GitHub repo" | SIMULATED (Artifacts); LOCAL VERIFIED (local store, verify_build against the sandbox stub, Restore) |
 | 2. Backend-ready stack | Done | LOCAL VERIFIED (`scripts/refresh-scaffold-lock.ts --check`, local Bun 1.3.14); the sandbox's own Bun is unverified |
 | 3. Previews | Done: Worker Loader isolate, preview database, relay + fetch bridge, Reset test data, runs-on-Cloudflare check, egress gate | LOCAL VERIFIED under workerd (`wrangler dev`); live Worker Loader BLOCKED |
 | 4. Publish | Done: Cloudflare adapter, dispatch + outbound Worker (PROPOSED configs), publish service (0028), routes, Publish card | SIMULATED (real adapter against the local Cloudflare stub; dispatch handlers under Bun); live BLOCKED |
-| 5. Safety | Partly: egress policy, CSP/headers/host-only cookies, Report link, 451 page, address rules, destructive-migration approval. Not yet: URL Scanner gate, Web Risk recheck, abuse reports (0029), verified email to publish | SIMULATED |
+| 5. Safety | Done: one Worker per deployment and a URL Scanner check on a private address before the public address switches (flagged = taken down + reported), daily Web Risk recheck, takedown/restore, public Report page, operator review page, abuse inbox email, confirmed email to publish, egress policy, CSP/headers/host-only cookies, Report link, 451 page, address rules, destructive-migration approval (0029) | SIMULATED (stubs for Cloudflare and Web Risk); live BLOCKED |
 | 8. App keys | Done: keyring, sealed `app_secrets` (0027), routes, Keys card, builder `request_app_key`, injection into previews and published Workers | LOCAL VERIFIED |
 | 6, 7, 9, 10 | Not started (10 is BLOCKED) | — |
 

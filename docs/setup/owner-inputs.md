@@ -17,7 +17,10 @@ is the checklist and the record.
 | Publishing: Cloudflare Workers Paid + Workers for Platforms; `CLOUDFLARE_API_TOKEN` (WfP scripts, D1, KV, custom hostnames, URL Scanner), `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_DISPATCH_NAMESPACE`, `CLOUDFLARE_ROUTES_KV_ID`, `CLOUDFLARE_APPS_ZONE_ID` | Publish (stage 4), the dispatch Worker in `workers/dispatch/` | BLOCKED — needs the account and a go-ahead with a budget |
 | Apps domain (`APPS_DOMAIN`, separate from Caddie's own domain, registered for 2+ years, on the Public Suffix List) | app addresses `<slug>.<APPS_DOMAIN>` | BLOCKED |
 | Optional `EGRESS_DENY_HOSTS` (comma-separated hosts apps' servers may never call; Caddie's own host and the apps domain are always denied) | tighter egress for previews and published apps | optional |
-| Monitored abuse inbox (replies within 24 hours) | going live with Publish | BLOCKED |
+| Monitored abuse inbox (`ABUSE_INBOX`, replies within 24 hours; needs `RESEND_API_KEY` + `RESEND_FROM` to send) | going live with Publish: new reports and automatic takedowns are emailed here | BLOCKED — reports are still stored and listed at `/operator/reports` without it |
+| Operators (`OPERATOR_EMAILS`, comma-separated sign-in emails) | `/operator/reports`: review reports, take apps down, restore them | not set — nobody can open the page |
+| Google Web Risk key (`WEB_RISK_API_KEY`, Lookup API; free up to 100,000 lookups a month, then paid — see Google's pricing page) | the daily recheck of live apps | optional — without it only the publish-time scan runs |
+| Cloudflare Artifacts binding (`ARTIFACTS`, Workers Paid, open beta) | app versions in a git repo per project | optional — without it versions live in Caddie's D1 |
 
 Secrets go directly into `.dev.vars` (gitignored). Never in chat, never in
 artifacts.
