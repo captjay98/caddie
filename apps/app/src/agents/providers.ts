@@ -65,8 +65,13 @@ export interface ModelRoute {
  */
 export const MODEL_ROUTES: readonly ModelRoute[] = [
 	{
-		// Frontier: strong agentic/tool-calling (agentic index 20.1 vs Super 1.7)
-		// — the chat coordinator and heavy build/plan reasoning.
+		// Frontier judgment for ideation only (the 30-turn Home brainstorm
+		// window; chat and vision moved to Super VL on 2026-10-18). The G1
+		// listing raised its context to 1,048,576 — the code carried the 3.x
+		// 262,144. The listing also prices it $1.00/$3.00 per Mtok against this
+		// entry's $0.50/$2.20 ceiling: re-pricing is a deliberate follow-up, not
+		// a silent edit, because the ceiling feeds budget reservations once
+		// they are wired (nothing reserves today).
 		id: 'nemotron-3-ultra',
 		specifier: 'nebius/nvidia/Nemotron-3-Ultra-550b-a55b',
 		providerId: 'nebius',
@@ -76,11 +81,15 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		inputPriceMinorUnits: 50, // $0.50/Mtok
 		outputPriceMinorUnits: 220, // $2.20/Mtok
 		currency: 'usd',
-		contextWindow: 262144,
+		contextWindow: 1048576,
 		maxTokens: 8192,
 	},
 	{
-		// Balanced mid tier — retained as a fallback / cheaper coordinator option.
+		// Balanced 3.x mid tier — superseded as the chat route by Super VL
+		// (2026-10-18) but RETAINED: stored run bindings and older tests refer to
+		// this id, and a removed route would fail closed on lookup. The listing
+		// now prices it $0.30/$0.90 against this entry's $0.08/$0.45 ceiling —
+		// see the Ultra note: re-pricing is a deliberate follow-up.
 		id: 'nemotron-3-super',
 		specifier: 'nebius/nvidia/nemotron-3-super-120b-a12b',
 		providerId: 'nebius',
@@ -94,9 +103,59 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		maxTokens: 4096,
 	},
 	{
+		// Nemotron 3.5 Super VL — the 3.5-tier generalist, and the first Nebius
+		// route this project has seen that genuinely accepts IMAGE input. G1
+		// probe 2026-10-18: a split red/blue PNG plus a `remember` tool returned
+		// HTTP 200, both colours named, and the tool call (711 in / 260 out,
+		// 1267 ms). That supersedes the 2026-10-15 note on the GLM entry below
+		// that every Nemotron route 400s images — true of the 3.x ids, not this
+		// one. Id spelling is the listing's (`3.5`, a dot); prices and context
+		// are the listing's too (GET /v1/models?verbose=true, 2026-10-18).
+		id: 'nemotron-3.5-super-vl',
+		specifier: 'nebius/nvidia/Nemotron-3.5-Super-VL',
+		providerId: 'nebius',
+		modelId: 'nvidia/Nemotron-3.5-Super-VL',
+		pricingVersion: '2026-10-nemotron-tier',
+		unitPriceMinorUnits: 90, // output $0.90/Mtok (budget ceiling)
+		inputPriceMinorUnits: 30, // $0.30/Mtok
+		outputPriceMinorUnits: 90, // $0.90/Mtok
+		currency: 'usd',
+		contextWindow: 1048576,
+		// Chat, vision and appSuper all share this route, so the cap has to
+		// cover a coordinator turn with tool calls AND a vision reply. It is a
+		// 3.5-tier reasoning model: the cap is not spend, and a tight one
+		// returns a truncated or empty reply (the Nano note, re-observed on
+		// Lightning in the same probe).
+		maxTokens: 8192,
+	},
+	{
+		// Nemotron 3.5 Lightning — the cheap 3.5-tier model (helper calls, and
+		// AI inside generated apps). G1 probe 2026-10-18: the rules-reading
+		// system prompt on a short excerpt at temperature 0 answered HTTP 200
+		// but hit the probe's 512-token cap (323 in / 512 out) and returned no
+		// parseable `{"claims":[...]}` — the same failure mode the Nano entry
+		// documents, so the cap stays generous. Id spelling is the listing's
+		// (`3_5`, an underscore — it differs from Super VL's dot).
+		id: 'nemotron-3.5-lightning',
+		specifier: 'nebius/nvidia/Nemotron-3_5-Lightning',
+		providerId: 'nebius',
+		modelId: 'nvidia/Nemotron-3_5-Lightning',
+		pricingVersion: '2026-10-nemotron-tier',
+		unitPriceMinorUnits: 24, // output $0.24/Mtok (budget ceiling)
+		inputPriceMinorUnits: 6, // $0.06/Mtok
+		outputPriceMinorUnits: 24, // $0.24/Mtok
+		currency: 'usd',
+		contextWindow: 1048576,
+		maxTokens: 4096,
+	},
+	{
 		// Small/fast/cheap reasoning model — bounded helper calls (discovery query
 		// shaping, research summarization). Generous maxTokens: it is a reasoning
 		// model and a tight cap returns empty output (LIVE VERIFIED Stage 1).
+		// Retained because stored run bindings name this id; the `helper` role
+		// moved to the 3.5 cheap tier on 2026-10-18. The listing now prices it
+		// $0.06/$0.24 against this entry's $0.05/$0.20 — see the Ultra note:
+		// re-pricing is a deliberate follow-up, not a silent edit.
 		id: 'nemotron-3-nano',
 		specifier: 'nebius/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
 		providerId: 'nebius',
@@ -113,13 +172,20 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		// VISION route — image input. LIVE VERIFIED 2026-10-15 on this account:
 		// GET /v1/models + one chat completion per served model with a split
 		// red/blue PNG and a `remember` tool. Nebius 400s image input on every
-		// Nemotron route ("This model does not support image input"), Qwen3.5 and
-		// GLM-5.3. GLM-5.3-Flash read both halves AND emitted the tool call
+		// 3.x Nemotron route ("This model does not support image input"), Qwen3.5
+		// and GLM-5.3. GLM-5.3-Flash read both halves AND emitted the tool call
 		// (7.0s). Kimi-K3 also passed (faster) but is $3/$15 per Mtok; Gemma 3
 		// 27B claimed a save without calling the tool; MiniCPM-V rejects auto
 		// tool choice; the original Qwen2.5-VL id is not served at all.
+		// 2026-10-18 correction: the 3.5 generation changed the Nemotron half of
+		// that negative — `nvidia/Nemotron-3.5-Super-VL` read the same split PNG
+		// and returned the tool call (1267ms). The 3.x ids still 400. Super VL
+		// now drives the `vision` role; this route stays in VISION_ROUTE_IDS
+		// because it demonstrably accepts images too.
 		// Pricing: Nebius cookbook listing $0.15 in / $0.50 out per Mtok
-		// (Sept 2026) — re-verify against the Nebius price page.
+		// (Sept 2026) — re-verify against the Nebius price page. Re-checked
+		// 2026-10-18 against GET /v1/models?verbose=true: $0.15/$0.50 ✓ (the
+		// listing reports its context as 1,024,000; left as-is to re-verify).
 		id: 'glm-5.3-flash',
 		specifier: 'nebius/zai-org/GLM-5.3-Flash',
 		providerId: 'nebius',
@@ -147,16 +213,19 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
  * ({@link findModelRouteForRole} throws otherwise — fail closed).
  */
 export const MODEL_ROLES = {
-	/** Caddie chat / coordinator. Super is fast + cheap and, with the strict
-	 *  "present only tool results" instruction, does not hallucinate listings —
-	 *  the frontier Ultra reasoned on every trivial turn (slow + ~5× cost) and
-	 *  did NOT fix the hallucination, which was always a missing-instruction bug. */
-	chat: 'nemotron-3-super',
+	/** Caddie chat / coordinator. Super VL is the 3.5-tier generalist: one price
+	 *  step above the cheap tier and two below Ultra's $1.00/$3.00, and it is
+	 *  also the one Nebius route that takes image input, so a text turn and a
+	 *  screenshot turn share it. The strict "present only tool results"
+	 *  instruction is what stops hallucinated listings — the frontier model
+	 *  reasoned on every trivial turn (slow, ~5× cost) and did NOT fix that,
+	 *  because it was always a missing-instruction bug. */
+	chat: 'nemotron-3.5-super-vl',
 	/** Brainstorming WHAT to build (Home chat only, a bounded window of turns —
 	 *  see {@link coordinatorModelRole}). This is where judgment pays: asking
 	 *  the right questions once, honest critique of ideas, grounding technical
 	 *  claims in the rules, and NOT taking "1 and 3" as a chosen idea. Ultra ran
-	 *  this same coordinator as the chat model before the switch to Super
+	 *  this same coordinator as the chat model before the switch to the mid tier
 	 *  (execution-ledger P05), so its tool-calling here is not new ground. */
 	ideation: 'nemotron-3-ultra',
 	/** Planning specialists (product, designer, tech-lead — the catalog's
@@ -170,14 +239,23 @@ export const MODEL_ROLES = {
 	 *  finished a coding task on it in 4 calls. The project RUN BINDING also
 	 *  records this route. */
 	build: 'glm-5.3-flash',
-	/** Cheap bounded helper calls (query shaping, summarization). */
-	helper: 'nemotron-3-nano',
+	/** Cheap bounded helper calls (query shaping, summarization). The 3.5 cheap
+	 *  tier replaced Nano on 2026-10-18: same price, and Nano stays registered
+	 *  for the runs that already name it. */
+	helper: 'nemotron-3.5-lightning',
 	/** AI inside generated apps (env.CADDIE.ai, app-ai.ts): a visitor waits on
-	 *  every reply, so the fast, cheap chat route — not a deep reasoning one.
-	 *  Caddie pays; each project has a monthly allowance. */
-	app: 'nemotron-3-super',
-	/** Image understanding (Stage 3) — a vision-language model that accepts image input. */
-	vision: 'glm-5.3-flash',
+	 *  every reply, so the fast cheap tier — not a deep reasoning one. Caddie
+	 *  pays; each project has a monthly allowance. */
+	app: 'nemotron-3.5-lightning',
+	/** The deeper tier a generated app may opt into for one call (S04): the
+	 *  chat route, at ~3.75× {@link app}'s per-token price ($0.30/$0.90 vs
+	 *  $0.06/$0.24), so a project's allowance simply runs out sooner. */
+	appSuper: 'nemotron-3.5-super-vl',
+	/** Image understanding — Super VL is the only route that passed the
+	 *  2026-10-18 G1 image+tool probe (split red/blue PNG: HTTP 200, both
+	 *  colours named, `remember` call returned), which is what moved vision off
+	 *  GLM. Keep {@link VISION_ROUTE_IDS} in step with this value. */
+	vision: 'nemotron-3.5-super-vl',
 } as const satisfies Record<string, string>;
 
 export type ModelRole = keyof typeof MODEL_ROLES;
@@ -217,8 +295,12 @@ export function coordinatorModelRole(input: { isHome: boolean; ideationTurnsLeft
 }
 
 /** Route ids that accept image input (the vision-capable routes). The one place
- *  that marks a route as a VLM — the ModelCapability contract reads from here. */
-export const VISION_ROUTE_IDS: readonly string[] = ['glm-5.3-flash'];
+ *  that marks a route as a VLM — the ModelCapability contract reads from here.
+ *  Two entries, deliberately: the `vision` ROLE is a preference, but both of
+ *  these demonstrably read a split red/blue PNG and returned a tool call
+ *  (GLM-5.3-Flash 2026-10-15, Super VL 2026-10-18), and dropping GLM here would
+ *  assert it cannot see images when it was verified that it can. */
+export const VISION_ROUTE_IDS: readonly string[] = ['nemotron-3.5-super-vl', 'glm-5.3-flash'];
 
 /** Whether a route accepts image input (used to pick a vision route for an
  *  image message, and to report the capability honestly). */

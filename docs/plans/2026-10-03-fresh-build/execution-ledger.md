@@ -1097,3 +1097,39 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "S03 model registry from the live listing (G1 probe; plan docs/plans/2026-10-18-submission-build-plan.md)",
+  "status": "LIVE VERIFIED (the listing and three probes, against Nebius) + LOCAL VERIFIED (registry, callers and tests)",
+  "owner": "G1 probe authored and run by a subagent; registry change, caller updates and tests by the integration lead",
+  "commands": [
+    {"command": "bun scripts/probe-models.ts (no CADDIE_LIVE_AUTHORIZED)", "exitCode": 1, "receipt": "BLOCKED — live model calls require explicit authorization; no spend, proven before the live run"},
+    {"command": "CADDIE_LIVE_AUTHORIZED=1 bun scripts/probe-models.ts", "exitCode": 0, "receipt": "GET /v1/models?verbose=true: 200, 992ms, 28 models, 9 Nemotron/GLM. text nvidia/Nemotron-3.5-Super-VL: 200, 934ms, 439/112 tokens, tool call `remember` — PASS. image same route + split red/blue PNG: 200, 1267ms, 711/260, both colours named AND tool call — PASS. json nvidia/Nemotron-3_5-Lightning: 200, 1942ms, 323/512, NOT parseable as {\"claims\":[...]} — FAIL (output hit the probe's own 512-token cap)"},
+    {"command": "bun test tests/providers.test.ts tests/attachments.test.ts tests/image-attachments.test.ts tests/multimodal-contract.test.ts tests/agent-permissions.test.ts tests/ai-behavior.test.ts tests/home-chat-tools.test.ts", "exitCode": 0, "receipt": "test-first: 6 failures naming the old chat/vision route ids; after the change 107 pass, 0 fail"},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1340 pass, 0 fail, 6358 expect() calls, 104 files"},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "root tsc + apps/app check:types clean (the new appSuper role is covered by the role-to-route test)"},
+    {"command": "bun run build", "exitCode": 0, "receipt": "exit 0; composed 1 relocated SPA + 98 SPA + 99 landing files, 0 collisions"},
+    {"command": "bun scripts/refresh-scaffold-lock.ts --check", "exitCode": 0, "receipt": "OK: lockfile is current (no template change in this packet)"}
+  ],
+  "artifacts": [
+    {"path": "scripts/probe-models.ts", "note": "NEW — the reusable G1/D3 probe: refuses without live authorization, loads NEBIUS_API_KEY from .dev.vars without printing it, prints only status/latency/token counts/tool-call names/assertions"},
+    {"path": "apps/app/src/agents/providers.ts", "note": "NEW routes nemotron-3.5-super-vl (nvidia/Nemotron-3.5-Super-VL, $0.30/$0.90, ctx 1,048,576, maxTokens 8192) and nemotron-3.5-lightning (nvidia/Nemotron-3_5-Lightning, $0.06/$0.24, ctx 1,048,576, maxTokens 4096) with the listing's exact id spelling (dot vs underscore); Ultra context 262,144 -> 1,048,576; roles chat -> super-vl, helper/app -> lightning, NEW appSuper -> super-vl, vision -> super-vl; VISION_ROUTE_IDS = [super-vl, glm-5.3-flash]"},
+    {"path": "apps/app/src/client/coordinator.ts", "note": "COORDINATOR_MODEL_ROUTE = nemotron-3.5-super-vl, still mirroring MODEL_ROLES.chat as the comment requires"},
+    {"path": "apps/app/src/server/candidate-inspection.ts", "note": "design comment no longer names Nano as the helper route"},
+    {"path": "tests/providers.test.ts", "note": "exact 3.5 id spellings pinned; role table updated; new appSuper = 3.75 x app output price; chat is cheaper than ideation; GLM stays listed as image-capable"},
+    {"path": "tests/attachments.test.ts", "note": "vision turns now expect nemotron-3.5-super-vl (image, text and mixed cases)"}
+  ],
+  "environment": "local + Nebius Token Factory (https://api.tokenfactory.nebius.com/v1) with the owner's .dev.vars key; no deploy",
+  "providerCalls": "1 free GET /v1/models?verbose=true + 3 chat completions = 1,473 in / 884 out tokens, approx $0.00082 (Super-VL text + Super-VL image + Lightning json). Budget ceiling for G1 was $0.01",
+  "specReview": "PENDING independent review",
+  "qualityReview": "self-reviewed; the probe's own assertions, not the model's prose, are what the receipts rest on",
+  "limitations": [
+    "The Lightning JSON probe FAILED: 323 in / 512 out with no parseable claims object — its output hit the probe's own 512-token cap. This is the same failure mode the Nano entry documents, so the new route ships with maxTokens 4096 and the helper prompt is unchanged; the model was not judged, the cap was",
+    "G2 (the <$0.10 build-model screen) has NOT run. It screens candidates for a decision (D3) that belongs to the live-build packet, so no registry value depends on it yet. Run it when S11 or D3 needs it, with the owner awake to the spend",
+    "The legacy routes' PRICES are stale against the same listing: nemotron-3-ultra 50/220 vs 100/300, nemotron-3-super 8/45 vs 30/90, nemotron-3-nano 5/20 vs 6/24, and GLM-5.3-Flash's context is 1,048,576 in code vs 1,024,000 in the listing. NOT changed: they are budget ceilings for routes that reserve nothing today, and a re-price changes what pricingVersion '2026-10-nemotron-tier' means, which is an owner decision. Recorded on each entry's comment and flagged here",
+    "VISION_ROUTE_IDS holds two entries, not exactly the vision role's route: GLM-5.3-Flash also passed the 2026-10-15 image+tool probe, and removing it would assert that a model we verified can see images cannot. The vision ROLE is the preference; the capability list is the fact",
+    "Vision coverage is one model, one image, one run each (2026-10-15 GLM, 2026-10-18 Super VL). Enough to move the role, not enough to claim photographic breadth"
+  ]
+}
+```

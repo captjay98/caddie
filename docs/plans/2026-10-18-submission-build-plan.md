@@ -29,6 +29,15 @@ drafts. Authority: `AGENTS.md` > `docs/plans/2026-10-03-fresh-build/README.md`
 > (so G1's Super-VL image probe re-tests a recorded negative), and
 > `docs/release-evidence.md`'s intentionally-absent list named two specs that
 > now exist.
+>
+> **G1 has since run (2026-10-18, ~$0.0008).** The listing serves
+> `nvidia/Nemotron-3.5-Super-VL` (a dot in `3.5`) at $0.30/$0.90 and
+> `nvidia/Nemotron-3_5-Lightning` (an underscore) at $0.06/$0.24. Super VL
+> **accepts image input** — the recorded negative holds for the 3.x ids only —
+> so `vision` moved to Super VL and `VISION_ROUTE_IDS` gained it (GLM-5.3-Flash
+> stays listed: it also passed). G2 has NOT run; nothing depends on it until
+> S11/D3. The legacy routes' prices are still their pre-listing values —
+> flagged in the execution ledger rather than silently changed.
 
 ---
 
