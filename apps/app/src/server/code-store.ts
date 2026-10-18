@@ -96,11 +96,15 @@ export interface CodeStore {
 	importPublic(repo: string, url: string, branch?: string): Promise<CodeCommit>;
 }
 
-/** Size caps shared by every implementation (match source-export.ts caps). */
+/**
+ * Size caps shared by every implementation. maxFileBytes stays under D1's
+ * 2,000,000-byte value limit so the local store can hold any file the
+ * Artifacts store accepts.
+ */
 export const CODE_STORE_CAPS = {
 	maxFiles: 400,
-	maxFileBytes: 2 * 1024 * 1024,
-	maxSnapshotBytes: 24 * 1024 * 1024,
+	maxFileBytes: 1024 * 1024,
+	maxSnapshotBytes: 16 * 1024 * 1024,
 } as const;
 
 const SAFE_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\0\\]+$/;
