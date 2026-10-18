@@ -58,17 +58,29 @@ try {
 	if (frozen.code !== 0) fail("bun install --frozen-lockfile failed", frozen.out);
 	if (readFileSync(join(dir, "bun.lock"), "utf8") !== lock) fail("the frozen install rewrote bun.lock");
 
-	// 2. The DOM + Testing Library preloads really work.
+	// 2. The DOM + Testing Library preloads really work, and so does the server
+	//    test harness (Hono app.request + the D1 test database).
 	const examples = run(dir, ["test", "test/examples"]);
-	if (examples.code !== 0 || !/\b2 pass\b/.test(examples.out)) fail("example tests did not pass through the preloads", examples.out);
+	if (examples.code !== 0 || !/\b4 pass\b/.test(examples.out)) fail("example tests did not pass through the preloads", examples.out);
 
 	// 3. The bare scaffold cannot satisfy the host's behavior-test gate.
 	const gate = run(dir, ["test", "src/"]);
 	if (gate.code === 0) fail("`bun test src/` passed on the bare scaffold; the gate would not need builder tests", gate.out);
 
-	// 4. The browser bundle builds.
+	// 4. The browser bundle AND the Workers server bundle build, and the
+	//    compatibility check passes on the scaffold's own server.
 	const build = run(dir, ["run", "build"]);
 	if (build.code !== 0 || !existsSync(join(dir, "dist", "main.js"))) fail("bun run build did not emit dist/main.js", build.out);
+	if (!existsSync(join(dir, "dist", "server.js"))) fail("bun run build did not emit dist/server.js", build.out);
+	if (!/ok for Cloudflare Workers/.test(build.out)) fail("the server check did not pass on the scaffold", build.out);
+
+	// 5. The check refuses a server that only works under Bun.
+	const server = join(dir, "src", "server.ts");
+	const original = readFileSync(server, "utf8");
+	writeFileSync(server, `${original}\nexport const size = Bun.file("x").size;\n`);
+	const refused = run(dir, ["run", "build"]);
+	writeFileSync(server, original);
+	if (refused.code === 0 || !/the Bun global/.test(refused.out)) fail("the server check accepted a server that uses Bun.file", refused.out);
 
 	if (check) {
 		console.log("OK: scaffold lockfile is current; install, example tests, gate refusal and build verified");

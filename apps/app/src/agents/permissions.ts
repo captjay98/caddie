@@ -71,6 +71,9 @@ export const PROTECTED_PATH_PREFIXES: readonly string[] = [
 	// builder writes tests, never the DOM/Testing Library setup that runs them.
 	'bunfig.toml',
 	'test/setup/',
+	// Caddie's runtime files in every app (D1 types, the Workers compatibility
+	// check that runs in the build): the builder uses them, never edits them.
+	'caddie/',
 ];
 
 export function isProtectedPath(path: string): boolean {

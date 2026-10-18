@@ -1,5 +1,6 @@
 import { recipe } from "./recipe.ts";
 import { SCAFFOLD_LOCKFILE } from "./scaffold-lock.ts";
+import { SERVER_FILES } from "./server-files.ts";
 
 /**
  * The ONE generic scaffold + command set for the react-hono stack (R03).
@@ -42,7 +43,13 @@ export const SCAFFOLD_PACKAGE = {
 	type: "module",
 	scripts: {
 		test: "bun test src/",
-		build: "bun build src/main.tsx --outdir dist --target browser",
+		// 1) the React client bundle (dist/main.js + dist/main.css, read by the host);
+		// 2) the app's server for Cloudflare Workers (dist/server.js);
+		// 3) Caddie's check that the server uses nothing Workers lacks.
+		build:
+			"bun build src/main.tsx --outdir dist --target browser && " +
+			"bun build src/server.ts --outfile dist/server.js --target browser --format esm --conditions workerd --external 'cloudflare:*' && " +
+			"bun run caddie/check-server.ts",
 		start: "bun run src/server.ts",
 	},
 	dependencies: {
@@ -62,6 +69,9 @@ export const SCAFFOLD_PACKAGE = {
 /** The test-harness files the builder must never edit (see PROTECTED_PATH_PREFIXES). */
 export const SCAFFOLD_TEST_HARNESS = ["bunfig.toml", "test/setup/"] as const;
 
+/** Caddie-owned runtime files in every app (D1 types, the Workers check). Protected too. */
+export const SCAFFOLD_RUNTIME_DIR = "caddie/" as const;
+
 const BASE_FILES: Readonly<Record<string, string>> = {
 	"package.json": `${JSON.stringify(SCAFFOLD_PACKAGE, null, 2)}\n`,
 	"tsconfig.json": `${JSON.stringify(
@@ -77,7 +87,7 @@ const BASE_FILES: Readonly<Record<string, string>> = {
 				skipLibCheck: true,
 				noEmit: true,
 			},
-			include: ["src", "test"],
+			include: ["src", "test", "caddie"],
 		},
 		null,
 		2,
@@ -171,6 +181,8 @@ const BASE_FILES: Readonly<Record<string, string>> = {
 		"",
 	].join("\n"),
 	"src/styles.css": "body{margin:0;font-family:system-ui,sans-serif}\n",
+	// Backend-ready from the start (stacks/react-hono/server-files.ts).
+	...SERVER_FILES,
 };
 
 /**
