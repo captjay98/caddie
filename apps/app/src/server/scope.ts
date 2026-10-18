@@ -207,6 +207,27 @@ export async function assertWorkspaceScope(
 }
 
 /**
+ * Owner-only actions (setting an app's keys, publishing it): the scope must
+ * verify AND the actor's membership in the project's workspace must carry the
+ * 'owner' role. Every membership Caddie creates today is its creator's own
+ * 'owner' row, so this changes nothing for current users; it keeps any future
+ * non-owner member from changing keys or what the public sees.
+ */
+export async function assertProjectOwner(db: D1Database, scope: unknown): Promise<Scope> {
+	const verified = await assertProjectScope(db, scope);
+	const rows = await queryAll(
+		db,
+		'select "role" from "workspace_memberships" where "workspaceId" = ? and "userId" = ?',
+		verified.workspaceId,
+		verified.actorId,
+	);
+	if (!rows.some((row) => row['role'] === 'owner')) {
+		fail(403, 'not_project_owner', 'only the project owner can do this');
+	}
+	return verified;
+}
+
+/**
  * Re-verify a project scope against D1: the project must exist, the scope's
  * workspace must be the project's real workspace, and the actor must hold the
  * membership. Catches fabricated and tampered scopes alike.
