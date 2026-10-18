@@ -69,6 +69,18 @@ and 390px screenshots.
 Reserved migration numbers: 0026 code versions, 0027 app secrets, 0028 app
 publishing (publications, databases, domains), 0029 abuse reports.
 
+## Status (2026-10-18, branch `feat/publish-on-cloudflare`, not pushed)
+
+| Stage | State | Evidence |
+|---|---|---|
+| 1. Code store | Port, Artifacts adapter, local D1 store and versions service done; not yet wired into the build loop or a Versions UI | SIMULATED (Artifacts, fake binding + git HTTP stub); LOCAL VERIFIED (local store) |
+| 2. Backend-ready stack | Done | LOCAL VERIFIED (`scripts/refresh-scaffold-lock.ts --check`, local Bun 1.3.14); the sandbox's own Bun is unverified |
+| 3. Previews | Done: Worker Loader isolate, preview database, relay + fetch bridge, Reset test data, runs-on-Cloudflare check, egress gate | LOCAL VERIFIED under workerd (`wrangler dev`); live Worker Loader BLOCKED |
+| 4. Publish | Done: Cloudflare adapter, dispatch + outbound Worker (PROPOSED configs), publish service (0028), routes, Publish card | SIMULATED (real adapter against the local Cloudflare stub; dispatch handlers under Bun); live BLOCKED |
+| 5. Safety | Partly: egress policy, CSP/headers/host-only cookies, Report link, 451 page, address rules, destructive-migration approval. Not yet: URL Scanner gate, Web Risk recheck, abuse reports (0029), verified email to publish | SIMULATED |
+| 8. App keys | Done: keyring, sealed `app_secrets` (0027), routes, Keys card, builder `request_app_key`, injection into previews and published Workers | LOCAL VERIFIED |
+| 6, 7, 9, 10 | Not started (10 is BLOCKED) | — |
+
 ## Owner inputs (BLOCKED until provided)
 
 - Cloudflare account on Workers Paid with Workers for Platforms ($25/month)
