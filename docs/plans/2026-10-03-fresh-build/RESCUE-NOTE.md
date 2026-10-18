@@ -7,7 +7,7 @@ repository before /tmp cleanup. No plan content was modified in the move.
 
 Status remains what the plan itself declared **at authoring time (2026-10-03)**:
 PLAN ONLY. That is history, not current state — the plan has since been
-EXECUTED (21 packets integrated, LOCAL VERIFIED build, 22 D1 migrations). See
+EXECUTED (21 packets integrated, LOCAL VERIFIED build, 32 D1 migrations). See
 the README `Status` line and `execution-ledger.md` for the reconciled current
 state (reconciled 2026-10-16); this note is kept only to record how the plan
 files reached the repository.

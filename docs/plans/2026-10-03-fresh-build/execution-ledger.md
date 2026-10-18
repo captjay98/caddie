@@ -1024,3 +1024,76 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+## 2026-10-18 — Hackathon submission build (S01–S13)
+
+```json
+{
+  "packet": "S01 verification net (plan: docs/plans/2026-10-18-submission-build-plan.md, remediation R01)",
+  "status": "LOCAL VERIFIED",
+  "owner": "Integration lead, with four parallel workers: packet-mapping classifier, completeness-test author, doc-count auditor, S02 implementer (subagent sessions)",
+  "commands": [
+    {"command": "bun scripts/verify-packet.ts --all", "exitCode": 0, "receipt": "43 packets — 37 PASS, 0 FAIL, 6 NOT APPLICABLE (named, not faked); 67s wall"},
+    {"command": "bun test tests/packet-completeness.test.ts", "exitCode": 0, "receipt": "6 pass, 0 fail"},
+    {"command": "negative proof r1: unmap tests/theme-state.test.ts from U01", "exitCode": 1, "receipt": "rule 1 fails, naming exactly tests/theme-state.test.ts; restored, 6 pass"},
+    {"command": "negative proof r2: map tests/live/github.spec.ts into P08 live", "exitCode": 1, "receipt": "rule 2 fails, naming exactly tests/live/github.spec.ts (the stale mapping §1 flagged); restored, 6 pass"},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1339 pass, 0 fail, 6332 expect() calls, 104 files (1,330/103 before S01+S02)"},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "root tsc + apps/app check:types clean"},
+    {"command": "bun run build", "exitCode": 0, "receipt": "Astro + Vite + composed Workers assets tree"},
+    {"command": "bun scripts/refresh-scaffold-lock.ts --check", "exitCode": 0, "receipt": "OK: scaffold lockfile is current (no template change in this packet)"},
+    {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "45 PASS, 0 FAIL, 1 BLOCKED (deployment authorization), 4 PROVISIONED — acceptance: credential-only live gates now report PROVISIONED, never PASS"},
+    {"command": "bun x playwright test tests/browser/project-workflow.spec.ts", "exitCode": 0, "receipt": "28 passed (26.6s) against the composed build — the plan's 'project-card spec 28/28 incl. Stop build' claim verified"},
+    {"command": "bun -e 'recordLiveReceipt -> readLiveReceipts round trip'", "exitCode": 0, "receipt": "roundtrip-ok true; docs/live-receipts.json removed after the proof"}
+  ],
+  "artifacts": [
+    {"path": "scripts/packet-list.ts", "note": "NEW — PACKET_MAP + PACKET_KEYS, the single source of truth (43 packets incl. new PUBLISH, KEYS, VERSIONS, APPS, BUILD, NET). No literal packet list remains in .github/scripts; the only other P15d token is a vestigial comment in scripts/capture-android.ts"},
+    {"path": "scripts/verify-packet.ts", "note": "reads packet-list.ts; adds --all (per-packet summary, failures listed); writes a live receipt only after a whole packet's live specs pass"},
+    {"path": "scripts/live-receipts.ts", "note": "NEW — read/record docs/live-receipts.json (packet, files, passed, at); no secret content"},
+    {"path": "scripts/release-check.ts", "note": "reads PACKET_KEYS (no hardcoded list); adds PROVISIONED status; live PASS now requires a recorded receipt"},
+    {"path": ".github/workflows/ci.yml", "note": "packet loop replaced by `bun run verify:packet --all` (U/B/PUBLISH/KEYS/VERSIONS/APPS/BUILD/NET now run in CI)"},
+    {"path": "tests/packet-completeness.test.ts", "note": "NEW (NET) — 6 rules: every candidate mapped (at least one packet), every mapped path exists, category matches directory+extension, no duplicates inside a packet+category, PACKET_KEYS mirrors PACKET_MAP, the net maps itself"},
+    {"path": "docs/plans/2026-10-03-fresh-build/README.md", "note": "migration count 22 -> 32 (read off apps/app/migrations)"},
+    {"path": "docs/plans/2026-10-03-fresh-build/RESCUE-NOTE.md", "note": "same count fix"},
+    {"path": "docs/feature-ledger.md", "note": "stale spec counts corrected: shell-v2 10->13, discovery 12->11, projects-v2 3->6, project-v2 6->13, settings+project-settings 11->13"},
+    {"path": "docs/release-evidence.md", "note": "intentionally-absent list refreshed (github.spec.ts added; sandbox/preview specs already exist); new dated 'Verification net (S01)' receipt section"},
+    {"path": "docs/plans/2026-10-18-submission-build-plan.md", "note": "four audit corrections applied in place + an audit note (80->76 unmapped, repair cap is per issue, the P15d grep also matches capture-android.ts, 'exactly one packet' -> 'at least one')"}
+  ],
+  "environment": "local only: bun 1.4.0, per-file bun test runner, Playwright chromium against the composed build, wrangler preview; .dev.vars loaded but never printed",
+  "providerCalls": "none — no model, sandbox, email or deploy call in this packet",
+  "specReview": "PENDING independent review (self-reviewed diffs by the integration lead; subagent outputs were verified by rerunning every gate)",
+  "qualityReview": "self-reviewed; integration-lead files (packet table, verifier, release check, CI, ledgers) edited serially by one actor",
+  "limitations": [
+    "Completeness is 'in at least one packet', not the plan's 'exactly one': 10 files hold 23 memberships (auth, workspace, conversation, artifacts, discovery, submission, search-isolation, settings, landing, shell-v2 specs are evidence for two packets each). Deduplicating would silently drop coverage, so the rule was relaxed in the table with a comment rather than removing mappings",
+    "tests/live/github.spec.ts stays un-authored (needs a registered GitHub App, owner-gated). Its P08 live mapping is removed; the missing-spec state is now caught by rule 2 instead of tolerated",
+    "The live-receipt WRITE path is proven only by a direct round-trip probe; verify-packet's live branch first executes at S11",
+    "`--all` spawns one bun process per file: 67s for 43 packets locally. Acceptable for CI, worth watching as the suite grows",
+    "Deferred doc corrections found during the audit but out of S01 scope: feature-ledger's 0022-terminated migration table (0023-0032 missing), release-evidence's dated 2026-10-06 gate table counts, the two dated execution-ledger receipt notes, and stale counts inside the two untracked draft plans (which this plan forbids editing)"
+  ]
+}
+```
+
+```json
+{
+  "packet": "S02 report rate-limit key (one slice of remediation R06)",
+  "status": "LOCAL VERIFIED",
+  "owner": "S02 implementer (subagent); integrated and committed by the lead",
+  "commands": [
+    {"command": "bun test tests/report-page.test.ts", "exitCode": 1, "receipt": "test-first: SyntaxError: Export named 'reportRateLimitKey' not found in apps/app/src/server/routes/report.ts — 0 pass, 1 fail, 1 error"},
+    {"command": "bun test tests/report-page.test.ts", "exitCode": 0, "receipt": "7 pass, 0 fail, 52 expect() calls"},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "exit 0"},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1339 pass, 0 fail (suite ran after the change)"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/routes/report.ts", "note": "NEW reportRateLimitKey(masterSecret, label='caddie-report-ratelimit:v1') — HMAC-SHA256, null below 16 chars, mirroring appAuthSecret; the 'caddie-report' literal fallback is GONE; POST /report answers 503 (plain words, nothing stored) when no key can be derived"},
+    {"path": "tests/report-page.test.ts", "note": "3 cases: key is purpose-bound (and a different label differs); same IP+day hashes equal, different IP differs; missing/short secret answers 503 and stores no row"}
+  ],
+  "environment": "local bun test + sqlite D1 fixture",
+  "providerCalls": "none",
+  "specReview": "PENDING independent review",
+  "qualityReview": "diff read by the lead; honeypot/same-origin/size-check ordering deliberately unchanged",
+  "limitations": [
+    "The 503 branch is unit-tested through the real router; no browser spec covers the report page's error state (it has none today)",
+    "REPORT_RATE_LIMIT_LABEL is exported for the test; no other route consumes it yet — S06's judge rate limit should reuse this derivation with its own label"
+  ]
+}
+```

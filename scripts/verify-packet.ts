@@ -3,8 +3,13 @@
  * Packet verifier (P00).
  *
  *   bun run verify:packet Pxx     run the packet's mapped unit/workerd tests
+ *   bun run verify:packet --all   run EVERY packet's tests, print a summary
  *   bun run test:live -- Pxx      run the packet's mapped live specs
  *   bun run test:browser -- Pxx   run the packet's mapped browser specs
+ *
+ * `--all` combines with `--live` / `--browser` (all packets, that category).
+ * CI calls `--all`, so a packet cannot be skipped by omitting it from a list:
+ * the packet table lives in `scripts/packet-list.ts` and nowhere else.
  *
  * Honesty rules:
  *   - A mapped test file that does not exist FAILS the command. Missing
@@ -13,13 +18,17 @@
  *   - A harness category with no existing files FAILS the command.
  *   - Live invocation additionally requires CADDIE_LIVE_AUTHORIZED=1 (explicit
  *     owner authorization for any external effect); without it the command is
- *     BLOCKED, exit nonzero.
+ *     BLOCKED, exit nonzero. A passing live packet records a receipt in
+ *     `docs/live-receipts.json` — the only thing `release-check.ts` accepts as
+ *     PASS for a credential-gated gate.
  *   - Default verification never deploys and never spends.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { recordLiveReceipt } from './live-receipts.ts';
+import { PACKET_KEYS, PACKET_MAP, type PacketCategory } from './packet-list.ts';
 
 // Load .dev.vars (gitignored; values never printed) so live verification
 // reflects the owner's standing authorization instead of failing on bun's
@@ -36,157 +45,6 @@ import { fileURLToPath } from 'node:url';
 	}
 }
 
-type Category = 'tests' | 'browser' | 'live';
-
-const PACKET_MAP: Record<string, Record<Category, string[]>> = {
-	P00: {
-		tests: ['tests/contracts.test.ts', 'tests/routing.test.ts'],
-		browser: [],
-		live: [],
-	},
-	P01: {
-		tests: ['tests/auth.integration.test.ts'],
-		browser: ['tests/browser/auth.spec.ts'],
-		live: [],
-	},
-	P02: {
-		tests: ['tests/project-isolation.integration.test.ts'],
-		browser: [],
-		live: [],
-	},
-	P03: {
-		tests: ['tests/controls.integration.test.ts', 'tests/budget-races.integration.test.ts'],
-		browser: [],
-		live: [],
-	},
-	P04: {
-		tests: ['tests/sandbox.contract.test.ts'],
-		browser: [],
-		live: ['tests/live/sandbox.spec.ts'],
-	},
-	P05: {
-		tests: ['tests/agent-permissions.test.ts'],
-		browser: [],
-		live: ['tests/live/flue-lifecycle.spec.ts'],
-	},
-	P06: {
-		tests: [],
-		browser: ['tests/browser/workspace.spec.ts', 'tests/browser/conversation.spec.ts'],
-		live: [],
-	},
-	P07: {
-		tests: ['tests/preview-access.integration.test.ts'],
-		browser: ['tests/browser/artifacts.spec.ts'],
-		live: ['tests/live/preview.spec.ts'],
-	},
-	P08: {
-		tests: ['tests/github.integration.test.ts'],
-		browser: [],
-		live: ['tests/live/github.spec.ts'],
-	},
-	P09: {
-		tests: ['tests/p09-local.test.ts'],
-		browser: ['tests/browser/forge-journey.spec.ts'],
-		live: ['tests/live/forge-react-hono.spec.ts'],
-	},
-	P10: {
-		tests: ['tests/evidence.test.ts', 'tests/evidence.integration.test.ts'],
-		browser: [],
-		live: [],
-	},
-	P11: {
-		tests: ['tests/discovery.test.ts', 'tests/planning.integration.test.ts'],
-		browser: ['tests/browser/discovery.spec.ts'],
-		live: [],
-	},
-	P12: {
-		tests: ['tests/schedules.integration.test.ts', 'tests/sentinel.test.ts'],
-		browser: [],
-		live: ['tests/live/notifications.spec.ts'],
-	},
-	P13: {
-		tests: ['tests/judge.test.ts', 'tests/submission.test.ts'],
-		browser: ['tests/browser/submission.spec.ts'],
-		live: [],
-	},
-	P14: {
-		tests: ['tests/memory.integration.test.ts', 'tests/search-isolation.test.ts'],
-		browser: ['tests/browser/settings.spec.ts'],
-		live: [],
-	},
-	P15a: { tests: [], browser: [], live: ['tests/live/stacks/tanstack-start.spec.ts'] },
-	P15b: { tests: [], browser: [], live: ['tests/live/stacks/laravel-inertia.spec.ts'] },
-	P15c: { tests: [], browser: [], live: ['tests/live/stacks/fastapi-react.spec.ts'] },
-	P15d: { tests: [], browser: [], live: ['tests/live/stacks/flutter.spec.ts'] },
-	P16: {
-		tests: [],
-		browser: ['tests/browser/landing.spec.ts'],
-		live: [],
-	},
-	P17: {
-		tests: [],
-		browser: ['tests/browser/release.spec.ts'],
-		live: ['tests/live/release.spec.ts'],
-	},
-	// --- Caddie v2 redesign (docs/design/2026-10-10-v2/PACKETS.md) -------------
-	U01: {
-		tests: [],
-		browser: ['tests/browser/workspace.spec.ts', 'tests/browser/shell-v2.spec.ts'],
-		live: [],
-	},
-	U02: {
-		tests: [],
-		browser: ['tests/browser/conversation.spec.ts', 'tests/browser/shell-v2.spec.ts'],
-		live: [],
-	},
-	U03: {
-		tests: [],
-		browser: ['tests/browser/shell-v2.spec.ts', 'tests/browser/states.spec.ts'],
-		live: [],
-	},
-	U04: {
-		tests: [],
-		browser: ['tests/browser/brief.spec.ts', 'tests/browser/conversation.spec.ts'],
-		live: [],
-	},
-	U05: {
-		tests: [],
-		browser: ['tests/browser/discovery.spec.ts', 'tests/browser/discovery-journey.spec.ts', 'tests/browser/projects-v2.spec.ts'],
-		live: [],
-	},
-	U06: {
-		tests: [],
-		browser: ['tests/browser/artifacts.spec.ts', 'tests/browser/project-v2.spec.ts'],
-		live: [],
-	},
-	U07: {
-		tests: [],
-		browser: ['tests/browser/submission.spec.ts', 'tests/browser/check-v2.spec.ts'],
-		live: [],
-	},
-	U08: {
-		tests: [],
-		browser: ['tests/browser/settings.spec.ts', 'tests/browser/project-settings.spec.ts'],
-		live: [],
-	},
-	U09: {
-		tests: [],
-		browser: ['tests/browser/auth.spec.ts', 'tests/browser/search.spec.ts', 'tests/browser/onboarding-v2.spec.ts'],
-		live: [],
-	},
-	U10: {
-		tests: [],
-		browser: ['tests/browser/landing.spec.ts'],
-		live: [],
-	},
-	B01: { tests: ['tests/discovery-saved.integration.test.ts'], browser: [], live: [] },
-	B02: { tests: ['tests/search-isolation.test.ts'], browser: [], live: [] },
-	B03: { tests: ['tests/stack-notify.integration.test.ts'], browser: [], live: [] },
-	B04: { tests: ['tests/plan-decisions.integration.test.ts'], browser: [], live: [] },
-	B05: { tests: ['tests/conversation-scope.test.ts'], browser: ['tests/browser/conversation.spec.ts'], live: [] },
-	B06: { tests: ['tests/approval-card.test.ts'], browser: [], live: [] },
-};
-
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 interface Check {
@@ -196,7 +54,17 @@ interface Check {
 	detail: string;
 }
 
-function runSpec(file: string, category: Category): Check {
+type PacketStatus = 'PASS' | 'FAIL' | 'NOT APPLICABLE';
+
+interface Outcome {
+	packet: string;
+	status: PacketStatus;
+	detail: string;
+	/** Test cases that passed across the packet's mapped files. */
+	passed: number;
+}
+
+function runSpec(file: string, category: PacketCategory): Check {
 	// Browser specs execute under Playwright; unit/integration/live specs
 	// execute under the bun test runner (live specs gate env themselves and
 	// CADDIE_LIVE_AUTHORIZED is already enforced above).
@@ -228,73 +96,121 @@ function fail(message: string): never {
 	process.exit(1);
 }
 
+/**
+ * Run one packet's mapped files for a category. Prints per-file lines unless
+ * `quiet` (the `--all` summary), which still prints every failure detail.
+ */
+function verifyPacket(packetId: string, category: PacketCategory, quiet: boolean): Outcome {
+	const packet = PACKET_MAP[packetId];
+	if (!packet) fail(`unknown packet ${packetId}; known: ${PACKET_KEYS.join(', ')}`);
+	const mapped = packet[category];
+	if (mapped.length === 0) {
+		if (!quiet) console.log(`verify-packet: ${packetId} has no ${category} mapped — NOT APPLICABLE (named, not faked)`);
+		return { packet: packetId, status: 'NOT APPLICABLE', detail: `no ${category} mapped`, passed: 0 };
+	}
+
+	const checks: Check[] = [];
+	const missing: string[] = [];
+	for (const file of mapped) {
+		if (!existsSync(join(REPO_ROOT, file))) {
+			missing.push(file);
+			continue;
+		}
+		checks.push(runSpec(file, category));
+	}
+
+	if (missing.length > 0 || checks.length === 0) {
+		const lines = missing.map((m) => `  MISSING ${m}`).join('\n');
+		console.error(
+			`verify-packet: FAIL — ${packetId} ${category}: ${
+				checks.length === 0 ? 'none of the mapped tests exist' : 'missing test files (incomplete verification)'
+			}:\n${lines}`,
+		);
+		for (const check of checks) {
+			if (check.exitCode !== 0) console.error(`${check.name}\n${check.detail}`);
+		}
+		return { packet: packetId, status: 'FAIL', detail: `missing mapped files: ${missing.join(', ')}`, passed: 0 };
+	}
+
+	let failed = 0;
+	let passed = 0;
+	for (const check of checks) {
+		const status = check.exitCode === 0 ? 'PASS' : 'FAIL';
+		if (check.exitCode !== 0) failed++;
+		else passed += Number(/(\d+) test\(s\) passed/.exec(check.detail)?.[1] ?? 0);
+		if (!quiet || check.exitCode !== 0) {
+			console.log(`[${status}] ${check.name} — ${check.command} (exit ${check.exitCode})`);
+			if (check.exitCode !== 0) console.error(check.detail);
+			else console.log(`        ${check.detail}`);
+		}
+	}
+
+	if (failed > 0) {
+		if (!quiet) console.error(`verify-packet: ${packetId} ${category}: ${failed} check(s) FAILED`);
+		return { packet: packetId, status: 'FAIL', detail: `${failed} check(s) FAILED`, passed: 0 };
+	}
+
+	// A green live packet is evidence: record the receipt release-check reads.
+	if (category === 'live') {
+		const receipt = recordLiveReceipt({ packet: packetId, files: mapped, passed });
+		if (!quiet) console.log(`verify-packet: recorded live receipt for ${packetId} (${receipt.files.length} spec(s), ${receipt.passed} test(s), ${receipt.at})`);
+	}
+	if (!quiet) console.log(`verify-packet: ${packetId} ${category}: all ${checks.length} check(s) PASS`);
+	return { packet: packetId, status: 'PASS', detail: `${checks.length} check(s) PASS`, passed };
+}
+
 // --- argument parsing -------------------------------------------------------
 
 const argv = process.argv.slice(2);
-let category: Category = 'tests';
+let category: PacketCategory = 'tests';
 let packetId: string | undefined;
+let all = false;
 for (let i = 0; i < argv.length; i++) {
 	const arg = argv[i];
 	if (arg === '--live') category = 'live';
 	else if (arg === '--browser') category = 'browser';
+	else if (arg === '--all') all = true;
 	else if (arg === '--') continue;
 	else if (!arg.startsWith('-') && packetId === undefined) packetId = arg;
 	else fail(`unrecognized argument: ${arg}`);
 }
-if (packetId === undefined) {
-	fail('usage: bun run verify:packet Pxx | bun run test:live -- Pxx | bun run test:browser -- Pxx');
-}
-const packet = PACKET_MAP[packetId];
-if (!packet) {
-	fail(`unknown packet ${packetId}; known: ${Object.keys(PACKET_MAP).join(', ')}`);
+if (all && packetId !== undefined) fail('use either --all or a single packet id, not both');
+if (!all && packetId === undefined) {
+	fail('usage: bun run verify:packet Pxx | --all [--live|--browser] | bun run test:live -- Pxx | bun run test:browser -- Pxx');
 }
 
 // --- live authorization gate -------------------------------------------------
 
 if (category === 'live' && process.env.CADDIE_LIVE_AUTHORIZED !== '1') {
 	console.error(
-		`verify-packet: BLOCKED — live verification for ${packetId} requires explicit authorization. Set CADDIE_LIVE_AUTHORIZED=1 with owner-approved budget/environment/recipient.`,
+		`verify-packet: BLOCKED — live verification${all ? '' : ` for ${packetId}`} requires explicit authorization. Set CADDIE_LIVE_AUTHORIZED=1 with owner-approved budget/environment/recipient.`,
 	);
 	process.exit(1);
 }
 
-// --- run checks ----------------------------------------------------------------
+// --- run ---------------------------------------------------------------------
 
-const mapped = packet[category];
-const checks: Check[] = [];
-const missing: string[] = [];
-for (const file of mapped) {
-	if (!existsSync(join(REPO_ROOT, file))) {
-		missing.push(file);
-		continue;
+if (all) {
+	const outcomes: Outcome[] = [];
+	for (const key of PACKET_KEYS) outcomes.push(verifyPacket(key, category, true));
+
+	const passed = outcomes.filter((o) => o.status === 'PASS');
+	const failed = outcomes.filter((o) => o.status === 'FAIL');
+	const notApplicable = outcomes.filter((o) => o.status === 'NOT APPLICABLE');
+	for (const outcome of outcomes) {
+		const marker = outcome.status === 'PASS' ? '[PASS]' : outcome.status === 'FAIL' ? '[FAIL]' : '[N/A]';
+		console.log(`${marker} ${outcome.packet} — ${outcome.detail}`);
 	}
-	checks.push(runSpec(file, category));
-}
-
-if (mapped.length === 0) {
-	console.log(`verify-packet: ${packetId} has no ${category} mapped — NOT APPLICABLE (named, not faked)`);
+	console.log(
+		`\nverify-packet --all ${category}: ${outcomes.length} packet(s) — ${passed.length} PASS, ${failed.length} FAIL, ${notApplicable.length} NOT APPLICABLE`,
+	);
+	if (failed.length > 0) {
+		console.error(`verify-packet --all: FAILING packets: ${failed.map((o) => o.packet).join(', ')}`);
+		process.exit(1);
+	}
+	console.log('verify-packet --all: every mapped test in every packet passed (NOT APPLICABLE packets are named, not faked).');
 	process.exit(0);
 }
-if (checks.length === 0) {
-	fail(`${packetId} ${category}: none of the mapped tests exist:\n${missing.map((m) => `  MISSING ${m}`).join('\n')}`);
-}
-if (missing.length > 0) {
-	fail(
-		`${packetId} ${category}: missing test files (incomplete verification):\n${missing.map((m) => `  MISSING ${m}`).join('\n')}`,
-	);
-}
 
-let failed = 0;
-for (const check of checks) {
-	const status = check.exitCode === 0 ? 'PASS' : 'FAIL';
-	if (check.exitCode !== 0) failed++;
-	console.log(`[${status}] ${check.name} — ${check.command} (exit ${check.exitCode})`);
-	if (check.exitCode !== 0) console.error(check.detail);
-	else console.log(`        ${check.detail}`);
-}
-
-if (failed > 0) {
-	console.error(`verify-packet: ${packetId} ${category}: ${failed} check(s) FAILED`);
-	process.exit(1);
-}
-console.log(`verify-packet: ${packetId} ${category}: all ${checks.length} check(s) PASS`);
+const outcome = verifyPacket(packetId as string, category, false);
+process.exit(outcome.status === 'FAIL' ? 1 : 0);

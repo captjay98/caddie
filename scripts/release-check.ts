@@ -2,7 +2,8 @@
 /**
  * Release readiness check (P17) — the local gate before ANY deployment
  * request. Runs every locally-verifiable check and reports each honestly;
- * missing credentials/capabilities are BLOCKED, never PASS.
+ * missing credentials/capabilities are BLOCKED, never PASS, and a present
+ * credential with no recorded live run is PROVISIONED (also never PASS).
  *
  * Deployment itself requires concrete owner authorization (a human decision)
  * and is never performed by this script.
@@ -10,6 +11,8 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { LIVE_RECEIPTS_PATH, readLiveReceipts } from './live-receipts.ts';
+import { PACKET_KEYS, PACKET_MAP } from './packet-list.ts';
 
 const REPO = import.meta.dir === undefined ? process.cwd() : join(import.meta.dir, '..');
 
@@ -27,7 +30,12 @@ if (existsSync(devVarsPath)) {
 
 interface Check {
 	name: string;
-	status: 'PASS' | 'FAIL' | 'BLOCKED';
+	/**
+	 * PASS — verified here, now. FAIL — broken. BLOCKED — a prerequisite is
+	 * absent. PROVISIONED — the credential exists but no live run is recorded:
+	 * provisioning is not proof, so it never counts toward PASS.
+	 */
+	status: 'PASS' | 'FAIL' | 'BLOCKED' | 'PROVISIONED';
 	detail: string;
 }
 
@@ -49,9 +57,9 @@ run('typecheck', ['bun', 'run', 'typecheck']);
 // 2. Build (composition included)
 run('build', ['bun', 'run', 'build']);
 
-// 3. Every packet's locally-mapped tests
-const PACKETS = ['P00', 'P01', 'P02', 'P03', 'P04', 'P05', 'P06', 'P07', 'P08', 'P09', 'P10', 'P11', 'P12', 'P13', 'P14', 'P15a', 'P15b', 'P15c', 'P15d', 'P16', 'P17'];
-for (const packet of PACKETS) {
+// 3. Every packet's locally-mapped tests (the table itself lives in
+// scripts/packet-list.ts: no literal list here to drift out of date)
+for (const packet of PACKET_KEYS) {
 	const proc = Bun.spawnSync(['bun', 'run', 'verify:packet', packet], { cwd: REPO, stdout: 'pipe', stderr: 'pipe' });
 	const output = `${proc.stdout}${proc.stderr}`;
 	const pass = proc.exitCode === 0;
@@ -63,20 +71,30 @@ for (const packet of PACKETS) {
 	});
 }
 
-// 4. Live gates: BLOCKED, never PASS without explicit authorization
-const liveGates: { name: string; env: string; configured: boolean }[] = [
-	{ name: 'OAuth live callbacks (P01)', env: 'GOOGLE_CLIENT_ID + GITHUB_CLIENT_ID', configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GITHUB_CLIENT_ID) },
-	{ name: 'Model round-trips (P05)', env: 'NEBIUS_API_KEY', configured: Boolean(process.env.NEBIUS_API_KEY) },
-	{ name: 'Sandbox live probes (P04)', env: 'CONTREE_BASE_URL + CONTREE_API_TOKEN', configured: Boolean(process.env.CONTREE_BASE_URL && process.env.CONTREE_API_TOKEN) },
-	{ name: 'Live external retrieval (P10)', env: 'CADDIE_LIVE_AUTHORIZED=1', configured: process.env.CADDIE_LIVE_AUTHORIZED === '1' },
+// 4. Live gates: provisioning is not proof. PASS requires a recorded live
+// receipt (docs/live-receipts.json), written by `bun run test:live -- Pxx`
+// only after every mapped live spec of that packet passed.
+const liveReceipts = readLiveReceipts();
+const liveGates: { name: string; packet: string; env: string; configured: boolean }[] = [
+	{ name: 'OAuth live callbacks (P01)', packet: 'P01', env: 'GOOGLE_CLIENT_ID + GITHUB_CLIENT_ID', configured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GITHUB_CLIENT_ID) },
+	{ name: 'Model round-trips (P05)', packet: 'P05', env: 'NEBIUS_API_KEY', configured: Boolean(process.env.NEBIUS_API_KEY) },
+	{ name: 'Sandbox live probes (P04)', packet: 'P04', env: 'CONTREE_BASE_URL + CONTREE_API_TOKEN', configured: Boolean(process.env.CONTREE_BASE_URL && process.env.CONTREE_API_TOKEN) },
+	{ name: 'Live external retrieval (P10)', packet: 'P10', env: 'CADDIE_LIVE_AUTHORIZED=1', configured: process.env.CADDIE_LIVE_AUTHORIZED === '1' },
 ];
 for (const gate of liveGates) {
+	const receipt = liveReceipts.get(gate.packet);
+	const mappedLive = PACKET_MAP[gate.packet]?.live ?? [];
+	const detail = receipt
+		? `live receipt recorded ${receipt.at} — ${receipt.files.length} spec(s), ${receipt.passed} test(s) passed`
+		: !gate.configured
+			? `BLOCKED — provision ${gate.env} (owner input)`
+			: mappedLive.length === 0
+				? `PROVISIONED, never PASS — ${gate.env} is present but ${gate.packet} maps no live spec, so only the owner's recorded run (docs/release-evidence.md) can assert this gate`
+				: `PROVISIONED, never PASS — ${gate.env} is present but no live receipt exists; run \`bun run test:live -- ${gate.packet}\``;
 	checks.push({
 		name: gate.name,
-		status: gate.configured ? 'PASS' : 'BLOCKED',
-		detail: gate.configured
-			? 'credentials present — live suite runs authorized under `bun run test:live`'
-			: `BLOCKED — provision ${gate.env} (owner input)`,
+		status: receipt ? 'PASS' : gate.configured ? 'PROVISIONED' : 'BLOCKED',
+		detail,
 	});
 }
 
@@ -90,14 +108,29 @@ checks.push({
 // --- report -----------------------------------------------------------------
 let failures = 0;
 let blocked = 0;
+let provisioned = 0;
 for (const check of checks) {
-	const marker = check.status === 'PASS' ? '[PASS]' : check.status === 'FAIL' ? '[FAIL]' : '[BLOCKED]';
+	const marker =
+		check.status === 'PASS'
+			? '[PASS]'
+			: check.status === 'FAIL'
+				? '[FAIL]'
+				: check.status === 'PROVISIONED'
+					? '[PROVISIONED]'
+					: '[BLOCKED]';
 	if (check.status === 'FAIL') failures++;
 	if (check.status === 'BLOCKED') blocked++;
+	if (check.status === 'PROVISIONED') provisioned++;
 	console.log(`${marker} ${check.name} — ${check.detail.split('\n')[0]}`);
 }
-console.log(`\nrelease-check: ${checks.length - failures - blocked} PASS, ${failures} FAIL, ${blocked} BLOCKED`);
+const passing = checks.length - failures - blocked - provisioned;
+console.log(`\nrelease-check: ${passing} PASS, ${failures} FAIL, ${blocked} BLOCKED, ${provisioned} PROVISIONED (not PASS)`);
+if (provisioned > 0) {
+	console.log(
+		`PROVISIONED is provisioning, not proof — a recorded live receipt in ${LIVE_RECEIPTS_PATH.replace(`${REPO}/`, '')} is the only thing that makes a live gate PASS.`,
+	);
+}
 console.log(failures === 0
-	? 'All locally-verifiable checks pass. Live gates remain BLOCKED pending owner inputs; deployment remains an owner decision.'
+	? 'All locally-verifiable checks pass. Live gates remain BLOCKED/PROVISIONED pending owner inputs; deployment remains an owner decision.'
 	: `${failures} FAILING check(s) — fix before requesting a release.`);
 process.exit(failures === 0 ? 0 : 1);

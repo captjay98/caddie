@@ -127,21 +127,21 @@ the product surface, all LOCAL VERIFIED:
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Resizable Caddie panel (fraction-persisted, ARIA separator, keyboard) | LOCAL VERIFIED | tests/browser/shell-v2.spec.ts (10) |
+| Resizable Caddie panel (fraction-persisted, ARIA separator, keyboard) | LOCAL VERIFIED | tests/browser/shell-v2.spec.ts (13) |
 | Viewport bands: mobile / tablet overlay / desktop two-panel | LOCAL VERIFIED | shell-v2 + workspace specs |
 | Mobile tabs Caddie·Brief·Discover·Projects + Ask bar | LOCAL VERIFIED | shell-v2 (U02 tests) |
 | "Talking about" scope switch (Everything + projects) | LOCAL VERIFIED (filtering semantics; threads verified per-scope in B05) | shell-v2 (U02 tests) |
 | Character (8 moods, real-state mapping, reduced-motion static) | LOCAL VERIFIED | tests/browser/states.spec.ts (7) |
 | v2 Brief (≤3 cards, deadline rows, Done fold) | LOCAL VERIFIED | tests/browser/brief.spec.ts (14) |
-| v2 Discover (For you/Saved, can't-enter reveal, plain verdicts) | LOCAL VERIFIED | tests/browser/discovery.spec.ts (12) |
+| v2 Discover (For you/Saved, can't-enter reveal, plain verdicts) | LOCAL VERIFIED | tests/browser/discovery.spec.ts (11) |
 | Two-step explore-ideas (no project before confirm) | LOCAL VERIFIED | discovery + journey specs |
-| v2 Projects cards (step text from real brief cards, archived fold, import window) | LOCAL VERIFIED | tests/browser/projects-v2.spec.ts (3) |
-| Overview next-step / app-so-far / to-dos / recent fold | LOCAL VERIFIED | tests/browser/project-v2.spec.ts (6) |
+| v2 Projects cards (step text from real brief cards, archived fold, import window) | LOCAL VERIFIED | tests/browser/projects-v2.spec.ts (6) |
+| Overview next-step / app-so-far / to-dos / recent fold | LOCAL VERIFIED | tests/browser/project-v2.spec.ts (13) |
 | Plan decision bar + approve window with real spend cap + suggest-a-change | LOCAL VERIFIED | project-v2 + artifacts specs |
 | Build tabs Activity/Files, builds as sentences, change-request → chat draft | LOCAL VERIFIED | project-v2 + workspace specs |
 | Check page (N of M ready, hand-in list, judges, proof drawer, personal variant) | LOCAL VERIFIED | tests/browser/check-v2.spec.ts (4) |
 | Submit: video-link draft + "I've submitted" window (never submits) | LOCAL VERIFIED | tests/browser/submission.spec.ts (6) |
-| Settings 8 tabs + Project settings (new route, typed-name archive) | LOCAL VERIFIED | settings + project-settings specs (11) |
+| Settings 8 tabs + Project settings (new route, typed-name archive) | LOCAL VERIFIED | settings + project-settings specs (13) |
 | ⌘K quick search + results page (chips, highlights, 5/page, recents) | LOCAL VERIFIED | tests/browser/search.spec.ts (3) |
 | Welcome intro (mood lines, username rule, saved name) | LOCAL VERIFIED | tests/browser/onboarding-v2.spec.ts (3) |
 | Landing refinement (plain steps, Your brief, ledger-faithful stack statuses, theme sharing) | LOCAL VERIFIED | tests/browser/landing.spec.ts (16) |
