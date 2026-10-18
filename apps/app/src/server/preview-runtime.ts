@@ -373,6 +373,31 @@ export interface WorkerLoaderLike {
 
 export const PREVIEW_COMPATIBILITY_DATE = '2026-06-01';
 
+// --- the per-project preview database, as callers see it -------------------------
+
+export interface PreviewDatabaseStub {
+	query(statements: unknown, transaction: boolean): Promise<PreviewStatementResult[]>;
+	execScript(script: unknown): Promise<{ count: number; duration: number }>;
+	applyMigrations(files: unknown): Promise<{ applied: string[] }>;
+	reset(): Promise<void>;
+}
+
+export interface PreviewDatabaseNamespace {
+	idFromName(name: string): unknown;
+	get(id: unknown): PreviewDatabaseStub;
+}
+
+export interface PreviewDatabaseEnv {
+	PREVIEW_DB?: PreviewDatabaseNamespace;
+}
+
+/** This project's preview database (one Durable Object per project). */
+export function previewDatabaseFor(env: PreviewDatabaseEnv, projectId: string): PreviewDatabaseStub {
+	const namespace = env.PREVIEW_DB;
+	if (!namespace) throw new PreviewRuntimeError('preview_db_unavailable', 'The preview database is not configured.', 503);
+	return namespace.get(namespace.idFromName(`project:${projectId}`));
+}
+
 export function previewWorkerCode(input: {
 	serverSource: string;
 	env: Record<string, unknown>;

@@ -22,6 +22,8 @@ interface Snapshot {
   approval: ApprovalRecord | null;
   design: PlanDocRevision | null;
   designApproval: ApprovalRecord | null;
+  /** The checked build has a server (relay /api calls; offer Reset test data). */
+  previewHasServer?: boolean;
 }
 const LABEL: Record<WorkflowPhase, string> = {
   planning: "Planning your app",
@@ -455,6 +457,14 @@ export function ProjectWorkflow({
             projectId={projectId}
             artifactId={workflow.previewId}
             contentUrl={`/api/projects/${encodeURIComponent(projectId)}/workflow/preview/${encodeURIComponent(workflow.previewId)}`}
+            {...(state.data?.previewHasServer
+              ? {
+                  appRequestUrl: `/api/projects/${encodeURIComponent(projectId)}/workflow/preview/${encodeURIComponent(workflow.previewId)}/app`,
+                  onResetData: async () => {
+                    await postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow/preview-data/reset`, {});
+                  },
+                }
+              : {})}
           />
           <SaveToGithub
             actorId={chrome.actorId}

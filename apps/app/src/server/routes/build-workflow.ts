@@ -8,9 +8,18 @@ import {
   decideDesign,
   acknowledgeDispatch,
   readBuildOutput,
+  readBuildBundle,
   retryWorkflow,
   stopWorkflow,
 } from "../build-workflow.ts";
+import {
+  PreviewRuntimeError,
+  bridgeRequestToRequest,
+  previewDatabaseFor,
+  runPreviewApp,
+  type PreviewDatabaseEnv,
+  type WorkerLoaderLike,
+} from "../preview-runtime.ts";
 import { rollbackToFeature } from "../build-features.ts";
 import {
   dispatchPendingWorkflow,
@@ -75,7 +84,10 @@ export function createBuildWorkflowRouter(
       c.req.param("projectId"),
     );
     await reconcileStalledBuild(c.env.DB, scope.projectId);
-    return c.json(await workflowSnapshot(c.env.DB, scope));
+    const snapshot = await workflowSnapshot(c.env.DB, scope);
+    const previewId = snapshot.workflow?.previewId ?? null;
+    const previewHasServer = previewId ? (await readBuildBundle(c.env.DB, scope, previewId).catch(() => null)) !== null : false;
+    return c.json({ ...snapshot, previewHasServer });
   });
 
   // Build activity: the honest "what is Caddie doing right now?" read while a
@@ -275,5 +287,65 @@ export function createBuildWorkflowRouter(
       },
     });
   });
+
+  // Backend previews: the preview frame relays its fetch('/api/…') calls here
+  // (it has no network of its own). The app's server bundle runs in a Worker
+  // Loader isolate with this project's preview database and no network.
+  router.post("/projects/:projectId/workflow/preview/:outputId/app", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const env = c.env as AuthEnv & PreviewRuntimeBindings;
+    const exportsOf = (c.executionCtx as unknown as { exports?: PreviewExports } | undefined)?.exports;
+    if (!env.LOADER || !env.PREVIEW_DB || !exportsOf?.PreviewDatabaseGateway)
+      throw new ScopeError(
+        503,
+        "PREVIEW_RUNTIME_UNAVAILABLE",
+        "Trying apps with a server needs Cloudflare's Worker Loader, which isn't available here.",
+      );
+    const outputId = c.req.param("outputId");
+    const bundle = await readBuildBundle(c.env.DB, scope, outputId);
+    if (!bundle) throw new ScopeError(409, "PREVIEW_HAS_NO_SERVER", "This version of the app has no server.");
+    let request: Request;
+    try {
+      request = bridgeRequestToRequest(await c.req.json());
+    } catch (error) {
+      if (error instanceof PreviewRuntimeError) throw new ScopeError(error.status, error.code, error.message);
+      throw new ScopeError(400, "invalid_request", "The preview sent a request Caddie could not read.");
+    }
+    try {
+      await previewDatabaseFor(env, scope.projectId).applyMigrations(bundle.migrations);
+      const relayed = await runPreviewApp({
+        loader: env.LOADER,
+        projectId: scope.projectId,
+        outputId,
+        serverSource: bundle.server,
+        vars: {},
+        database: exportsOf.PreviewDatabaseGateway({ props: { projectId: scope.projectId } }),
+        globalOutbound: null,
+        request,
+      });
+      return c.json(relayed);
+    } catch (error) {
+      if (error instanceof PreviewRuntimeError) throw new ScopeError(error.status, error.code, error.message);
+      const message = error instanceof Error ? error.message : String(error);
+      // The app's own failure (a thrown error in its server) is the app's answer, not Caddie's.
+      return c.json({
+        status: 500,
+        headers: [["content-type", "text/plain; charset=utf-8"]],
+        body: btoa(unescape(encodeURIComponent(`The app's server failed: ${message.slice(0, 500)}`))),
+      });
+    }
+  });
+
+  // "Reset test data": empty this project's preview database.
+  router.post("/projects/:projectId/workflow/preview-data/reset", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const env = c.env as AuthEnv & PreviewRuntimeBindings;
+    if (!env.PREVIEW_DB) throw new ScopeError(503, "PREVIEW_RUNTIME_UNAVAILABLE", "The preview database isn't available here.");
+    await previewDatabaseFor(env, scope.projectId).reset();
+    return c.json({ reset: true });
+  });
   return router;
 }
+
+type PreviewRuntimeBindings = { LOADER?: WorkerLoaderLike } & PreviewDatabaseEnv;
+type PreviewExports = { PreviewDatabaseGateway?(options: { props: { projectId: string } }): unknown };

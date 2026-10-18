@@ -16,26 +16,14 @@
 import { DurableObject, WorkerEntrypoint } from 'cloudflare:workers';
 import {
 	applyPreviewMigrations,
+	previewDatabaseFor,
 	runPreviewScript,
 	runPreviewStatements,
+	type PreviewDatabaseEnv,
 	type PreviewStatementResult,
 } from './preview-runtime.ts';
 
-export interface PreviewDatabaseStub {
-	query(statements: unknown, transaction: boolean): Promise<PreviewStatementResult[]>;
-	execScript(script: unknown): Promise<{ count: number; duration: number }>;
-	applyMigrations(files: unknown): Promise<{ applied: string[] }>;
-	reset(): Promise<void>;
-}
-
-export interface PreviewDatabaseNamespace {
-	idFromName(name: string): unknown;
-	get(id: unknown): PreviewDatabaseStub;
-}
-
-export interface PreviewDatabaseEnv {
-	PREVIEW_DB?: PreviewDatabaseNamespace;
-}
+export { previewDatabaseFor, type PreviewDatabaseEnv } from './preview-runtime.ts';
 
 export class PreviewDatabase extends DurableObject<PreviewDatabaseEnv> {
 	async query(statements: unknown, transaction: boolean): Promise<PreviewStatementResult[]> {
@@ -54,12 +42,6 @@ export class PreviewDatabase extends DurableObject<PreviewDatabaseEnv> {
 	async reset(): Promise<void> {
 		await this.ctx.storage.deleteAll();
 	}
-}
-
-export function previewDatabaseFor(env: PreviewDatabaseEnv, projectId: string): PreviewDatabaseStub {
-	const namespace = env.PREVIEW_DB;
-	if (!namespace) throw new Error('The preview database is not configured.');
-	return namespace.get(namespace.idFromName(`project:${projectId}`));
 }
 
 export class PreviewDatabaseGateway extends WorkerEntrypoint<PreviewDatabaseEnv, { projectId: string }> {
