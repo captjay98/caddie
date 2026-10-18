@@ -17,6 +17,7 @@ import { createJudgeRouter } from './server/routes/judge.ts';
 import { createProfileRouter } from './server/routes/profile.ts';
 import { createArtifactsRouter } from './server/routes/artifacts.ts';
 import { createPreviewsRouter } from './server/routes/previews.ts';
+import { createAppKeysRouter } from './server/routes/app-keys.ts';
 import { SandboxError } from './server/adapters/sandbox.ts';
 import { ScopeError } from './server/scope.ts';
 import type { AuthEnv } from './server/auth.ts';
@@ -63,6 +64,8 @@ type Env = {
 	 *  absent → the noop mailer's honest BLOCKED receipt, never a faked send. */
 	RESEND_API_KEY?: string;
 	RESEND_FROM?: string;
+	/** Keyring sealing app keys at rest: "kid:base64-32-bytes[,kid:...]", first seals (owner input). */
+	APP_SECRETS_KEYS?: string;
 };
 
 registerNebiusProvider();
@@ -85,6 +88,7 @@ api.route('/', createGithubRouter());
 api.route('/', createDiscoveryRouter());
 api.route('/', createJudgeRouter());
 api.route('/', createBriefRouter());
+api.route('/', createAppKeysRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------
