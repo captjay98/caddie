@@ -108,15 +108,13 @@ function toSummary(row: Row): AppSecretSummary {
 const SUMMARY_COLUMNS = '"name","status","description","helpUrl","requestedBy","createdAt","updatedAt"';
 
 async function readRow(db: D1Database, projectId: string, name: string): Promise<Row | null> {
-	return (await db
-		.prepare(`select ${SUMMARY_COLUMNS} from "app_secrets" where "projectId" = ? and "name" = ?`)
-		.bind(projectId, name)
-		.first()) as Row | null;
+	const res = await db.prepare(`select ${SUMMARY_COLUMNS} from "app_secrets" where "projectId" = ? and "name" = ?`).bind(projectId, name).all<Row>();
+	return res.results[0] ?? null;
 }
 
 async function countKeys(db: D1Database, projectId: string): Promise<number> {
-	const row = (await db.prepare('select count(*) as "n" from "app_secrets" where "projectId" = ?').bind(projectId).first()) as Row | null;
-	return Number(row?.['n'] ?? 0);
+	const res = await db.prepare('select count(*) as "n" from "app_secrets" where "projectId" = ?').bind(projectId).all<Row>();
+	return Number(res.results[0]?.['n'] ?? 0);
 }
 
 /** Every key of the project, metadata only (never a value or an envelope). */

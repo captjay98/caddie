@@ -126,7 +126,7 @@ describe('secret box', () => {
 				caught = error;
 			}
 			expect(caught).toBeInstanceOf(SecretBoxError);
-			expect((caught as SecretBoxError).code).toBe(code);
+			expect(String((caught as SecretBoxError).code)).toBe(code);
 			const message = (caught as SecretBoxError).message;
 			expect(message).not.toContain(good);
 			expect(message).not.toContain(short);
