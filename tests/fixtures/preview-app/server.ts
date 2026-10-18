@@ -38,6 +38,15 @@ app.get('/egress', async (c) => {
 	}
 });
 
+app.get('/fetch', async (c) => {
+	try {
+		const res = await fetch(c.req.query('url') ?? '', { headers: { authorization: `Bearer ${c.env.WEATHER_KEY ?? ''}` } });
+		return c.json({ status: res.status, body: await res.text() });
+	} catch (error) {
+		return c.json({ error: error instanceof Error ? error.message : String(error) });
+	}
+});
+
 app.get('/cookie', (c) => {
 	c.header('set-cookie', 'sid=abc; Path=/; HttpOnly', { append: true });
 	c.header('set-cookie', 'theme=dark; Path=/', { append: true });

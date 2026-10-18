@@ -64,6 +64,7 @@ beforeAll(async () => {
 		worker_loaders: [{ binding: 'LOADER' }],
 		durable_objects: { bindings: [{ name: 'PREVIEW_DB', class_name: 'PreviewDatabase' }] },
 		migrations: [{ tag: 'v1', new_sqlite_classes: ['PreviewDatabase'] }],
+		vars: { EGRESS_DENY_HOSTS: 'caddie.test' },
 	};
 	const configPath = join(tmp, 'preview-runtime.wrangler.json');
 	writeFileSync(configPath, JSON.stringify(config, null, 2));
@@ -147,6 +148,29 @@ describe('backend preview runtime under workerd', () => {
 		expect(JSON.parse(atob(changed.relayed.body))).toEqual({ key: 'w-456' });
 		const egress = await run({ method: 'GET', path: '/api/egress' });
 		expect(atob(egress.relayed.body)).toBe('blocked');
+	});
+
+	test("with the gate, the app's server reaches public services with its key and nothing private", async () => {
+		const fetchVia = async (target: string) => {
+			const res = await run(
+				{ method: 'GET', path: `/api/fetch?url=${encodeURIComponent(target)}` },
+				{ vars: { WEATHER_KEY: 'w-789' }, egress: 'gate' },
+			);
+			return JSON.parse(atob(res.relayed.body));
+		};
+		expect(await fetchVia('https://api.weather.example.com/forecast?city=Kano')).toEqual({
+			status: 200,
+			body: 'upstream saw GET https://api.weather.example.com/forecast?city=Kano auth=Bearer w-789',
+		});
+		for (const target of ['http://169.254.169.254/latest/meta-data/', 'http://[::1]:8787/', 'http://localhost:8787/api/projects', 'https://caddie.test/api/projects']) {
+			const denied = await fetchVia(target);
+			expect(denied.status).toBe(403);
+			expect(JSON.parse(denied.body).error).toBe('egress_denied');
+		}
+		// An allowed site that redirects to a private address is stopped at the hop.
+		const bounced = await fetchVia('https://bounce.example.com/');
+		expect(bounced.status).toBe(403);
+		expect(JSON.parse(bounced.body).reason).toBe('private-address');
 	});
 
 	test('every Set-Cookie survives the relay', async () => {

@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { AuthEnv } from "../auth.ts";
 import { ScopeError, requireProjectScope } from "../scope.ts";
+import { resolveAppSecrets } from "../app-secrets.ts";
+import { SecretBoxError, keyringFromEnv } from "../secret-box.ts";
 import {
   workflowSnapshot,
   reconcileStalledBuild,
@@ -290,11 +292,12 @@ export function createBuildWorkflowRouter(
 
   // Backend previews: the preview frame relays its fetch('/api/…') calls here
   // (it has no network of its own). The app's server bundle runs in a Worker
-  // Loader isolate with this project's preview database and no network.
+  // Loader isolate with this project's preview database, the app's own keys,
+  // and outside requests only through Caddie's egress gate.
   router.post("/projects/:projectId/workflow/preview/:outputId/app", async (c) => {
     const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
     const env = c.env as AuthEnv & PreviewRuntimeBindings;
-    const exportsOf = (c.executionCtx as unknown as { exports?: PreviewExports } | undefined)?.exports;
+    const exportsOf = previewExports(c);
     if (!env.LOADER || !env.PREVIEW_DB || !exportsOf?.PreviewDatabaseGateway)
       throw new ScopeError(
         503,
@@ -318,9 +321,9 @@ export function createBuildWorkflowRouter(
         projectId: scope.projectId,
         outputId,
         serverSource: bundle.server,
-        vars: {},
+        vars: await previewKeys(env, scope.projectId),
         database: exportsOf.PreviewDatabaseGateway({ props: { projectId: scope.projectId } }),
-        globalOutbound: null,
+        globalOutbound: exportsOf.PreviewOutbound ? exportsOf.PreviewOutbound({ props: { projectId: scope.projectId } }) : null,
         request,
       });
       return c.json(relayed);
@@ -347,5 +350,35 @@ export function createBuildWorkflowRouter(
   return router;
 }
 
-type PreviewRuntimeBindings = { LOADER?: WorkerLoaderLike } & PreviewDatabaseEnv;
-type PreviewExports = { PreviewDatabaseGateway?(options: { props: { projectId: string } }): unknown };
+type PreviewRuntimeBindings = { LOADER?: WorkerLoaderLike; APP_SECRETS_KEYS?: string } & PreviewDatabaseEnv;
+type PreviewExports = {
+  PreviewDatabaseGateway?(options: { props: { projectId: string } }): unknown;
+  PreviewOutbound?(options: { props: { projectId: string } }): unknown;
+};
+
+/** The Worker's own entrypoints (ctx.exports). Hono's executionCtx getter throws when there is none (tests, Bun). */
+function previewExports(c: { executionCtx: unknown }): PreviewExports | undefined {
+  try {
+    return (c.executionCtx as { exports?: PreviewExports } | undefined)?.exports;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The app's own keys for its preview, opened server-side. A server without a
+ * keyring has no keys to give (the preview still runs); a key that can no
+ * longer be opened is left out, and the Keys card says to paste it again.
+ */
+async function previewKeys(env: PreviewRuntimeBindings & { DB: AuthEnv["DB"] }, projectId: string): Promise<Record<string, string>> {
+  if (!(env.APP_SECRETS_KEYS ?? "").trim()) return {};
+  try {
+    return (await resolveAppSecrets(env.DB, await keyringFromEnv(env), projectId)).values;
+  } catch (error) {
+    if (error instanceof SecretBoxError) {
+      console.error("preview: app keys unavailable:", error.code);
+      return {};
+    }
+    throw error;
+  }
+}

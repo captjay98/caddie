@@ -594,11 +594,13 @@ export async function previewCacheKey(parts: {
 	outputId: string;
 	serverSource: string;
 	vars: Record<string, string>;
+	/** 'none' (no network) or 'gate' (Caddie's egress policy): part of the env too. */
+	egress?: 'none' | 'gate';
 }): Promise<string> {
 	const vars = Object.keys(parts.vars)
 		.sort()
 		.map((name) => [name, parts.vars[name]]);
-	const material = JSON.stringify([parts.projectId, parts.outputId, parts.serverSource, vars]);
+	const material = JSON.stringify([parts.projectId, parts.outputId, parts.serverSource, vars, parts.egress ?? 'none']);
 	const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material)));
 	return [...digest.slice(0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
@@ -618,7 +620,7 @@ export async function runPreviewApp(input: {
 	globalOutbound: unknown;
 	request: Request;
 }): Promise<BridgeResponse> {
-	const key = await previewCacheKey(input);
+	const key = await previewCacheKey({ ...input, egress: input.globalOutbound === null ? 'none' : 'gate' });
 	const env: Record<string, unknown> = { CADDIE_DB: input.database, CADDIE_VARS: input.vars };
 	if (input.platform) env.CADDIE = input.platform;
 	const stub = input.loader.get(`preview:${key}`, () =>

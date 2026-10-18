@@ -23,8 +23,10 @@ import { dispatchDueSchedules } from './server/schedules.ts';
 import { sweepStalledBuilds } from './server/build-workflow.ts';
 
 // Backend previews (docs/plans/2026-10-17-publish): the per-project preview
-// database and the RPC gateway an app's preview isolate reaches it through.
+// database and the RPC gateway an app's preview isolate reaches it through,
+// and the outbound gate every fetch the preview's server makes goes through.
 export { PreviewDatabase, PreviewDatabaseGateway } from './server/preview-database.ts';
+export { PreviewOutbound } from './server/preview-outbound.ts';
 
 /** Structural handler types (this module stays free of extra type deps). */
 interface CronController {
