@@ -11,6 +11,7 @@ import {
 	advanceImportPreviews,
 	beginImportPreview,
 	checkImportedApp,
+	importPreviewDepsFromEnv,
 	readImportPreview,
 	type ImportPreviewDeps,
 } from '../apps/app/src/server/import-preview.ts';
@@ -178,5 +179,24 @@ describe('the copied app, right after the copy', () => {
 		sqlite.prepare('update import_previews set updatedAt = ?').run(new Date(Date.now() - 10 * 60_000).toISOString());
 		expect(await advanceImportPreviews(deps())).toBe(1);
 		expect((await readImportPreview(db, scope))!.status).toBe('ready');
+	});
+
+	test('the route and the cron read the same setup from the Worker env', () => {
+		const bare = importPreviewDepsFromEnv({ DB: db });
+		expect(bare.driver).toBeNull();
+		expect(bare.store.kind).toBe('local');
+		expect(bare.baseImage).toBe('tag:tt-base:1');
+		expect(bare.loader).toBeUndefined();
+		const full = importPreviewDepsFromEnv({
+			DB: db,
+			CONTREE_BASE_URL: stub.url,
+			CONTREE_API_TOKEN: 'local-import-token',
+			CONTREE_PROJECT_ID: 'local-project',
+			CONTREE_IMAGE: IMAGE,
+			LOADER: loader(200),
+		});
+		expect(full.driver).not.toBeNull();
+		expect(full.baseImage).toBe(IMAGE);
+		expect(full.loader).toBeDefined();
 	});
 });

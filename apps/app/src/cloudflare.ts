@@ -24,6 +24,7 @@ import { sweepStalledBuilds } from './server/build-workflow.ts';
 import { advanceSafetyChecks, recheckLiveApps } from './server/publish.ts';
 import { publishDepsFromEnv, type PublishEnv } from './server/publish-env.ts';
 import { createWebRisk } from './server/adapters/web-risk.ts';
+import { advanceImportPreviews, importPreviewDepsFromEnv, type ImportPreviewEnv } from './server/import-preview.ts';
 
 // Backend previews (docs/plans/2026-10-17-publish): the per-project preview
 // database and the RPC gateway an app's preview isolate reaches it through,
@@ -42,7 +43,7 @@ interface CronController {
 }
 
 export default {
-	async scheduled(controller: CronController, env: Pick<AuthEnv, 'DB'> & PublishEnv & { WEB_RISK_API_KEY?: string }, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<void> {
+	async scheduled(controller: CronController, env: Pick<AuthEnv, 'DB'> & PublishEnv & ImportPreviewEnv & { WEB_RISK_API_KEY?: string }, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<void> {
 		ctx.waitUntil(
 			dispatchDueSchedules(env.DB, Date.now()).then((fired) => {
 				if (fired > 0) {
@@ -60,6 +61,17 @@ export default {
 				})
 				.catch((error: unknown) => {
 					console.error('[builds] stall sweep failed', error instanceof Error ? error.message : error);
+				}),
+		);
+		// "Start from my GitHub repo": finish building copied apps whose card
+		// nobody has open (the tab was closed right after the copy).
+		ctx.waitUntil(
+			advanceImportPreviews(importPreviewDepsFromEnv(env))
+				.then((settled) => {
+					if (settled > 0) console.log(`[import-preview] cron ${controller.cron} settled ${settled} copied app(s)`);
+				})
+				.catch((error: unknown) => {
+					console.error('[import-preview] sweep failed', error instanceof Error ? error.message : error);
 				}),
 		);
 		// Published apps (only when publishing is set up): finish safety scans that

@@ -31,6 +31,7 @@ import {
 } from "../workflow-dispatch.ts";
 import { projectExperience, approvePlan } from "../project-experience.ts";
 import { buildActivity } from "../build-activity.ts";
+import { checkImportedApp, importPreviewDepsFromEnv, readImportPreview, type ImportPreviewEnv } from "../import-preview.ts";
 import { acceptProposal, dismissProposal, getProposal } from "../project-proposals.ts";
 import { projectHackathon } from "../project-hackathon.ts";
 import { ApprovePlanCommandSchema } from "@caddie/contracts";
@@ -90,7 +91,20 @@ export function createBuildWorkflowRouter(
     const snapshot = await workflowSnapshot(c.env.DB, scope);
     const previewId = snapshot.workflow?.previewId ?? null;
     const previewHasServer = previewId ? (await readBuildBundle(c.env.DB, scope, previewId).catch(() => null)) !== null : false;
-    return c.json({ ...snapshot, previewHasServer });
+    // "Start from my GitHub repo": the copied app, shown until the first build has a preview of its own.
+    const importPreview = await readImportPreview(c.env.DB, scope);
+    return c.json({ ...snapshot, previewHasServer, importPreview });
+  });
+
+  // Carry the copied app's build forward (import-preview.ts). The card calls
+  // this while it shows "checking"; it may run for minutes (install + build)
+  // or answer "checking" at once when the sandbox is busy with the same work.
+  router.post("/projects/:projectId/import-preview/check", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const env = c.env as typeof c.env & ImportPreviewEnv;
+    const importPreview = await checkImportedApp(importPreviewDepsFromEnv(env), scope);
+    if (!importPreview) throw new ScopeError(404, "no_import_preview", "This project didn't start from GitHub.");
+    return c.json({ importPreview });
   });
 
   // Build activity: the honest "what is Caddie doing right now?" read while a
