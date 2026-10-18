@@ -624,16 +624,7 @@ export async function storeBuildOutput(
       "STALE_CHECK",
       "Checks no longer match the current plan.",
     );
-  const bytes = new TextEncoder().encode(input.html);
-  if (!input.html.toLowerCase().includes("<html") || bytes.length > 500_000)
-    throw new ScopeError(
-      422,
-      "INVALID_PREVIEW",
-      "A complete HTML preview of at most 500 KB is required.",
-    );
-  const content = await createD1ContentStore(db).put(bytes);
-  const manifestSha256 = input.bundle ? await storeBundleManifest(db, input.bundle) : null;
-  const id = `out_${hash(`${scope.projectId}:${plan.id}:${input.image}:${content.contentHash}${manifestSha256 ? `:${manifestSha256}` : ""}`).slice(0, 32)}`;
+  const { id, contentHash, manifestSha256 } = await prepareOutput(db, scope.projectId, plan.id, input);
   await db.batch([
     db
       .prepare(
@@ -645,7 +636,7 @@ export async function storeBuildOutput(
         workflow.runId,
         plan.id,
         input.image,
-        content.contentHash,
+        contentHash,
         manifestSha256,
         now(),
       ),
@@ -684,7 +675,50 @@ export async function storeBuildOutput(
       "STALE_CHECK",
       "The plan or approval changed before publication. Run checks against the latest approved plan.",
     );
-  return { outputId: id, sha256: content.contentHash };
+  return { outputId: id, sha256: contentHash };
+}
+
+/** Validate and store a preview document (and its bundle); the output id follows from the content. */
+async function prepareOutput(
+  db: D1Database,
+  projectId: string,
+  planId: string,
+  input: { html: string; image: string; bundle?: BuildBundleInput },
+) {
+  const bytes = new TextEncoder().encode(input.html);
+  if (!input.html.toLowerCase().includes("<html") || bytes.length > 500_000)
+    throw new ScopeError(
+      422,
+      "INVALID_PREVIEW",
+      "A complete HTML preview of at most 500 KB is required.",
+    );
+  const content = await createD1ContentStore(db).put(bytes);
+  const manifestSha256 = input.bundle ? await storeBundleManifest(db, input.bundle) : null;
+  const id = `out_${hash(`${projectId}:${planId}:${input.image}:${content.contentHash}${manifestSha256 ? `:${manifestSha256}` : ""}`).slice(0, 32)}`;
+  return { id, contentHash: content.contentHash, manifestSha256 };
+}
+
+/**
+ * The copied app's preview ("Start from my GitHub repo", import-preview.ts):
+ * the same output record a checked build makes, tied to the imported version
+ * instead of a plan. It never moves the build workflow — the card shows it
+ * until the first build has a preview of its own.
+ */
+export async function storeImportedOutput(
+  db: D1Database,
+  scope: Scope,
+  input: { html: string; image: string; commitId: string; bundle: BuildBundleInput },
+) {
+  await assertProjectScope(db, scope);
+  const source = `import:${input.commitId}`;
+  const { id, contentHash, manifestSha256 } = await prepareOutput(db, scope.projectId, source, input);
+  await db
+    .prepare(
+      "insert or ignore into workflow_outputs (id,projectId,runId,planId,image,sha256,manifestSha256,createdAt) values (?,?,?,?,?,?,?,?)",
+    )
+    .bind(id, scope.projectId, source, source, input.image, contentHash, manifestSha256, now())
+    .run();
+  return { outputId: id, sha256: contentHash };
 }
 /** The checked build's server bundle and migrations, or null when it has no server. */
 export async function readBuildBundle(

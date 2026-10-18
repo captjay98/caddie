@@ -2,8 +2,9 @@ import type { AuthEnv } from "./auth.ts";
 import type { RunBindingRecord } from "@caddie/contracts";
 import type { CoordinatorHostContext } from "../agents/coordinator.ts";
 import type { SandboxToolDeps } from "../agents/tools.ts";
-import { D1SandboxPersistence } from "./adapters/sandbox-persistence.ts";
-import { SandboxDriver, SandboxError } from "./adapters/sandbox.ts";
+import { BUILD_RUNTIME_ENV, DEFAULT_BASE_IMAGE, buildSandboxFromEnv } from "./build-sandbox.ts";
+import { previewDocument, readBuiltApp } from "./built-app.ts";
+import { type SandboxDriver, SandboxError } from "./adapters/sandbox.ts";
 import { bytesToBase64, base64ToBytes } from "./adapters/contree.ts";
 import {
   lookupRunByConversation,
@@ -161,9 +162,7 @@ export async function createCoordinatorContext(
   let planRevision = run.planRevision;
   const sessionId = `session:${runId}`;
   const root = `/workspace/${scope.projectId}`;
-  // tt-base installs Bun outside the non-login shell's default PATH.
-  // Only runtime locations enter the sandbox, never the Worker's environment.
-  const runtimeEnv = { PATH: "/root/.bun/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin" };
+  const runtimeEnv = BUILD_RUNTIME_ENV;
   let driver: SandboxDriver | null = null;
   let sessionReady: Promise<string> | null = null;
   const ensureSession = async () => {
@@ -186,22 +185,7 @@ export async function createCoordinatorContext(
         "The build sandbox is not configured. Planning remains available.",
       );
     }
-    driver ??= new SandboxDriver(
-      {
-        contree: {
-          baseUrl: env.CONTREE_BASE_URL,
-          apiToken: env.CONTREE_API_TOKEN,
-          platformProjectId: env.CONTREE_PROJECT_ID,
-        },
-        quotas: {
-          maxCommandTimeoutMs: 15 * 60_000,
-          maxOutputBytes: 5 * 1024 * 1024,
-          maxUploadBytes: 20 * 1024 * 1024,
-        },
-        workspaceRoot: "/workspace",
-      },
-      new D1SandboxPersistence(env.DB),
-    );
+    driver ??= buildSandboxFromEnv(env)!;
     // A rollback or Restore points the build at another session; a working
     // copy the sandbox no longer keeps is started again from the saved code.
     // A failed open is not cached, so the next call in this context retries.
@@ -212,7 +196,7 @@ export async function createCoordinatorContext(
       scope,
       runId,
       sessionKey: sessionId,
-      baseImage: env.CONTREE_IMAGE ?? "tag:tt-base:1",
+      baseImage: env.CONTREE_IMAGE ?? DEFAULT_BASE_IMAGE,
       root,
       installCommand: SCAFFOLD_COMMANDS.install.join(" && "),
       env: runtimeEnv,
@@ -611,32 +595,9 @@ export async function createCoordinatorContext(
         "STALE_BUILD",
         "Files changed after the build. Run checks again.",
       );
-    const js = new TextDecoder().decode(
-      base64ToBytes(
-        (await driver.readFile(id, `${root}/dist/main.js`)).contentBase64,
-      ),
-    );
-    let css = "";
-    if (await driver.pathExists(id, `${root}/dist/main.css`))
-      css = new TextDecoder().decode(
-        base64ToBytes(
-          (await driver.readFile(id, `${root}/dist/main.css`)).contentBase64,
-        ),
-      );
     // Backend apps: the server bundle and the migrations travel with the
     // checked output (previews and publishing read them from there).
-    const readText = async (path: string) =>
-      new TextDecoder().decode(base64ToBytes((await driver.readFile(id, path)).contentBase64));
-    const server = (await driver.pathExists(id, `${root}/dist/server.js`))
-      ? await readText(`${root}/dist/server.js`)
-      : null;
-    const migrations: { name: string; sql: string }[] = [];
-    if (server !== null && (await driver.pathExists(id, `${root}/migrations`))) {
-      for (const entry of await driver.listEntries(id, `${root}/migrations`)) {
-        if (entry.isFile && /^\d{4}_[A-Za-z0-9_.-]+\.sql$/.test(entry.name))
-          migrations.push({ name: entry.name, sql: await readText(`${root}/migrations/${entry.name}`) });
-      }
-    }
+    const { js, css, server, migrations } = await readBuiltApp(driver, id, root);
     // The version history: the app's source as checked (same skip rules as the
     // GitHub save — no dependencies, build output or secrets). Never fails the
     // build: a version that can't be saved is logged and the preview still lands.
@@ -702,12 +663,7 @@ export async function createCoordinatorContext(
         };
       }
     }
-    const html =
-      '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your app</title><style>' +
-      css.replace(/<\/style/gi, "<\\/style") +
-      '</style></head><body><div id="root"></div><script type="module">' +
-      js.replace(/<\/script/gi, "<\\/script") +
-      "</script></body></html>";
+    const html = previewDocument({ js, css });
     signal?.throwIfAborted();
     const output = await storeBuildOutput(env.DB, scope, {
       html,
