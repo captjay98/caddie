@@ -21,7 +21,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -43,7 +43,41 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 	const design = options.designBody
 		? { id: 'design-1', projectId: PROJECT.id, kind: 'design', revision: 2, bodyHash: 'sha256-design-1', body: options.designBody, createdBy: 'actor-workflow', createdAt: NOW }
 		: null;
-	const snapshot = () => ({ workflow: { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null, design, designApproval: null });
+	const snapshot = () => ({ workflow: { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null, design, designApproval: null, ...(options.keys ? { previewHasServer: true } : {}) });
+	// App keys for a backend app: names and status only, exactly like the server.
+	const keys = {
+		list: [
+			{ name: 'WEATHER_API_KEY', status: 'requested', description: 'Lets the app read the forecast from OpenWeather.', helpUrl: 'https://home.openweathermap.org/api_keys', requested: true, createdAt: NOW, updatedAt: NOW },
+		] as Array<Record<string, unknown>>,
+		writes: [] as Array<{ method: string; name: string; body: unknown }>,
+	};
+	const keysRoute = (route: Route, method: string, path: string): Promise<void> | null => {
+		if (!options.keys || !/\/keys(\/|$)/.test(path)) return null;
+		const name = decodeURIComponent(path.split('/keys/')[1] ?? '');
+		if (method === 'GET' && !name) return json(route, 200, { configured: true, keys: keys.list });
+		if (method === 'PUT' && name) {
+			const body = route.request().postDataJSON() as { value?: string };
+			keys.writes.push({ method, name, body });
+			if (!/^[A-Z][A-Z0-9_]{1,63}$/.test(name)) return json(route, 400, { error: 'invalid_input', message: 'A key name uses capital letters, digits and underscores, like WEATHER_API_KEY.' });
+			const existing = keys.list.find((k) => k.name === name);
+			const key = { ...(existing ?? { name, description: null, helpUrl: null, requested: false, createdAt: NOW }), status: 'set', updatedAt: NOW };
+			keys.list = existing ? keys.list.map((k) => (k.name === name ? key : k)) : [...keys.list, key];
+			return json(route, 200, { key });
+		}
+		if (method === 'DELETE' && name) {
+			keys.writes.push({ method, name, body: null });
+			const existing = keys.list.find((k) => k.name === name);
+			if (!existing) return json(route, 404, { error: 'key_not_found', message: 'This app has no key with that name.' });
+			if (existing.requested) {
+				const back = { ...existing, status: 'requested' };
+				keys.list = keys.list.map((k) => (k.name === name ? back : k));
+				return json(route, 200, { key: back });
+			}
+			keys.list = keys.list.filter((k) => k.name !== name);
+			return json(route, 200, { key: null });
+		}
+		return json(route, 405, { error: 'method_not_allowed' });
+	};
 	// "Save the code to GitHub": a linked repo, the server-side save, and the
 	// merge that only runs once an approval for the exact head commit exists.
 	const repo = { projectId: PROJECT.id, installationId: '6100001', repoFullName: 'octo/todoer', visibility: 'private', origin: 'connected', htmlUrl: 'https://github.com/octo/todoer' };
@@ -91,6 +125,8 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		const request = route.request(), path = new URL(request.url()).pathname;
 		const githubReply = githubRoute(route, request.method(), path);
 		if (githubReply) return githubReply;
+		const keysReply = keysRoute(route, request.method(), path);
+		if (keysReply) return keysReply;
 		if (path === '/api/auth/status') return json(route, 200, { authenticated: true });
 		if (path === '/api/onboarding') return json(route, 200, { completedAt: NOW });
 		if (path === '/api/auth/get-session') return json(route, 200, { session: { userId: 'actor-workflow' }, user: { id: 'actor-workflow', name: 'Ada', email: 'ada@example.test' } });
@@ -180,7 +216,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		return route.fulfill({ contentType: 'application/json', headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' }, body: JSON.stringify({ v: 1, conversationId, offset: OFFSET, messages: options.repeatHandoff ? [...messages, ...messages.map(m => ({...m, id: m.id + '-continued'}))] : messages, settlements: [] }) });
 	});
 	return {
-		workflow, decisions, admissions, acks, stops, rollbacks, github,
+		workflow, decisions, admissions, acks, stops, rollbacks, github, keys,
 		get previewReads() { return previewReads; },
 		revise() { currentPlan = plan(currentPlan.revision + 1); workflow.planId = currentPlan.id; workflow.phase = 'review'; workflow.pendingKey = null; workflow.pendingBody = null; },
 		ready() { workflow.phase = 'ready'; workflow.previewId = 'output-workflow'; workflow.pendingKey = null; workflow.pendingBody = null; },
@@ -461,6 +497,71 @@ test('a finished build saves its code as a pull request and merges it only after
 		decision: 'approved',
 	}]);
 	expect(state.github.merges).toEqual([{ repoFullName: 'octo/todoer', headSha: 'abc1234def5678abc1234def5678abc1234def56' }]);
+});
+
+test('an app with a server lists the keys it needs; a key is pasted once and never shown again', async ({ page, context }) => {
+	const state = await fixture(context, { phase: 'ready', keys: true });
+	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
+	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	const panel = card.getByTestId('app-keys');
+	const shot = async (name: string) => {
+		const dir = process.env.CADDIE_SHOTS;
+		if (!dir) return;
+		await panel.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		await panel.screenshot({ path: `${dir}/app-keys-${mobile ? 'mobile-' : ''}${name}.png` });
+	};
+
+	// The builder's request, in plain words, with where to get it.
+	const weather = panel.getByTestId('app-key-WEATHER_API_KEY');
+	await expect(panel.getByTestId('app-keys-needed')).toHaveText('1 needed');
+	await expect(weather).toHaveAttribute('data-status', 'requested');
+	await expect(weather).toContainText('Lets the app read the forecast from OpenWeather.');
+	await expect(weather.getByRole('link', { name: 'Where to get it (home.openweathermap.org)' })).toHaveAttribute('href', 'https://home.openweathermap.org/api_keys');
+	await shot('1-needed');
+
+	// Paste once: a password field, then only "Saved" ever comes back.
+	await weather.getByTestId('app-key-edit-WEATHER_API_KEY').click();
+	const input = weather.getByTestId('app-key-input-WEATHER_API_KEY');
+	await expect(input).toHaveAttribute('type', 'password');
+	await input.fill('ow_live_not_a_real_key');
+	await shot('2-paste');
+	await weather.getByTestId('app-key-save-WEATHER_API_KEY').click();
+	await expect(weather).toHaveAttribute('data-status', 'set');
+	await expect(weather).toContainText('Saved');
+	await expect(panel.getByTestId('app-keys-needed')).toHaveCount(0);
+	await expect(page.getByText('ow_live_not_a_real_key')).toHaveCount(0);
+	expect(state.keys.writes).toEqual([{ method: 'PUT', name: 'WEATHER_API_KEY', body: { value: 'ow_live_not_a_real_key' } }]);
+	await shot('3-saved');
+
+	// The owner's own key: the name is shaped as they type.
+	await panel.getByTestId('app-keys-add').click();
+	await panel.getByTestId('app-keys-new-name').fill('maps key');
+	await expect(panel.getByTestId('app-keys-new-name')).toHaveValue('MAPS_KEY');
+	await panel.getByTestId('app-keys-new-value').fill('maps-123');
+	await panel.getByTestId('app-keys-new-save').click();
+	await expect(panel.getByTestId('app-key-MAPS_KEY')).toHaveAttribute('data-status', 'set');
+
+	// Removing asks first; a requested key goes back to needed, an own key disappears.
+	await weather.getByTestId('app-key-remove-WEATHER_API_KEY').click();
+	await expect(weather.getByRole('group', { name: 'Remove WEATHER_API_KEY' })).toContainText('The app will ask for it again.');
+	await weather.getByTestId('app-key-remove-confirm-WEATHER_API_KEY').click();
+	await expect(weather).toHaveAttribute('data-status', 'requested');
+	await panel.getByTestId('app-key-remove-MAPS_KEY').click();
+	await panel.getByTestId('app-key-remove-confirm-MAPS_KEY').click();
+	await expect(panel.getByTestId('app-key-MAPS_KEY')).toHaveCount(0);
+	expect(state.keys.writes.map((w) => `${w.method} ${w.name}`)).toEqual(['PUT WEATHER_API_KEY', 'PUT MAPS_KEY', 'DELETE WEATHER_API_KEY', 'DELETE MAPS_KEY']);
+});
+
+test('a client-only app shows no Keys section', async ({ page, context }) => {
+	await fixture(context, { phase: 'ready' });
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	await expect(card.getByRole('link', { name: 'Download app' })).toBeVisible();
+	await expect(card.getByTestId('app-keys')).toHaveCount(0);
 });
 
 test('mobile Home chat retains the embedded workflow and opens its explicit project only when requested', async ({ page, context }) => {

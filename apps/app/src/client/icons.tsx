@@ -51,7 +51,8 @@ export type IconName =
 	| 'camera'
 	| 'chevronDown'
 	| 'expand'
-	| 'collapse';
+	| 'collapse'
+	| 'key';
 
 interface IconProps {
 	name: IconName;
@@ -261,6 +262,12 @@ const PATHS: Record<IconName, ReactElement> = {
 		</>
 	),
 	chevronDown: <path d="M4 6.5 8 10.5l4-4" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
+	key: (
+		<>
+			<circle cx="5.5" cy="10.5" r="3" fill="none" stroke="currentColor" />
+			<path d="M7.6 8.4 13.5 2.5M11.5 4.5l1.5 1.5M10 6l1.2 1.2" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
+	),
 };
 
 export function Icon({ name, title, className }: IconProps): ReactElement {

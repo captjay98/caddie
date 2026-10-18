@@ -6493,6 +6493,35 @@ body.conv-resizing * {
 .save-github-confirm-text { flex: 1 1 100%; font-size: var(--r-meta); color: var(--color-bright); }
 .save-github-confirm-text code { font-size: 0.95em; }
 .save-github-error { color: var(--color-danger); }
+
+/* Keys for outside services (Publish stage 8): one list, rows separated by rules, no nested boxes. */
+.app-keys { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.app-keys-head { display: flex; align-items: center; gap: 8px; }
+.app-keys-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.app-keys-head > svg { color: var(--color-muted); flex: none; }
+.app-keys-intro, .app-keys-empty { margin: 0; }
+.app-keys-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.app-keys-row { display: grid; gap: 8px; padding: 10px 0; border-top: 1px solid var(--color-line-soft); }
+.app-keys-row:first-child { border-top: 0; padding-top: 2px; }
+.app-keys-what { display: grid; gap: 4px; min-width: 0; }
+.app-keys-desc { color: var(--color-bright); font-size: 14px; overflow-wrap: anywhere; }
+.app-keys-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: var(--r-meta); color: var(--color-muted); }
+.app-keys-meta code { font-size: 0.95em; overflow-wrap: anywhere; }
+.app-keys-meta .badge svg { width: 12px; height: 12px; }
+.app-keys-help { font-size: var(--r-meta); overflow-wrap: anywhere; justify-self: start; }
+.app-keys-form { display: grid; gap: 6px; max-width: 420px; }
+.app-keys-label, .app-keys-hint { font-size: var(--r-meta); color: var(--color-muted); }
+.app-keys-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: var(--r-meta); color: var(--color-bright); }
+.app-keys-error { margin: 0; color: var(--color-danger); font-size: var(--r-meta); }
+.app-keys-add { justify-self: start; display: inline-flex; align-items: center; gap: 6px; }
+/* .r-link on a <button>: drop the browser's default button box so it reads as a link. */
+.app-keys button.r-link { background: none; border: 0; padding: 2px 0; font-family: inherit; cursor: pointer; }
+.app-keys button.r-link:disabled { opacity: 0.5; cursor: default; }
+.app-keys button.r-link:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; border-radius: 4px; }
+@media (min-width: 640px) {
+	.app-keys-row { grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: 16px; }
+	.app-keys-row > .app-keys-form, .app-keys-row > .app-keys-confirm, .app-keys-row > .app-keys-error { grid-column: 1 / -1; }
+}
 .workflow-repo-nudge { color: var(--color-muted); }
 
 /* Code (§4): the connected-repo state + create/connect forms. */
