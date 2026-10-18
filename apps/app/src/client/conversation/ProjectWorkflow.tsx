@@ -18,6 +18,7 @@ import { PlanFeatureList, SavedFeatures } from "../project/FeatureChecklist.tsx"
 import { AppKeys } from "../project/AppKeys.tsx";
 import { PublishApp } from "../project/PublishApp.tsx";
 import { AppVersions } from "../project/AppVersions.tsx";
+import { AppAi } from "../project/AppAi.tsx";
 
 interface Snapshot {
   workflow: BuildWorkflow | null;
@@ -471,6 +472,7 @@ export function ProjectWorkflow({
           <AppKeys actorId={chrome.actorId} projectId={projectId} hasServer={Boolean(state.data?.previewHasServer)} />
           <PublishApp actorId={chrome.actorId} projectId={projectId} />
           <AppVersions actorId={chrome.actorId} projectId={projectId} onRestored={() => state.refetch()} />
+          <AppAi actorId={chrome.actorId} projectId={projectId} />
           <SaveToGithub
             actorId={chrome.actorId}
             projectId={projectId}

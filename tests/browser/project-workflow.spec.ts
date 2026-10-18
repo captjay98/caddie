@@ -21,7 +21,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean } } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -220,6 +220,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		if (publishReply) return publishReply;
 		const versionsReply = versionsRoute(route, request.method(), path);
 		if (versionsReply) return versionsReply;
+		if (options.ai && path.endsWith('/ai-usage')) return json(route, 200, { available: true, month: '2026-10', renewsOn: '2026-11-01', ...options.ai });
 		if (path === '/api/auth/status') return json(route, 200, { authenticated: true });
 		if (path === '/api/onboarding') return json(route, 200, { completedAt: NOW });
 		if (path === '/api/auth/get-session') return json(route, 200, { session: { userId: 'actor-workflow' }, user: { id: 'actor-workflow', name: 'Ada', email: 'ada@example.test' } });
@@ -791,6 +792,47 @@ test('Versions lists every checked build and goes back to an earlier one in two 
 	await expect(panel.getByTestId('version-4')).toContainText('Restored version 1');
 	expect(state.versions.restores.map((r) => r.commitId)).toEqual([(1).toString(16).padStart(40, 'a')]);
 	expect(state.versions.restores[0]!.key).toMatch(/^restore-[0-9a-f]{12}-\d+$/);
+});
+
+test("AI in your app shows this month's answers and allowance; when it runs out it says when AI answers again", async ({ page, context }) => {
+	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
+	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+	const shot = async (panel: import('@playwright/test').Locator, name: string) => {
+		const dir = process.env.CADDIE_SHOTS;
+		if (!dir) return;
+		await panel.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		await panel.screenshot({ path: `${dir}/ai-${mobile ? 'mobile-' : ''}${name}.png` });
+	};
+	const ai = { calls: 12, usedPercent: 4, limitReached: false };
+	await fixture(context, { phase: 'ready', ai });
+	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	const panel = card.getByTestId('app-ai');
+	await expect(panel.getByRole('heading', { name: 'AI in your app' })).toBeVisible();
+	await expect(panel.getByTestId('app-ai-summary')).toHaveText('12 answers · 4% used');
+	await expect(panel.getByRole('img', { name: "4% of this month's AI allowance used" })).toBeVisible();
+	await expect(panel.getByTestId('app-ai-paused')).toHaveCount(0);
+	await expect(panel).not.toContainText('Paused');
+	await shot(panel, '1-used');
+
+	// Later the same month: the allowance ran out.
+	Object.assign(ai, { calls: 340, usedPercent: 100, limitReached: true });
+	await page.reload();
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	await expect(panel).toContainText('Paused');
+	await expect(panel.getByTestId('app-ai-summary')).toHaveText('340 answers · 100% used');
+	await expect(panel.getByTestId('app-ai-paused')).toContainText('This month’s allowance is used up. Your app’s AI answers again on');
+	await shot(panel, '2-paused');
+});
+
+test('an app that never used AI shows no AI section', async ({ page, context }) => {
+	await fixture(context, { phase: 'ready' });
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	await expect(card.getByRole('link', { name: 'Download app' })).toBeVisible();
+	await expect(card.getByTestId('app-ai')).toHaveCount(0);
 });
 
 test('one version needs no Versions list', async ({ page, context }) => {

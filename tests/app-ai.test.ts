@@ -161,6 +161,26 @@ describe('AI inside apps', () => {
 		expect(appAiDepsFromEnv({ APP_AI_MONTHLY_LIMIT_CENTS: 'lots' })).toEqual({ apiKey: null, monthlyLimitCents: APP_AI_LIMITS.defaultMonthlyCents });
 	});
 
+	test('GET /projects/:id/ai-usage answers the card without caching; scope refusals keep their status', async () => {
+		const { createAppAiRouter } = await import('../apps/app/src/server/routes/app-ai.ts');
+		const { ScopeError } = await import('../apps/app/src/server/scope.ts');
+		const router = createAppAiRouter({
+			scopeFor: async (_env, request) => {
+				if (request.headers.get('x-test-user') !== 'owner-1') throw new ScopeError(403, 'forbidden', 'Not your project.');
+				return projectScopeForUser(db, 'owner-1', projectId);
+			},
+			depsFor: () => deps,
+		});
+		const env = { DB: db } as never;
+		const ok = await router.request(`/projects/${projectId}/ai-usage`, { headers: { 'x-test-user': 'owner-1' } }, env);
+		expect(ok.status).toBe(200);
+		expect(ok.headers.get('cache-control')).toBe('no-store');
+		expect(await ok.json()).toEqual({ available: true, month: '2026-10', calls: 0, usedPercent: 0, limitReached: false, renewsOn: '2026-11-01' });
+		const refused = await router.request(`/projects/${projectId}/ai-usage`, {}, env);
+		expect(refused.status).toBe(403);
+		expect(await refused.json()).toEqual({ error: 'forbidden', message: 'Not your project.' });
+	});
+
 	test('the entrypoints take the project and the mode from Caddie, never from the app', async () => {
 		const { AppPlatform, PublishedAppPlatform } = await import('../apps/app/src/server/app-platform.ts');
 		type Ctor = new (ctx: unknown, env: unknown) => { ai(...args: unknown[]): Promise<unknown> };

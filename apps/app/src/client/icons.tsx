@@ -52,7 +52,8 @@ export type IconName =
 	| 'chevronDown'
 	| 'expand'
 	| 'collapse'
-	| 'key';
+	| 'key'
+	| 'sparkle';
 
 interface IconProps {
 	name: IconName;
@@ -266,6 +267,12 @@ const PATHS: Record<IconName, ReactElement> = {
 		<>
 			<circle cx="5.5" cy="10.5" r="3" fill="none" stroke="currentColor" />
 			<path d="M7.6 8.4 13.5 2.5M11.5 4.5l1.5 1.5M10 6l1.2 1.2" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
+	),
+	sparkle: (
+		<>
+			<path d="M7 2c.5 2.8 1.7 4 4.5 4.5C8.7 7 7.5 8.2 7 11c-.5-2.8-1.7-4-4.5-4.5C5.3 6 6.5 4.8 7 2z" fill="none" stroke="currentColor" strokeLinejoin="round" />
+			<path d="M12.2 10.2c.2 1 .6 1.4 1.6 1.6-1 .2-1.4.6-1.6 1.6-.2-1-.6-1.4-1.6-1.6 1-.2 1.4-.6 1.6-1.6z" fill="none" stroke="currentColor" strokeLinejoin="round" />
 		</>
 	),
 };

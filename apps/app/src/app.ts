@@ -20,6 +20,7 @@ import { createPreviewsRouter } from './server/routes/previews.ts';
 import { createAppKeysRouter } from './server/routes/app-keys.ts';
 import { createPublishRouter } from './server/routes/publish.ts';
 import { createVersionsRouter } from './server/routes/versions.ts';
+import { createAppAiRouter } from './server/routes/app-ai.ts';
 import { createReportRouter } from './server/routes/report.ts';
 import { createOperatorRouter } from './server/routes/operator.ts';
 import { SandboxError } from './server/adapters/sandbox.ts';
@@ -82,6 +83,8 @@ type Env = {
 	ABUSE_INBOX?: string;
 	OPERATOR_EMAILS?: string;
 	WEB_RISK_API_KEY?: string;
+	/** AI inside apps: each project's monthly allowance in US cents (default 100). Uses NEBIUS_API_KEY. */
+	APP_AI_MONTHLY_LIMIT_CENTS?: string;
 };
 
 registerNebiusProvider();
@@ -107,6 +110,7 @@ api.route('/', createBriefRouter());
 api.route('/', createAppKeysRouter());
 api.route('/', createPublishRouter());
 api.route('/', createVersionsRouter());
+api.route('/', createAppAiRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------

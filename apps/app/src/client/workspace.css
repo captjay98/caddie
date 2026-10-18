@@ -6544,6 +6544,19 @@ body.conv-resizing * {
 .app-versions button.r-link:disabled { opacity: 0.5; cursor: default; }
 .app-versions button.r-link:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; border-radius: 4px; }
 
+/* AI in the app (Publish stage 9): same rhythm as Keys; one row and a thin bar, no nested boxes. */
+.app-ai { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.app-ai-head { display: flex; align-items: center; gap: 8px; }
+.app-ai-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.app-ai-head > svg { color: var(--color-muted); flex: none; }
+.app-ai-intro, .app-ai-paused { margin: 0; }
+.app-ai-row { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 4px 12px; }
+.app-ai-what { font-size: 13px; color: var(--color-bright); }
+.app-ai-meta { font-size: var(--r-meta); color: var(--color-muted); text-align: right; }
+.app-ai-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--color-line-soft); overflow: hidden; }
+.app-ai-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--color-ok); }
+.app-ai-bar > span[data-tone="warn"] { background: var(--color-warn); }
+
 /* Publish (Publish stage 4): same rhythm as Keys; one list of facts and actions, no nested boxes. */
 .publish-app { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
 .publish-head { display: flex; align-items: center; gap: 8px; }
