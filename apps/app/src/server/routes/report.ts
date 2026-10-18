@@ -135,9 +135,38 @@ function thanksPage(): string {
 	);
 }
 
+/** Shown when Caddie's own secret is missing, so no reporter hash can be derived. Nothing is stored. */
+function unavailablePage(): string {
+	return page(
+		'Report an app',
+		`<h1>Report an app</h1>
+<p>Caddie can't take reports right now. Try again in a little while.</p>`,
+	);
+}
+
+/**
+ * The label Caddie binds the reporter rate-limit key with. A purpose-specific
+ * key, so the reporter hash never rides on the bare session secret.
+ */
+export const REPORT_RATE_LIMIT_LABEL = 'caddie-report-ratelimit:v1';
+
+/**
+ * Derive the reporter rate-limit key from Caddie's own secret (HMAC-SHA256),
+ * the same trick `appAuthSecret` uses to bind app sign-in secrets to a purpose.
+ * Null when the master secret is missing or shorter than 16 characters — there
+ * is no literal fallback, and callers store nothing without a key.
+ */
+export async function reportRateLimitKey(masterSecret: string | undefined, label: string = REPORT_RATE_LIMIT_LABEL): Promise<string | null> {
+	const master = (masterSecret ?? '').trim();
+	if (master.length < 16) return null;
+	const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(master), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+	const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(label)));
+	return [...mac].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /** A keyed, daily-rotating hash of the visitor's IP: enough to rate-limit, useless to identify them. */
-async function reporterHash(secret: string, ip: string, now: Date): Promise<string> {
-	const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret || 'caddie-report'), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+async function reporterHash(keyMaterial: string, ip: string, now: Date): Promise<string> {
+	const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(keyMaterial), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
 	const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${ip}|${now.toISOString().slice(0, 10)}`)));
 	return [...mac.slice(0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
@@ -180,7 +209,9 @@ export function createReportRouter(options: ReportRouterOptions = {}): Hono<{ Bi
 		// The honeypot: people never see this field; a bot that fills it gets a thank-you and nothing is stored.
 		if ((form.get('website') ?? '').trim() !== '') return c.body(thanksPage(), 200, PAGE_HEADERS);
 		try {
-			const hash = await reporterHash(c.env.BETTER_AUTH_SECRET ?? '', request.headers.get('cf-connecting-ip') ?? 'unknown', new Date());
+			const key = await reportRateLimitKey(c.env.BETTER_AUTH_SECRET);
+			if (key === null) return c.body(unavailablePage(), 503, PAGE_HEADERS);
+			const hash = await reporterHash(key, request.headers.get('cf-connecting-ip') ?? 'unknown', new Date());
 			await fileAbuseReport(
 				c.env.DB,
 				{ slug: values.app, source: 'visitor', category: values.category, details: values.details, reporterEmail: values.email, reporterHash: hash },

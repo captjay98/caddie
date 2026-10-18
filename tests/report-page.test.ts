@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Database } from 'bun:sqlite';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import { listAbuseReports } from '../apps/app/src/server/abuse-reports.ts';
-import { createReportRouter } from '../apps/app/src/server/routes/report.ts';
+import { createReportRouter, reportRateLimitKey } from '../apps/app/src/server/routes/report.ts';
 import { migratedDatabase } from './fixtures/sqlite-d1.ts';
 
 /**
@@ -17,18 +17,18 @@ describe('report page', () => {
 	let sqlite: Database;
 	let db: D1Database;
 	let inbox: string[];
-	const env = () => ({ DB: db, APPS_DOMAIN: 'caddieapps.com', BETTER_AUTH_SECRET: 'test-secret-0123456789' }) as never;
+	const env = (overrides: Record<string, unknown> = {}) => ({ DB: db, APPS_DOMAIN: 'caddieapps.com', BETTER_AUTH_SECRET: 'test-secret-0123456789', ...overrides }) as never;
 	const router = createReportRouter({
 		notifierFor: () => async (subject) => {
 			inbox.push(subject);
 			return true;
 		},
 	});
-	const post = (fields: Record<string, string>, headers: Record<string, string> = {}) =>
+	const post = (fields: Record<string, string>, headers: Record<string, string> = {}, environment = env()) =>
 		router.request(
 			`${ORIGIN}/report`,
 			{ method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: ORIGIN, 'cf-connecting-ip': '203.0.113.7', ...headers }, body: new URLSearchParams(fields).toString() },
-			env(),
+			environment,
 		);
 
 	beforeEach(() => {
@@ -90,5 +90,43 @@ describe('report page', () => {
 		// A different visitor is not affected.
 		expect((await post({ app: 'farm-log', category: 'other', details: 'someone else' }, { 'cf-connecting-ip': '198.51.100.9' })).status).toBe(200);
 		expect((await listAbuseReports(db)).length).toBe(6);
+	});
+
+	test('the reporter key is purpose-bound to the report rate limit, never the bare secret', async () => {
+		const secret = 'test-secret-0123456789';
+		const key = await reportRateLimitKey(secret);
+		expect(key).toMatch(/^[0-9a-f]{64}$/);
+		expect(key).not.toBe(secret);
+		// Same secret, same label: the key is stable, and the default label is the report one.
+		expect(await reportRateLimitKey(secret)).toBe(key);
+		expect(await reportRateLimitKey(secret, 'caddie-report-ratelimit:v1')).toBe(key);
+		// A different purpose label (the way appAuthSecret binds app sign-in) gives a different key.
+		expect(await reportRateLimitKey(secret, 'caddie-app-auth:v1')).not.toBe(key);
+		expect(await reportRateLimitKey(secret, 'caddie-judge-ratelimit:v1')).not.toBe(key);
+		// Missing, blank or too-short secrets yield no key at all: no literal fallback.
+		expect(await reportRateLimitKey(undefined)).toBeNull();
+		expect(await reportRateLimitKey('')).toBeNull();
+		expect(await reportRateLimitKey('   ')).toBeNull();
+		expect(await reportRateLimitKey('short')).toBeNull();
+	});
+
+	test('the same visitor on the same day hashes to the same key; a different visitor does not', async () => {
+		await post({ app: 'farm-log', category: 'other', details: 'first from this visitor' });
+		await post({ app: 'farm-log', category: 'other', details: 'second from this visitor' });
+		await post({ app: 'farm-log', category: 'other', details: 'another visitor entirely' }, { 'cf-connecting-ip': '198.51.100.9' });
+		const hashes = (sqlite.prepare('select reporterHash from abuse_reports order by rowid').all() as Array<{ reporterHash: string }>).map((row) => row.reporterHash);
+		expect(hashes[0]).toMatch(/^[0-9a-f]{32}$/);
+		expect(hashes[1]).toBe(hashes[0]);
+		expect(hashes[2]).not.toBe(hashes[0]);
+	});
+
+	test('without a usable master secret the report page says so and stores nothing', async () => {
+		for (const secret of [undefined, '', 'short-secret']) {
+			const res = await post({ app: 'farm-log', category: 'other', details: 'a report while the key is missing' }, {}, env({ BETTER_AUTH_SECRET: secret }));
+			expect(res.status).toBe(503);
+			expect(await res.text()).toContain("Caddie can't take reports right now.");
+		}
+		expect(await listAbuseReports(db)).toEqual([]);
+		expect(inbox).toEqual([]);
 	});
 });
