@@ -160,4 +160,17 @@ describe('AI inside apps', () => {
 		expect(appAiDepsFromEnv({ NEBIUS_API_KEY: ' k ', APP_AI_MONTHLY_LIMIT_CENTS: '250' })).toEqual({ apiKey: 'k', monthlyLimitCents: 250 });
 		expect(appAiDepsFromEnv({ APP_AI_MONTHLY_LIMIT_CENTS: 'lots' })).toEqual({ apiKey: null, monthlyLimitCents: APP_AI_LIMITS.defaultMonthlyCents });
 	});
+
+	test('the entrypoints take the project and the mode from Caddie, never from the app', async () => {
+		const { AppPlatform, PublishedAppPlatform } = await import('../apps/app/src/server/app-platform.ts');
+		type Ctor = new (ctx: unknown, env: unknown) => { ai(...args: unknown[]): Promise<unknown> };
+		// The published side is live mode: an app that isn't published gets a plain no, before any model call.
+		const published = new (PublishedAppPlatform as unknown as Ctor)({}, { DB: db, NEBIUS_API_KEY: 'k' });
+		expect(await published.ai(projectId, ask('hi'))).toEqual({ ok: false, reason: 'unavailable', message: "This app isn't published right now." });
+		expect(await published.ai('', ask('hi'))).toMatchObject({ ok: false, reason: 'unavailable' });
+		// The preview side reads the project from its props; without a key it says AI isn't set up.
+		const preview = new (AppPlatform as unknown as Ctor)({ props: { projectId } }, { DB: db });
+		expect(await preview.ai({ ...ask('hi'), projectId: 'someone-else' })).toEqual({ ok: false, reason: 'unavailable', message: "AI isn't available for apps on this Caddie server yet." });
+		expect(usageRows()).toHaveLength(0);
+	});
 });

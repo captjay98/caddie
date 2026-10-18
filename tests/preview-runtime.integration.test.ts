@@ -173,6 +173,13 @@ describe('backend preview runtime under workerd', () => {
 		expect(JSON.parse(bounced.body).reason).toBe('private-address');
 	});
 
+	test("env.CADDIE reaches Caddie's platform over RPC, always for the app's own project", async () => {
+		const asked = await run({ method: 'GET', path: '/api/ask?q=soup%3F' }, { platform: true });
+		expect(JSON.parse(atob(asked.relayed.body))).toEqual({ ok: true, text: 'proj-a asked: soup?' });
+		const without = await run({ method: 'GET', path: '/api/ask?q=soup%3F' });
+		expect(JSON.parse(atob(without.relayed.body))).toEqual({ ok: false, reason: 'no_platform' });
+	});
+
 	test('every Set-Cookie survives the relay', async () => {
 		const res = await run({ method: 'GET', path: '/api/cookie' });
 		const cookies = res.relayed.headers.filter(([name]: [string]) => name === 'set-cookie').map(([, value]: [string, string]) => value);

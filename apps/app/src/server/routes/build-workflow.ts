@@ -293,7 +293,8 @@ export function createBuildWorkflowRouter(
   // Backend previews: the preview frame relays its fetch('/api/…') calls here
   // (it has no network of its own). The app's server bundle runs in a Worker
   // Loader isolate with this project's preview database, the app's own keys,
-  // and outside requests only through Caddie's egress gate.
+  // Caddie's platform (env.CADDIE: AI) for this project, and outside requests
+  // only through Caddie's egress gate.
   router.post("/projects/:projectId/workflow/preview/:outputId/app", async (c) => {
     const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
     const env = c.env as AuthEnv & PreviewRuntimeBindings;
@@ -323,6 +324,7 @@ export function createBuildWorkflowRouter(
         serverSource: bundle.server,
         vars: await previewKeys(env, scope.projectId),
         database: exportsOf.PreviewDatabaseGateway({ props: { projectId: scope.projectId } }),
+        platform: exportsOf.AppPlatform ? exportsOf.AppPlatform({ props: { projectId: scope.projectId } }) : undefined,
         globalOutbound: exportsOf.PreviewOutbound ? exportsOf.PreviewOutbound({ props: { projectId: scope.projectId } }) : null,
         request,
       });
@@ -354,6 +356,7 @@ type PreviewRuntimeBindings = { LOADER?: WorkerLoaderLike; APP_SECRETS_KEYS?: st
 type PreviewExports = {
   PreviewDatabaseGateway?(options: { props: { projectId: string } }): unknown;
   PreviewOutbound?(options: { props: { projectId: string } }): unknown;
+  AppPlatform?(options: { props: { projectId: string } }): unknown;
 };
 
 /** The Worker's own entrypoints (ctx.exports). Hono's executionCtx getter throws when there is none (tests, Bun). */

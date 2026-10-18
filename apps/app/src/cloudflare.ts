@@ -30,6 +30,7 @@ import { createWebRisk } from './server/adapters/web-risk.ts';
 // and the outbound gate every fetch the preview's server makes goes through.
 export { PreviewDatabase, PreviewDatabaseGateway } from './server/preview-database.ts';
 export { PreviewOutbound } from './server/preview-outbound.ts';
+export { AppPlatform, PublishedAppPlatform } from './server/app-platform.ts';
 
 /** Structural handler types (this module stays free of extra type deps). */
 interface CronController {

@@ -2,11 +2,23 @@
 // preview runtime (Worker Loader + PreviewDatabase Durable Object + gateway +
 // outbound gate) under real workerd via `wrangler dev`. Test-only; never
 // deployed.
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import { bridgeRequestToRequest, checkServerStarts, runPreviewApp, type WorkerLoaderLike } from '../../apps/app/src/server/preview-runtime.ts';
 import { previewDatabaseFor, type PreviewDatabaseEnv } from '../../apps/app/src/server/preview-database.ts';
 import { PreviewOutbound } from '../../apps/app/src/server/preview-outbound.ts';
 
 export { PreviewDatabase, PreviewDatabaseGateway } from '../../apps/app/src/server/preview-database.ts';
+
+/**
+ * A stand-in for AppPlatform with the same shape (props-bound projectId, an
+ * ai(request) RPC method) and no model call, so the test proves the plumbing:
+ * a ctx.exports stub in the isolate's env, called over RPC by the app.
+ */
+export class TestPlatform extends WorkerEntrypoint<Record<string, never>, { projectId: string }> {
+	async ai(request: { messages?: { content?: string }[] }) {
+		return { ok: true, text: `${this.ctx.props.projectId} asked: ${request.messages?.at(-1)?.content ?? ''}` };
+	}
+}
 
 /**
  * The real gate (policy, redirect handling, logging) with the internet swapped
@@ -24,6 +36,7 @@ type Ctx = {
 	exports: {
 		PreviewDatabaseGateway(options: { props: { projectId: string } }): unknown;
 		TestOutbound(options: { props: { projectId: string } }): unknown;
+		TestPlatform(options: { props: { projectId: string } }): unknown;
 	};
 };
 
@@ -48,6 +61,7 @@ export default {
 					serverSource: body.serverSource,
 					vars: body.vars ?? {},
 					database: ctx.exports.PreviewDatabaseGateway({ props: { projectId: body.projectId } }),
+					platform: body.platform ? ctx.exports.TestPlatform({ props: { projectId: body.projectId } }) : undefined,
 					globalOutbound: body.egress === 'gate' ? ctx.exports.TestOutbound({ props: { projectId: body.projectId } }) : null,
 					request: bridgeRequestToRequest(body.request),
 				});

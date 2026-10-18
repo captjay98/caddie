@@ -10,11 +10,22 @@ interface D1Like {
 	};
 }
 
-type Env = { DB: D1Like; WEATHER_KEY?: string };
+type Env = {
+	DB: D1Like;
+	WEATHER_KEY?: string;
+	CADDIE?: { ai(request: unknown): Promise<{ ok: boolean; text?: string; reason?: string; message?: string }> };
+};
 
 const app = new Hono<{ Bindings: Env }>().basePath('/api');
 
 app.get('/health', (c) => c.json({ ok: true }));
+
+// AI the way generated apps use it: env.CADDIE.ai(), no key in the app. The
+// app also tries to name another project — Caddie's capability ignores it.
+app.get('/ask', async (c) => {
+	if (!c.env.CADDIE) return c.json({ ok: false, reason: 'no_platform' });
+	return c.json(await c.env.CADDIE.ai({ messages: [{ role: 'user', content: c.req.query('q') ?? '' }], projectId: 'proj-b' }));
+});
 
 app.get('/notes', async (c) => {
 	const { results } = await c.env.DB.prepare('select id, body from notes order by id').all();
