@@ -23,6 +23,8 @@ is the checklist and the record.
 | Cloudflare Artifacts binding (`ARTIFACTS`, Workers Paid, open beta) | app versions in a git repo per project | optional — without it versions live in Caddie's D1 |
 | AI inside apps: `NEBIUS_API_KEY` (already set for Caddie) plus the monthly allowance per app, `APP_AI_MONTHLY_LIMIT_CENTS` (US cents, default 100; Caddie pays — the provider bills per token, see Nebius's price page) | `env.CADDIE.ai()` in previews and published apps | allowance: owner decision; without the key apps' AI answers "not available" |
 | Dispatch Worker's `CADDIE_PLATFORM` service binding to Caddie's `PublishedAppPlatform` entrypoint (`workers/dispatch/wrangler.jsonc`, PROPOSED) | AI in published apps | BLOCKED with the rest of Publish |
+| Sign-in emails for apps' own users: `RESEND_API_KEY` + `RESEND_FROM` (Caddie's mailer; the text is fixed and names the app's address) | codes for published apps' users (previews use the test inbox and send nothing) | without them published apps' sign-in says emails "aren't set up" |
+| `BETTER_AUTH_SECRET` (already Caddie's own) | each app's sign-in cookie secret is derived from it per project and mode (HMAC), never stored | required for sign-in in previews and published apps |
 
 Secrets go directly into `.dev.vars` (gitignored). Never in chat, never in
 artifacts.

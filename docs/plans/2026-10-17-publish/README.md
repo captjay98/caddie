@@ -68,20 +68,21 @@ and 390px screenshots.
 
 Reserved migration numbers: 0026 code versions, 0027 app secrets, 0028 app
 publishing (publications, databases, domains), 0029 abuse reports, 0030 AI
-usage in apps.
+usage in apps, 0031 apps' sign-in codes and the preview test inbox.
 
 ## Status (2026-10-18, branch `feat/publish-on-cloudflare`, not pushed)
 
 | Stage | State | Evidence |
 |---|---|---|
-| 1. Code store | Port, Artifacts adapter, local D1 store, versions service; every checked build is a version (verify_build); Versions list + Restore in the project card; a build whose sandbox working copy is gone continues from the newest saved version (dependencies reinstalled, lost features re-queued; no version = start again from the plan). Not yet: feature-level commits (features keep their image save points), GitHub save from the store, "Start from my GitHub repo" | SIMULATED (Artifacts); LOCAL VERIFIED (local store, verify_build and working-copy restarts against the sandbox stand-in, Restore); the real sandbox's answer for an expired image is unverified |
+| 1. Code store | Port, Artifacts adapter, local D1 store, versions service; every checked build is a version (verify_build); Versions list + Restore in the project card; a build whose sandbox working copy is gone continues from the newest saved version (dependencies reinstalled, lost features re-queued; no version = start again from the plan); "Start from my GitHub repo" for apps made with Caddie (stack check; the copy becomes version 1 and the first build starts from it; the copy never takes dependencies, build output or secrets). Not yet: other stacks (Vite/Lovable exports), feature-level commits (features keep their image save points), GitHub save from the store, a preview before the first build | SIMULATED (Artifacts, GitHub); LOCAL VERIFIED (local store, verify_build and working-copy restarts against the sandbox stand-in, Restore, import); the real sandbox's answer for an expired image is unverified |
 | 2. Backend-ready stack | Done | LOCAL VERIFIED (`scripts/refresh-scaffold-lock.ts --check`, local Bun 1.3.14); the sandbox's own Bun is unverified |
 | 3. Previews | Done: Worker Loader isolate, preview database, relay + fetch bridge, Reset test data, runs-on-Cloudflare check, egress gate | LOCAL VERIFIED under workerd (`wrangler dev`); live Worker Loader BLOCKED |
 | 4. Publish | Done: Cloudflare adapter, dispatch + outbound Worker (PROPOSED configs), publish service (0028), routes, Publish card | SIMULATED (real adapter against the local Cloudflare stub; dispatch handlers under Bun); live BLOCKED |
 | 5. Safety | Done: one Worker per deployment and a URL Scanner check on a private address before the public address switches (flagged = taken down + reported), daily Web Risk recheck, takedown/restore, public Report page, operator review page, abuse inbox email, confirmed email to publish, egress policy, CSP/headers/host-only cookies, Report link, 451 page, address rules, destructive-migration approval (0029) | SIMULATED (stubs for Cloudflare and Web Risk); live BLOCKED |
 | 8. App keys | Done: keyring, sealed `app_secrets` (0027), routes, Keys card, builder `request_app_key`, injection into previews and published Workers | LOCAL VERIFIED |
 | 9. AI in apps | Done: `env.CADDIE.ai({ messages, json? })` on Caddie's Nebius route (role `app`), monthly allowance per project with reserve/settle usage records (0030), per-minute cap, live only while published; preview capability (`AppPlatform`, props-bound), published capability through the dispatch Worker (`props.CADDIE` → `PublishedAppPlatform`, PROPOSED); template types + `createTestAi`; builder guidance; AI-provider keys refused; "AI in your app" in the card | LOCAL VERIFIED (service on real migrations, RPC plumbing under workerd, template via `refresh-scaffold-lock --check`); SIMULATED (model provider, dispatch props); live BLOCKED |
-| 6, 7, 10 | Not started (10 is BLOCKED) | — |
+| 6, 10 | Not started (10 is BLOCKED) | — |
+| 7. App logins | Done: template `caddie/auth.ts` (Better Auth 1.7.10 on the app's D1, 6-digit email codes, 30-day sessions; `mountSignIn` / `requireUser`), `<SignIn />` / `useUser()`, `migrations/0000_caddie_auth.sql`, test helpers; codes through `env.CADDIE.signInCode` (preview test inbox in the card; live fixed-text email via Caddie's mailer, published apps only; capped per person and per app, 0031); per-app cookie secret derived from Caddie's secret | LOCAL VERIFIED (scaffold check under Bun with 1.7.10; workerd run of the template's sign-in with Caddie's installed 1.7.7); live email BLOCKED |
 
 ## Owner inputs (BLOCKED until provided)
 
