@@ -278,6 +278,11 @@ export class CloudflareAppHost implements AppHost {
 	async deploy(input: AppHostDeployInput): Promise<{ script: string }> {
 		assertScriptName(input.script);
 		assertAssets(input.assets);
+		for (const name of Object.keys(input.modules ?? {})) {
+			if (name === 'index.js' || !/^[A-Za-z0-9_-]+\.js$/.test(name)) {
+				throw new AppHostError('INVALID_INPUT', `module name ${name} is not allowed`, 400);
+			}
+		}
 
 		const completionJwt = await this.uploadAssets(input.script, input.assets);
 		const mainModule = 'index.js';
@@ -307,6 +312,9 @@ export class CloudflareAppHost implements AppHost {
 			new Blob([moduleSource], { type: 'application/javascript+module' }),
 			mainModule,
 		);
+		for (const [name, source] of Object.entries(input.modules ?? {})) {
+			form.append(name, new Blob([source], { type: 'application/javascript+module' }), name);
+		}
 
 		await this.call(
 			'PUT',

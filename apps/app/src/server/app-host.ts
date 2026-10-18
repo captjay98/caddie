@@ -37,6 +37,11 @@ export interface AppHostDeployInput {
 	 * static-only app (the adapter then uploads a minimal assets-only module).
 	 */
 	serverModule: string | null;
+	/**
+	 * More ES modules the main module imports, by file name (e.g. `app.js`:
+	 * the app's own server under Caddie's published entry). Never `index.js`.
+	 */
+	modules?: Readonly<Record<string, string>>;
 	bindings: AppHostBinding[];
 	/** e.g. `project:<id>`, `owner:<userId>`; used for bulk cleanup. */
 	tags: string[];

@@ -17,6 +17,7 @@ import {
 	restoreTakenDownApp,
 	rollbackApp,
 	scriptNameFor,
+	PUBLISHED_ENTRY_SOURCE,
 	suggestSlug,
 	takeDownApp,
 	unpublishApp,
@@ -203,6 +204,9 @@ describe('publish service', () => {
 		// What reached Cloudflare.
 		const script = stub.scripts.get(scriptNameFor(scope.projectId, 1))!;
 		expect(script.hasModule).toBe(true);
+		// The app's own server runs under Caddie's entry, which hands it env.CADDIE.
+		expect(Object.keys(script.modules).sort()).toEqual(['app.js', 'index.js']);
+		expect(script.modules['index.js']).toBe(PUBLISHED_ENTRY_SOURCE);
 		const bindings = script.bindings as Array<Record<string, unknown>>;
 		expect(bindings.find((b) => b['name'] === 'DB')).toMatchObject({ type: 'd1' });
 		expect(bindings.find((b) => b['name'] === 'WEATHER_API_KEY')).toMatchObject({ type: 'secret_text', text: 'ow-live-secret-123' });

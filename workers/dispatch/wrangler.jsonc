@@ -28,6 +28,10 @@
 		}
 	],
 	"kv_namespaces": [{ "binding": "ROUTES", "id": "<ROUTES_KV_NAMESPACE_ID>" }],
+	// Caddie's platform for published apps (AI): the main Caddie Worker's
+	// PublishedAppPlatform entrypoint. Apps never get this binding; each request
+	// gets a capability bound to its own project (AppPlatform in src/index.ts).
+	"services": [{ "binding": "CADDIE_PLATFORM", "service": "caddie-app", "entrypoint": "PublishedAppPlatform" }],
 	"vars": {
 		"CADDIE_ORIGIN": "https://<CADDIE_HOST>",
 		"APPS_DOMAIN": "<APPS_DOMAIN>"

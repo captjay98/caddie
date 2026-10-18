@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { AppRoute } from '../packages/contracts/src/publish.ts';
-import { appCsp, handleDispatch, hostOnlyCookie, type DispatchEnv } from '../workers/dispatch/src/index.ts';
+import { AppPlatform, appCsp, handleDispatch, hostOnlyCookie, type DispatchEnv } from '../workers/dispatch/src/index.ts';
 import { handleOutbound, outboundDecision } from '../workers/dispatch/src/outbound.ts';
 
 /**
@@ -28,12 +28,14 @@ function route(overrides: Partial<AppRoute> = {}): AppRoute {
 
 function world(routes: Record<string, unknown>, app: (request: Request) => Response | Promise<Response> = () => new Response('ok')) {
 	const gets: Array<{ name: string; options: unknown }> = [];
+	const args: unknown[] = [];
 	const seen: Request[] = [];
 	const env: DispatchEnv = {
 		ROUTES: { get: async (key: string) => routes[key] ?? null },
 		DISPATCHER: {
 			get(name, _args, options) {
 				gets.push({ name, options });
+				args.push(_args);
 				if (name === 'missing-script') throw new Error('Worker not found.');
 				if (name === 'broken-script') throw new Error('internal: isolate exploded at 0xdeadbeef');
 				return {
@@ -47,12 +49,43 @@ function world(routes: Record<string, unknown>, app: (request: Request) => Respo
 		CADDIE_ORIGIN: ORIGIN,
 		APPS_DOMAIN: 'caddieapps.com',
 	};
-	return { env, gets, seen };
+	return { env, gets, seen, args };
 }
 
 const html = (body: string, headers: Record<string, string> = {}) => new Response(body, { headers: { 'content-type': 'text/html; charset=utf-8', ...headers } });
 
 describe('dispatch Worker', () => {
+	test("an app with a server gets env.CADDIE for its own project; a static app gets none", async () => {
+		const { env, args } = world({
+			'route:farmlog.caddieapps.com': route(),
+			'route:poster.caddieapps.com': route({ slug: 'poster', script: 'app-poster', projectId: 'proj-2', hasServer: false }),
+		});
+		const forwarded: unknown[][] = [];
+		env.CADDIE_PLATFORM = { ai: async (projectId, request) => { forwarded.push([projectId, request]); return { ok: true, text: 'Try soup.' }; } };
+		const made: Array<{ projectId: string }> = [];
+		const ctx = {
+			exports: {
+				AppPlatform: (options: { props: { projectId: string } }) => {
+					made.push(options.props);
+					return new AppPlatform({ props: options.props } as never, env);
+				},
+			},
+		};
+		await handleDispatch(new Request('https://farmlog.caddieapps.com/api/ask'), env, ctx);
+		await handleDispatch(new Request('https://poster.caddieapps.com/'), env, ctx);
+		expect(made).toEqual([{ projectId: 'proj-1' }]);
+		expect(args[1]).toEqual({});
+		const platform = (args[0] as { props: { CADDIE: AppPlatform } }).props.CADDIE;
+		expect(platform).toBeInstanceOf(AppPlatform);
+		// Each call reaches Caddie with the route's project, whatever the app sends.
+		const request = { messages: [{ role: 'user', content: 'Dinner?' }], projectId: 'proj-2' };
+		expect(await platform.ai(request)).toEqual({ ok: true, text: 'Try soup.' });
+		expect(forwarded).toEqual([['proj-1', request]]);
+		// Without the binding the app gets a plain no, not a crash.
+		delete env.CADDIE_PLATFORM;
+		expect(await platform.ai(request)).toMatchObject({ ok: false, reason: 'unavailable' });
+	});
+
 	test('health and reserved paths never reach an app', async () => {
 		const { env, gets } = world({ 'route:farmlog.caddieapps.com': route() });
 		const health = await handleDispatch(new Request('https://farmlog.caddieapps.com/__caddie/health'), env);

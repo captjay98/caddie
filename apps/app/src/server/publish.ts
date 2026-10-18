@@ -36,6 +36,22 @@ import { fileAbuseReport, type OperatorNotifier } from './abuse-reports.ts';
 
 export const PUBLISH_POLICY_VERSION = 'publish/2026-10-18';
 const COMPATIBILITY_DATE = '2026-06-01';
+
+/**
+ * The published Worker's main module. The app's own server is `app.js`; this
+ * entry hands it `env.CADDIE` — the platform capability (AI) the dispatch
+ * Worker passes per request in `ctx.props` (workers/dispatch) — so the app's
+ * code reads env.CADDIE the same way in its tests, its preview and live.
+ */
+export const PUBLISHED_ENTRY_SOURCE = `import app from "./app.js";
+export default {
+  async fetch(request, env, ctx) {
+    if (!app || typeof app.fetch !== "function") return new Response(JSON.stringify({ error: "app_has_no_server" }), { status: 500, headers: { "content-type": "application/json" } });
+    const platform = ctx && ctx.props ? ctx.props.CADDIE : undefined;
+    return app.fetch(request, platform ? Object.assign({}, env, { CADDIE: platform }) : env, ctx);
+  },
+};
+`;
 /** A run older than this with nothing waiting on it was interrupted. Longer than the scan timeout. */
 const RUN_STALE_MS = 20 * 60_000;
 const PROBE_BACKOFF_MS = [1000, 2000, 4000, 8000, 8000];
@@ -482,7 +498,8 @@ async function deployOutput(
 		await deps.host.deploy({
 			script: candidateScript,
 			assets,
-			serverModule: bundle.server,
+			serverModule: bundle.server !== null ? PUBLISHED_ENTRY_SOURCE : null,
+			...(bundle.server !== null ? { modules: { 'app.js': bundle.server } } : {}),
 			bindings,
 			tags: [`project:${scope.projectId}`, `workspace:${scope.workspaceId}`],
 			compatibilityDate: COMPATIBILITY_DATE,

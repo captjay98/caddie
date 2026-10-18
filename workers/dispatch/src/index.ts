@@ -12,7 +12,8 @@
  *      "isn't published right now"; blocked -> 451 takedown page with a link
  *      to Caddie; live -> the app's user Worker in the dispatch namespace,
  *      with the record's CPU/subrequest limits and the project/slug passed to
- *      the outbound Worker (outbound.ts).
+ *      the outbound Worker (outbound.ts). An app with a server also gets
+ *      env.CADDIE (AppPlatform below) through `props`, bound to its project.
  *   3. Incoming `x-caddie-*` headers are removed before the app sees them.
  *   4. Every app response gets nosniff + a referrer policy; HTML documents
  *      also get Caddie's CSP APPENDED (an app's own policy still applies; a
@@ -22,6 +23,7 @@
  *   5. "Worker not found" -> 404 page; anything else -> 502 page with no
  *      internals.
  */
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import { routeKey, type AppRoute } from '../../../packages/contracts/src/publish.ts';
 import { dispatchPage, escapeAttr, reportUrl } from './pages.ts';
 
@@ -38,6 +40,26 @@ export interface DispatchEnv {
 	CADDIE_ORIGIN: string;
 	/** The apps domain, e.g. caddieapps.com. */
 	APPS_DOMAIN: string;
+	/** Service binding to Caddie's PublishedAppPlatform entrypoint (AI for published apps). */
+	CADDIE_PLATFORM?: { ai(projectId: string, request: unknown): Promise<unknown> };
+}
+
+/** The per-request context: ctx.exports makes the props-bound platform capability. */
+export interface DispatchContext {
+	exports?: { AppPlatform?(options: { props: { projectId: string } }): unknown };
+}
+
+/**
+ * env.CADDIE for a published app. The dispatch Worker makes one per request
+ * with the project from the route record and hands it to the app's Worker in
+ * `props`; the app can call ai() but can't read or change which project it
+ * is. Each call goes to Caddie's PublishedAppPlatform over the service binding.
+ */
+export class AppPlatform extends WorkerEntrypoint<DispatchEnv, { projectId: string }> {
+	async ai(request: unknown): Promise<unknown> {
+		if (!this.env.CADDIE_PLATFORM) return { ok: false, reason: 'unavailable', message: "AI isn't available for this app right now." };
+		return this.env.CADDIE_PLATFORM.ai(this.ctx.props.projectId, request);
+	}
 }
 
 /**
@@ -156,7 +178,7 @@ function isWorkerNotFound(error: unknown): boolean {
 	return error instanceof Error && error.message.startsWith('Worker not found');
 }
 
-export async function handleDispatch(request: Request, env: DispatchEnv): Promise<Response> {
+export async function handleDispatch(request: Request, env: DispatchEnv, ctx?: DispatchContext): Promise<Response> {
 	const url = new URL(request.url);
 	const pageOptions = { caddieOrigin: env.CADDIE_ORIGIN, method: request.method };
 	if (url.pathname === '/__caddie/health' || url.pathname.startsWith('/__caddie/')) {
@@ -179,7 +201,9 @@ export async function handleDispatch(request: Request, env: DispatchEnv): Promis
 
 	let response: Response;
 	try {
-		const worker = env.DISPATCHER.get(route.script, {}, {
+		// An app with a server gets Caddie's platform (env.CADDIE) for its own project.
+		const platform = route.hasServer ? ctx?.exports?.AppPlatform?.({ props: { projectId: route.projectId } }) : undefined;
+		const worker = env.DISPATCHER.get(route.script, platform ? { props: { CADDIE: platform } } : {}, {
 			limits: { cpuMs: route.limits.cpuMs, subRequests: route.limits.subRequests },
 			outbound: { projectId: route.projectId, slug: route.slug },
 		});
@@ -193,7 +217,7 @@ export async function handleDispatch(request: Request, env: DispatchEnv): Promis
 }
 
 export default {
-	fetch(request: Request, env: DispatchEnv): Promise<Response> {
-		return handleDispatch(request, env);
+	fetch(request: Request, env: DispatchEnv, ctx: DispatchContext): Promise<Response> {
+		return handleDispatch(request, env, ctx);
 	},
 };

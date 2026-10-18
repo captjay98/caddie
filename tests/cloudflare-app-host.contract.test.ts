@@ -157,6 +157,21 @@ describe('deploy (Workers for Platforms scripts + assets)', () => {
 		expect(script?.bindings).toContainEqual({ type: 'service', name: 'CADDIE', service: 'caddie-platform', entrypoint: 'AppApi' });
 	});
 
+	test("extra modules (the app's server under Caddie's entry) land as their own parts; unsafe names are refused", async () => {
+		const entry = 'import app from "./app.js"; export default app;';
+		const server = 'export default { fetch(){ return new Response("app"); } };';
+		await host.deploy(deployInput({ script: 'wrapped-app', serverModule: entry, modules: { 'app.js': server } }));
+		const script = stub.scripts.get('wrapped-app');
+		expect(script?.metadata['main_module']).toBe('index.js');
+		expect(script?.modules).toEqual({ 'index.js': entry, 'app.js': server });
+		const assetsBefore = stub.storedAssets.size;
+		for (const name of ['index.js', '../app.js', 'app.mjs']) {
+			await expect(host.deploy(deployInput({ script: 'bad-modules', serverModule: entry, modules: { [name]: server } }))).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+		}
+		expect(stub.scripts.has('bad-modules')).toBe(false);
+		expect(stub.storedAssets.size).toBe(assetsBefore);
+	});
+
 	test('redeploy replaces the script in place', async () => {
 		await host.deploy(deployInput({ script: 'replace-me', tags: ['v:1'] }));
 		await host.deploy(deployInput({ script: 'replace-me', tags: ['v:2'] }));

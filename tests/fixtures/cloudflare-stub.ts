@@ -33,6 +33,8 @@ interface StubScript {
 	assets: { jwt?: unknown; config?: unknown } | null;
 	mainModule: string;
 	hasModule: boolean;
+	/** Every module part's source by name (main module included). */
+	modules: Record<string, string>;
 }
 
 interface StubDatabase {
@@ -314,6 +316,7 @@ export class CloudflareStub {
 					assets,
 					mainModule,
 					hasModule: true,
+					modules: Object.fromEntries(parts.filter((p) => p.name !== 'metadata').map((p) => [p.name, p.body.toString('utf8')])),
 				});
 				return this.envelope(res, 200, { id: name });
 			}
