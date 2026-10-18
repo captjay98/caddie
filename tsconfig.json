@@ -27,6 +27,7 @@
 		"scripts/**/*.ts",
 		"tests/**/*.ts",
 		"packages/contracts/src/**/*.ts",
+		"workers/**/*.ts",
 		"apps/app/src/vite-env.d.ts",
 		"apps/app/src/cloudflare-workers.d.ts"
 	],
