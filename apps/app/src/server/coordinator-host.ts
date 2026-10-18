@@ -674,7 +674,7 @@ export async function createCoordinatorContext(
       image: final.resultImage,
       planId: plan.id,
       runId: workflow.runId,
-      bundle: server !== null ? { server, migrations } : undefined,
+      bundle: { server, migrations, client: { js, css } },
     });
     return {
       passed: true,

@@ -561,16 +561,24 @@ export interface BuildBundleInput {
   server: string | null;
   /** migrations/NNNN_name.sql files, in name order. */
   migrations: { name: string; sql: string }[];
+  /**
+   * dist/main.js and dist/main.css as checked. The preview inlines them into
+   * one document; publishing serves them as files, because a published page
+   * may only run scripts from its own origin (the dispatch Worker's CSP).
+   */
+  client?: { js: string; css: string };
 }
 
 export interface BuildManifest {
   v: 1;
   server: { sha256: string; bytes: number } | null;
   migrations: { name: string; sha256: string }[];
+  client?: { js: { sha256: string; bytes: number }; css: { sha256: string; bytes: number } };
 }
 
 const MAX_SERVER_BUNDLE_BYTES = 3 * 1024 * 1024;
 const MAX_MIGRATION_BYTES = 256 * 1024;
+const MAX_CLIENT_FILE_BYTES = 3 * 1024 * 1024;
 
 async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Promise<string> {
   const store = createD1ContentStore(db);
@@ -590,7 +598,17 @@ async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Pr
       throw new ScopeError(422, "INVALID_MIGRATION", `${file.name} is larger than 256 KB.`);
     migrations.push({ name: file.name, sha256: (await store.put(bytes)).contentHash });
   }
-  const manifest: BuildManifest = { v: 1, server, migrations };
+  let client: BuildManifest["client"];
+  if (bundle.client) {
+    const part = async (text: string, label: string) => {
+      const bytes = new TextEncoder().encode(text);
+      if (bytes.length > MAX_CLIENT_FILE_BYTES)
+        throw new ScopeError(422, "CLIENT_TOO_LARGE", `The app's ${label} is larger than 3 MB.`);
+      return { sha256: (await store.put(bytes)).contentHash, bytes: bytes.length };
+    };
+    client = { js: await part(bundle.client.js, "script"), css: await part(bundle.client.css, "styles") };
+  }
+  const manifest: BuildManifest = { v: 1, server, migrations, ...(client ? { client } : {}) };
   return (await store.put(new TextEncoder().encode(JSON.stringify(manifest)))).contentHash;
 }
 
@@ -695,6 +713,72 @@ export async function readBuildBundle(
   const migrations = [];
   for (const file of manifest.migrations) migrations.push({ name: file.name, sql: await text(file.sha256) });
   return { server: await text(manifest.server.sha256), migrations };
+}
+
+export interface OutputManifestView {
+  manifestSha256: string;
+  publishable: boolean;
+  hasServer: boolean;
+  migrations: { name: string; sha256: string }[];
+}
+
+/** A checked output's manifest only (no file bodies): what status screens need. */
+export async function readOutputManifest(db: D1Database, scope: Scope, id: string): Promise<OutputManifestView | null> {
+  await assertProjectScope(db, scope);
+  const found = await rows(db, 'select "manifestSha256" from workflow_outputs where id = ? and projectId = ?', id, scope.projectId);
+  if (!found[0]) return null;
+  const manifestHash = found[0].manifestSha256;
+  if (manifestHash === null || manifestHash === undefined) return { manifestSha256: "", publishable: false, hasServer: false, migrations: [] };
+  const bytes = await createD1ContentStore(db).get(String(manifestHash));
+  if (!bytes) return null;
+  const manifest = JSON.parse(new TextDecoder().decode(bytes)) as BuildManifest;
+  return {
+    manifestSha256: String(manifestHash),
+    publishable: manifest.v === 1 && Boolean(manifest.client),
+    hasServer: manifest.server !== null,
+    migrations: manifest.migrations.map((m) => ({ name: m.name, sha256: m.sha256 })),
+  };
+}
+
+export interface PublishBundle {
+  /** The bundle manifest's hash: what this exact version is. */
+  manifestSha256: string;
+  js: string;
+  css: string;
+  server: string | null;
+  migrations: { name: string; sha256: string; sql: string }[];
+}
+
+/**
+ * Everything publishing needs from a checked build output, scoped to the
+ * project. A build checked before client files were kept has no `client`
+ * part; publishing it needs the checks to run again (REBUILD_TO_PUBLISH).
+ */
+export async function readPublishBundle(db: D1Database, scope: Scope, id: string): Promise<PublishBundle> {
+  await assertProjectScope(db, scope);
+  const found = await rows(db, 'select "manifestSha256" from workflow_outputs where id = ? and projectId = ?', id, scope.projectId);
+  if (!found[0]) throw new ScopeError(404, "preview_not_found", "No such version in this project.");
+  const manifestHash = found[0].manifestSha256;
+  const rebuild = () =>
+    new ScopeError(409, "REBUILD_TO_PUBLISH", "This version was checked before publishing was possible. Run the checks again, then publish.");
+  if (manifestHash === null || manifestHash === undefined) throw rebuild();
+  const store = createD1ContentStore(db);
+  const text = async (sha: string) => {
+    const bytes = await store.get(sha);
+    if (!bytes) throw new ScopeError(404, "preview_missing", "Part of this build is no longer available.");
+    return new TextDecoder().decode(bytes);
+  };
+  const manifest = JSON.parse(await text(String(manifestHash))) as BuildManifest;
+  if (manifest.v !== 1 || !manifest.client) throw rebuild();
+  const migrations = [];
+  for (const file of manifest.migrations) migrations.push({ name: file.name, sha256: file.sha256, sql: await text(file.sha256) });
+  return {
+    manifestSha256: String(manifestHash),
+    js: await text(manifest.client.js.sha256),
+    css: await text(manifest.client.css.sha256),
+    server: manifest.server ? await text(manifest.server.sha256) : null,
+    migrations,
+  };
 }
 
 export async function readBuildOutput(
