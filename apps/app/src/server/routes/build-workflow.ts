@@ -3,6 +3,7 @@ import type { AuthEnv } from "../auth.ts";
 import { ScopeError, requireProjectScope } from "../scope.ts";
 import { resolveAppSecrets } from "../app-secrets.ts";
 import { SecretBoxError, keyringFromEnv } from "../secret-box.ts";
+import { appAuthSecret, clearTestInbox, listTestInbox } from "../app-sign-in.ts";
 import {
   workflowSnapshot,
   reconcileStalledBuild,
@@ -322,7 +323,7 @@ export function createBuildWorkflowRouter(
         projectId: scope.projectId,
         outputId,
         serverSource: bundle.server,
-        vars: await previewKeys(env, scope.projectId),
+        vars: await previewVars(env, scope.projectId),
         database: exportsOf.PreviewDatabaseGateway({ props: { projectId: scope.projectId } }),
         platform: exportsOf.AppPlatform ? exportsOf.AppPlatform({ props: { projectId: scope.projectId } }) : undefined,
         globalOutbound: exportsOf.PreviewOutbound ? exportsOf.PreviewOutbound({ props: { projectId: scope.projectId } }) : null,
@@ -341,13 +342,20 @@ export function createBuildWorkflowRouter(
     }
   });
 
-  // "Reset test data": empty this project's preview database.
+  // "Reset test data": empty this project's preview database (and its test inbox).
   router.post("/projects/:projectId/workflow/preview-data/reset", async (c) => {
     const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
     const env = c.env as AuthEnv & PreviewRuntimeBindings;
     if (!env.PREVIEW_DB) throw new ScopeError(503, "PREVIEW_RUNTIME_UNAVAILABLE", "The preview database isn't available here.");
     await previewDatabaseFor(env, scope.projectId).reset();
+    await clearTestInbox(c.env.DB, scope.projectId);
     return c.json({ reset: true });
+  });
+
+  // The preview's test inbox: sign-in codes the app sent while you tried it.
+  router.get("/projects/:projectId/workflow/test-inbox", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    return c.json({ messages: await listTestInbox(c.env.DB, scope) }, 200, { "cache-control": "no-store" });
   });
   return router;
 }
@@ -384,4 +392,11 @@ async function previewKeys(env: PreviewRuntimeBindings & { DB: AuthEnv["DB"] }, 
     }
     throw error;
   }
+}
+
+/** Everything the preview's env carries as text: the app's keys and its sign-in secret. */
+async function previewVars(env: PreviewRuntimeBindings & { DB: AuthEnv["DB"]; BETTER_AUTH_SECRET?: string }, projectId: string): Promise<Record<string, string>> {
+  const vars = await previewKeys(env, projectId);
+  const authSecret = await appAuthSecret(env.BETTER_AUTH_SECRET, projectId, "preview");
+  return authSecret ? { ...vars, CADDIE_AUTH_SECRET: authSecret } : vars;
 }

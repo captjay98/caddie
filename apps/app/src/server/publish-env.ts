@@ -18,6 +18,8 @@ export type PublishEnv = Partial<CloudflareEnv> & {
 	ABUSE_INBOX?: string;
 	RESEND_API_KEY?: string;
 	RESEND_FROM?: string;
+	/** Caddie's own auth secret; each published app's sign-in secret is derived from it. */
+	BETTER_AUTH_SECRET?: string;
 };
 
 const APPS_DOMAIN = /^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
@@ -72,5 +74,5 @@ export async function publishDepsFromEnv(env: PublishEnv): Promise<PublishDeps |
 		if (error instanceof AppHostError && error.code === 'NOT_CONFIGURED') return null;
 		throw error;
 	}
-	return { host, appsDomain, keyring: await keyringOrNull(env), probe, notifyOperator: operatorNotifierFromEnv(env) };
+	return { host, appsDomain, keyring: await keyringOrNull(env), probe, notifyOperator: operatorNotifierFromEnv(env), authSecret: env.BETTER_AUTH_SECRET ?? null };
 }

@@ -4,6 +4,7 @@ import type { D1Database } from './auth.ts';
 import { AppHostError, type AppHost, type AppHostBinding, type AppHostFile, type ScanResult } from './app-host.ts';
 import { checkApprovalForEffect } from './approvals.ts';
 import { resolveAppSecrets } from './app-secrets.ts';
+import { appAuthSecret } from './app-sign-in.ts';
 import { readOutputManifest, readPublishBundle, readWorkflow, type PublishBundle } from './build-workflow.ts';
 import { createD1ContentStore } from './artifacts.ts';
 import { splitSqlScript } from './preview-runtime.ts';
@@ -70,6 +71,8 @@ export interface PublishDeps {
 	probe: (url: string) => Promise<number>;
 	/** The operator's abuse inbox (flagged apps are reported there). */
 	notifyOperator?: OperatorNotifier;
+	/** Caddie's own secret (BETTER_AUTH_SECRET): each app's sign-in secret is derived from it. */
+	authSecret?: string | null;
 	sleep?: (ms: number) => Promise<void>;
 	now?: () => string;
 }
@@ -491,9 +494,12 @@ async function deployOutput(
 
 		current = 'upload';
 		const assets = publishedAssets(project.name, bundle);
+		// The app's own sign-in secret (template caddie/auth.ts), derived per project; never stored.
+		const authSecret = bundle.server !== null ? await appAuthSecret(deps.authSecret ?? undefined, scope.projectId, 'live') : null;
 		const bindings: AppHostBinding[] = [
 			...(bundle.server !== null && databaseId ? [{ type: 'd1' as const, name: 'DB', databaseId }] : []),
 			...Object.entries(secrets).map(([name, text]) => ({ type: 'secret_text' as const, name, text })),
+			...(authSecret ? [{ type: 'secret_text' as const, name: 'CADDIE_AUTH_SECRET', text: authSecret }] : []),
 		];
 		await deps.host.deploy({
 			script: candidateScript,

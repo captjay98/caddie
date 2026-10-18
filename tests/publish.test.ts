@@ -28,6 +28,7 @@ import { createRun } from '../apps/app/src/server/runs.ts';
 import { createPublishRouter } from '../apps/app/src/server/routes/publish.ts';
 import { ScopeError, projectScopeForUser } from '../apps/app/src/server/scope.ts';
 import { parseKeyring, type Keyring } from '../apps/app/src/server/secret-box.ts';
+import { appAuthSecret } from '../apps/app/src/server/app-sign-in.ts';
 import { CloudflareStub } from './fixtures/cloudflare-stub.ts';
 import { freePort } from './fixtures/controls-harness.ts';
 import { addUser, migratedDatabase } from './fixtures/sqlite-d1.ts';
@@ -156,6 +157,7 @@ describe('publish service', () => {
 				inbox.push({ subject, text });
 				return true;
 			},
+			authSecret: 'caddie-master-secret-for-tests-0123',
 			sleep: async () => undefined,
 		};
 		const ready = await readyProject();
@@ -210,6 +212,8 @@ describe('publish service', () => {
 		const bindings = script.bindings as Array<Record<string, unknown>>;
 		expect(bindings.find((b) => b['name'] === 'DB')).toMatchObject({ type: 'd1' });
 		expect(bindings.find((b) => b['name'] === 'WEATHER_API_KEY')).toMatchObject({ type: 'secret_text', text: 'ow-live-secret-123' });
+		// The app's own sign-in secret, derived for its live mode (not one of its keys).
+		expect(bindings.find((b) => b['name'] === 'CADDIE_AUTH_SECRET')).toEqual({ type: 'secret_text', name: 'CADDIE_AUTH_SECRET', text: await appAuthSecret('caddie-master-secret-for-tests-0123', scope.projectId, 'live') });
 		const database = [...stub.databases.values()].at(-1)!;
 		expect(database.executedSql.join('\n')).toContain('create table notes');
 		expect(routeOf('farm-log')).toMatchObject({ v: 1, script: script.name, projectId: scope.projectId, slug: 'farm-log', status: 'live', hasServer: true, limits: { cpuMs: 50, subRequests: 50 } });

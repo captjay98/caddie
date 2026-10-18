@@ -61,7 +61,10 @@ describe('dispatch Worker', () => {
 			'route:poster.caddieapps.com': route({ slug: 'poster', script: 'app-poster', projectId: 'proj-2', hasServer: false }),
 		});
 		const forwarded: unknown[][] = [];
-		env.CADDIE_PLATFORM = { ai: async (projectId, request) => { forwarded.push([projectId, request]); return { ok: true, text: 'Try soup.' }; } };
+		env.CADDIE_PLATFORM = {
+			ai: async (projectId, request) => { forwarded.push([projectId, request]); return { ok: true, text: 'Try soup.' }; },
+			signInCode: async (projectId, request) => { forwarded.push(['code', projectId, request]); return { ok: true }; },
+		};
 		const made: Array<{ projectId: string }> = [];
 		const ctx = {
 			exports: {
@@ -80,10 +83,12 @@ describe('dispatch Worker', () => {
 		// Each call reaches Caddie with the route's project, whatever the app sends.
 		const request = { messages: [{ role: 'user', content: 'Dinner?' }], projectId: 'proj-2' };
 		expect(await platform.ai(request)).toEqual({ ok: true, text: 'Try soup.' });
-		expect(forwarded).toEqual([['proj-1', request]]);
+		expect(await platform.signInCode({ email: 'ada@example.com', code: '123456' })).toEqual({ ok: true });
+		expect(forwarded).toEqual([['proj-1', request], ['code', 'proj-1', { email: 'ada@example.com', code: '123456' }]]);
 		// Without the binding the app gets a plain no, not a crash.
 		delete env.CADDIE_PLATFORM;
 		expect(await platform.ai(request)).toMatchObject({ ok: false, reason: 'unavailable' });
+		expect(await platform.signInCode({ email: 'ada@example.com', code: '123456' })).toMatchObject({ ok: false, reason: 'unavailable' });
 	});
 
 	test('health and reserved paths never reach an app', async () => {
