@@ -14,6 +14,7 @@ import { addUser, migratedDatabase } from './fixtures/sqlite-d1.ts';
  */
 
 const route = findModelRouteForRole('app');
+const superRoute = findModelRouteForRole('appSuper');
 const NOW = new Date('2026-10-18T12:00:00.000Z');
 
 interface Call { url: string; auth: string | null; body: { model: string; messages: { role: string; content: string }[]; max_tokens: number } }
@@ -68,6 +69,46 @@ describe('AI inside apps', () => {
 		]);
 		const scope = await projectScopeForUser(db, 'owner-1', projectId);
 		expect(await getAppAiUsage(db, deps, scope)).toMatchObject({ available: true, month: '2026-10', calls: 1, usedPercent: 0, limitReached: false, renewsOn: '2026-11-01' });
+	});
+
+	test('the default and "fast" both use the cheap Lightning tier', async () => {
+		const p = provider(() => answer('ok'));
+		expect((await runAppAi(db, { ...deps, fetch: p.fetch }, { projectId, mode: 'preview', request: ask('hi') })).ok).toBe(true);
+		expect((await runAppAi(db, { ...deps, fetch: p.fetch }, { projectId, mode: 'preview', request: ask('hi', { tier: 'fast' }) })).ok).toBe(true);
+		expect(p.calls.map((call) => call.body.model)).toEqual([route.modelId, route.modelId]);
+		expect(usageRows().map((row) => row.routeId)).toEqual([route.id, route.id]);
+	});
+
+	test('"super" calls Super-VL, capped at 4,096 output tokens, and records the route it used', async () => {
+		const p = provider(() => answer('ok'));
+		expect((await runAppAi(db, { ...deps, fetch: p.fetch }, { projectId, mode: 'preview', request: ask('hi', { tier: 'super' }) })).ok).toBe(true);
+		// The cap is deliberate and tighter than the route's own default.
+		expect(superRoute.maxTokens).toBeGreaterThan(4096);
+		expect(p.calls[0]!.body).toMatchObject({ model: superRoute.modelId, max_tokens: 4096 });
+		expect(usageRows()).toEqual([
+			expect.objectContaining({ status: 'settled', routeId: 'nemotron-3.5-super-vl', inputTokens: 120, outputTokens: 40 }),
+		]);
+	});
+
+	test('an unknown tier is refused with the exact wording, before any model call', async () => {
+		const p = provider(() => answer('ok'));
+		const refused = await runAppAi(db, { ...deps, fetch: p.fetch }, { projectId, mode: 'preview', request: ask('hi', { tier: 'deeper' }) });
+		expect(refused).toEqual({ ok: false, reason: 'invalid_request', message: 'Choose tier "fast" or "super".' });
+		expect(p.calls).toHaveLength(0);
+		expect(usageRows()).toHaveLength(0);
+	});
+
+	test('a super call reserves about 3.75× what the same call reserves on the cheap tier', async () => {
+		const p = provider(() => answer('ok'));
+		expect((await runAppAi(db, { ...deps, fetch: p.fetch }, { projectId, mode: 'preview', request: ask('hi') })).ok).toBe(true);
+		expect((await runAppAi(db, { ...deps, fetch: p.fetch }, { projectId, mode: 'preview', request: ask('hi', { tier: 'super' }) })).ok).toBe(true);
+		const [fast, deep] = usageRows();
+		// The deep tier's output rate is exactly 3.75× the cheap tier's, and both
+		// reserve the same 4,096-token cap, so the allowance drains 3.75× faster.
+		expect(superRoute.outputPriceMinorUnits).toBe(route.outputPriceMinorUnits * 3.75);
+		const ratio = Number(deep!.reservedMicros) / Number(fast!.reservedMicros);
+		expect(ratio).toBeGreaterThan(3.7);
+		expect(ratio).toBeLessThan(3.8);
 	});
 
 	test('stops at the monthly allowance and says when it renews; the next month starts fresh', async () => {

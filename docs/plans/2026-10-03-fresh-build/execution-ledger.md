@@ -1133,3 +1133,37 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "S04 fast and deep AI for apps (plan docs/plans/2026-10-18-submission-build-plan.md)",
+  "status": "LOCAL VERIFIED",
+  "owner": "app-ai and builder-guidance half by a subagent; template type and scaffold-lock regeneration by the integration lead (serial, lockfile-owned)",
+  "commands": [
+    {"command": "bun test tests/app-ai.test.ts (test-first, source unchanged)", "exitCode": 1, "receipt": "3 fail: a super call sent nvidia/Nemotron-3_5-Lightning instead of Super-VL; an unknown tier answered ok:true instead of the refusal; the super reservation ratio was 1.0, not ~3.75"},
+    {"command": "bun test tests/app-ai.test.ts", "exitCode": 0, "receipt": "14 pass, 0 fail, 82 expect() calls"},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "both tsc projects clean"},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1344 pass, 0 fail, 6374 expect() calls, 104 files"},
+    {"command": "bun scripts/refresh-scaffold-lock.ts", "exitCode": 0, "receipt": "wrote stacks/react-hono/scaffold-lock.ts (15,469 bytes); install, example tests, gate refusal and build verified"},
+    {"command": "bun scripts/refresh-scaffold-lock.ts --check", "exitCode": 0, "receipt": "OK: scaffold lockfile is current"},
+    {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "45 PASS, 0 FAIL, 1 BLOCKED (deployment authorization), 4 PROVISIONED — this run includes typecheck, build and all 43 packets, so it doubles as the S05 gate"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/app-ai.ts", "note": "readRequest accepts tier 'fast'|'super' and refuses anything else with the exact wording before any cost; runAppAi resolves appSuper vs app; APP_AI_LIMITS.maxOutputTokens = 4096 caps both the outgoing request and the reserved worst case; usage rows record the route actually used (the insert already bound the per-call route)"},
+    {"path": "apps/app/src/agents/specialists.ts", "note": "builder guidance: leave tier out for everyday replies, use tier: \"super\" when a feature needs deeper reasoning"},
+    {"path": "tests/app-ai.test.ts", "note": "4 cases: default and fast stay on the cheap tier; super calls Super-VL with max_tokens 4096 and records nemotron-3.5-super-vl; a bad tier is refused with the exact message and no model call and no usage row; a super call reserves ~3.75x (98,406 vs 369,150 micro-cents with the same prompt)"},
+    {"path": "stacks/react-hono/server-files.ts", "note": "CaddieAiRequest gains tier?: \"fast\" | \"super\" with a one-line comment; the runtime (app-platform.ts) hands the app's request object to runAppAi verbatim, so no other template change is needed"},
+    {"path": "stacks/react-hono/scaffold-lock.ts", "note": "regenerated in the same packet, as the plan requires"}
+  ],
+  "environment": "local: bun test with an injected fetch stub and the sqlite D1 fixture; no network, no deploy",
+  "providerCalls": "none — every tier path was exercised through the injected provider stub, so the 3.75x drain is arithmetic on the listing's prices, not a live billing observation",
+  "specReview": "PENDING independent review",
+  "qualityReview": "self-reviewed; fail-closed allowance semantics (reserve at worst case, settle at reported tokens, settle 0 on refusal) untouched and still covered by the pre-existing cases in the same file",
+  "limitations": [
+    "The regenerated scaffold lock also picked up bun 1.4.0's current resolution shape beyond this packet's template edit (lockfileVersion 1 -> 2 and a bun-types/undici-types entry). The --check gate (frozen install, example tests, gate refusal, Workers build) passes with it, and CI pins bun-version 1.4.0; flagged because the diff is larger than the one-line type change implies",
+    "The scaffold's own example tests never pass a tier, so the template's new field is type-verified but not exercised end-to-end by the scaffold suite; the seam is app-platform.ts handing the request through unchanged",
+    "A generated app can now drain its monthly allowance ~3.75x faster by asking for super. That is the intended trade (deeper reasoning for more of the allowance) and it is documented in caddie/ai.ts, but there is no extra owner-facing warning and no per-call tier display in the app-usage card",
+    "Tier selection is the app builder's judgement (prompt guidance), not a host-enforced policy: an app may ask for super on every call"
+  ]
+}
+```

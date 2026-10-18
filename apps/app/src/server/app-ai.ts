@@ -38,6 +38,13 @@ export const APP_AI_LIMITS = {
 	timeoutMs: 20_000,
 	callsPerMinute: { preview: 20, live: 60 } satisfies Record<AppAiMode, number>,
 	defaultMonthlyCents: 100,
+	/**
+	 * The output cap for every app call, on either tier. An app's reply is read
+	 * by a person in the UI, so the deep tier's larger route default would only
+	 * buy a longer wait — and a larger worst-case reservation against the
+	 * project's monthly allowance.
+	 */
+	maxOutputTokens: 4096,
 } as const;
 
 export interface AppAiDeps {
@@ -62,10 +69,13 @@ function renewsOn(date: Date): string {
 }
 
 /** Validate what the app sent. Forgiving about extra fields; strict about shape and size. */
-function readRequest(input: unknown): { messages: AppAiMessage[]; json: boolean; chars: number } | AppAiReply {
-	const body = input as { messages?: unknown; json?: unknown } | null;
+function readRequest(input: unknown): { messages: AppAiMessage[]; json: boolean; chars: number; tier: 'fast' | 'super' } | AppAiReply {
+	const body = input as { messages?: unknown; json?: unknown; tier?: unknown } | null;
 	if (!body || typeof body !== 'object' || !Array.isArray(body.messages) || body.messages.length === 0) {
 		return fail('invalid_request', 'Send { messages: [{ role: "user", content: "…" }] }.');
+	}
+	if (body.tier !== undefined && body.tier !== 'fast' && body.tier !== 'super') {
+		return fail('invalid_request', 'Choose tier "fast" or "super".');
 	}
 	if (body.messages.length > APP_AI_LIMITS.maxMessages) {
 		return fail('too_long', `Send at most ${APP_AI_LIMITS.maxMessages} messages.`);
@@ -82,13 +92,14 @@ function readRequest(input: unknown): { messages: AppAiMessage[]; json: boolean;
 	}
 	if (chars === 0) return fail('invalid_request', 'The messages are empty.');
 	if (chars > APP_AI_LIMITS.maxChars) return fail('too_long', `Keep the messages under ${APP_AI_LIMITS.maxChars.toLocaleString('en-US')} characters in total.`);
-	return { messages, json: body.json === true, chars };
+	// Omitted means the everyday fast tier; only an explicit "super" upgrades.
+	return { messages, json: body.json === true, chars, tier: body.tier === 'super' ? 'super' : 'fast' };
 }
 
-/** Worst-case cost in micro-cents: a generous input estimate plus the route's whole output cap. */
+/** Worst-case cost in micro-cents: a generous input estimate plus the call's whole output cap. */
 function reservationFor(route: ModelRoute, chars: number, messageCount: number): number {
 	const inputTokens = Math.ceil(chars / 3) + 16 * messageCount;
-	return inputTokens * route.inputPriceMinorUnits + route.maxTokens * route.outputPriceMinorUnits;
+	return inputTokens * route.inputPriceMinorUnits + Math.min(route.maxTokens, APP_AI_LIMITS.maxOutputTokens) * route.outputPriceMinorUnits;
 }
 
 /** The first JSON object in a reply (models sometimes wrap it in a fence or a sentence). */
@@ -136,7 +147,7 @@ export async function runAppAi(db: D1Database, deps: AppAiDeps, input: { project
 		return fail('busy', 'Too many AI requests in the last minute. Try again shortly.');
 	}
 
-	const route = findModelRouteForRole('app');
+	const route = findModelRouteForRole(read.tier === 'super' ? 'appSuper' : 'app');
 	const month = monthOf(now);
 	const reserved = reservationFor(route, read.chars, read.messages.length);
 	const id = `aiu_${crypto.randomUUID()}`;
@@ -167,7 +178,7 @@ export async function runAppAi(db: D1Database, deps: AppAiDeps, input: { project
 			new Request(`${NEBIUS_BASE_URL}/chat/completions`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json', authorization: `Bearer ${deps.apiKey}` },
-				body: JSON.stringify({ model: route.modelId, messages, max_tokens: route.maxTokens, temperature: 0.4 }),
+				body: JSON.stringify({ model: route.modelId, messages, max_tokens: Math.min(route.maxTokens, APP_AI_LIMITS.maxOutputTokens), temperature: 0.4 }),
 				signal: timeoutSignal(APP_AI_LIMITS.timeoutMs),
 			}),
 		);

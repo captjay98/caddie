@@ -117,6 +117,8 @@ export const SERVER_FILES: Readonly<Record<string, string>> = {
 		"  messages: CaddieAiMessage[];",
 		"  /** Ask for one JSON object back. */",
 		"  json?: boolean;",
+		'  /** "fast" (the default) is cheap and quick; "super" reasons deeper and costs about 3.75x. */',
+		'  tier?: "fast" | "super";',
 		"}",
 		"",
 		"export type CaddieAiReply =",
