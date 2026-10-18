@@ -32,6 +32,7 @@ import {
   requireBuildApproval,
   storeBuildOutput,
   readBuildOutput,
+  readBuildBundle,
   setWorkflowBlocker,
   stopWorkflow,
   planIntent,
@@ -116,6 +117,7 @@ async function world() {
     "0022_build_activity.sql",
     "0023_build_features.sql",
     "0024_design_phase.sql",
+    "0026_code_versions.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -826,6 +828,60 @@ describe("approved output and preview identity", () => {
         ),
         "not_a_member",
       );
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a backend build keeps its server bundle and migrations with the output", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      const server = "export default { fetch() { return new Response('ok'); } };";
+      const migrations = [
+        { name: "0002_tags.sql", sql: "alter table notes add column tag text;" },
+        { name: "0001_init.sql", sql: "create table notes (id integer primary key, body text);" },
+      ];
+      const output = await storeBuildOutput(w.db, item.scope, {
+        html: "<!doctype html><html><body>notes</body></html>",
+        image: "sha256:backend-image",
+        planId: item.plan.id,
+        runId: item.workflow.runId,
+        bundle: { server, migrations },
+      });
+      const bundle = await readBuildBundle(w.db, item.scope, output.outputId);
+      expect(bundle?.server).toBe(server);
+      expect(bundle?.migrations.map((m) => m.name)).toEqual(["0001_init.sql", "0002_tags.sql"]);
+      expect(bundle?.migrations[0]?.sql).toContain("create table notes");
+      const other = await w.start({ ...w.intake, operationKey: "bundle-other-project" });
+      await rejectsCode(readBuildBundle(w.db, other.scope, output.outputId), "preview_not_found");
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a client-only build has no bundle, and a bad migration name is refused", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      await rejectsCode(
+        storeBuildOutput(w.db, item.scope, {
+          html: "<!doctype html><html><body>bad</body></html>",
+          image: "sha256:bad-image",
+          planId: item.plan.id,
+          runId: item.workflow.runId,
+          bundle: { server: "export default {}", migrations: [{ name: "../escape.sql", sql: "select 1" }] },
+        }),
+        "INVALID_MIGRATION",
+      );
+      expect(w.count("workflow_outputs")).toBe(0);
+      const plain = await storeBuildOutput(w.db, item.scope, {
+        html: "<!doctype html><html><body>static</body></html>",
+        image: "sha256:static-image",
+        planId: item.plan.id,
+        runId: item.workflow.runId,
+      });
+      expect(await readBuildBundle(w.db, item.scope, plain.outputId)).toBeNull();
     } finally {
       w.sqlite.close();
     }

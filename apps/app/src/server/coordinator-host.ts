@@ -31,6 +31,7 @@ import {
 } from "./build-workflow.ts";
 import { STACK_CATALOG } from "./stacks.ts";
 import { recordBuildActivity } from "./build-activity.ts";
+import { checkServerStarts, type WorkerLoaderLike } from "./preview-runtime.ts";
 import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS } from "../../../../stacks/react-hono/scaffold.ts";
 import { projectScopeForUser, ScopeError } from "./scope.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
@@ -97,6 +98,8 @@ export interface CoordinatorEnvironment {
   CONTREE_API_TOKEN?: string;
   CONTREE_PROJECT_ID?: string;
   CONTREE_IMAGE?: string;
+  /** Worker Loader (backend previews + the runs-on-Cloudflare check). Absent: the check is skipped honestly. */
+  LOADER?: WorkerLoaderLike;
 }
 /** Called inside the owning DO, including alarms/recovery; no HTTP module globals. */
 export async function resolveCoordinatorContext(
@@ -595,6 +598,20 @@ export async function createCoordinatorContext(
           (await driver.readFile(id, `${root}/dist/main.css`)).contentBase64,
         ),
       );
+    // Backend apps: the server bundle and the migrations travel with the
+    // checked output (previews and publishing read them from there).
+    const readText = async (path: string) =>
+      new TextDecoder().decode(base64ToBytes((await driver.readFile(id, path)).contentBase64));
+    const server = (await driver.pathExists(id, `${root}/dist/server.js`))
+      ? await readText(`${root}/dist/server.js`)
+      : null;
+    const migrations: { name: string; sql: string }[] = [];
+    if (server !== null && (await driver.pathExists(id, `${root}/migrations`))) {
+      for (const entry of await driver.listEntries(id, `${root}/migrations`)) {
+        if (entry.isFile && /^\d{4}_[A-Za-z0-9_.-]+\.sql$/.test(entry.name))
+          migrations.push({ name: entry.name, sql: await readText(`${root}/migrations/${entry.name}`) });
+      }
+    }
     const after = await driver.checkpoint(id);
     if (after.checkpointRef !== final.resultImage)
       throw new ScopeError(
@@ -602,6 +619,48 @@ export async function createCoordinatorContext(
         "STALE_BUILD",
         "Files changed while preparing the preview. Run checks again.",
       );
+    // The runs-on-Cloudflare check: the server must start in the Workers
+    // runtime, not just under Bun in the sandbox.
+    if (server !== null && env.LOADER) {
+      const started = new Date().toISOString();
+      const startup = await checkServerStarts(env.LOADER, server);
+      const operationKey = `verify:${runId}:${plan.id}:${attempt}:server-starts`;
+      await recordVerification(env.DB, scope, workflow.runId, {
+        check: "server-starts",
+        passed: startup.ok,
+        evidence: JSON.stringify(startup.ok ? { ok: true } : { ok: false, reason: startup.reason }),
+        planRevision: plan.id,
+      });
+      await recordBuildActivity(env.DB, {
+        projectId: scope.projectId, runId: workflow.runId, kind: "check", subject: "server-starts",
+        outcome: startup.ok ? "ok" : "failed", exitCode: startup.ok ? 0 : 1,
+        output: startup.ok ? "GET /api/health answered 200 on the Workers runtime" : startup.reason,
+        startedAt: started, finishedAt: new Date().toISOString(), key: operationKey,
+      });
+      if (!startup.ok) {
+        const receipt = { check: "server-starts", passed: false, exitCode: 1, stdout: "", stderr: startup.reason, operationKey };
+        await recordRepairRound(env.DB, scope, workflow.runId, {
+          issue: "server-starts",
+          operationKey,
+          round: "repair_attempt",
+          outcome: "failed",
+          detail: JSON.stringify(receipt),
+        });
+        const paused = (await workflowRepairPause(env.DB, workflow.runId)).paused;
+        if (paused)
+          await setWorkflowBlocker(
+            env.DB,
+            scope,
+            "Caddie could not get the app's server starting on Cloudflare after three attempts. Your plan and files are saved. The app is not ready to try yet.",
+          );
+        return {
+          passed: false,
+          paused,
+          receipts: [...receipts, receipt],
+          next: `The app's server does not start on Cloudflare's runtime: ${startup.reason}. Fix src/server.ts so it uses only Web APIs and env.DB (GET /api/health must answer 200), then run verify_build again.`,
+        };
+      }
+    }
     const html =
       '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your app</title><style>' +
       css.replace(/<\/style/gi, "<\\/style") +
@@ -614,6 +673,7 @@ export async function createCoordinatorContext(
       image: final.resultImage,
       planId: plan.id,
       runId: workflow.runId,
+      bundle: server !== null ? { server, migrations } : undefined,
     });
     return {
       passed: true,

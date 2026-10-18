@@ -555,10 +555,49 @@ export async function stopWorkflow(db: D1Database, scope: Scope) {
     .bind("Stop requested. Your plan and files are retained. Wait for Caddie to stop before retrying.", now(), scope.projectId).run();
   return workflowSnapshot(db, scope);
 }
+/** What a checked build carries besides its preview page (manifest v1, stored by content hash). */
+export interface BuildBundleInput {
+  /** dist/server.js — the app's server for Cloudflare Workers, or null for a client-only build. */
+  server: string | null;
+  /** migrations/NNNN_name.sql files, in name order. */
+  migrations: { name: string; sql: string }[];
+}
+
+export interface BuildManifest {
+  v: 1;
+  server: { sha256: string; bytes: number } | null;
+  migrations: { name: string; sha256: string }[];
+}
+
+const MAX_SERVER_BUNDLE_BYTES = 3 * 1024 * 1024;
+const MAX_MIGRATION_BYTES = 256 * 1024;
+
+async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Promise<string> {
+  const store = createD1ContentStore(db);
+  let server: BuildManifest["server"] = null;
+  if (bundle.server !== null) {
+    const bytes = new TextEncoder().encode(bundle.server);
+    if (bytes.length > MAX_SERVER_BUNDLE_BYTES)
+      throw new ScopeError(422, "SERVER_TOO_LARGE", "The app's server bundle is larger than 3 MB.");
+    server = { sha256: (await store.put(bytes)).contentHash, bytes: bytes.length };
+  }
+  const migrations: BuildManifest["migrations"] = [];
+  for (const file of [...bundle.migrations].sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    if (!/^\d{4}_[A-Za-z0-9_.-]+\.sql$/.test(file.name))
+      throw new ScopeError(422, "INVALID_MIGRATION", `${file.name} is not a NNNN_name.sql migration.`);
+    const bytes = new TextEncoder().encode(file.sql);
+    if (bytes.length > MAX_MIGRATION_BYTES)
+      throw new ScopeError(422, "INVALID_MIGRATION", `${file.name} is larger than 256 KB.`);
+    migrations.push({ name: file.name, sha256: (await store.put(bytes)).contentHash });
+  }
+  const manifest: BuildManifest = { v: 1, server, migrations };
+  return (await store.put(new TextEncoder().encode(JSON.stringify(manifest)))).contentHash;
+}
+
 export async function storeBuildOutput(
   db: D1Database,
   scope: Scope,
-  input: { html: string; image: string; planId: string; runId: string },
+  input: { html: string; image: string; planId: string; runId: string; bundle?: BuildBundleInput },
 ) {
   const { workflow, plan } = await requireBuildApproval(db, scope);
   if (plan.id !== input.planId || workflow.runId !== input.runId)
@@ -575,11 +614,12 @@ export async function storeBuildOutput(
       "A complete HTML preview of at most 500 KB is required.",
     );
   const content = await createD1ContentStore(db).put(bytes);
-  const id = `out_${hash(`${scope.projectId}:${plan.id}:${input.image}:${content.contentHash}`).slice(0, 32)}`;
+  const manifestSha256 = input.bundle ? await storeBundleManifest(db, input.bundle) : null;
+  const id = `out_${hash(`${scope.projectId}:${plan.id}:${input.image}:${content.contentHash}${manifestSha256 ? `:${manifestSha256}` : ""}`).slice(0, 32)}`;
   await db.batch([
     db
       .prepare(
-        "insert or ignore into workflow_outputs (id,projectId,runId,planId,image,sha256,createdAt) values (?,?,?,?,?,?,?)",
+        "insert or ignore into workflow_outputs (id,projectId,runId,planId,image,sha256,manifestSha256,createdAt) values (?,?,?,?,?,?,?,?)",
       )
       .bind(
         id,
@@ -588,6 +628,7 @@ export async function storeBuildOutput(
         plan.id,
         input.image,
         content.contentHash,
+        manifestSha256,
         now(),
       ),
     db
@@ -627,6 +668,35 @@ export async function storeBuildOutput(
     );
   return { outputId: id, sha256: content.contentHash };
 }
+/** The checked build's server bundle and migrations, or null when it has no server. */
+export async function readBuildBundle(
+  db: D1Database,
+  scope: Scope,
+  id: string,
+): Promise<{ server: string; migrations: { name: string; sql: string }[] } | null> {
+  await assertProjectScope(db, scope);
+  const found = await rows(
+    db,
+    'select "manifestSha256" from workflow_outputs where id = ? and projectId = ?',
+    id,
+    scope.projectId,
+  );
+  if (!found[0]) throw new ScopeError(404, "preview_not_found", "No such preview in this project.");
+  const manifestHash = found[0].manifestSha256;
+  if (manifestHash === null || manifestHash === undefined) return null;
+  const store = createD1ContentStore(db);
+  const text = async (sha: string) => {
+    const bytes = await store.get(sha);
+    if (!bytes) throw new ScopeError(404, "preview_missing", "Part of this build is no longer available.");
+    return new TextDecoder().decode(bytes);
+  };
+  const manifest = JSON.parse(await text(String(manifestHash))) as BuildManifest;
+  if (manifest.v !== 1 || !manifest.server) return null;
+  const migrations = [];
+  for (const file of manifest.migrations) migrations.push({ name: file.name, sql: await text(file.sha256) });
+  return { server: await text(manifest.server.sha256), migrations };
+}
+
 export async function readBuildOutput(
   db: D1Database,
   scope: Scope,
