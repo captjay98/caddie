@@ -8,6 +8,7 @@ import { LocalCodeStore, listCodeVersions, readVersionFiles } from '../apps/app/
 import { createProject, createWorkspace, getProject } from '../apps/app/src/server/projects.ts';
 import { bindInstallation, importRepoSnapshot, processGithubWebhook } from '../apps/app/src/server/repositories.ts';
 import { checkCaddieApp, startFromImport } from '../apps/app/src/server/repo-start.ts';
+import { readImportPreview } from '../apps/app/src/server/import-preview.ts';
 import { projectScopeForUser, workspaceScopeForUser } from '../apps/app/src/server/scope.ts';
 import { SCAFFOLD_FILES, SCAFFOLD_PACKAGE } from '../stacks/react-hono/scaffold.ts';
 import { freePort } from './fixtures/controls-harness.ts';
@@ -127,6 +128,8 @@ describe('start from my GitHub repo', () => {
 		expect(version!.skipped.map((s) => s.path)).toEqual(expect.arrayContaining(['.env', 'node_modules/', 'dist/']));
 		// The planner reads the description: it says the app continues the copied code.
 		expect((await getProject(db, scope)).description).toBe(`Imported from GitHub to keep improving it. Its code was copied from GitHub (${ACCOUNT}/farm-log) as version 1; Caddie builds on it.`);
+		// The card shows the copied app next: Caddie starts building it right away (import-preview.ts).
+		expect(await readImportPreview(db, scope)).toMatchObject({ status: 'checking', versionSeq: 1, repoFullName: `${ACCOUNT}/farm-log` });
 		// Only once: the project has its own code now.
 		expect(await startFromImport(db, new LocalCodeStore(db), scope, { importId: imported.id })).toMatchObject({ ok: false, reason: 'already_started' });
 	});
@@ -136,6 +139,7 @@ describe('start from my GitHub repo', () => {
 		const viteStart = await startFromImport(db, new LocalCodeStore(db), vite, { importId: (await copy(vite, 'vite-app')).id });
 		expect(viteStart).toEqual({ ok: false, reason: 'not_caddie_app', message: "Caddie can continue apps that were made with Caddie and saved to GitHub. This repo was made another way, so Caddie can't build on it yet." });
 		expect(await listCodeVersions(db, vite)).toEqual([]);
+		expect(await readImportPreview(db, vite)).toBeNull();
 
 		const half = await newProject('Half app');
 		const halfStart = await startFromImport(db, new LocalCodeStore(db), half, { importId: (await copy(half, 'half-app')).id });

@@ -4,6 +4,7 @@ import { bytesToBase64 } from './adapters/contree.ts';
 import { readWorkflow } from './build-workflow.ts';
 import type { CodeStore } from './code-store.ts';
 import { listCodeVersions, recordCodeVersion } from './code-versions.ts';
+import { beginImportPreview } from './import-preview.ts';
 import { ScopeError, assertProjectOwner } from './scope.ts';
 import { isProtectedPath } from '../agents/permissions.ts';
 import { SCAFFOLD_FILES, SCAFFOLD_PACKAGE } from '../../../../stacks/react-hono/scaffold.ts';
@@ -113,5 +114,7 @@ export async function startFromImport(db: D1Database, store: CodeStore, scope: S
 		.prepare('update "projects" set "description" = trim(coalesce("description", \'\') || \' \' || ?) where "id" = ?')
 		.bind(`Its code was copied from GitHub (${repoFullName}) as version ${version.seq}; Caddie builds on it.`, verified.projectId)
 		.run();
+	// The card shows "checking" now and the copied app once it is built (import-preview.ts).
+	await beginImportPreview(db, verified, { commitId: version.commitId, versionSeq: version.seq, repoFullName });
 	return { ok: true, repoFullName, version: { commitId: version.commitId, seq: version.seq, fileCount: files.size } };
 }
