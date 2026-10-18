@@ -19,6 +19,7 @@ import { createArtifactsRouter } from './server/routes/artifacts.ts';
 import { createPreviewsRouter } from './server/routes/previews.ts';
 import { createAppKeysRouter } from './server/routes/app-keys.ts';
 import { createPublishRouter } from './server/routes/publish.ts';
+import { createVersionsRouter } from './server/routes/versions.ts';
 import { createReportRouter } from './server/routes/report.ts';
 import { createOperatorRouter } from './server/routes/operator.ts';
 import { SandboxError } from './server/adapters/sandbox.ts';
@@ -105,6 +106,7 @@ api.route('/', createJudgeRouter());
 api.route('/', createBriefRouter());
 api.route('/', createAppKeysRouter());
 api.route('/', createPublishRouter());
+api.route('/', createVersionsRouter());
 app.route('/api', api);
 
 // --- agents ----------------------------------------------------------------

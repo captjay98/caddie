@@ -34,6 +34,8 @@ export interface StubBehavior {
 	exitCode?: number;
 	stdout?: string;
 	stderr?: string;
+	/** Files the command leaves in its result image (absolute path -> text), e.g. a build's dist/. */
+	writes?: Record<string, string>;
 }
 
 export interface StubRequestLog {
@@ -529,6 +531,11 @@ export class SandboxStub {
 					};
 					for (const [absPath, record] of attachedFiles) {
 						clone.files.set(absPath, record);
+						this.addParentDirs(clone, absPath);
+					}
+					for (const [path, text] of Object.entries(behavior?.writes ?? {})) {
+						const absPath = this.normalize(path);
+						clone.files.set(absPath, { bytes: Buffer.from(text, 'utf8'), mode: 0o100644, mtime: 1_760_000_000 });
 						this.addParentDirs(clone, absPath);
 					}
 					const outcome = behavior

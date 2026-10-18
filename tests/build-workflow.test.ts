@@ -51,6 +51,7 @@ import { resolveCoordinatorContext } from "../apps/app/src/server/coordinator-ho
 import { listAppSecrets, setAppSecret } from "../apps/app/src/server/app-secrets.ts";
 import { parseKeyring } from "../apps/app/src/server/secret-box.ts";
 import { makeRequestAppKey } from "../apps/app/src/agents/tools.ts";
+import { LocalCodeStore, listCodeVersions, readVersionFiles } from "../apps/app/src/server/code-versions.ts";
 import {
   checkedCoordinatorSnapshot,
   coordinatorSnapshot,
@@ -1626,6 +1627,46 @@ describe("host-driven feature loop", () => {
       expect(activity.features.map((f) => [f.id, f.status])).toEqual([["log-feed", "passed"], ["view-dashboard", "passed"]]);
       // Nothing is offered for rollback while the build is still running.
       expect(activity.features.some((f) => f.canRollBack)).toBe(false);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("verify_build stores the preview and records it as a version with the app's own source", async () => {
+    const w = await world();
+    const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+    stub.seedImage("tag:feature:1");
+    stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+    await stub.start();
+    try {
+      const item = await featureBuild(w);
+      const root = `/workspace/${item.scope.projectId}`;
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      await host.buildNextFeature();
+      expect(((await host.finishFeature("log-feed", "v-finish-1")) as { passed: boolean }).passed).toBe(true);
+      await host.buildNextFeature();
+      stub.setBehavior("bun run test", { stdout: "3 pass\n0 fail" });
+      expect(((await host.finishFeature("view-dashboard", "v-finish-2")) as { passed: boolean }).passed).toBe(true);
+
+      // The build check emits the bundle (and leaves build output and dependencies that a version must not keep).
+      stub.setBehavior("bun run build", {
+        stdout: "built",
+        writes: {
+          [`${root}/dist/main.js`]: 'console.log("farm log")',
+          [`${root}/dist/main.css`]: "body { margin: 0 }",
+          [`${root}/node_modules/react/index.js`]: "module.exports = {}",
+        },
+      });
+      const verified = (await host.verifyBuild("verify-version-1")) as { passed: boolean; outputId: string };
+      expect(verified.passed).toBe(true);
+
+      const versions = await listCodeVersions(w.db, item.scope);
+      expect(versions).toHaveLength(1);
+      expect(versions[0]).toMatchObject({ seq: 1, kind: "build", title: "Log daily feed, See the feed dashboard", outputId: verified.outputId, hasImage: true });
+      const files = await readVersionFiles(new LocalCodeStore(w.db), item.scope.projectId, versions[0]!.commitId);
+      const paths = files.map((f) => f.path);
+      expect(paths).toContain("src/App.tsx");
+      expect(paths).toContain("package.json");
+      expect(paths.some((p) => p.startsWith("node_modules/") || p.startsWith("dist/"))).toBe(false);
+      expect(versions[0]!.skipped.map((s) => s.path)).toEqual(expect.arrayContaining(["dist/", "node_modules/"]));
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 

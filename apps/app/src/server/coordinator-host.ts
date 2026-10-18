@@ -48,6 +48,19 @@ import {
 } from "./build-features.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { FEATURE_BLOCK_GUIDE, parsePlanFeatures } from "@caddie/contracts";
+import { collectSourceSnapshot } from "./source-export.ts";
+import { recordCodeVersion } from "./code-versions.ts";
+import { codeStoreFor } from "./code-store-env.ts";
+import { CODE_STORE_CAPS } from "./code-store.ts";
+import type { ArtifactsBinding } from "./adapters/cloudflare-artifacts.ts";
+
+/** A version snapshot must fit both the source walker's and the code store's limits. */
+const VERSION_SOURCE_CAPS = {
+  maxFiles: Math.min(300, CODE_STORE_CAPS.maxFiles),
+  maxFileBytes: Math.min(512 * 1024, CODE_STORE_CAPS.maxFileBytes),
+  maxTotalBytes: Math.min(8 * 1024 * 1024, CODE_STORE_CAPS.maxSnapshotBytes),
+  maxDirectories: 400,
+};
 
 const NO_SUCH_TABLE = (error: unknown) => String(error).includes("no such table");
 
@@ -91,6 +104,8 @@ const tail = (text: string | undefined, limit = 4000) =>
   !text ? "" : text.length > limit ? `…${text.slice(-limit)}` : text;
 export interface CoordinatorEnvironment {
   DB: AuthEnv["DB"];
+  /** Cloudflare Artifacts (owner input): app versions live there when bound, in D1 otherwise. */
+  ARTIFACTS?: ArtifactsBinding;
   /** Tavily search key — the required PRIMARY discovery source + research tool (see AuthEnv). */
   TAVILY_API_KEY?: string;
   /** Nebius model key — powers AI fit inspection of discovery candidates (fail-soft when unset). */
@@ -613,6 +628,22 @@ export async function createCoordinatorContext(
           migrations.push({ name: entry.name, sql: await readText(`${root}/migrations/${entry.name}`) });
       }
     }
+    // The version history: the app's source as checked (same skip rules as the
+    // GitHub save — no dependencies, build output or secrets). Never fails the
+    // build: a version that can't be saved is logged and the preview still lands.
+    let source: Awaited<ReturnType<typeof collectSourceSnapshot>> | null = null;
+    try {
+      source = await collectSourceSnapshot(
+        {
+          list: (path) => driver.listEntries(id, path),
+          read: async (path) => base64ToBytes((await driver.readFile(id, path)).contentBase64),
+        },
+        root,
+        VERSION_SOURCE_CAPS,
+      );
+    } catch (error) {
+      console.error("verify_build: version snapshot skipped:", error instanceof Error ? error.message : error);
+    }
     const after = await driver.checkpoint(id);
     if (after.checkpointRef !== final.resultImage)
       throw new ScopeError(
@@ -676,6 +707,28 @@ export async function createCoordinatorContext(
       runId: workflow.runId,
       bundle: { server, migrations, client: { js, css } },
     });
+    if (source) {
+      try {
+        const features = await listBuildFeatures(env.DB, scope.projectId, plan.id);
+        const titles = features.filter((f) => f.status === "passed").map((f) => f.title);
+        const title = titles.length > 0 ? titles.join(", ").slice(0, 160) : "Checked build";
+        await recordCodeVersion(env.DB, codeStoreFor(env), scope, {
+          kind: "build",
+          title,
+          files: source.files.map((file) => ({
+            path: file.path,
+            contentBase64: file.encoding === "base64" ? file.content : bytesToBase64(new TextEncoder().encode(file.content)),
+          })),
+          skipped: source.skipped,
+          planId: plan.id,
+          image: final.resultImage,
+          outputId: output.outputId,
+          actorId: scope.actorId,
+        });
+      } catch (error) {
+        console.error("verify_build: version not saved:", error instanceof Error ? error.message : error);
+      }
+    }
     return {
       passed: true,
       receipts,
