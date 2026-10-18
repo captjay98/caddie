@@ -22,6 +22,7 @@ export interface PublishStatusView {
   available: boolean;
   reason: string | null;
   appsDomain: string | null;
+  pendingCheck: { startedAt: string } | null;
   publication: {
     slug: string;
     url: string;
@@ -29,6 +30,7 @@ export interface PublishStatusView {
     outputId: string | null;
     publishedAt: string;
     hasServer: boolean;
+    blockedReason: string | null;
   } | null;
   current: {
     outputId: string;
@@ -83,6 +85,11 @@ export function PublishApp(props: { actorId: string; projectId: string }): React
   const status = useQuery({
     queryKey: publishQueryKey(props.actorId, props.projectId),
     queryFn: () => fetchJson<PublishStatusView>(publishPath(props.projectId)),
+    // While a new version is being checked (or an update is running), keep the card current on its own.
+    refetchInterval: (query) => {
+      const view = query.state.data as Partial<PublishStatusView> | undefined;
+      return view?.pendingCheck || view?.runs?.[0]?.status === "running" ? 4000 : false;
+    },
   });
   const [busy, setBusy] = useState<"publish" | "unpublish" | "rollback" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -108,7 +115,8 @@ export function PublishApp(props: { actorId: string; projectId: string }): React
     available: raw.available === true,
     reason: raw.reason ?? "Publishing isn't set up on this Caddie server yet.",
     appsDomain: raw.appsDomain ?? null,
-    publication: raw.publication ?? null,
+    pendingCheck: raw.pendingCheck ?? null,
+    publication: raw.publication ? { ...raw.publication, blockedReason: raw.publication.blockedReason ?? null } : null,
     current: raw.current ? { ...raw.current, destructive: raw.current.destructive ?? [] } : null,
     suggestedSlug: raw.suggestedSlug ?? null,
     missingKeys: raw.missingKeys ?? [],
@@ -196,9 +204,11 @@ export function PublishApp(props: { actorId: string; projectId: string }): React
           {data.reason}
         </p>
       ) : publication?.status === "blocked" ? (
-        <p className="state-detail" role="status" data-testid="publish-blocked">
-          This app was taken down for breaking Caddie&rsquo;s rules, so it isn&rsquo;t on the web.
-        </p>
+        <div className="publish-blocked" role="status" data-testid="publish-blocked">
+          <p className="state-detail">This app was taken down for breaking Caddie&rsquo;s rules, so it isn&rsquo;t on the web.</p>
+          {publication.blockedReason ? <p className="publish-meta">Reason: {publication.blockedReason}</p> : null}
+          <p className="publish-meta">A person at Caddie reviews every takedown.</p>
+        </div>
       ) : (
         <>
           {publication?.status === "live" ? (
@@ -258,9 +268,11 @@ export function PublishApp(props: { actorId: string; projectId: string }): React
                   {chosenSlug}
                   {domain ? `.${domain}` : ""}
                 </span>
-                <button type="button" className="r-link" onClick={() => setEditingSlug(true)} data-testid="publish-slug-change">
-                  Change
-                </button>
+                {data.pendingCheck ? null : (
+                  <button type="button" className="r-link" onClick={() => setEditingSlug(true)} data-testid="publish-slug-change">
+                    Change
+                  </button>
+                )}
               </p>
             )
           ) : null}
@@ -281,7 +293,12 @@ export function PublishApp(props: { actorId: string; projectId: string }): React
             </p>
           ) : null}
 
-          {confirm === "destructive" ? (
+          {data.pendingCheck ? (
+            <p className="state-detail publish-checking" role="status" data-testid="publish-checking">
+              Caddie is checking the new version for safety before visitors see it. This usually takes a minute or two
+              {publication?.status === "live" ? "; visitors keep the current version meanwhile." : "."}
+            </p>
+          ) : confirm === "destructive" ? (
             <div className="publish-confirm" role="group" aria-label="Confirm deleting data">
               <span>
                 This update deletes data from the live app ({destructive.map((d) => d.name).join(", ")}). This can&rsquo;t be undone.

@@ -6538,6 +6538,9 @@ body.conv-resizing * {
 .publish-slug-domain { font-family: var(--font-mono); font-size: 13px; color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
 .publish-label, .publish-hint { font-size: var(--r-meta); color: var(--color-muted); }
 .publish-needs { color: var(--color-warn); }
+.publish-checking { color: var(--color-bright); }
+.publish-blocked { display: grid; gap: 4px; }
+.publish-blocked p { margin: 0; }
 .publish-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; font-size: var(--r-meta); color: var(--color-bright); }
 .publish-confirm > span { flex: 1 1 100%; }
 .publish-error { margin: 0; color: var(--color-danger); font-size: var(--r-meta); }

@@ -84,11 +84,23 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		calls: [] as string[],
 		approvals: [] as unknown[],
 		deployments: 1,
+		/** Status reads a publish stays "being checked" for (0 = the check passes at once). */
+		checkPolls: 0,
+		pendingSlug: null as string | null,
 		status: {
 			available: true, reason: null as string | null, appsDomain: 'caddieapps.test', publication: null as Record<string, unknown> | null,
+			pendingCheck: null as { startedAt: string } | null,
 			current: { outputId: 'output-workflow', publishable: true, upToDate: false, intent: intentFor(1), destructive: [] },
 			suggestedSlug: 'todoer', missingKeys: [] as string[], runs: [] as unknown[], versions: [] as unknown[],
 		},
+	};
+	const goLive = (slug: string, outputId: string) => {
+		publish.deployments += 1;
+		publish.status.pendingCheck = null;
+		publish.status.publication = { slug, url: `https://${slug}.caddieapps.test/`, status: 'live', outputId, publishedAt: NOW, hasServer: false, blockedReason: null };
+		publish.status.current = { ...publish.status.current, upToDate: true, intent: intentFor(publish.deployments) };
+		publish.status.runs = [{ id: 'pub-1', kind: 'publish', status: 'succeeded', error: null, steps: [], startedAt: NOW }];
+		publish.status.versions = [{ outputId, publishedAt: NOW, live: true, intent: intentFor(publish.deployments) }];
 	};
 	const publishRoute = (route: Route, method: string, path: string): Promise<void> | null => {
 		if (!options.publish) return null;
@@ -99,18 +111,23 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 			return json(route, 200, { approval: { id: `apr-${publish.approvals.length}`, status: 'approved' } });
 		}
 		if (!path.endsWith('/publish') && !path.includes('/publish/')) return null;
-		if (method === 'GET') return json(route, 200, publish.status);
+		if (method === 'GET') {
+			if (publish.status.pendingCheck && publish.pendingSlug && --publish.checkPolls <= 0) goLive(publish.pendingSlug, 'output-workflow');
+			return json(route, 200, publish.status);
+		}
 		const approved = (intent: unknown) => publish.approvals.some((a) => JSON.stringify((a as { intent: unknown }).intent) === JSON.stringify(intent));
 		if (path.endsWith('/publish')) {
 			publish.calls.push('publish');
 			if (!approved(publish.status.current.intent)) return json(route, 403, { error: 'STALE_APPROVAL', message: 'no approved record covers this exact intent' });
 			const body = request.postDataJSON() as { outputId: string; slug?: string };
 			const slug = (publish.status.publication?.slug as string | undefined) ?? body.slug ?? 'todoer';
-			publish.deployments += 1;
-			publish.status.publication = { slug, url: `https://${slug}.caddieapps.test/`, status: 'live', outputId: body.outputId, publishedAt: NOW, hasServer: false };
-			publish.status.current = { ...publish.status.current, upToDate: true, intent: intentFor(publish.deployments) };
-			publish.status.runs = [{ id: 'pub-1', kind: 'publish', status: 'succeeded', error: null, steps: [], startedAt: NOW }];
-			publish.status.versions = [{ outputId: body.outputId, publishedAt: NOW, live: true, intent: intentFor(publish.deployments) }];
+			if (publish.checkPolls > 0) {
+				publish.pendingSlug = slug;
+				publish.status.pendingCheck = { startedAt: NOW };
+				publish.status.runs = [{ id: 'pub-1', kind: 'publish', status: 'running', error: null, steps: [], startedAt: NOW }];
+				return json(route, 200, publish.status);
+			}
+			goLive(slug, body.outputId);
 			return json(route, 200, publish.status);
 		}
 		if (path.endsWith('/publish/unpublish')) {
@@ -651,6 +668,51 @@ test('Publish puts the checked app on the web in one click, then unpublishes it 
 	await expect(panel.getByTestId('publish-paused')).toContainText('publish again to bring it back at todo-board.caddieapps.test');
 	await expect(panel.getByTestId('publish-go')).toHaveText('Publish again');
 	expect(state.publish.calls).toEqual(['approval', 'publish', 'unpublish']);
+});
+
+test('a new version waits for the safety check, then goes live on its own', async ({ page, context }) => {
+	const state = await fixture(context, { phase: 'ready', publish: true });
+	state.publish.checkPolls = 2;
+	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
+	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	const panel = page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-app');
+	await panel.getByTestId('publish-go').click();
+	const checking = panel.getByTestId('publish-checking');
+	await expect(checking).toContainText('Caddie is checking the new version for safety before visitors see it.');
+	await expect(panel.getByTestId('publish-go')).toHaveCount(0);
+	await expect(panel.getByTestId('publish-slug-change')).toHaveCount(0);
+	const dir = process.env.CADDIE_SHOTS;
+	if (dir) {
+		await panel.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		await panel.screenshot({ path: `${dir}/publish-${mobile ? 'mobile-' : ''}4-checking.png` });
+	}
+	// No click needed: the card keeps itself current while the check runs.
+	await expect(panel).toHaveAttribute('data-state', 'live', { timeout: 15_000 });
+	await expect(checking).toHaveCount(0);
+	expect(state.publish.calls).toEqual(['approval', 'publish']);
+});
+
+test('a taken-down app says why and offers no way to publish', async ({ page, context }) => {
+	const state = await fixture(context, { phase: 'ready', publish: true });
+	state.publish.status.publication = {
+		slug: 'todoer', url: 'https://todoer.caddieapps.test/', status: 'blocked', outputId: 'output-workflow', publishedAt: NOW, hasServer: false,
+		blockedReason: "Caddie's safety check flagged a new version (Phishing).",
+	};
+	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
+	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	const panel = page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-app');
+	const blocked = panel.getByTestId('publish-blocked');
+	await expect(blocked).toContainText('This app was taken down for breaking Caddie’s rules');
+	await expect(blocked).toContainText("Reason: Caddie's safety check flagged a new version (Phishing).");
+	await expect(panel.getByTestId('publish-go')).toHaveCount(0);
+	await expect(panel.getByTestId('publish-unpublish')).toHaveCount(0);
+	const dir = process.env.CADDIE_SHOTS;
+	if (dir) {
+		await panel.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		await panel.screenshot({ path: `${dir}/publish-${mobile ? 'mobile-' : ''}5-taken-down.png` });
+	}
 });
 
 test('Publish waits for the keys the app needs, and says plainly when publishing is not set up', async ({ page, context }) => {
