@@ -19,6 +19,8 @@ import { createArtifactsRouter } from './server/routes/artifacts.ts';
 import { createPreviewsRouter } from './server/routes/previews.ts';
 import { createAppKeysRouter } from './server/routes/app-keys.ts';
 import { createPublishRouter } from './server/routes/publish.ts';
+import { createReportRouter } from './server/routes/report.ts';
+import { createOperatorRouter } from './server/routes/operator.ts';
 import { SandboxError } from './server/adapters/sandbox.ts';
 import { ScopeError } from './server/scope.ts';
 import type { AuthEnv } from './server/auth.ts';
@@ -75,6 +77,10 @@ type Env = {
 	CLOUDFLARE_DISPATCH_NAMESPACE?: string;
 	CLOUDFLARE_ROUTES_KV_ID?: string;
 	CLOUDFLARE_APPS_ZONE_ID?: string;
+	/** Safety (owner inputs): the monitored abuse inbox, who may review reports and take apps down, Web Risk. */
+	ABUSE_INBOX?: string;
+	OPERATOR_EMAILS?: string;
+	WEB_RISK_API_KEY?: string;
 };
 
 registerNebiusProvider();
@@ -110,6 +116,11 @@ app.route('/agents/coordinator', createAgentRouter(Coordinator));
 app.route('/agents/hello', createAgentRouter(Hello));
 
 // --- SPA under /app --------------------------------------------------------
+// The public "Report an app" page every published app links to, and the
+// operator's page for answering reports (OPERATOR_EMAILS only).
+app.route('/', createReportRouter());
+app.route('/', createOperatorRouter());
+
 app.get('/app', (c) => c.redirect('/app/', 307));
 app.get('/app/*', async (c) => {
 	const assets = c.env?.ASSETS;

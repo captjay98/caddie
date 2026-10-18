@@ -39,6 +39,6 @@
 		"directory": "./dist/client",
 		"binding": "ASSETS",
 		"not_found_handling": "none",
-		"run_worker_first": ["/api", "/api/*", "/agents", "/agents/*", "/app", "/app/*"]
+		"run_worker_first": ["/api", "/api/*", "/agents", "/agents/*", "/app", "/app/*", "/report", "/operator", "/operator/*"]
 	}
 }
