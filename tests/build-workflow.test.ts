@@ -46,8 +46,11 @@ import {
 } from "../apps/app/src/server/build-workflow.ts";
 import { buildActivity } from "../apps/app/src/server/build-activity.ts";
 import { rollbackToFeature } from "../apps/app/src/server/build-features.ts";
-import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT } from "../apps/app/src/agents/permissions.ts";
+import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, ROLE_TOOL_POLICY } from "../apps/app/src/agents/permissions.ts";
 import { resolveCoordinatorContext } from "../apps/app/src/server/coordinator-host.ts";
+import { listAppSecrets, setAppSecret } from "../apps/app/src/server/app-secrets.ts";
+import { parseKeyring } from "../apps/app/src/server/secret-box.ts";
+import { makeRequestAppKey } from "../apps/app/src/agents/tools.ts";
 import {
   checkedCoordinatorSnapshot,
   coordinatorSnapshot,
@@ -118,6 +121,7 @@ async function world() {
     "0023_build_features.sql",
     "0024_design_phase.sql",
     "0026_code_versions.sql",
+    "0027_app_secrets.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -1230,6 +1234,45 @@ test("stop retains files and approval but denies effects until an explicit retry
   } finally { w.sqlite.close(); }
 });
 
+describe("app keys during a build", () => {
+  test("the builder can ask for a key only in an approved build, and learns only its status", async () => {
+    const w = await world();
+    try {
+      const draft = await planned(w);
+      const early = await resolveCoordinatorContext({ DB: w.db }, draft.workflow.conversationId);
+      await expect(early.requestAppKey!({ name: "WEATHER_API_KEY", description: "Reads the forecast." })).rejects.toThrow();
+      expect(await listAppSecrets(w.db, draft.scope)).toEqual([]);
+
+      const item = await approved(w);
+      const host = await resolveCoordinatorContext({ DB: w.db }, item.workflow.conversationId);
+      const asked = await host.requestAppKey!({ name: "WEATHER_API_KEY", description: "Lets the app read the forecast.", helpUrl: "https://home.openweathermap.org/api_keys" });
+      expect(asked).toEqual({ name: "WEATHER_API_KEY", status: "requested" });
+      const listed = await listAppSecrets(w.db, item.scope);
+      expect(listed.map((k) => [k.name, k.status, k.requested, k.helpUrl])).toEqual([["WEATHER_API_KEY", "requested", true, "https://home.openweathermap.org/api_keys"]]);
+
+      // Once the owner saved it, asking again reports it as saved and still carries no value.
+      const keyring = await parseKeyring(`k1:${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64")}`);
+      await setAppSecret(w.db, keyring, item.scope, { name: "WEATHER_API_KEY", value: "ow_secret_value" });
+      const again = await host.requestAppKey!({ name: "WEATHER_API_KEY", description: "Lets the app read the forecast." });
+      expect(again).toEqual({ name: "WEATHER_API_KEY", status: "set" });
+      expect(JSON.stringify(again)).not.toContain("ow_secret_value");
+
+      // The tool's answer to the model names the key and how to read it — never a value.
+      let seen: unknown = null;
+      const tool = makeRequestAppKey({ request: async (input) => { seen = input; return { name: input.name, status: "set" }; } });
+      const out = await (tool as unknown as { run: (ctx: { data: Record<string, unknown> }) => Promise<{ output: string }> }).run({
+        data: { name: "WEATHER_API_KEY", description: "Lets the app read the forecast." },
+      });
+      expect(seen).toEqual({ name: "WEATHER_API_KEY", description: "Lets the app read the forecast." });
+      expect(out.output).toBe("WEATHER_API_KEY is already saved. The server reads it as c.env.WEATHER_API_KEY.");
+    } finally { w.sqlite.close(); }
+  });
+
+  test("only build roles may ask for keys; planning roles and QA cannot", () => {
+    const allowed = Object.entries(ROLE_TOOL_POLICY).filter(([, tools]) => tools.includes("request_app_key")).map(([role]) => role).sort();
+    expect(allowed).toEqual(["backend", "frontend", "mobile", "tech-lead"]);
+  });
+});
 
 describe("specialist repair boundaries", () => {
   test("shell test runs are refused; failed run_checks count once per receipt and stop the next effect after three attempts", async () => {

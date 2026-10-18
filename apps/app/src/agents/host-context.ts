@@ -98,6 +98,11 @@ export function scopedCoordinatorContext(
       if (!host.runChecks) throw new Error("Host checks are not configured.");
       return host.runChecks(key, signal);
     },
+    requestAppKey: async (input) => {
+      const host = await resolve();
+      if (!host.requestAppKey) throw new Error("App keys are not available here.");
+      return host.requestAppKey(input);
+    },
     blockBuild: async (reason) => (await resolve()).blockBuild(reason),
     requestApproval: async (input) => (await resolve()).requestApproval(input),
     readPlanNote: async (kind) => (await resolve()).readPlanNote(kind),

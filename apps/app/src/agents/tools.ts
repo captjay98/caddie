@@ -386,6 +386,38 @@ export function makeRunChecks(deps: { run: (operationKey: string, signal?: Abort
 	});
 }
 
+const RequestAppKeyInput = v.strictObject({
+	name: v.pipe(v.string(), v.regex(/^[A-Z][A-Z0-9_]{1,63}$/, 'Use UPPER_SNAKE_CASE, like WEATHER_API_KEY.')),
+	description: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(300)),
+	helpUrl: v.optional(v.pipe(v.string(), v.maxLength(500))),
+});
+
+/**
+ * Build roles: ask the project owner for a key the app needs for an outside
+ * service. The owner pastes it in the project card; the app's server reads it
+ * as env.<NAME> at runtime. The model NEVER receives a value — the answer is
+ * only whether the key is saved yet.
+ */
+export function makeRequestAppKey(deps: {
+	request: (input: { name: string; description: string; helpUrl?: string }) => Promise<{ name: string; status: 'requested' | 'set' }>;
+}) {
+	return defineTool({
+		name: 'request_app_key',
+		description:
+			"Ask the project owner for a key the app's SERVER needs to call an outside service (a weather, maps or payments API). Give an UPPER_SNAKE name, one plain sentence saying what the key lets the app do, and the https page where the owner can get it. The owner pastes it in the project card; read it in src/server.ts as c.env.<NAME>. You never see the value; this tool only says whether it is saved yet. Never ask the user to paste a key in chat, and never hard-code or log one.",
+		input: RequestAppKeyInput,
+		async run(ctx) {
+			const input = ctx.data;
+			const key = await deps.request({ name: input.name, description: input.description, ...(input.helpUrl ? { helpUrl: input.helpUrl } : {}) });
+			const status =
+				key.status === 'set'
+					? `${key.name} is already saved. The server reads it as c.env.${key.name}.`
+					: `Asked the owner for ${key.name}. Until they save it, routes that need it must answer 503 with a plain message (never crash). Read it as c.env.${key.name}; tests pass a fake one with createTestEnv({ ${key.name}: "test-value" }).`;
+			return { output: status };
+		},
+	});
+}
+
 // --- "Caddie learns you" capture tools (feature: capture → infer → surface) ---
 
 /** The profile fields the coordinator may set from conversation. These are

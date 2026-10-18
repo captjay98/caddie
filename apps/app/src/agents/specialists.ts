@@ -10,6 +10,7 @@ import {
 	makeRecordVerification,
  makeVerifyBuild,
 	makeRunChecks,
+	makeRequestAppKey,
 	type SandboxToolDeps,
 } from './tools.ts';
 import type { ToolDefinition } from '@flue/runtime';
@@ -40,6 +41,8 @@ export interface SpecialistBuildContext {
  verifyBuild?: (operationKey:string, signal?:AbortSignal)=>Promise<unknown>;
 	/** Host-run project checks for build roles (run_checks); never publishes a preview. */
 	runChecks?: (operationKey: string, signal?: AbortSignal) => Promise<unknown>;
+	/** Ask the owner for an app key (request_app_key). Returns status only, never a value. */
+	requestAppKey?: (input: { name: string; description: string; helpUrl?: string }) => Promise<{ name: string; status: 'requested' | 'set' }>;
 	/** Sandbox adapter surface (P04) bound to this run's session. */
 	driver: SandboxToolDeps;
 	sessionId: string;
@@ -92,6 +95,7 @@ export const BUILD_RECIPE_INSTRUCTION =
 	'Create tables with a NEW migrations/NNNN_name.sql file (0001_init.sql, then 0002_..., plain SQLite) and never edit an existing migration. ' +
 	'Test server routes in src/*.test.ts with createTestEnv() from test/setup/d1.ts and app.request("/api/...", init, env); test/examples/server.example.test.ts shows the pattern. ' +
 	'In src/server.ts use only Web APIs (fetch, Request, Response, URL, crypto) — never Bun.* or Node fs/child_process/net — because the published app runs on Cloudflare Workers and the build refuses them. Never edit anything under caddie/. ' +
+	'When the app needs a key for an outside service, call request_app_key (UPPER_SNAKE name, one plain sentence on what it lets the app do, the https page where the owner gets it) and call that service ONLY from src/server.ts with c.env.<NAME>; never put a key in browser code, in a file, in a test or in a log, and never ask for one in chat. Until the owner saves it, a route that needs it answers 503 with a plain sentence; tests use createTestEnv({ NAME: "test-value" }) and never call the real service. ' +
 	'During a build the coordinator hands you ONE feature with its doneWhen checks: build only that feature, keep earlier features working, and add at least one test in src/*.test.tsx for each doneWhen check (the host refuses to finish a feature that adds no new passing tests). ' +
 	'The host creates the scaffold only after approval. Read the full brief, prd, spec and feedback. Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass.';
 
@@ -127,6 +131,7 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 		record_verification: makeRecordVerification({ record: context.recordVerification }),
  verify_build: makeVerifyBuild({verify: context.verifyBuild ?? (async () => { throw new Error('Host checks are not configured.'); })}),
 		run_checks: makeRunChecks({ run: context.runChecks ?? (async () => { throw new Error('Host checks are not configured.'); }) }),
+		request_app_key: makeRequestAppKey({ request: context.requestAppKey ?? (async () => { throw new Error('App keys are not available here.'); }) }),
 	};
 	const descriptor = SPECIALIST_CATALOG.find((d) => d.role === role);
 	if (!descriptor) throw new Error(`no catalog entry for role ${role}`);

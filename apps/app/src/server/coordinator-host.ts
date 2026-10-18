@@ -34,6 +34,7 @@ import { recordBuildActivity } from "./build-activity.ts";
 import { checkServerStarts, type WorkerLoaderLike } from "./preview-runtime.ts";
 import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS } from "../../../../stacks/react-hono/scaffold.ts";
 import { projectScopeForUser, ScopeError } from "./scope.ts";
+import { requestAppSecret } from "./app-secrets.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
 import {
   buildSessionOverride,
@@ -804,6 +805,11 @@ export async function createCoordinatorContext(
     },
     verifyBuild,
     runChecks,
+    requestAppKey: async (input) => {
+      await requireBuildApproval(env.DB, scope);
+      const key = await requestAppSecret(env.DB, scope, input);
+      return { name: key.name, status: key.status };
+    },
     buildNextFeature,
     finishFeature,
     featureProgress,
