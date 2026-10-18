@@ -68,13 +68,14 @@ and 390px screenshots.
 
 Reserved migration numbers: 0026 code versions, 0027 app secrets, 0028 app
 publishing (publications, databases, domains), 0029 abuse reports, 0030 AI
-usage in apps, 0031 apps' sign-in codes and the preview test inbox.
+usage in apps, 0031 apps' sign-in codes and the preview test inbox, 0032 the
+copied app's preview right after "Start from my GitHub repo".
 
 ## Status (2026-10-18, branch `feat/publish-on-cloudflare`, not pushed)
 
 | Stage | State | Evidence |
 |---|---|---|
-| 1. Code store | Port, Artifacts adapter, local D1 store, versions service; every checked build is a version (verify_build); Versions list + Restore in the project card; a build whose sandbox working copy is gone continues from the newest saved version (dependencies reinstalled, lost features re-queued; no version = start again from the plan); "Start from my GitHub repo" for apps made with Caddie (stack check; the copy becomes version 1 and the first build starts from it; the copy never takes dependencies, build output or secrets). Not yet: other stacks (Vite/Lovable exports), feature-level commits (features keep their image save points), GitHub save from the store, a preview before the first build | SIMULATED (Artifacts, GitHub); LOCAL VERIFIED (local store, verify_build and working-copy restarts against the sandbox stand-in, Restore, import); the real sandbox's answer for an expired image is unverified |
+| 1. Code store | Port, Artifacts adapter, local D1 store, versions service; every checked build is a version (verify_build); Versions list + Restore in the project card; a build whose sandbox working copy is gone continues from the newest saved version (dependencies reinstalled, lost features re-queued; no version = start again from the plan); "Start from my GitHub repo" for apps made with Caddie (stack check; the copy becomes version 1 and the first build starts from it; the copy never takes dependencies, build output or secrets); right after the copy, Caddie builds it once without AI (install + build + runs-on-Cloudflare check in a sandbox of its own, resumable, finished by the 5-minute cron if nobody has the card open) and the card shows it to try before anything is planned, as version 1's preview (0032). Not yet: other stacks (Vite/Lovable exports), feature-level commits (features keep their image save points), GitHub save from the store | SIMULATED (Artifacts, GitHub, sandbox); LOCAL VERIFIED (local store, verify_build and working-copy restarts against the sandbox stand-in, Restore, import, the copied-app preview service and card); the two copied-app preview route handlers are typechecked only; the real sandbox's answer for an expired image and real install/build times are unverified |
 | 2. Backend-ready stack | Done | LOCAL VERIFIED (`scripts/refresh-scaffold-lock.ts --check`, local Bun 1.3.14); the sandbox's own Bun is unverified |
 | 3. Previews | Done: Worker Loader isolate, preview database, relay + fetch bridge, Reset test data, runs-on-Cloudflare check, egress gate | LOCAL VERIFIED under workerd (`wrangler dev`); live Worker Loader BLOCKED |
 | 4. Publish | Done: Cloudflare adapter, dispatch + outbound Worker (PROPOSED configs), publish service (0028), routes, Publish card | SIMULATED (real adapter against the local Cloudflare stub; dispatch handlers under Bun); live BLOCKED |
