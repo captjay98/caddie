@@ -21,7 +21,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -101,6 +101,34 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		publish.status.current = { ...publish.status.current, upToDate: true, intent: intentFor(publish.deployments) };
 		publish.status.runs = [{ id: 'pub-1', kind: 'publish', status: 'succeeded', error: null, steps: [], startedAt: NOW }];
 		publish.status.versions = [{ outputId, publishedAt: NOW, live: true, intent: intentFor(publish.deployments) }];
+	};
+	// Versions: every checked build; Restore makes an earlier one current as a NEW version.
+	const commit = (n: number) => n.toString(16).padStart(40, 'a');
+	const versionTitles = ['Add tasks', 'Add tasks, Complete and delete tasks', 'Add tasks, Complete and delete tasks, Save tasks in your browser'];
+	const versions = {
+		restores: [] as Array<{ commitId: string; key: string }>,
+		list: Array.from({ length: options.versions ?? 0 }, (_, i) => ({
+			commitId: commit(i + 1), seq: i + 1, kind: 'build', title: versionTitles[i] ?? `Build ${i + 1}`, createdAt: NOW, current: i + 1 === (options.versions ?? 0), restorable: i + 1 !== (options.versions ?? 0),
+		})).reverse() as Array<Record<string, unknown>>,
+	};
+	const versionsRoute = (route: Route, method: string, path: string): Promise<void> | null => {
+		if (!options.versions || !/\/versions(\/|$)/.test(path)) return null;
+		if (method === 'GET' && path.endsWith('/versions')) return json(route, 200, { versions: versions.list, blockedReason: null });
+		const match = path.match(/\/versions\/([0-9a-f]{40})\/restore$/);
+		if (method === 'POST' && match) {
+			const body = route.request().postDataJSON() as { key: string };
+			versions.restores.push({ commitId: match[1]!, key: body.key });
+			const target = versions.list.find((v) => v.commitId === match[1]);
+			if (!target) return json(route, 404, { error: 'version_not_found', message: 'No such version.' });
+			const seq = versions.list.length + 1;
+			versions.list = [
+				{ commitId: commit(seq), seq, kind: 'restore', title: `Restored version ${target.seq}`, createdAt: NOW, current: true, restorable: false },
+				...versions.list.map((v) => ({ ...v, current: false, restorable: true })),
+			];
+			workflow.detail = `Restored version ${target.seq}. You're trying it below. Publish it to put it on the web.`;
+			return json(route, 200, { restored: true, ...snapshot() });
+		}
+		return json(route, 405, { error: 'method_not_allowed' });
 	};
 	const publishRoute = (route: Route, method: string, path: string): Promise<void> | null => {
 		if (!options.publish) return null;
@@ -190,6 +218,8 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		if (keysReply) return keysReply;
 		const publishReply = publishRoute(route, request.method(), path);
 		if (publishReply) return publishReply;
+		const versionsReply = versionsRoute(route, request.method(), path);
+		if (versionsReply) return versionsReply;
 		if (path === '/api/auth/status') return json(route, 200, { authenticated: true });
 		if (path === '/api/onboarding') return json(route, 200, { completedAt: NOW });
 		if (path === '/api/auth/get-session') return json(route, 200, { session: { userId: 'actor-workflow' }, user: { id: 'actor-workflow', name: 'Ada', email: 'ada@example.test' } });
@@ -279,7 +309,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		return route.fulfill({ contentType: 'application/json', headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' }, body: JSON.stringify({ v: 1, conversationId, offset: OFFSET, messages: options.repeatHandoff ? [...messages, ...messages.map(m => ({...m, id: m.id + '-continued'}))] : messages, settlements: [] }) });
 	});
 	return {
-		workflow, decisions, admissions, acks, stops, rollbacks, github, keys, publish,
+		workflow, decisions, admissions, acks, stops, rollbacks, github, keys, publish, versions,
 		get previewReads() { return previewReads; },
 		revise() { currentPlan = plan(currentPlan.revision + 1); workflow.planId = currentPlan.id; workflow.phase = 'review'; workflow.pendingKey = null; workflow.pendingBody = null; },
 		ready() { workflow.phase = 'ready'; workflow.previewId = 'output-workflow'; workflow.pendingKey = null; workflow.pendingBody = null; },
@@ -727,6 +757,49 @@ test('Publish waits for the keys the app needs, and says plainly when publishing
 	await page.reload();
 	await expect(page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-unavailable')).toHaveText("Publishing isn't set up on this Caddie server yet.");
 	await expect(page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-go')).toHaveCount(0);
+});
+
+test('Versions lists every checked build and goes back to an earlier one in two clicks', async ({ page, context }) => {
+	const state = await fixture(context, { phase: 'ready', versions: 3 });
+	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
+	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	const panel = card.getByTestId('app-versions');
+	const shot = async (name: string) => {
+		const dir = process.env.CADDIE_SHOTS;
+		if (!dir) return;
+		await panel.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		await panel.screenshot({ path: `${dir}/versions-${mobile ? 'mobile-' : ''}${name}.png` });
+	};
+	await panel.locator('summary').click();
+	await expect(panel.getByTestId('version-3')).toHaveAttribute('data-current', 'true');
+	await expect(panel.getByTestId('version-3')).toContainText('Showing');
+	await expect(panel.getByTestId('version-restore-3')).toHaveCount(0);
+	await expect(panel.getByTestId('version-1')).toContainText('Add tasks');
+	await shot('1-list');
+
+	await panel.getByTestId('version-restore-1').click();
+	const confirm = panel.getByRole('group', { name: 'Go back to version 1' });
+	await expect(confirm).toContainText('The newer versions stay in this list.');
+	await shot('2-confirm');
+	await panel.getByTestId('version-restore-confirm').click();
+
+	await expect(card.getByTestId('workflow-ready-detail')).toHaveText("Restored version 1. You're trying it below. Publish it to put it on the web.");
+	await expect(panel.getByTestId('version-4')).toHaveAttribute('data-current', 'true');
+	await expect(panel.getByTestId('version-4')).toContainText('Restored version 1');
+	expect(state.versions.restores.map((r) => r.commitId)).toEqual([(1).toString(16).padStart(40, 'a')]);
+	expect(state.versions.restores[0]!.key).toMatch(/^restore-[0-9a-f]{12}-\d+$/);
+});
+
+test('one version needs no Versions list', async ({ page, context }) => {
+	await fixture(context, { phase: 'ready', versions: 1 });
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	await expect(card.getByRole('link', { name: 'Download app' })).toBeVisible();
+	await expect(card.getByTestId('app-versions')).toHaveCount(0);
 });
 
 test('a client-only app shows no Keys section', async ({ page, context }) => {

@@ -6523,6 +6523,27 @@ body.conv-resizing * {
 	.app-keys-row > .app-keys-form, .app-keys-row > .app-keys-confirm, .app-keys-row > .app-keys-error { grid-column: 1 / -1; }
 }
 
+/* Versions (Publish stage 1): a collapsed list under Publish; rows separated by rules. */
+.app-versions { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); display: grid; gap: 8px; }
+.app-versions > summary { cursor: pointer; font-size: 14px; font-weight: 600; color: var(--color-bright); display: flex; align-items: center; gap: 8px; }
+.app-versions-count { font-size: var(--r-meta); color: var(--color-muted); font-weight: 600; }
+.app-versions > summary { list-style: none; }
+.app-versions > summary::-webkit-details-marker { display: none; }
+.app-versions-chevron { color: var(--color-muted); transition: transform 0.15s ease; }
+.app-versions[open] .app-versions-chevron { transform: rotate(180deg); }
+@media (prefers-reduced-motion: reduce) { .app-versions-chevron { transition: none; } }
+.app-versions-intro { margin: 0; }
+.app-versions-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.app-versions-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 16px; padding: 8px 0; border-top: 1px solid var(--color-line-soft); }
+.app-versions-row:first-child { border-top: 0; }
+.app-versions-what { display: grid; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.app-versions-name { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--color-bright); }
+.app-versions-title { font-size: 13px; color: var(--color-bright); overflow-wrap: anywhere; }
+.app-versions-meta { font-size: var(--r-meta); color: var(--color-muted); }
+.app-versions button.r-link { background: none; border: 0; padding: 2px 0; font-family: inherit; cursor: pointer; }
+.app-versions button.r-link:disabled { opacity: 0.5; cursor: default; }
+.app-versions button.r-link:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; border-radius: 4px; }
+
 /* Publish (Publish stage 4): same rhythm as Keys; one list of facts and actions, no nested boxes. */
 .publish-app { display: grid; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
 .publish-head { display: flex; align-items: center; gap: 8px; }

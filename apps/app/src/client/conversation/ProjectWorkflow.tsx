@@ -17,6 +17,7 @@ import { BuildProgress } from "../project/BuildProgress.tsx";
 import { PlanFeatureList, SavedFeatures } from "../project/FeatureChecklist.tsx";
 import { AppKeys } from "../project/AppKeys.tsx";
 import { PublishApp } from "../project/PublishApp.tsx";
+import { AppVersions } from "../project/AppVersions.tsx";
 
 interface Snapshot {
   workflow: BuildWorkflow | null;
@@ -450,9 +451,8 @@ export function ProjectWorkflow({
       ) : null}
       {workflow.phase === "ready" && workflow.previewId && chrome.actorId ? (
         <>
-          <p className="state-detail">
-            Build checks passed. Try the app below and tell Caddie what you’d
-            like to change.
+          <p className="state-detail" data-testid="workflow-ready-detail">
+            {workflow.detail ?? "Build checks passed. Try the app below and tell Caddie what you’d like to change."}
           </p>
           <InteractivePreview
             actorId={chrome.actorId}
@@ -470,6 +470,7 @@ export function ProjectWorkflow({
           />
           <AppKeys actorId={chrome.actorId} projectId={projectId} hasServer={Boolean(state.data?.previewHasServer)} />
           <PublishApp actorId={chrome.actorId} projectId={projectId} />
+          <AppVersions actorId={chrome.actorId} projectId={projectId} onRestored={() => state.refetch()} />
           <SaveToGithub
             actorId={chrome.actorId}
             projectId={projectId}
