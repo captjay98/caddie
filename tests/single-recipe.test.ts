@@ -162,7 +162,18 @@ describe("backend-ready from the start (Publish stage 2)", () => {
     expect(build).toContain("bun build src/main.tsx --outdir dist --target browser");
     expect(build).toContain("--outfile dist/server.js");
     expect(build).toContain("--external 'cloudflare:*'");
+    expect(build).toContain("--external 'node:*'");
     expect(build.endsWith("bun run caddie/check-server.ts")).toBe(true);
+  });
+
+  test("sign-in ships with every app: Better Auth pinned, its files and tables protected", () => {
+    expect(SCAFFOLD_PACKAGE.dependencies["better-auth"]).toBe("1.7.10");
+    for (const path of ["caddie/auth.ts", "caddie/sign-in.tsx", "caddie/platform.ts", "migrations/0000_caddie_auth.sql", "test/setup/auth.ts", "test/setup/caddie.ts"]) {
+      expect(SCAFFOLD_FILES[path]).toBeDefined();
+      expect(isProtectedPath(path)).toBe(true);
+    }
+    expect(isProtectedPath("migrations/0001_init.sql")).toBe(false);
+    expect(SCAFFOLD_FILES["caddie/auth.ts"]).toContain("export function mountSignIn");
   });
 
   test("Caddie's runtime files and the test database are protected", () => {
