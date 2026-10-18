@@ -19,6 +19,7 @@ import { AppKeys } from "../project/AppKeys.tsx";
 import { PublishApp } from "../project/PublishApp.tsx";
 import { AppVersions } from "../project/AppVersions.tsx";
 import { AppAi } from "../project/AppAi.tsx";
+import { TestInbox } from "../project/TestInbox.tsx";
 
 interface Snapshot {
   workflow: BuildWorkflow | null;
@@ -469,6 +470,7 @@ export function ProjectWorkflow({
                 }
               : {})}
           />
+          {state.data?.previewHasServer ? <TestInbox actorId={chrome.actorId} projectId={projectId} /> : null}
           <AppKeys actorId={chrome.actorId} projectId={projectId} hasServer={Boolean(state.data?.previewHasServer)} />
           <PublishApp actorId={chrome.actorId} projectId={projectId} />
           <AppVersions actorId={chrome.actorId} projectId={projectId} onRestored={() => state.refetch()} />

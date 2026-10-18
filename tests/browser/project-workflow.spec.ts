@@ -21,7 +21,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean } } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }> } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -43,7 +43,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 	const design = options.designBody
 		? { id: 'design-1', projectId: PROJECT.id, kind: 'design', revision: 2, bodyHash: 'sha256-design-1', body: options.designBody, createdBy: 'actor-workflow', createdAt: NOW }
 		: null;
-	const snapshot = () => ({ workflow: { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null, design, designApproval: null, ...(options.keys ? { previewHasServer: true } : {}) });
+	const snapshot = () => ({ workflow: { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null, design, designApproval: null, ...(options.keys || options.inbox ? { previewHasServer: true } : {}) });
 	// App keys for a backend app: names and status only, exactly like the server.
 	const keys = {
 		list: [
@@ -221,6 +221,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		const versionsReply = versionsRoute(route, request.method(), path);
 		if (versionsReply) return versionsReply;
 		if (options.ai && path.endsWith('/ai-usage')) return json(route, 200, { available: true, month: '2026-10', renewsOn: '2026-11-01', ...options.ai });
+		if (path.endsWith('/workflow/test-inbox')) return json(route, 200, { messages: options.inbox ?? [] });
 		if (path === '/api/auth/status') return json(route, 200, { authenticated: true });
 		if (path === '/api/onboarding') return json(route, 200, { completedAt: NOW });
 		if (path === '/api/auth/get-session') return json(route, 200, { session: { userId: 'actor-workflow' }, user: { id: 'actor-workflow', name: 'Ada', email: 'ada@example.test' } });
@@ -824,6 +825,46 @@ test("AI in your app shows this month's answers and allowance; when it runs out 
 	await expect(panel.getByTestId('app-ai-summary')).toHaveText('340 answers · 100% used');
 	await expect(panel.getByTestId('app-ai-paused')).toContainText('This month’s allowance is used up. Your app’s AI answers again on');
 	await shot(panel, '2-paused');
+});
+
+test('the test inbox shows the sign-in codes the app sent while you tried it, newest first', async ({ page, context }) => {
+	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
+	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+	const now = Date.now();
+	await fixture(context, {
+		phase: 'ready',
+		inbox: [
+			{ to: 'bo@example.com', code: '654321', createdAt: new Date(now - 5_000).toISOString() },
+			{ to: 'ada.lovelace@example.com', code: '123456', createdAt: new Date(now - 3 * 60_000).toISOString() },
+		],
+	});
+	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	const inbox = card.getByTestId('test-inbox');
+	await expect(inbox.getByRole('heading', { name: 'Test inbox' })).toBeVisible();
+	await expect(inbox).toContainText('nobody gets an email');
+	const rows = inbox.getByTestId('test-inbox-message');
+	await expect(rows).toHaveCount(2);
+	await expect(rows.nth(0)).toContainText('bo@example.com');
+	await expect(rows.nth(0)).toContainText('654321');
+	await expect(rows.nth(0)).toContainText('just now');
+	await expect(rows.nth(1)).toContainText('123456');
+	await expect(rows.nth(1)).toContainText('3 min ago');
+	const dir = process.env.CADDIE_SHOTS;
+	if (dir) {
+		await inbox.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		await inbox.screenshot({ path: `${dir}/inbox-${mobile ? 'mobile-' : ''}1-codes.png` });
+	}
+});
+
+test('an app that sent no sign-in codes shows no test inbox', async ({ page, context }) => {
+	await fixture(context, { phase: 'ready', inbox: [] });
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	await expect(card.getByRole('link', { name: 'Download app' })).toBeVisible();
+	await expect(card.getByTestId('test-inbox')).toHaveCount(0);
 });
 
 test('an app that never used AI shows no AI section', async ({ page, context }) => {

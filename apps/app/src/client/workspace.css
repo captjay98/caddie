@@ -6544,6 +6544,23 @@ body.conv-resizing * {
 .app-versions button.r-link:disabled { opacity: 0.5; cursor: default; }
 .app-versions button.r-link:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; border-radius: 4px; }
 
+/* Test inbox (Publish stage 7): the preview's sign-in codes, same rhythm as Keys; rows separated by rules. */
+.test-inbox { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.test-inbox-head { display: flex; align-items: center; gap: 8px; }
+.test-inbox-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.test-inbox-head > svg { color: var(--color-muted); flex: none; }
+.test-inbox-intro { margin: 0; }
+.test-inbox-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.test-inbox-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; gap: 4px 12px; padding: 8px 0; border-top: 1px solid var(--color-line-soft); }
+.test-inbox-row:first-child { border-top: 0; padding-top: 2px; }
+.test-inbox-to { font-size: 13px; color: var(--color-bright); overflow-wrap: anywhere; }
+.test-inbox-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 600; letter-spacing: 0.12em; color: var(--color-bright); }
+.test-inbox-when { font-size: var(--r-meta); color: var(--color-muted); white-space: nowrap; }
+@media (max-width: 480px) {
+  .test-inbox-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .test-inbox-when { grid-column: 1 / -1; }
+}
+
 /* AI in the app (Publish stage 9): same rhythm as Keys; one row and a thin bar, no nested boxes. */
 .app-ai { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
 .app-ai-head { display: flex; align-items: center; gap: 8px; }
