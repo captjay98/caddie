@@ -13,7 +13,8 @@
  *   3 android  Android command-line tools (sha1-checked before unzipping),
  *              then platform-tools, android-36, build-tools 36.0.0 and NDK
  *              28.2.13676358 (Flutter 3.44.8's defaults)
- *   4 warm     the Flutter template (stacks/flutter/template): flutter create,
+ *   4 warm     the Flutter template (the files the image was warmed with; the app
+ *              scaffold is now stacks/flutter/scaffold.ts): flutter create,
  *              pub get, test and a release APK, so the Gradle and pub caches
  *              are filled once; the build output is deleted again
  *

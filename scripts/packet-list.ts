@@ -305,6 +305,11 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 	// Manifest, icons, share target, service worker, safe areas. Real devices
 	// (an Android or iOS install) are not reachable from here.
 	PWA: { tests: ['tests/pwa.test.ts'], browser: ['tests/browser/pwa.spec.ts'], live: [] },
+	// --- Flutter apps + Android APK (same plan, Track 3) ---------------------
+	// The scaffold's real behaviour needs a Flutter SDK, so it is proven by
+	// `bun scripts/refresh-flutter-scaffold-lock.ts --check` (local) and the
+	// sandbox runs; these unit tests pin what can be checked without one.
+	FLUTTER: { tests: ['tests/flutter-scaffold.test.ts'], browser: [], live: [] },
 	// --- Verification net (S01) ----------------------------------------------
 	NET: { tests: ['tests/packet-completeness.test.ts'], browser: [], live: [] },
 };
