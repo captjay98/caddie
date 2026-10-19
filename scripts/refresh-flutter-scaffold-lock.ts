@@ -67,21 +67,24 @@ try {
 	const pubLock = readFileSync(join(dir, "pubspec.lock"), "utf8");
 	if (!/sha256:/.test(pubLock)) fail("pubspec.lock records no content hashes, so --enforce-lockfile could not check packages");
 
-	// 1. The lockfiles alone reproduce the install, unchanged.
+	// 1. The product's order (stacks/flutter/recipe.ts install): the Android and
+	//    web setup FIRST, then pub against the lockfile, then the frozen server
+	//    install. Neither lockfile may change on the way.
 	rmSync(join(dir, "node_modules"), { recursive: true, force: true });
-	const frozen = run(dir, bun, ["install", "--frozen-lockfile"]);
-	if (frozen.code !== 0) fail("bun install --frozen-lockfile failed", frozen.out);
-	const enforced = run(dir, FLUTTER, ["pub", "get", "--enforce-lockfile"]);
-	if (enforced.code !== 0) fail("flutter pub get --enforce-lockfile failed", enforced.out);
-	if (readFileSync(join(dir, "bun.lock"), "utf8") !== bunLock) fail("the frozen install rewrote bun.lock");
-	if (readFileSync(join(dir, "pubspec.lock"), "utf8") !== pubLock) fail("pub get rewrote pubspec.lock");
-	steps.push("locks reproduce the install");
-
-	// 2. Android project, network permission once, Gradle caps, no stray test.
 	for (let pass = 1; pass <= 2; pass++) {
 		const setup = run(dir, DART, ["caddie/setup.dart"]);
 		if (setup.code !== 0 || !/android project ready/.test(setup.out)) fail(`caddie/setup.dart failed (run ${pass})`, setup.out);
+		if (readFileSync(join(dir, "pubspec.lock"), "utf8") !== pubLock) fail(`caddie/setup.dart changed pubspec.lock (run ${pass})`);
 	}
+	const enforced = run(dir, FLUTTER, ["pub", "get", "--enforce-lockfile"]);
+	if (enforced.code !== 0) fail("flutter pub get --enforce-lockfile failed after setup", enforced.out);
+	const frozen = run(dir, bun, ["install", "--frozen-lockfile"]);
+	if (frozen.code !== 0) fail("bun install --frozen-lockfile failed", frozen.out);
+	if (readFileSync(join(dir, "bun.lock"), "utf8") !== bunLock) fail("the frozen install rewrote bun.lock");
+	if (readFileSync(join(dir, "pubspec.lock"), "utf8") !== pubLock) fail("pub get rewrote pubspec.lock");
+	steps.push("setup then locked installs, in the product's order, leave both lockfiles unchanged");
+
+	// 2. Android project, network permission once, Gradle caps, no stray test.
 	const manifest = readFileSync(join(dir, "android/app/src/main/AndroidManifest.xml"), "utf8");
 	if ((manifest.match(/android\.permission\.INTERNET/g) ?? []).length !== 1) fail("the main manifest does not ask for the network exactly once", manifest);
 	const properties = readFileSync(join(dir, "android/gradle.properties"), "utf8");
