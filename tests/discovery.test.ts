@@ -456,6 +456,49 @@ describe('P11 explainable fit + ranking: hard-ineligible cannot rank as eligible
 		expect(entry.assumptions.length).toBeGreaterThan(0);
 	});
 
+	test('fit explanations are plain words: the requirement in the contest\'s words, never an internal claim type', async () => {
+		// Discover's "Why it fits" shows these strings to the user as they are,
+		// so none of them may carry a claim-type id or evidence-store jargon.
+		const world = makeDiscoveryWorld();
+		const theme = { text: 'Theme: accessibility', claimType: 'requirement.theme' };
+		const team = { text: 'Teams of up to 4', claimType: 'requirement.team_size' };
+		const audience = { text: 'Open to students', claimType: 'requirement.audience' };
+		await seedCandidates(world.db, [
+			{
+				source: 'local-seed',
+				url: 'https://devpost.com/software/fit-plain-words',
+				title: 'Plain words probe',
+				summary: 'A candidate authored to probe the fit wording.',
+				requirements: [theme, team, audience],
+			},
+		]);
+		const feed = await runDiscoveryFeed(world.db, world.aliceScope, { adapters: [createLocalSeedAdapter(world.db)] });
+		await addEvidenceClaim(world, world.aliceScope, theme.claimType, 'accessibility', `"${theme.text}"`);
+		// Two equally binding rules pages disagree about team size: a retained conflict.
+		await addEvidenceClaim(world, world.aliceScope, team.claimType, '4', '"Teams of up to 4"');
+		await addEvidenceClaim(world, world.aliceScope, team.claimType, '6', '"Teams of up to 6"');
+		const fit = await computeFit(world.db, world.aliceScope, feed.candidates[0]!);
+		const byType = new Map(fit.claims.map((claim) => [claim.claimType, claim]));
+		expect(byType.get(theme.claimType)?.verdict).toBe('supported');
+		expect(byType.get(team.claimType)?.verdict).toBe('conflict');
+		expect(byType.get(audience.claimType)?.verdict).toBe('unknown');
+
+		expect(byType.get(theme.claimType)?.statement).toBe('Theme: accessibility (on record: accessibility)');
+		expect(byType.get(team.claimType)?.statement).toBe('Teams of up to 4 (the sources disagree)');
+		expect(byType.get(audience.claimType)?.statement).toBe('Open to students (nothing on record yet)');
+		expect(byType.get(theme.claimType)?.assumptions).toEqual([]);
+		expect(byType.get(team.claimType)?.assumptions).toEqual(["Not counted as a fit until it's clear which source is right."]);
+		expect(byType.get(audience.claimType)?.assumptions).toEqual(['Not counted as a fit until Caddie has read a rule about it.']);
+
+		const jargon = /claim of type|evidence claim|stored evidence|equal-authority|retained conflict|auto-resolved|\b[a-z_]+\.[a-z_]+\b/;
+		for (const claim of fit.claims) {
+			for (const text of [claim.statement, ...claim.assumptions]) {
+				expect(text).not.toContain(claim.claimType);
+				expect(text).not.toMatch(jargon);
+			}
+		}
+	});
+
 	test('ranking never presents a hard-ineligible candidate as eligible, whatever its fit', async () => {
 		const world = makeDiscoveryWorld();
 		const claimId = await addEvidenceClaim(

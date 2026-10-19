@@ -1520,6 +1520,10 @@ export async function listSavedCandidates(db: D1Database, scope: Scope): Promise
  */
 export async function computeFit(db: D1Database, scope: Scope, candidate: CandidateRecord): Promise<FitResult> {
 	await assertProjectScope(db, scope);
+	// Discover's "Why it fits" shows these strings as they are, so they are
+	// plain words: the requirement in the contest's own words, never a claim
+	// type id. A supported line repeats what is on record rather than saying
+	// "confirmed": the record's value may not be what the requirement asks.
 	const claims: FitClaim[] = [];
 	for (const requirement of candidate.requirements) {
 		const surveys = await surveyClaims(db, scope, { claimType: requirement.claimType });
@@ -1529,9 +1533,9 @@ export async function computeFit(db: D1Database, scope: Scope, candidate: Candid
 				requirement: requirement.text,
 				claimType: requirement.claimType,
 				verdict: 'conflict',
-				statement: `equal-authority evidence disagrees about ${requirement.claimType} — retained conflict, not auto-resolved`,
+				statement: `${requirement.text} (the sources disagree)`,
 				evidenceClaimIds: [...survey.conflict.claimIds],
-				assumptions: ['the conflict must be resolved against the sources before this requirement is treated as met'],
+				assumptions: ["Not counted as a fit until it's clear which source is right."],
 			});
 			continue;
 		}
@@ -1541,7 +1545,7 @@ export async function computeFit(db: D1Database, scope: Scope, candidate: Candid
 				requirement: requirement.text,
 				claimType: requirement.claimType,
 				verdict: 'supported',
-				statement: `stored evidence: ${requirement.claimType} = ${winner.value}`,
+				statement: `${requirement.text} (on record: ${winner.value})`,
 				evidenceClaimIds: [winner.claimId],
 				assumptions: [],
 			});
@@ -1551,9 +1555,9 @@ export async function computeFit(db: D1Database, scope: Scope, candidate: Candid
 			requirement: requirement.text,
 			claimType: requirement.claimType,
 			verdict: 'unknown',
-			statement: `no stored evidence for ${requirement.claimType}`,
+			statement: `${requirement.text} (nothing on record yet)`,
 			evidenceClaimIds: [],
-			assumptions: [`the project holds no evidence claim of type ${requirement.claimType} — capture the rule before treating this as met`],
+			assumptions: ['Not counted as a fit until Caddie has read a rule about it.'],
 		});
 	}
 	return {

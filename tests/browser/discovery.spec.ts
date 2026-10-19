@@ -169,7 +169,7 @@ const WITH_CANDIDATES: StubState['evaluated'] = {
 						requirement: 'Teams of 1-4 may enter',
 						claimType: 'team_size',
 						verdict: 'supported',
-						statement: 'The recorded rules state teams of 1-4 may enter.',
+						statement: 'Teams of 1-4 may enter (on record: 1-4)',
 						evidenceClaimIds: ['cl-team-1'],
 						assumptions: [],
 					},
@@ -177,9 +177,9 @@ const WITH_CANDIDATES: StubState['evaluated'] = {
 						requirement: 'Open to international entrants',
 						claimType: 'region',
 						verdict: 'unknown',
-						statement: 'No recorded rule says who may enter by region.',
+						statement: 'Open to international entrants (nothing on record yet)',
 						evidenceClaimIds: [],
-						assumptions: ['region rule assumed unrestricted absent a recorded rule'],
+						assumptions: ['Not counted as a fit until Caddie has read a rule about it.'],
 					},
 				],
 			},
@@ -429,7 +429,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		// One reason it fits: the first evidenced claim's statement, in the
 		// row's "Why it fits" fold (collapsed by default since the 2026-10-15 card).
 		await page.getByTestId('disc-fit-cand-1').locator('summary').click();
-		await expect(page.getByTestId('disc-fit-cand-1').getByText('The recorded rules state teams of 1-4 may enter.')).toBeVisible();
+		await expect(page.getByTestId('disc-fit-cand-1').getByText('Teams of 1-4 may enter (on record: 1-4)')).toBeVisible();
 
 		// Partial feed failure is a VISIBLE, NAMED gap — never silently dropped.
 		const gaps = page.getByRole('status').filter({ hasText: 'Some sources failed' });
@@ -447,7 +447,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		await expect(open).toBeVisible();
 		await expect(open).toContainText('Not confirmed yet');
 		await expect(open).toContainText('Open to international entrants · no rule on record yet');
-		await expect(open).toContainText('Assumption: region rule assumed unrestricted absent a recorded rule');
+		await expect(open).toContainText('Assumption: Not counted as a fit until Caddie has read a rule about it.');
 		// Review screenshot of the open fold (same switch as interactive-preview.spec.ts).
 		if (process.env.CADDIE_SHOTS) {
 			if (process.env.CADDIE_SHOTS_MOBILE) await page.setViewportSize({ width: 390, height: 844 });
