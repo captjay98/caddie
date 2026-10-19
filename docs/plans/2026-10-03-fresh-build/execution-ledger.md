@@ -2013,3 +2013,24 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   "environment": "Local Mac for the D1 fix; one live Token Factory sandbox run for the probe."
 }
 ```
+
+```json
+{
+  "packet": "Track 3 step 3.1: the Flutter sandbox image (owner chose to start Track 3)",
+  "status": "LIVE VERIFIED: a release APK of the Flutter template builds inside the production sandbox. Nothing in Caddie uses the image yet (steps 3.2-3.4 not started).",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "CADDIE_LIVE_AUTHORIZED=1 bun scripts/build-flutter-image.ts", "exitCode": 0, "receipt": "Four non-disposable runs from tag:tt-base:1 (e971ff5b-8624-40c5-a8c5-b9bc7e9d985a). system 14 s (OpenJDK 17.0.20.1, git 2.39.5, xz 5.4.1); flutter 112 s (tarball sha256 OK, Flutter 3.44.8); android 84 s (cmdline-tools sha1 OK; platform 36, build-tools 36.0.0, NDK 28.2.13676358); warm 153 s (template's 2 tests pass; release arm64 APK built in 137 s, 15,998,460 bytes, with Gradle capped at 1.5 GB). Result image 1864960e-7449-4d26-ab77-9582989efc2e. Sizes in the image: Gradle cache 2.0 GB, pub cache 138 MB, Flutter 2.5 GB, Android SDK 2.7 GB. Raw cost fields (diagnostic, units unconfirmed): 0.109 + 0.573 + 0.328 + 0.216 = 1.226."},
+    {"command": "env check (one disposable run)", "exitCode": 0, "receipt": "uid 0 (root), HOME unset, apt-get/curl/tar/unzip present, xz/git/python3/sudo absent, deb.debian.org reachable, openjdk-17-jdk-headless available."}
+  ],
+  "found": [
+    "The 3.8 GB sandbox CAN build a release APK when Gradle is capped (-Xmx1536m, 2 workers, no daemon). The 137 s build had warm Flutter engine files but cold Gradle caches; a user build from this image starts with Gradle warm.",
+    "The APK is the same size as on the Mac (16.0 MB for arm64), so the D1 2 MB limit means it must go to R2, and getting it out of the sandbox exceeds the driver's 5 MiB read cap (Contree's own download limit undocumented)."
+  ],
+  "notDone": [
+    "No tag API is wired in our client, so the image is referenced by uuid; untagged images may be deleted 180 days after creation (about 2027-04-17).",
+    "Steps 3.2-3.4: Flutter scaffold with the Hono backend, stack-aware build loop and checks, Flutter web preview, APK storage in R2, download/QR UI, permissions. Nothing reads CONTREE_FLUTTER_IMAGE yet."
+  ],
+  "providerCalls": "5 sandbox runs (1 disposable env check, 4 non-disposable image steps)."
+}
+```

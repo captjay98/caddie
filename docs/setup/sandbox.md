@@ -28,6 +28,7 @@ Files:
 | `CONTREE_API_TOKEN` | yes | IAM bearer token (secret). Sent ONLY as `Authorization: Bearer …` — the driver refuses to place it in any sandbox-visible command text or env (`CREDENTIAL_IN_ENV` guard, test-proven). Store with `wrangler secret put CONTREE_API_TOKEN`; never in the repo. |
 | `CONTREE_PROJECT_ID` | yes | Platform project id sent as the `Project` header. |
 | `CONTREE_IMAGE` | no | Base image reference sessions bootstrap from. Default `tag:tt-base:1` (the adjudication-proven image). |
+| `CONTREE_FLUTTER_IMAGE` | no (Track 3, not wired yet) | The Flutter build image, `1864960e-7449-4d26-ab77-9582989efc2e`, built 2026-10-19 by `scripts/build-flutter-image.ts` from `tag:tt-base:1`: OpenJDK 17, Flutter 3.44.8, Android SDK (platform 36, build-tools 36.0.0, NDK 28.2.13676358), with Gradle and pub caches warmed by a release build of `stacks/flutter/template`. Untagged: Contree may delete it 180 days after creation (about 2027-04-17), so re-run the script before relying on it past that. Build with Gradle's heap capped (`-Xmx1536m`): the sandbox has about 3.8 GB of memory. |
 
 No value may be printed or committed. Local tests never read these: they use
 an obviously fake token against the 127.0.0.1 stub.
