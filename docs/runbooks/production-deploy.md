@@ -130,6 +130,13 @@ Nebius's console.
   `https://<host>/api/auth/callback/<google|github>`.
 - **Sign-in loops, or "invalid origin":** `BETTER_AUTH_URL` is not the address
   in the browser.
+- **GitHub's Authorize button is disabled on the consent page** (chips like
+  "Created less than a day ago", "Fewer than 10 GitHub users"): GitHub's
+  trust gate for brand-new OAuth apps, not a Caddie fault — by then the
+  redirect, callback and scopes are already proven. The button is
+  server-rendered `disabled`; do not force the form. Check the account's
+  primary email is verified, wait for the app to age out of the gate (on the
+  order of a day), then click Authorize in any signed-in browser.
 - **No judge option on the sign-in page:** expected while judge access is off.
   Otherwise `JUDGE_ACCESS_CODE` is missing or shorter than 16 characters, or
   `JUDGE_ACCESS_UNTIL` has passed.

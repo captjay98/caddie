@@ -61,8 +61,8 @@ Order matters: `caddie-app` first (G4), then the outbound Worker, then dispatch.
 The dispatch Worker binds to `caddie-app`'s `PublishedAppPlatform` entrypoint
 and to the outbound Worker by name.
 
-`<CADDIE_HOST>` is Caddie's own address. While Caddie is on workers.dev
-(`90c4c2a`), that is `caddie-app.<your-subdomain>.workers.dev`.
+`<CADDIE_HOST>` is Caddie's own address: `https://caddie.jamalibrahim.dev`
+(custom domain since `7e2e64f`; the workers.dev era ended at `90c4c2a`).
 
 1. **Outbound Worker** (every `fetch()` a published app's server makes goes
    through the same egress policy as previews): in

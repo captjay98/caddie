@@ -1,0 +1,16 @@
+[
+	{
+		"packet": "P17",
+		"files": [
+			"tests/live/release.spec.ts"
+		],
+		"passed": 5,
+		"at": "2026-10-19T21:19:47.408Z",
+		"id": "lr_1445a409fddf0a19",
+		"commit": "a58adabd406a0e3ab66da677db6ea2abbcd65569",
+		"dirty": false,
+		"specDigest": "bea6d75b94f713b8b55793bd874c04a5910d17a42a6124a7bd05b96d862497d9",
+		"target": "https://caddie.jamalibrahim.dev",
+		"runtime": "bun 1.4.0"
+	}
+]

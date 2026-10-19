@@ -47,7 +47,7 @@ Recorded 2026-10-06 on branch `p15-p17-completion`, with the owner's
 | P15b | Laravel + Inertia journey | BLOCKED | `tests/live/stacks/laravel-inertia.spec.ts` gates honestly: needs `CADDIE_LIVE_AUTHORIZED=1` (composer install is a network effect) + composer/php/npm present |
 | P15c | FastAPI + React journey | BLOCKED | `tests/live/stacks/fastapi-react.spec.ts`: needs `CADDIE_LIVE_AUTHORIZED=1` + uv/python/bun present |
 | P15d | Flutter journey (APK + emulator) | BLOCKED | `tests/live/stacks/flutter.spec.ts`: needs `CADDIE_LIVE_AUTHORIZED=1` + flutter + adb + a booted emulator; acceptance bar is a real APK launch + interaction capture, never a web screenshot |
-| P17 | Hosted acceptance smoke | BLOCKED | `tests/live/release.spec.ts`: needs `CADDIE_LIVE_AUTHORIZED=1` + `CADDIE_RELEASE_URL` (a deployed base URL). The LOCAL half runs green above |
+| P17 | Hosted acceptance smoke | LIVE VERIFIED | `tests/live/release.spec.ts` against `https://caddie.jamalibrahim.dev` — 5/5 PASS, receipt `lr_1445a409fddf0a19` at build `a58adabd406a`, 2026-10-19 |
 
 Intentionally-absent live specs stay honest holes, not fake passes:
 `tests/live/github.spec.ts` (P08) is authored only against a real registered
@@ -55,6 +55,19 @@ GitHub App (owner-gated; docs/setup/github-app.md), so it stays out of the P08
 live map rather than promising a spec that cannot run. The two earlier holes
 are closed: `tests/live/sandbox.spec.ts` (P04) and
 `tests/live/preview.spec.ts` (P07) now exist and are mapped.
+
+## Production deploy (G4, 2026-10-19)
+
+| Item | Value |
+|---|---|
+| URL | https://caddie.jamalibrahim.dev (custom domain, DNS + cert created by the deploy) |
+| Version id | `b80283db-0d80-4253-aa75-1f14aaebc24d` |
+| Commit | `7e2e64f` (tree carried three pre-existing untracked docs/scripts files) |
+| Preflight | `bun scripts/deploy-preflight.ts --owner-only` — 18 PASS, 2 WARN (reused-local Nebius/Tavily/Contree keys, flagged for rotation; untracked files), 0 FAIL |
+| D1 | `caddie` → `f6315eae-99da-4afc-93d0-356afcd511a0`, migrations 0001–0035 applied remotely before the deploy |
+| Smoke | P17 live 5/5 PASS (receipt above); landing, /app shell, sign-in status, JSON 404 |
+| Sign-in round trip | BLOCKED (external): GitHub renders its Authorize button `disabled` for its new "trust context" gate ("Created less than a day ago", "Fewer than 10 GitHub users"). Caddie's side is proven up to the authorize page (correct app, redirect `https://caddie.jamalibrahim.dev`, read-only scopes; `/api/integrations/health` reports `github: true`; account email verified). Retry the authorize click once the app ages out of the gate, then record the round trip here. |
+| Judge access | OFF by design until the owner sign-in lands, then two `wrangler secret put`s (JUDGE_ACCESS_CODE, JUDGE_ACCESS_UNTIL=2026-12-16) with no rebuild, then one judge account in a private window |
 
 ## Verification net (S01, 2026-10-18)
 
