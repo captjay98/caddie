@@ -13,7 +13,8 @@
  *     PRODUCTION dependencies (`dependencies` only — `devDependencies` are build
  *     tooling that never ships) are all resolvable in node_modules and carry a
  *     licence that is one of: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC,
- *     0BSD.
+ *     0BSD — plus, for the bundled `@fontsource/*` webfont packages only,
+ *     OFL-1.1 (see PACKAGE_LICENCE_ALLOWANCES and its header note).
  *   - Nothing is silently skipped: a dependency that cannot be resolved is
  *     reported UNRESOLVED, and an UNRESOLVED dependency is NOT clean (exit 1).
  *
@@ -46,6 +47,36 @@ const DOCS_PATH = join(REPO, 'docs', 'licenses.md');
 
 /** The licences this project accepts in what it ships. */
 const ALLOWED = new Set(['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC', '0BSD']);
+
+/**
+ * Licence ids accepted for ONE package family, by name prefix (owner decision,
+ * 2026-10-19).
+ *
+ * Why this exists rather than widening {@link ALLOWED}: OFL-1.1 is the SIL Open
+ * Font License, which is permissive but is a FONT licence, not a software one —
+ * it was outside the set above when the audit first ran and flagged the two
+ * bundled `@fontsource/*` webfont packages. The owner accepted it for exactly
+ * those packages: they are font ASSETS pulled in for their CSS `@font-face`
+ * rules, are not modified, and are not redistributed as a font product. Widening
+ * the global set would have silently accepted OFL-1.1 (and any other
+ * font-licence id in it) for a future SOFTWARE dependency too, which is a
+ * different decision nobody made.
+ */
+const PACKAGE_LICENCE_ALLOWANCES: Array<{ prefix: string; licences: Set<string>; why: string }> = [
+	{
+		prefix: '@fontsource/',
+		licences: new Set(['OFL-1.1']),
+		why: 'SIL Open Font License 1.1 — bundled webfont assets, used unmodified as web assets',
+	},
+];
+
+/** The family allowance that covers `name`, or null. */
+function familyAllowance(name: string): { licences: Set<string>; why: string } | null {
+	for (const allowance of PACKAGE_LICENCE_ALLOWANCES) {
+		if (name.startsWith(allowance.prefix)) return allowance;
+	}
+	return null;
+}
 
 interface PackageManifest {
 	name?: unknown;
@@ -275,18 +306,20 @@ function readLicence(packageDir: string, manifest: PackageManifest): LicenceValu
 }
 
 /**
- * Whether an SPDX expression is entirely within the allowed set. Every `OR`/`AND`
+ * Whether an SPDX expression is entirely within `allowedSet`. Every `OR`/`AND`
  * operand must be allowed (see the header note), `WITH <exception>` is stripped,
- * and parentheses are ignored for the operand split.
+ * and parentheses are ignored for the operand split. The set is a parameter
+ * because a package family may carry its own allowance (see
+ * {@link PACKAGE_LICENCE_ALLOWANCES}).
  */
-function evaluate(expression: string): { allowed: boolean; operands: string[] } {
+function evaluate(expression: string, allowedSet: Set<string> = ALLOWED): { allowed: boolean; operands: string[] } {
 	const cleaned = expression.replace(/[()]/g, ' ');
 	const parts = cleaned
 		.split(/\s+(?:OR|AND)\s+/i)
 		.map((part) => part.split(/\s+WITH\s+/i)[0]!.trim())
 		.filter((part) => part !== '');
 	if (parts.length === 0) return { allowed: false, operands: [] };
-	return { allowed: parts.every((part) => ALLOWED.has(part)), operands: parts };
+	return { allowed: parts.every((part) => allowedSet.has(part)), operands: parts };
 }
 
 /** Format the licence cell so a fallback or an expression is visible in the docs. */
@@ -357,14 +390,19 @@ for (const location of locations) {
 			});
 			continue;
 		}
-		const { allowed, operands } = evaluate(licence.expression);
+		const allowance = familyAllowance(name);
+		const allowedSet = allowance ? new Set([...ALLOWED, ...allowance.licences]) : ALLOWED;
+		const { allowed, operands } = evaluate(licence.expression, allowedSet);
 		const expressionIsSpdx = /[()]|\s(?:OR|AND|WITH)\s/i.test(licence.expression);
+		const viaFamily = allowance !== null && operands.some((operand) => allowance.licences.has(operand));
 		const detail = allowed
 			? expressionIsSpdx
 				? `SPDX expression — every operand in the allowed set (${operands.join(', ')})`
-				: 'allowed'
+				: viaFamily
+					? `allowed for this package family: ${allowance!.why}`
+					: 'allowed'
 			: expressionIsSpdx
-				? `operand(s) outside the allowed set: ${operands.filter((operand) => !ALLOWED.has(operand)).join(', ')}`
+				? `operand(s) outside the allowed set: ${operands.filter((operand) => !allowedSet.has(operand)).join(', ')}`
 				: 'not in the allowed set';
 		findings.push({
 			name,
@@ -407,7 +445,7 @@ if (workspaceLinks.length > 0) {
 }
 
 if (flagged.length > 0) {
-	console.log('\nFLAGGED — outside the allowed set (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD):');
+	console.log('\nFLAGGED — outside the allowed set (MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD; OFL-1.1 only for @fontsource/*):');
 	for (const finding of flagged) console.log(`  ${finding.name}@${finding.version ?? '?'} — ${finding.expression} (${finding.detail})`);
 } else {
 	console.log('\nFLAGGED: nothing — every resolved production dependency is in the allowed set.');
@@ -443,6 +481,9 @@ lines.push('- Licence value: `license` in the package\'s `node_modules/<name>/pa
 lines.push('  falling back to a legacy `licenses` array, then to the text of the package\'s');
 lines.push('  `LICENSE` file. Where a fallback was used, the table says so.');
 lines.push('- Allowed set: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD.');
+lines.push('- Family allowance: OFL-1.1 is accepted for the bundled `@fontsource/*`');
+lines.push('  webfont packages, as font assets used unmodified. It is NOT accepted for');
+lines.push('  any other package (owner decision, 2026-10-19).');
 lines.push('- SPDX expressions are allowed only when every named operand is in the set');
 lines.push('  (e.g. `(MIT OR Apache-2.0)` is allowed; a `WITH <exception>` clause keeps the');
 lines.push('  base licence id). This is stricter than an OR requires, deliberately.');
@@ -483,7 +524,7 @@ if (workspaceLinks.length > 0) {
 lines.push('## Flagged');
 lines.push('');
 if (flagged.length === 0) {
-	lines.push('Nothing was flagged: every resolved production dependency is licensed under one of MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC or 0BSD.');
+	lines.push('Nothing was flagged: every resolved production dependency is licensed under one of MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC or 0BSD, or (for the `@fontsource/*` webfont packages only) OFL-1.1.');
 } else {
 	lines.push('These are outside the allowed set and need a decision (replace, or record why they are acceptable):');
 	lines.push('');

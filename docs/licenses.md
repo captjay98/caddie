@@ -3,7 +3,7 @@
 A licence audit of Caddie's shipped **production** dependencies: their declared
 licence, and whether it falls outside the set this project accepts.
 
-- Generated: 2026-10-19T01:54:03.386Z
+- Generated: 2026-10-19T09:28:42.677Z
 - Regenerate with: `bun scripts/license-audit.ts`
 - Never edit this file by hand; the script rewrites it.
 
@@ -20,6 +20,9 @@ licence, and whether it falls outside the set this project accepts.
   falling back to a legacy `licenses` array, then to the text of the package's
   `LICENSE` file. Where a fallback was used, the table says so.
 - Allowed set: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD.
+- Family allowance: OFL-1.1 is accepted for the bundled `@fontsource/*`
+  webfont packages, as font assets used unmodified. It is NOT accepted for
+  any other package (owner decision, 2026-10-19).
 - SPDX expressions are allowed only when every named operand is in the set
   (e.g. `(MIT OR Apache-2.0)` is allowed; a `WITH <exception>` clause keeps the
   base licence id). This is stricter than an OR requires, deliberately.
@@ -28,7 +31,7 @@ licence, and whether it falls outside the set this project accepts.
 
 ## Summary
 
-24 production dependencies audited across 5 locations: 22 allowed, 2 flagged, 0 unresolved.
+24 production dependencies audited across 5 locations: 24 allowed, 0 flagged, 0 unresolved.
 
 ### apps/app
 
@@ -99,12 +102,7 @@ No production dependencies.
 
 ## Flagged
 
-These are outside the allowed set and need a decision (replace, or record why they are acceptable):
-
-| Package | Version | Licence | Why it is flagged |
-| --- | --- | --- | --- |
-| `@fontsource/ibm-plex-mono` | 5.3.0 | OFL-1.1 | not in the allowed set |
-| `@fontsource/inter` | 5.3.0 | OFL-1.1 | not in the allowed set |
+Nothing was flagged: every resolved production dependency is licensed under one of MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC or 0BSD, or (for the `@fontsource/*` webfont packages only) OFL-1.1.
 
 ## Unresolved
 
