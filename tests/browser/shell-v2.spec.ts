@@ -336,7 +336,10 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		await expect(page.getByTestId('conversation-panel')).toBeVisible();
 		await expect(page.getByTestId('conv-scrim')).toBeVisible();
 		const box = await page.getByTestId('conversation-panel').boundingBox();
-		expect(Math.ceil(box?.width ?? 0)).toBeLessThanOrEqual(420);
+		// Round, don't ceil: the overlay is a fixed 420px that slides in with a
+		// transform, and mid-slide the rect's width can read 420.00001, which
+		// Math.ceil turned into a 421 failure about one run in eight.
+		expect(Math.round(box?.width ?? 0)).toBeLessThanOrEqual(420);
 
 		// Scrim click closes.
 		await page.getByTestId('conv-scrim').click({ position: { x: 40, y: 300 } });
