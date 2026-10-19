@@ -47,13 +47,17 @@ const tarballs = new Map<string, Uint8Array>();
 const requested: string[] = [];
 let registry: ReturnType<typeof Bun.serve>;
 let registryUrl = '';
+/** Slow the registry down, and count how many downloads are in flight at once. */
+let responseDelayMs = 0;
+let inFlight = 0;
+let maxInFlight = 0;
 
 const sha512 = (bytes: Uint8Array) => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
 
 /** A real npm-style tarball: gzip'd tar with everything under `package/`. */
-function packTarball(name: string, version: string, extra: Record<string, string> = {}): Uint8Array {
+function packTarball(name: string, version: string, extra: Record<string, string | Uint8Array> = {}): Uint8Array {
 	const root = mkdtempSync(join(scratch, 'pack-'));
-	const files: Record<string, string> = {
+	const files: Record<string, string | Uint8Array> = {
 		'package.json': JSON.stringify({ name, version, main: 'index.js' }),
 		'index.js': `module.exports = ${JSON.stringify(`${name}@${version}`)};\n`,
 		...extra,
@@ -69,7 +73,7 @@ function packTarball(name: string, version: string, extra: Record<string, string
 }
 
 /** Publish name@version to the local registry; returns the bytes it serves. */
-function publish(name: string, version: string, extra: Record<string, string> = {}): Uint8Array {
+function publish(name: string, version: string, extra: Record<string, string | Uint8Array> = {}): Uint8Array {
 	const bytes = packTarball(name, version, extra);
 	tarballs.set(new URL(script.tarballUrlFor(name, version, registryUrl)).pathname, bytes);
 	return bytes;
@@ -114,11 +118,18 @@ beforeAll(async () => {
 	registry = Bun.serve({
 		hostname: '127.0.0.1',
 		port: 0,
-		fetch(request) {
+		async fetch(request) {
 			const path = new URL(request.url).pathname;
 			requested.push(path);
-			const bytes = tarballs.get(path);
-			return bytes ? new Response(new Blob([bytes as Uint8Array<ArrayBuffer>])) : new Response('not found', { status: 404 });
+			inFlight++;
+			maxInFlight = Math.max(maxInFlight, inFlight);
+			try {
+				if (responseDelayMs > 0) await Bun.sleep(responseDelayMs);
+				const bytes = tarballs.get(path);
+				return bytes ? new Response(new Blob([bytes as Uint8Array<ArrayBuffer>])) : new Response('not found', { status: 404 });
+			} finally {
+				inFlight--;
+			}
 		},
 	});
 	registryUrl = `http://127.0.0.1:${registry.port}`;
@@ -132,6 +143,9 @@ afterAll(() => {
 beforeEach(() => {
 	tarballs.clear();
 	requested.length = 0;
+	responseDelayMs = 0;
+	inFlight = 0;
+	maxInFlight = 0;
 });
 
 describe('reading bun.lock', () => {
@@ -352,6 +366,93 @@ describe('the script against a local registry', () => {
 		expect(refused.exit).toBe(1);
 		expect(refused.stderr).toContain('nohash');
 	}, 20_000);
+});
+
+describe('large packages and a failing unpack (live finding, 2026-10-20)', () => {
+	// In the sandbox, writing sql.js's 13.6 MB tarball to /tmp failed with
+	// EBADF and the stack trace reached the owner. Not reproducible on this
+	// machine, so these pin the safer shape instead: no temp file at all, one
+	// more try, a plain message, fewer downloads at once.
+	const onePackage = () => {
+		const alpha = publish('alpha', '1.0.0');
+		return appWith(lockText({ alpha: ['alpha@1.0.0', '', {}, sha512(alpha)] }));
+	};
+
+	/** A `tar` first on PATH that fails (once, or always), then hands over to the real one. */
+	function fakeTar(mode: 'fail-once' | 'always-fail'): string {
+		const bin = mkdtempSync(join(scratch, 'bin-'));
+		const marker = join(bin, 'failed-once');
+		const realTar = Bun.which('tar') ?? '/usr/bin/tar';
+		const body =
+			mode === 'fail-once'
+				? `if [ ! -e '${marker}' ]; then : > '${marker}'; cat > /dev/null; echo 'simulated unpack failure' >&2; exit 2; fi\nexec '${realTar}' "$@"\n`
+				: `cat > /dev/null\necho 'simulated unpack failure' >&2\nexit 2\n`;
+		writeFileSync(join(bin, 'tar'), `#!/bin/sh\n${body}`, { mode: 0o755 });
+		return bin;
+	}
+
+	async function withEnv<T>(name: 'PATH' | 'TMPDIR', value: string, fn: () => Promise<T>): Promise<T> {
+		const saved = process.env[name];
+		process.env[name] = value;
+		try {
+			return await fn();
+		} finally {
+			if (saved === undefined) delete process.env[name];
+			else process.env[name] = saved;
+		}
+	}
+
+	test('the tarball never goes through a temporary file: unpacking works with no temp folder at all', async () => {
+		const app = onePackage();
+		const result = await withEnv('TMPDIR', join(scratch, 'no-such-temp-folder'), () => run(app));
+		expect(result).toMatchObject({ code: 0, stderr: '' });
+		expect(read(app, 'node_modules/alpha/index.js')).toContain('alpha@1.0.0');
+	});
+
+	test('an unpack that fails once is tried again, and the package lands', async () => {
+		const app = onePackage();
+		const bin = fakeTar('fail-once');
+		const result = await withEnv('PATH', `${bin}:${process.env.PATH ?? ''}`, () => run(app));
+		expect(result).toMatchObject({ code: 0, stderr: '' });
+		expect(read(app, 'node_modules/alpha/index.js')).toContain('alpha@1.0.0');
+		expect(existsSync(join(bin, 'failed-once'))).toBe(true);
+	});
+
+	test('an unpack that keeps failing is reported in one plain line naming the package, with no stack trace', async () => {
+		const app = onePackage();
+		const bin = fakeTar('always-fail');
+		const result = await withEnv('PATH', `${bin}:${process.env.PATH ?? ''}`, () => run(app));
+		expect(result.code).toBe(1);
+		expect(result.stderr).toContain('alpha@1.0.0: could not be unpacked after 2 tries (tar exited 2: simulated unpack failure)');
+		expect(result.stderr).not.toMatch(/\n\s+at /);
+		expect(existsSync(join(app, 'node_modules/alpha/index.js'))).toBe(false);
+	});
+
+	test('a 14 MB package (sql.js-sized) unpacks through the pipe byte-identical', async () => {
+		const big = new Uint8Array(14 * 1024 * 1024);
+		for (let at = 0; at < big.length; at += 65_536) crypto.getRandomValues(big.subarray(at, at + 65_536));
+		const bytes = publish('bigpkg', '1.0.0', { 'big.bin': big });
+		const app = appWith(lockText({ bigpkg: ['bigpkg@1.0.0', '', {}, sha512(bytes)] }));
+		const result = await run(app);
+		expect(result).toMatchObject({ code: 0, stderr: '' });
+		const out = readFileSync(join(app, 'node_modules/bigpkg/big.bin'));
+		expect(out.length).toBe(big.length);
+		expect(createHash('sha256').update(out).digest('hex')).toBe(createHash('sha256').update(big).digest('hex'));
+	}, 30_000);
+
+	test('at most 4 downloads run at once, still in parallel', async () => {
+		const entries: Record<string, unknown[]> = {};
+		for (let i = 0; i < 9; i++) {
+			const bytes = publish(`pkg${i}`, '1.0.0');
+			entries[`pkg${i}`] = [`pkg${i}@1.0.0`, '', {}, sha512(bytes)];
+		}
+		const app = appWith(lockText(entries));
+		responseDelayMs = 60;
+		const result = await run(app);
+		expect(result).toMatchObject({ code: 0, stderr: '' });
+		expect(maxInFlight).toBeLessThanOrEqual(4);
+		expect(maxInFlight).toBeGreaterThan(1);
+	});
 });
 
 describe('runVerifiedInstall, the host step', () => {

@@ -67,14 +67,14 @@ const SCRIPT_PATH = '/tmp/caddie-verified-install.mjs';
 export const VERIFIED_INSTALL_SCRIPT = String.raw`import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export const MARKER = ".caddie-verified";
 export const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 const NAME_PART = /^[A-Za-z0-9._~-]+$/;
 const VERSION_TEXT = /^[0-9A-Za-z.+_-]+$/;
-const PARALLEL_DOWNLOADS = 8;
+const PARALLEL_DOWNLOADS = 4;
+const UNPACK_TRIES = 2;
 
 // bun.lock is JSONC: drop the trailing commas JSON.parse rejects, but only
 // outside strings, so a comma inside a string is left alone.
@@ -220,24 +220,31 @@ async function placePackage(cwd, pkg, registryBase) {
   if (!verifyIntegrity(pkg.integrity, digest)) {
     return { failure: label + ": the downloaded tarball does not match the sha512 in bun.lock, so it was not unpacked" };
   }
-  const archive = join(tmpdir(), "caddie-verified-" + process.pid + "-" + Math.random().toString(36).slice(2) + ".tgz");
+  // The checked bytes go to tar on stdin, never through a temporary file
+  // (writing a 13.6 MB tarball to the sandbox's /tmp once failed with EBADF).
+  // GNU tar drops the archive's top folder ("package/"); files are owned by
+  // the sandbox user, not whatever ids the archive records.
+  let why = "";
+  for (let attempt = 1; attempt <= UNPACK_TRIES; attempt++) {
+    try {
+      clearCopy(dir);
+      mkdirSync(dir, { recursive: true });
+      const tar = spawnSync("tar", ["-xzf", "-", "-C", dir, "--strip-components=1", "--no-same-owner"], { input: bytes, encoding: "utf8" });
+      if (!tar.error && tar.status === 0) {
+        writeFileSync(marker, pkg.integrity);
+        return { downloaded: true };
+      }
+      why = tar.error ? "tar could not run: " + tar.error.message : "tar exited " + tar.status + (tar.stderr ? ": " + String(tar.stderr).trim().slice(0, 300) : "");
+    } catch (error) {
+      why = error && error.message ? error.message : String(error);
+    }
+  }
   try {
     clearCopy(dir);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(archive, bytes);
-    // GNU tar drops the archive's top folder ("package/"); files are owned by
-    // the sandbox user, not whatever ids the archive records.
-    const tar = spawnSync("tar", ["-xzf", archive, "-C", dir, "--strip-components=1", "--no-same-owner"], { encoding: "utf8" });
-    if (tar.error || tar.status !== 0) {
-      clearCopy(dir);
-      const why = tar.error ? "tar could not run (" + tar.error.message + ")" : "tar exited " + tar.status;
-      return { failure: label + ": " + why + (tar.stderr ? " " + String(tar.stderr).trim().slice(0, 300) : "") };
-    }
-    writeFileSync(marker, pkg.integrity);
-    return { downloaded: true };
-  } finally {
-    rmSync(archive, { force: true });
+  } catch {
+    // nothing more to undo
   }
+  return { failure: label + ": could not be unpacked after " + UNPACK_TRIES + " tries (" + why + ")" };
 }
 
 export async function main(cwd, env, platform, arch) {

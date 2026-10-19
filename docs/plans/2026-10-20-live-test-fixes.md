@@ -30,7 +30,7 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 
 ## 1. Builds survive large packages
 
-- [ ] 1.1 Installer: no temporary archive (pipe the checked tarball to
+- [x] 1.1 Installer: no temporary archive (pipe the checked tarball to
   `tar -xzf -`), at most 4 downloads at once, one retry on a failed extract, a
   plain error naming the package. `tests/verified-install.test.ts`: nothing left
   in tmpdir, a first failure is retried, existing cases green.
