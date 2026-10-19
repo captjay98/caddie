@@ -8,8 +8,8 @@ import { ScopeError } from './scope.ts';
  * single value over 2,000,000 bytes, so a file is split into chunks of at
  * most LARGE_CHUNK_BYTES, keyed by its sha256 (migration 0036).
  *
- *   put  one D1 batch (a transaction) writes the row and every chunk, so a
- *        file is either all there or not at all; the same bytes are stored once
+ *   put  chunks a few per D1 batch, the head row in the last one, so a file
+ *        is either readable whole or not at all; the same bytes are stored once
  *   get  reads chunk by chunk and refuses a file whose chunks do not add up
  *        or whose bytes no longer match the hash: never serve half an APK
  *
@@ -18,6 +18,7 @@ import { ScopeError } from './scope.ts';
  */
 
 export const LARGE_CHUNK_BYTES = 1_900_000;
+export const LARGE_CHUNKS_PER_BATCH = 4;
 export const LARGE_MAX_BYTES = 64 * 1024 * 1024;
 
 export async function putLarge(db: D1Database, bytes: Uint8Array): Promise<{ sha256: string; bytes: number; deduped: boolean }> {
@@ -27,19 +28,24 @@ export async function putLarge(db: D1Database, bytes: Uint8Array): Promise<{ sha
 	const existing = await db.prepare('select "bytes" from "large_content" where "sha256" = ?').bind(sha256).all<{ bytes: number }>();
 	if ((existing.results ?? []).length > 0) return { sha256, bytes: bytes.byteLength, deduped: true };
 	const chunks = Math.ceil(bytes.byteLength / LARGE_CHUNK_BYTES);
-	const statements = [
-		db
-			.prepare('insert or ignore into "large_content" ("sha256","bytes","chunks","createdAt") values (?,?,?,?)')
-			.bind(sha256, bytes.byteLength, chunks, new Date().toISOString()),
-	];
+	// A few chunks per batch keeps each D1 request under ~8 MB. The head row
+	// goes in the LAST batch, so a file is readable only once every chunk is
+	// in; an interrupted write leaves unreferenced chunks, never half a file.
+	const pending = [];
 	for (let index = 0; index < chunks; index++) {
-		statements.push(
+		pending.push(
 			db
 				.prepare('insert or ignore into "large_content_chunks" ("sha256","idx","bytes") values (?,?,?)')
 				.bind(sha256, index, bytes.subarray(index * LARGE_CHUNK_BYTES, (index + 1) * LARGE_CHUNK_BYTES)),
 		);
 	}
-	await db.batch(statements);
+	const head = db
+		.prepare('insert or ignore into "large_content" ("sha256","bytes","chunks","createdAt") values (?,?,?,?)')
+		.bind(sha256, bytes.byteLength, chunks, new Date().toISOString());
+	for (let start = 0; start < pending.length; start += LARGE_CHUNKS_PER_BATCH) {
+		const group = pending.slice(start, start + LARGE_CHUNKS_PER_BATCH);
+		await db.batch(start + LARGE_CHUNKS_PER_BATCH >= pending.length ? [...group, head] : group);
+	}
 	return { sha256, bytes: bytes.byteLength, deduped: false };
 }
 

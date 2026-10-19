@@ -3,7 +3,7 @@ import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import { D1_MAX_VALUE_BYTES } from '../apps/app/src/server/artifacts.ts';
-import { LARGE_CHUNK_BYTES, LARGE_MAX_BYTES, getLarge, putLarge } from '../apps/app/src/server/large-content.ts';
+import { LARGE_CHUNK_BYTES, LARGE_CHUNKS_PER_BATCH, LARGE_MAX_BYTES, getLarge, putLarge } from '../apps/app/src/server/large-content.ts';
 import { allMigrationPaths } from './fixtures/migrations.ts';
 
 /**
@@ -57,17 +57,35 @@ describe('the large-file store', () => {
 		expect(LARGE_MAX_BYTES).toBe(64 * 1024 * 1024);
 	});
 
-	test('an APK-sized file goes in as chunks in one batch and comes back byte-identical', async () => {
+	test('an APK-sized file goes in as chunks, a few per batch, and comes back byte-identical', async () => {
 		const w = world();
 		const apk = random(16_000_000);
 		const stored = await putLarge(w.db, apk);
 		expect(stored).toEqual({ sha256: sha(apk), bytes: 16_000_000, deduped: false });
-		expect(w.batches()).toBe(1);
+		const chunkCount = Math.ceil(16_000_000 / LARGE_CHUNK_BYTES);
+		expect(w.batches()).toBe(Math.ceil(chunkCount / LARGE_CHUNKS_PER_BATCH));
 		const chunks = w.sqlite.prepare('select idx, length(bytes) as n from large_content_chunks where sha256 = ? order by idx').all(stored.sha256) as { idx: number; n: number }[];
-		expect(chunks.length).toBe(Math.ceil(16_000_000 / LARGE_CHUNK_BYTES));
+		expect(chunks.length).toBe(chunkCount);
 		for (const chunk of chunks) expect(chunk.n).toBeLessThanOrEqual(LARGE_CHUNK_BYTES);
 		const back = await getLarge(w.db, stored.sha256);
 		expect(back && Buffer.from(back).equals(Buffer.from(apk))).toBe(true);
+	});
+
+	test('a write cut off before its last batch leaves nothing readable', async () => {
+		const w = world();
+		const apk = random(9_000_000);
+		const realBatch = w.db.batch.bind(w.db);
+		let calls = 0;
+		(w.db as unknown as { batch: typeof realBatch }).batch = async (statements) => {
+			if (++calls === 2) throw new Error('connection lost');
+			return realBatch(statements);
+		};
+		await expect(putLarge(w.db, apk)).rejects.toThrow('connection lost');
+		expect(await getLarge(w.db, sha(apk))).toBeNull();
+		// Trying again finishes it.
+		(w.db as unknown as { batch: typeof realBatch }).batch = realBatch;
+		await putLarge(w.db, apk);
+		expect(Buffer.from((await getLarge(w.db, sha(apk)))!).equals(Buffer.from(apk))).toBe(true);
 	});
 
 	test('a small file is one chunk; the same bytes twice are stored once', async () => {
