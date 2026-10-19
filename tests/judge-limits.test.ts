@@ -22,14 +22,18 @@ import { projectScopeForUser, ScopeError, workspaceScopeForUser } from '../apps/
 import { judgeIdentityFrom } from '../apps/app/src/server/judge-access.ts';
 import {
 	JUDGE_MAX_BUILDS_PER_DAY_DEFAULT,
+	JUDGE_MAX_DISCOVERY_PER_DAY_DEFAULT,
 	JUDGE_MAX_MESSAGES_PER_DAY_DEFAULT,
 	JUDGE_MAX_PROJECTS_DEFAULT,
 	admitJudgeBuildStart,
+	admitJudgeDiscovery,
 	admitJudgeMessage,
+	admitJudgeProject,
 	countJudgeProjects,
 	countJudgeUsage,
 	judgeLimits,
 } from '../apps/app/src/server/judge-limits.ts';
+import { createDiscoveryRouter } from '../apps/app/src/server/routes/discovery.ts';
 import { conversationGuard } from '../apps/app/src/server/routes/runs.ts';
 import { INTERNAL_DISPATCH_HEADER, internalDispatchSignature, isInternalDispatch } from '../apps/app/src/server/internal-dispatch.ts';
 import { workerSelfDeliver } from '../apps/app/src/server/workflow-dispatch.ts';
@@ -70,7 +74,7 @@ function seedJudge(sqlite: BunDatabase, userId = JUDGE_ID, name = 'judge-one'): 
 		.run(name, userId, 'active', new Date().toISOString());
 }
 
-function seedUsage(sqlite: BunDatabase, userId: string, kind: 'build' | 'message', rows: number, at = new Date().toISOString()): void {
+function seedUsage(sqlite: BunDatabase, userId: string, kind: 'build' | 'message' | 'discovery', rows: number, at = new Date().toISOString()): void {
 	for (let i = 0; i < rows; i++) {
 		sqlite
 			.prepare('insert into "judge_usage_events" ("id","userId","kind","createdAt") values (?,?,?,?)')
@@ -202,23 +206,116 @@ async function guardWorld(options: { judge?: boolean; limits?: Record<string, st
 }
 
 describe('judge limits: configuration', () => {
-	test('the D4 defaults apply when an override is absent, unparseable or zero', () => {
-		expect(judgeLimits(undefined)).toEqual({
+	test('the D4 defaults apply when an override is absent or unparseable', () => {
+		const defaults = {
 			projects: JUDGE_MAX_PROJECTS_DEFAULT,
 			buildsPerDay: JUDGE_MAX_BUILDS_PER_DAY_DEFAULT,
 			messagesPerDay: JUDGE_MAX_MESSAGES_PER_DAY_DEFAULT,
-		});
-		const defaults = judgeLimits({ JUDGE_MAX_PROJECTS: '0', JUDGE_MAX_BUILDS_PER_DAY: 'many', JUDGE_MAX_MESSAGES_PER_DAY: '-5' });
-		expect(defaults).toEqual({
-			projects: JUDGE_MAX_PROJECTS_DEFAULT,
-			buildsPerDay: JUDGE_MAX_BUILDS_PER_DAY_DEFAULT,
-			messagesPerDay: JUDGE_MAX_MESSAGES_PER_DAY_DEFAULT,
-		});
-		expect(judgeLimits({ JUDGE_MAX_PROJECTS: '5', JUDGE_MAX_BUILDS_PER_DAY: 2, JUDGE_MAX_MESSAGES_PER_DAY: ' 40 ' })).toEqual({
-			projects: 5,
-			buildsPerDay: 2,
-			messagesPerDay: 40,
-		});
+			discoveryPerDay: JUDGE_MAX_DISCOVERY_PER_DAY_DEFAULT,
+		};
+		expect(judgeLimits(undefined)).toEqual(defaults);
+		expect(judgeLimits({})).toEqual(defaults);
+		// Every value a typo can produce reads as the default — never more
+		// permissive than D4.
+		expect(
+			judgeLimits({
+				JUDGE_MAX_PROJECTS: 'abc',
+				JUDGE_MAX_BUILDS_PER_DAY: 'many',
+				JUDGE_MAX_MESSAGES_PER_DAY: '-5',
+				JUDGE_MAX_DISCOVERY_PER_DAY: '2.5',
+			}),
+		).toEqual(defaults);
+		expect(
+			judgeLimits({
+				JUDGE_MAX_PROJECTS: '',
+				JUDGE_MAX_BUILDS_PER_DAY: '-1',
+				JUDGE_MAX_MESSAGES_PER_DAY: '   ',
+				JUDGE_MAX_DISCOVERY_PER_DAY: '',
+			}),
+		).toEqual(defaults);
+	});
+
+	test('0 is a real limit meaning NONE, not the default', () => {
+		expect(
+			judgeLimits({
+				JUDGE_MAX_PROJECTS: '0',
+				JUDGE_MAX_BUILDS_PER_DAY: 0,
+				JUDGE_MAX_MESSAGES_PER_DAY: '0',
+				JUDGE_MAX_DISCOVERY_PER_DAY: ' 0 ',
+			}),
+		).toEqual({ projects: 0, buildsPerDay: 0, messagesPerDay: 0, discoveryPerDay: 0 });
+	});
+
+	test('valid overrides are honored, including trimming', () => {
+		expect(
+			judgeLimits({
+				JUDGE_MAX_PROJECTS: '5',
+				JUDGE_MAX_BUILDS_PER_DAY: 2,
+				JUDGE_MAX_MESSAGES_PER_DAY: ' 40 ',
+				JUDGE_MAX_DISCOVERY_PER_DAY: 7,
+			}),
+		).toEqual({ projects: 5, buildsPerDay: 2, messagesPerDay: 40, discoveryPerDay: 7 });
+	});
+});
+
+describe('judge limits: 0 means none at every limit', () => {
+	let sqlite: BunDatabase;
+	afterEach(() => sqlite?.close());
+
+	test('a judge is refused the FIRST project at 0 and no usage row is written', async () => {
+		const world = await serviceWorld();
+		sqlite = world.sqlite;
+		const message = await rejectsCode(
+			createProject(world.db, world.wsScope, { workspaceId: world.workspace.id, name: 'First' }, { JUDGE_MAX_PROJECTS: '0' }),
+			'JUDGE_LIMIT_PROJECTS',
+		);
+		expect(message).toBe('Judges can have 0 projects. Everything else works the same.');
+		expect(count(sqlite, 'select count(*) as n from "projects"')).toBe(0);
+		expect(count(sqlite, 'select count(*) as n from "judge_usage_events"')).toBe(0);
+		// The admit helper agrees at the same limit.
+		await rejectsCode(admitJudgeProject(world.db, JUDGE_ID, { JUDGE_MAX_PROJECTS: '0' }), 'JUDGE_LIMIT_PROJECTS');
+	});
+
+	test('a judge is refused the FIRST build start at 0 and writes no usage row', async () => {
+		const world = await serviceWorld();
+		sqlite = world.sqlite;
+		const message = await rejectsCode(
+			admitJudgeBuildStart(world.db, JUDGE_ID, { JUDGE_MAX_BUILDS_PER_DAY: '0' }),
+			'JUDGE_LIMIT_BUILDS',
+		);
+		expect(message).toBe('Judges can start 0 builds in 24 hours. Everything else works the same.');
+		expect(await countJudgeUsage(world.db, JUDGE_ID, 'build')).toBe(0);
+		expect(count(sqlite, 'select count(*) as n from "judge_usage_events"')).toBe(0);
+	});
+
+	test('a judge is refused the FIRST message at 0 and writes no usage row', async () => {
+		const world = await serviceWorld();
+		sqlite = world.sqlite;
+		const message = await rejectsCode(
+			admitJudgeMessage(world.db, JUDGE_ID, { JUDGE_MAX_MESSAGES_PER_DAY: '0' }),
+			'JUDGE_LIMIT_MESSAGES',
+		);
+		expect(message).toBe('Judges can send 0 Caddie messages in 24 hours. Everything else works the same.');
+		expect(await countJudgeUsage(world.db, JUDGE_ID, 'message')).toBe(0);
+		expect(count(sqlite, 'select count(*) as n from "judge_usage_events"')).toBe(0);
+	});
+
+	test('a non-judge is never refused, even with every limit set to 0', async () => {
+		const { sqlite: local, db } = migratedDatabase();
+		sqlite = local;
+		const OWNER = 'owner-1';
+		addUser(sqlite, OWNER, 'owner@example.com');
+		const env = {
+			JUDGE_MAX_PROJECTS: '0',
+			JUDGE_MAX_BUILDS_PER_DAY: '0',
+			JUDGE_MAX_MESSAGES_PER_DAY: '0',
+			JUDGE_MAX_DISCOVERY_PER_DAY: '0',
+		};
+		expect(await admitJudgeProject(db, OWNER, env)).toBe(false);
+		expect(await admitJudgeBuildStart(db, OWNER, env)).toBe(false);
+		expect(await admitJudgeMessage(db, OWNER, env)).toBe(false);
+		expect(await admitJudgeDiscovery(db, OWNER, env)).toBe(false);
+		expect(count(sqlite, 'select count(*) as n from "judge_usage_events"')).toBe(0);
 	});
 });
 
@@ -523,5 +620,76 @@ describe('judge limit classifiers', () => {
 		expect(await admitJudgeMessage(db, 'owner-1', limit)).toBe(false);
 		expect(await countJudgeUsage(db, JUDGE_ID, 'message')).toBe(2);
 		sqlite.close();
+	});
+});
+
+describe('judge limits: discovery lookups', () => {
+	let sqlite: BunDatabase;
+	afterEach(() => sqlite?.close());
+
+	test('a judge is admitted up to the cap then refused 403, one discovery row per admit', async () => {
+		const world = await serviceWorld();
+		sqlite = world.sqlite;
+		const env = { JUDGE_MAX_DISCOVERY_PER_DAY: '2' };
+		expect(await admitJudgeDiscovery(world.db, JUDGE_ID, env)).toBe(true);
+		expect(await countJudgeUsage(world.db, JUDGE_ID, 'discovery')).toBe(1);
+		expect(await admitJudgeDiscovery(world.db, JUDGE_ID, env)).toBe(true);
+		expect(await countJudgeUsage(world.db, JUDGE_ID, 'discovery')).toBe(2);
+
+		const message = await rejectsCode(admitJudgeDiscovery(world.db, JUDGE_ID, env), 'JUDGE_LIMIT_DISCOVERY');
+		expect(message).toBe('Judges can run 2 discovery lookups in 24 hours. Everything else works the same.');
+		expect(await countJudgeUsage(world.db, JUDGE_ID, 'discovery')).toBe(2);
+		expect(count(sqlite, 'select count(*) as n from "judge_usage_events" where "kind" = \'discovery\'')).toBe(2);
+	});
+
+	test('JUDGE_MAX_DISCOVERY_PER_DAY=0 refuses the first lookup and writes no row', async () => {
+		const world = await serviceWorld();
+		sqlite = world.sqlite;
+		const message = await rejectsCode(
+			admitJudgeDiscovery(world.db, JUDGE_ID, { JUDGE_MAX_DISCOVERY_PER_DAY: '0' }),
+			'JUDGE_LIMIT_DISCOVERY',
+		);
+		expect(message).toBe('Judges can run 0 discovery lookups in 24 hours. Everything else works the same.');
+		expect(count(sqlite, 'select count(*) as n from "judge_usage_events"')).toBe(0);
+	});
+
+	test('the default cap is 20: the 21st lookup in the window is refused', async () => {
+		const world = await serviceWorld();
+		sqlite = world.sqlite;
+		seedUsage(sqlite, JUDGE_ID, 'discovery', 20);
+		await rejectsCode(admitJudgeDiscovery(world.db, JUDGE_ID), 'JUDGE_LIMIT_DISCOVERY');
+		expect(await countJudgeUsage(world.db, JUDGE_ID, 'discovery')).toBe(20);
+	});
+
+	test('a user without an active judge row is never limited on discovery', async () => {
+		const { sqlite: local, db } = migratedDatabase();
+		sqlite = local;
+		addUser(sqlite, 'owner-1', 'owner@example.com');
+		expect(await admitJudgeDiscovery(db, 'owner-1', { JUDGE_MAX_DISCOVERY_PER_DAY: '0' })).toBe(false);
+		expect(count(sqlite, 'select count(*) as n from "judge_usage_events"')).toBe(0);
+	});
+});
+
+describe('judge limits: the POST feed route spends the discovery budget first', () => {
+	let sqlite: BunDatabase;
+	afterEach(() => sqlite?.close());
+
+	test('at 0 the route refuses before any paid sweep runs', async () => {
+		const world = await guardWorld({ judge: true, limits: { JUDGE_MAX_DISCOVERY_PER_DAY: '0' } });
+		sqlite = world.sqlite;
+		const router = createDiscoveryRouter();
+		const refused = await router.request(
+			`${ORIGIN}/projects/${world.project.id}/discovery/feed`,
+			{ method: 'POST', headers: { cookie: world.cookie } },
+			world.env,
+		);
+		expect(refused.status).toBe(403);
+		expect(await refused.json()).toEqual({
+			error: 'JUDGE_LIMIT_DISCOVERY',
+			message: 'Judges can run 0 discovery lookups in 24 hours. Everything else works the same.',
+		});
+		// The refusal lands BEFORE discoverForActor: no feed run, no admitted event.
+		expect(count(sqlite, 'select count(*) as n from "discovery_feed_runs"')).toBe(0);
+		expect(await countJudgeUsage(world.db, world.user.id, 'discovery')).toBe(0);
 	});
 });

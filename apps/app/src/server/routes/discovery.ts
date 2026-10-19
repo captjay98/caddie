@@ -21,6 +21,7 @@ import { getProfile } from '../profiles.ts';
 import { digestProfileFrom } from '../candidate-inspection.ts';
 import { discoverForActor } from '../coordinator-context.ts';
 import { buildHackathonResultsCard } from '../hackathon-card.ts';
+import { admitJudgeDiscovery } from '../judge-limits.ts';
 
 /**
  * Background hook for work that must not delay the response. In a Worker it
@@ -146,6 +147,9 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 			c.req.raw.headers,
 			c.req.param('projectId'),
 		);
+		// S07 judge limits: this is a live paid sweep (Tavily + Nebius), so a
+		// judge's rolling-24h discovery budget is spent HERE, before any work.
+		await admitJudgeDiscovery(c.env.DB, scope.actorId, c.env);
 		// "Check again": the full live sweep, exactly what the chat runs (paid
 		// Tavily + Nebius calls, bounded inside discoverForActor).
 		await discoverForActor(c.env.DB, scope, { refresh: true, limit: DISCOVER_LIMIT }, {
@@ -158,6 +162,11 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 		return c.json({ feed }, 201);
 	});
 
+	// Deliberately NOT judge-limited: the GETs below read stored rows (feed
+	// history, candidates, one candidate, the detail pane, the cached digest);
+	// none runs a live Tavily/Nebius call, so none spends money per click. Only
+	// the two POSTs that DO — this feed refresh and check-eligibility below —
+	// are capped. Do not add a limit to a GET.
 	router.get('/projects/:projectId/discovery/feed', async (c) => {
 		const scope = await requireProjectScope(
 			c.env.DB,
@@ -260,6 +269,9 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 			c.req.raw.headers,
 			c.req.param('projectId'),
 		);
+		// S07 judge limits: paid Tavily + Nebius calls, so the discovery budget
+		// is spent here, before the single-page read.
+		await admitJudgeDiscovery(c.env.DB, scope.actorId, c.env);
 		const profile = await actorEligibilityProfile(c.env, c.req.raw.headers);
 		return c.json(
 			await checkCandidateEligibility(c.env.DB, scope, c.req.param('candidateId') ?? '', profile, {
