@@ -10,6 +10,17 @@ const MAX_RELAY_BODY = Math.ceil((1024 * 1024) / 3) * 4 + 4;
 const MAX_IN_FLIGHT = 8;
 const CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+/**
+ * Android apps' browser preview (Track 3): Flutter's web engine (CanvasKit,
+ * WebAssembly) and its Roboto font come from Google's two Flutter CDNs, and
+ * the compiled app starts from a blob: script (server/flutter-preview.ts).
+ * Nothing else is reachable: the app's /api calls and its asset files are
+ * answered through the shim, never the network.
+ */
+export const FLUTTER_CSP =
+  "default-src 'none'; script-src 'unsafe-inline' blob: https://www.gstatic.com 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data: blob:; connect-src https://www.gstatic.com https://fonts.gstatic.com; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+/** A Flutter preview page carries its compiled app and assets (server/flutter-preview.ts caps them at 12 MB). */
+const FLUTTER_PREVIEW_LIMIT = 17 * 1024 * 1024;
 
 function storageKey(actorId: string, projectId: string): string {
   return `caddie:preview:${encodeURIComponent(actorId)}:${encodeURIComponent(projectId)}`;
@@ -138,11 +149,13 @@ function fetchBridgeShim(nonce: string): string {
 	})();`;
 }
 
-function previewDocument(
+/** The frame document (policy, storage shim, fetch shim, app); exported for tests/browser/flutter-preview.spec.ts. */
+export function previewDocument(
   html: string,
   nonce: string,
   seed: Record<string, string>,
   bridgeFetch = false,
+  kind: "web" | "flutter" = "web",
 ): string {
   // Keep all generated HTML parsing inside the sandbox, including resource tags.
   // The policy and synchronous storage shim precede every generated script.
@@ -180,7 +193,81 @@ function previewDocument(
 		});
 		Object.defineProperty(window, 'localStorage', { value: storage, configurable: false, writable: false });
 	})();`;
-  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="referrer" content="no-referrer"><script>${shim}</script>${bridgeFetch ? `<script>${fetchBridgeShim(nonce)}</script>` : ""}</head><body>${html}</body></html>`;
+  const fetchShim = kind === "flutter" ? flutterFetchShim(nonce, bridgeFetch) : bridgeFetch ? fetchBridgeShim(nonce) : null;
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${kind === "flutter" ? FLUTTER_CSP : CSP}"><meta name="referrer" content="no-referrer"><script>${shim}</script>${fetchShim ? `<script>${fetchShim}</script>` : ""}</head><body>${html}</body></html>`;
+}
+
+/**
+ * Android apps (Track 3): Flutter's engine fetches its asset files from the
+ * page's assetBase (answered here from the page's own data), the app's /api
+ * calls go through the same parent relay as web apps, and only Google's two
+ * Flutter CDNs (allowed by FLUTTER_CSP) reach the network.
+ */
+function flutterFetchShim(nonce: string, bridge: boolean): string {
+  return `(function () {
+		'use strict';
+		var nonce = ${scriptJSON(nonce)};
+		var BASE = 'https://app.preview.invalid';
+		var ASSETS = 'https://assets.preview.invalid';
+		var CDNS = ['https://www.gstatic.com', 'https://fonts.gstatic.com'];
+		var bridge = ${bridge ? "true" : "false"};
+		var network = window.fetch.bind(window);
+		var pending = new Map();
+		var seq = 0;
+		var TYPES = { json: 'application/json', otf: 'font/otf', ttf: 'font/ttf', woff2: 'font/woff2', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', frag: 'application/octet-stream', bin: 'application/octet-stream' };
+		function toBase64(bytes) { var text = ''; for (var i = 0; i < bytes.length; i += 32768) text += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768)); return btoa(text); }
+		function fromBase64(value) { var binary = atob(value); var out = new Uint8Array(binary.length); for (var i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i); return out; }
+		// The frame has no address of its own (about:srcdoc, opaque origin):
+		// Flutter's router writes its route into the URL, which the browser
+		// refuses here, so keep the history state and drop the URL change.
+		['pushState', 'replaceState'].forEach(function (name) {
+			var original = history[name].bind(history);
+			history[name] = function (state, title, url) {
+				try { return original(state, title, url); } catch (error) { return original(state, title); }
+			};
+		});
+		// Reading navigator.serviceWorker throws in a sandboxed frame; there is none.
+		try { Object.defineProperty(Navigator.prototype, 'serviceWorker', { configurable: true, get: function () { return undefined; } }); } catch (error) {}
+		window.addEventListener('message', function (event) {
+			if (event.source !== parent) return;
+			var message = event.data;
+			if (!message || message.kind !== ${scriptJSON(FETCH_RESULT_KIND)} || message.nonce !== nonce) return;
+			var waiting = pending.get(message.id);
+			if (!waiting) return;
+			pending.delete(message.id);
+			if (message.error) { waiting.reject(new TypeError(message.error)); return; }
+			var answer = message.response;
+			var status = answer.status >= 200 && answer.status <= 599 ? answer.status : 502;
+			var headers = answer.headers.filter(function (pair) { return String(pair[0]).toLowerCase() !== 'set-cookie'; });
+			var empty = status === 204 || status === 205 || status === 304;
+			waiting.resolve(new Response(empty ? null : fromBase64(answer.body), { status: status, headers: headers }));
+		});
+		window.fetch = async function (input, init) {
+			var request = new Request(input instanceof Request ? input : new URL(String(input), BASE + '/'), init);
+			var url = new URL(request.url);
+			if (url.origin === ASSETS) {
+				var assets = window.__caddieFlutterAssets || {};
+				var path = decodeURIComponent(url.pathname.slice(1));
+				if (!Object.prototype.hasOwnProperty.call(assets, path)) return new Response(null, { status: 404 });
+				var ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
+				return new Response(fromBase64(assets[path]), { status: 200, headers: { 'content-type': TYPES[ext] || 'application/octet-stream' } });
+			}
+			if (CDNS.indexOf(url.origin) !== -1 && request.method === 'GET') return network(request);
+			if (!bridge || url.origin !== BASE || !/^\\/api(?:\\/|$)/.test(url.pathname)) throw new TypeError("The preview can only reach the app's own /api routes.");
+			var body = null;
+			if (request.method !== 'GET' && request.method !== 'HEAD') {
+				var bytes = new Uint8Array(await request.arrayBuffer());
+				if (bytes.length > 0) body = toBase64(bytes);
+			}
+			var headers = [];
+			request.headers.forEach(function (value, name) { headers.push([name, value]); });
+			var id = ++seq;
+			return new Promise(function (resolve, reject) {
+				pending.set(id, { resolve: resolve, reject: reject });
+				parent.postMessage({ kind: ${scriptJSON(FETCH_KIND)}, nonce: nonce, id: id, request: { method: request.method, path: url.pathname + url.search, headers: headers, body: body } }, '*');
+			});
+		};
+	})();`;
 }
 
 /** Generated code stays in an opaque iframe; only its own bounded storage is shared. */
@@ -194,6 +281,8 @@ export function InteractivePreview(props: {
   appRequestUrl?: string;
   /** Apps with a server: empties the preview's test data. */
   onResetData?: () => Promise<void>;
+  /** "flutter": an Android app's browser preview (Track 3), in a phone-sized frame. */
+  kind?: "web" | "flutter";
 }): ReactElement {
   const frame = useRef<HTMLIFrameElement>(null);
   const [attempt, setAttempt] = useState(0);
@@ -204,6 +293,7 @@ export function InteractivePreview(props: {
   const [error, setError] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const kind = props.kind ?? "web";
   const contentUrl =
     props.contentUrl ??
     `/api/projects/${encodeURIComponent(props.projectId)}/artifact-revisions/${encodeURIComponent(props.artifactId)}/content`;
@@ -305,12 +395,13 @@ export function InteractivePreview(props: {
             .startsWith("text/html")
         )
           throw new Error("This artifact is not an interactive app preview.");
-        if (Number(response.headers.get("content-length")) > PREVIEW_LIMIT)
+        const limit = kind === "flutter" ? FLUTTER_PREVIEW_LIMIT : PREVIEW_LIMIT;
+        if (Number(response.headers.get("content-length")) > limit)
           throw new Error(
             "This preview is too large to open here. Download it instead.",
           );
         const html = await response.text();
-        if (new TextEncoder().encode(html).byteLength > PREVIEW_LIMIT)
+        if (new TextEncoder().encode(html).byteLength > limit)
           throw new Error(
             "This preview is too large to open here. Download it instead.",
           );
@@ -324,7 +415,7 @@ export function InteractivePreview(props: {
         } catch {
           setStorageWarning(true);
         }
-        setLoaded({ scope, document: previewDocument(html, nonce, seed, Boolean(appRequestUrl)) });
+        setLoaded({ scope, document: previewDocument(html, nonce, seed, Boolean(appRequestUrl), kind) });
       } catch (failure) {
         if (active)
           setError(
@@ -339,7 +430,7 @@ export function InteractivePreview(props: {
       controller.abort();
       window.removeEventListener("message", onMessage);
     };
-  }, [scope, props.actorId, props.projectId, props.artifactId, contentUrl, props.appRequestUrl]);
+  }, [scope, props.actorId, props.projectId, props.artifactId, contentUrl, props.appRequestUrl, kind]);
 
   return (
     <section
@@ -367,13 +458,12 @@ export function InteractivePreview(props: {
           sandbox="allow-scripts allow-forms"
           referrerPolicy="no-referrer"
           srcDoc={loaded.document}
-          style={{
-            width: "100%",
-            minHeight: 440,
-            border: 0,
-            borderRadius: 16,
-            background: "#fff",
-          }}
+          data-kind={kind}
+          style={
+            kind === "flutter"
+              ? { width: "min(100%, 400px)", height: 760, justifySelf: "center", border: 0, borderRadius: 28, background: "#fff", boxShadow: "0 0 0 10px var(--surface-2, #1f2430)" }
+              : { width: "100%", minHeight: 440, border: 0, borderRadius: 16, background: "#fff" }
+          }
         />
       ) : (
         <p role="status">Opening your app preview…</p>

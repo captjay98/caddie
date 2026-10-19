@@ -12,6 +12,7 @@ import {
   acknowledgeDispatch,
   readBuildOutput,
   readBuildBundle,
+  readOutputManifest,
   retryWorkflow,
   stopWorkflow,
 } from "../build-workflow.ts";
@@ -92,9 +93,10 @@ export function createBuildWorkflowRouter(
     const snapshot = await workflowSnapshot(c.env.DB, scope);
     const previewId = snapshot.workflow?.previewId ?? null;
     const previewHasServer = previewId ? (await readBuildBundle(c.env.DB, scope, previewId).catch(() => null)) !== null : false;
+    const previewKind = previewId ? ((await readOutputManifest(c.env.DB, scope, previewId).catch(() => null))?.kind ?? "web") : "web";
     // "Start from my GitHub repo": the copied app, shown until the first build has a preview of its own.
     const importPreview = await readImportPreview(c.env.DB, scope);
-    return c.json({ ...snapshot, previewHasServer, importPreview });
+    return c.json({ ...snapshot, previewHasServer, previewKind, importPreview });
   });
 
   // Carry the copied app's build forward (import-preview.ts). The card calls

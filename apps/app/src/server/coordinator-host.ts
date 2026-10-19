@@ -3,7 +3,8 @@ import type { RunBindingRecord } from "@caddie/contracts";
 import type { CoordinatorHostContext } from "../agents/coordinator.ts";
 import type { SandboxToolDeps } from "../agents/tools.ts";
 import { buildSandboxFromEnv, stackRuntime } from "./build-sandbox.ts";
-import { previewDocument, readBuiltApp } from "./built-app.ts";
+import { previewDocument, readBuiltApp, readBuiltServer } from "./built-app.ts";
+import { flutterPreviewDocument, readFlutterWebBuild } from "./flutter-preview.ts";
 import { type SandboxDriver, SandboxError } from "./adapters/sandbox.ts";
 import { bytesToBase64, base64ToBytes } from "./adapters/contree.ts";
 import {
@@ -615,14 +616,14 @@ export async function createCoordinatorContext(
         "Files changed after the build. Run checks again.",
       );
     // Backend apps: the server bundle and the migrations travel with the
-    // checked output (previews and publishing read them from there).
-    if (stack === "flutter")
-      return {
-        passed: false,
-        receipts,
-        next: "Every check passed, but Android apps cannot publish a preview yet (Track 3 stage D). Tell the user the app builds and its tests pass; do not retry verify_build.",
-      };
-    const { js, css, server, migrations } = await readBuiltApp(driver, id, root);
+    // checked output (previews and publishing read them from there). Android
+    // apps (Track 3) have the same server and a Flutter web build for the
+    // browser preview, carried as one page (flutter-preview.ts).
+    const built =
+      stack === "flutter"
+        ? { kind: "flutter" as const, ...(await readBuiltServer(driver, id, root)), page: flutterPreviewDocument(await readFlutterWebBuild(driver, id, root)) }
+        : { kind: "web" as const, ...(await readBuiltApp(driver, id, root)) };
+    const { server, migrations } = built;
     // The version history: the app's source as checked (same skip rules as the
     // GitHub save — no dependencies, build output or secrets). Never fails the
     // build: a version that can't be saved is logged and the preview still lands.
@@ -688,14 +689,20 @@ export async function createCoordinatorContext(
         };
       }
     }
-    const html = previewDocument({ js, css });
+    const html =
+      built.kind === "flutter"
+        ? "<!doctype html><html><body><p>An Android app built by Caddie. Open it in Caddie to try it in the browser.</p></body></html>"
+        : previewDocument({ js: built.js, css: built.css });
     signal?.throwIfAborted();
     const output = await storeBuildOutput(env.DB, scope, {
       html,
       image: final.resultImage,
       planId: plan.id,
       runId: workflow.runId,
-      bundle: { server, migrations, client: { js, css } },
+      bundle:
+        built.kind === "flutter"
+          ? { server, migrations, flutterWeb: built.page }
+          : { server, migrations, client: { js: built.js, css: built.css } },
     });
     if (source) {
       try {

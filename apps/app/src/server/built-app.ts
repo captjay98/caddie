@@ -22,6 +22,15 @@ export async function readBuiltApp(driver: Reader, sessionId: string, root: stri
 	const readText = async (path: string) => new TextDecoder().decode(base64ToBytes((await driver.readFile(sessionId, path)).contentBase64));
 	const js = await readText(`${root}/dist/main.js`);
 	const css = (await driver.pathExists(sessionId, `${root}/dist/main.css`)) ? await readText(`${root}/dist/main.css`) : '';
+	return { js, css, ...(await readBuiltServer(driver, sessionId, root)) };
+}
+
+/**
+ * dist/server.js and migrations/NNNN_*.sql: the app's server as built. Web
+ * apps and Android apps (Track 3, whose client is Flutter) share it.
+ */
+export async function readBuiltServer(driver: Reader, sessionId: string, root: string): Promise<Pick<BuiltApp, 'server' | 'migrations'>> {
+	const readText = async (path: string) => new TextDecoder().decode(base64ToBytes((await driver.readFile(sessionId, path)).contentBase64));
 	const server = (await driver.pathExists(sessionId, `${root}/dist/server.js`)) ? await readText(`${root}/dist/server.js`) : null;
 	const migrations: { name: string; sql: string }[] = [];
 	if (server !== null && (await driver.pathExists(sessionId, `${root}/migrations`))) {
@@ -31,7 +40,7 @@ export async function readBuiltApp(driver: Reader, sessionId: string, root: stri
 			}
 		}
 	}
-	return { js, css, server, migrations };
+	return { server, migrations };
 }
 
 /** The single-file document the preview frame loads (style and script inlined, closing tags escaped). */

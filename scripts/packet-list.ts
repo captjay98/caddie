@@ -309,7 +309,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 	// The scaffold's real behaviour needs a Flutter SDK, so it is proven by
 	// `bun scripts/refresh-flutter-scaffold-lock.ts --check` (local) and the
 	// sandbox runs; these unit tests pin what can be checked without one.
-	FLUTTER: { tests: ['tests/flutter-scaffold.test.ts', 'tests/flutter-apps-switch.test.ts', 'tests/flutter-build-loop.test.ts'], browser: [], live: [] },
+	FLUTTER: { tests: ['tests/flutter-scaffold.test.ts', 'tests/flutter-apps-switch.test.ts', 'tests/flutter-build-loop.test.ts', 'tests/flutter-preview.test.ts', 'tests/large-content.test.ts'], browser: [], live: [] },
 	// --- Verification net (S01) ----------------------------------------------
 	NET: { tests: ['tests/packet-completeness.test.ts'], browser: [], live: [] },
 };

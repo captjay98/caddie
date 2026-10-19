@@ -31,6 +31,8 @@ interface Snapshot {
   designApproval: ApprovalRecord | null;
   /** The checked build has a server (relay /api calls; offer Reset test data). */
   previewHasServer?: boolean;
+  /** "flutter": an Android app's browser preview (Track 3). */
+  previewKind?: "web" | "flutter";
   /** "Start from my GitHub repo": the copied app, until the first build has its own preview. */
   importPreview?: ImportPreviewView | null;
 }
@@ -501,6 +503,7 @@ export function ProjectWorkflow({
             projectId={projectId}
             artifactId={workflow.previewId}
             contentUrl={`/api/projects/${encodeURIComponent(projectId)}/workflow/preview/${encodeURIComponent(workflow.previewId)}`}
+            {...(state.data?.previewKind === "flutter" ? { kind: "flutter" as const } : {})}
             {...(state.data?.previewHasServer
               ? {
                   appRequestUrl: `/api/projects/${encodeURIComponent(projectId)}/workflow/preview/${encodeURIComponent(workflow.previewId)}/app`,

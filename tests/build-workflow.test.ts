@@ -32,6 +32,7 @@ import {
   requireBuildApproval,
   storeBuildOutput,
   readBuildOutput,
+  readOutputManifest,
   readBuildBundle,
   setWorkflowBlocker,
   stopWorkflow,
@@ -125,6 +126,8 @@ async function world() {
     "0024_design_phase.sql",
     "0026_code_versions.sql",
     "0027_app_secrets.sql",
+    // Track 3: the large-file store (an Android app's preview page and APK).
+    "0037_large_content.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -889,6 +892,30 @@ describe("approved output and preview identity", () => {
         runId: item.workflow.runId,
       });
       expect(await readBuildBundle(w.db, item.scope, plain.outputId)).toBeNull();
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("an Android app's preview page (bigger than one D1 value) is kept whole and served instead of the stand-in", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      const page = `<!doctype html><html><body><script type="application/json">${"x".repeat(3_000_000)}</script></body></html>`;
+      const output = await storeBuildOutput(w.db, item.scope, {
+        html: "<!doctype html><html><body>stand-in</body></html>",
+        image: "sha256:flutter-image",
+        planId: item.plan.id,
+        runId: item.workflow.runId,
+        bundle: { server: "export default {};", migrations: [], flutterWeb: page },
+      });
+      const served = new TextDecoder().decode(await readBuildOutput(w.db, item.scope, output.outputId));
+      expect(served).toBe(page);
+      expect((await readOutputManifest(w.db, item.scope, output.outputId))?.kind).toBe("flutter");
+      expect(w.count("large_content")).toBe(1);
+      expect(w.count("large_content_chunks")).toBe(2);
+      // Nothing over D1's value limit went into the ordinary content table.
+      expect(w.count("artifact_content", "size > 2000000")).toBe(0);
     } finally {
       w.sqlite.close();
     }
