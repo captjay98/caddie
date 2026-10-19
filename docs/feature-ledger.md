@@ -176,18 +176,18 @@ filesystem via `tests/fixtures/migrations.ts`, so no harness can drift again):
 
 | Capability | Status | Evidence |
 |---|---|---|
-| Tavily as the REQUIRED PRIMARY discovery source + NVIDIA Nemotron model tiers | LIVE VERIFIED | execution ledger P11 (guarded Tavily/Devpost probe, 15 real contests); commit `3c431cf8` |
-| Devpost API primary + quoted-rule eligibility + AI fit | LOCAL VERIFIED | commit `23c1cc9e` |
-| Image attachments + voice input; image turns routed to the served Token Factory VLM (gemma-3-27b-it) | LIVE VERIFIED (model id confirmed served via GET /v1/models + probe) | commits `889ac36e`, `fa5a2876`, `e2f8bb32`; lesson in learned-corrections |
-| Text-file attachments delivered to Caddie as fenced blocks | LOCAL VERIFIED | commit `6b4be7bf` |
-| Model routing: planning on ultra, building moved to glm-5.3-flash, vision on glm-5.3-flash | LOCAL VERIFIED | commits `ba15c745`, `d3ed14f4`, `96fe6771`, `3ae3eee5` |
-| Hackathon results card + rules-first detail pane with cached AI digest; follow-ups read the stored checked detail | LOCAL VERIFIED | commits `fb1c43d4`, `400e3582`, `f07fd45a` |
-| Discovery returns results without waiting for the digest pre-warm (237s → 38s) | LOCAL VERIFIED | commit `e0fa53c1` |
-| Persistent adaptive home header; theme picker (palettes + light/dark) | LOCAL VERIFIED | commits `a98b6c70`, `47e0287e` |
-| Shared InterestPicker (open to anything); settings redesign (one header, grouped sections) | LOCAL VERIFIED | commits `6475a333`, `8f389f64` |
-| Slower ideation on ultra; project page non-technical users understand; project page redesigned around "what Caddie is doing now" | LOCAL VERIFIED | commits `3cf1387e`, `421f218d`, `bb6b16eb` |
-| Server-side coordinator dispatch forwards worker bindings; coordinator message posted in Flue's flat wire shape | LOCAL VERIFIED | commits `215f6710`, `61de8c3e` |
-| Bound search-path requests + explain stopped turns in chat | LOCAL VERIFIED | commit `5a22b64b` |
+| Tavily as the REQUIRED PRIMARY discovery source + NVIDIA Nemotron model tiers | LIVE VERIFIED | execution ledger P11 (guarded Tavily/Devpost probe, 15 real contests); commit `0b3f8d47` |
+| Devpost API primary + quoted-rule eligibility + AI fit | LOCAL VERIFIED | commit `d88d96a7` |
+| Image attachments + voice input; image turns routed to the served Token Factory VLM (gemma-3-27b-it) | LIVE VERIFIED (model id confirmed served via GET /v1/models + probe) | commits `7a0b17aa`, `834d84fc`, `05005b24`; lesson in learned-corrections |
+| Text-file attachments delivered to Caddie as fenced blocks | LOCAL VERIFIED | commit `89672af1` |
+| Model routing: planning on ultra, building moved to glm-5.3-flash, vision on glm-5.3-flash | LOCAL VERIFIED | commits `2db99e87`, `16c8a815`, `b3167527`, `9458f014` |
+| Hackathon results card + rules-first detail pane with cached AI digest; follow-ups read the stored checked detail | LOCAL VERIFIED | commits `2ba49db8`, `bbbc5b32`, `8603b729` |
+| Discovery returns results without waiting for the digest pre-warm (237s → 38s) | LOCAL VERIFIED | commit `4ee9cfe9` |
+| Persistent adaptive home header; theme picker (palettes + light/dark) | LOCAL VERIFIED | commits `a9e3a9f3`, `d849d5b2` |
+| Shared InterestPicker (open to anything); settings redesign (one header, grouped sections) | LOCAL VERIFIED | commits `8beee61e`, `2440a7c2` |
+| Slower ideation on ultra; project page non-technical users understand; project page redesigned around "what Caddie is doing now" | LOCAL VERIFIED | commits `26db7f19`, `40982716`, `67bbcbc7` |
+| Server-side coordinator dispatch forwards worker bindings; coordinator message posted in Flue's flat wire shape | LOCAL VERIFIED | commits `b9903695`, `e1a6784a` |
+| Bound search-path requests + explain stopped turns in chat | LOCAL VERIFIED | commit `f95396ac` |
 
 Security/correctness pass (2026-10-16, independent review): four P1s fixed —
 Resend key threaded from the Worker `env` (was `process.env`, dead in prod);

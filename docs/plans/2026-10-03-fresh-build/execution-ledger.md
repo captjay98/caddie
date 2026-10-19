@@ -41,15 +41,15 @@ Status, evidence, review verdicts and integrated SHA. All 21 packets (P00–P17)
 
 ```json
 {
-  "packet": "AGENT-WAVES", "status": "ALL PARTIALS CLOSED — 4 worktree agents integrated + dev dispatch LIVE VERIFIED", "sha": "2eeb54ec",
+  "packet": "AGENT-WAVES", "status": "ALL PARTIALS CLOSED — 4 worktree agents integrated + dev dispatch LIVE VERIFIED", "sha": "b0ed7483",
   "integration": [
-    "p11-p13-surfaces e3669dc5: discovery/judge/submission routes + topbar/onboarding entries, submission SKILL.md, 12 browser tests; judge router mounted by integrator b986e614",
-    "p12-completion 743d5902: /schedules surface, RESEND keys in Env, REAL cron dispatch (cloudflare.ts scheduled export, build-proven), live email receipt 01a11346-68df-7538-8dc7-ee1b593ad5ef",
+    "p11-p13-surfaces f7d89963: discovery/judge/submission routes + topbar/onboarding entries, submission SKILL.md, 12 browser tests; judge router mounted by integrator 1b13ef3a",
+    "p12-completion 4a701b71: /schedules surface, RESEND keys in Env, REAL cron dispatch (cloudflare.ts scheduled export, build-proven), live email receipt 01a11346-68df-7538-8dc7-ee1b593ad5ef",
     "p05-hardening: sessions as driver-side bookkeeping over the real contree API (the old client spoke fictional endpoints), endpoint-backed file ops (injection fired at real sandbox: no effect), runId ownership 404s, LRU cache, adapter fidelity; tests/live/sandbox.spec.ts LIVE PASS",
     "p15-p17-completion: real laravel/fastapi/flutter templates, capture-android.ts, ALL remaining phantom specs written (P15a live is LIVE PASS; P15b/c/d journeys LIVE PASS after integrator fixes: gitignore-swallowed template files, collision+mockery deps, advisory-policy opt-out, withoutVite, migrate-before-serve, flutter injectable client), P17 docs + release specs"
   ],
   "devDispatchFixes": [
-    "2eeb54ec: bun patch agents@0.20.1 (tracing probe — module-runner polyfill lacks startActiveSpan), createRun derives planRevision (rev-0 before first plan), nanoid declared",
+    "b0ed7483: bun patch agents@0.20.1 (tracing probe — module-runner polyfill lacks startActiveSpan), createRun derives planRevision (rev-0 before first plan), nanoid declared",
     "LIVE VERIFIED with the owner's real session: run creation 201 (planRevision rev-0), dispatch 202 (submissionId sub_01M49W8YCXE…, instance uid minted), Nebius round-trip streamed reasoning + reply, traces enabled"
   ],
   "regression": "release-check 27 PASS / 0 FAIL / 1 BLOCKED (deployment); every mapped spec file exists; browser suites P01 2, P06 20, P07 4, P09 3, P11 6, P13 6, P14 5, P16 13, P17 5 all green"
@@ -58,7 +58,7 @@ Status, evidence, review verdicts and integrated SHA. All 21 packets (P00–P17)
 
 ```json
 {
-  "packet": "A-Z-AUDIT", "status": "FULL AUDIT 2026-10-06 — 21 packets verified against packets.md", "sha": "44f0a08a",
+  "packet": "A-Z-AUDIT", "status": "FULL AUDIT 2026-10-06 — 21 packets verified against packets.md", "sha": "5f807725",
   "commands": [
     {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "27 PASS, 0 FAIL, 1 BLOCKED (deployment authorization only)"},
     {"command": "bun run test:live -- P05", "exitCode": 0, "receipt": "LIVE VERIFIED — flue-lifecycle 1/1 (real Nebius model round-trip); verify-packet now loads .dev.vars so test:live honors standing CADDIE_LIVE_AUTHORIZED"},
@@ -67,10 +67,10 @@ Status, evidence, review verdicts and integrated SHA. All 21 packets (P00–P17)
     {"command": "grep stubs/TODO sweep", "exitCode": 0, "receipt": "no fake implementations; only honest 'for now' = InMemorySandboxPersistence (D1-backed port is P09/P17 wiring)"}
   ],
   "liveUserEvidence": [
-    "P01 Google OAuth end-to-end on localhost:5176 (redirect URI registered for 5176; /app/ dev fallback fixed 73b25f06)",
-    "P01 GitHub sign-in merges into the same account (trusted-provider linking, 17cc494a)",
-    "P14 onboarding wired for zero-project users (d728f024) — was mounted but unreachable",
-    "P05/P09 coordinator run transport wired in the SPA (650f87da) — channel sends now create the run and stream from the real agent; P06 draft semantics made honest (44f0a08a)"
+    "P01 Google OAuth end-to-end on localhost:5176 (redirect URI registered for 5176; /app/ dev fallback fixed 957ed499)",
+    "P01 GitHub sign-in merges into the same account (trusted-provider linking, 51bd3c9c)",
+    "P14 onboarding wired for zero-project users (7158604f) — was mounted but unreachable",
+    "P05/P09 coordinator run transport wired in the SPA (650f87da) — channel sends now create the run and stream from the real agent; P06 draft semantics made honest (5f807725)"
   ],
   "gapsFound": [
     "PHANTOM SPECS (mapped in verify-packet.ts, never written): live — P04 sandbox, P07 preview, P08 github, P12 notifications, P15a-d stacks/*, P17 release; browser — P11 discovery, P13 submission, P17 release",
@@ -669,7 +669,7 @@ Status, evidence, review verdicts and integrated SHA. All 21 packets (P00–P17)
     {"path": "apps/app/src/client/brief/DecisionCard.tsx + conversation/Channel.tsx", "note": "empty states humanized: 'You're all set — nothing needs you right now' + 'Say hello — your first message starts a run'; the transport-honesty strings that named infrastructure are gone from user copy"},
     {"path": "apps/app/src/client/auth.ts", "note": "provider chips say 'ready'/'not set up yet' (were configured/not configured); the /api/integrations/health presence line became a human sentence in a title attribute"},
     {"path": "apps/app/src/client/workspace.css + Shell.tsx bottom nav", "note": "MOBILE CHROME (today.ai pattern): topbar = 3 controls (wordmark · theme · avatar); 5-tab bottom bar with icons (Brief · Runs · Channel · Discovery · Schedules); project switching/refresh live in a mobile-only context row; gate surfaces' crumbs carry a back-to-workspace link"},
-    {"path": "apps/app/vite.config.ts", "note": "dev server pinned to localhost:5176 with strictPort (5173-5175 belong to other local projects; OAuth registered for 5176) — committed 1cb04490"}
+    {"path": "apps/app/vite.config.ts", "note": "dev server pinned to localhost:5176 with strictPort (5173-5175 belong to other local projects; OAuth registered for 5176) — committed 2384c9d5"}
   ],
   "environment": "local vite dev :5176 (owner's in-app browser), playwright chromium_headless_shell v1243, aside-browser for the owner's today.ai session",
   "providerCalls": "none",
@@ -1174,16 +1174,16 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   "status": "LOCAL VERIFIED",
   "owner": "integration lead — merging into main is a default-branch action, so it was not delegated",
   "commands": [
-    {"command": "bun scripts/release-check.ts (pre-merge, on the branch tip a342ae6b)", "exitCode": 0, "receipt": "45 PASS, 0 FAIL, 1 BLOCKED, 4 PROVISIONED — acceptance for S05 is 'S01-S04 green', met before the merge; this run includes typecheck, build and all 43 packets"},
+    {"command": "bun scripts/release-check.ts (pre-merge, on the branch tip 6bcdb337)", "exitCode": 0, "receipt": "45 PASS, 0 FAIL, 1 BLOCKED, 4 PROVISIONED — acceptance for S05 is 'S01-S04 green', met before the merge; this run includes typecheck, build and all 43 packets"},
     {"command": "git rev-list --count main..feat/publish-on-cloudflare / feat/publish-on-cloudflare..main", "exitCode": 0, "receipt": "63 / 0 — main held nothing the branch lacked, so the merge could not lose work"},
     {"command": "git remote -v", "exitCode": 0, "receipt": "empty — there is no remote, so the merge is local by construction and nothing can have been pushed"},
-    {"command": "git merge --no-ff feat/publish-on-cloudflare", "exitCode": 0, "receipt": "d344feba 'merge: publish programme + hackathon submission build S01-S04' — no conflicts, --no-ff so the packet history stays readable"},
+    {"command": "git merge --no-ff feat/publish-on-cloudflare", "exitCode": 0, "receipt": "e3c8e4ab 'merge: publish programme + hackathon submission build S01-S04' — no conflicts, --no-ff so the packet history stays readable"},
     {"command": "bun run typecheck (post-merge, on main)", "exitCode": 0, "receipt": "both tsc projects clean"},
     {"command": "bun run test (post-merge, on main)", "exitCode": 0, "receipt": "1344 pass, 0 fail, 6374 expect() calls, 104 files — re-verified on main rather than inferred from the branch"}
   ],
   "artifacts": [
     {"path": "docs/plans/2026-10-17-publish/README.md", "note": "the stage table's `6, 10 | Not started` row now reads `6: not built; after the hackathon. 10: BLOCKED`, per the plan; and stage 9's row records the tier (env.CADDIE.ai({ messages, json?, tier? }), role appSuper for tier \"super\", ~3.75x faster allowance drain) so the row does not describe the pre-S04 surface"},
-    {"path": "main", "note": "d344feba — the merge commit; the feature branch is fully merged and left in place as the audit trail"}
+    {"path": "main", "note": "e3c8e4ab — the merge commit; the feature branch is fully merged and left in place as the audit trail"}
   ],
   "environment": "local: bun test, tsc, and git only; no deploy, no push, no remote",
   "providerCalls": "none",
@@ -1217,13 +1217,13 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
     {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "46 PASS, 0 FAIL, 1 BLOCKED (deployment authorization), 4 PROVISIONED — 46 rather than S05's 45 because JUDGE_ACCESS is a new packet"}
   ],
   "artifacts": [
-    {"path": "scripts/probe-lightning.ts", "note": "R1's evidence (commit d14332cc). Imports the production prompt builder, eligibilityExcerpt, parseClaims, locateVerbatim, the app request shape and the route resolved BY ROLE, so it tests whatever the roles point at. --only= and --budget-usd; refuses without CADDIE_LIVE_AUTHORIZED=1 and prints no key."},
+    {"path": "scripts/probe-lightning.ts", "note": "R1's evidence (commit ec38a260). Imports the production prompt builder, eligibilityExcerpt, parseClaims, locateVerbatim, the app request shape and the route resolved BY ROLE, so it tests whatever the roles point at. --only= and --budget-usd; refuses without CADDIE_LIVE_AUTHORIZED=1 and prints no key."},
     {"path": "apps/app/src/agents/providers.ts", "note": "R1 + R4. helper goes back to nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B with maxTokens 2048 -> 8192 (at 2048 nano emitted 9,270 chars of reasoning and EMPTY content on the same excerpt — its own cap, the same failure shape Lightning had). app STAYS on nvidia/Nemotron-3_5-Lightning. All six routes re-priced from the listing under PRICING_VERSION '2026-10-nemotron-listing': ultra 50/220 -> 100/300, super 8/45 -> 30/90, nano 5/20 -> 6/24, GLM context 1,048,576 -> 1,024,000."},
     {"path": "apps/app/src/server/rules-reading.ts", "note": "two exports (the system prompt and the excerpt helper) so the probe runs the real thing; no behaviour change"},
     {"path": "tests/providers.test.ts", "note": "the pricing pin keeps a LITERAL copy of the version string AND the literal prices: importing the constant would re-baseline the pin whenever the constant changed, which is the opposite of a pin"},
     {"path": "tests/agent-permissions.test.ts", "note": "role -> model pin moved with helper"},
-    {"path": "scripts/probe-sandbox-scaffold.ts", "note": "R3's evidence (commit f5e721ca): boots one session on the production base image, records bun --version, then runs a frozen install and a build on a fresh template app and prints the raw failure text. Importable, so the same diagnostic runs from any harness."},
-    {"path": ".github/workflows/ci.yml", "note": "R5 (commit e7ebf5b5): the one install is now `bun install --frozen-lockfile`, at bun-version 1.4.0"}
+    {"path": "scripts/probe-sandbox-scaffold.ts", "note": "R3's evidence (commit f54b1ec1): boots one session on the production base image, records bun --version, then runs a frozen install and a build on a fresh template app and prints the raw failure text. Importable, so the same diagnostic runs from any harness."},
+    {"path": ".github/workflows/ci.yml", "note": "R5 (commit ca162460): the one install is now `bun install --frozen-lockfile`, at bun-version 1.4.0"}
   ],
   "environment": "Local for R4/R5 and the test gates. Live for R1 (six Nebius calls), R2 (three Nebius calls) and R3 (one contree sandbox session). No deploy, no push, no purchase; the model key was read from .dev.vars and never printed.",
   "providerCalls": "R1 about 0.0070 USD (six model calls, under the owner's 0.01 cap); R2 about 0.003 USD (three trials at roughly 0.001 each). R3 uses the contree sandbox, no model spend.",
@@ -1454,13 +1454,13 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   "owner": "Integration lead (the scan, the findings, and the rewrite are lead-owned; secrets are never printed, only key names and booleans)",
   "commands": [
     {"command": "git rev-list --count --all", "exitCode": 0, "receipt": "327 reachable commits"},
-    {"command": "git log --all --oneline --diff-filter=A -- .dev.vars", "exitCode": 0, "receipt": "Exactly one commit ADDED it: 42315d89 ('fix(p05): skills via flue SKILL.md auto-packaging ...'). Exactly one commit removed it: 70ad7c35 ('fix(repo): untrack .dev.vars and .wrangler dev state'). One path named .dev.vars has ever been tracked."},
-    {"command": "per-key comparison of today's .dev.vars against 42315d89:.dev.vars (python3; prints key names and MATCH/DIFFER only, never a value)", "exitCode": 0, "receipt": "The committed file held 14 keys; today's holds 15. TWELVE keys are byte-identical to today's live values: BETTER_AUTH_SECRET, CADDIE_LIVE_AUTHORIZED, CONTREE_API_TOKEN, CONTREE_BASE_URL, CONTREE_PROJECT_ID, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, NEBIUS_API_KEY, RESEND_API_KEY, RESEND_FROM. Two DIFFER: BETTER_AUTH_URL (a URL, not a credential) and INVITE_ALLOWLIST (email addresses — personal data, not a credential). TAVILY_API_KEY appears ONLY in today's untracked file and was never committed."},
+    {"command": "git log --all --oneline --diff-filter=A -- .dev.vars", "exitCode": 0, "receipt": "Exactly one commit ADDED it: c10ebc85 ('fix(p05): skills via flue SKILL.md auto-packaging ...'). Exactly one commit removed it: 70ad7c35 ('fix(repo): untrack .dev.vars and .wrangler dev state'). One path named .dev.vars has ever been tracked."},
+    {"command": "per-key comparison of today's .dev.vars against c10ebc85:.dev.vars (python3; prints key names and MATCH/DIFFER only, never a value)", "exitCode": 0, "receipt": "The committed file held 14 keys; today's holds 15. TWELVE keys are byte-identical to today's live values: BETTER_AUTH_SECRET, CADDIE_LIVE_AUTHORIZED, CONTREE_API_TOKEN, CONTREE_BASE_URL, CONTREE_PROJECT_ID, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, NEBIUS_API_KEY, RESEND_API_KEY, RESEND_FROM. Two DIFFER: BETTER_AUTH_URL (a URL, not a credential) and INVITE_ALLOWLIST (email addresses — personal data, not a credential). TAVILY_API_KEY appears ONLY in today's untracked file and was never committed."},
     {"command": "git log --all --format= --name-only | sort -u | grep -cE '<area>'", "exitCode": 0, "receipt": "55717 distinct paths ever touched. node_modules/ 54943, .wrangler/ 16, .worktrees 5 (.worktrees/p07, p08, p09, p15a, p17 — gitlinks), test-results/ 1 (test-results/.last-run.json), and .dev.vars 1."},
     {"command": "git cat-file --batch-all-objects --batch-check='%(objecttype) %(objectsize)' | awk ...", "exitCode": 0, "receipt": "THREE reachable blobs exceed GitHub's 100 MB hard limit: 111865464, 114566712 and 130610440 bytes — the workerd binaries under node_modules, which also sit at the top of the 54k-file tree. Five largest reachable blobs by size: 18662336, 23653616, 111865464, 114566712, 130610440."}
   ],
   "artifacts": [
-    {"path": "apps/app/.dev.vars (deleted from history by the rewrite; gitignored and still present locally)", "note": "The single tracked copy rode in via 42315d89 and was untracked by 70ad7c35. Twelve of its keys still match today's live values, which is why the owner's ruling is ROTATE, not merely remove: deleting history does not un-know a key that a human may have copied out of the old commit."},
+    {"path": "apps/app/.dev.vars (deleted from history by the rewrite; gitignored and still present locally)", "note": "The single tracked copy rode in via c10ebc85 and was untracked by 70ad7c35. Twelve of its keys still match today's live values, which is why the owner's ruling is ROTATE, not merely remove: deleting history does not un-know a key that a human may have copied out of the old commit."},
     {"path": "docs/plans/2026-10-03-fresh-build/execution-ledger.md", "note": "This record. It is written before the rewrite on purpose — the scan evidence is the thing the rewrite destroys, so the findings must be durable in prose and counts rather than only reproducible from a history that will no longer contain them."}
   ],
   "environment": "Local repository only: git plumbing and a python3 comparison over two files. No network, no remote, no push. Secret VALUES were never read into the transcript; the comparison printed only key names and MATCH/DIFFER verdicts.",
@@ -1488,8 +1488,8 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
     {"command": "bun run test:browser --all", "exitCode": 1, "receipt": "45 packets — 19 PASS, 4 FAIL (P11, U01, U04, U05), 22 NOT APPLICABLE. The 22 are named as NOT APPLICABLE rather than faked as passes."},
     {"command": "bunx playwright test tests/browser/{theme-picker,brief,discovery,discovery-journey}.spec.ts --reporter=list", "exitCode": 1, "receipt": "6 failed, 26 passed, run twice (once with nothing else on the machine, once under heavy concurrent load) with the SAME SIX cases both times. Six deterministic failures, not flakiness."},
     {"command": "git diff HEAD --stat -- tests/browser apps/app/src/client apps/site", "exitCode": 0, "receipt": "0 bytes. The specs and the client sources are byte-identical to the tree without this session's changes, and the failing specs stub /api — so the failures cannot be caused by the S06/S07/auth work, which touched no client or spec file. This is the check that makes the classification 'pre-existing' evidence rather than opinion."},
-    {"command": "git log -S '· saved' -- apps/app/src/client | tests/browser/*.spec.ts", "exitCode": 0, "receipt": "c0554b09 (2026-10-10) ADDED '· saved' to the client and added the spec expectations together — they agreed. fb1c43d4 (2026-10-15) REMOVED it from the client (Results.tsx rewritten, 643 lines) and did NOT touch the specs. Discovery's four failures date from that commit."},
-    {"command": "grep PALETTES apps/app/src/client/theme.ts", "exitCode": 0, "receipt": "FIVE palettes — caddie, clearcut, onesecos, farmhand, kirocrew — and git log shows theme.ts has only ever had one commit (47e0287e, 2026-10-15), the same commit that wrote theme-picker.spec.ts. The test's four-press wrap was wrong from birth."},
+    {"command": "git log -S '· saved' -- apps/app/src/client | tests/browser/*.spec.ts", "exitCode": 0, "receipt": "ecbb222e (2026-10-10) ADDED '· saved' to the client and added the spec expectations together — they agreed. 2ba49db8 (2026-10-15) REMOVED it from the client (Results.tsx rewritten, 643 lines) and did NOT touch the specs. Discovery's four failures date from that commit."},
+    {"command": "grep PALETTES apps/app/src/client/theme.ts", "exitCode": 0, "receipt": "FIVE palettes — caddie, clearcut, onesecos, farmhand, kirocrew — and git log shows theme.ts has only ever had one commit (d849d5b2, 2026-10-15), the same commit that wrote theme-picker.spec.ts. The test's four-press wrap was wrong from birth."},
     {"command": "bun run test", "exitCode": 0, "receipt": "1397 pass, 0 fail, 6619 expect() calls, 106 files. The white-box suite is green on the SAME tree whose browser suite has six failures — which is the whole point: the two harnesses do not see the same thing."},
     {"command": "grep -n browser .github/workflows/ci.yml scripts/release-check.ts", "exitCode": 1, "receipt": "No matches in either. CI runs install/build/typecheck/verify:packet --all/release-check; the browser suite is in no CI step and release-check has no browser check, so nothing automated can see these failures."}
   ],
@@ -1553,7 +1553,7 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   "status": "LOCAL VERIFIED. bun run test:browser -- --all: 23 PASS / 0 FAIL / 22 NOT APPLICABLE against a fresh bun run build. No client code changed; the CI change has not run on GitHub (no remote).",
   "owner": "Integration lead (the owner handed the browser decision to the lead: 'take over from here')",
   "commands": [
-    {"command": "git rev-parse --short <branch>:<file> for the four specs, Results.tsx, ThemePicker.tsx and theme.ts on all 8 branches", "exitCode": 0, "receipt": "Byte-identical on main, feat/chat-ui-polish, feat/publish-on-cloudflare and the five wt/* worktrees (all clean, all containing fb1c43d4), so no other branch or worktree could have passed them. The theme spec could never have passed: theme.ts had five palettes in the commit that wrote it (47e0287e)."},
+    {"command": "git rev-parse --short <branch>:<file> for the four specs, Results.tsx, ThemePicker.tsx and theme.ts on all 8 branches", "exitCode": 0, "receipt": "Byte-identical on main, feat/chat-ui-polish, feat/publish-on-cloudflare and the five wt/* worktrees (all clean, all containing 2ba49db8), so no other branch or worktree could have passed them. The theme spec could never have passed: theme.ts had five palettes in the commit that wrote it (d849d5b2)."},
     {"command": "bun run test:browser -- U04 (after reordering the stubs in brief.spec.ts)", "exitCode": 0, "receipt": "brief.spec.ts 14 passed, conversation.spec.ts 11 passed. Root cause of brief.spec.ts:265: the catch-all **/api/projects/** stub was registered after the **/api/projects/**/runs stub; Playwright runs the last-registered matching route first, so the welcome action's run POST got {} and never reached the counter. The page snapshot showed the draft 'Not sent', consistent with a reply carrying no run."},
     {"command": "bunx playwright test tests/browser/discovery.spec.ts tests/browser/discovery-journey.spec.ts tests/browser/theme-picker.spec.ts", "exitCode": 0, "receipt": "All pass after the updates. Fixing the first stale assertion in each Discover case exposed further stale ones behind it (the collapsed 'Why it fits' fold, 'Some sources failed', 'Entry checked for United States', the removed 'Can you enter?' detail, a projects row with two buttons); each was checked against the shipped component before the spec was changed."},
     {"command": "bun run test:browser -- --all", "exitCode": 0, "receipt": "45 packets: 23 PASS, 0 FAIL, 22 NOT APPLICABLE."},
@@ -1575,6 +1575,39 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
     "OPEN PRODUCT QUESTION: since the 2026-10-15 card, 'Why it fits' lists supported claims only, so an unknown fit claim's recorded assumption is no longer shown anywhere in the Discover list (the 2026-10-10 card showed it). The spec no longer asserts the assumption text; this is the owner's call, not a test fix.",
     "The CI workflow change has not run on GitHub: there is no remote. Its parse was checked locally with Bun.YAML only.",
     "22 packets have no browser spec at all; that is a coverage gap, not a pass."
+  ]
+}
+```
+
+```json
+{
+  "packet": "S09 history rewrite, run (owner-approved; plan docs/plans/2026-10-18-submission-build-plan.md)",
+  "status": "DONE, local only. Nothing pushed; no remote exists. main's tree is byte-identical before and after (c72cef82622fb2a8008f5f2bd943c1f4bfa4c17a). Old main tip 33711151 is now 8ba3d068 (before this record's own commit).",
+  "owner": "Integration lead, under the owner's rewrite go-ahead",
+  "commands": [
+    {"command": "git worktree remove <path> x5; git branch -d wt/artifacts-adapter wt/cf-adapter wt/dispatch wt/secret-box wt/stack-v2", "exitCode": 0, "receipt": "All five were clean (0 changes, 0 untracked; only ignored node_modules) and their tips merged into main before removal; -d (safe delete) succeeded for all five."},
+    {"command": "git clone --mirror <repo> /Users/captjay98/projects/caddie-forge-history-backup.git", "exitCode": 0, "receipt": "224M backup outside the repo, main = 33711151; deleted after the checks below passed."},
+    {"command": "brew install git-filter-repo", "exitCode": 0, "receipt": "git-filter-repo 2.47.0."},
+    {"command": "git filter-repo --force --invert-paths --path .dev.vars --path test-results/ --path .worktrees/ --path-regex '(^|/)(node_modules|\\.wrangler)/'", "exitCode": 0, "receipt": "336 commits parsed. commit-map: 129 unchanged (before 2026-10-06 20:09), 206 rewritten, 1 dropped as empty: 70ad7c35 'fix(repo): untrack .dev.vars and .wrangler dev state' (it only removed paths the rewrite removes everywhere)."},
+    {"command": "post-rewrite checks", "exitCode": 0, "receipt": "main^{tree} unchanged; 0 reachable blobs over 100 MB (largest 439501 bytes); 0 reachable paths under node_modules/, .wrangler/, .worktrees/, test-results/ or named .dev.vars (.dev.vars.example kept); 335 commits, 3 branches, 21 tags, 0 remotes; .git 225M -> 6.9M; local .dev.vars still present (ignored)."},
+    {"command": "in-process scan of all 1916 reachable blobs for each value in today's .dev.vars (key names and counts only)", "exitCode": 0, "receipt": "No credential value is reachable. Matches only for non-secrets: BETTER_AUTH_URL (39 blobs), CONTREE_BASE_URL (55), RESEND_FROM (37), GITHUB_CLIENT_ID (8, all docs/setup/owner-inputs.md; an OAuth client id is public by design). CADDIE_LIVE_AUTHORIZED skipped (too short to be a credential). TAVILY_API_KEY, NEBIUS_API_KEY, CONTREE_API_TOKEN, RESEND_API_KEY, BETTER_AUTH_SECRET, GOOGLE_CLIENT_ID/SECRET, GITHUB_CLIENT_SECRET: none."},
+    {"command": "credential-shape scan of 4420 reachable text objects (gitleaks not installed; 10 regexes: sk-, ghp_/gho_/ghs_/ghu_, github_pat_, AKIA/ASIA, PRIVATE KEY block, re_, tvly-, GOCSPX-, xox?-, named-secret assignments)", "exitCode": 0, "receipt": "Every match is a placeholder or a fixture: .dev.vars.example (empty values), docs/setup/auth.md (a local-dev placeholder), tests/source-export.test.ts (a 'value' test string), docs/setup/github-app.md (the PEM header named in prose), tests/controls.integration.test.ts (a fake 'sk-byok-...' BYOK fixture)."},
+    {"command": "commit ids cited in tracked files remapped from .git/filter-repo/commit-map", "exitCode": 0, "receipt": "69 citations of 50 distinct rewritten commits in 8 files (docs/feature-ledger.md 24, execution-ledger.md 25, submission plan 3, release-evidence.md 4, three docs/reviews files 12, caddie-ui-review-board.html 1). Every changed line differs only in ids; all ledger JSON blocks parse."},
+    {"command": "full gate after the rewrite", "exitCode": 0, "receipt": "bun run test 1416/0/107 files; typecheck 0; build 0; verify:packet --all 45 packets 39 PASS 0 FAIL 6 N/A; test:browser -- --all 23 PASS 0 FAIL 22 N/A (after fixing one flaky width check, see the next commit); release-check 47 PASS 0 FAIL 1 BLOCKED 4 PROVISIONED."}
+  ],
+  "artifacts": [
+    {"path": ".git/filter-repo/commit-map", "note": "Local only (not tracked): the old -> new map for every commit."},
+    {"path": "docs/plans/2026-10-18-hackathon-win-and-nemotron-3.5-plan.md, docs/plans/2026-10-18-remediation-plan.md", "note": "NOT edited (the owner's rule for the two source drafts), so their ids are now stale. Their new ids: 276828cb -> 0fae3813, 3d8bc1f6 -> 9f943db5, 96fe6771 -> b3167527, 99db7c55 -> 4e57b5fc, baabbbf6 -> 08595c65 (hackathon draft); 4f4e1c65 -> 84782f98 (remediation draft)."}
+  ],
+  "environment": "Local repository only. No network beyond Homebrew's bottle download for git-filter-repo. No push.",
+  "providerCalls": "none",
+  "specReview": "PENDING independent review",
+  "qualityReview": "The tree hash was compared before and after, and the id remap was dry-run first; the drafts were excluded deliberately.",
+  "limitations": [
+    "70ad7c35 no longer exists, so the S09 record's citation of it cannot resolve; it is left as written there. 650f87da (cited in an older record) was already unreachable before the rewrite.",
+    "Commit ids quoted outside this repository (chat transcripts, memory notes, earlier reports) are the OLD ids; .git/filter-repo/commit-map resolves them.",
+    "The rewrite only changes what git can reach. It does not un-know a value anyone copied out of the old commit. The owner's review called rotation optional (the Nebius and Resend dev keys) because nothing was ever pushed; that still holds only while the first push is of this rewritten history.",
+    "Push nothing until G3; then push main only. The 21 tags and the two feat/* branches were rewritten too and point at new ids."
   ]
 }
 ```
