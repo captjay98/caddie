@@ -107,6 +107,78 @@ lead merges those statements into `apps/app/migrations/0001_product.sql`
   immediately for every bearer of the cookie. Default TTL 7 days
   (override with the fixture-only `AUTH_SESSION_TTL_SECONDS` in tests).
 
+## Judge access (S06)
+
+Hackathon judges sign in without a Google or GitHub account: an access code,
+then a judge name and a password. Judge access is OFF unless an owner
+configures it, so a deployment without `JUDGE_ACCESS_CODE` shows no judge
+option at all. The four owner inputs and their defaults are in
+`docs/setup/owner-inputs.md`.
+
+**How it works.**
+
+- A judge name maps to one synthetic address, `<judge-name>@judges.caddie.invalid`,
+  in exactly one place, server-side. The client never builds or sends an email.
+- `.invalid` can never be a real Google or GitHub address, so OAuth account
+  linking can never attach to a judge account, and NO email is ever sent —
+  there is no deliverable address.
+- The password lives in Better Auth's existing `account.password` column. The
+  identity tables and columns are unchanged, so the "installed Better Auth
+  needs no new identity tables or columns" test still holds.
+- Accounts are created only through Caddie's own routes. Direct
+  `POST /api/auth/sign-up/email` stays refused for everyone. The account
+  doubles as an invite ticket: `POST /api/judge/start` writes a short-lived
+  `starting` row just before it creates the user, and the invite gate admits a
+  `@judges.caddie.invalid` address only while that exact name is reserved.
+
+| Route | Body | Success |
+|---|---|---|
+| `POST /api/judge/start` | `{ code, name, password }` | `200 { ok, name }` + a real session cookie |
+| `POST /api/judge/sign-in` | `{ name, password }` | `200 { ok, name }` + a real session cookie |
+| `GET /api/judge/access` | — | `200 { open, canStart }` for the sign-in panel |
+
+Every refusal is `{ error, message }` with a plain sentence the panel shows
+verbatim: wrong code (`403 judge_code`, "That access code isn't right."), no
+places left (`403 judge_full`, "All the judge places are taken."), name taken
+(`409 name_taken`, "That judge name is taken. Try another."), closed
+(`403 judge_closed`, "Judge access has closed."), too many tries
+(`429 too_many_attempts`, "Too many tries from here. Wait a little while and
+try again."), or not configured (`503 judge_unavailable`). Sign-in never says
+which of the name or password was wrong (`401 invalid_credentials`).
+
+**What judges see.** The sign-in panel keeps Google and GitHub and adds one
+quiet link: "Judging the hackathon? Use your access code". First visit: access
+code, a judge name (letters, numbers and dashes) and a password (at least 10
+characters), then "Start judging" — they arrive signed in. Returning, on any
+device: "Sign in as a judge" with judge name and password. After signing in
+they land where any signed-in user lands (the existing callbackURL flow) and
+meet the existing onboarding gate at most once; nothing in onboarding needs an
+email confirmation or an OAuth account, and the time zone is prefilled from the
+browser.
+
+**No publishing.** Judge accounts cannot publish (D2). The publish routes
+refuse them with "Publishing is turned off for judge accounts. Everything else
+works the same." There is no separate gate in the client — the server refuses.
+
+**Where the code lives.** `JUDGE_ACCESS_CODE` is an owner secret (wrangler
+secret / `.dev.vars`), at least 16 characters, never in the repo, the README or
+the Devpost text. The server compares it in constant time; the code never
+reaches the browser.
+
+**Kill switch.** `JUDGE_ACCESS_ENABLED=0` stops new judge starts immediately
+(`403 judge_closed`); returning judges can still sign in. Unsetting
+`JUDGE_ACCESS_CODE`, or leaving `JUDGE_ACCESS_UNTIL` unset or unparseable, turns
+judge access off entirely — `GET /api/judge/access` reports it closed and the
+panel shows no judge option. `JUDGE_ACCESS_UNTIL` is a date meaning the END of
+that day in UTC (`2026-12-16` for this build).
+
+**Classification.** The credential mechanics above (synthetic address, no
+email, password-only sign-in, the invite ticket, the constant-time code, the
+publish refusal) are LOCAL VERIFIED by the server suite. The panel states are
+SIMULATED — UI against stubbed endpoints — in
+`tests/browser/judge-access.spec.ts`. A judge signing in for real on a deployed
+Worker is LIVE VERIFIED only after the owner sets these inputs and rehearses.
+
 ## Verification status (honest classification)
 
 - Workers + D1 + Better Auth mechanics (schema, sessions, allowlist, linking,

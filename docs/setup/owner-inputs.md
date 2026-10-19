@@ -25,6 +25,11 @@ is the checklist and the record.
 | Dispatch Worker's `CADDIE_PLATFORM` service binding to Caddie's `PublishedAppPlatform` entrypoint (`workers/dispatch/wrangler.jsonc`, PROPOSED) | AI in published apps | BLOCKED with the rest of Publish |
 | Sign-in emails for apps' own users: `RESEND_API_KEY` + `RESEND_FROM` (Caddie's mailer; the text is fixed and names the app's address) | codes for published apps' users (previews use the test inbox and send nothing) | without them published apps' sign-in says emails "aren't set up" |
 | `BETTER_AUTH_SECRET` (already Caddie's own) | each app's sign-in cookie secret is derived from it per project and mode (HMAC), never stored | required for sign-in in previews and published apps |
+| `JUDGE_ACCESS_CODE` (random, at least 16 characters — e.g. `openssl rand -base64 24`) | judge sign-in (S06) | S06 default: random, ≥16 chars. Absent or shorter than 16: judge access is off — the sign-in panel shows no judge option and a stale attempt gets `503 judge_unavailable`. NEVER write a real code value here. |
+| `JUDGE_ACCESS_UNTIL` (`YYYY-MM-DD`, meaning the END of that day in UTC) | the date judge access closes (D4) | S06 default: `2026-12-16`. Absent or unparseable: judge access is off (same `503`). Past the date: `403 judge_closed`. |
+| `JUDGE_ACCESS_MAX_ACCOUNTS` (integer) | how many judge accounts may exist (D4) | S06 default: `40`. Absent or not a number: the built-in default `40` applies. Full: `403 judge_full`. |
+| `JUDGE_ACCESS_ENABLED` (the kill switch) | stopping new judge starts immediately (S07) | S06 default: unset means enabled. `0` refuses NEW judge starts (`403 judge_closed`); returning judges can still sign in. |
 
 Secrets go directly into `.dev.vars` (gitignored). Never in chat, never in
-artifacts.
+artifacts. That includes the judge access code: this document records only the
+input name and its default, never a real value.

@@ -524,6 +524,22 @@ describe('publish service', () => {
 		expect(stub.scripts.has(scriptNameFor(scope.projectId, 1))).toBe(false);
 	});
 
+	test('a judge account cannot publish and never sees the confirm-your-email message', async () => {
+		const outputId = await checkedBuild(ready(), { server: null, migrations: [] }, 'sha256:img-judge');
+		await approve((await status()).current!.intent);
+		// A judge's `.invalid` address can never be confirmed, so the refusal
+		// must come first and say the thing a judge can act on.
+		sqlite.prepare('update "user" set "emailVerified" = 0 where "id" = ?').run('alice');
+		sqlite
+			.prepare('insert into "judge_accounts" ("judgeName","userId","state","createdAt","lastSignInAt") values (?,?,?,?,null)')
+			.run('judge-one', 'alice', 'active', new Date().toISOString());
+		const message = await rejects(publishApp(db, deps, scope, { outputId }), 'JUDGE_ACCOUNT');
+		expect(message).toBe('Publishing is turned off for judge accounts. Everything else works the same.');
+		expect(stub.scripts.has(scriptNameFor(scope.projectId, 1))).toBe(false);
+		// Roll back is a publish-shaped action, so it is refused the same way.
+		await rejects(rollbackApp(db, deps, scope, { outputId }), 'JUDGE_ACCOUNT');
+	});
+
 	test('addresses: chosen once, checked for look-alikes, never shared', async () => {
 		const outputId = await checkedBuild(ready(), { server: null, migrations: [] }, 'sha256:img-slug');
 		await approve((await status()).current!.intent);

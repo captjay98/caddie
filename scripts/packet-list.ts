@@ -282,6 +282,13 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 		browser: ['tests/browser/project-workflow.spec.ts'],
 		live: [],
 	},
+	// --- Submission build (docs/plans/2026-10-18-submission-build-plan.md) ----
+	// S06 judge access: the access-code way in for hackathon judges (0033).
+	// Deliberately NOT P13, which is Caddie's own judge-*scorecard* surface for
+	// a project's submission — the two share a word and nothing else. The
+	// end-to-end half (a real cookie from a real worker) lands in
+	// `tests/auth.integration.test.ts`, so it runs under P01 as well.
+	JUDGE_ACCESS: { tests: ['tests/judge-access.test.ts'], browser: ['tests/browser/judge-access.spec.ts'], live: [] },
 	// --- Verification net (S01) ----------------------------------------------
 	NET: { tests: ['tests/packet-completeness.test.ts'], browser: [], live: [] },
 };

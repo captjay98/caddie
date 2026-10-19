@@ -9,6 +9,7 @@ import { readOutputManifest, readPublishBundle, readWorkflow, type PublishBundle
 import { createD1ContentStore } from './artifacts.ts';
 import { splitSqlScript } from './preview-runtime.ts';
 import { getProject } from './projects.ts';
+import { isJudgeAccount } from './judge-access.ts';
 import { ScopeError, assertProjectOwner, assertProjectScope, projectScopeForUser } from './scope.ts';
 import type { Keyring } from './secret-box.ts';
 import { fileAbuseReport, type OperatorNotifier } from './abuse-reports.ts';
@@ -898,9 +899,23 @@ async function requireVerifiedEmail(db: D1Database, actorId: string): Promise<vo
 	}
 }
 
+/**
+ * D2: publishing is off for judge accounts. Checked BEFORE the confirmed-email
+ * rule, because a judge's synthetic `.invalid` address can never be confirmed
+ * and that message would ask them to do something impossible. Judges see this
+ * sentence on publish and on roll back alike; unpublish and the publish card
+ * stay available so a judge can always SEE state — they just cannot publish.
+ */
+async function requireNotJudgeAccount(db: D1Database, actorId: string): Promise<void> {
+	if (await isJudgeAccount(db, actorId)) {
+		throw new ScopeError(403, 'JUDGE_ACCOUNT', 'Publishing is turned off for judge accounts. Everything else works the same.');
+	}
+}
+
 /** Publish the project's current checked build (first publish or update). */
 export async function publishApp(db: D1Database, deps: PublishDeps, scope: Scope, input: { outputId: unknown; slug?: unknown }): Promise<void> {
 	const verified = await assertProjectOwner(db, scope);
+	await requireNotJudgeAccount(db, verified.actorId);
 	await requireVerifiedEmail(db, verified.actorId);
 	if (typeof input.outputId !== 'string' || input.outputId.length === 0) throw new ScopeError(400, 'invalid_input', 'outputId is required');
 	if ((await currentReadyOutput(db, verified)) !== input.outputId) {
@@ -912,6 +927,7 @@ export async function publishApp(db: D1Database, deps: PublishDeps, scope: Scope
 /** Put an earlier published version back live (code only; data stays as it is). */
 export async function rollbackApp(db: D1Database, deps: PublishDeps, scope: Scope, input: { outputId: unknown }): Promise<void> {
 	const verified = await assertProjectOwner(db, scope);
+	await requireNotJudgeAccount(db, verified.actorId);
 	await requireVerifiedEmail(db, verified.actorId);
 	if (typeof input.outputId !== 'string' || input.outputId.length === 0) throw new ScopeError(400, 'invalid_input', 'outputId is required');
 	const publication = await readPublication(db, verified.projectId);

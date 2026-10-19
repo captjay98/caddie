@@ -14,6 +14,7 @@ import { createTasksRouter } from './server/routes/tasks.ts';
 import { createGithubRouter } from './server/routes/github.ts';
 import { createDiscoveryRouter } from './server/routes/discovery.ts';
 import { createJudgeRouter } from './server/routes/judge.ts';
+import { createJudgeAccessRouter } from './server/routes/judge-access.ts';
 import { createProfileRouter } from './server/routes/profile.ts';
 import { createArtifactsRouter } from './server/routes/artifacts.ts';
 import { createPreviewsRouter } from './server/routes/previews.ts';
@@ -106,6 +107,10 @@ api.route('/', createTasksRouter());
 api.route('/', createGithubRouter());
 api.route('/', createDiscoveryRouter());
 api.route('/', createJudgeRouter());
+// S06: judge sign-in by access code. Distinct from createJudgeRouter() above
+// (that is the P13 scoring surface at /projects/:projectId/judge/...); this one
+// owns /judge/access, /judge/start and /judge/sign-in.
+api.route('/', createJudgeAccessRouter());
 api.route('/', createBriefRouter());
 api.route('/', createAppKeysRouter());
 api.route('/', createPublishRouter());

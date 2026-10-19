@@ -1,6 +1,7 @@
 import { APIError, betterAuth } from 'better-auth';
 import type { BetterAuthOptions } from 'better-auth';
 import { genericOAuth } from 'better-auth/plugins';
+import { judgeInviteAdmits, judgeNameFromEmail } from './judge-access.ts';
 
 /**
  * P01 identity: Better Auth 1.7.10 on Cloudflare Workers + D1.
@@ -130,6 +131,7 @@ export function createAuth(env: AuthEnv, overrides: CreateAuthOverrides = {}) {
 	const secret = requireEnv(env, 'BETTER_AUTH_SECRET');
 	const baseURL = requireEnv(env, 'BETTER_AUTH_URL').replace(/\/$/, '');
 	const allowlist = inviteAllowlist(env.INVITE_ALLOWLIST);
+	const database = overrides.database ?? env.DB;
 	const ttlSeconds = env.AUTH_SESSION_TTL_SECONDS
 		? Math.max(2, Number.parseInt(env.AUTH_SESSION_TTL_SECONDS, 10) || DEFAULT_SESSION_TTL_SECONDS)
 		: DEFAULT_SESSION_TTL_SECONDS;
@@ -194,9 +196,15 @@ export function createAuth(env: AuthEnv, overrides: CreateAuthOverrides = {}) {
 		secret,
 		baseURL,
 		basePath: '/api/auth',
-		database: (overrides.database ?? env.DB) as unknown as BetterAuthOptions['database'],
+		database: database as unknown as BetterAuthOptions['database'],
 		telemetry: { enabled: false },
-		emailAndPassword: { enabled: false },
+		// S06: email/password exists ONLY to give hackathon judges a sign-in
+		// that needs no Google or GitHub account. `disableSignUp` keeps Better
+		// Auth's own `/sign-up/email` endpoint refused for everyone (verified
+		// against 1.7.10 in tests/judge-access.test.ts); judge accounts are
+		// created server-side by the judge service through the same invite
+		// gate as everyone else. The minimum length matches the judge form.
+		emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: 10 },
 		session: {
 			expiresIn: ttlSeconds,
 			// keep updateAge below expiresIn so short fixture TTLs stay valid
@@ -220,6 +228,25 @@ export function createAuth(env: AuthEnv, overrides: CreateAuthOverrides = {}) {
 		},
 		socialProviders: socialProviders as never,
 		plugins: plugins as never,
+		hooks: {
+			// S06: Better Auth's email/password sign-in exists ONLY for judge
+			// accounts, whose addresses are the synthetic
+			// `<name>@judges.caddie.invalid`. A NON-judge address is refused
+			// here with the library's own invalid-credentials answer, so a
+			// caller cannot tell the two refusals apart and OAuth passwords can
+			// never be set or used. (Sign-UP is refused outright by
+			// `disableSignUp`; judge accounts are created server-side.)
+			async before(ctx) {
+				const path = (ctx as { path?: string }).path;
+				if (path !== '/sign-in/email') return;
+				const email = (ctx.body as { email?: unknown } | undefined)?.email;
+				if (judgeNameFromEmail(typeof email === 'string' ? email : '') !== null) return;
+				throw new APIError('UNAUTHORIZED', {
+					code: 'INVALID_EMAIL_OR_PASSWORD',
+					message: 'Invalid email or password',
+				});
+			},
+		},
 		databaseHooks: {
 			user: {
 				create: {
@@ -228,19 +255,23 @@ export function createAuth(env: AuthEnv, overrides: CreateAuthOverrides = {}) {
 					// so uninvited users are denied at sign-in (fail closed).
 					async before(user) {
 						const email = (user as { email?: string }).email?.toLowerCase();
-						if (!email || !allowlist.has(email)) {
-							// IMPORTANT: set `code` as well as `message`. better-auth's OAuth
-							// callback only turns a thrown APIError into a styled redirect
-							// (errorURL?error=<code>) when `body.code` is present; without a
-							// code it rethrows and the browser lands on raw JSON
-							// (`{"message":"INVITE_REQUIRED…"}`). The code becomes the
-							// `?error=` the sign-in panel reads to render the friendly notice.
-							throw new APIError('FORBIDDEN', {
-								code: 'INVITE_REQUIRED',
-								message: 'INVITE_REQUIRED: this email is not on the invite allowlist',
-							});
+						// S06: a judge address is admitted only while the judge start
+						// that is in progress has reserved it with a fresh 'starting'
+						// row. Every other email must be on the allowlist; the refusal
+						// and its code are unchanged.
+						if (email && (allowlist.has(email) || (await judgeInviteAdmits(database as D1Database, email, new Date().toISOString())))) {
+							return;
 						}
-						return;
+						// IMPORTANT: set `code` as well as `message`. better-auth's OAuth
+						// callback only turns a thrown APIError into a styled redirect
+						// (errorURL?error=<code>) when `body.code` is present; without a
+						// code it rethrows and the browser lands on raw JSON
+						// (`{"message":"INVITE_REQUIRED…"}`). The code becomes the
+						// `?error=` the sign-in panel reads to render the friendly notice.
+						throw new APIError('FORBIDDEN', {
+							code: 'INVITE_REQUIRED',
+							message: 'INVITE_REQUIRED: this email is not on the invite allowlist',
+						});
 					},
 				},
 			},

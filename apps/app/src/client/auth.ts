@@ -117,6 +117,266 @@ function callbackErrorView(code: string, description: string | null): SignInErro
 	};
 }
 
+/**
+ * S06 judge access: whether judges can get in on this deployment, and whether
+ * NEW judge accounts can still be started. `canStart` is false once judge
+ * access has been switched off for new judges — returning judges can still
+ * sign in.
+ */
+export interface JudgeAccess {
+	open: boolean;
+	canStart: boolean;
+}
+
+interface JudgeRefusalBody {
+	error?: unknown;
+	message?: unknown;
+}
+
+/**
+ * POST one judge endpoint and return either success or the sentence to show.
+ * The server writes a plain sentence into `message` for every refusal; the
+ * panel renders that sentence VERBATIM — it never rephrases a refusal the
+ * server explained and never echoes an HTTP status. Only a refusal with no
+ * sentence (or a request that never reached the server) gets the panel's own
+ * honest fallback line.
+ */
+async function postJudge(path: string, payload: Record<string, string>): Promise<{ ok: true } | { ok: false; message: string }> {
+	let response: Response;
+	try {
+		response = await fetch(path, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify(payload),
+		});
+	} catch {
+		return { ok: false, message: 'We couldn’t reach Caddie just now. Check your connection and try again.' };
+	}
+	if (response.ok) return { ok: true };
+	let message = '';
+	try {
+		const body = (await response.json()) as JudgeRefusalBody;
+		if (typeof body.message === 'string' && body.message.trim() !== '') message = body.message.trim();
+	} catch {
+		// non-JSON refusal — fall through to the honest generic line
+	}
+	return { ok: false, message: message || 'That didn’t work. Please try again.' };
+}
+
+/** One labelled judge field. The label carries the hint so the field reads as one thing. */
+function judgeField(props: {
+	testId: string;
+	label: string;
+	value: string;
+	onChange: (value: string) => void;
+	type?: string;
+	autoComplete?: string;
+	hint?: string;
+}): ReactElement {
+	return createElement(
+		'label',
+		{ key: props.testId, className: 'judge-field', style: { display: 'grid', gap: '0.25rem' } },
+		createElement('span', { key: 'label' }, props.label),
+		createElement('input', {
+			key: 'input',
+			className: 'input',
+			'data-testid': props.testId,
+			type: props.type ?? 'text',
+			autoComplete: props.autoComplete,
+			value: props.value,
+			// Not a hard `minLength`: the server owns the password rule and its
+			// plain sentence is what a too-short password must show.
+			onChange: (event: { target: { value: string } }) => props.onChange(event.target.value),
+		}),
+		props.hint ? createElement('small', { key: 'hint', className: 'sign-in-unavailable-note' }, props.hint) : null,
+	);
+}
+
+/**
+ * The judge door, added beside the providers. Collapsed it is one quiet link
+ * ("Judging the hackathon? Use your access code"); open it offers the
+ * first-visit form (access code + judge name + password) and, for someone who
+ * judged before, name + password. Access is read once from
+ * `GET /api/judge/access`; an unknown or failed read is treated as CLOSED and
+ * no judge option is shown — an older build without the endpoint must not
+ * surface a control that cannot work.
+ */
+export function JudgeAccessBlock(props: { callbackURL: string }): ReactElement | null {
+	const [access, setAccess] = useState<JudgeAccess | null>(null);
+	const [open, setOpen] = useState(false);
+	const [mode, setMode] = useState<'start' | 'sign-in'>('start');
+	const [code, setCode] = useState('');
+	const [name, setName] = useState('');
+	const [password, setPassword] = useState('');
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		let cancelled = false;
+		void fetch('/api/judge/access')
+			.then((res) => (res.ok ? (res.json() as Promise<Partial<JudgeAccess>>) : null))
+			.then((body) => {
+				if (!cancelled && body) {
+					setAccess({ open: body.open === true, canStart: body.canStart === true });
+				}
+			})
+			.catch(() => {
+				// judge access unknown — leave it closed, show no judge option
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	if (access?.open !== true) return null;
+
+	const canStart = access.canStart === true;
+	const showingSignIn = !canStart || mode === 'sign-in';
+
+	async function startJudging() {
+		if (busy) return;
+		setBusy(true);
+		setError(null);
+		const result = await postJudge('/api/judge/start', { code, name, password });
+		if (result.ok) {
+			// The server set a session cookie. Reload into the app the same way
+			// the OAuth callback returns, so the onboarding gate sees the new
+			// judge session exactly as it would any other signed-in arrival.
+			window.location.assign(props.callbackURL);
+			return;
+		}
+		setError(result.message);
+		setBusy(false);
+	}
+
+	async function signInAsJudge() {
+		if (busy) return;
+		setBusy(true);
+		setError(null);
+		// The server maps a judge name to its synthetic address; the client never
+		// builds or sends an email.
+		const result = await postJudge('/api/judge/sign-in', { name, password });
+		if (result.ok) {
+			window.location.assign(props.callbackURL);
+			return;
+		}
+		setError(result.message);
+		setBusy(false);
+	}
+
+	if (!open) {
+		return createElement(
+			'button',
+			{
+				type: 'button',
+				className: 'btn-ghost judge-link',
+				'data-testid': 'judge-link',
+				onClick: () => {
+					setOpen(true);
+					setError(null);
+				},
+			},
+			'Judging the hackathon? Use your access code',
+		);
+	}
+
+	const form = showingSignIn
+		? createElement(
+				'form',
+				{
+					key: 'sign-in',
+					'data-testid': 'judge-sign-in-form',
+					style: { display: 'grid', gap: '0.6rem' },
+					onSubmit: (event: { preventDefault: () => void }) => {
+						event.preventDefault();
+						void signInAsJudge();
+					},
+				},
+				judgeField({ testId: 'judge-name', label: 'Judge name', value: name, onChange: setName, autoComplete: 'username' }),
+				judgeField({ testId: 'judge-password', label: 'Password', value: password, onChange: setPassword, type: 'password', autoComplete: 'current-password' }),
+				createElement(
+					'button',
+					{ key: 'submit', type: 'submit', className: 'btn-key', 'data-testid': 'judge-sign-in', disabled: busy },
+					busy ? 'Signing in…' : 'Sign in as a judge',
+				),
+			)
+		: createElement(
+				'form',
+				{
+					key: 'start',
+					'data-testid': 'judge-start-form',
+					style: { display: 'grid', gap: '0.6rem' },
+					onSubmit: (event: { preventDefault: () => void }) => {
+						event.preventDefault();
+						void startJudging();
+					},
+				},
+				judgeField({ testId: 'judge-code', label: 'Access code', value: code, onChange: setCode, autoComplete: 'off' }),
+				judgeField({ testId: 'judge-name', label: 'Judge name', value: name, onChange: setName, autoComplete: 'username', hint: 'Letters, numbers and dashes.' }),
+				judgeField({ testId: 'judge-password', label: 'Password', value: password, onChange: setPassword, type: 'password', autoComplete: 'new-password', hint: 'At least 10 characters.' }),
+				createElement(
+					'button',
+					{ key: 'submit', type: 'submit', className: 'btn-key', 'data-testid': 'judge-start', disabled: busy },
+					busy ? 'Starting…' : 'Start judging',
+				),
+			);
+
+	return createElement(
+		'div',
+		{
+			'data-testid': 'judge-panel',
+			style: { display: 'grid', gap: '0.6rem', marginTop: '1rem', textAlign: 'left' },
+		},
+		!canStart
+			? createElement(
+					'p',
+					{ key: 'closed', className: 'sign-in-unavailable-note', 'data-testid': 'judge-closed' },
+					'New judge places aren’t open right now. Sign in if you already have a judge account.',
+				)
+			: null,
+		form,
+		error
+			? createElement(
+					'div',
+					{ key: 'error', role: 'alert', className: 'sign-in-error', 'data-testid': 'judge-error' },
+					error,
+				)
+			: null,
+		canStart && !showingSignIn
+			? createElement(
+					'button',
+					{
+						key: 'returning',
+						type: 'button',
+						className: 'btn-ghost judge-link',
+						'data-testid': 'judge-returning-link',
+						onClick: () => {
+							setMode('sign-in');
+							setError(null);
+						},
+					},
+					'Sign in as a judge',
+				)
+			: null,
+		canStart && showingSignIn
+			? createElement(
+					'button',
+					{
+						key: 'new',
+						type: 'button',
+						className: 'btn-ghost judge-link',
+						'data-testid': 'judge-new-link',
+						onClick: () => {
+							setMode('start');
+							setError(null);
+						},
+					},
+					'First time judging? Use your access code',
+				)
+			: null,
+	);
+}
+
 export interface SignInPanelProps {
 	callbackURL?: string;
 }
@@ -327,5 +587,9 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 							: null,
 				)
 			: null,
+		// The judge door (S06) sits quietly beside the providers. It reads its
+		// own availability and renders nothing when judge access is off or
+		// unknown — including on an older build with no /api/judge/access.
+		createElement(JudgeAccessBlock, { key: 'judge', callbackURL }),
 	);
 }
