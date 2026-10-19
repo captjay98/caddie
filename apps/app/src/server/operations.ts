@@ -177,6 +177,33 @@ export async function prepareOperation(db: D1Database, input: unknown): Promise<
 }
 
 /** Record the provider accepting the dispatch (remote identity persisted). */
+/**
+ * Take the right to send (or re-send) an operation, atomically: from
+ * 'prepared', or from 'dispatched' / 'reconciliation-required' once its last
+ * attempt is older than `staleBefore`. Moves it to 'dispatched' and stamps the
+ * attempt time. False when another sender holds it, or its last attempt is
+ * still fresh. One conditional UPDATE, so two senders can never both win.
+ */
+export async function claimForDelivery(
+	db: D1Database,
+	operationKey: string,
+	remoteId: string,
+	at: string,
+	staleBefore: string,
+): Promise<boolean> {
+	const key = requireNonEmpty(operationKey, 'operationKey');
+	const remote = requireNonEmpty(remoteId, 'remoteId');
+	const res = (await db
+		.prepare(
+			`update "external_operations" set "status" = 'dispatched', "remoteId" = ?, "updatedAt" = ?
+			 where "operationKey" = ?
+			   and ("status" = 'prepared' or ("status" in ('dispatched', 'reconciliation-required') and "updatedAt" < ?))`,
+		)
+		.bind(remote, at, key, staleBefore)
+		.run()) as { meta?: { changes?: number } };
+	return (res.meta?.changes ?? 0) > 0;
+}
+
 export async function markDispatched(
 	db: D1Database,
 	operationKey: string,

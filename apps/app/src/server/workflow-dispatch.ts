@@ -18,12 +18,20 @@
  * runtime's job, not ours. The client is reduced to OBSERVING workflow state.
  *
  * We do NOT build a second lease/drain engine. This module only:
- *   1. elects one dispatcher (unique key → a duplicate is a typed no-op),
+ *   1. elects one sender per lease (one conditional UPDATE, claimForDelivery),
  *   2. hands the message to the DO via an injected `deliver` boundary
  *      (so the Worker self-fetch is testable and the runtime send stays at
  *      the edge), keyed by the SAME idempotency key the DO dedupes on,
- *   3. acks the pending slot on success, or marks reconciliation-required on
- *      an uncertain delivery — never a blind re-send that could double-fire.
+ *   3. records the receipt and clears the pending slot ONLY after a 2xx. Any
+ *      attempt that did not end in a recorded 2xx (a Worker that stopped
+ *      mid-send, a non-2xx, a thrown send) keeps the message and is sent again
+ *      after REDELIVERY_AFTER_MS with the same key. Flue 2.2.2 converges a
+ *      keyed resend of the same message on the original submission, so a
+ *      resend after the DO did admit the first one cannot start a second turn
+ *      (review 2026-10-19 F01: the old code read "dispatched" as delivered and
+ *      cleared the slot, so a crash before admission lost the message).
+ *   4. recovers stranded handoffs when the project is polled
+ *      (recoverStalledDispatch, from GET /experience).
  */
 
 import type { Scope } from '@caddie/contracts';
@@ -32,14 +40,18 @@ import { assertProjectScope, ScopeError } from './scope.ts';
 import { readWorkflow, acknowledgeDispatch, type BuildWorkflow } from './build-workflow.ts';
 import {
 	prepareOperation,
-	markDispatched,
+	claimForDelivery,
 	recordReceipt,
 	markReconciliationRequired,
 	getOperation,
 } from './operations.ts';
 import { signInternalDispatch } from './internal-dispatch.ts';
+import { lookupRunByConversation } from './runs.ts';
 
 const DISPATCH_PROVIDER = 'coordinator-dispatch';
+
+/** How long an unconfirmed delivery is left alone before it is sent again. */
+export const REDELIVERY_AFTER_MS = 2 * 60_000;
 
 /**
  * How a message reaches the coordinator conversation. Injected so the HTTP /
@@ -55,24 +67,44 @@ export type CoordinatorDeliver = (input: {
 }) => Promise<{ delivered: boolean }>;
 
 export interface DispatchResult {
-	/** 'dispatched' = handed to the DO and acked; 'noop' = already owned/acked;
-	 *  'reconcile' = delivery outcome uncertain, left for reconciliation;
+	/** 'dispatched' = this call handed it to the coordinator and got a 2xx;
+	 *  'noop' = a 2xx was already recorded, so only the slot was cleared;
+	 *  'in-flight' = another attempt is recent, so nothing was sent now;
+	 *  'reconcile' = this attempt got no 2xx (kept; retried after the lease),
+	 *  or the operation was failed/cancelled and needs a person;
 	 *  'none' = nothing pending to dispatch. */
-	outcome: 'dispatched' | 'noop' | 'reconcile' | 'none';
+	outcome: 'dispatched' | 'noop' | 'in-flight' | 'reconcile' | 'none';
 	operationKey?: string;
+}
+
+export interface DispatchOptions {
+	/** Epoch ms for the lease check (tests pass a later clock). */
+	readonly now?: number;
 }
 
 /**
  * Deliver whatever is pending for this project's workflow to the coordinator
- * DO, server-side. Idempotent: the unique operationKey elects one dispatcher,
- * so concurrent calls (a double-click, a retried HTTP request, a monitor tick)
- * collapse to one logical delivery. Safe to call after decide/retry/continue
- * and from a server-side reconcile sweep.
+ * DO, server-side (review 2026-10-19 F01).
+ *
+ * The pending message is cleared ONLY after a delivery got a 2xx and that was
+ * recorded. Any other state keeps it:
+ *   - an attempt in flight, or one that ended without a 2xx, is left alone for
+ *     REDELIVERY_AFTER_MS, then sent again with the SAME idempotency key. The
+ *     pinned Flue runtime (2.2.2, adoptKeyedSubmissionReplay) converges a keyed
+ *     resend of the same message on the original submission, so a resend after
+ *     the coordinator did admit the first one cannot start a second turn;
+ *   - a Worker that died after "dispatched" and before the coordinator admitted
+ *     it is therefore recovered by the next call after the lease, instead of
+ *     the old behaviour of reading "dispatched" as delivered and dropping it.
+ * One conditional UPDATE (claimForDelivery) elects the sender, so concurrent
+ * callers (a double-click, a retried request, a poll) send at most once per
+ * lease. Safe to call from any authenticated request for the project.
  */
 export async function dispatchPendingWorkflow(
 	db: D1Database,
 	scope: Scope,
 	deliver: CoordinatorDeliver,
+	options: DispatchOptions = {},
 ): Promise<DispatchResult> {
 	await assertProjectScope(db, scope);
 	const workflow = await readWorkflow(db, scope);
@@ -81,26 +113,10 @@ export async function dispatchPendingWorkflow(
 	const key = workflow.pendingKey;
 	const body = workflow.pendingBody;
 	const conversationId = workflow.conversationId;
+	const now = options.now ?? Date.now();
 
-	// Elect exactly one dispatcher for this logical delivery. A second caller
-	// loses on the unique key and must not re-deliver.
-	const existing = await getOperation(db, key);
-	if (existing) {
-		// Already owned. If it reached a terminal/dispatched state, the ack
-		// either happened or will on reconcile — never re-send here.
-		if (existing.status === 'succeeded' || existing.status === 'dispatched') {
-			await acknowledgeDispatch(db, scope, key);
-			return { outcome: 'noop', operationKey: key };
-		}
-		if (existing.status === 'reconciliation-required') {
-			return { outcome: 'reconcile', operationKey: key };
-		}
-		// prepared/failed/cancel-* — fall through to a single delivery attempt
-		// only when still prepared; otherwise report reconcile.
-		if (existing.status !== 'prepared') {
-			return { outcome: 'reconcile', operationKey: key };
-		}
-	} else {
+	let existing = await getOperation(db, key);
+	if (!existing) {
 		try {
 			await prepareOperation(db, {
 				projectId: scope.projectId,
@@ -109,21 +125,30 @@ export async function dispatchPendingWorkflow(
 				operationKey: key,
 			});
 		} catch (error) {
-			if (error instanceof ScopeError && error.code === 'operation_key_conflict') {
-				// Another dispatcher won the election between our read and insert.
-				return { outcome: 'noop', operationKey: key };
-			}
-			throw error;
+			if (!(error instanceof ScopeError && error.code === 'operation_key_conflict')) throw error;
+			// Another dispatcher prepared it between our read and insert.
+			existing = await getOperation(db, key);
 		}
 	}
+	if (existing?.status === 'succeeded') {
+		// The coordinator accepted it and that was recorded; only clearing the
+		// slot was lost (e.g. the Worker stopped right after the receipt).
+		await acknowledgeDispatch(db, scope, key);
+		return { outcome: 'noop', operationKey: key };
+	}
+	if (existing && !['prepared', 'dispatched', 'reconciliation-required'].includes(existing.status)) {
+		// failed / cancel-requested / cancelled: not ours to resend.
+		return { outcome: 'reconcile', operationKey: key };
+	}
+	const claimed = await claimForDelivery(
+		db,
+		key,
+		conversationId,
+		new Date(now).toISOString(),
+		new Date(now - REDELIVERY_AFTER_MS).toISOString(),
+	);
+	if (!claimed) return { outcome: 'in-flight', operationKey: key };
 
-	// One delivery attempt. We optimistically mark the operation dispatched
-	// BEFORE the send so an uncertain outcome can legally transition to
-	// reconciliation-required (operations.ts allows reconcile only from
-	// 'dispatched'). The DO dedupes on the idempotency key and its own onStart
-	// drain owns re-delivery after a crash — so an uncertain outcome here is
-	// reconciled, never blindly re-sent.
-	await markDispatched(db, key, conversationId);
 	try {
 		const result = await deliver({ conversationId, body, idempotencyKey: key });
 		if (!result.delivered) {
@@ -135,12 +160,56 @@ export async function dispatchPendingWorkflow(
 		return { outcome: 'reconcile', operationKey: key };
 	}
 
-	// Delivered. Record the receipt (idempotent) and clear the pending slot so
-	// the UI stops showing a pending dispatch. The receipt id is the key —
-	// one logical delivery, one settlement.
+	// Accepted. Record the receipt (idempotent) and only then clear the pending
+	// slot. The receipt id is the key: one logical delivery, one settlement.
 	await recordReceipt(db, key, { receiptId: `delivered:${key}`, outcome: 'succeeded' });
 	await acknowledgeDispatch(db, scope, key);
 	return { outcome: 'dispatched', operationKey: key };
+}
+
+/**
+ * Whether this project's pending message looks stranded (review F01): kept
+ * but not delivered, with nothing having happened for REDELIVERY_AFTER_MS.
+ * That covers a Worker that stopped between writing the message and sending
+ * it (no operation row yet), one that stopped mid-send ('dispatched' or
+ * 'prepared'), a delivery that got no 2xx ('reconciliation-required'), and
+ * one whose 2xx was recorded but whose slot was not cleared ('succeeded').
+ * A message written or sent within the lease is left to its own sender.
+ */
+export async function needsRedelivery(db: D1Database, scope: Scope, now: number = Date.now()): Promise<boolean> {
+	const workflow = await readWorkflow(db, scope);
+	if (!workflow?.pendingKey || !workflow.pendingBody) return false;
+	const staleBefore = now - REDELIVERY_AFTER_MS;
+	const rows = await db
+		.prepare('select "status", "updatedAt" from "external_operations" where "operationKey" = ?')
+		.bind(workflow.pendingKey)
+		.all();
+	const op = (rows.results ?? [])[0] as { status?: string; updatedAt?: string } | undefined;
+	if (!op) return Date.parse(workflow.updatedAt) < staleBefore;
+	if (op.status === 'succeeded') return true;
+	if (!['prepared', 'dispatched', 'reconciliation-required'].includes(String(op.status))) return false;
+	return Date.parse(String(op.updatedAt)) < staleBefore;
+}
+
+/**
+ * Re-send a stranded handoff, if there is one. Called when the project's
+ * state is polled (GET /experience, every 3 s while a project or the Projects
+ * list is open), so a lost handoff recovers within one lease of the user
+ * looking, with the same key and at most one send per lease.
+ */
+export async function recoverStalledDispatch(
+	db: D1Database,
+	scope: Scope,
+	deliver: CoordinatorDeliver,
+	now: number = Date.now(),
+): Promise<DispatchResult | null> {
+	if (!(await needsRedelivery(db, scope, now))) return null;
+	// The conversation guard admits only its owner, so another member's poll
+	// would only collect refusals: leave the resend to the owner.
+	const workflow = await readWorkflow(db, scope);
+	const owner = workflow ? await lookupRunByConversation(db, workflow.conversationId) : null;
+	if (!owner || owner.createdBy !== scope.actorId) return null;
+	return dispatchPendingWorkflow(db, scope, deliver, { now });
 }
 
 /**

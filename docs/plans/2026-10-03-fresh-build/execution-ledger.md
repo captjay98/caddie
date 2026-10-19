@@ -1832,3 +1832,29 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "Review 2026-10-19 F01: an interrupted handoff can no longer discard the pending message",
+  "status": "LOCAL VERIFIED for the dispatch policy (real migrations and services; the coordinator is an in-process stand-in that mimics keyed admission). The pinned runtime's dedupe of a keyed resend is SOURCE-READ ONLY (Flue 2.2.2 agent-coordinator / builtin-providers: adoptKeyedSubmissionReplay converges the same key + same message on the stored submission and answers 2xx with deduplicated:true; a different message under the same key is a 409 SubmissionConflictError). It was not executed against workerd here: an executed proof needs a coordinator turn, which reaches the model provider.",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "bun test tests/workflow-dispatch.test.ts (before; only the lease constant exported)", "exitCode": 1, "receipt": "6 of 14 failed as intended: a crash after 'dispatched' and before admission, in planning, design and building, was read as delivered and the message cleared; the admitted-but-unrecorded case did the same; an uncertain delivery was never retried; a non-2xx stayed stuck. The deterministic two-dispatcher case also failed: the loser answered noop and cleared the slot while the first send was still in flight."},
+    {"command": "bun test tests/workflow-dispatch.test.ts tests/controls.integration.test.ts (after)", "exitCode": 0, "receipt": "39 pass / 0 fail (15 dispatch, 24 controls)."},
+    {"command": "bun mutate.ts (scratch), 3 mutations", "exitCode": 0, "receipt": "Reading 'dispatched' as delivered fails 5 tests; a claim with no lease fails 5; recovery with no lease fails the fresh-message case. Files restored byte-identical."},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "exit 0."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/workflow-dispatch.ts", "note": "The pending message is cleared only after a 2xx is recorded. An attempt that did not end that way is left alone for REDELIVERY_AFTER_MS (2 min), then sent again with the SAME key. 'succeeded' with the slot still set only clears the slot. Failed or cancelled operations are not resent. Outcomes gain 'in-flight'. needsRedelivery and recoverStalledDispatch find stranded handoffs: no operation row after the lease (the Worker stopped between writing and sending), prepared/dispatched/reconciliation-required past the lease, or succeeded-but-uncleared. Only the conversation owner's poll resends, because the guard refuses anyone else."},
+    {"path": "apps/app/src/server/operations.ts", "note": "claimForDelivery: one conditional UPDATE takes the right to send from 'prepared', or from 'dispatched'/'reconciliation-required' older than the lease. Two senders cannot both win."},
+    {"path": "apps/app/src/server/routes/build-workflow.ts", "note": "GET /experience (polled every 3 s while a project or the Projects list is open) runs the recovery before answering; a failure is logged and never blocks the answer."}
+  ],
+  "environment": "Local Mac only.",
+  "providerCalls": "none",
+  "limitations": [
+    "Recovery runs when the owner's browser polls the project. A handoff stranded while nobody has Caddie open waits until they come back. A cron sweep cannot resend: the conversation guard needs the owner's session.",
+    "If the coordinator answers 2xx but the Worker dies before the receipt, the resend relies on Flue's keyed dedupe (source-read above) to not start a second turn. Executing that against workerd is a live check for S11.",
+    "A resend uses the stored pending text, so the message is identical and the dedupe applies; any change to how pendingBody is written would need the same care."
+  ]
+}
+```

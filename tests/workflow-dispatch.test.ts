@@ -8,12 +8,20 @@ import { createRun } from "../apps/app/src/server/runs.ts";
 import {
   startProjectFromChat,
   decideWorkflow,
+  decideDesign,
   workflowSnapshot,
   stopWorkflow,
   readWorkflow,
 } from "../apps/app/src/server/build-workflow.ts";
-import { dispatchPendingWorkflow, workerSelfDeliver, type CoordinatorDeliver } from "../apps/app/src/server/workflow-dispatch.ts";
-import { getOperation } from "../apps/app/src/server/operations.ts";
+import {
+  dispatchPendingWorkflow,
+  needsRedelivery,
+  recoverStalledDispatch,
+  REDELIVERY_AFTER_MS,
+  workerSelfDeliver,
+  type CoordinatorDeliver,
+} from "../apps/app/src/server/workflow-dispatch.ts";
+import { getOperation, markDispatched, prepareOperation, recordReceipt } from "../apps/app/src/server/operations.ts";
 import { splitSqlStatements } from "./fixtures/controls-harness.ts";
 
 /**
@@ -98,8 +106,55 @@ async function world() {
     await decideWorkflow(db, scope, { planId: plan.id, decision: "approved" });
     return { scope, plan };
   }
-  return { db, approvedProject };
+  /** A project whose pending message is the intake (phase planning). */
+  async function intakeProject(name = "Intake app") {
+    const started = await startProjectFromChat(db, homeScope, {
+      name,
+      description: name,
+      brief: `Build ${name}. Show the plan first.`,
+      operationKey: `tool-create-${name}`,
+      sourceConversationId: homeRun.conversationId,
+    });
+    return { scope: await projectScopeForUser(db, "alice", started.project.id) };
+  }
+  /** A project whose pending message starts the build (design approved, phase building). */
+  async function buildingProject() {
+    const { scope } = await approvedProject();
+    await dispatchPendingWorkflow(db, scope, async () => ({ delivered: true }));
+    const design = await createPlanDocRevision(db, scope, { kind: "design", body: "# Design\n\nOne screen." });
+    await workflowSnapshot(db, scope); // design -> design-review
+    await decideDesign(db, scope, { designId: design.id, decision: "approved" });
+    return { scope };
+  }
+  return { sqlite, db, approvedProject, intakeProject, buildingProject };
 }
+
+/**
+ * A coordinator stand-in that behaves like the pinned Flue 2.2.2 keyed
+ * admission (agent-coordinator / builtin-providers: adoptKeyedSubmissionReplay):
+ * the same idempotency key with the same message converges on ONE submission
+ * (deduplicated); the same key with a different message is a conflict. It can
+ * also fail its first N deliveries (a non-2xx answer).
+ */
+function dedupingCoordinator(options: { failFirst?: number } = {}) {
+  const admitted = new Map<string, string>();
+  const deliveries: string[] = [];
+  let failures = options.failFirst ?? 0;
+  const deliver: CoordinatorDeliver = async ({ body, idempotencyKey }) => {
+    deliveries.push(idempotencyKey);
+    if (failures > 0) {
+      failures -= 1;
+      return { delivered: false };
+    }
+    const prior = admitted.get(idempotencyKey);
+    if (prior !== undefined && prior !== body) throw new Error("SubmissionConflictError: the key names a different delivery");
+    admitted.set(idempotencyKey, body);
+    return { delivered: true };
+  };
+  return { deliver, admitted, deliveries };
+}
+
+const AFTER_LEASE = () => Date.now() + REDELIVERY_AFTER_MS + 1_000;
 
 /** A deliver boundary that records every logical hand-off to the DO. */
 function recordingDeliver(): CoordinatorDeliver & { calls: Array<{ conversationId: string; idempotencyKey: string }> } {
@@ -154,7 +209,7 @@ describe("R02 server-owned durable dispatch", () => {
     expect(a.calls).toHaveLength(1);
   });
 
-  test("uncertain delivery reconciles — never a blind re-send that double-fires", async () => {
+  test("uncertain delivery keeps the pending message, waits out the lease, then re-delivers once with the SAME key", async () => {
     const w = await world();
     const { scope } = await w.approvedProject();
     const uncertain: CoordinatorDeliver = async () => ({ delivered: false });
@@ -163,13 +218,20 @@ describe("R02 server-owned durable dispatch", () => {
     const key = result.operationKey!;
     expect((await getOperation(w.db, key))?.status).toBe("reconciliation-required");
 
-    // A follow-up dispatch must NOT re-deliver an operation stuck in reconcile.
-    const after = recordingDeliver();
-    const again = await dispatchPendingWorkflow(w.db, scope, after);
-    expect(again.outcome).toBe("reconcile");
-    expect(after.calls).toHaveLength(0); // no second send
-    // pending slot stays set (not acked) until reconciliation resolves it.
+    // Inside the lease a follow-up does not re-send, and nothing is cleared.
+    const early = recordingDeliver();
+    const again = await dispatchPendingWorkflow(w.db, scope, early);
+    expect(again.outcome).toBe("in-flight");
+    expect(early.calls).toHaveLength(0);
     expect((await readWorkflow(w.db, scope))?.pendingKey).toBe(key);
+
+    // After the lease, one re-delivery with the same key settles it.
+    const later = recordingDeliver();
+    const settled = await dispatchPendingWorkflow(w.db, scope, later, { now: Date.now() + REDELIVERY_AFTER_MS + 1 });
+    expect(settled.outcome).toBe("dispatched");
+    expect(later.calls).toEqual([{ conversationId: expect.any(String), idempotencyKey: key }]);
+    expect((await getOperation(w.db, key))?.status).toBe("succeeded");
+    expect((await readWorkflow(w.db, scope))?.pendingKey).toBeNull();
   });
 
   test("a thrown delivery (network drop) reconciles rather than crashing or re-sending", async () => {
@@ -193,6 +255,136 @@ describe("R02 server-owned durable dispatch", () => {
     const result = await dispatchPendingWorkflow(w.db, scope, afterStop);
     expect(result.outcome).toBe("none");
     expect(afterStop.calls).toHaveLength(0);
+  });
+});
+
+describe("F01 a handoff is cleared only by an accepted delivery (review 2026-10-19)", () => {
+  /** Simulate an attempt that marked the operation dispatched and then died. */
+  async function crashedAttempt(db: D1Database, scope: { projectId: string }, key: string, conversationId: string, runId: string) {
+    await prepareOperation(db, { projectId: scope.projectId, runId, provider: "coordinator-dispatch", operationKey: key });
+    await markDispatched(db, key, conversationId);
+  }
+
+  for (const phase of ["planning", "design", "building"] as const) {
+    test(`crash before the coordinator admitted it (${phase}): kept, then re-delivered once after the lease`, async () => {
+      const w = await world();
+      const { scope } =
+        phase === "planning" ? await w.intakeProject() : phase === "design" ? await w.approvedProject() : await w.buildingProject();
+      const workflow = (await readWorkflow(w.db, scope))!;
+      expect(workflow.phase).toBe(phase);
+      const key = workflow.pendingKey!;
+      await crashedAttempt(w.db, scope, key, workflow.conversationId, workflow.runId);
+
+      // The old code read 'dispatched' as delivered and cleared the slot here.
+      const coordinator = dedupingCoordinator();
+      const early = await dispatchPendingWorkflow(w.db, scope, coordinator.deliver);
+      expect(early.outcome).toBe("in-flight");
+      expect(coordinator.deliveries).toHaveLength(0);
+      expect((await readWorkflow(w.db, scope))?.pendingKey).toBe(key);
+
+      const recovered = await dispatchPendingWorkflow(w.db, scope, coordinator.deliver, { now: AFTER_LEASE() });
+      expect(recovered.outcome).toBe("dispatched");
+      expect(coordinator.deliveries).toEqual([key]);
+      expect(coordinator.admitted.size).toBe(1);
+      expect((await getOperation(w.db, key))?.status).toBe("succeeded");
+      expect((await readWorkflow(w.db, scope))?.pendingKey).toBeNull();
+    });
+  }
+
+  test("crash after the coordinator admitted it, before the receipt: the re-delivery converges on the same submission", async () => {
+    const w = await world();
+    const { scope } = await w.approvedProject();
+    const workflow = (await readWorkflow(w.db, scope))!;
+    const key = workflow.pendingKey!;
+    const coordinator = dedupingCoordinator();
+    await crashedAttempt(w.db, scope, key, workflow.conversationId, workflow.runId);
+    // The coordinator admitted it; the Worker died before recording that.
+    await coordinator.deliver({ conversationId: workflow.conversationId, body: workflow.pendingBody!, idempotencyKey: key });
+
+    const recovered = await dispatchPendingWorkflow(w.db, scope, coordinator.deliver, { now: AFTER_LEASE() });
+    expect(recovered.outcome).toBe("dispatched");
+    expect(coordinator.deliveries).toEqual([key, key]);
+    expect(coordinator.admitted.size).toBe(1); // one submission, not two
+    expect((await readWorkflow(w.db, scope))?.pendingKey).toBeNull();
+  });
+
+  test("crash after the receipt, before the slot was cleared: the next call clears it without sending", async () => {
+    const w = await world();
+    const { scope } = await w.approvedProject();
+    const workflow = (await readWorkflow(w.db, scope))!;
+    const key = workflow.pendingKey!;
+    await crashedAttempt(w.db, scope, key, workflow.conversationId, workflow.runId);
+    await recordReceipt(w.db, key, { receiptId: `delivered:${key}`, outcome: "succeeded" });
+
+    const coordinator = dedupingCoordinator();
+    const result = await dispatchPendingWorkflow(w.db, scope, coordinator.deliver);
+    expect(result.outcome).toBe("noop");
+    expect(coordinator.deliveries).toHaveLength(0);
+    expect((await readWorkflow(w.db, scope))?.pendingKey).toBeNull();
+  });
+
+  test("two dispatchers at once: one delivery, and the loser never clears the message before the 2xx", async () => {
+    const w = await world();
+    const { scope } = await w.approvedProject();
+    const key = (await readWorkflow(w.db, scope))!.pendingKey!;
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const inside = new Promise<void>((resolve) => (entered = resolve));
+    const deliveries: string[] = [];
+    const slow: CoordinatorDeliver = async ({ idempotencyKey }) => {
+      deliveries.push(idempotencyKey);
+      entered();
+      await gate;
+      return { delivered: true };
+    };
+    const first = dispatchPendingWorkflow(w.db, scope, slow);
+    await inside; // the first dispatcher is now mid-delivery, its outcome unknown
+    const second = await dispatchPendingWorkflow(w.db, scope, slow);
+    expect(second.outcome).toBe("in-flight");
+    expect((await readWorkflow(w.db, scope))?.pendingKey).toBe(key); // still there: nothing accepted yet
+    release();
+    expect((await first).outcome).toBe("dispatched");
+    expect(deliveries).toEqual([key]);
+    expect((await readWorkflow(w.db, scope))?.pendingKey).toBeNull();
+  });
+
+  test("looking at the project recovers a stranded handoff after the lease, and leaves a fresh one alone", async () => {
+    const w = await world();
+    // A message the decision route has just written: its own sender is still on it.
+    const fresh = await w.intakeProject("Fresh app");
+    const coordinator = dedupingCoordinator();
+    expect(await recoverStalledDispatch(w.db, fresh.scope, coordinator.deliver)).toBeNull();
+    expect(coordinator.deliveries).toHaveLength(0);
+
+    // A Worker that died between writing the message and sending it: no
+    // operation row at all. Recovered once the lease has passed.
+    const stranded = await w.intakeProject("Stranded app");
+    const key = (await readWorkflow(w.db, stranded.scope))!.pendingKey!;
+    expect(await needsRedelivery(w.db, stranded.scope)).toBe(false);
+    expect(await needsRedelivery(w.db, stranded.scope, AFTER_LEASE())).toBe(true);
+    const recovered = await recoverStalledDispatch(w.db, stranded.scope, coordinator.deliver, AFTER_LEASE());
+    expect(recovered?.outcome).toBe("dispatched");
+    expect(coordinator.deliveries).toEqual([key]);
+    expect((await readWorkflow(w.db, stranded.scope))?.pendingKey).toBeNull();
+    // Settled: nothing more to recover.
+    expect(await recoverStalledDispatch(w.db, stranded.scope, coordinator.deliver, AFTER_LEASE())).toBeNull();
+    expect(coordinator.deliveries).toEqual([key]);
+  });
+
+  test("repeated non-2xx answers keep the message; each retry waits out the lease and the first 2xx settles it", async () => {
+    const w = await world();
+    const { scope } = await w.intakeProject("Flaky app");
+    const key = (await readWorkflow(w.db, scope))!.pendingKey!;
+    const coordinator = dedupingCoordinator({ failFirst: 2 });
+    expect((await dispatchPendingWorkflow(w.db, scope, coordinator.deliver)).outcome).toBe("reconcile");
+    expect((await dispatchPendingWorkflow(w.db, scope, coordinator.deliver, { now: AFTER_LEASE() })).outcome).toBe("reconcile");
+    expect((await readWorkflow(w.db, scope))?.pendingKey).toBe(key);
+    const settled = await dispatchPendingWorkflow(w.db, scope, coordinator.deliver, { now: AFTER_LEASE() + REDELIVERY_AFTER_MS });
+    expect(settled.outcome).toBe("dispatched");
+    expect(coordinator.deliveries).toEqual([key, key, key]);
+    expect(coordinator.admitted.size).toBe(1);
+    expect((await readWorkflow(w.db, scope))?.pendingKey).toBeNull();
   });
 });
 

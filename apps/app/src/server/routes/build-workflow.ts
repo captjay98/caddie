@@ -26,6 +26,7 @@ import {
 import { rollbackToFeature } from "../build-features.ts";
 import {
   dispatchPendingWorkflow,
+  recoverStalledDispatch,
   workerSelfDeliver,
   type CoordinatorDeliver,
 } from "../workflow-dispatch.ts";
@@ -129,6 +130,17 @@ export function createBuildWorkflowRouter(
       c.req.raw.headers,
       c.req.param("projectId"),
     );
+    // Review F01: a handoff that was written but never accepted (a Worker
+    // that stopped mid-send, or a delivery with no 2xx) is re-sent here, with
+    // the same key, once its lease has passed. This route is polled every 3 s
+    // while the project is open, so a lost handoff recovers while someone
+    // looks. It never blocks the answer: a failed recovery is logged.
+    const deliver = deliverFor(c);
+    if (deliver) {
+      await recoverStalledDispatch(c.env.DB, scope, deliver).catch((error: unknown) => {
+        console.error("[dispatch] recovery failed", error instanceof Error ? error.message : error);
+      });
+    }
     return c.json(await projectExperience(c.env.DB, scope));
   });
 
