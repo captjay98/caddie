@@ -46,14 +46,15 @@ Nothing was uploaded (execution ledger, S10 record).
 The pre-final review (`docs/reviews/2026-10-19-pre-final-testing-review.md`)
 found two holes in the judge limits:
 
-- **F02:** judges' discovery through chat, and the scaffold `/agents/hello`
-  agent, are not counted against the limits.
-- **F03:** projects created at the same moment can exceed the project limit.
+- **F02:** paid work judges could trigger outside the limits (chat discovery,
+  research, AI digests, change requests, the scaffold `/agents/hello` agent).
+- **F03:** projects created at the same moment could exceed the project limit.
 
-Until both are fixed and re-verified, leave `JUDGE_ACCESS_CODE` and
-`JUDGE_ACCESS_UNTIL` out of `.prod.vars` and add `--owner-only` to the
-preflight. Judge sign-in stays hidden. Turn it on later without a rebuild (see
-"Changing settings").
+Both were fixed on 2026-10-19 (`0811b8a`, LOCAL VERIFIED). Still deploy without
+judge access first: leave `JUDGE_ACCESS_CODE` and `JUDGE_ACCESS_UNTIL` out of
+`.prod.vars` and add `--owner-only` to the preflight. Run the smoke and your own
+sign-in, then turn judge access on without a rebuild (see "Changing settings")
+and start one judge account yourself before sharing the code.
 
 ## Every deploy
 
@@ -91,7 +92,7 @@ makes it work from any folder.
 | :--- | :--- |
 | Stop new judge accounts | `JUDGE_ACCESS_ENABLED` = `0` |
 | Stop judges' builds, messages, projects or lookups | `JUDGE_MAX_BUILDS_PER_DAY`, `JUDGE_MAX_MESSAGES_PER_DAY`, `JUDGE_MAX_PROJECTS` or `JUDGE_MAX_DISCOVERY_PER_DAY` = `0` |
-| Open judge access (after F02 and F03) | `JUDGE_ACCESS_CODE` (16+ characters), then `JUDGE_ACCESS_UNTIL` = `2026-12-16` |
+| Open judge access (after the smoke) | `JUDGE_ACCESS_CODE` (16+ characters), then `JUDGE_ACCESS_UNTIL` = `2026-12-16` |
 | Replace a leaked judge code | a new `JUDGE_ACCESS_CODE`; existing judges still sign in with their name and password |
 
 For example: `bunx wrangler secret put JUDGE_ACCESS_ENABLED --name caddie-app`,

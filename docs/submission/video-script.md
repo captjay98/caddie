@@ -99,13 +99,16 @@ the line it was quoted from).
 > This conversation is answered by **NVIDIA Nemotron 3.5 Super VL**. First,
 > Find: Caddie sweeps live hackathon sources with **Tavily** — its search
 > endpoint to build the candidate list, then its extract endpoint to pull the
-> rules page. A fast Nemotron helper reads that page and quotes the eligibility
-> lines **verbatim**. Every claim shows where it came from, and if a source
-> fails, Caddie shows the gap instead of guessing."
+> rules page. **NVIDIA Nemotron 3 Nano**, the fast helper model, reads that
+> page and quotes the eligibility lines **verbatim**. Every claim shows where it
+> came from, and if a source fails, Caddie shows the gap instead of guessing."
 
 **Notes.** The Find feed is Devpost's public open-contests API *plus* a Tavily
 multi-platform sweep, de-duplicated and filtered to real event pages
-(`apps/app/src/server/discovery.ts`, `apps/app/src/server/tavily.ts`). Say
+(`apps/app/src/server/discovery.ts`, `apps/app/src/server/tavily.ts`). The rules
+reader is the `helper` role, `nemotron-3-nano` (`MODEL_ROLES` in
+`apps/app/src/agents/providers.ts`). With Beat 2 (Ultra) and Beat 5 (Lightning
+and Super VL), the audio names all four Nemotron models Caddie uses. Say
 "the rules pane" only if the verbatim claims are actually visible on screen.
 
 ---
@@ -292,11 +295,12 @@ status this repo records. If a claim is not below, do not say it.
 | Publish (Workers for Platforms) | **NOT DEPLOYED / LOCAL VERIFIED only** | `apps/app/src/client/project/PublishApp.tsx`; `README.md` status table; `docs/release-evidence.md`. |
 | Worker Loader preview / Artifacts / Web Risk on a **deployed** Worker | **Not live-verified** | `README.md` status table. |
 | Hosted demo URL accessible to judges | **NOT BUILT / not deployed** | `README.md` status table. |
-| ~~"Token Factory Sandboxes" as the name of Caddie's sandbox~~ | **Owner to confirm — do not assert** | `README.md` owner-to-confirm note; `docs/setup/sandbox.md`. Say "an isolated sandbox on the Token Factory account" and stop there on camera. |
+| The template app installs and builds in the sandbox (`verified-install.ts` on `tag:tt-base:1`) | **LIVE VERIFIED** (recorded 2026-10-19) | `README.md` status table; `scripts/probe-sandbox-scaffold.ts`; ledger item 3 receipt. A full build driven by Caddie's agents is **not yet live**: don't present the template run as one. |
+| Code is written, run and tested in Token Factory (sandbox API at `https://api.tokenfactory.nebius.com/sandboxes`) | **LIVE VERIFIED** for the sandbox and the template install (2026-10-06, 2026-10-19) | `README.md` "The sandbox and Caddie's checks". Say "in Nebius Token Factory"; don't call it "Token Factory Sandboxes" (the rules don't use that name). |
 
 ### Three things never to say on camera
 
 1. That the demo is hosted/live when it is a local recording.
 2. That Publish put the app online when production is not deployed.
-3. That Caddie's sandbox **is** the rules' "Token Factory Sandboxes". This repo
-   cannot establish that. Match the README's owner-to-confirm note.
+3. That a full app build by Caddie's agents has run live in the sandbox. Only
+   the starting template's install, build and tests have (2026-10-19).

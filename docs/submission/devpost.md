@@ -74,13 +74,12 @@ loop so a model's own claims never count: `build_next_feature` → `run_checks`
 → `finish_feature` (which requires the feature to have added new *passing*
 tests over its baseline) → `verify_build`.
 
-> **Owner to confirm before submitting.** The competition's Coding track text
-> uses the phrase **"Token Factory Sandboxes"**. Caddie's sandbox is reached
-> through `CONTREE_BASE_URL` on a Token Factory account, but **this repository
-> cannot confirm that this endpoint is the product the rules call "Token Factory
-> Sandboxes"**. The owner must confirm the naming against the Nebius docs or the
-> rules FAQ before the submission uses that term. Until then, describe it as
-> "an isolated sandbox on the Token Factory account".
+**Code runs in Token Factory.** The Coding track asks for "agents that write,
+run, and test code in Token Factory". Caddie's sandbox API is
+`https://api.tokenfactory.nebius.com/sandboxes`, on the same Token Factory
+account that serves its models, and builds install, build and test the
+generated code there. The starting template did that live on 2026-10-19; a full
+build driven by Caddie's agents has not been run live yet.
 
 **Honest status.** The app is a working build that makes real runtime calls to
 Token Factory and runs the pipeline locally and in recorded live runs. The
@@ -138,7 +137,7 @@ execution ledger 2026-10-03 fresh-build entry for **P11**
 
 Caddie-forge is a ground-up rebuild, not a continuation of the earlier `caddie`
 concept; no history was carried over. Read from this repository's own `git log`
-(325 commits as of 2026-10-19; first commit **2026-10-03**):
+(347 commits as of 2026-10-19; first commit **2026-10-03**):
 
 | Date(s) | What landed |
 | :--- | :--- |
@@ -148,7 +147,7 @@ concept; no history was carried over. Read from this repository's own `git log`
 | **2026-10-15 – 10-16** | Project-page redesign, the host-driven feature build loop, the PRD + design review step, saving source to GitHub as a PR, and model re-routing. |
 | **2026-10-17** | The publish programme: app-host ports and the Cloudflare adapter, an Artifacts-backed code store, and running an app's server in a Worker Loader isolate for previews. |
 | **2026-10-18** | Publishing end to end (service, `/api` routes, the Publish card, safety scan + takedowns), keys for outside services, AI inside generated apps with a per-project allowance, app sign-in, versions/restore, "Start from my GitHub repo"; then S01–S04 (one packet table with a completeness net, a purpose-specific report rate-limit key, model routing re-read from the live Nebius listing, and the fast/super app-AI tiers). |
-| **2026-10-19** | S06: judges sign in with an access code, a name and a password (no Google or GitHub, no email). S07: judge limits (3 projects, 3 build starts and 300 Caddie messages per rolling 24 hours, enforced server-side). S08: the MIT `LICENSE`, this README and a licence audit; models re-priced from the live listing. |
+| **2026-10-19** | S06: judges sign in with an access code, a name and a password (no Google or GitHub, no email). S07: judge limits enforced server-side: 3 projects, 3 build starts, 300 Caddie messages and 20 discovery lookups per rolling 24 hours, where `0` means none. S07b: when the deployment names a demo project (`JUDGE_EXAMPLE_PROJECT_ID`), each new judge finds a finished copy, "<Name> (example)", ready to try. Installs in the sandbox now check every package's sha512 from `bun.lock` before unpacking it, which fixed the react-dom unpacking failure on `tag:tt-base:1` (LIVE VERIFIED for the starting template). The browser acceptance suite passes (23 groups, 0 failures) and CI is set up to run it. Discover's "Why it fits" is in plain words. A pre-final review's five findings were fixed: every paid path counts against the judge limits, the project limit holds when creates race, an interrupted handoff to Caddie is re-sent instead of lost, live test receipts are tied to the code they tested, and the project Overview shows the app the build made. S08: the MIT `LICENSE`, this README and a licence audit; S10: a checked production deploy procedure. |
 
 (The dates and counts come from `git log` in this repo. The README's "What
 changed during the submission period" section is the judge-facing version of the
@@ -192,8 +191,11 @@ screenshot, or the video.
 >    password.
 > 5. Try the loop: ask Caddie for a project idea, open **Find** to see live
 >    hackathons ranked against a profile and open a contest's cited rules
->    verdict, then ask Caddie to plan a small project and approve the plan to
->    start a build.
+>    verdict, then ask Caddie to plan a small project, approve the plan and
+>    the design, and the build starts.
+> 6. Your **Projects** list already has a finished example app,
+>    **"<Name> (example)"**. Open it to try it right away, or ask Caddie to
+>    change it.
 >
 > **Demo limits (so a few dozen judges can't exhaust it):** each judge account
 > may have **3 projects**, start **3 builds per 24 hours**, send **300 Caddie
@@ -204,6 +206,11 @@ screenshot, or the video.
 > Asking for changes to a plan or a design counts as a message. There are
 > **at most 40 judge accounts** in total, and **judge access closes on
 > 2026-12-16**. Judge accounts cannot publish apps.
+
+**Step 6 (for the owner):** keep it only if production sets
+`JUDGE_EXAMPLE_PROJECT_ID` to one of your projects with a checked build, and
+put that project's name in place of `<Name>`. Without it, delete step 6: judges
+would find no example. Judges who started before it was set get none.
 
 **Notes on these limits (not for the form, for the owner):** these are the
 defaults in code — `apps/app/src/server/judge-limits.ts` (3 projects / 3 builds /
@@ -268,8 +275,11 @@ status.
   24 allowed, 0 flagged, 0 unresolved (exit 0). The two `@fontsource/*` webfont
   packages are OFL-1.1, accepted for that package family only (`docs/licenses.md`,
   owner decision 2026-10-19).
-- **The sandbox name:** owner to confirm that `CONTREE_BASE_URL` is what the
-  rules call "Token Factory Sandboxes" (§1).
+- **The sandbox wording:** the rules say "in Token Factory", not "Token Factory
+  Sandboxes" (the earlier quote was wrong; `nebius-forge-eval`'s compliance
+  correction, rules re-read 2026-10-03). The sandbox API is on
+  `api.tokenfactory.nebius.com`. Its availability through 2026-12-15 is not
+  confirmed.
 
 ---
 
@@ -283,6 +293,8 @@ status.
 - [ ] The judge access code is entered **only** in the Devpost form, and the
       code is not in the repo, README, screenshots or video.
 - [ ] Track(s) selected after checking the current Devpost rules (§2).
-- [ ] The "Token Factory Sandboxes" naming is confirmed or avoided (§1).
+- [ ] Re-read the live rules page: the Coding track still says code runs "in
+      Token Factory" (last read 2026-10-03), and nothing new conflicts (§1).
+- [ ] Nebius confirms the sandbox stays available through 2026-12-15.
 - [x] The licence flags are resolved: OFL-1.1 accepted for the `@fontsource/*`
       webfont packages, audit clean (2026-10-19).

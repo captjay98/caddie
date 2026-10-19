@@ -1858,3 +1858,29 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "Submission docs brought up to date (Slices 2 and 3 of the owner's pasted prompt, as corrected) and the full gate after the five review fixes",
+  "status": "LOCAL VERIFIED (gate). Docs: DOCUMENTATION ONLY.",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "bun scripts/license-audit.ts", "exitCode": 0, "receipt": "24 production dependencies, 24 allowed, 0 flagged, 0 unresolved: CLEAN."},
+    {"command": "bun scripts/refresh-scaffold-lock.ts --check", "exitCode": 0, "receipt": "scaffold lockfile current; install, example tests, gate refusal and build verified."},
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "typecheck 0; build 0, 0 collisions."},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1483 pass / 0 fail / 111 files / 7296 expect() calls."},
+    {"command": "bun run verify:packet --all", "exitCode": 0, "receipt": "45 packets: 40 PASS, 0 FAIL, 5 NOT APPLICABLE."},
+    {"command": "CADDIE_TEST_STATE=<tmp> bun run test:browser -- --all", "exitCode": 0, "receipt": "45 packets: 23 PASS, 0 FAIL, 22 NOT APPLICABLE (preview state kept apart from the dev server running on 5176)."},
+    {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "47 PASS, 0 FAIL, 1 BLOCKED (deployment authorization), 4 PROVISIONED (no current live receipt)."}
+  ],
+  "artifacts": [
+    {"path": "README.md, docs/submission/devpost.md, docs/submission/video-script.md", "note": "The sandbox callout misquoted the rules ('Token Factory Sandboxes'); the official text, re-read 2026-10-03 (nebius-forge-eval compliance correction), is 'agents that write, run, and test code in Token Factory'. Replaced with that wording plus the facts: the sandbox API is on api.tokenfactory.nebius.com, the template install/build/tests ran there live, and a full agent-driven build has not run live. The owner checklist keeps two real checks: re-read the live rules page, and confirm sandbox availability through 2026-12-15. Video: Beat 1 names Nemotron 3 Nano as the rules reader; the claims table gains the verified-install row. Devpost §4: the 2026-10-19 row and the commit count. The history scrub is left out of judge-facing text. §6 step 6 (the example app) carries an owner note to delete it unless JUDGE_EXAMPLE_PROJECT_ID is set."},
+    {"path": "docs/runbooks/production-deploy.md", "note": "F02/F03 are fixed (0811b8a); the first deploy still leaves judge access off until the smoke and the owner's own sign-in pass."}
+  ],
+  "environment": "Local Mac only.",
+  "providerCalls": "none",
+  "limitations": [
+    "The rules page was last read on 2026-10-03; it is not re-fetched here."
+  ]
+}
+```
