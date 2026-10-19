@@ -2034,3 +2034,22 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   "providerCalls": "5 sandbox runs (1 disposable env check, 4 non-disposable image steps)."
 }
 ```
+
+```json
+{
+  "packet": "Track 3 input: an APK-sized file comes out of the sandbox intact; publishing runbook written",
+  "status": "Download: LIVE VERIFIED (one owner-authorized run). Runbook: DOCUMENTATION ONLY, not yet run against a real Cloudflare account.",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "CADDIE_LIVE_AUTHORIZED=1 bun scripts/probe-sandbox-download.ts", "exitCode": 0, "receipt": "One non-disposable run on tag:tt-base:1 wrote two random files (2.1 s). Read back through ContreeClient.inspectDownload, the call SandboxDriver.readFile makes: 16,000,000 bytes in 7.7 s (2.1 MB/s) and 48,000,000 bytes in 19.4 s (2.5 MB/s), both sha256-identical to the sandbox's own hash. Throughput was measured from the dev Mac; a Worker's link will differ. Probe image 016d5a30-c5f6-4dd9-9100-ed4c14eb2fdc holds 64 MB of random data (untagged, unreferenced)."}
+  ],
+  "corrections": [
+    "Earlier today the Track 3 notes said Caddie's file reader stops at 5 MiB. Wrong: the 5 MiB quota (build-sandbox.ts maxOutputBytes) caps a command's stdout/stderr. SandboxDriver.readFile uses inspectDownload with no size cap, and the sandbox served 48 MB. Getting an APK out of the sandbox is not a blocker. Storing it is: production D1's 2 MB value limit still means R2."
+  ],
+  "artifacts": [
+    {"path": "docs/runbooks/publishing-setup.md", "note": "Everything the Publish button needs after G4: Workers for Platforms, the apps domain (proxied wildcard DNS; Public Suffix List with its cookie caveat), the dispatch namespace, the routes KV namespace, an API token whose permissions are derived from every Cloudflare API path the adapter calls, the outbound and dispatch Worker deploys in order, the caddie-app secrets (the five CLOUDFLARE_* values are all-or-nothing), a smoke test that includes the first real-phone check of plan step 2.4, and how to switch publishing off."},
+    {"path": "scripts/probe-sandbox-download.ts", "note": "One paid run; refuses without CADDIE_LIVE_AUTHORIZED=1; prints no credential values."}
+  ],
+  "providerCalls": "one sandbox run plus two file downloads."
+}
+```

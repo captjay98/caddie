@@ -133,6 +133,6 @@ Nebius's console.
 - **No judge option on the sign-in page:** expected while judge access is off.
   Otherwise `JUDGE_ACCESS_CODE` is missing or shorter than 16 characters, or
   `JUDGE_ACCESS_UNTIL` has passed.
-- **"Publishing isn't set up":** expected. Publishing needs its six values and
-  the dispatch Worker in `workers/dispatch/`, which this runbook does not
-  deploy.
+- **"Publishing isn't set up":** expected. Publishing needs its own values and
+  the two Workers in `workers/dispatch/`: see
+  `docs/runbooks/publishing-setup.md`.
