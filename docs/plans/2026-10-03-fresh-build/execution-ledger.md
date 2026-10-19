@@ -1636,3 +1636,38 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "S07b: a finished example in every judge workspace (plan docs/plans/2026-10-18-submission-build-plan.md)",
+  "status": "LOCAL VERIFIED in-process (real migrations, local code store, real output store; the start route through the real Better Auth 1.7.10 and the real judge router) and in the browser against the composed build (stubbed /api). Not run on a deployed Worker; JUDGE_EXAMPLE_PROJECT_ID is unset everywhere.",
+  "owner": "Integration lead (owner chose 'Build S07b next')",
+  "commands": [
+    {"command": "bun test tests/judge-example.test.ts", "exitCode": 0, "receipt": "8 pass / 0 fail: the demo's newest CHECKED version (a newer unchecked one is skipped) becomes the example's version 1 with an identical snapshot digest; its preview, client files, server and migrations are byte-equal (readPublishBundle equal); the import preview reads ready / origin example; the demo is unchanged and stays out of the judge's reach; the example is not counted (the judge still gets 3 own projects, the 4th is refused); once per judge; skipped when unset, unknown, Home, unchecked, or checked before client files were kept; a code-store failure part way leaves nothing and a later try succeeds; POST /api/judge/start adds it, never fails because of it, and adds nothing without the setting."},
+    {"command": "temporary mutations, each restored and cmp-checked", "exitCode": 1, "receipt": "Dropping the allowance exclusion fails exactly the allowance case; skipping the cleanup fails exactly the part-way-failure case."},
+    {"command": "bunx playwright test tests/browser/projects-v2.spec.ts tests/browser/project-workflow.spec.ts", "exitCode": 0, "receipt": "36 passed, including the example card ('An example app to try', no GitHub wording, no build started) and the Projects card reading 'Ready to try' instead of 'No updates yet'. Desktop and 390px screenshots of the example card reviewed."},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1427 pass / 0 fail / 108 files."},
+    {"command": "bun run typecheck && bun run build && bun run verify:packet --all && bun run test:browser -- --all && bun scripts/release-check.ts", "exitCode": 0, "receipt": "typecheck 0; build 0; 45 packets 39 PASS 0 FAIL 6 N/A; browser 23 PASS 0 FAIL 22 N/A; release-check 47 PASS 0 FAIL 1 BLOCKED 4 PROVISIONED."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/judge-example.ts", "note": "seedJudgeExample: reads the demo as its workspace owner (naming it in JUDGE_EXAMPLE_PROJECT_ID is the owner's consent), copies the newest checked version's files (recordCodeVersion, kind import) and its checked output (storeImportedOutput; the content store dedupes), links them, and writes an already-ready import preview. No sandbox, no model call. Best-effort; a half-made example is removed."},
+    {"path": "apps/app/src/server/copied-app-origin.ts", "note": "No new migration: an example is an import_previews row whose repoFullName starts 'example:', which no GitHub owner/repo can. A leaf module so judge-limits.ts reads the marker without importing the import-preview service."},
+    {"path": "apps/app/src/server/projects.ts", "note": "createGivenProject: a project Caddie puts in the actor's own workspace; like Home it is not checked against the judge allowance. createProject's insert shared, unchanged in behaviour."},
+    {"path": "apps/app/src/server/judge-limits.ts", "note": "countJudgeProjects leaves the example out."},
+    {"path": "apps/app/src/server/judge-access.ts, routes/judge-access.ts", "note": "startJudge also returns the new user's id; the start route seeds after the account exists, in waitUntil on Workers and awaited where there is no execution context."},
+    {"path": "apps/app/src/server/import-preview.ts, apps/app/src/client/project/ImportedApp.tsx", "note": "The view gains origin; an example reads 'An example app to try' / 'Caddie built <name>. Try it, then tell Caddie what you'd like to change, and it builds on this code.'"},
+    {"path": "apps/app/src/client/workspace/project-status.ts, apps/app/src/client/surface.tsx", "note": "projectCardFromCopiedApp: a project with no workflow but a copied app (the example, or a GitHub copy) no longer reads 'No updates yet' on the Projects list."},
+    {"path": "docs/setup/owner-inputs.md, README.md", "note": "JUDGE_EXAMPLE_PROJECT_ID documented. Also corrected owner-inputs: it still said a JUDGE_MAX_* value of 0 'applies the default', contradicting the code since f83df64c ('0 means none'), and it lacked JUDGE_MAX_DISCOVERY_PER_DAY."}
+  ],
+  "environment": "Local Mac only. No deploy, no sandbox, no model call.",
+  "providerCalls": "none",
+  "specReview": "PENDING independent review",
+  "qualityReview": "The two safety-relevant behaviours (the example never consumes the allowance; a failure leaves nothing) were each proven to be tested by a mutation that fails exactly its case.",
+  "limitations": [
+    "Judges who started before JUDGE_EXAMPLE_PROJECT_ID was set get no example; seeding happens only at a judge's first start.",
+    "On Workers the copy runs after the start answer (waitUntil), so a judge who opens Projects within the first second or two may need one refresh. Not measured on a deployed Worker.",
+    "The example's output keeps the demo build's sandbox image reference (workflow_outputs.image is required). It is read only by Save to GitHub, which judges cannot use without connecting GitHub.",
+    "The live path (a real judge on a deployed Worker finding the example) belongs to S11."
+  ]
+}
+```

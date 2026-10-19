@@ -1,4 +1,5 @@
 import type { D1Database } from './auth.ts';
+import { EXAMPLE_PREFIX } from './copied-app-origin.ts';
 import { isJudgeAccount } from './judge-access.ts';
 import { ScopeError } from './scope.ts';
 
@@ -158,15 +159,19 @@ async function isActiveJudge(db: D1Database, userId: string): Promise<boolean> {
  * memberships. `projects` has no createdBy, so the account's projects are the
  * ones in workspaces it belongs to. Home is excluded everywhere: the lazy
  * `ensureHomeProject` conversation is not a project a judge chose, so it must
- * never consume the allowance or be refused.
+ * never consume the allowance or be refused. The same goes for the finished
+ * example Caddie puts in a judge's workspace (S07b, judge-example.ts): its
+ * import_previews row carries the example prefix, and it is left out here.
  */
 export async function countJudgeProjects(db: D1Database, userId: string): Promise<number> {
 	return countRows(
 		db,
 		`select count(distinct p."id") as "n" from "projects" p
 		 join "workspace_memberships" m on m."workspaceId" = p."workspaceId"
-		 where m."userId" = ? and p."kind" <> 'home'`,
+		 where m."userId" = ? and p."kind" <> 'home'
+		   and not exists (select 1 from "import_previews" x where x."projectId" = p."id" and x."repoFullName" like ?)`,
 		userId,
+		`${EXAMPLE_PREFIX}%`,
 	);
 }
 

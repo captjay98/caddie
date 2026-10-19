@@ -49,6 +49,44 @@ export function projectCardFromExperience(experience: ProjectExperience): Projec
 
 const PRIORITY = { 'needs-you': 0, blocked: 1, changed: 2, handled: 3 };
 
+/** The part of the copied-app preview the Projects card needs (import-preview.ts's view). */
+export interface CopiedAppSummary {
+	readonly status: 'checking' | 'ready' | 'failed';
+	readonly origin?: 'github' | 'example';
+	readonly message: string | null;
+}
+
+/**
+ * The Projects card for a project with no workflow yet but a copied app: a
+ * judge's finished example (S07b) or a "Start from my GitHub repo" copy.
+ * Without this the card fell back to "No updates yet" while the project page
+ * already showed the app ready to try.
+ */
+export function projectCardFromCopiedApp(preview: CopiedAppSummary): ProjectCardState {
+	if (preview.status === 'ready') {
+		return {
+			label: 'Ready to try',
+			tone: 'ok',
+			working: false,
+			detail:
+				preview.origin === 'example'
+					? 'An example app Caddie built. Try it, then tell Caddie what to change.'
+					: 'Your app from GitHub is ready. Try it, then tell Caddie what to change.',
+			action: { label: 'Try app', target: 'project' },
+		};
+	}
+	if (preview.status === 'checking') {
+		return { label: 'Getting it ready', tone: 'action', working: true, detail: 'Caddie is building the copied app so you can try it.', action: { label: 'See progress', target: 'project' } };
+	}
+	return {
+		label: 'Code copied',
+		tone: 'warn',
+		working: false,
+		detail: preview.message ?? 'Your code is saved. Tell Caddie what you would like, and it fixes the build first.',
+		action: { label: 'Continue with Caddie', target: 'chat' },
+	};
+}
+
 /** Brief cards report events, not a completed percentage of a build. */
 export function projectStatus(cards: readonly DecisionCard[]) {
 	const ordered = [...cards].sort((a, b) =>

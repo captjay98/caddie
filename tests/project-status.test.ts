@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { DecisionCard, ExperienceStage, ProjectExperience } from '@caddie/contracts';
-import { projectCardFromExperience, projectStatus } from '../apps/app/src/client/workspace/project-status.ts';
+import { projectCardFromCopiedApp, projectCardFromExperience, projectStatus } from '../apps/app/src/client/workspace/project-status.ts';
 
 function card(id: string, kind: DecisionCard['kind'], status: DecisionCard['status'], updatedAt = '2026-10-11T12:00:00Z'): DecisionCard {
  return { id, projectId: 'project-a', kind, status, headline: id, summary: id + ' details', evidenceIds: [], updatedAt, primaryAction: { label: 'Review', kind: 'review', targetId: id } };
@@ -31,5 +31,25 @@ describe('Projects card from the shared projection', () => {
  test('the design step reads as designing, then as a design waiting for review — never as still planning', () => {
   expect(projectCardFromExperience(experience('design'))).toMatchObject({ label: 'Designing', working: true, action: { target: 'chat' } });
   expect(projectCardFromExperience(experience('design_review'))).toMatchObject({ label: 'Design ready', working: false, action: { label: 'Review design', target: 'chat' } });
+ });
+});
+
+describe('Projects card for a project that only has a copied app', () => {
+ test("a judge's example reads ready to try, never 'No updates yet'", () => {
+  expect(projectCardFromCopiedApp({ status: 'ready', origin: 'example', message: null })).toEqual({
+   label: 'Ready to try', tone: 'ok', working: false,
+   detail: 'An example app Caddie built. Try it, then tell Caddie what to change.',
+   action: { label: 'Try app', target: 'project' },
+  });
+ });
+ test('a GitHub copy reads ready once built, and building while it is checked', () => {
+  expect(projectCardFromCopiedApp({ status: 'ready', origin: 'github', message: null })).toMatchObject({ label: 'Ready to try', detail: 'Your app from GitHub is ready. Try it, then tell Caddie what to change.' });
+  // An older answer without an origin is a GitHub copy.
+  expect(projectCardFromCopiedApp({ status: 'ready', message: null }).detail).toContain('GitHub');
+  expect(projectCardFromCopiedApp({ status: 'checking', origin: 'github', message: null })).toMatchObject({ label: 'Getting it ready', working: true, action: { target: 'project' } });
+ });
+ test('a copy that could not be built says so in its own words', () => {
+  const message = "Caddie couldn't build this app the way it was copied, so there's nothing to try yet.";
+  expect(projectCardFromCopiedApp({ status: 'failed', origin: 'github', message })).toMatchObject({ label: 'Code copied', tone: 'warn', detail: message, action: { target: 'chat' } });
  });
 });

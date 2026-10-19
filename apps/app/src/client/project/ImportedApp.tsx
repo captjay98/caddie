@@ -7,6 +7,7 @@ import { Icon } from '../icons.tsx';
 
 /** The heading the card shows for the copied app, by status. */
 export function importedAppTitle(preview: ImportPreviewView): string {
+	if (preview.origin === 'example') return 'An example app to try';
 	if (preview.status === 'ready') return 'Your app from GitHub';
 	if (preview.status === 'failed') return 'Your code is copied';
 	return 'Getting your app ready to try';
@@ -56,7 +57,7 @@ export function ImportedApp(props: {
 		<div className="imported-app" data-testid="imported-app" data-status={preview.status} {...(props.titled ? { 'data-titled': '' } : {})}>
 			{props.titled ? (
 				<div className="imported-app-head">
-					<Icon name="github" title="" />
+					<Icon name={preview.origin === 'example' ? 'box' : 'github'} title="" />
 					<h4>{importedAppTitle(preview)}</h4>
 				</div>
 			) : null}
@@ -73,8 +74,17 @@ export function ImportedApp(props: {
 			{preview.status === 'ready' && preview.outputId ? (
 				<>
 					<p className="state-detail" data-testid="imported-app-ready">
-						This is <b>{preview.repoFullName}</b> as Caddie copied it (version {preview.versionSeq}). Try it, then tell
-						Caddie what you&rsquo;d like to change.
+						{preview.origin === 'example' ? (
+							<>
+								Caddie built <b>{preview.repoFullName}</b>. Try it, then tell Caddie what you&rsquo;d like to change, and it builds on
+								this code.
+							</>
+						) : (
+							<>
+								This is <b>{preview.repoFullName}</b> as Caddie copied it (version {preview.versionSeq}). Try it, then tell
+								Caddie what you&rsquo;d like to change.
+							</>
+						)}
 					</p>
 					<InteractivePreview
 						actorId={props.actorId}

@@ -21,7 +21,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }>; imported?: { status: 'checking' | 'ready' | 'failed'; noWorkflow?: boolean; checksUntilReady?: number; message?: string } } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }>; imported?: { status: 'checking' | 'ready' | 'failed'; noWorkflow?: boolean; checksUntilReady?: number; message?: string; example?: boolean } } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -45,7 +45,8 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		? {
 				status: options.imported.status,
 				versionSeq: 1,
-				repoFullName: 'octo-farm/farm-log',
+				origin: options.imported.example ? 'example' : 'github',
+				repoFullName: options.imported.example ? 'Farm Log' : 'octo-farm/farm-log',
 				outputId: options.imported.status === 'ready' ? 'output-imported' : (null as string | null),
 				hasServer: false,
 				message: options.imported.message ?? null,
@@ -988,6 +989,26 @@ test('right after a GitHub import, the card builds the copied app and then shows
 	// Ready: nothing keeps asking.
 	await page.waitForTimeout(3500);
 	expect(state.importChecks.length).toBe(2);
+});
+
+test("a judge's example (S07b) is ready to try at once, in its own words", async ({ page, context }) => {
+	const state = await fixture(context, { imported: { status: 'ready', noWorkflow: true, example: true } });
+	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
+	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
+	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'imported');
+	await expect(card.getByRole('heading', { name: 'An example app to try' })).toBeVisible();
+	await expect(card.getByTestId('imported-app-ready')).toHaveText('Caddie built Farm Log. Try it, then tell Caddie what you’d like to change, and it builds on this code.');
+	await expect(card).not.toContainText('GitHub');
+	await expect(card.frameLocator('iframe').getByRole('textbox', { name: 'New task' })).toBeVisible();
+	if (process.env.CADDIE_SHOTS) {
+		await card.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		await card.screenshot({ path: `${process.env.CADDIE_SHOTS}/example-${mobile ? 'mobile-' : ''}ready.png` });
+	}
+	// Already checked: nothing is built for it.
+	await page.waitForTimeout(3500);
+	expect(state.importChecks).toHaveLength(0);
 });
 
 test('while Caddie plans, the copied app stays in the card under the plan', async ({ page, context }) => {

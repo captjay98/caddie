@@ -1,7 +1,10 @@
 import { Hono } from 'hono';
+import type { ArtifactsBinding } from '../adapters/cloudflare-artifacts.ts';
 import type { AuthEnv } from '../auth.ts';
 import { getAuth } from '../auth.ts';
+import { codeStoreFor } from '../code-store-env.ts';
 import { judgeAccessState, judgeIdentityFrom, signInJudge, startJudge, type JudgeAccessConfig } from '../judge-access.ts';
+import { seedJudgeExample } from '../judge-example.ts';
 import { ScopeError } from '../scope.ts';
 import { reportRateLimitKey } from './report.ts';
 
@@ -11,6 +14,7 @@ import { reportRateLimitKey } from './report.ts';
  *
  *   GET  /api/judge/access    { open, canStart } for the sign-in panel
  *   POST /api/judge/start     { code, name, password } -> session cookie
+ *                             (and, S07b, the judge's finished example)
  *   POST /api/judge/sign-in   { name, password }       -> session cookie
  *
  * The route layer only reads the body, keys the caller and forwards the cookie;
@@ -24,6 +28,9 @@ type Env = AuthEnv & {
 	JUDGE_ACCESS_UNTIL?: string;
 	JUDGE_ACCESS_ENABLED?: string;
 	JUDGE_ACCESS_MAX_ACCOUNTS?: string;
+	/** S07b: the owner's demo project, copied into every new judge's workspace. */
+	JUDGE_EXAMPLE_PROJECT_ID?: string;
+	ARTIFACTS?: ArtifactsBinding;
 };
 
 /** Purpose-bound rate-limit label; the same derivation the report page uses. */
@@ -109,6 +116,23 @@ export function createJudgeAccessRouter(): Hono<{ Bindings: Env }> {
 			},
 			judgeIdentityFrom(getAuth(c.env)),
 		);
+		// S07b: the judge's finished example. Best-effort and off the answer's
+		// path on Workers (waitUntil); awaited where there is no execution
+		// context (tests, local scripts) so the result is deterministic.
+		const seeding = seedJudgeExample(
+			{ db: c.env.DB, store: codeStoreFor(c.env), demoProjectId: c.env.JUDGE_EXAMPLE_PROJECT_ID },
+			result.userId,
+		).catch((error: unknown) => {
+			console.error('judge access: the example was not added:', error instanceof Error ? error.message : String(error));
+		});
+		let inBackground = false;
+		try {
+			c.executionCtx.waitUntil(seeding);
+			inBackground = true;
+		} catch {
+			// No execution context: fall through and wait for it.
+		}
+		if (!inBackground) await seeding;
 		return forwardSessionCookie(c.json({ ok: true, name: result.name }), result.headers);
 	});
 

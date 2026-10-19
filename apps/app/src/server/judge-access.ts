@@ -297,7 +297,7 @@ export interface JudgeStartInput {
  * The reservation is written BEFORE the user exists so the invite gate admits
  * exactly this address, and only for the next ten minutes.
  */
-export async function startJudge(db: D1Database, input: JudgeStartInput, identity: JudgeIdentity): Promise<{ name: string; headers: Headers }> {
+export async function startJudge(db: D1Database, input: JudgeStartInput, identity: JudgeIdentity): Promise<{ name: string; headers: Headers; userId: string }> {
 	const now = input.now ?? new Date().toISOString();
 	const name = validateJudgeName(input.name);
 	const password = validateJudgePassword(input.password);
@@ -339,7 +339,7 @@ export async function startJudge(db: D1Database, input: JudgeStartInput, identit
 		.run();
 
 	const headers = await identity.signIn({ email, password });
-	return { name, headers };
+	return { name, headers, userId: created.id };
 }
 
 export interface JudgeSignInInput {

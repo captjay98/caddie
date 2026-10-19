@@ -12,6 +12,7 @@ import { checkServerStarts, type WorkerLoaderLike } from './preview-runtime.ts';
 import { assertProjectScope, projectScopeForUser } from './scope.ts';
 import { SCAFFOLD_COMMANDS } from '../../../../stacks/react-hono/scaffold.ts';
 import { runVerifiedInstall } from './verified-install.ts';
+import { copiedAppOrigin, exampleRepoName } from './copied-app-origin.ts';
 
 /**
  * "Start from my GitHub repo", the part the user sees first: right after the
@@ -34,6 +35,9 @@ export type ImportPreviewStatus = 'checking' | 'ready' | 'failed';
 export interface ImportPreviewView {
 	status: ImportPreviewStatus;
 	versionSeq: number;
+	/** Where the copied code came from: a GitHub repo, or Caddie's own example for a judge. */
+	origin: 'github' | 'example';
+	/** The GitHub repo's owner/name, or for an example the app's name. */
 	repoFullName: string;
 	/** The preview output, once ready. */
 	outputId: string | null;
@@ -87,10 +91,12 @@ async function loadRow(db: D1Database, projectId: string): Promise<Row | null> {
 }
 
 function view(row: Row): ImportPreviewView {
+	const { origin, name } = copiedAppOrigin(row.repoFullName);
 	return {
 		status: row.status,
 		versionSeq: Number(row.versionSeq),
-		repoFullName: row.repoFullName,
+		origin,
+		repoFullName: name,
 		outputId: row.outputId,
 		hasServer: Number(row.hasServer) === 1,
 		message: row.message,
@@ -114,6 +120,28 @@ export async function beginImportPreview(
 				'insert into "import_previews" ("projectId","actorId","commitId","versionSeq","repoFullName","status","createdAt","updatedAt") values (?,?,?,?,?,\'checking\',?,?)',
 			)
 			.bind(verified.projectId, verified.actorId, input.commitId, input.versionSeq, input.repoFullName, stamp, stamp),
+	]);
+}
+
+/**
+ * S07b: a judge's example arrives already checked (its preview is a copy of
+ * the demo's checked output), so its row starts ready and nothing is built.
+ */
+export async function recordExamplePreview(
+	db: D1Database,
+	scope: Scope,
+	input: { commitId: string; versionSeq: number; name: string; outputId: string; hasServer: boolean },
+	now: Date = new Date(),
+): Promise<void> {
+	const verified = await assertProjectScope(db, scope);
+	const stamp = now.toISOString();
+	await db.batch([
+		db.prepare('delete from "import_previews" where "projectId" = ?').bind(verified.projectId),
+		db
+			.prepare(
+				'insert into "import_previews" ("projectId","actorId","commitId","versionSeq","repoFullName","status","outputId","hasServer","createdAt","updatedAt") values (?,?,?,?,?,\'ready\',?,?,?,?)',
+			)
+			.bind(verified.projectId, verified.actorId, input.commitId, input.versionSeq, exampleRepoName(input.name), input.outputId, input.hasServer ? 1 : 0, stamp, stamp),
 	]);
 }
 

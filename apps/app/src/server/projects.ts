@@ -254,6 +254,11 @@ export async function createProject(
 	// S07 judge limits: refused BEFORE the insert, so a refused 4th project
 	// leaves nothing behind.
 	await admitJudgeProject(db, verified.actorId, limits);
+	await insertProject(db, project);
+	return project;
+}
+
+async function insertProject(db: D1Database, project: Project): Promise<void> {
 	await db
 		.prepare(
 			'insert into "projects" ("id","workspaceId","name","description","contestId","contestUrl","status","kind","createdAt","updatedAt") values (?,?,?,?,?,?,?,?,?,?)',
@@ -271,6 +276,34 @@ export async function createProject(
 			project.updatedAt,
 		)
 		.run();
+}
+
+/**
+ * A project Caddie puts in the actor's own workspace (the one their Home
+ * project lives in) rather than one they created: S07b's finished example for
+ * a judge. Like Home, it is not one of the judge's choices, so it is not
+ * checked against the judge's project allowance (judge-limits.ts leaves it out
+ * of the count too).
+ */
+export async function createGivenProject(
+	db: D1Database,
+	actorId: string,
+	input: { name: string; description: string },
+): Promise<Project> {
+	const home = await ensureHomeProject(db, actorId);
+	const project: Project = {
+		id: newId('proj'),
+		workspaceId: home.workspaceId,
+		name: input.name.slice(0, 120),
+		description: input.description,
+		contestId: null,
+		contestUrl: null,
+		status: 'active',
+		kind: 'standard',
+		createdAt: nowIso(),
+		updatedAt: nowIso(),
+	};
+	await insertProject(db, project);
 	return project;
 }
 

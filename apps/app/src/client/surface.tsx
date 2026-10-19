@@ -38,7 +38,7 @@ import { useWorkspaceChrome } from './workspace/Chrome.tsx';
 import { NowPanel } from './project/NowPanel.tsx';
 import { relativeUpdated } from './project/now-panel.ts';
 import { ProjectTabs } from './workspace/ProjectTabs.tsx';
-import { projectCardFromExperience, projectStatus } from './workspace/project-status.ts';
+import { projectCardFromCopiedApp, projectCardFromExperience, projectStatus, type CopiedAppSummary } from './workspace/project-status.ts';
 
 /**
  * The routed surfaces for the discovery-first shell.
@@ -681,9 +681,20 @@ function ProjectCard(props: {
 	const experience = useProjectExperience(actor, props.project.id);
 	const { project, fallback } = props;
 	const parsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
-	const card = parsed?.success ? projectCardFromExperience(parsed.output) : null;
+	const fromWorkflow = parsed?.success ? projectCardFromExperience(parsed.output) : null;
+	// No workflow yet: a copied app (a judge's example, or a GitHub copy) may
+	// already be ready to try. Read it from the same /workflow answer the
+	// project page uses; only asked for once the projection says "no workflow".
+	const noWorkflow = parsed?.success === true && parsed.output.version === 0;
+	const copied = useQuery({
+		queryKey: ['build-workflow', chrome.actorId, props.project.id],
+		enabled: Boolean(chrome.actorId) && noWorkflow,
+		queryFn: () => fetchJson<{ importPreview?: CopiedAppSummary | null }>(`/api/projects/${encodeURIComponent(props.project.id)}/workflow`),
+	});
+	const copiedApp = noWorkflow ? (copied.data?.importPreview ?? null) : null;
+	const card = fromWorkflow ?? (copiedApp ? projectCardFromCopiedApp(copiedApp) : null);
 	const purpose = project.description?.trim() || (project.contestUrl ? 'For the linked hackathon' : 'A personal project');
-	const updatedMs = card && parsed?.success ? parsed.output.version : Date.parse(project.updatedAt);
+	const updatedMs = fromWorkflow && parsed?.success ? parsed.output.version : Date.parse(project.updatedAt);
 	const updated = relativeUpdated(updatedMs, Date.now());
 
 	return (

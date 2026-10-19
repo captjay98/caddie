@@ -290,7 +290,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 	// a project's submission — the two share a word and nothing else. The
 	// end-to-end half (a real cookie from a real worker) lands in
 	// `tests/auth.integration.test.ts`, so it runs under P01 as well.
-	JUDGE_ACCESS: { tests: ['tests/judge-access.test.ts'], browser: ['tests/browser/judge-access.spec.ts'], live: [] },
+	JUDGE_ACCESS: { tests: ['tests/judge-access.test.ts', 'tests/judge-example.test.ts'], browser: ['tests/browser/judge-access.spec.ts'], live: [] },
 	// S07 judge limits (D4): 3 projects, 3 build starts, 300 Caddie messages and
 	// 20 live discovery lookups per rolling 24 hours, for judge accounts only
 	// (0034; 0035 adds the discovery kind). Each quota is also settable to 0,

@@ -68,12 +68,19 @@ later need retracting. Until then, the only way to try Caddie is
 - On the sign-in page, use the link **"Judging the hackathon? Use your access
   code"** and enter the code, then pick a judge name and a password. Returning
   judges sign in with their name and password.
+- **A finished app is waiting.** When the deployment names a demo project
+  (`JUDGE_EXAMPLE_PROJECT_ID`), every new judge account starts with a copy of
+  it under Projects, marked "(example)" and ready to try, so there is something
+  working to open in the first minute. Asking Caddie to change it builds on its
+  code like any project. (`apps/app/src/server/judge-example.ts`,
+  `tests/judge-example.test.ts`, **LOCAL VERIFIED**.)
 
 ### Judge limits (plain words)
 
 The hosted demo is capped so a few dozen judges cannot exhaust it:
 
-- **3 projects** per judge account (the automatic home conversation is not one).
+- **3 projects** per judge account (the automatic home conversation is not one,
+  and neither is the example below).
 - **3 build starts per 24 hours** per judge account. Approving a plan, approving
   the design and retrying a stopped build each count as one, so a full build
   that needs a retry costs two.
@@ -266,7 +273,7 @@ such rather than omitted.
 
 | Surface | Status | What backs it |
 | :--- | :--- | :--- |
-| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1416 pass, 0 fail, 107 files — run at the time of writing. |
+| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1427 pass, 0 fail, 108 files — run at the time of writing. |
 | Browser acceptance suite (`bun run test:browser`) | **LOCAL VERIFIED** (2026-10-19) | `bun run test:browser -- --all` against the composed build: 23 packets PASS, 0 FAIL, 22 have no browser spec (named, not counted). Six cases had failed earlier the same day; every one was a spec that no longer matched the shipped client, now updated, with one root-caused stub-ordering bug (`docs/release-evidence.md`). CI now runs this suite. |
 | Typecheck (`bun run typecheck`) | **LOCAL VERIFIED** | exit 0 (root project + `apps/app`). |
 | Build composition (`bun run build`) | **LOCAL VERIFIED** | One composed Workers assets tree from the Astro landing + Vite SPA. |
@@ -309,7 +316,7 @@ app runs and fails closed with visible gaps.
 
 | Command | What it is | Last observed |
 | :--- | :--- | :--- |
-| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1416 pass, 0 fail, 6719 expect() calls, 107 files** |
+| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1427 pass, 0 fail, 6761 expect() calls, 108 files** |
 | `bun run typecheck` | Root project + `apps/app` typecheck | exit 0 |
 | `bun run build` | Astro + Vite + asset composition into one Workers assets tree (no deploy) | exit 0 (LOCAL VERIFIED) |
 | `bun run verify:packet Pxx` | That packet's mapped tests; fails when a mapped test file is missing or empty | — |

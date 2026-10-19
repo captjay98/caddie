@@ -199,6 +199,29 @@ test.describe('Projects v2 (U05)', () => {
 		await context.close();
 	});
 
+	test("a judge's example with no workflow yet reads Ready to try, not No updates yet (S07b)", async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context);
+		// Registered after stubAccount's catch-all on purpose: Playwright runs
+		// the last-registered matching route first.
+		await context.route('**/api/projects/proj-a/experience', (route) =>
+			json(route, 200, { projectId: 'proj-a', version: 0, stage: 'planning', plan: null, preview: null, message: 'Nothing planned yet.', actions: [] }),
+		);
+		await context.route('**/api/projects/proj-a/workflow', (route) =>
+			json(route, 200, {
+				workflow: null,
+				importPreview: { status: 'ready', versionSeq: 1, origin: 'example', repoFullName: 'Farm Log', outputId: 'output-example', hasServer: false, message: null },
+			}),
+		);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/projects`);
+		const row = page.getByTestId('project-row-proj-a');
+		await expect(row.getByTestId('project-step-text-proj-a')).toHaveText('Ready to try');
+		await expect(row).toContainText('An example app Caddie built. Try it, then tell Caddie what to change.');
+		await expect(row.getByRole('button', { name: 'Try app' })).toBeVisible();
+		await context.close();
+	});
+
     test('New project opens idea capture in Chat instead of returning to onboarding', async ({ browser }) => {
         const context = await browser.newContext();
         await stubAccount(context);
