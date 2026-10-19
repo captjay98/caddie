@@ -182,7 +182,9 @@ function validClaim(raw: { type?: unknown; value?: unknown; quote?: unknown }): 
 	}
 }
 
-const SYSTEM_PROMPT =
+// Exported so the live probe (`scripts/probe-lightning.ts`) and any prompt test
+// can send and check the REAL prompt rather than a copy that silently drifts.
+export const SYSTEM_PROMPT =
 	"You extract ELIGIBILITY rules from ONE hackathon's official rules text. " +
 	'Return STRICT JSON ONLY: {"claims":[{"type":"...","value":"...","quote":"..."}]}. Allowed types: ' +
 	'"eligibility.open_countries" — entry is ONLY open to residents of specific countries; value = comma-separated ISO 3166-1 alpha-2 codes. ' +
@@ -194,7 +196,7 @@ const SYSTEM_PROMPT =
 	'Never paraphrase, never combine passages, never invent. If a rule is not clearly stated, omit it. Return {"claims":[]} when none apply.';
 
 /** Tolerant JSON extraction (fences / stray prose), mirroring candidate-inspection. */
-function parseClaims(content: string): { type?: unknown; value?: unknown; quote?: unknown }[] | null {
+export function parseClaims(content: string): { type?: unknown; value?: unknown; quote?: unknown }[] | null {
 	if (!content.trim()) return null;
 	const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i);
 	const text = fenced ? fenced[1]! : content;

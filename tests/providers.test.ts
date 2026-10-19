@@ -56,14 +56,29 @@ describe('model registry (providers.ts)', () => {
 		}
 	});
 
-	test('chat routes to the 3.5 mid tier; build/plan to GLM; helper to the 3.5 cheap tier', () => {
+	test('chat routes to the 3.5 mid tier; build/plan to GLM; helper stays on Nano', () => {
 		expect(findModelRouteForRole('chat').id).toBe('nemotron-3.5-super-vl');
 		expect(findModelRouteForRole('build').id).toBe('glm-5.3-flash');
 		expect(findModelRouteForRole('plan').id).toBe('glm-5.3-flash');
-		expect(findModelRouteForRole('helper').id).toBe('nemotron-3.5-lightning');
+		// The helper job is rules-reading: strict JSON out of a long page.
+		// Lightning was moved here on 2026-10-18 and moved back on 2026-10-19
+		// after the live probe (scripts/probe-lightning.ts): on the real prompt at
+		// temperature 0 it spent every output token narrating its thinking INSIDE
+		// `content` and never emitted JSON, at every excerpt size tried (671,
+		// 3,772 and 5,998 chars). Nano keeps its reasoning in `reasoning_content`
+		// and returned claims whose quotes were verbatim in the page.
+		expect(findModelRouteForRole('helper').id).toBe('nemotron-3-nano');
 		// the helper really is cheaper than the chat model (per-output rate).
 		expect(findModelRouteForRole('helper').outputPriceMinorUnits)
 			.toBeLessThan(findModelRouteForRole('chat').outputPriceMinorUnits);
+	});
+
+	test('the helper route has room to finish its reasoning', () => {
+		// A cap that ends the answer mid-thought is worse than no cap: the model
+		// bills for the tokens and returns nothing usable. At 2,048 the live probe
+		// got 9,270 chars of `reasoning_content` and EMPTY content; at 8,192 the
+		// same call finished in 1,382 output tokens with 4 verbatim claims.
+		expect(findModelRouteForRole('helper').maxTokens).toBeGreaterThanOrEqual(4096);
 	});
 
 	test('AI inside apps: the cheap tier by default, the deeper tier on request', () => {

@@ -54,10 +54,27 @@ export interface ModelRoute {
 }
 
 /**
+ * The price list every route below is priced against. Bump this whenever a
+ * price changes: it travels onto each run binding at creation (P03 keys budget
+ * rows per (route, pricingVersion)), so a binding keeps the version it was
+ * created under and a re-price never silently rewrites history.
+ *
+ * '2026-10-nemotron-tier' was the first Nemotron tier, priced from
+ * cookbook/aggregator figures. '2026-10-nemotron-listing' is every value
+ * re-read from `GET /v1/models?verbose=true` on 2026-10-18 (execution-ledger
+ * G1) and applied on 2026-10-19. The OLD string still lives in bindings created
+ * before that date — deliberately, and that is all it is: the old *prices* are
+ * no longer in this registry, so a settlement that resolves prices by route id
+ * today charges today's prices. Nothing reserves budget yet (see
+ * `reserveBudget`'s missing callers), so no stored run is mis-settled by it.
+ */
+export const PRICING_VERSION = '2026-10-nemotron-listing';
+
+/**
  * The verified NVIDIA Nemotron tier on Nebius Token Factory (every id + that it
  * serves confirmed by a live probe 2026-10-12; the exact ids are case-sensitive
- * and differ from the marketing names). Pricing from Nebius/OpenRouter listings
- * for pricingVersion '2026-10-nemotron-tier'. Prices are minor units per Mtok.
+ * and differ from the marketing names). Prices are minor units per Mtok and
+ * carry {@link PRICING_VERSION}.
  *
  * Role assignment is NOT encoded on the route (a route is a priced model, not a
  * role); {@link MODEL_ROLES} maps roles → route ids so one model can serve
@@ -68,18 +85,18 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		// Frontier judgment for ideation only (the 30-turn Home brainstorm
 		// window; chat and vision moved to Super VL on 2026-10-18). The G1
 		// listing raised its context to 1,048,576 — the code carried the 3.x
-		// 262,144. The listing also prices it $1.00/$3.00 per Mtok against this
-		// entry's $0.50/$2.20 ceiling: re-pricing is a deliberate follow-up, not
-		// a silent edit, because the ceiling feeds budget reservations once
-		// they are wired (nothing reserves today).
+		// 262,144 — and priced it $1.00/$3.00 per Mtok, which this entry now
+		// carries too (re-priced under '2026-10-nemotron-listing' on
+		// 2026-10-19; the old '2026-10-nemotron-tier' string survives only in
+		// run bindings created before that date, which is what the field is for).
 		id: 'nemotron-3-ultra',
 		specifier: 'nebius/nvidia/Nemotron-3-Ultra-550b-a55b',
 		providerId: 'nebius',
 		modelId: 'nvidia/Nemotron-3-Ultra-550b-a55b',
-		pricingVersion: '2026-10-nemotron-tier',
-		unitPriceMinorUnits: 220, // output $2.20/Mtok (budget ceiling)
-		inputPriceMinorUnits: 50, // $0.50/Mtok
-		outputPriceMinorUnits: 220, // $2.20/Mtok
+		pricingVersion: PRICING_VERSION,
+		unitPriceMinorUnits: 300, // output $3.00/Mtok (budget ceiling)
+		inputPriceMinorUnits: 100, // $1.00/Mtok
+		outputPriceMinorUnits: 300, // $3.00/Mtok
 		currency: 'usd',
 		contextWindow: 1048576,
 		maxTokens: 8192,
@@ -87,17 +104,17 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 	{
 		// Balanced 3.x mid tier — superseded as the chat route by Super VL
 		// (2026-10-18) but RETAINED: stored run bindings and older tests refer to
-		// this id, and a removed route would fail closed on lookup. The listing
-		// now prices it $0.30/$0.90 against this entry's $0.08/$0.45 ceiling —
-		// see the Ultra note: re-pricing is a deliberate follow-up.
+		// this id, and a removed route would fail closed on lookup. Re-priced
+		// $0.08/$0.45 → $0.30/$0.90 on 2026-10-19 from the G1 listing (its
+		// 262,144 context the listing confirms unchanged).
 		id: 'nemotron-3-super',
 		specifier: 'nebius/nvidia/nemotron-3-super-120b-a12b',
 		providerId: 'nebius',
 		modelId: 'nvidia/nemotron-3-super-120b-a12b',
-		pricingVersion: '2026-10-nemotron-tier',
-		unitPriceMinorUnits: 45, // output $0.45/Mtok (budget ceiling)
-		inputPriceMinorUnits: 8, // $0.08/Mtok
-		outputPriceMinorUnits: 45, // $0.45/Mtok
+		pricingVersion: PRICING_VERSION,
+		unitPriceMinorUnits: 90, // output $0.90/Mtok (budget ceiling)
+		inputPriceMinorUnits: 30, // $0.30/Mtok
+		outputPriceMinorUnits: 90, // $0.90/Mtok
 		currency: 'usd',
 		contextWindow: 262144,
 		maxTokens: 4096,
@@ -115,7 +132,7 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		specifier: 'nebius/nvidia/Nemotron-3.5-Super-VL',
 		providerId: 'nebius',
 		modelId: 'nvidia/Nemotron-3.5-Super-VL',
-		pricingVersion: '2026-10-nemotron-tier',
+		pricingVersion: PRICING_VERSION,
 		unitPriceMinorUnits: 90, // output $0.90/Mtok (budget ceiling)
 		inputPriceMinorUnits: 30, // $0.30/Mtok
 		outputPriceMinorUnits: 90, // $0.90/Mtok
@@ -140,7 +157,7 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		specifier: 'nebius/nvidia/Nemotron-3_5-Lightning',
 		providerId: 'nebius',
 		modelId: 'nvidia/Nemotron-3_5-Lightning',
-		pricingVersion: '2026-10-nemotron-tier',
+		pricingVersion: PRICING_VERSION,
 		unitPriceMinorUnits: 24, // output $0.24/Mtok (budget ceiling)
 		inputPriceMinorUnits: 6, // $0.06/Mtok
 		outputPriceMinorUnits: 24, // $0.24/Mtok
@@ -152,21 +169,28 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		// Small/fast/cheap reasoning model — bounded helper calls (discovery query
 		// shaping, research summarization). Generous maxTokens: it is a reasoning
 		// model and a tight cap returns empty output (LIVE VERIFIED Stage 1).
-		// Retained because stored run bindings name this id; the `helper` role
-		// moved to the 3.5 cheap tier on 2026-10-18. The listing now prices it
-		// $0.06/$0.24 against this entry's $0.05/$0.20 — see the Ultra note:
-		// re-pricing is a deliberate follow-up, not a silent edit.
+		// Retained because stored run bindings name this id, and it is the
+		// `helper` route again as of 2026-10-19 (see that role's note: Lightning
+		// failed the rules-reading probe). Re-priced $0.05/$0.20 → $0.06/$0.24 on
+		// 2026-10-19 from the G1 listing. maxTokens raised 2,048 → 8,192 the same
+		// day: at 2,048 the probe's own run hit the cap mid-reasoning and
+		// returned EMPTY content (9,270 chars of `reasoning_content`, no answer)
+		// on a 3,772-char excerpt, which is the failure this comment always
+		// warned about. The cap is a ceiling, not a spend: it costs nothing
+		// unless the model actually needs the tokens, and needing them is the
+		// point. Nano's output rate is $0.24/Mtok, so even a full 8,192-token
+		// answer is ~$0.002.
 		id: 'nemotron-3-nano',
 		specifier: 'nebius/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
 		providerId: 'nebius',
 		modelId: 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
-		pricingVersion: '2026-10-nemotron-tier',
-		unitPriceMinorUnits: 20, // output $0.20/Mtok (budget ceiling)
-		inputPriceMinorUnits: 5, // $0.05/Mtok
-		outputPriceMinorUnits: 20, // $0.20/Mtok
+		pricingVersion: PRICING_VERSION,
+		unitPriceMinorUnits: 24, // output $0.24/Mtok (budget ceiling)
+		inputPriceMinorUnits: 6, // $0.06/Mtok
+		outputPriceMinorUnits: 24, // $0.24/Mtok
 		currency: 'usd',
 		contextWindow: 262144,
-		maxTokens: 2048,
+		maxTokens: 8192,
 	},
 	{
 		// VISION route — image input. LIVE VERIFIED 2026-10-15 on this account:
@@ -184,18 +208,22 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		// because it demonstrably accepts images too.
 		// Pricing: Nebius cookbook listing $0.15 in / $0.50 out per Mtok
 		// (Sept 2026) — re-verify against the Nebius price page. Re-checked
-		// 2026-10-18 against GET /v1/models?verbose=true: $0.15/$0.50 ✓ (the
-		// listing reports its context as 1,024,000; left as-is to re-verify).
+		// 2026-10-18 against GET /v1/models?verbose=true: $0.15/$0.50 ✓ and
+		// unchanged by the 2026-10-19 re-price. The listing reports its context
+		// as 1,024,000 — not 1,048,576 (a round 1000×1024 rather than a power of
+		// two) — and the code now carries the listing's figure: a context window
+		// that overstates the truth is the one direction that silently sends a
+		// prompt the model cannot hold.
 		id: 'glm-5.3-flash',
 		specifier: 'nebius/zai-org/GLM-5.3-Flash',
 		providerId: 'nebius',
 		modelId: 'zai-org/GLM-5.3-Flash',
-		pricingVersion: '2026-10-nemotron-tier',
+		pricingVersion: PRICING_VERSION,
 		unitPriceMinorUnits: 50, // output $0.50/Mtok (budget ceiling)
 		inputPriceMinorUnits: 15, // $0.15/Mtok
 		outputPriceMinorUnits: 50,
 		currency: 'usd',
-		contextWindow: 1048576,
+		contextWindow: 1024000,
 		// A plan revision is ~3.5k reasoning tokens + the whole PRD inside the
 		// write_plan_note call. LIVE VERIFIED 2026-10-15: at 4096 the FarmLog AI
 		// revision stopped at finish=length before the tool call (nothing saved,
@@ -239,10 +267,15 @@ export const MODEL_ROLES = {
 	 *  finished a coding task on it in 4 calls. The project RUN BINDING also
 	 *  records this route. */
 	build: 'glm-5.3-flash',
-	/** Cheap bounded helper calls (query shaping, summarization). The 3.5 cheap
-	 *  tier replaced Nano on 2026-10-18: same price, and Nano stays registered
-	 *  for the runs that already name it. */
-	helper: 'nemotron-3.5-lightning',
+	/** Cheap bounded helper calls (query shaping, summarization). REVERTED to
+	 *  Nano on 2026-10-19 by the live probe (scripts/probe-lightning.ts): on the
+	 *  real rules prompt at temperature 0 with its own 4,096 cap, Lightning
+	 *  spent every output token narrating a "thinking process" INSIDE `content`
+	 *  and never emitted JSON, so `parseClaims` returned null at both excerpt
+	 *  sizes tried (671 and 3,772 chars). Nano keeps its reasoning in
+	 *  `reasoning_content` and returns claims whose quotes are verbatim in the
+	 *  page — provided the output cap is generous, see its entry. */
+	helper: 'nemotron-3-nano',
 	/** AI inside generated apps (env.CADDIE.ai, app-ai.ts): a visitor waits on
 	 *  every reply, so the fast cheap tier — not a deep reasoning one. Caddie
 	 *  pays; each project has a monthly allowance. */

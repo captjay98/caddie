@@ -456,7 +456,10 @@ describe('P05 run lifecycle', () => {
 		});
 		runAId = binding.runId;
 		expect(binding.modelRouteId).toBe('nemotron-3-super');
-		expect(binding.pricingVersion).toBe('2026-10-nemotron-tier');
+		// The literal is the point: a binding records the price list in force on
+		// the day it was created, so an accidental change to PRICING_VERSION must
+		// fail here rather than silently re-price stored runs.
+		expect(binding.pricingVersion).toBe('2026-10-nemotron-listing');
 		// conversation binding is server-derived and durable
 		const byConversation = await runsService.lookupRunByConversation(d1db as never, binding.conversationId);
 		expect(byConversation?.runId).toBe(runAId);
