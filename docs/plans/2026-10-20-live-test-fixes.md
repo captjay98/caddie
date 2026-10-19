@@ -128,10 +128,14 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 - [ ] 8.4 Rebase on main, full gate with Flutter on PATH, docs (`sandbox.md`,
   `owner-inputs.md`, `.prod.vars.example`, ledger), merge locally as in 7.2.
 
-## 9. Live checks: need the owner's OK (paid)
+## 9. Live checks: paid, OK'd by the owner on 2026-10-20 (run each when ready)
 
-- [ ] 9.1 Installer proof: one sandbox run of about a minute (scaffold + sql.js
-  + fake-indexeddb).
+- [x] 9.1 Installer proof: one sandbox run of about a minute (scaffold + sql.js
+  + fake-indexeddb). LIVE VERIFIED 2026-10-20 with
+  `scripts/probe-sandbox-large-package.ts` on tag:tt-base:1 (Bun 1.4.2): 65
+  pinned packages downloaded, checked and unpacked in 9.3 s, the frozen install
+  found no changes, sql.js loaded its wasm and answered a query. The old code
+  was not re-run, so the EBADF itself is still unexplained.
 - [ ] 9.2 Track 3: scaffold, a probe test and the APK build in the Flutter image.
 - [ ] 9.3 After deploy: one chat-to-plan-to-build journey through Caddie.
 
