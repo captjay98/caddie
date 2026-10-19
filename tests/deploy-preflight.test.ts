@@ -28,6 +28,8 @@ const APP_DIR = join(ROOT, 'apps', 'app');
 const NOW = new Date('2026-10-19T12:00:00Z');
 const DB_ID = '0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f9';
 const HOST = 'caddie.example.com';
+// The address this repo actually deploys to (apps/app/wrangler.jsonc).
+const COMMITTED_HOST = 'caddie.jamalibrahim.dev';
 
 function committedConfig(): WorkerConfig {
 	return parseJsonc(readFileSync(join(APP_DIR, 'wrangler.jsonc'), 'utf8')) as WorkerConfig;
@@ -87,7 +89,8 @@ describe('S10 preflight: the committed production environment', () => {
 		expect(findings.some((f) => f.level === 'PASS' && f.detail.startsWith('env.production restates every binding'))).toBe(true);
 		expect(fails(findings)).toEqual([]);
 		expect(warns(findings)).toEqual([]);
-		expect(target.workersDev).toBe(true);
+		expect(target.workersDev).toBe(false);
+		expect(target.hosts).toEqual([COMMITTED_HOST]);
 		expect(target.d1DatabaseId).toMatch(/^[0-9a-f][0-9a-f-]{35}$/);
 	});
 
@@ -399,13 +402,13 @@ describe('S10 preflight: the command', () => {
 		const dir = mkdtempSync(join(tmpdir(), 'caddie-prodvars-'));
 		const path = join(dir, '.prod.vars');
 		const values = goodValues();
-		values.set('BETTER_AUTH_URL', 'https://caddie-app.someone.workers.dev');
+		values.set('BETTER_AUTH_URL', `https://${COMMITTED_HOST}`);
 		const lines = [...values].map(([key, value]) => `${key}="${value}"`);
 		writeFileSync(path, `${lines.join('\n')}\n`);
 		const run = Bun.spawnSync([process.execPath, 'scripts/deploy-preflight.ts', '--vars', path, '--skip-build'], { cwd: ROOT });
 		const out = run.stdout.toString();
 		expect(run.exitCode).toBe(0);
-		expect(out).toContain('serves its workers.dev address');
+		expect(out).toContain(`serves ${COMMITTED_HOST}`);
 		for (const value of values.values()) if (value.length >= 6) expect(out).not.toContain(value);
 	});
 });

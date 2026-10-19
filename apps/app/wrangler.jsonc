@@ -55,11 +55,13 @@
 		"production": {
 		"name": "caddie-app",
 		"account_id": "9016ab965fe4980700cc9775a88812a5",
-		// One public address. No custom domain yet: the workers.dev address
-		// (https://caddie-app.<subdomain>.workers.dev) comes from the deploy.
-		// preview_urls would add per-version addresses where sign-in cannot work.
-		"workers_dev": true,
+		// One public address: caddie.jamalibrahim.dev (owner's zone, same
+		// account). The deploy creates the DNS record and certificate.
+		// preview_urls would add per-version workers.dev addresses where
+		// sign-in cannot work.
+		"workers_dev": false,
 		"preview_urls": false,
+		"routes": [{ "pattern": "caddie.jamalibrahim.dev", "custom_domain": true }],
 			// Workers Logs on for judging, alongside the traces above.
 			"observability": { "enabled": true, "traces": { "enabled": true } },
 			"worker_loaders": [{ "binding": "LOADER" }],
