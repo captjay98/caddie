@@ -572,6 +572,9 @@ export function Channel(props: {
 	 *  store so it survives navigation and reloads. */
 	composerText?: string;
 	onComposerTextChange?: (text: string) => void;
+	/** Label for composer text the user has not touched in this visit. Defaults
+	 *  to "Draft from earlier"; a link shared into Caddie says so instead. */
+	composerNote?: string;
 	/** The conversation scope is still resolving (e.g. the account Home project
 	 *  is being created/fetched on a global route). Render an honest loading
 	 *  state — NOT the empty "no project" prompt, and NOT an error. */
@@ -763,7 +766,7 @@ export function Channel(props: {
 					disabledReason={live ? 'A run is working — wait for it to settle.' : undefined}
 					value={props.composerText}
 					onValueChange={handleComposerTextChange}
-					draftNote={draftNote ? 'Draft from earlier · not sent yet' : undefined}
+					draftNote={draftNote ? (props.composerNote ?? 'Draft from earlier · not sent yet') : undefined}
 				/>
 			) : null}
 		</div>

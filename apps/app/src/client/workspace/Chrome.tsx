@@ -62,6 +62,8 @@ import { ThemePicker } from './ThemePicker.tsx';
 import { QuickSearch, useQuickSearchHotkey } from '../search/QuickSearch.tsx';
 import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
 import { WORDS } from '../copy.ts';
+import { sessionShareStorage, takeSharedDraft } from '../share-target.ts';
+import { StatePanel, failureKind } from '../states.tsx';
 import { applyTheme, browserStorage, currentTheme, saveThemeChoice, type Palette, type ThemeChoice, type ThemeMode } from '../theme.ts';
 import {
 	useAccountBrief,
@@ -389,6 +391,28 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	}, [home.data, projectList, queryClient, actorId]);
 
 	const authenticated = Boolean(auth.data?.authenticated);
+	// No answer at all from the auth check because the device is offline (an
+	// installed app opened with no connection): say so, instead of asking a
+	// signed-in user to sign in again.
+	const authOffline = !auth.data && auth.error != null && failureKind(auth.error) === 'offline';
+
+	// A link shared into Caddie from another app (manifest share_target) waits
+	// in sessionStorage until the signed-in Home conversation is ready, then
+	// goes under whatever is in its composer, for the user to read and send.
+	// Nothing is sent for them. takeSharedDraft hands it over once.
+	const [sharedArrived, setSharedArrived] = useState(false);
+	useEffect(() => {
+		if (!authenticated || !actorId || conversationKind !== 'general' || conversationResolving) return;
+		const shared = takeSharedDraft(sessionShareStorage());
+		if (!shared) return;
+		channel.appendComposerText(shared);
+		setSharedArrived(true);
+		if (viewportMode === 'desktop') setConvOpen(true);
+		else if (viewportMode === 'tablet') setTabletOpen(true);
+		else if (!mobileConversation) setMobileConversation(true);
+		// Runs when the conversation becomes ready; the rest is read at that moment.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [authenticated, actorId, conversationKind, conversationResolving]);
 
 	// --- Chat starting point + urgent decisions (approved navigation) ----------
 	// The welcome panel is a DETERMINISTIC first-run teaching surface: real
@@ -653,6 +677,17 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 						<main id="main" className="shell-main" data-hidden={conversationKind !== 'none' && mobileConversation && !isDesktop}>
 							{authenticated ? (
 								props.children
+							) : authOffline ? (
+								<div className="shell-loading" data-testid="offline-launch">
+									<StatePanel
+										kind="offline"
+										detail="Caddie needs a connection to open your workspace. Connect, then try again."
+										onRetry={() => void auth.refetch()}
+										retryLabel="Try again"
+										busy={auth.isFetching}
+										askCaddie={false}
+									/>
+								</div>
 							) : (
 								<div className="signin-view" data-testid="sign-in-gate">
 									<div className="signin-col">
@@ -847,6 +882,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								composerHidden={viewportMode === 'mobile'}
 								composerText={channel.composerText}
 								onComposerTextChange={channel.setComposerText}
+								composerNote={sharedArrived ? 'Shared to Caddie · not sent yet' : undefined}
 								resolving={conversationResolving}
 								onSend={sendText}
 								onRetryDraft={(id) => {

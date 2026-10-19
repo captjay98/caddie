@@ -1884,3 +1884,43 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "PWA: Caddie's /app installs as a phone app (Track 2 of docs/plans/2026-10-19-pwa-flutter-apk-monetization-plan.md)",
+  "status": "LOCAL VERIFIED in Chromium on the composed build (local workerd). Installing on a real Android phone or iPhone, and the iOS status bar, were NOT tried: no device here.",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "bun test tests/pwa.test.ts tests/theme-state.test.ts (before)", "exitCode": 1, "receipt": "Both files failed to load: share-target.ts, pwa.ts, sw-stamp.ts and themeCanvas did not exist."},
+    {"command": "bunx playwright test tests/browser/pwa.spec.ts (first runs)", "exitCode": 1, "receipt": "8 of 9 passed. The offline launch stayed on 'Getting your workspace ready…'. A probe found a remount loop with the network off (2,629 /api/auth/status requests in about 3 s): with no data, each refetch put the auth check back to pending, the gate unmounted the workspace, the failed fetch mounted it again, and every mounting observer refetched. The same loop follows a server error on the first check. Fixed in useAuthStatus (retryOnMount: false; networkMode: always). With retryOnMount removed, both loop guards fail; restored, the spec passes (10)."},
+    {"command": "bun mutate.ts (scratch), 9 mutations", "exitCode": 0, "receipt": "Each fails its own tests: the worker answers every GET (/api included); the kept shell is never used offline; a failed or redirected page replaces it; old builds' caches are never dropped; a share replaces the user's typing; shared values stay in the URL; light mode keeps the translucent iOS bar; the pre-paint script paints the dark canvas in light mode; a theme pick stops recolouring theme-color. Files restored byte-identical."},
+    {"command": "bun scripts/license-audit.ts; bun scripts/refresh-scaffold-lock.ts --check", "exitCode": 0, "receipt": "CLEAN; scaffold lockfile current."},
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "typecheck 0; build 0, 0 collisions, sw.js stamped."},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1518 pass / 0 fail / 112 files / 7462 expect() calls."},
+    {"command": "bun run verify:packet --all", "exitCode": 0, "receipt": "46 packets: 41 PASS, 0 FAIL, 5 NOT APPLICABLE."},
+    {"command": "CADDIE_TEST_STATE=<tmp> bun run test:browser -- --all", "exitCode": 0, "receipt": "46 packets: 24 PASS, 0 FAIL, 22 NOT APPLICABLE (PWA added)."},
+    {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "48 PASS, 0 FAIL, 1 BLOCKED, 4 PROVISIONED."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/public/manifest.webmanifest, icons/*.png, apple-touch-icon.png", "note": "id, scope and start_url are /app/. No orientation lock: tablet and landscape layouts are supported. Shortcuts open Ask Caddie, Brief, Discover and Projects. The share target sends title, text and url to /app/. scripts/generate-pwa-icons.ts draws the icons from apps/site/public/favicon.svg in Chromium; the maskable and Apple icons are full-bleed."},
+    {"path": "apps/app/public/sw.js, scripts/sw-stamp.ts, scripts/compose-assets.ts", "note": "Scope /app/. App pages are network-first, with the kept shell when offline. Hashed /assets/ files are cache-first. /api, /agents, non-GET and other origins are never answered by the worker. Compose stamps the build id (sha256 of app/index.html), so each build replaces the worker and its caches."},
+    {"path": "apps/app/src/client/share-target.ts, share-capture.ts, conversation/channel-store.ts, workspace/Chrome.tsx", "note": "Shared values leave the URL before the router reads it and wait in sessionStorage through sign-in and onboarding. They are merged under the user's typing in the Home composer, labelled 'Shared to Caddie · not sent yet', and never sent automatically."},
+    {"path": "apps/app/src/client/workspace/Chrome.tsx, states.tsx, queries.ts", "note": "Opened with no connection, the workspace shows the offline state with Try again, instead of the sign-in panel. The auth-check remount loop is fixed."},
+    {"path": "apps/app/index.html, theme.ts, workspace.css, conversation/Composer.tsx", "note": "Added viewport-fit=cover, the install meta tags, and theme-color set to the saved canvas (pre-paint script and applyTheme). The iOS status bar is black-translucent in dark mode and default in light mode. One set of --safe-* inset variables pads the shell, the tablet chat overlay, the full-screen chat, the detail drawer and dialogs. The composer grows with its text, so a two-line share is fully visible (screenshots at 1280 and 390)."}
+  ],
+  "planCorrections": [
+    "Hashed files live at /assets/*, not /app/assets/*. Vite public files land at the asset root, so the manifest and worker are served at /manifest.webmanifest and /sw.js (scope /app/).",
+    "start_url is /app/: ?pane=channel opens full-screen chat on desktop. The light canvas is #f6f8fc (and differs per palette), not #f6f5f0.",
+    "The plan expected an offline StatePanel. In fact an offline launch showed sign-in, then looped (see the before receipt); both are fixed.",
+    "The '<150 ms cold launch' figure was not measured and is not claimed.",
+    "Step 2.4 (generated apps) not done; needs an owner decision. There is no template index.html (documents come from built-app.ts and publish.ts). Meta tags alone do not make a site installable on Android. iOS standalone removes the back button from apps not designed for it. viewport-fit=cover without inset padding would put content under the notch."
+  ],
+  "environment": "Local Mac, Chromium via Playwright 1.63; local workerd via vite preview.",
+  "providerCalls": "none",
+  "limitations": [
+    "No real-device evidence: Android install and share sheet, iOS Add to Home Screen, status bar and safe areas. The insets were simulated in the 390 px screenshot by setting --safe-top and --safe-bottom.",
+    "Chromium's offline emulation is not a phone losing signal.",
+    "Installing needs HTTPS (the production Worker has it) and a deployed demo; neither exists yet (G4)."
+  ]
+}
+```

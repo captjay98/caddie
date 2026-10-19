@@ -40,6 +40,18 @@ export function useAuthStatus() {
 		queryKey: ['auth', 'status'],
 		queryFn: () => fetchJson<AuthStatus>('/api/auth/status'),
 		staleTime: AUTH_STATUS_STALE_MS,
+		// React Query pauses queries while the browser is offline, and a paused
+		// first check left an installed app opened offline on "Getting your
+		// workspace ready…" for good. Run it anyway: it fails as `offline`, the
+		// workspace says so (Chrome.tsx), and coming back online refetches it.
+		networkMode: 'always',
+		// A failed check with no data must STAY failed until someone retries
+		// (Try again, or the browser coming back online). With the default, every
+		// component that mounts refetches it; a refetch with no data puts the
+		// query back to pending, OnboardingGate swaps the workspace for "Getting
+		// your workspace ready…", the workspace remounts when the fetch fails, and
+		// round it goes: 2,629 requests in 3 s with the network off.
+		retryOnMount: false,
 	});
 }
 

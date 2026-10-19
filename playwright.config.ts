@@ -10,6 +10,10 @@ export default defineConfig({
 	timeout: 60_000,
 	use: {
 		baseURL: 'http://127.0.0.1:4173',
+		// The built app registers a service worker (apps/app/public/sw.js).
+		// Specs stub /api with context.route, which must see every request, so
+		// workers stay off; tests/browser/pwa.spec.ts turns them on to test it.
+		serviceWorkers: 'block',
 	},
 	webServer: {
 		command: 'bun --cwd=apps/app run preview -- --port 4173 --host 127.0.0.1',

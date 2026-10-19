@@ -1,0 +1,28 @@
+{
+	"id": "/app/",
+	"name": "Caddie",
+	"short_name": "Caddie",
+	"description": "Find hackathons, plan a project with the rules in hand, and let Caddie build and test the app.",
+	"lang": "en",
+	"start_url": "/app/",
+	"scope": "/app/",
+	"display": "standalone",
+	"background_color": "#090b10",
+	"theme_color": "#090b10",
+	"icons": [
+		{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+		{ "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+		{ "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+	],
+	"shortcuts": [
+		{ "name": "Ask Caddie", "url": "/app/?pane=channel", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+		{ "name": "Brief", "url": "/app/?pane=brief", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+		{ "name": "Discover", "url": "/app/discover", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+		{ "name": "Projects", "url": "/app/projects", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+	],
+	"share_target": {
+		"action": "/app/",
+		"method": "GET",
+		"params": { "title": "shared_title", "text": "shared_text", "url": "shared_url" }
+	}
+}

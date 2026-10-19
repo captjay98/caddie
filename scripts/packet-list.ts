@@ -297,6 +297,10 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 	// (0034; 0035 adds the discovery kind). Each quota is also settable to 0,
 	// which means none.
 	JUDGE_LIMITS: { tests: ['tests/judge-limits.test.ts'], browser: [], live: [] },
+	// --- Installable app (docs/plans/2026-10-19-pwa-flutter-apk-monetization-plan.md, Track 2)
+	// Manifest, icons, share target, service worker, safe areas. Real devices
+	// (an Android or iOS install) are not reachable from here.
+	PWA: { tests: ['tests/pwa.test.ts'], browser: ['tests/browser/pwa.spec.ts'], live: [] },
 	// --- Verification net (S01) ----------------------------------------------
 	NET: { tests: ['tests/packet-completeness.test.ts'], browser: [], live: [] },
 };

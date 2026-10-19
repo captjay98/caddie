@@ -15,6 +15,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildStamp, stampServiceWorker } from './sw-stamp.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SPA_DIR = join(REPO_ROOT, 'apps/app/dist/client');
@@ -89,6 +90,21 @@ for (const p of htmlEntries) {
 }
 cpSync(SITE_DIR, SPA_DIR, { recursive: true });
 
+// --- 4b. stamp the service worker with this build -----------------------------
+// apps/app/public/sw.js names its caches after the build (scripts/sw-stamp.ts).
+// The stamp is the composed shell's hash, so every build installs a new worker,
+// which keeps the new shell and drops the previous build's files.
+const SW_PATH = join(SPA_DIR, 'sw.js');
+if (!existsSync(SW_PATH)) {
+	fail('sw.js missing from the SPA build — apps/app/public/sw.js must be copied by Vite');
+}
+const swStamp = buildStamp(readFileSync(join(SPA_DIR, 'app', 'index.html')));
+try {
+	writeFileSync(SW_PATH, stampServiceWorker(readFileSync(SW_PATH, 'utf8'), swStamp));
+} catch (error) {
+	fail(`could not stamp sw.js: ${(error as Error).message}`);
+}
+
 // --- 5. manifest -------------------------------------------------------------
 // collisions is the real computed intersection: always empty here because a
 // non-empty intersection hard-failed above, before any write.
@@ -118,5 +134,5 @@ if (existsSync(WORKER_CONFIG)) {
 }
 
 console.log(
-	`compose-assets: composed ${relocated.length} relocated SPA + ${unchanged.length} SPA asset + ${landingEntries.length} landing files; collisions: 0; manifest: ${relative(REPO_ROOT, MANIFEST_PATH)}${legacyEnvRemoved ? '; legacy_env removed from the Worker config' : ''}`,
+	`compose-assets: composed ${relocated.length} relocated SPA + ${unchanged.length} SPA asset + ${landingEntries.length} landing files; collisions: 0; sw.js build ${swStamp}; manifest: ${relative(REPO_ROOT, MANIFEST_PATH)}${legacyEnvRemoved ? '; legacy_env removed from the Worker config' : ''}`,
 );

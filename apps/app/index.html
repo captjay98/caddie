@@ -4,8 +4,18 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Caddie</title>
+    <!-- Installable app: manifest, icons and the phone's status bar. The
+         pre-paint script below recolours theme-color and the iOS status bar
+         to the saved theme, so those two tags must stay ABOVE it. -->
+    <meta name="theme-color" content="#090b10" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Caddie" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <!-- Pre-paint theme: runs before the stylesheet paints the canvas, so a
          saved light mode or non-default palette never flashes the dark
          Caddie default. Mirrors readStoredTheme + applyTheme in
@@ -21,6 +31,22 @@
         } catch (e) {}
         document.documentElement.setAttribute('data-theme', mode);
         document.documentElement.setAttribute('data-palette', palette);
+        // The phone's status bar takes the saved canvas (the PALETTE_META
+        // swatches in theme.ts). Light mode asks iOS for its own opaque bar:
+        // its light status text would vanish on a light canvas.
+        try {
+          var canvas = {
+            caddie: ['#090b10', '#f6f8fc'],
+            clearcut: ['#14161b', '#f6f3ea'],
+            onesecos: ['#0b0f14', '#f7f5ec'],
+            farmhand: ['#0f1318', '#f7f5ee'],
+            kirocrew: ['#0f1117', '#f7f5fc']
+          };
+          var color = document.querySelector('meta[name="theme-color"]');
+          if (color) color.setAttribute('content', canvas[palette][mode === 'light' ? 1 : 0]);
+          var bar = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+          if (bar) bar.setAttribute('content', mode === 'light' ? 'default' : 'black-translucent');
+        } catch (e) {}
       })();
     </script>
   </head>

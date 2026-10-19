@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactElement, KeyboardEvent } from 'react';
 import { Icon } from '../icons.tsx';
 import { COMPOSER_PLACEHOLDER } from '../copy.ts';
@@ -68,6 +68,15 @@ export function Composer(props: {
 	const value = props.value ?? localValue;
 	const setValue = props.onValueChange ?? setLocalValue;
 	const disabled = Boolean(props.disabled);
+	// The field grows with its text, up to the CSS max-height (then it
+	// scrolls), so a pasted or shared second line is never cut off.
+	const textRef = useRef<HTMLTextAreaElement>(null);
+	useLayoutEffect(() => {
+		const field = textRef.current;
+		if (!field) return;
+		field.style.height = 'auto';
+		field.style.height = `${field.scrollHeight + field.offsetHeight - field.clientHeight}px`;
+	}, [value]);
 	const [picked, setPicked] = useState<PickedAttachment[]>([]);
 	const [attachError, setAttachError] = useState<string | null>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
@@ -302,6 +311,7 @@ export function Composer(props: {
 					) : null}
 				</div>
 				<textarea
+					ref={textRef}
 					value={value}
 					onChange={(event) => setValue(event.target.value)}
 					onKeyDown={onKeyDown}

@@ -53,6 +53,9 @@ export function StatePanel(props: {
 	/** Bare variant for use INSIDE another card: no own card surface, so a
 	    section never renders a card inside a card (owner steering, 2026-10-15). */
 	flat?: boolean;
+	/** false where the conversation cannot be reached either (the app opened
+	    with no connection): "Ask Caddie what happened" would be a dead end. */
+	askCaddie?: boolean;
 }): ReactElement {
 	const { kind } = props;
 	const copy = COPY[kind];
@@ -97,7 +100,7 @@ export function StatePanel(props: {
 					<p className="state-detail" data-testid="state-safety-note">
 						Your work is safe — this is only the connection.
 					</p>
-					<AskCaddieWhatHappened />
+					{props.askCaddie === false ? null : <AskCaddieWhatHappened />}
 				</>
 			) : null}
 			{kind === 'denied' ? (

@@ -1,8 +1,12 @@
+// FIRST, before routes.tsx creates the router: a link shared into Caddie
+// leaves the address and waits in sessionStorage (share-target.ts).
+import './share-capture.ts';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { router } from './routes.tsx';
+import { registerServiceWorker } from './pwa.ts';
 import { applyTheme, browserStorage, readStoredTheme } from './theme.ts';
 // Same self-hosted faces the landing uses (site/src/pages/index.astro) — the
 // token stacks (--font-ui/--font-mono) name Inter and IBM Plex Mono first.
@@ -51,3 +55,6 @@ createRoot(document.getElementById('root')!).render(
 		</QueryClientProvider>
 	</StrictMode>,
 );
+
+// Installed-app support (pwa.ts): the built app under /app only.
+registerServiceWorker();

@@ -11,6 +11,7 @@ import {
 	currentTheme,
 	readStoredTheme,
 	saveThemeChoice,
+	themeCanvas,
 	type ThemeChoice,
 	type ThemeStorage,
 } from '../apps/app/src/client/theme.ts';
@@ -69,13 +70,28 @@ const CASES: { name: string; seed: Record<string, string>; expected: ThemeChoice
 	{ name: 'junk mode -> dark', seed: { [THEME_KEY]: 'clearcut-light' }, expected: { palette: 'caddie', mode: 'dark' } },
 ];
 
+/** The <head> meta tags the theme recolours (theme-color, the iOS status bar). */
+class FakeHead {
+	readonly metas = new Map<string, FakeRoot>([
+		['theme-color', new FakeRoot()],
+		['apple-mobile-web-app-status-bar-style', new FakeRoot()],
+	]);
+	querySelector(selector: string) {
+		const name = selector.match(/^meta\[name="([^"]+)"\]$/)?.[1];
+		return (name && this.metas.get(name)) || null;
+	}
+	content(name: string) {
+		return this.metas.get(name)?.getAttribute('content') ?? null;
+	}
+}
+
 /** Run the real inline script from index.html against a storage + fake <html>. */
-function runBootScript(storage: ThemeStorage): FakeRoot {
+function runBootScript(storage: ThemeStorage, head: FakeHead = new FakeHead()): FakeRoot {
 	const html = readFileSync(join(ROOT, 'apps', 'app', 'index.html'), 'utf8');
 	const script = html.match(/<script data-theme-boot>([\s\S]*?)<\/script>/)?.[1];
 	if (!script) throw new Error('index.html has no <script data-theme-boot>');
 	const root = new FakeRoot();
-	new Function('localStorage', 'document', script)(storage, { documentElement: root });
+	new Function('localStorage', 'document', script)(storage, { documentElement: root, querySelector: (s: string) => head.querySelector(s) });
 	return root;
 }
 
@@ -114,6 +130,47 @@ describe('pre-paint script in index.html', () => {
 			const root = runBootScript(new MemoryStorage({ [PALETTE_KEY]: palette }));
 			expect(root.getAttribute('data-palette')).toBe(palette);
 		}
+	});
+
+	test('colours the phone status bar with the saved canvas, for every palette x mode', () => {
+		for (const palette of PALETTES) {
+			for (const mode of ['dark', 'light'] as const) {
+				const head = new FakeHead();
+				runBootScript(new MemoryStorage({ [PALETTE_KEY]: palette, [THEME_KEY]: mode }), head);
+				expect({ palette, mode, color: head.content('theme-color') }).toEqual({ palette, mode, color: themeCanvas({ palette, mode }) });
+				// Light text over a light canvas is unreadable: light mode asks iOS for its own bar.
+				expect({ palette, mode, bar: head.content('apple-mobile-web-app-status-bar-style') }).toEqual({
+					palette,
+					mode,
+					bar: mode === 'light' ? 'default' : 'black-translucent',
+				});
+			}
+		}
+	});
+
+	test('a page without the meta tags still gets its theme', () => {
+		const root = new FakeRoot();
+		const script = readFileSync(join(ROOT, 'apps', 'app', 'index.html'), 'utf8').match(/<script data-theme-boot>([\s\S]*?)<\/script>/)![1]!;
+		new Function('localStorage', 'document', script)(new MemoryStorage({ [THEME_KEY]: 'light' }), { documentElement: root });
+		expect(root.getAttribute('data-theme')).toBe('light');
+	});
+});
+
+describe('theme-color', () => {
+	test('is the palette canvas (the swatch the picker shows, kept equal to tokens.css below)', () => {
+		for (const palette of PALETTES) {
+			expect(themeCanvas({ palette, mode: 'dark' })).toBe(PALETTE_META[palette].swatch.dark[0]);
+			expect(themeCanvas({ palette, mode: 'light' })).toBe(PALETTE_META[palette].swatch.light[0]);
+		}
+	});
+
+	test('applyTheme recolours it when the user picks a theme', () => {
+		const head = new FakeHead();
+		const root = Object.assign(new FakeRoot(), { ownerDocument: head });
+		applyTheme({ palette: 'farmhand', mode: 'light' }, root as unknown as Element);
+		expect(head.content('theme-color')).toBe(PALETTE_META.farmhand.swatch.light[0]);
+		// No document (a harness root): attributes only, nothing thrown.
+		expect(() => applyTheme(DEFAULT_THEME, new FakeRoot() as unknown as Element)).not.toThrow();
 	});
 });
 

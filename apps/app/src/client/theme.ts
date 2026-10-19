@@ -73,6 +73,14 @@ export function readStoredTheme(storage: ThemeStorage | null): ThemeChoice {
 export function applyTheme(choice: ThemeChoice, root: Element = document.documentElement): void {
 	root.setAttribute('data-theme', choice.mode);
 	root.setAttribute('data-palette', choice.palette);
+	// The phone's status bar follows the canvas (the pre-paint script in
+	// index.html does the same at load). A harness root has no document.
+	root.ownerDocument?.querySelector?.('meta[name="theme-color"]')?.setAttribute('content', themeCanvas(choice));
+}
+
+/** A choice's canvas colour: the picker swatch, equal to --seed-bg in tokens.css. */
+export function themeCanvas(choice: ThemeChoice): string {
+	return PALETTE_META[choice.palette].swatch[choice.mode][0];
 }
 
 /** The choice currently on <html> (what the pre-paint script applied). */

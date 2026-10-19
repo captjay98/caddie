@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { FlueConversationMessage, FlueConversationSettlement } from '@flue/react';
+import { mergeSharedDraft } from '../share-target.ts';
 
 /**
  * Props-driven channel store — feature-ledger row C7 (transport ADOPT
@@ -139,6 +140,26 @@ export function useChannelStore(options: {
 		[composerKey_],
 	);
 
+	/** Add text under the unsent typing (a link shared into Caddie). It works
+	 *  from the CURRENT state, so it lands on the draft of the scope that is
+	 *  live when it runs, even in the commit where that scope's draft was just
+	 *  loaded. The write inside the updater is idempotent (StrictMode may run
+	 *  an updater twice: same input, same stored value). */
+	const appendComposerText = useCallback(
+		(text: string) => {
+			setComposerTextState((current) => {
+				const next = mergeSharedDraft(current, text);
+				try {
+					sessionStorage.setItem(composerKey_, next);
+				} catch {
+					// storage blocked: text stays in memory for the session
+				}
+				return next;
+			});
+		},
+		[composerKey_],
+	);
+
 	/** Creates the optimistic draft and returns it (null for empty input) —
 	 *  the caller sends it through the transport with the draft's own key. */
 	const addDraft = useCallback((text: string): ChannelDraft | null => {
@@ -193,5 +214,5 @@ export function useChannelStore(options: {
 		setDrafts((existing) => existing.filter((draft) => draft.id !== id));
 	}, []);
 
-	return { drafts, addDraft, retryDraft, discardDraft, editDraft, resolveDraft, composerText, setComposerText };
+	return { drafts, addDraft, retryDraft, discardDraft, editDraft, resolveDraft, composerText, setComposerText, appendComposerText };
 }

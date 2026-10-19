@@ -8,6 +8,27 @@
 	box-sizing: border-box;
 }
 
+/* Safe areas. index.html sets viewport-fit=cover, so an installed app can
+   draw edge to edge on a phone with a notch, a translucent status bar or a
+   home indicator. The insets are read ONCE here (0px in an ordinary browser
+   tab) and every rule below uses these four, which also lets
+   tests/browser/pwa.spec.ts simulate a phone by setting them. */
+:root {
+	--safe-top: env(safe-area-inset-top, 0px);
+	--safe-right: env(safe-area-inset-right, 0px);
+	--safe-bottom: env(safe-area-inset-bottom, 0px);
+	--safe-left: env(safe-area-inset-left, 0px);
+}
+
+/* The whole workspace sits inside the safe area: below the status bar, clear
+   of the notch in landscape. The bottom inset is handled where things touch
+   the bottom edge (the bottom nav, the main column's clearance). */
+.app-shell {
+	padding-top: var(--safe-top);
+	padding-right: var(--safe-right);
+	padding-left: var(--safe-left);
+}
+
 html,
 body,
 #root {
@@ -933,7 +954,7 @@ a.btn-ghost.topbar-nav-link {
 	/* Clearance under the floating bar so the transcript and panels never sit
 	   behind it (the bar is out of flow). */
 	.shell-main {
-		padding-bottom: calc(172px + env(safe-area-inset-bottom));
+		padding-bottom: calc(172px + var(--safe-bottom));
 	}
 	.bottom-nav {
 		display: grid;
@@ -941,7 +962,7 @@ a.btn-ghost.topbar-nav-link {
 		position: fixed;
 		left: 12px;
 		right: 12px;
-		bottom: calc(9px + env(safe-area-inset-bottom));
+		bottom: calc(9px + var(--safe-bottom));
 		background: transparent;
 		border: none;
 		padding: 0;
@@ -2482,7 +2503,7 @@ a.btn-ghost.topbar-nav-link {
 	/* End-to-end: the field row spans the full width with no redundant outer
 	   inset — the controls' own footprint carries the edge spacing, so the
 	   textarea is not a bordered box inside a padded box. */
-	padding: 0.55rem 0.55rem calc(0.4rem + env(safe-area-inset-bottom));
+	padding: 0.55rem 0.55rem calc(0.4rem + var(--safe-bottom));
 	display: grid;
 	gap: 0.3rem;
 }
@@ -3519,7 +3540,7 @@ a.btn-ghost.topbar-nav-link {
 	z-index: 60;
 	display: grid;
 	place-items: center;
-	padding: 1rem;
+	padding: calc(1rem + var(--safe-top)) calc(1rem + var(--safe-right)) calc(1rem + var(--safe-bottom)) calc(1rem + var(--safe-left));
 	background: rgb(0 0 0 / 0.55);
 }
 
@@ -3811,6 +3832,11 @@ a.btn-ghost.topbar-nav-link {
 	border-left: 1px solid var(--color-line);
 	display: flex;
 	flex-direction: column;
+	/* Full height against the right edge: clear the status bar, the notch and
+	   the home indicator on an installed phone app (0 in a browser tab). */
+	padding-top: var(--safe-top);
+	padding-right: var(--safe-right);
+	padding-bottom: var(--safe-bottom);
 }
 .cdp-head {
 	display: flex;
@@ -5178,10 +5204,10 @@ a.btn-ghost.topbar-nav-link {
 	}
 	/* Clearance so content and transcript never sit behind the floating bar. */
 	.shell-main {
-		padding-bottom: calc(172px + env(safe-area-inset-bottom));
+		padding-bottom: calc(172px + var(--safe-bottom));
 	}
 	.shell-right .transcript {
-		padding-bottom: calc(160px + env(safe-area-inset-bottom));
+		padding-bottom: calc(160px + var(--safe-bottom));
 	}
 	/* The unauth header keeps its capsule margins on mobile; the authed
 	   capsule is desktop-only (mobile uses the page-aware MobileHeader +
@@ -5561,6 +5587,11 @@ body.conv-resizing * {
 		bottom: 0;
 		width: min(420px, 100vw) !important;
 		max-width: none;
+		/* Pinned to the screen's corner: clear the status bar, a landscape
+		   notch and the home indicator on an installed tablet app. */
+		padding-top: var(--safe-top);
+		padding-right: var(--safe-right);
+		padding-bottom: var(--safe-bottom);
 		box-shadow: 0 24px 60px rgb(0 0 0 / 0.45);
 		transform: translateX(102%);
 		visibility: hidden;
@@ -5578,6 +5609,7 @@ body.conv-resizing * {
 		inset: 0;
 		width: 100vw !important;
 		max-width: none;
+		padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
 		background: var(--color-panel);
 	}
 	/* No bottom nav / mobile header in the tablet band; content is full width. */

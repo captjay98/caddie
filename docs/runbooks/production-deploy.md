@@ -109,6 +109,13 @@ Nebius's console.
 - **Durable Objects:** Cloudflare refuses a rollback to a version from before
   a Durable Object migration (the `migrations` tags in `wrangler.jsonc`).
 - **Window:** only the 100 most recent versions can be rolled back to.
+- **The phone-app service worker:** browsers keep `/sw.js` installed. It only
+  keeps the app shell and the hashed files under `/assets/`, never `/api` or
+  `/agents`, and every build replaces it on the next visit, so a rollback
+  needs nothing extra. To remove it from every browser, deploy a build whose
+  `apps/app/public/sw.js` only unregisters itself and deletes the caches
+  whose names start with `caddie-` (keep the `'__CADDIE_BUILD__'` placeholder
+  once, or the build refuses it).
 
 ## If something fails
 
