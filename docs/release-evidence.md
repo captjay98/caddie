@@ -66,7 +66,7 @@ are closed: `tests/live/sandbox.spec.ts` (P04) and
 | Preflight | `bun scripts/deploy-preflight.ts --owner-only` — 18 PASS, 2 WARN (reused-local Nebius/Tavily/Contree keys, flagged for rotation; untracked files), 0 FAIL |
 | D1 | `caddie` → `f6315eae-99da-4afc-93d0-356afcd511a0`, migrations 0001–0035 applied remotely before the deploy |
 | Smoke | P17 live 5/5 PASS (receipt above); landing, /app shell, sign-in status, JSON 404 |
-| Sign-in round trip | LIVE VERIFIED (user-performed, 2026-10-19): owner signed in via GitHub against the production origin; D1 `user` count 1. GitHub's new-app trust gate had blocked the consent button earlier in the day; it lifted within hours. |
+| Sign-in round trip | LIVE VERIFIED (user-performed, 2026-10-19/20): owner signed in via GitHub and via Google against the production origin; D1 shows 1 user with two `account` rows (github ×1, google ×1 — same-email linking). GitHub's new-app trust gate blocked the consent button earlier in the day; it lifted within hours. Google client: project `airy-cortex-512223-k2`, consent screen in **Testing** with the owner as test user (publishing to In production waits on Google's branding-page completion — cosmetic while only the owner signs in). |
 | Judge access | LIVE VERIFIED: `JUDGE_ACCESS_CODE` + `JUDGE_ACCESS_UNTIL=2026-12-16` uploaded as secrets (no rebuild); `GET /api/judge/access` → `{"open":true,"canStart":true}`. Remaining: owner starts one judge account in a private window before the code is shared. |
 
 ## Verification net (S01, 2026-10-18)
