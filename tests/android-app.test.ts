@@ -137,4 +137,31 @@ describe('the public /a/<project> routes', () => {
 		expect(sentCookie).toBeNull();
 		expect(response.headers.get('set-cookie')).toBeNull();
 	});
+
+	test('a malformed apps domain never forwards anywhere', async () => {
+		const w = world();
+		w.sqlite.prepare("insert into app_publications (projectId,slug,script,status,outputId,hasServer,createdAt,updatedAt) values ('proj_android','farm-log','app-1','live','out-1',1,?,?)").run(w.stamp, w.stamp);
+		let called = false;
+		const fetchImpl = (async () => {
+			called = true;
+			return new Response('{}');
+		}) as unknown as typeof fetch;
+		const response = await createAndroidAppRouter().request('/a/proj_android/api/health', {}, { ...env(w.db, fetchImpl), APPS_DOMAIN: 'caddieapps.com/evil' });
+		expect(response.status).toBe(503);
+		expect(called).toBe(false);
+	});
+});
+
+describe('wiring into the running app', () => {
+	test('the /a routes sit on the app itself (no Caddie session), before the fallbacks, and run before static files', () => {
+		const app = readFileSync(new URL('../apps/app/src/app.ts', import.meta.url), 'utf8');
+		expect(app).toContain("import { createAndroidAppRouter } from './server/android-app.ts';");
+		const mount = app.indexOf("app.route('/', createAndroidAppRouter());");
+		expect(mount).toBeGreaterThan(-1);
+		expect(mount).toBeLessThan(app.indexOf('app.notFound('));
+		expect(app).not.toContain('api.route(\'/\', createAndroidAppRouter())');
+		const wrangler = readFileSync(new URL('../apps/app/wrangler.jsonc', import.meta.url), 'utf8');
+		const workerFirst = /"run_worker_first":\s*\[([^\]]*)\]/.exec(wrangler)?.[1] ?? '';
+		expect(workerFirst).toContain('"/a/*"');
+	});
 });

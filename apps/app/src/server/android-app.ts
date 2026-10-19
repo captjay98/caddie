@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { D1Database } from './auth.ts';
 import { getLarge, putLarge } from './large-content.ts';
+import { appsDomainOf } from './publish-env.ts';
 
 /**
  * Android apps (Track 3, stage E).
@@ -138,7 +139,7 @@ export function createAndroidAppRouter() {
 	router.all('/a/:projectId/api/*', async (c) => {
 		const projectId = c.req.param('projectId');
 		const publication = await livePublication(c.env.DB, projectId);
-		const domain = (c.env.APPS_DOMAIN ?? '').trim().toLowerCase();
+		const domain = appsDomainOf(c.env);
 		if (!publication || !domain) {
 			return Response.json({ error: 'app_not_published', message: "This app's server isn't on the web right now." }, { status: 503, headers: { 'cache-control': 'no-store' } });
 		}
