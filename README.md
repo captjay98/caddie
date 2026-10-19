@@ -79,6 +79,10 @@ The hosted demo is capped so a few dozen judges cannot exhaust it:
   that needs a retry costs two.
 - **300 Caddie messages per 24 hours** per judge account. Messages Caddie sends
   itself do not count.
+- **20 discovery lookups per 24 hours** per judge account — the two Find actions
+  that reach out and spend per click ("check the sources again" and "check this
+  contest's eligibility"). Opening the feed, a contest's detail pane and its
+  cited rules costs nothing and is not counted.
 - **At most 40 judge accounts** in total (the code's default when
   `JUDGE_ACCESS_MAX_ACCOUNTS` is unset is `40` —
   `apps/app/src/server/judge-access.ts`).
@@ -86,12 +90,16 @@ The hosted demo is capped so a few dozen judges cannot exhaust it:
 - Judge accounts cannot publish apps.
 
 These are the demo's configured limits. The 40-place cap is a code default as
-well; all three per-account quotas and the closing date come from the Worker's
+well; every per-account quota and the closing date come from the Worker's
 environment when set (`JUDGE_MAX_PROJECTS`, `JUDGE_MAX_BUILDS_PER_DAY`,
-`JUDGE_MAX_MESSAGES_PER_DAY`, `JUDGE_ACCESS_MAX_ACCOUNTS`, `JUDGE_ACCESS_UNTIL`),
-and fall back to the numbers above. The gate and refusal paths are in
-`apps/app/src/server/judge-access.ts` and `apps/app/src/server/judge-limits.ts`,
-with tests in `tests/judge-access.test.ts` and `tests/judge-limits.test.ts`
+`JUDGE_MAX_MESSAGES_PER_DAY`, `JUDGE_MAX_DISCOVERY_PER_DAY`,
+`JUDGE_ACCESS_MAX_ACCOUNTS`, `JUDGE_ACCESS_UNTIL`), and fall back to the numbers
+above. Setting any quota to **0** means *none*: that is how a judge who already
+has an account is stopped from spending, whereas `JUDGE_ACCESS_ENABLED=0` only
+stops new accounts being created. The gate and refusal paths are in
+`apps/app/src/server/judge-access.ts` and `apps/app/src/server/judge-limits.ts`;
+the quotas themselves are exercised in `tests/judge-limits.test.ts` and the
+gate, rate limits and refusals in `tests/judge-access.test.ts`
 (**LOCAL VERIFIED**).
 
 ### A two-minute path to try
@@ -247,7 +255,7 @@ continuation of the earlier `caddie` project — no history was carried over).
 | 2026-10-15 – 10-16 | Project-page redesign around "what Caddie is doing now", the host-driven feature build loop, the PRD + design review step, saving source to GitHub as a PR, and model re-routing (vision moved to a served VLM). |
 | 2026-10-17 | The publish programme: `Publish on Cloudflare` plan, app-host ports and the Cloudflare adapter (Workers for Platforms, D1, KV routes, custom hostnames), an Artifacts-backed code store, and running an app's server in a Worker Loader isolate for previews. |
 | 2026-10-18 | Publishing end to end (service, `/api` routes, the Publish card, safety scan + takedowns), keys for outside services, AI inside generated apps with a per-project allowance, app sign-in, versions/restore, "Start from my GitHub repo"; then S01–S04: one packet table with a completeness net, a purpose-specific report rate-limit key, model routing re-read from the live Nebius listing, and the fast/super app-AI tiers. |
-| **2026-10-19** | S06: judges sign in with an access code, a name and a password (no Google or GitHub, no email delivery); S07: judge limits (3 projects, 3 build starts and 300 messages per rolling 24 hours, server-side, before any sandbox or model work); S08: this README, the MIT `LICENSE` and `scripts/license-audit.ts`; models re-priced from the live listing with `helper` returned to Nemotron Nano; CI tightened to `--frozen-lockfile`. |
+| **2026-10-19** | S06: judges sign in with an access code, a name and a password (no Google or GitHub, no email delivery); S07: judge limits (3 projects, 3 build starts, 300 messages and 20 discovery lookups per rolling 24 hours, server-side, before any sandbox or model work); S08: this README, the MIT `LICENSE` and `scripts/license-audit.ts`; models re-priced from the live listing with `helper` returned to Nemotron Nano; CI tightened to `--frozen-lockfile`. Owner review then closed two S06 holes (Better Auth's own sign-in route was a rate-limit bypass, and judge places are now reserved atomically), added the fourth quota with `0` meaning *none* at every quota, and turned the licence audit clean by accepting OFL-1.1 for the `@fontsource/*` family only. |
 
 ---
 
@@ -258,21 +266,23 @@ such rather than omitted.
 
 | Surface | Status | What backs it |
 | :--- | :--- | :--- |
-| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1380 pass, 0 fail, 106 files — run at the time of writing. |
+| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1397 pass, 0 fail, 106 files — run at the time of writing. |
+| Browser acceptance suite (`bun run test:browser`) | **6 cases FAILED** (2026-10-19); the rest pass | Two runs against the composed build, 26 pass / 6 fail, the same six both times. All six are **pre-existing and unrelated to the judge work**: the client sources and the specs are byte-identical to the tree without it (0 bytes of diff), and these specs stub `/api`, so no server change can reach them. Three Discover assertions expect copy that the card rewrite of 2026-10-15 replaced (`You can enter` and `source … · saved` are no longer rendered — the v2 row shows `Can enter` and a `Saved` button); the theme keyboard case still assumes four palettes where `theme.ts` has shipped five since the commit that wrote the test; and the mobile welcome-panel case expects exactly one run POST and observes none (not yet root-caused). CI does not run this suite — `ci.yml` runs `verify:packet --all` and `release-check` only — which is how they went unnoticed. |
 | Typecheck (`bun run typecheck`) | **LOCAL VERIFIED** | exit 0 (root project + `apps/app`). |
 | Build composition (`bun run build`) | **LOCAL VERIFIED** | One composed Workers assets tree from the Astro landing + Vite SPA. |
-| Model round-trips on Nebius Token Factory | **LIVE VERIFIED** (recorded 2026-10-06) | Owner-authorized runs recorded in `docs/release-evidence.md` and the execution ledger (P05); the route/pricing table is refreshed from a live listing (2026-10-18). |
-| Sandbox execution | **LIVE VERIFIED** (recorded 2026-10-06) | Real contree session + remote exec probe recorded in `docs/release-evidence.md` (P04), and a full React+Hono journey (P09). |
-| React + Hono generated-app journey | **LIVE VERIFIED** (recorded 2026-10-06) | The journey runner passed every phase in the sandbox (P09) — the only stack marked verified; the other four stacks are **BLOCKED** on their own live gates. |
+| Direct model calls on Nebius Token Factory | **LIVE VERIFIED** (probes recorded 2026-10-18, re-probed 2026-10-19) | Owner-authorized calls recorded in `docs/release-evidence.md` and the execution ledger (P05); the route/pricing table is refreshed from a live `GET /v1/models?verbose=true` listing (2026-10-18) and `scripts/probe-lightning.ts` re-probed the routed roles on 2026-10-19. |
+| P05 conversation round-trip (a full coordinator turn through the app) | **PROVISIONED** | No live receipt: `tests/live/flue-lifecycle.spec.ts` needs a deployed conversation URL and a session cookie. `docs/release-evidence.md` records P05 as PROVISIONED; direct model calls are live-verified in the row above. |
+| Sandbox execution (the sandbox *service*: session create + remote exec) | **LIVE VERIFIED** (recorded 2026-10-06) | A real contree session and remote exec probe recorded in `docs/release-evidence.md` (P04). This row covers the sandbox service only; it is not a claim that a generated app installs inside it — see the next row. |
+| A generated React + Hono app installing and building in the sandbox | **FAILED as of 2026-10-19** | The one live journey (P09, recorded 2026-10-06) passed every phase **only with a `curl` + GNU `tar` workaround that the product's own install path does not have**. Re-probed against the production base image (`tag:tt-base:1`) on 2026-10-19: `bun install --frozen-lockfile` exits 1 with `error: Fail extracting tarball from react-dom`, and the build then cannot resolve `react-dom/client` (`scripts/probe-sandbox-scaffold.ts`). The other four stacks are **BLOCKED** on their own live gates. This row stays FAILED until the fix carries its own live receipt. |
 | Real outbound email (Resend) | **LIVE VERIFIED** (recorded 2026-10-06) | One real send to the owner's own address, provider receipt id in `docs/release-evidence.md` (P12). |
 | Judge access by code (`S06`) | **LOCAL VERIFIED** | `tests/judge-access.test.ts`; the gate, rate limits and refusals are tested. Not exercised against a deployed Worker. |
-| Judge limits (`S07`) | **LOCAL VERIFIED** | `apps/app/src/server/judge-limits.ts`, `tests/judge-limits.test.ts`; the three limits are enforced server-side and refused before any write. Not exercised against a deployed Worker. |
+| Judge limits (`S07`) | **LOCAL VERIFIED** | `apps/app/src/server/judge-limits.ts`, `tests/judge-limits.test.ts`; the four limits (projects, build starts, messages, discovery lookups) are enforced server-side and refused before any write. Not exercised against a deployed Worker. |
 | Landing page product art / workspace illustrations | **SIMULATED** | Labelled on the page itself: illustrative compositions, not live captures. |
 | **Hosted demo (the judge URL)** | **NOT BUILT / not deployed** | Production deploy is owner-gated. There is no demo URL yet. |
 | App publishing (Workers for Platforms) | **Not deployed** | The dispatch Worker is **PROPOSED** (`workers/dispatch/wrangler.jsonc`); the publish service and `/api` routes exist locally. |
 | Custom domains for published apps | **Not built** | Only the plan and the adapter's headroom exist; nothing is configured. |
 | Cloudflare Artifacts code store, Web Risk safety scan, Worker Loader preview on a **deployed** Worker | **Not live-verified** | Implemented and locally tested; never run on a deployed Worker. |
-| Licence audit (`bun scripts/license-audit.ts`) | **LOCAL VERIFIED** — and currently **not clean** | 24 production dependencies, 2 flagged (`@fontsource/inter` and `@fontsource/ibm-plex-mono`, both OFL-1.1 — a permissive font licence outside this project's allowed set). Full table in `docs/licenses.md`. |
+| Licence audit (`bun scripts/license-audit.ts`) | **LOCAL VERIFIED** — clean | 24 production dependencies, 24 allowed, 0 flagged, 0 unresolved (exit 0). The two `@fontsource/*` webfont packages are OFL-1.1, accepted for that package family only (owner decision, 2026-10-19). Full table in `docs/licenses.md`. |
 | Screenshots in `docs/reviews/` | **LOCAL VERIFIED** | Real captures from local browser acceptance runs (2026-10-08 / 2026-10-09). |
 
 ---
@@ -305,11 +315,11 @@ app runs and fails closed with visible gaps.
 | `bun run verify:packet Pxx` | That packet's mapped tests; fails when a mapped test file is missing or empty | — |
 | `bun run test:browser -- Pxx` | Browser specs against the composed build (`bun run build` first) | — |
 | `bun run test:live -- Pxx` | Live specs; gated behind `CADDIE_LIVE_AUTHORIZED=1` and real credentials | BLOCKED without owner authorization |
-| `bun scripts/license-audit.ts` | Third-party licence audit → `docs/licenses.md` | 22 allowed, **2 flagged**, 0 unresolved (exit 1) |
+| `bun scripts/license-audit.ts` | Third-party licence audit → `docs/licenses.md` | 24 allowed, 0 flagged, 0 unresolved (exit 0 — CLEAN) |
 | `bun scripts/release-check.ts` | The local release gate (deployment is always BLOCKED by design) | — |
 
-Also in the repo: **34** SQL migrations (`apps/app/migrations/0001_…` →
-`0034_judge_usage_events.sql`), counted at the time of writing
+Also in the repo: **35** SQL migrations (`apps/app/migrations/0001_…` →
+`0035_judge_discovery_events.sql`), counted at the time of writing
 (`ls apps/app/migrations/*.sql | wc -l`).
 
 ---

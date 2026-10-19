@@ -78,6 +78,50 @@ gates turn PASS only via a receipt in `docs/live-receipts.json`, which
 `bun run test:live -- Pxx` writes after every mapped live spec of that packet
 passes (the round-trip was proven directly; no live run has been made yet).
 
+## Browser acceptance suite: known failures (2026-10-19)
+
+The two gates above record the browser specs as green. They were green when
+written; they are **not green now**. Recorded on 2026-10-19 against the composed
+build (`bun run build` first), no deploy and no paid call.
+
+| Check | Classification | Receipt |
+|---|---|---|
+| `bun run test:browser --all` | FAILED (partial) | 45 packets — 19 PASS, 4 FAIL (P11, U01, U04, U05), 22 NOT APPLICABLE |
+| the four failing packets' specs, re-run alone | FAILED (partial) | **6 failed, 26 passed, exit 1** — twice, with identical results, so not flakiness |
+
+Six cases across four spec files, all **pre-existing and none caused by the
+S06/S07 review work**: the client sources and the spec files are byte-identical
+to the tree without those changes (0 bytes of diff across `tests/browser`,
+`apps/app/src/client` and `apps/site`), and these specs stub `/api`, so no
+server change can reach them.
+
+- `discovery.spec.ts:409` — asserts `You can enter`; the v2 row renders `Can enter` (`hackathon-format.ts` calls that the dense-row "short chip").
+- `discovery.spec.ts:467` and `:527` — assert `source local-seed · saved`; the row renders a `Saved` button instead.
+- `discovery-journey.spec.ts:231` — asserts `· saved` inside `discovery-results`; the panel renders `Saved 1` in the segment count and a `Saved` button on the row.
+- `theme-picker.spec.ts:166` — after four `ArrowRight` presses it expects focus to wrap to the first swatch, but `PALETTES` in `apps/app/src/client/theme.ts` has shipped **five** entries (`caddie`, `clearcut`, `onesecos`, `farmhand`, `kirocrew`) since the same commit that wrote the test, so the fifth press lands on `kirocrew`.
+- `brief.spec.ts:265` — expects exactly one run POST from the mobile welcome panel's discovery action and observes none. Not yet root-caused.
+
+Root cause of the Discover four: `fb1c43d4` (2026-10-15, "hackathon results card
+and detail pane") rewrote `Results.tsx` (643 lines) and dropped the `· saved`
+wording that `c0554b09` (2026-10-10) introduced together with the spec
+expectations; the specs were not updated. The theme case was wrong from its own
+commit (`47e0287e`, 2026-10-15).
+
+Why it went unnoticed: **CI does not run the browser suite.**
+`.github/workflows/ci.yml` runs `bun install --frozen-lockfile`, `bun run build`,
+`bun run typecheck`, `bun run verify:packet --all` and
+`bun scripts/release-check.ts`. `test:browser` is not among them, and
+`scripts/release-check.ts` has no browser check at all, so neither CI nor the
+release gate can see this.
+
+Status: **FAILED, recorded rather than fixed.** Fixing means deciding product
+copy — whether the v2 list should show the long verdict (`You can enter`, as the
+2026-10-10 design's `docs/design/2026-10-10-v2/assets/events.js` has it) or the
+short chip — and whether the theme keyboard test should follow the palette
+count. Both are owner calls, so they are surfaced here rather than silently
+rewritten. Any fix must come with a CI step that runs `test:browser`, or the
+next regression will hide in the same place.
+
 ## Stack availability (frozen scope, feature-ledger)
 
 | Stack | ID | Status |
