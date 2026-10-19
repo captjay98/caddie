@@ -39,6 +39,7 @@ import { NowPanel } from './project/NowPanel.tsx';
 import { relativeUpdated } from './project/now-panel.ts';
 import { ProjectTabs } from './workspace/ProjectTabs.tsx';
 import { projectCardFromCopiedApp, projectCardFromExperience, projectStatus, type CopiedAppSummary } from './workspace/project-status.ts';
+import { overviewAppState } from './project/overview-app.ts';
 
 /**
  * The routed surfaces for the discovery-first shell.
@@ -782,9 +783,20 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 	// never shifts the Overview layout (user steering, 2026-10-15).
 	const [briefOpen, setBriefOpen] = useState(false);
 
-	// "Your app so far" (§4): the project's real preview state from the P07
-	// previews API (metadata only — the secret token is never re-readable).
-	const [preview, setPreview] = useState<{ live: boolean; createdAt: string | null; error: boolean } | null>(null);
+	// "Your app" (review F04): the same truth as the Now panel and the Projects
+	// card. The checked preview comes from the experience projection (polled);
+	// a project with no workflow yet may have a copied app (GitHub copy or a
+	// judge's example), read from the same /workflow answer and polled while it
+	// is being checked. A live private share link (P07 previews API, metadata
+	// only) is a separate line, never the source of "is there an app".
+	const noWorkflow = experienceParsed?.success === true && experienceParsed.output.version === 0;
+	const copied = useQuery({
+		queryKey: ['build-workflow', chrome.actorId, props.projectId],
+		enabled: Boolean(chrome.actorId) && noWorkflow,
+		queryFn: () => fetchJson<{ importPreview?: CopiedAppSummary | null }>(`/api/projects/${encodeURIComponent(props.projectId)}/workflow`),
+		refetchInterval: (query) => (query.state.data?.importPreview?.status === 'checking' ? 3000 : false),
+	});
+	const [share, setShare] = useState<{ live: boolean; createdAt: string | null } | null>(null);
 	useEffect(() => {
 		let cancelled = false;
 		void fetch(`/api/projects/${encodeURIComponent(props.projectId)}/previews`, { credentials: 'same-origin' })
@@ -793,15 +805,32 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 				if (cancelled) return;
 				const now = Date.now();
 				const live = (body?.previews ?? []).find((p) => !p.revoked && new Date(p.expiresAt).getTime() > now);
-				setPreview({ live: Boolean(live), createdAt: live?.createdAt ?? null, error: false });
+				setShare({ live: Boolean(live), createdAt: live?.createdAt ?? null });
 			})
 			.catch(() => {
-				if (!cancelled) setPreview({ live: false, createdAt: null, error: true });
+				if (!cancelled) setShare(null);
 			});
 		return () => {
 			cancelled = true;
 		};
 	}, [props.projectId]);
+	const app = overviewAppState({
+		experience: experience.isError ? null : experience.data === undefined ? undefined : experienceParsed?.success ? experienceParsed.output : null,
+		copiedApp: noWorkflow ? (copied.data?.importPreview ?? null) : null,
+		share,
+	});
+	// The app runs inside the project card in the chat pane: open it there and
+	// bring the preview into view (on a phone the pane switch renders first).
+	const tryApp = () => {
+		chrome.openProject(props.projectId, true);
+		let tries = 0;
+		const reveal = () => {
+			const target = document.querySelector('[data-app-preview]');
+			if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+			else if (++tries < 20) window.setTimeout(reveal, 100);
+		};
+		window.setTimeout(reveal, 0);
+	};
 
 	const cards = brief.data?.cards ?? [];
 	const open = cards.filter((c) => c.status !== 'handled');
@@ -922,23 +951,51 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 						) : null}
 					</section>
 
-					{/* Your app: the real preview state, never a fake screenshot. */}
-					<section className="card-surface settings-panel" data-testid="overview-preview">
+					{/* Your app: the real app state, never a fake screenshot (review F04). */}
+					<section className="card-surface settings-panel" data-testid="overview-preview" data-state={app.kind}>
 						<p className="kicker">Your app</p>
 						<div className="overview-app">
-							<span className="overview-app-phone" data-live={preview?.live ? 'true' : 'false'} aria-hidden="true" />
-							{preview === null ? (
-								<p className="state-detail">Checking for a live preview…</p>
-							) : preview.error ? (
-								<p className="state-detail">The preview list could not be read just now.</p>
-							) : preview.live ? (
-								<p className="state-detail" data-testid="overview-preview-live">
-									A private preview of your app is live{preview.createdAt ? ` (created ${new Date(preview.createdAt).toLocaleDateString()})` : ''}. The link lives in
-									the chat where Caddie shared it — ask there to share it again.
+							<span className="overview-app-phone" data-live={app.kind === 'ready' ? 'true' : 'false'} aria-hidden="true" />
+							{app.kind === 'checking' ? (
+								<p className="state-detail">Checking your app…</p>
+							) : app.kind === 'unavailable' ? (
+								<p className="state-detail">Your app’s status couldn’t be read just now.</p>
+							) : app.kind === 'ready' ? (
+								<div className="overview-app-body">
+									<p className="state-detail" data-testid="overview-preview-ready">
+										{app.source === 'example'
+											? 'An example app Caddie built is ready to try.'
+											: app.source === 'github'
+												? 'Your app from GitHub is ready to try.'
+												: app.current
+													? 'Your app is ready to try.'
+													: 'An earlier version of your app is ready to try. The latest plan isn’t built yet.'}
+									</p>
+									<button type="button" className="btn-key" data-testid="overview-try-app" onClick={tryApp}>
+										Try your app
+									</button>
+									{app.share ? (
+										<p className="state-detail overview-app-share" data-testid="overview-preview-share">
+											A private share link is also live{app.share.createdAt ? ` (created ${new Date(app.share.createdAt).toLocaleDateString()})` : ''}.
+										</p>
+									) : null}
+								</div>
+							) : app.kind === 'building' ? (
+								<p className="state-detail" data-testid="overview-preview-building">
+									Caddie is getting your app ready. It shows here once its checks pass.
 								</p>
+							) : app.kind === 'failed' ? (
+								<div className="overview-app-body">
+									<p className="state-detail" data-testid="overview-preview-failed">
+										{app.message ?? 'Your code is saved, but it didn’t build yet. Tell Caddie what you’d like, and it fixes the build first.'}
+									</p>
+									<button type="button" className="btn-ghost" onClick={() => chrome.openProject(props.projectId, true)}>
+										Continue with Caddie
+									</button>
+								</div>
 							) : (
 								<p className="state-detail" data-testid="overview-preview-none">
-									Your app appears here once the plan is approved and built. You’ll get a link to try it on your phone.
+									Your app appears here once its design is approved and built.
 								</p>
 							)}
 						</div>

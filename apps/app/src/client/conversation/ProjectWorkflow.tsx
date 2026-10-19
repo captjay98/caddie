@@ -493,7 +493,7 @@ export function ProjectWorkflow({
       ) : null}
       {workflow.phase === "ready" && workflow.previewId && chrome.actorId ? (
         <>
-          <p className="state-detail" data-testid="workflow-ready-detail">
+          <p className="state-detail" data-testid="workflow-ready-detail" data-app-preview="">
             {workflow.detail ?? "Build checks passed. Try the app below and tell Caddie what you’d like to change."}
           </p>
           <InteractivePreview

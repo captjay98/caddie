@@ -1809,3 +1809,26 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "Review 2026-10-19 F04: the project Overview's 'Your app' follows the workflow, not the share list",
+  "status": "LOCAL VERIFIED: unit tests on the state function, and browser specs against the composed build (stubbed /api) with isolated preview state. Screenshots reviewed at desktop and 390px.",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "bun test tests/overview-app.test.ts (before)", "exitCode": 1, "receipt": "Cannot find module overview-app.ts: there was no state to test; the panel read GET /previews once and nothing else."},
+    {"command": "bun test tests/overview-app.test.ts (after)", "exitCode": 0, "receipt": "6 pass: checked build with no share is ready; copied example with no workflow is ready (and says example); a build finishing flips it on the next projection; a revoked share does not hide the app and a live share is its own line; stale preview, copy in progress and a failed copy; loading and unreadable."},
+    {"command": "bunx playwright test project-v2, project-workflow, projects-v2 (CADDIE_TEST_STATE isolated)", "exitCode": 0, "receipt": "52 passed, 4 of them new or changed: ready + Try + separate share line, the copied example, a build finishing while the page is open (no reload), and Try on a phone opening the chat pane."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/project/overview-app.ts (new)", "note": "overviewAppState: the experience projection's preview first, then (no workflow) the copied app; the share link only as a secondary fact."},
+    {"path": "apps/app/src/client/surface.tsx, workspace.css", "note": "The panel reads the polled experience and the /workflow copied app (polled while checking), offers 'Try your app' (opens the project chat and scrolls the preview into view), and no longer says the link 'lives in the chat'. Uses the app's own btn-key/btn-ghost; the first build used non-existent btn classes, caught in the screenshots."},
+    {"path": "apps/app/src/client/conversation/ProjectWorkflow.tsx, project/ImportedApp.tsx", "note": "data-app-preview marks where the app runs, for the Try action."}
+  ],
+  "environment": "Local Mac only.",
+  "providerCalls": "none",
+  "limitations": [
+    "On a wide screen Try scrolls the chat pane to the preview; that scroll is not asserted (the stubbed chat card has no preview frame). The phone case is asserted (pane=channel)."
+  ]
+}
+```

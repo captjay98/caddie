@@ -131,7 +131,18 @@ function json(route: { fulfill(options: Record<string, unknown>): unknown }, sta
 	return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; planDocs?: unknown[]; usage?: unknown; approval?: unknown; experience?: unknown; hackathon?: unknown; workflowPhase?: string } = {}) {
+/** A project whose checked build is the current preview (the workflow projection's view). */
+const READY_EXPERIENCE = {
+	projectId: 'proj-a',
+	version: Date.parse('2026-10-19T12:00:00.000Z'),
+	stage: 'ready',
+	plan: { id: 'plan-1', revision: '2', approved: true },
+	preview: { id: 'out-1', revision: '2', current: true },
+	message: 'Your app is ready.',
+	actions: [],
+} as const;
+
+async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; planDocs?: unknown[]; usage?: unknown; approval?: unknown; experience?: unknown; hackathon?: unknown; workflowPhase?: string; importPreview?: unknown; share?: boolean } = {}) {
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
 	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) =>
@@ -155,7 +166,7 @@ async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; p
 	await context.route('**/api/projects/**', (route) => {
 		const path = new URL(route.request().url()).pathname;
 		if (path.endsWith('/workflow/decision')) return json(route, 200, { workflow: null, approval: { id: 'apr-1', status: route.request().postDataJSON().decision } });
-        if (path.endsWith('/workflow')) return json(route, 200, { workflow: opts.workflowPhase ? { phase: opts.workflowPhase, brief: 'Build FarmLog AI.' } : null });
+        if (path.endsWith('/workflow')) return json(route, 200, { workflow: opts.workflowPhase ? { phase: opts.workflowPhase, brief: 'Build FarmLog AI.' } : null, importPreview: opts.importPreview ?? null });
 		if (path.endsWith('/brief')) return json(route, 200, { cards: opts.brief ?? [] });
 		if (path.endsWith('/experience') && opts.experience) return json(route, 200, opts.experience);
 		if (path.endsWith('/hackathon')) return json(route, 200, { hackathon: opts.hackathon ?? null });
@@ -165,7 +176,7 @@ async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; p
 		if (path.endsWith('/tasks') && route.request().method() === 'POST') return json(route, 201, { task: { id: 'task-1', projectId: 'proj-a', title: 'x', status: 'open', createdBy: 'a', createdAt: NOW } });
 		if (path.endsWith('/previews'))
 			return json(route, 200, {
-				previews: [
+				previews: opts.share === false ? [] : [
 					{ id: 'pvw-1', projectId: 'proj-a', revisionId: 'rev-1', expiresAt: '2027-01-01T00:00:00.000Z', revoked: false, createdBy: 'x', createdAt: NOW },
 				],
 			});
@@ -174,6 +185,56 @@ async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; p
 }
 
 test.describe('Project Overview / Plan / Build v2 (U06)', () => {
+	test('Overview: a copied example with no build workflow is ready to try (review F04)', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, {
+			experience: { projectId: 'proj-a', version: 0, stage: 'planning', plan: null, preview: null, message: 'No plan yet.', actions: [] },
+			importPreview: { status: 'ready', origin: 'example', message: null, outputId: 'out-ex', repoFullName: 'Todoer', versionSeq: 1, hasServer: false },
+			share: false,
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('overview-preview-ready')).toHaveText('An example app Caddie built is ready to try.');
+		await expect(page.getByTestId('overview-try-app')).toBeVisible();
+		await expect(page.getByTestId('overview-preview-share')).toHaveCount(0);
+		if (process.env.CADDIE_SHOTS) {
+			await page.setViewportSize({ width: 390, height: 844 });
+			await page.getByTestId('overview-preview').screenshot({ path: join(process.env.CADDIE_SHOTS, 'overview-app-example-mobile.png') });
+		}
+		await context.close();
+	});
+
+	test('Overview: a build finishing while the page is open flips "Your app" to ready, no reload (review F04)', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, { share: false });
+		let calls = 0;
+		await context.route('**/api/projects/proj-a/experience', (route) => {
+			calls += 1;
+			const ready = calls > 1;
+			return json(route, 200, {
+				...READY_EXPERIENCE,
+				version: Date.parse(NOW) + calls,
+				stage: ready ? 'ready' : 'building',
+				preview: ready ? READY_EXPERIENCE.preview : null,
+			});
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('overview-preview-building')).toBeVisible();
+		await expect(page.getByTestId('overview-preview-ready')).toHaveText('Your app is ready to try.', { timeout: 10_000 });
+		await context.close();
+	});
+
+	test('Overview: Try your app opens the chat pane, where the app runs (phone width, review F04)', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await stubAccount(context, { experience: READY_EXPERIENCE });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await page.getByTestId('overview-try-app').click();
+		await expect(page).toHaveURL(/pane=channel/);
+		await context.close();
+	});
+
 	test('Overview: next step card from the top open brief card with one button', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubAccount(context, {
@@ -285,13 +346,19 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await context.close();
 	});
 
-	test('Overview: "Your app so far" states the real preview status and to-dos embed with the add-task window', async ({ browser }) => {
+	test('Overview: "Your app" reads the checked build, offers Try your app, states a share link separately, and to-dos embed', async ({ browser }) => {
 		const context = await browser.newContext();
-		await stubAccount(context);
+		await stubAccount(context, { experience: READY_EXPERIENCE });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/project?project=proj-a`);
-		// A live preview record exists in the stub → stated, not faked as a link.
-		await expect(page.getByTestId('overview-preview-live')).toContainText('A private preview of your app is live');
+		// Review F04: the app is there because the build produced it, not because a share link exists.
+		await expect(page.getByTestId('overview-preview-ready')).toHaveText('Your app is ready to try.');
+		await expect(page.getByTestId('overview-try-app')).toBeVisible();
+		await expect(page.getByTestId('overview-preview-share')).toContainText('A private share link is also live');
+		await expect(page.getByTestId('overview-preview')).not.toContainText('in the chat');
+		if (process.env.CADDIE_SHOTS) {
+			await page.getByTestId('overview-preview').screenshot({ path: join(process.env.CADDIE_SHOTS, 'overview-app-ready.png') });
+		}
 
 		// The to-do list is embedded; the create form hides behind the button.
 		await page.getByTestId('overview-todo').locator('summary').click();

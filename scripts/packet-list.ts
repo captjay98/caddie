@@ -195,6 +195,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/project-experience.test.ts',
 			'tests/project-hackathon.test.ts',
 			'tests/project-status.test.ts',
+			'tests/overview-app.test.ts',
 		],
 		browser: ['tests/browser/artifacts.spec.ts', 'tests/browser/project-v2.spec.ts'],
 		live: [],

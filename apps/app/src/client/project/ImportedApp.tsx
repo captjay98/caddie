@@ -73,7 +73,7 @@ export function ImportedApp(props: {
 			) : null}
 			{preview.status === 'ready' && preview.outputId ? (
 				<>
-					<p className="state-detail" data-testid="imported-app-ready">
+					<p className="state-detail" data-testid="imported-app-ready" data-app-preview="">
 						{preview.origin === 'example' ? (
 							<>
 								Caddie built <b>{preview.repoFullName}</b>. Try it, then tell Caddie what you&rsquo;d like to change, and it builds on

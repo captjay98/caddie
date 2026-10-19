@@ -7479,6 +7479,18 @@ mark {
 .overview-app .state-detail {
 	margin: 0;
 }
+/* Text, then the action, then any secondary line: one column, even rhythm. */
+.overview-app-body {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 8px;
+	min-width: 0;
+}
+.overview-app-share {
+	font-size: 0.85em;
+	color: var(--color-muted);
+}
 .overview-app-phone {
 	flex: none;
 	width: 34px;
