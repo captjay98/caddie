@@ -283,6 +283,8 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/stopped-turn.test.ts',
 			// Owner review item 3: the one install step every install path uses.
 			'tests/verified-install.test.ts',
+			// Found 2026-10-19: no stored build file may exceed D1's 2 MB value limit.
+			'tests/content-store-limit.test.ts',
 		],
 		browser: ['tests/browser/project-workflow.spec.ts'],
 		live: [],

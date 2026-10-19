@@ -278,7 +278,7 @@ such rather than omitted.
 
 | Surface | Status | What backs it |
 | :--- | :--- | :--- |
-| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1541 pass, 0 fail, 114 files — run at the time of writing. |
+| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1545 pass, 0 fail, 115 files — run at the time of writing. |
 | Browser acceptance suite (`bun run test:browser`) | **LOCAL VERIFIED** (2026-10-19) | `bun run test:browser -- --all` against the composed build: 24 packets PASS, 0 FAIL, 22 have no browser spec (named, not counted), at the last full run (2026-10-19, with the PWA spec). PUBLISH has since gained `tests/browser/app-install.spec.ts`; it and BUILD's spec pass on their own runs. Six cases had failed earlier the same day; every one was a spec that no longer matched the shipped client, now updated, with one root-caused stub-ordering bug (`docs/release-evidence.md`). CI now runs this suite. |
 | Typecheck (`bun run typecheck`) | **LOCAL VERIFIED** | exit 0 (root project + `apps/app`). |
 | Build composition (`bun run build`) | **LOCAL VERIFIED** | One composed Workers assets tree from the Astro landing + Vite SPA. |
@@ -324,7 +324,7 @@ app runs and fails closed with visible gaps.
 
 | Command | What it is | Last observed |
 | :--- | :--- | :--- |
-| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1541 pass, 0 fail, 7664 expect() calls, 114 files** |
+| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1545 pass, 0 fail, 7664 expect() calls, 115 files** |
 | `bun run typecheck` | Root project + `apps/app` typecheck | exit 0 |
 | `bun run build` | Astro + Vite + asset composition into one Workers assets tree (no deploy) | exit 0 (LOCAL VERIFIED) |
 | `bun run verify:packet Pxx` | That packet's mapped tests; fails when a mapped test file is missing or empty | — |

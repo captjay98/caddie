@@ -36,6 +36,19 @@ import { ScopeError, assertProjectScope } from './scope.ts';
 /** ~5 MiB per artifact in the local store; the DDL CHECK enforces the same. */
 export const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024;
 
+/**
+ * Production D1 refuses any single string/BLOB/row over 2,000,000 bytes
+ * (developers.cloudflare.com/d1/platform/limits). Every content-store write
+ * is one BLOB row, so this is the real ceiling for ANY payload — build
+ * bundles, code versions, artifacts — regardless of the higher per-kind
+ * limits above. Enforced in {@link createD1ContentStore} so a payload that
+ * would be rejected by production D1 is refused here, with a reason, instead
+ * of failing the insert only once deployed. The local SQLite test DB has no
+ * such limit, so without this check an over-2 MB bundle passes every local
+ * test and then cannot be saved in production.
+ */
+export const D1_MAX_VALUE_BYTES = 2_000_000;
+
 export const ARTIFACT_KINDS = ['plan', 'test-result', 'browser-capture', 'diff'] as const;
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
@@ -103,6 +116,15 @@ function asBytes(value: unknown): Uint8Array | null {
 export function createD1ContentStore(db: D1Database): ArtifactContentStore {
 	return {
 		async put(bytes: Uint8Array): Promise<ArtifactContentPutResult> {
+			if (bytes.byteLength > D1_MAX_VALUE_BYTES) {
+				// Production D1 would reject this BLOB. Fail here, with a reason,
+				// not at the insert on a deployed Worker.
+				throw new ScopeError(
+					422,
+					'CONTENT_TOO_LARGE',
+					`A single file is ${(bytes.byteLength / 1_000_000).toFixed(1)} MB; the most a saved app can hold in one file is 2 MB.`,
+				);
+			}
 			const contentHash = await sha256Hex(bytes);
 			const existing = await db
 				.prepare('select "contentHash" from "artifact_content" where "contentHash" = ?')

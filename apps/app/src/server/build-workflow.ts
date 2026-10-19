@@ -20,7 +20,7 @@ import {
   checkApprovalForEffect,
 } from "./approvals.ts";
 import { recordPlanDecision } from "./planning.ts";
-import { createD1ContentStore } from "./artifacts.ts";
+import { createD1ContentStore, D1_MAX_VALUE_BYTES } from "./artifacts.ts";
 import { findModelRouteForRole } from "../agents/providers.ts";
 
 export type WorkflowPhase =
@@ -625,9 +625,13 @@ export interface BuildManifest {
   client?: { js: { sha256: string; bytes: number }; css: { sha256: string; bytes: number } };
 }
 
-const MAX_SERVER_BUNDLE_BYTES = 3 * 1024 * 1024;
+// A build file is stored as one D1 BLOB, capped at 2 MB in production
+// (D1_MAX_VALUE_BYTES). These per-file ceilings match that real limit, so an
+// over-size file is refused at check time with a specific message rather than
+// failing the content-store write later.
+const MAX_SERVER_BUNDLE_BYTES = D1_MAX_VALUE_BYTES;
 const MAX_MIGRATION_BYTES = 256 * 1024;
-const MAX_CLIENT_FILE_BYTES = 3 * 1024 * 1024;
+const MAX_CLIENT_FILE_BYTES = D1_MAX_VALUE_BYTES;
 
 async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Promise<string> {
   const store = createD1ContentStore(db);
@@ -635,7 +639,7 @@ async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Pr
   if (bundle.server !== null) {
     const bytes = new TextEncoder().encode(bundle.server);
     if (bytes.length > MAX_SERVER_BUNDLE_BYTES)
-      throw new ScopeError(422, "SERVER_TOO_LARGE", "The app's server bundle is larger than 3 MB.");
+      throw new ScopeError(422, "SERVER_TOO_LARGE", "The app's server is larger than 2 MB, which is the most a saved app can hold in one file.");
     server = { sha256: (await store.put(bytes)).contentHash, bytes: bytes.length };
   }
   const migrations: BuildManifest["migrations"] = [];
@@ -652,7 +656,7 @@ async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Pr
     const part = async (text: string, label: string) => {
       const bytes = new TextEncoder().encode(text);
       if (bytes.length > MAX_CLIENT_FILE_BYTES)
-        throw new ScopeError(422, "CLIENT_TOO_LARGE", `The app's ${label} is larger than 3 MB.`);
+        throw new ScopeError(422, "CLIENT_TOO_LARGE", `The app's ${label} is larger than 2 MB, which is the most a saved app can hold in one file.`);
       return { sha256: (await store.put(bytes)).contentHash, bytes: bytes.length };
     };
     client = { js: await part(bundle.client.js, "script"), css: await part(bundle.client.css, "styles") };

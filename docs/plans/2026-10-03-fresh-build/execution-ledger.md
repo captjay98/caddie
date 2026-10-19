@@ -1985,3 +1985,31 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   "providerCalls": "none"
 }
 ```
+
+```json
+{
+  "packet": "Sandbox host probe (Track 3 decision input) + the 2 MB D1 value limit fixed",
+  "status": "Probe: LIVE VERIFIED (one owner-authorized disposable sandbox run). D1 fix: LOCAL VERIFIED.",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "CADDIE_LIVE_AUTHORIZED=1 bun scripts/probe-sandbox-host.ts", "exitCode": 0, "receipt": "One disposable instance on tag:tt-base:1, SUCCEEDED, exit 0, duration 1.6 s. arch=x86_64 (AMD EPYC 9654, 4 vCPU, KVM), Debian 12, glibc 2.36, MemTotal 3940 MiB / MemAvailable 3772 MiB, rootfs 47T 1% used. No java/flutter/sdkmanager preinstalled. Network OK: dl.google.com Android repo 200, Flutter releases JSON 200, Gradle distributions 200. Account limits: instance_max_timeout 3600 s, instance_max_concurrency 50, instance_max_layer_bytes 12 GiB (12884901888), images_import_max_concurrency 8. Raw op resources (diagnostic, units unconfirmed): cost 0.0012, max_rss 12912. No image kept."},
+    {"command": "bun test tests/content-store-limit.test.ts tests/build-workflow.test.ts tests/publish.test.ts tests/versions.test.ts tests/judge-example.test.ts", "exitCode": 0, "receipt": "91 pass, 0 fail. New: an at-limit 2,000,000-byte payload stores; one byte over is refused with ScopeError 422 CONTENT_TOO_LARGE; a 2.5 MB server bundle and a 2.5 MB client file are refused at storeBuildOutput (SERVER_TOO_LARGE / CLIENT_TOO_LARGE) with no workflow_outputs row and no over-size artifact_content row."},
+    {"command": "mutation: D1_MAX_VALUE_BYTES raised 2M -> 5M (scratch, restored byte-identical)", "exitCode": 0, "receipt": "Fails the content-store limit test and the build-workflow over-size test; the guard is load-bearing."},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "0 errors."}
+  ],
+  "found": [
+    "The sandbox is x86-64, so Android's Linux-x86-64 build tools CAN run there — the earlier 'may be ARM, may be impossible' unknown is resolved in Track 3's favour. BUT MemAvailable is ~3.8 GB: a Flutter+Gradle APK build is memory-tight (the local build needed Gradle's heap capped; the template's default is 8 GB). An image layer may be up to 12 GiB, enough for Flutter+JDK+Android SDK."
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/artifacts.ts", "note": "New export D1_MAX_VALUE_BYTES = 2_000_000 (production D1's per-value limit). createD1ContentStore.put throws ScopeError 422 CONTENT_TOO_LARGE above it — the one choke point every build/version/artifact write passes through, so nothing can store a BLOB production D1 would reject. The local SQLite test DB has no such limit, which is why this was invisible until now."},
+    {"path": "apps/app/src/server/build-workflow.ts", "note": "MAX_SERVER_BUNDLE_BYTES and MAX_CLIENT_FILE_BYTES lowered from 3 MiB to D1_MAX_VALUE_BYTES, so an over-size server or client file is refused at check time with a specific message ('larger than 2 MB, the most a saved app can hold in one file') instead of the generic store error. Migration ceiling (256 KB) unchanged — already under the limit."},
+    {"path": "scripts/probe-sandbox-host.ts", "note": "One disposable sandbox run reporting CPU/memory/disk/libc, Android+Flutter+Gradle network reachability and account limits. Refuses without CADDIE_LIVE_AUTHORIZED=1; prints no credential values."},
+    {"path": "tests/content-store-limit.test.ts", "note": "The content store's 2 MB guard: at-limit stores, over-limit refused, and a check that the stated limit is below the migration's 5 MiB CHECK so the guard genuinely matters."}
+  ],
+  "notFixed": [
+    "The migration 0003_artifacts.sql CHECK stays at 5 MiB (<= 5242880). It is a backstop below which the new code guard is stricter; left as-is to avoid an append-only migration that would only tighten a limit the code already enforces. artifacts.ts MAX_ARTIFACT_BYTES (5 MiB) is likewise unchanged — it bounds test-result/plan/diff artifacts, now additionally capped by the content-store guard."
+  ],
+  "providerCalls": "one disposable sandbox instance (cost ~0.0012 in the op's raw units; billing records are the invoice truth).",
+  "environment": "Local Mac for the D1 fix; one live Token Factory sandbox run for the probe."
+}
+```

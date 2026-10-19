@@ -894,6 +894,46 @@ describe("approved output and preview identity", () => {
     }
   });
 
+  test("a server bundle over 2 MB is refused at check time (production D1 would reject the write)", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      // 2.5 MB: under the OLD 3 MB ceiling (was silently accepted, then failed
+      // in production), over D1's real 2,000,000-byte value limit.
+      const bigServer = "export default {};\n" + "a".repeat(2_500_000);
+      await rejectsCode(
+        storeBuildOutput(w.db, item.scope, {
+          html: "<!doctype html><html><body>big</body></html>",
+          image: "sha256:big-image",
+          planId: item.plan.id,
+          runId: item.workflow.runId,
+          bundle: { server: bigServer, migrations: [] },
+        }),
+        "SERVER_TOO_LARGE",
+      );
+      expect(w.count("workflow_outputs")).toBe(0);
+      // Only the small HTML preview was stored before the oversized bundle was
+      // rejected; the 2.5 MB bundle itself never reached artifact_content.
+      expect(w.count("artifact_content")).toBe(1);
+      expect(w.count("artifact_content", "size > 2000000")).toBe(0);
+
+      // A client file of the same size is refused the same way.
+      await rejectsCode(
+        storeBuildOutput(w.db, item.scope, {
+          html: "<!doctype html><html><body>big</body></html>",
+          image: "sha256:big-image-2",
+          planId: item.plan.id,
+          runId: item.workflow.runId,
+          bundle: { server: null, migrations: [], client: { js: "x".repeat(2_500_000), css: "" } },
+        }),
+        "CLIENT_TOO_LARGE",
+      );
+      expect(w.count("workflow_outputs")).toBe(0);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
   test("unapproved, stale-check, incomplete HTML and oversized output never publish readiness", async () => {
     const w = await world();
     try {
