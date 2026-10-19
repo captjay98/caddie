@@ -136,6 +136,7 @@ export async function acceptProposal(
 	db: D1Database,
 	scope: Scope,
 	proposalId: string,
+	limits?: unknown,
 ): Promise<{ proposal: ProjectProposal; project: { id: string; name: string } }> {
 	const proposal = await getProposal(db, scope, proposalId);
 	const row = await db
@@ -149,7 +150,7 @@ export async function acceptProposal(
 		brief: proposal.brief,
 		operationKey: `proposal:${proposal.id}`,
 		sourceConversationId,
-	});
+	}, limits);
 	await setStatus(db, proposal.id, 'accepted', started.project.id);
 	return {
 		proposal: await getProposal(db, scope, proposal.id),

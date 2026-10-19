@@ -160,6 +160,38 @@ browser.
 refuse them with "Publishing is turned off for judge accounts. Everything else
 works the same." There is no separate gate in the client — the server refuses.
 
+**Judge limits.** A judge account (a user with an `active` row in
+`judge_accounts`) is capped at **3 projects**, **3 build starts per rolling 24
+hours** and **300 Caddie messages per rolling 24 hours** (D4). The owner and
+invited users are never counted or limited. The rules live in one place,
+`apps/app/src/server/judge-limits.ts`, and are tuned by three optional env vars
+(defaults above; `0`, an unparseable value or an absent one all mean the
+default — the kill switch, not a zero limit, is how judges are stopped):
+`JUDGE_MAX_PROJECTS`, `JUDGE_MAX_BUILDS_PER_DAY`, `JUDGE_MAX_MESSAGES_PER_DAY`.
+
+- **Projects** are counted as the non-home `projects` rows reachable through
+  the account's workspace memberships. The lazy Home conversation never counts
+  and is never refused. Refusal (`403 JUDGE_LIMIT_PROJECTS`) happens before the
+  insert, on both `POST /api/projects` and the chat/proposal create path.
+- **Build starts** are counted across all the account's projects and recorded
+  in `judge_usage_events` (0034). The three paths that start work each count
+  once: approving the plan, approving the design brief, and Retry (including
+  the chat "continue" path that reaches it). The check runs before any
+  approval, phase change, resume row or dispatch. Refusal is
+  `403 JUDGE_LIMIT_BUILDS`.
+- **Messages** are counted in the conversation guard
+  (`apps/app/src/server/routes/runs.ts`) on exactly `POST
+  /agents/coordinator/<conversationId>` — the request that admits a user
+  message, before the Flue turn starts. History, `?view=updates` and `/abort`
+  cost nothing. The server's own intake dispatch carries an HMAC of the
+  conversation id keyed by `BETTER_AUTH_SECRET`, so it is admitted without
+  consuming a judge's quota and a browser cannot forge the header. Refusal is
+  `403 JUDGE_LIMIT_MESSAGES`.
+
+Every refusal is `{ error, message }` with a plain sentence such as "Judges can
+have 3 projects. Everything else works the same." Nothing is metered (D4) and
+no refusal happens in the client.
+
 **Where the code lives.** `JUDGE_ACCESS_CODE` is an owner secret (wrangler
 secret / `.dev.vars`), at least 16 characters, never in the repo, the README or
 the Devpost text. The server compares it in constant time; the code never

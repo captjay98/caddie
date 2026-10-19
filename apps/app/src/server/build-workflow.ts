@@ -8,6 +8,7 @@ import {
   ScopeError,
 } from "./scope.ts";
 import { createRun, isRunPaused, lookupRunByConversation } from "./runs.ts";
+import { admitJudgeBuildStart, admitJudgeProject } from "./judge-limits.ts";
 import {
   getProject,
   listPlanDocRevisions,
@@ -72,6 +73,7 @@ export async function startProjectFromChat(
     operationKey: string;
     sourceConversationId: string;
   },
+  limits?: unknown,
 ) {
   await assertProjectScope(db, scope);
   const source = await rows(
@@ -121,6 +123,10 @@ export async function startProjectFromChat(
   const projectId = `proj_${digest.slice(0, 32)}`,
     runId = `run_${digest.slice(0, 32)}`;
   const conversationId = `conv_${digest.slice(0, 32)}`;
+  // S07 judge limits: only a NEW project is counted (a replay above already
+  // returned the same project), and the refusal lands before the batch, so a
+  // refused 4th project creates no project, run or intake.
+  if (!existing[0]) await admitJudgeProject(db, scope.actorId, limits);
   const route = findModelRouteForRole("build");
   const stamp = now();
   await db.batch([
@@ -286,6 +292,7 @@ export async function decideWorkflow(
   db: D1Database,
   scope: Scope,
   input: { planId: string; decision: "approved" | "rejected"; note?: string },
+  limits?: unknown,
 ) {
   await ensureWorkflow(db, scope);
   const { workflow, plan } = await workflowSnapshot(db, scope);
@@ -308,6 +315,11 @@ export async function decideWorkflow(
       "feedback_required",
       "Describe the change in 2000 characters or fewer.",
     );
+  // S07 judge limits: approving a plan is one build start, refused BEFORE any
+  // write (no approval, no plan decision, no phase change). A re-click on an
+  // already-approved plan is in phase 'design' and is not counted again.
+  if (input.decision === "approved" && workflow!.phase === "review")
+    await admitJudgeBuildStart(db, scope.actorId, limits);
   const approval = await recordDecision(db, scope.actorId, {
     intent: planIntent(scope.projectId, plan),
     decision: input.decision,
@@ -368,6 +380,7 @@ export async function decideDesign(
   db: D1Database,
   scope: Scope,
   input: { designId: string; decision: "approved" | "rejected"; note?: string },
+  limits?: unknown,
 ) {
   await ensureWorkflow(db, scope);
   const { workflow, design } = await workflowSnapshot(db, scope);
@@ -390,6 +403,10 @@ export async function decideDesign(
       "feedback_required",
       "Describe the change in 2000 characters or fewer.",
     );
+  // S07 judge limits: approving the design brief starts the actual build, and
+  // is refused before any write. Only the transition from design-review counts.
+  if (input.decision === "approved" && workflow!.phase === "design-review")
+    await admitJudgeBuildStart(db, scope.actorId, limits);
   const approval = await recordDecision(db, scope.actorId, {
     intent: designIntent(scope.projectId, design),
     decision: input.decision,
@@ -924,7 +941,7 @@ async function resumePlanning(
   return workflowSnapshot(db, scope);
 }
 
-export async function retryWorkflow(db: D1Database, scope: Scope, key: string, request?: string) {
+export async function retryWorkflow(db: D1Database, scope: Scope, key: string, request?: string, limits?: unknown) {
   if (typeof key !== "string" || !/^[a-zA-Z0-9:_-]{8,160}$/.test(key))
     throw new ScopeError(
       400,
@@ -959,6 +976,10 @@ export async function retryWorkflow(db: D1Database, scope: Scope, key: string, r
       "NOT_BLOCKED",
       "Only a stopped build can be retried.",
     );
+  // S07 judge limits: a real retry is one build start, refused BEFORE the
+  // resume row and the phase change. Replays (the `previous` check above) and a
+  // blocked plan that resumes planning never reach here.
+  await admitJudgeBuildStart(db, scope.actorId, limits);
   await db.batch([
     db
       .prepare(
@@ -990,6 +1011,7 @@ export async function continueProjectFromChat(
   db: D1Database,
   sourceScope: Scope,
   input: { projectId: string; request: string; operationKey: string; resumeBlocked?: boolean },
+  limits?: unknown,
 ) {
   await assertProjectScope(db, sourceScope);
   const target = await projectScopeForUser(
@@ -1011,7 +1033,7 @@ export async function continueProjectFromChat(
   const delivered = await rows(db, "select id from workflow_resumes where projectId=? and id=?", target.projectId, recoveryKey);
   if (delivered.length) return { project, workflow: (await workflowSnapshot(db, target)).workflow };
   if (workflow.phase === "blocked" && input.resumeBlocked) {
-    const resumed = await retryWorkflow(db, target, recoveryKey, input.request);
+    const resumed = await retryWorkflow(db, target, recoveryKey, input.request, limits);
     return { project, workflow: resumed.workflow };
   }
   if (!workflow.pendingKey)

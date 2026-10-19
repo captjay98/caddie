@@ -164,7 +164,7 @@ export function createBuildWorkflowRouter(
     if (!parsed.success) {
       throw new ScopeError(400, "invalid_input", "Invalid approve-plan command.");
     }
-    const result = await approvePlan(c.env.DB, scope, parsed.output);
+    const result = await approvePlan(c.env.DB, scope, parsed.output, c.env);
     // The command delivered the pending message if it transitioned to building;
     // dispatch it server-side exactly as the decision route does.
     if (result.outcome === "applied") {
@@ -186,7 +186,7 @@ export function createBuildWorkflowRouter(
     } catch {
       throw new ScopeError(400, "invalid_input", "Expected JSON.");
     }
-    const snapshot = await decideWorkflow(c.env.DB, scope, input);
+    const snapshot = await decideWorkflow(c.env.DB, scope, input, c.env);
     // Server-owned dispatch (R02): deliver the pending coordinator message now,
     // from the server, so an approved build starts even if the browser closes.
     // The DO's own onStart drain owns re-delivery after a crash.
@@ -210,7 +210,7 @@ export function createBuildWorkflowRouter(
     // The DESIGN-brief gate: approve -> building (feature loop), reject ->
     // design (re-author). Same server-owned dispatch as the plan decision so an
     // approved build starts even if the browser closes.
-    const snapshot = await decideDesign(c.env.DB, scope, input);
+    const snapshot = await decideDesign(c.env.DB, scope, input, c.env);
     const deliver = deliverFor(c);
     if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
     return c.json(snapshot);
@@ -223,7 +223,7 @@ export function createBuildWorkflowRouter(
       c.req.param("projectId"),
     );
     const input = await c.req.json<{ key: string }>();
-    const snapshot = await retryWorkflow(c.env.DB, scope, input.key);
+    const snapshot = await retryWorkflow(c.env.DB, scope, input.key, undefined, c.env);
     const deliver = deliverFor(c);
     if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
     return c.json(snapshot);
@@ -237,7 +237,7 @@ export function createBuildWorkflowRouter(
   });
   router.post("/projects/:projectId/proposals/:proposalId/accept", async (c) => {
     const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
-    const result = await acceptProposal(c.env.DB, scope, c.req.param("proposalId"));
+    const result = await acceptProposal(c.env.DB, scope, c.req.param("proposalId"), c.env);
     // Deliver the new project's planning intake now, from the server, exactly
     // like a plan approval does (the DO dedupes on the same key).
     const deliver = deliverFor(c);

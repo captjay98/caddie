@@ -73,20 +73,26 @@ later need retracting. Until then, the only way to try Caddie is
 
 The hosted demo is capped so a few dozen judges cannot exhaust it:
 
-- **3 projects** per judge account.
-- **3 builds started per 24 hours** per judge account.
-- **300 Caddie messages per 24 hours** per judge account.
+- **3 projects** per judge account (the automatic home conversation is not one).
+- **3 build starts per 24 hours** per judge account. Approving a plan, approving
+  the design and retrying a stopped build each count as one, so a full build
+  that needs a retry costs two.
+- **300 Caddie messages per 24 hours** per judge account. Messages Caddie sends
+  itself do not count.
 - **At most 40 judge accounts** in total (the code's default when
   `JUDGE_ACCESS_MAX_ACCOUNTS` is unset is `40` —
   `apps/app/src/server/judge-access.ts`).
 - **Access closes on 2026-12-16** (the deployment's `JUDGE_ACCESS_UNTIL`).
 - Judge accounts cannot publish apps.
 
-These are the demo's configured limits. The 40-place cap is a code default;
-the closing date and the per-account quotas are set on the deployed Worker as
-owner configuration. The gate and refusal paths themselves are in
-`apps/app/src/server/judge-access.ts` with tests in
-`tests/judge-access.test.ts` (**LOCAL VERIFIED**).
+These are the demo's configured limits. The 40-place cap is a code default as
+well; all three per-account quotas and the closing date come from the Worker's
+environment when set (`JUDGE_MAX_PROJECTS`, `JUDGE_MAX_BUILDS_PER_DAY`,
+`JUDGE_MAX_MESSAGES_PER_DAY`, `JUDGE_ACCESS_MAX_ACCOUNTS`, `JUDGE_ACCESS_UNTIL`),
+and fall back to the numbers above. The gate and refusal paths are in
+`apps/app/src/server/judge-access.ts` and `apps/app/src/server/judge-limits.ts`,
+with tests in `tests/judge-access.test.ts` and `tests/judge-limits.test.ts`
+(**LOCAL VERIFIED**).
 
 ### A two-minute path to try
 
@@ -241,7 +247,7 @@ continuation of the earlier `caddie` project — no history was carried over).
 | 2026-10-15 – 10-16 | Project-page redesign around "what Caddie is doing now", the host-driven feature build loop, the PRD + design review step, saving source to GitHub as a PR, and model re-routing (vision moved to a served VLM). |
 | 2026-10-17 | The publish programme: `Publish on Cloudflare` plan, app-host ports and the Cloudflare adapter (Workers for Platforms, D1, KV routes, custom hostnames), an Artifacts-backed code store, and running an app's server in a Worker Loader isolate for previews. |
 | 2026-10-18 | Publishing end to end (service, `/api` routes, the Publish card, safety scan + takedowns), keys for outside services, AI inside generated apps with a per-project allowance, app sign-in, versions/restore, "Start from my GitHub repo"; then S01–S04: one packet table with a completeness net, a purpose-specific report rate-limit key, model routing re-read from the live Nebius listing, and the fast/super app-AI tiers. |
-| **2026-10-19** | S06: judges sign in with an access code, a name and a password (no Google or GitHub, no email delivery); models re-priced from the live listing with `helper` returned to Nemotron Nano; CI tightened to `--frozen-lockfile`. |
+| **2026-10-19** | S06: judges sign in with an access code, a name and a password (no Google or GitHub, no email delivery); S07: judge limits (3 projects, 3 build starts and 300 messages per rolling 24 hours, server-side, before any sandbox or model work); S08: this README, the MIT `LICENSE` and `scripts/license-audit.ts`; models re-priced from the live listing with `helper` returned to Nemotron Nano; CI tightened to `--frozen-lockfile`. |
 
 ---
 
@@ -252,7 +258,7 @@ such rather than omitted.
 
 | Surface | Status | What backs it |
 | :--- | :--- | :--- |
-| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1368 pass, 0 fail, 105 files — run at the time of writing. |
+| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1380 pass, 0 fail, 106 files — run at the time of writing. |
 | Typecheck (`bun run typecheck`) | **LOCAL VERIFIED** | exit 0 (root project + `apps/app`). |
 | Build composition (`bun run build`) | **LOCAL VERIFIED** | One composed Workers assets tree from the Astro landing + Vite SPA. |
 | Model round-trips on Nebius Token Factory | **LIVE VERIFIED** (recorded 2026-10-06) | Owner-authorized runs recorded in `docs/release-evidence.md` and the execution ledger (P05); the route/pricing table is refreshed from a live listing (2026-10-18). |
@@ -260,6 +266,7 @@ such rather than omitted.
 | React + Hono generated-app journey | **LIVE VERIFIED** (recorded 2026-10-06) | The journey runner passed every phase in the sandbox (P09) — the only stack marked verified; the other four stacks are **BLOCKED** on their own live gates. |
 | Real outbound email (Resend) | **LIVE VERIFIED** (recorded 2026-10-06) | One real send to the owner's own address, provider receipt id in `docs/release-evidence.md` (P12). |
 | Judge access by code (`S06`) | **LOCAL VERIFIED** | `tests/judge-access.test.ts`; the gate, rate limits and refusals are tested. Not exercised against a deployed Worker. |
+| Judge limits (`S07`) | **LOCAL VERIFIED** | `apps/app/src/server/judge-limits.ts`, `tests/judge-limits.test.ts`; the three limits are enforced server-side and refused before any write. Not exercised against a deployed Worker. |
 | Landing page product art / workspace illustrations | **SIMULATED** | Labelled on the page itself: illustrative compositions, not live captures. |
 | **Hosted demo (the judge URL)** | **NOT BUILT / not deployed** | Production deploy is owner-gated. There is no demo URL yet. |
 | App publishing (Workers for Platforms) | **Not deployed** | The dispatch Worker is **PROPOSED** (`workers/dispatch/wrangler.jsonc`); the publish service and `/api` routes exist locally. |
@@ -292,7 +299,7 @@ app runs and fails closed with visible gaps.
 
 | Command | What it is | Last observed |
 | :--- | :--- | :--- |
-| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1368 pass, 0 fail, 6471 expect() calls, 105 files** |
+| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1380 pass, 0 fail, 6548 expect() calls, 106 files** |
 | `bun run typecheck` | Root project + `apps/app` typecheck | exit 0 |
 | `bun run build` | Astro + Vite + asset composition into one Workers assets tree (no deploy) | exit 0 (LOCAL VERIFIED) |
 | `bun run verify:packet Pxx` | That packet's mapped tests; fails when a mapped test file is missing or empty | — |

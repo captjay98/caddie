@@ -29,6 +29,9 @@ is the checklist and the record.
 | `JUDGE_ACCESS_UNTIL` (`YYYY-MM-DD`, meaning the END of that day in UTC) | the date judge access closes (D4) | S06 default: `2026-12-16`. Absent or unparseable: judge access is off (same `503`). Past the date: `403 judge_closed`. |
 | `JUDGE_ACCESS_MAX_ACCOUNTS` (integer) | how many judge accounts may exist (D4) | S06 default: `40`. Absent or not a number: the built-in default `40` applies. Full: `403 judge_full`. |
 | `JUDGE_ACCESS_ENABLED` (the kill switch) | stopping new judge starts immediately (S07) | S06 default: unset means enabled. `0` refuses NEW judge starts (`403 judge_closed`); returning judges can still sign in. |
+| `JUDGE_MAX_PROJECTS` (integer) | how many non-home projects one judge account may have (S07/D4) | S07 default: `3`. Absent, not a whole number, or `0`: the default `3` applies. Over the limit: `403 JUDGE_LIMIT_PROJECTS`. The lazy Home conversation never counts and is never refused. |
+| `JUDGE_MAX_BUILDS_PER_DAY` (integer) | how many build starts one judge account may make in a rolling 24 hours (S07/D4); plan approval, design approval and Retry each count once | S07 default: `3`. Absent, not a whole number, or `0`: the default `3` applies. Over the limit: `403 JUDGE_LIMIT_BUILDS`. |
+| `JUDGE_MAX_MESSAGES_PER_DAY` (integer) | how many Caddie messages one judge account may send in a rolling 24 hours (S07/D4) | S07 default: `300`. Absent, not a whole number, or `0`: the default `300` applies. Over the limit: `403 JUDGE_LIMIT_MESSAGES`. Messages the server itself dispatches never count. |
 
 Secrets go directly into `.dev.vars` (gitignored). Never in chat, never in
 artifacts. That includes the judge access code: this document records only the

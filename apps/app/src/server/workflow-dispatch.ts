@@ -37,6 +37,7 @@ import {
 	markReconciliationRequired,
 	getOperation,
 } from './operations.ts';
+import { signInternalDispatch } from './internal-dispatch.ts';
 
 const DISPATCH_PROVIDER = 'coordinator-dispatch';
 
@@ -165,6 +166,10 @@ export function workerSelfDeliver(
 		const url = new URL(`/agents/coordinator/${encodeURIComponent(conversationId)}`, origin);
 		const headers: Record<string, string> = { 'content-type': 'application/json' };
 		if (cookieHeader) headers['cookie'] = cookieHeader;
+		// S07: mark the delivery as server-originated. The guard admits it
+		// without counting it against the judge's message quota; without this
+		// HMAC the server's own intake would consume a judge's messages.
+		await signInternalDispatch(env, headers, conversationId);
 		const response = await app.fetch(
 			new Request(url.href, {
 				method: 'POST',

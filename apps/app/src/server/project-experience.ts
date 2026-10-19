@@ -193,6 +193,7 @@ export async function approvePlan(
 	db: D1Database,
 	scope: Scope,
 	command: ApprovePlanCommand,
+	limits?: unknown,
 ): Promise<ExperienceCommandResult> {
 	if (command.projectId !== scope.projectId) {
 		// The authenticated scope is authoritative; a mismatched body is denied,
@@ -219,9 +220,13 @@ export async function approvePlan(
 	}
 
 	try {
-		await decideWorkflow(db, scope, { planId: command.planRevisionId, decision: 'approved' });
+		await decideWorkflow(db, scope, { planId: command.planRevisionId, decision: 'approved' }, limits);
 	} catch (error) {
 		if (error instanceof ScopeError) {
+			// A judge limit is not a stale projection: it must reach the route's
+			// {error,message} handler with its 403, not become a silent 'denied'
+			// with the plain sentence dropped.
+			if (error.code.startsWith('JUDGE_LIMIT_')) throw error;
 			// STALE_PLAN etc. from the durable layer — surface as a refreshable
 			// conflict, never a crash, with the current truth attached.
 			const code = error.code;

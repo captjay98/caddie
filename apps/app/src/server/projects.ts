@@ -2,6 +2,7 @@ import * as v from 'valibot';
 import type { Scope } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { ScopeError, assertProjectScope, assertWorkspaceScope } from './scope.ts';
+import { admitJudgeProject } from './judge-limits.ts';
 import {
 	ArtifactCreateInputSchema,
 	ArtifactRevisionSchema,
@@ -227,6 +228,7 @@ export async function createProject(
 	db: D1Database,
 	scope: WorkspaceScope,
 	input: unknown,
+	limits?: unknown,
 ): Promise<Project> {
 	const verified = await assertWorkspaceScope(db, scope);
 	const parsed = parseOr400(ProjectCreateInputSchema, input);
@@ -249,6 +251,9 @@ export async function createProject(
 		createdAt: nowIso(),
 		updatedAt: nowIso(),
 	};
+	// S07 judge limits: refused BEFORE the insert, so a refused 4th project
+	// leaves nothing behind.
+	await admitJudgeProject(db, verified.actorId, limits);
 	await db
 		.prepare(
 			'insert into "projects" ("id","workspaceId","name","description","contestId","contestUrl","status","kind","createdAt","updatedAt") values (?,?,?,?,?,?,?,?,?,?)',

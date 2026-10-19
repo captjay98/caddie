@@ -100,7 +100,7 @@ export function createProjectsRouter(): Hono<{ Bindings: Env }> {
 			'workspaceId',
 		);
 		const scope = await requireWorkspaceScope(c.env.DB, c.env, c.req.raw.headers, workspaceId);
-		const project = await createProject(c.env.DB, { actorId, workspaceId }, body);
+		const project = await createProject(c.env.DB, { actorId, workspaceId }, body, c.env);
 		return c.json({ project }, 201);
 	});
 

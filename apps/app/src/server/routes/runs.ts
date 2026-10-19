@@ -4,6 +4,8 @@ import { ScopeError, projectScopeForUser, sessionUserId } from "../scope.ts";
 import { lookupRunByConversation } from "../runs.ts";
 import { readWorkflow } from "../build-workflow.ts";
 import { createRun, recordRepairRound, runSnapshot } from "../runs.ts";
+import { admitJudgeMessage } from "../judge-limits.ts";
+import { isInternalDispatch } from "../internal-dispatch.ts";
 
 /**
  * P05 run routes + the conversation guard.
@@ -189,6 +191,24 @@ export function conversationGuard(): Hono<{ Bindings: Env }> {
         "not_a_member",
         "actor has no membership in the conversation project",
       );
+    }
+    // S07 judge limits: only the conversation ROOT's POST admits a user
+    // message. /abort, GET history and GET ?view=updates are not messages and
+    // cost nothing. The method/path test comes first, so non-message traffic
+    // pays no judge lookup at all; a real judge pays exactly one. A message the
+    // server dispatched itself carries an HMAC the browser cannot forge, so it
+    // is admitted without consuming the judge's quota.
+    const conversationId = c.req.param("conversationId");
+    const isUserMessage =
+      c.req.method === "POST" &&
+      c.req.path.endsWith(`/coordinator/${conversationId}`);
+    if (isUserMessage) {
+      const fromServer = await isInternalDispatch(
+        c.env,
+        c.req.raw.headers,
+        conversationId,
+      );
+      if (!fromServer) await admitJudgeMessage(c.env.DB, userId, c.env);
     }
     await next();
   });

@@ -779,13 +779,13 @@ export async function createCoordinatorContext(
       if (candidates.length !== 1) return null;
       return continueProjectFromChat(env.DB, scope, {
         ...input, operationKey: `${input.operationKey}:${candidates[0]!.id}`, projectId: candidates[0]!.id, resumeBlocked: true,
-      });
+      }, env);
     },
     startProject: (input) =>
       startProjectFromChat(env.DB, scope, {
         ...input,
         sourceConversationId: run.conversationId,
-      }),
+      }, env),
     proposeProject: async (input) => {
       const proposal = await proposeProjectOnServer(env.DB, scope, {
         ...input,
