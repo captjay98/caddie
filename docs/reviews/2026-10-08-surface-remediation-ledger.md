@@ -1,12 +1,12 @@
 # Caddie surface remediation ledger
 
-**Date:** 2026-10-08 · **Baseline audited:** `d12d03e3` · **Ledger owner:** integrator
+**Date:** 2026-10-08 · **Baseline audited:** `c11e2a2b` · **Ledger owner:** integrator
 **Baseline audit:** `2026-10-08-independent-surface-audit.md` (kept as the historical
 baseline; this ledger tracks the repair, not a re-argument of it).
 
 ## Baseline and ownership plan
 
-- HEAD at takeover: `d12d03e3` (audited commit); working tree clean apart from the
+- HEAD at takeover: `c11e2a2b` (audited commit); working tree clean apart from the
   audit document. All later commits listed by `git log` postdate the audit.
 - Runtime: bun 1.4.0; default `node` is v26.3.0 (homebrew). The Flue build requires
   Node ≥22.18 / ≥23.6, so builds and browser runs use
@@ -33,16 +33,16 @@ NOT APPLICABLE WITH EVIDENCE
 | ID | Finding (summary) | Status | Repair | Verification |
 |---|---|---|---|---|
 | F01 | Route changes recreate the shell/conversation; unsent composer text local-only; transcript position lost | FIXED | Pathless `_shell` layout route mounts WorkspaceChrome once above an Outlet (99dd95c7); composer text lives in the scoped channel store (sessionStorage, keyed actor+conversation, controlled Composer, cleared on send); transcript scroll preserved. | LOCAL VERIFIED: stable-mount/scroll/draft probes in workspace.spec + full battery (waves 1-2). |
-| F02 | `['auth','session']` caches two incompatible shapes (actor string vs SessionPayload) | FIXED | One shared `sessionQueryOptions` (single raw-payload queryFn); `useSessionActor`/`useSessionDisplayName` project via stable module-level `select` functions (cab63df1). | LOCAL VERIFIED: typecheck/build + auth-gated suites in the battery. |
+| F02 | `['auth','session']` caches two incompatible shapes (actor string vs SessionPayload) | FIXED | One shared `sessionQueryOptions` (single raw-payload queryFn); `useSessionActor`/`useSessionDisplayName` project via stable module-level `select` functions (32c34d1f). | LOCAL VERIFIED: typecheck/build + auth-gated suites in the battery. |
 | F03 | Page geometry owned by competing wrappers (1rem shell + 1.5rem shell-loading + 1.2rem settings-stack + per-page max-widths) | FIXED—AWAITING VERIFICATION | `.page-col` (max-width 860px) is the single width owner; `.settings-stack` is gaps-only (`min-width: 0`); discovery/judge/submission panels fill the shared column (removed `max-width: 760px; margin: 0 auto`); `Settings` joined the shared frame (`shell-loading shell-page` + `page-col`). | LOCAL VERIFIED: typecheck + build green; settings.spec 5/5; visual geometry probe in the A-Z battery |
-| F04 | `?pane=channel` persists into Discover/Projects, concealing the destination | FIXED | `withoutPane` search reducer on every destination link (capsule wordmark/tabs, mobile Discover/Projects tabs, conversation search chip); Chat/Brief set their pane intentionally (cab63df1). | LOCAL VERIFIED: tap-through assertions in workspace.spec (pane-leak) + battery. |
-| F05 | Idea/import entry incomplete; internal anchors (`href='./'`, `/settings`, `/onboarding`) bypass the router and break `/app` | FIXED | Router `Link`s everywhere internal; real idea-capture form on `/onboarding` creates the project and opens it; repository entry keeps the `/app` basepath (e09820af). | LOCAL VERIFIED: workspace/discovery/settings suites in the battery. |
+| F04 | `?pane=channel` persists into Discover/Projects, concealing the destination | FIXED | `withoutPane` search reducer on every destination link (capsule wordmark/tabs, mobile Discover/Projects tabs, conversation search chip); Chat/Brief set their pane intentionally (32c34d1f). | LOCAL VERIFIED: tap-through assertions in workspace.spec (pane-leak) + battery. |
+| F05 | Idea/import entry incomplete; internal anchors (`href='./'`, `/settings`, `/onboarding`) bypass the router and break `/app` | FIXED | Router `Link`s everywhere internal; real idea-capture form on `/onboarding` creates the project and opens it; repository entry keeps the `/app` basepath (dd102e52). | LOCAL VERIFIED: workspace/discovery/settings suites in the battery. |
 | F06 | Discovery reads a local seed adapter; suitability = evidence coverage, not profile matching | BLOCKED | Client-side presentation fixed under S10/S11/S14; live source adapters + profile-weighted ranking need an external source decision (which sources, keys, licensing) — cannot be done locally without inventing data. Prerequisite: owner chooses/approves ≥1 live source + credentials. | n/a until unblocked |
 | F07 | Save flips status to accepted and removes Explore; Explore creates a project immediately and swallows errors | FIXED | Explore stays available for accepted candidates (Saved chip instead of a vanishing action); Explore opens an explicit commit step — project name, stated consequence, visible errors — and only then creates (idempotent continue-first guard + busy lock). | LOCAL VERIFIED: discovery.spec (commit dialog + failure-stays-open + saved-filter) + journey D step in the battery. |
 | F08 | Home decisions ignore their target (`void card`; goProjectTab('/project', {})) and read only the synthetic Home project | FIXED | Cards route by kind with their own target id + claim (approval→/design-review, change→/evidence or /artifacts, deadline→/schedules, result→/runs); account-wide roll-up recorded as a server prerequisite (no GET /api/brief). | LOCAL VERIFIED: workspace/brief suites in the battery; roll-up prerequisite documented in the surface map. |
 | F09 | Plan review shows revision metadata without plan content; decisions local-only | FIXED | The plan body renders readably for the revision under review (pre-wrap, full text from the real plan-docs payload); decision records relabelled honestly ("your decisions this session"). A server approval-history LIST endpoint does not exist — recorded as prerequisite; the decision POST itself is real. | LOCAL VERIFIED: artifacts.spec plan-body assertions + battery. |
 | F10 | No preview entry; repository selection never persisted | FIXED | Preview entry wired in Files: per-revision mint (token returned once, revealed + copyable), revoke/extend, honest isolation copy over the REAL P07 previews routes (mounted in app.ts:98). Repository binding already persists via POST /api/github/installations/bind with typed conflicts — verified wired. | LOCAL VERIFIED: artifacts.spec + battery; live previewed bytes require a completed build (credential-gated, documented). |
-| F11 | Search inert/no paging; Settings ignores `section`; profile clearing keeps old hours; memory scope never set; usage placeholder | FIXED | Search hits are Links with typed destinations + real paging (x–y of z); Settings `?section=` scrolls/focuses; profile clearing posts explicit nulls + invalidates profile/brief/discovery; memory scope control wired to the project filter; Usage reads a real read-only model over the budget ledger (GET /api/usage). | LOCAL VERIFIED: workspace.spec usage read-model assertions + battery (wave 4, 8e5c92e0). |
+| F11 | Search inert/no paging; Settings ignores `section`; profile clearing keeps old hours; memory scope never set; usage placeholder | FIXED | Search hits are Links with typed destinations + real paging (x–y of z); Settings `?section=` scrolls/focuses; profile clearing posts explicit nulls + invalidates profile/brief/discovery; memory scope control wired to the project filter; Usage reads a real read-only model over the budget ledger (GET /api/usage). | LOCAL VERIFIED: workspace.spec usage read-model assertions + battery (wave 4, dd35cd72). |
 | F12 | Tasks absent; automations lists projects; schedule mutations swallow errors; judge asks the user for scores; submission gaps unactionable; standalone delivery missing | FIXED | Schedule mutations surface named in-row errors; Automations aggregates the REAL schedules of every project (per-project error branch); judge refuses blank scores client-side with named criteria + "your score" labelling (coaching average is the user's own recorded assessment); NEW Tasks surface over the real P12 task routes (create/done/cancel/reopen, in-row errors) with a Build sub-tab + Overview entry + search destination (S25 unblocked — server tasks.ts exists). Standalone delivery still needs a server concept — recorded as prerequisite. | LOCAL VERIFIED: submission.spec judge validation + battery. |
 | F13 | Implementation details shown as product copy (roll-up note, duplicated headings, "Run feed", deployment variables) | FIXED | Duplicate Hackathons heading removed (page h1 stays; results panel is now "Matches for you"); "Run feed" → "Check for new contests"; Home needs-you copy is plain outcomes; ProjectHeader states the real next deadline derived from brief deadline cards or an honest "none scheduled yet"; no deployment-variables copy remains. | LOCAL VERIFIED: battery + copy grep audit. |
 | F14 | Two stale conversation-label tests; journey halted at its first assertion | FIXED | Assertions corrected to the approved pill semantics (scope name in the pill, explanation in the tooltip) in discovery-journey.spec + workspace.spec; journey re-runs end-to-end A–G. | LOCAL VERIFIED: journey + workspace suites in the battery. |
@@ -149,7 +149,7 @@ packets P01/P06-implied/P07/P11/P13/P14 all PASS on the refactored tree.
   created during the test were archived afterwards — the owner's project
   list is clean).
 - **F14 verified fixed:** the audit's two stale-label failures were already
-  corrected in `774d12ab` + the scope-pill change; the audit's exact 8-file
+  corrected in `e3a5c0a3` + the scope-pill change; the audit's exact 8-file
   browser set now passes **56/56** (`--workers=1`, same invocation).
 
 ### Wave 4 — F08 + F11 (IMPLEMENTED)
@@ -175,7 +175,7 @@ packets P01/P06-implied/P07/P11/P13/P14 all PASS on the refactored tree.
   deployment has no budget tables). Verified: endpoint 200 + page renders the
   real state; settings.spec 5/5 on the fixed harness.
 
-### Wave 5 — F03 geometry (8199ed3f)
+### Wave 5 — F03 geometry (52726dee)
 
 - One page-frame owner: `.page-col` (max-width 860px) is the single width
   authority; `.settings-stack` neutralised to gaps-only (`min-width: 0`);
@@ -237,8 +237,8 @@ packets P01/P06-implied/P07/P11/P13/P14 all PASS on the refactored tree.
   added the projects `kind` column; every workerd fixture harness applied only a
   partial migration list, so POST /api/projects 500'd (`no such column: kind`)
   and ALL fixture integration suites failed on every commit since the Home
-  commit (9047f502) — reproduced identically on the pre-session takeover
-  commit 5e83a338. Fixed by appending 0011 to every harness migration list
+  commit (675caf0c) — reproduced identically on the pre-session takeover
+  commit 5d30e4ea. Fixed by appending 0011 to every harness migration list
   (controls/discovery/evidence/github/previews/profile/schedules/submission
   + the inline list in github.integration.test.ts). Result:
   `verify:packet` P07 (19) / P08 (32) / P10 (17+2) / P11 (11+2) / P12 (15+2) /

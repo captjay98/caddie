@@ -1,6 +1,6 @@
 # Caddie Forge — Hackathon Submission Build Plan (S01–S13)
 
-**Written:** 2026-10-18, against `feat/publish-on-cloudflare` at `25b03133`
+**Written:** 2026-10-18, against `feat/publish-on-cloudflare` at `511f35f3`
 **Contest:** Nebius × NVIDIA Global AI Hackathon (Devpost)
 **Deadline:** 2026-10-30, 10:00 PDT = 18:00 WAT. Target: everything ready by
 2026-10-29, 18:00 WAT (24-hour buffer). The owner submits.
@@ -16,7 +16,7 @@ drafts. Authority: `AGENTS.md` > `docs/plans/2026-10-03-fresh-build/README.md`
 > this plan.
 
 > **Audit note (2026-10-18, before S01 started).** Every §1 claim was
-> re-verified against `25b03133` from the repo, not from the plan. They hold,
+> re-verified against `511f35f3` from the repo, not from the plan. They hold,
 > including every line citation, the 1,330-green suite and 28/28
 > `tests/browser/project-workflow.spec.ts` (which is the "project-card spec"
 > and already contains "Stop build"). Four corrections are applied in place
@@ -94,7 +94,7 @@ drafts. Authority: `AGENTS.md` > `docs/plans/2026-10-03-fresh-build/README.md`
 
 ---
 
-## 1. Verified state (2026-10-18, `25b03133`)
+## 1. Verified state (2026-10-18, `511f35f3`)
 
 | Area | Fact | Where |
 | :--- | :--- | :--- |

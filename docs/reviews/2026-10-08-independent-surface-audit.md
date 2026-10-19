@@ -1,6 +1,6 @@
 # Caddie surface acceptance audit
 
-Date: 2026-10-08 (Africa/Lagos). Reviewed HEAD: `d12d03e32c9bda622e34392a087049c1c7b8ac4a`.
+Date: 2026-10-08 (Africa/Lagos). Reviewed HEAD: `c11e2a2bc3edf87714ab60c08698bcb3cb9a9258`.
 
 ## Verdict: NO-GO for the agreed end-to-end product
 

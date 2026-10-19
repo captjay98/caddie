@@ -11,7 +11,7 @@ evidence.
 | Fact | Value |
 |---|---|
 | Branch | `main` |
-| HEAD SHA | `4c86fe2fd1118fd74b6aefa8668a43c0aceaea31` |
+| HEAD SHA | `ba2255d688d69c4ac8b598268555b32931742e15` |
 | Worktree | **DIRTY — preserve.** 83 entries: 51 modified, plus untracked `.kiro/`, a `.wrangler-backup-*.tar.gz`, migrations `0016/0017/0018`, and new files `agents/host-context.ts`, `client/conversation/{ProjectWorkflow,workflow-dispatch}.tsx/.ts`, `client/artifacts/InteractivePreview.tsx` |
 | node | v26.3.0 (satisfies the Flue/Vite "needs Node ≥26" toolchain note) |
 | bun | **1.4.0** via `~/.bun/bin/bun` directly. ⚠️ mise shim is NOT active in this dir (`mise ERROR bun ... not currently active`); shims list only 1.3.5 / 1.3.14. Export `PATH="$HOME/.bun/bin:$PATH"` to run bun. Recorded as a toolchain fact; not blocking. |

@@ -59,7 +59,7 @@ are closed: `tests/live/sandbox.spec.ts` (P04) and
 ## Verification net (S01, 2026-10-18)
 
 The 2026-10-06 gate above is kept as a dated receipt; this is the net that
-keeps it honest. Recorded on `feat/publish-on-cloudflare` at `25b03133` + S01,
+keeps it honest. Recorded on `feat/publish-on-cloudflare` at `511f35f3` + S01,
 no deploy and no paid call.
 
 | Check | Classification | Receipt |
@@ -101,11 +101,11 @@ server change can reach them.
 - `theme-picker.spec.ts:166` — after four `ArrowRight` presses it expects focus to wrap to the first swatch, but `PALETTES` in `apps/app/src/client/theme.ts` has shipped **five** entries (`caddie`, `clearcut`, `onesecos`, `farmhand`, `kirocrew`) since the same commit that wrote the test, so the fifth press lands on `kirocrew`.
 - `brief.spec.ts:265` — expects exactly one run POST from the mobile welcome panel's discovery action and observes none. Not yet root-caused.
 
-Root cause of the Discover four: `2ba49db8` (2026-10-15, "hackathon results card
+Root cause of the Discover four: `eca3f5e9` (2026-10-15, "hackathon results card
 and detail pane") rewrote `Results.tsx` (643 lines) and dropped the `· saved`
-wording that `ecbb222e` (2026-10-10) introduced together with the spec
+wording that `72b3753a` (2026-10-10) introduced together with the spec
 expectations; the specs were not updated. The theme case was wrong from its own
-commit (`d849d5b2`, 2026-10-15).
+commit (`0196f4fa`, 2026-10-15).
 
 Why it went unnoticed: **CI does not run the browser suite.**
 `.github/workflows/ci.yml` runs `bun install --frozen-lockfile`, `bun run build`,
