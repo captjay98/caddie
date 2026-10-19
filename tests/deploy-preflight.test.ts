@@ -33,12 +33,13 @@ function committedConfig(): WorkerConfig {
 	return parseJsonc(readFileSync(join(APP_DIR, 'wrangler.jsonc'), 'utf8')) as WorkerConfig;
 }
 
-/** The committed config with the two owner inputs filled in. */
+/** The committed config normalized to the custom-domain shape (workers.dev off). */
 function filledConfig(): WorkerConfig {
 	const config = committedConfig();
 	const prod = config.env!.production!;
 	prod.d1_databases = prod.d1_databases!.map((db) => ({ ...db, database_id: DB_ID }));
 	prod.routes = [{ pattern: HOST, custom_domain: true }];
+	prod.workers_dev = false;
 	return config;
 }
 
@@ -81,14 +82,23 @@ async function check(values: Map<string, string>, local: Map<string, string> = L
 }
 
 describe('S10 preflight: the committed production environment', () => {
-	test('restates every binding, and its only open items are the two owner inputs', () => {
-		const { findings } = checkProductionConfig(committedConfig(), APP_DIR);
+	test('restates every binding, and the committed owner inputs are real', () => {
+		const { findings, target } = checkProductionConfig(committedConfig(), APP_DIR);
 		expect(findings.some((f) => f.level === 'PASS' && f.detail.startsWith('env.production restates every binding'))).toBe(true);
-		const open = fails(findings);
+		expect(fails(findings)).toEqual([]);
+		expect(warns(findings)).toEqual([]);
+		expect(target.workersDev).toBe(true);
+		expect(target.d1DatabaseId).toMatch(/^[0-9a-f][0-9a-f-]{35}$/);
+	});
+
+	test('a config that still has the placeholders fails, naming both owner inputs', () => {
+		const config = filledConfig();
+		config.env!.production!.d1_databases![0]!.database_id = 'local-dev-placeholder';
+		config.env!.production!.routes = [{ pattern: '<CADDIE_DOMAIN>', custom_domain: true }];
+		const open = fails(checkProductionConfig(config, APP_DIR).findings);
 		expect(open).toHaveLength(2);
 		expect(open.some((detail) => detail.includes('D1 database_id'))).toBe(true);
 		expect(open.some((detail) => detail.includes('<CADDIE_DOMAIN>'))).toBe(true);
-		expect(warns(findings)).toEqual([]);
 	});
 
 	test('with the D1 id and domain filled in, nothing fails', () => {
@@ -385,17 +395,17 @@ describe('S10 preflight: the production build and the migrations', () => {
 });
 
 describe('S10 preflight: the command', () => {
-	test('against the committed config it refuses, names the owner inputs, and prints no value', () => {
+	test('against the committed config and a matching values file it passes, and prints no value', () => {
 		const dir = mkdtempSync(join(tmpdir(), 'caddie-prodvars-'));
 		const path = join(dir, '.prod.vars');
-		const lines = [...goodValues()].map(([key, value]) => `${key}="${value}"`);
+		const values = goodValues();
+		values.set('BETTER_AUTH_URL', 'https://caddie-app.someone.workers.dev');
+		const lines = [...values].map(([key, value]) => `${key}="${value}"`);
 		writeFileSync(path, `${lines.join('\n')}\n`);
 		const run = Bun.spawnSync([process.execPath, 'scripts/deploy-preflight.ts', '--vars', path, '--skip-build'], { cwd: ROOT });
 		const out = run.stdout.toString();
-		expect(run.exitCode).toBe(1);
-		expect(out).toContain('the production D1 database_id is not a real id yet');
-		expect(out).toContain('<CADDIE_DOMAIN>');
-		expect(out).toContain('Nothing was uploaded or changed.');
-		for (const value of goodValues().values()) if (value.length >= 6) expect(out).not.toContain(value);
+		expect(run.exitCode).toBe(0);
+		expect(out).toContain('serves its workers.dev address');
+		for (const value of values.values()) if (value.length >= 6) expect(out).not.toContain(value);
 	});
 });

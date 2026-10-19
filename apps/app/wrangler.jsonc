@@ -53,12 +53,13 @@
 	// apps/app/.prod.vars, uploaded with `wrangler deploy --secrets-file`.
 	"env": {
 		"production": {
-			"name": "caddie-app",
-			// One public address. preview_urls would add per-version
-			// workers.dev addresses where sign-in cannot work.
-			"workers_dev": false,
-			"preview_urls": false,
-			"routes": [{ "pattern": "<CADDIE_DOMAIN>", "custom_domain": true }],
+		"name": "caddie-app",
+		"account_id": "9016ab965fe4980700cc9775a88812a5",
+		// One public address. No custom domain yet: the workers.dev address
+		// (https://caddie-app.<subdomain>.workers.dev) comes from the deploy.
+		// preview_urls would add per-version addresses where sign-in cannot work.
+		"workers_dev": true,
+		"preview_urls": false,
 			// Workers Logs on for judging, alongside the traces above.
 			"observability": { "enabled": true, "traces": { "enabled": true } },
 			"worker_loaders": [{ "binding": "LOADER" }],
@@ -69,7 +70,7 @@
 				{
 					"binding": "DB",
 					"database_name": "caddie",
-					"database_id": "<PRODUCTION_D1_DATABASE_ID>",
+					"database_id": "f6315eae-99da-4afc-93d0-356afcd511a0",
 					"migrations_dir": "migrations"
 				}
 			]
