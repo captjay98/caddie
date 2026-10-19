@@ -1358,3 +1358,157 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "S06 follow-up: the two owner-ordered judge sign-in fixes (plan docs/plans/2026-10-18-submission-build-plan.md, owner review of S06)",
+  "status": "LOCAL VERIFIED — both fixes applied test-first and re-verified by the integration lead; not exercised against a deployed Worker",
+  "owner": "Subagent (implementation, tests written first); reviewed, gated and committed by the integration lead",
+  "commands": [
+    {"command": "bun test tests/judge-access.test.ts", "exitCode": 0, "receipt": "28 pass, 0 fail, 114 expect() calls — up from 22 cases at the S06 commit"},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "both tsc projects clean (root project + apps/app)"},
+    {"command": "red run — auth.ts and judge-access.ts reverted to HEAD, the new tests kept", "exitCode": 1, "receipt": "Reported by the implementing subagent and NOT independently re-run by the lead, deliberately: item 3 was mid-flight in the same working tree and stashing two source files underneath it risked corrupting a concurrent agent's build. The reported red signatures are the two the fix targets: the native-path case failed 'Expected: not 200' because POST /api/auth/sign-in/email returned 200 at HEAD, and the cap case failed with ScopeError 'All the judge places are taken.' raised by the removed pre-count."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/auth.ts", "note": "disabledPaths: ['/sign-in/email'] added to the emailAndPassword options, closing Better Auth's OWN native sign-in route. That route accepted a judge address whenever the password matched but never passed the judge service's 20-per-hour limiter, so it was a rate-limit bypass on the only credential that costs a judge a place. In better-auth 1.7.10 the option is honoured only in the HTTP router's onRequest (the path answers 404), so the server-side auth.api.signInEmail call the judge route depends on is untouched and the limiter remains the only door. The hooks.before guard is unchanged and stays a second fence."},
+    {"path": "apps/app/src/server/judge-access.ts", "note": "The 'starting' reservation is now ONE conditional statement — insert into judge_accounts ... select ?,?,?,null where (select count(*) from judge_accounts) < ? — and judge_full (403) is thrown when meta.changes < 1. The read-then-compare pre-count gate is deleted, so two simultaneous first-visits can no longer both observe a count below the cap and both reserve. judgeAccountCount is kept but re-documented as a diagnostic count that the gate does not read."},
+    {"path": "tests/judge-access.test.ts", "note": "Six added cases: the native path no longer returns 200 and sets neither cookie nor session; the native path cannot sign a judge in even with the correct password; /api/judge/sign-in still returns 200 and a session cookie through the server-side API; a full roster refuses with judge_full and never calls createUser; a refusal leaves no 'starting' row behind; room left still succeeds and flips the row to active. The file had no identity port, so the new block introduces a recording JudgeIdentity locally (the file is the subagent's to own)."}
+  ],
+  "environment": "Local: bun test over the sqlite D1 fixture with Better Auth in-process, plus typecheck. No deploy, no remote, no live model or sandbox call.",
+  "providerCalls": "none",
+  "specReview": "PENDING independent review",
+  "qualityReview": "Lead-reviewed the diff before commit: both edits are the owner's exact instruction, the invite gate and hooks.before are untouched, and the ordering validate -> gate -> rate limit -> attempt -> code -> name-blocked -> delete stale -> conditional insert -> create user -> set password -> flip -> sign in is preserved with the delete-before-count now load-bearing. The file and typecheck were re-run by the lead rather than taken from the report.",
+  "limitations": [
+    "SUPERSEDES one line of the S06 record's limitations: 'a start that crashes between the reservation insert and the active flip leaves a row that consumes a judge place permanently'. Stale rows are now deleted BEFORE the count, so a same-name retry reclaims its own abandoned row and the permanent-consume window is closed for that case. It is NOT closed for a stale row belonging to a DIFFERENT name, which still counts toward the cap until it ages out. Recorded rather than silently widened.",
+    "The whole new cap block's discriminating power rests on ONE case — same-name stale row consumes no place under insert-time counting — because the other cap cases pass under both the old pre-count and the new conditional insert. Noted so a green block is not over-read as proof of atomicity on its own.",
+    "The disabledPaths fix is pinned to better-auth 1.7.10's behaviour, where the option is read only by the HTTP router's onRequest. A version bump must re-establish both halves (the native route still refuses, and auth.api.signInEmail still works). Both are asserted in the test file, so a bump fails loudly instead of silently re-opening the bypass — but the assertion is behavioural, not a version pin.",
+    "The native-path cases assert 'not 200 and no session' rather than a specific 404, because the refusal is Better Auth's own router response and its exact status is the library's to change.",
+    "Nothing here runs against a deployed Worker; the judge sign-in host route is local-only until production is authorized."
+  ]
+}
+```
+
+```json
+{
+  "packet": "S07 follow-up: the owner-ordered judge-limit additions (plan docs/plans/2026-10-18-submission-build-plan.md, owner review of S07)",
+  "status": "LOCAL VERIFIED — enforced server-side before any paid work; not exercised against a deployed Worker",
+  "owner": "Subagent (implementation); reviewed, gated and committed by the integration lead",
+  "commands": [
+    {"command": "bun test tests/judge-limits.test.ts", "exitCode": 0, "receipt": "23 pass, 0 fail, 124 expect() calls — up from 12 cases at the S07 commit. Re-run by the lead, not taken from the report."},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "both tsc projects clean"}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/judge-limits.ts", "note": "A fourth quota: JUDGE_MAX_DISCOVERY_PER_DAY_DEFAULT = 20, judged by admitJudgeDiscovery over the same rolling 24h window, with its own plain refusal sentence (judgeDiscoveryLimitMessage) and code JUDGE_LIMIT_DISCOVERY. admitEvent and countJudgeUsage widen from ('build'|'message') to ('build'|'message'|'discovery'). parseLimits now uses nonNegativeInteger, so 0 honours the owner's '0 means NONE' ruling at all four quotas — see the limitations, this REVERSES the S07 record."},
+    {"path": "apps/app/src/server/routes/discovery.ts", "note": "Both POST routes that spend Tavily + Nebius per click call admitJudgeDiscovery AFTER the project scope resolves and BEFORE any paid work, so a refused lookup costs nothing. The GET routes stay deliberately uncapped: they read feed rows alreadʸ stored and spend nothing, so capping them would remove a judge's ability to look without protecting any budget."},
+    {"path": "apps/app/migrations/0035_judge_discovery_events.sql", "note": "Rebuilds judge_usage_events with kind constrained to ('build','message','discovery'), preserving existing rows and recreating the index. Append-only; the migration harness derives its list from the filesystem, so no fixture list needed editing."},
+    {"path": "tests/judge-limits.test.ts", "note": "Eleven added cases, including a route-level case that drives the real POST handler and proves the (N+1)th lookup answers 403 JUDGE_LIMIT_DISCOVERY with NO discovery_feed_runs row written — i.e. the refusal lands before the paid work rather than after it. Zero-quota cases pin '0 means NONE' at each quota."},
+    {"path": "README.md", "note": "The 'For judges' limits paragraph now names the fourth quota, the 0-means-none rule, and where each limit is enforced."}
+  ],
+  "environment": "Local: bun test over the sqlite D1 fixture, typecheck. No deploy, no remote, no live Tavily or Nebius call.",
+  "providerCalls": "none — refusals are evaluated before any paid call by construction, which is the property the route-level test pins",
+  "specReview": "PENDING independent review",
+  "qualityReview": "Lead-reviewed the quota arithmetic, the refusal ordering on both POST routes, and that the widened unions did not loosen the build or message paths; re-ran the test file by hand.",
+  "limitations": [
+    "SUPERSEDES the S07 record's line '`0` for any JUDGE_MAX_* override means the DEFAULT, not off'. That is now the opposite of the truth: the owner ruled that 0 means NONE, nonNegativeInteger honours it at all four quotas, and the tests pin a zero quota refusing the very first item. JUDGE_ACCESS_ENABLED=0 remains the switch that turns judge access off entirely, so there are now two different stops with two different shapes and the README must not conflate them.",
+    "CORRECTS a claim carried in the lead's working notes: the S07 record's 'the project limit is count-then-create rather than a conditional insert' STILL STANDS. admitJudgeProject is still read-then-compare (judge-limits.ts:242-249) and the insert happens at the caller. The atomic-insert change the owner ordered applies to the judge SIGN-UP place count (judge_accounts), not to the projects quota — two different counters that were briefly conflated. The two-simultaneous-creations worst case of one project over the cap therefore remains open and bounded.",
+    "A discovery lookup is charged per CLICK, and the two POST routes are the only charge points. Any future route that spends Tavily or Nebius to discover would need its own admitJudgeDiscovery call or it would be free — the guard is a call site, not an interceptor, which is a deliberate choice (an interceptor could not tell a paid lookup from a free read) but is a place a later change could forget.",
+    "The fourth quota's default of 20 is the owner's number, not a cost derived from the Tavily/Nebius unit price. It bounds a single judge at 20 live lookups per rolling day; the cost of 20 lookups was not measured.",
+    "Nothing here is exercised against a deployed Worker, and JUDGE_MAX_DISCOVERY_PER_DAY does not exist in any deployment yet. The default applies when it is unset, so the cap is live the moment judge access is."
+  ]
+}
+```
+
+```json
+{
+  "packet": "Owner review items 1 and 5: the app-route live probe, the OFL-1.1 licence allowance, and the README status rows (plan docs/plans/2026-10-18-submission-build-plan.md)",
+  "status": "Item 1 LIVE VERIFIED (passed). Item 5 LOCAL VERIFIED — audit CLEAN, exit 0. README rows corrected.",
+  "owner": "Integration lead (both items were lead-owned: a live provider probe under an owner-set budget, and the lead-owned licence rules and README)",
+  "commands": [
+    {"command": "bun scripts/probe-lightning.ts --only=f", "exitCode": 0, "receipt": "Owner-authorized live call on the app route with the LONG input and json:true. Reasoning stayed entirely in reasoning_content (6385 chars) and content came back as clean parseable JSON, so no route change was needed. Spend 0.000454 USD of the 0.002 USD cap."},
+    {"command": "bun scripts/license-audit.ts", "exitCode": 0, "receipt": "24 production dependencies across 5 locations — 24 allowed, 0 flagged, 0 unresolved, 2 first-party workspace links skipped; wrote docs/licenses.md; prints CLEAN. Was exit 1 with 2 flagged before the owner's allowance."}
+  ],
+  "artifacts": [
+    {"path": "scripts/probe-lightning.ts", "note": "A new label 'f' added to the labelled probe set: the app route, a deliberately long input, json:true. The probe prints token counts, the reasoning length and whether content parsed as JSON — it never prints the prompt or the completion."},
+    {"path": "scripts/license-audit.ts", "note": "PACKAGE_LICENCE_ALLOWANCES: an OFL-1.1 allowance scoped to the '@fontsource/*' package family, not a global widening of the allowed-licence set. Any other package under OFL-1.1 is still flagged, and the method note states the family-scoped nature so the allowance cannot be misread as a blanket OFL acceptance."},
+    {"path": "docs/licenses.md", "note": "Regenerated; the two @fontsource 5.3.0 packages now appear as allowed-for-family with the reason inline."},
+    {"path": "README.md", "note": "Three rows updated: the licence-audit row (now CLEAN with the family-scoped reason), the model row (direct calls LIVE VERIFIED with the 2026-10-19 re-probe), and — this pass — the sandbox rows. The sandbox 'service' row stays LIVE VERIFIED and is now explicitly scoped to the service; a new 'generated app installing and building' row reads FAILED as of 2026-10-19, stating that the one live journey passed only with a curl+GNU tar workaround the product lacks, that the production base image fails bun install --frozen-lockfile with 'error: Fail extracting tarball from react-dom', and that the row stays FAILED until the fix carries its own live receipt."}
+  ],
+  "environment": "Item 1: live Nebius Token Factory call, owner-authorized, budget-capped at 0.002 USD. Item 5: local only (node_modules + git).",
+  "providerCalls": "one live Nebius call (~455 micro-USD) for item 1; none for item 5",
+  "specReview": "PENDING independent review",
+  "qualityReview": "Lead-verified: the licence audit's exit code and counts were re-run by hand rather than read from the report; the probe's outcome was read from the probe's own printed fields (content parsed, reasoning length) rather than inferred; the README rows were checked against the journey and probe records so the page does not claim a sandbox install that fails.",
+  "limitations": [
+    "The probe passed for ONE shape of request (long input + json:true) on ONE route at ONE time. It is evidence that reasoning is not leaking into content for that shape, not a general guarantee across inputs, and it does not cover the other routed roles.",
+    "The licence allowance is a deliberate, owner-authorized exception rather than a clean set of licences: two packages are accepted because a human ruled the family acceptable, and the audit now reports CLEAN partly because of that rule. The audit is therefore clean-by-policy, and the README says so.",
+    "The sandbox rows now state a FAILURE, so the README and docs/release-evidence.md disagreed until the latter was annotated; the README is the surface a judge reads, so it is the one that was corrected first.",
+    "The 'the row stays FAILED until the fix carries its own live receipt' wording is intentionally forward-looking, and must be revised the moment item 3 produces a receipt that changes the truth — leaving it would be an understatement rather than an overstatement, which is the safer error for a status table.",
+    "Item 1's spend is a real charge against the owner's account even though it is small; it is recorded here so the total live spend is not understated."
+  ]
+}
+```
+
+```json
+{
+  "packet": "S09 secret hygiene: what the git history actually holds, and the approved rewrite (plan docs/plans/2026-10-18-submission-build-plan.md)",
+  "status": "FINDINGS ESTABLISHED AND RECORDED — repository-local only, and recorded BEFORE the rewrite so the evidence survives the rewrite. The rewrite itself is APPROVED and had not run when this record was written. No push has happened and no remote exists, so no value has left this machine.",
+  "owner": "Integration lead (the scan, the findings, and the rewrite are lead-owned; secrets are never printed, only key names and booleans)",
+  "commands": [
+    {"command": "git rev-list --count --all", "exitCode": 0, "receipt": "327 reachable commits"},
+    {"command": "git log --all --oneline --diff-filter=A -- .dev.vars", "exitCode": 0, "receipt": "Exactly one commit ADDED it: 42315d89 ('fix(p05): skills via flue SKILL.md auto-packaging ...'). Exactly one commit removed it: 70ad7c35 ('fix(repo): untrack .dev.vars and .wrangler dev state'). One path named .dev.vars has ever been tracked."},
+    {"command": "per-key comparison of today's .dev.vars against 42315d89:.dev.vars (python3; prints key names and MATCH/DIFFER only, never a value)", "exitCode": 0, "receipt": "The committed file held 14 keys; today's holds 15. TWELVE keys are byte-identical to today's live values: BETTER_AUTH_SECRET, CADDIE_LIVE_AUTHORIZED, CONTREE_API_TOKEN, CONTREE_BASE_URL, CONTREE_PROJECT_ID, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, NEBIUS_API_KEY, RESEND_API_KEY, RESEND_FROM. Two DIFFER: BETTER_AUTH_URL (a URL, not a credential) and INVITE_ALLOWLIST (email addresses — personal data, not a credential). TAVILY_API_KEY appears ONLY in today's untracked file and was never committed."},
+    {"command": "git log --all --format= --name-only | sort -u | grep -cE '<area>'", "exitCode": 0, "receipt": "55717 distinct paths ever touched. node_modules/ 54943, .wrangler/ 16, .worktrees 5 (.worktrees/p07, p08, p09, p15a, p17 — gitlinks), test-results/ 1 (test-results/.last-run.json), and .dev.vars 1."},
+    {"command": "git cat-file --batch-all-objects --batch-check='%(objecttype) %(objectsize)' | awk ...", "exitCode": 0, "receipt": "THREE reachable blobs exceed GitHub's 100 MB hard limit: 111865464, 114566712 and 130610440 bytes — the workerd binaries under node_modules, which also sit at the top of the 54k-file tree. Five largest reachable blobs by size: 18662336, 23653616, 111865464, 114566712, 130610440."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/.dev.vars (deleted from history by the rewrite; gitignored and still present locally)", "note": "The single tracked copy rode in via 42315d89 and was untracked by 70ad7c35. Twelve of its keys still match today's live values, which is why the owner's ruling is ROTATE, not merely remove: deleting history does not un-know a key that a human may have copied out of the old commit."},
+    {"path": "docs/plans/2026-10-03-fresh-build/execution-ledger.md", "note": "This record. It is written before the rewrite on purpose — the scan evidence is the thing the rewrite destroys, so the findings must be durable in prose and counts rather than only reproducible from a history that will no longer contain them."}
+  ],
+  "environment": "Local repository only: git plumbing and a python3 comparison over two files. No network, no remote, no push. Secret VALUES were never read into the transcript; the comparison printed only key names and MATCH/DIFFER verdicts.",
+  "providerCalls": "none",
+  "specReview": "PENDING independent review",
+  "qualityReview": "Lead-reviewed the method before trusting it: the per-key comparison is used INSTEAD of a whole-file hash, because an early whole-file comparison returned 'differs' and would have hidden twelve matching credential values behind one irrelevant line difference — the coarse check was rejected precisely because it would have understated the exposure.",
+  "limitations": [
+    "THE EXPOSURE IS REAL AND ROTATION IS THE ONLY COMPLETE FIX. Twelve keys equal today's live values, including NEBIUS_API_KEY, CONTREE_API_TOKEN, RESEND_API_KEY, BETTER_AUTH_SECRET and both OAuth client secrets. Nothing has left this machine (no remote exists, nothing was pushed), but the values are in this repository's object database and in any local clone or backup of it. The rewrite removes them from the reachable dataset; only rotating each credential removes the exposure. Owner action, not a code change.",
+    "INVITE_ALLOWLIST differs from today's value but was still committed, and it is a LIST OF EMAIL ADDRESSES — personal data rather than a credential. It is removed by the rewrite alongside the credentials and is called out separately because 'rotate the keys' does not cover it and the owner may want it changed for a different reason.",
+    "The rewrite is a filter over local history and is NOT a substitute for rotation, and it cannot repair a value that a human already read out of the old commit — it only stops the value being reachable from git. The plan's ordering (rotate for exposure, rewrite for reachability) reflects that; this record must not be read as saying the rewrite removes the need to rotate.",
+    "No automated guard exists yet, so nothing prevents a future commit from re-adding a dotenv file. The intended guard is a pre-commit/CI check plus a repeatable scan script that prints counts only; both are still to be built, and until then this record is the manual control.",
+    "The scan is point-in-time over the CURRENT object database. It says what is reachable from refs now; it does not prove that no copy exists in a stash, a reflog, a bundle, an editor backup or another clone on this machine. The mirror clone taken before the rewrite is itself such a copy and must be handled deliberately.",
+    "The three oversized blobs are recorded as a scope fact, not a leak: they are the reason the rewrite also strips node_modules rather than only the dotenv file, since a repository that cannot be pushed to GitHub is an independent problem from the secrets it carries."
+  ]
+}
+```
+
+```json
+{
+  "packet": "Owner request: end-to-end browser acceptance of the composed product (not a plan packet)",
+  "status": "FAILED (partial) — 6 browser cases fail deterministically. PRE-EXISTING, not caused by this session's work, and left recorded rather than fixed because the fix is a product-copy decision.",
+  "owner": "Integration lead (the runs, the root-cause trace to a specific commit, and the two doc corrections)",
+  "commands": [
+    {"command": "bun run build", "exitCode": 0, "receipt": "compose-assets: 1 relocated SPA + 98 SPA asset + 99 landing files; collisions: 0. Run first, as the browser config requires."},
+    {"command": "bun run test:browser --all", "exitCode": 1, "receipt": "45 packets — 19 PASS, 4 FAIL (P11, U01, U04, U05), 22 NOT APPLICABLE. The 22 are named as NOT APPLICABLE rather than faked as passes."},
+    {"command": "bunx playwright test tests/browser/{theme-picker,brief,discovery,discovery-journey}.spec.ts --reporter=list", "exitCode": 1, "receipt": "6 failed, 26 passed, run twice (once with nothing else on the machine, once under heavy concurrent load) with the SAME SIX cases both times. Six deterministic failures, not flakiness."},
+    {"command": "git diff HEAD --stat -- tests/browser apps/app/src/client apps/site", "exitCode": 0, "receipt": "0 bytes. The specs and the client sources are byte-identical to the tree without this session's changes, and the failing specs stub /api — so the failures cannot be caused by the S06/S07/auth work, which touched no client or spec file. This is the check that makes the classification 'pre-existing' evidence rather than opinion."},
+    {"command": "git log -S '· saved' -- apps/app/src/client | tests/browser/*.spec.ts", "exitCode": 0, "receipt": "c0554b09 (2026-10-10) ADDED '· saved' to the client and added the spec expectations together — they agreed. fb1c43d4 (2026-10-15) REMOVED it from the client (Results.tsx rewritten, 643 lines) and did NOT touch the specs. Discovery's four failures date from that commit."},
+    {"command": "grep PALETTES apps/app/src/client/theme.ts", "exitCode": 0, "receipt": "FIVE palettes — caddie, clearcut, onesecos, farmhand, kirocrew — and git log shows theme.ts has only ever had one commit (47e0287e, 2026-10-15), the same commit that wrote theme-picker.spec.ts. The test's four-press wrap was wrong from birth."},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1397 pass, 0 fail, 6619 expect() calls, 106 files. The white-box suite is green on the SAME tree whose browser suite has six failures — which is the whole point: the two harnesses do not see the same thing."},
+    {"command": "grep -n browser .github/workflows/ci.yml scripts/release-check.ts", "exitCode": 1, "receipt": "No matches in either. CI runs install/build/typecheck/verify:packet --all/release-check; the browser suite is in no CI step and release-check has no browser check, so nothing automated can see these failures."}
+  ],
+  "artifacts": [
+    {"path": "docs/release-evidence.md", "note": "A new dated section, 'Browser acceptance suite: known failures (2026-10-19)', added rather than rewriting the two earlier gates: both had recorded the browser specs green, and that was true when written. The section names the six, their root-cause commits, and the CI gap."},
+    {"path": "README.md", "note": "A status-table row for the browser suite, and the test-suite row refreshed from 1380/106 to 1397/106. The row states plainly that six cases fail and that they are pre-existing and unrelated to the judge work."},
+    {"path": "test-results/", "note": "Playwright's own failure artefacts (accessibility snapshots + error context) for each failing case. Gitignored, so they are working evidence rather than committed files; the decisive one is the discovery panel snapshot, which shows the rendered row text 'Can enter' where the spec demands 'You can enter'."}
+  ],
+  "environment": "Local: real Chromium (Playwright 1.63.0) against the composed build served by vite preview on 127.0.0.1:4173, with /api stubbed by the specs themselves. No deploy, no live call, no remote.",
+  "providerCalls": "none",
+  "specReview": "PENDING independent review",
+  "qualityReview": "Lead-verified by reading the rendered accessibility snapshot rather than the assertion text: the snapshot shows the DOM rendering 'Can enter' and a 'Saved' button, which is what proved the failures are real spec/UI disagreements and not timing. Also checked the CI workflow by hand to confirm the blind spot instead of assuming it.",
+  "limitations": [
+    "SIX FAILURES ARE RECORDED, NOT FIXED. Two of them require a product decision that belongs to the owner: whether the v2 Discover list should show the long verdict word ('You can enter', which is what the 2026-10-10 design data in docs/design/2026-10-10-v2/assets/events.js carries) or the dense-row short chip ('Can enter', which is what hackathon-format.ts documents and what ships), and whether the saved marker should be a row button or a '· saved' text. Choosing either side is a one-line change; guessing wrong silently changes the product.",
+    "brief.spec.ts:265 is NOT root-caused. It expects exactly one run POST from the mobile welcome panel's discovery action and observes none. It could be a stale spec (the panel's action changed) or a real defect (the action no longer starts a run). It is listed as un-resolved rather than folded into the other five, because the two possibilities have very different weights.",
+    "The theme-picker case looks like a stale test, but the palette count is a product surface: five palettes ship and the test expects four. 'The test is stale' is the likely reading, not a certainty about which count was intended.",
+    "Four failing packets (P11, U01, U04, U05) means their own `bun run test:browser -- Pxx` invocations fail too, so any per-packet browser claim for those four is wrong until the specs or the client are reconciled. The other 19 packets' browser checks passed in this run.",
+    "This run covered the composed build with stubbed APIs. It is NOT a live journey: no real model call, no sandbox, no OAuth. A live end-to-end pass through the actual judge path would additionally need JUDGE_ACCESS_CODE (absent from .dev.vars) and would spend money, so it was not performed.",
+    "The 22 NOT APPLICABLE packets are packets with no browser spec mapped at all — their absence is a coverage gap, not a pass, and the README row says 'the rest pass' which should be read as 'the other mapped cases', not as a claim that every packet has browser coverage."
+  ]
+}
+```
