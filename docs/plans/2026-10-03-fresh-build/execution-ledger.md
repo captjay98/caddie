@@ -1924,3 +1924,64 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "Plan step 2.4, improved: every published app can be installed from the browser (Track 2 of docs/plans/2026-10-19-pwa-flutter-apk-monetization-plan.md)",
+  "status": "LOCAL VERIFIED in Chromium on the exact files the publish step uploads, under the dispatch Worker's CSP. Installing on a real Android phone or iPhone was NOT tried (no device), and publishing itself is not deployed (G4).",
+  "owner": "Integration lead (owner said: don't follow the plan literally, improve it)",
+  "commands": [
+    {"command": "bun test tests/app-icons.test.ts tests/published-page.test.ts (before)", "exitCode": 1, "receipt": "Both files failed to load: app-icons.ts and published-page.ts did not exist."},
+    {"command": "bun scripts/generate-app-icon-glyphs.ts", "exitCode": 0, "receipt": "36 glyphs (A-Z, 0-9, Inter Bold from @fontsource/inter 5.3.0, OFL-1.1) drawn once in Playwright's Chromium; apps/app/src/server/app-icon-glyphs.ts is 92 KB. Capitals share one 240 px band centred at 256; round letters overshoot by 4 px."},
+    {"command": "bun test tests/app-icons.test.ts tests/published-page.test.ts", "exitCode": 0, "receipt": "23 pass. The PNGs are decoded by the test's own reader (own CRC and unfilter): sizes, see-through rounded corners on the any-purpose icons, full-bleed maskable and Apple icons, white letter on the app colour, the maskable letter inside the 80% safe circle for wide letters and the no-letter mark, byte-identical output on repeat."},
+    {"command": "bunx playwright test tests/browser/app-install.spec.ts", "exitCode": 0, "receipt": "3 pass, 1 evidence-only skip. Chromium (channel chromium, normal profile) reports no installability errors (DevTools Page.getInstallabilityErrors) and a parsed manifest with no errors, served from 127.0.0.1 with appCsp and the single-page fallback; every icon decodes at its stated size under that CSP. Control: with the manifest link removed, Chromium reports no-manifest."},
+    {"command": "mutations (scratch copies, restored byte-identical)", "exitCode": 0, "receipt": "M1 maskable letter at 0.62 of the icon: fails only the safe-circle test. M2 manifest link removed from the page: fails only the link test. M3 viewport-fit=cover added: fails only the plain-viewport test."},
+    {"command": "bun run verify:packet PUBLISH; bun run test:browser -- PUBLISH; bun run test:browser -- BUILD", "exitCode": 0, "receipt": "PUBLISH 10 files PASS (publish.test.ts now pins '8 files and the server, 1 key'); app-install.spec PASS; project-workflow.spec PASS with the new install hint under the Live line."},
+    {"command": "bun run typecheck && bun run build", "exitCode": 0, "receipt": "typecheck 0; build 0, 0 collisions."},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1541 pass / 0 fail / 114 files / 7664 expect() calls."},
+    {"command": "bun run verify:packet --all", "exitCode": 0, "receipt": "46 packets: 41 PASS, 0 FAIL, 5 NOT APPLICABLE."},
+    {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "48 PASS, 0 FAIL, 1 BLOCKED, 4 PROVISIONED."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/published-page.ts", "note": "The page, main.js, main.css, manifest.webmanifest and four icons, written by the publish step for every app (the model that builds an app cannot break it). Manifest: id, start_url and scope '/', display standalone, name (60 chars), short_name (whole words, 12 chars), white background, no theme colour. The page links the manifest, a PNG favicon and the Apple touch icon, and sets apple-mobile-web-app-title. Plain module so a browser test can import it."},
+    {"path": "apps/app/src/server/app-icons.ts, app-icon-glyphs.ts, scripts/generate-app-icon-glyphs.ts", "note": "The app's first Latin letter or digit (accents removed), white on one of eight 700-shade hues picked from the project id (renames keep the colour), with a soft vertical gradient; a 2x2 grid mark when the name has no Latin letter. Drawn by box-filter scaling of the pre-drawn glyphs and PNG-encoded with CompressionStream: no font engine, canvas or image library in the Worker."},
+    {"path": "workers/dispatch/src/csp.ts", "note": "appCsp moved to its own module (re-exported from index.ts) so the browser test serves pages under the exact policy. default-src 'self' covers the same-origin manifest."},
+    {"path": "apps/app/src/client/project/PublishApp.tsx", "note": "One line under 'Live at': how to put the app on a phone (Android: Install app in Chrome's menu; iPhone: Share, then Add to Home Screen)."}
+  ],
+  "planCorrections": [
+    "The template has no index.html: the published page comes from the publish step, so that is where the tags go. The scaffold and its lockfile are unchanged.",
+    "Meta tags alone do not make Android install an app; a manifest with 192 and 512 icons does. mobile-web-app-capable and apple-mobile-web-app-capable are not needed with a manifest.",
+    "viewport-fit=cover dropped: generated apps don't pad for the notch, so it would put their content under it.",
+    "No service worker: Chrome installs from its menu without one since Chrome 108 on Android (developer.chrome.com/blog/update-install-criteria); the automatic install banner still needs one. A cached copy could also keep showing an old version after a new publish."
+  ],
+  "environment": "Local Mac, Chromium via Playwright 1.63 (channel chromium, headless); local workerd via vite preview for BUILD's spec.",
+  "providerCalls": "none",
+  "limitations": [
+    "No real-device evidence: Chrome's Install app on Android, Add to Home Screen on iPhone, the WebAPK icon mask.",
+    "Cloudflare's own static-asset serving (content type of .webmanifest, SPA fallback) is not exercised; the test server mirrors it.",
+    "Installed apps open without the browser's address bar and back button; Android's back gesture and the iPhone's edge swipe still go back."
+  ]
+}
+```
+
+```json
+{
+  "packet": "Track 3 (Flutter + APK) feasibility, checked locally after the owner asked why it can't be built: corrections and open unknowns",
+  "status": "LOCAL VERIFIED for the Flutter template on this Mac. Nothing ran in the sandbox (paid; needs the owner's OK). Track 3 itself is not started.",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "toolchain check", "exitCode": 0, "receipt": "CORRECTION: the earlier report said this Mac has no Flutter and no Java; that checked only the shell's PATH. Present: Flutter 3.44.8 via fvm (plus 3.38.10, 3.41.9, 3.47.1 and /opt/flutter), Android SDK (build-tools to 36, NDK 26-28, an arm64 Pixel_5 emulator), Java 21 from Android Studio, a 17 GB Gradle cache."},
+    {"command": "flutter create --platforms=android (throwaway copy outside the repo) + the template's files; flutter test; flutter analyze", "exitCode": 0, "receipt": "Both widget tests pass. analyze: 1 info (prefer_const_constructors, lib/main.dart:27). The template ships no android/ folder, so the recipe's 'flutter build apk' cannot run on it as committed."},
+    {"command": "flutter build apk --release --target-platform android-arm64 (Gradle heap capped at 2 GB)", "exitCode": 0, "receipt": "16.0 MB APK (15,998,464 bytes) in 169 s with warm caches; libflutter.so 11.6 MB and libapp.so 4.0 MB inside. The build left about 2 GB in the shared Gradle cache; the throwaway project was deleted."}
+  ],
+  "found": [
+    "Production D1 refuses any value over 2,000,000 bytes (developers.cloudflare.com/d1/platform/limits). Caddie stores build files and artifacts as single D1 values and allows 3 MiB per server or client file (build-workflow.ts) and 5 MiB per artifact (artifacts.ts, DDL CHECK in 0003_artifacts.sql). A file between 2 MB and those caps passes Caddie's checks and would be refused by production D1. NOT FIXED. Not checked: whether the local test database enforces Cloudflare's limit.",
+    "An APK (16 MB for one phone type) is 8 times that limit, so APKs need R2; reading one out of the sandbox also exceeds the driver's 5 MiB read cap, and Contree's own download limit is undocumented (its docs say to ask)."
+  ],
+  "unknowns": [
+    "The sandbox's CPU type: Google publishes Android's build tools for Linux on x86-64 only, so an ARM sandbox cannot build an APK without unofficial tools. One short paid run (uname -m) answers it.",
+    "Sandbox price per build: Token Factory bills sandbox use but publishes no per-minute rate in the pages read."
+  ],
+  "providerCalls": "none"
+}
+```

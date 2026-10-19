@@ -25,6 +25,7 @@
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { routeKey, type AppRoute } from '../../../packages/contracts/src/publish.ts';
+import { appCsp } from './csp.ts';
 import { dispatchPage, escapeAttr, reportUrl } from './pages.ts';
 
 export interface DispatchEnv {
@@ -70,27 +71,8 @@ export class AppPlatform extends WorkerEntrypoint<DispatchEnv, { projectId: stri
 	}
 }
 
-/**
- * Caddie's CSP for app documents. The page can load only its own scripts,
- * fetch only its own server and post forms only to itself — so a page cannot
- * send what a visitor types to another site; outside calls go through the
- * app's server (and its outbound policy).
- */
-export function appCsp(caddieOrigin: string): string {
-	return [
-		"default-src 'self'",
-		"script-src 'self'",
-		"style-src 'self' 'unsafe-inline' https:",
-		"img-src 'self' data: blob: https:",
-		"media-src 'self' data: blob: https:",
-		"font-src 'self' data: https:",
-		"connect-src 'self'",
-		"form-action 'self'",
-		"base-uri 'self'",
-		"object-src 'none'",
-		`frame-ancestors 'self' ${caddieOrigin.replace(/\/+$/, '')}`,
-	].join('; ');
-}
+/** Caddie's CSP for app documents (csp.ts), re-exported for existing callers. */
+export { appCsp };
 
 function parseRoute(value: unknown): AppRoute | null | 'invalid' {
 	if (value === null || value === undefined) return null;

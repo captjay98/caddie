@@ -201,7 +201,8 @@ describe('publish service', () => {
 		const run = after.runs[0]!;
 		expect(run).toMatchObject({ kind: 'publish', status: 'succeeded', error: null });
 		expect(run.steps.map((s) => `${s.step}:${s.outcome}`)).toEqual(['approval:ok', 'database:ok', 'migration:ok', 'upload:ok', 'safety-check:waiting', 'safety-check:ok', 'route:ok', 'health:ok']);
-		expect(run.steps.find((s) => s.step === 'upload')!.detail).toBe('3 files and the server, 1 key');
+		// Page + its two files + the manifest and four home-screen icons (published-page.ts).
+		expect(run.steps.find((s) => s.step === 'upload')!.detail).toBe('8 files and the server, 1 key');
 
 		// What reached Cloudflare.
 		const script = stub.scripts.get(scriptNameFor(scope.projectId, 1))!;

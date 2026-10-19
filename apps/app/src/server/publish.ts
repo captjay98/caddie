@@ -1,14 +1,15 @@
 import type { ApprovalIntent, AppRoute, Scope } from '@caddie/contracts';
 import { DEFAULT_APP_LIMITS } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
-import { AppHostError, type AppHost, type AppHostBinding, type AppHostFile, type ScanResult } from './app-host.ts';
+import { AppHostError, type AppHost, type AppHostBinding, type ScanResult } from './app-host.ts';
 import { checkApprovalForEffect } from './approvals.ts';
 import { resolveAppSecrets } from './app-secrets.ts';
 import { appAuthSecret } from './app-sign-in.ts';
-import { readOutputManifest, readPublishBundle, readWorkflow, type PublishBundle } from './build-workflow.ts';
+import { readOutputManifest, readPublishBundle, readWorkflow } from './build-workflow.ts';
 import { createD1ContentStore } from './artifacts.ts';
 import { splitSqlScript } from './preview-runtime.ts';
 import { getProject } from './projects.ts';
+import { publishedAssets } from './published-page.ts';
 import { isJudgeAccount } from './judge-access.ts';
 import { ScopeError, assertProjectOwner, assertProjectScope, projectScopeForUser } from './scope.ts';
 import type { Keyring } from './secret-box.ts';
@@ -339,25 +340,7 @@ function plainHostFailure(error: unknown): string {
 	return 'Something went wrong while publishing. Try again.';
 }
 
-// --- the published files ------------------------------------------------------------------
-
-function escapeText(text: string): string {
-	return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-/** index.html + main.js + main.css: the page loads its own files only (the dispatch Worker's CSP forbids inline scripts). */
-export function publishedAssets(title: string, bundle: Pick<PublishBundle, 'js' | 'css'>): AppHostFile[] {
-	const html =
-		'<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
-		`<title>${escapeText(title.slice(0, 120))}</title>\n<link rel="stylesheet" href="/main.css">\n</head>\n<body>\n<div id="root"></div>\n` +
-		'<script type="module" src="/main.js"></script>\n</body>\n</html>\n';
-	const encode = (text: string) => new TextEncoder().encode(text);
-	return [
-		{ path: '/index.html', bytes: encode(html), contentType: 'text/html; charset=utf-8' },
-		{ path: '/main.js', bytes: encode(bundle.js), contentType: 'text/javascript; charset=utf-8' },
-		{ path: '/main.css', bytes: encode(bundle.css), contentType: 'text/css; charset=utf-8' },
-	];
-}
+// --- the published files: published-page.ts (page, manifest, home-screen icons) -------------
 
 async function probeLive(deps: PublishDeps, hostname: string, hasServer: boolean): Promise<{ ok: boolean; detail: string }> {
 	const sleep = deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -494,7 +477,7 @@ async function deployOutput(
 		if (pending.length === 0) await run.step('migration', 'skipped', 'no new migrations');
 
 		current = 'upload';
-		const assets = publishedAssets(project.name, bundle);
+		const assets = await publishedAssets({ name: project.name, seed: scope.projectId }, bundle);
 		// The app's own sign-in secret (template caddie/auth.ts), derived per project; never stored.
 		const authSecret = bundle.server !== null ? await appAuthSecret(deps.authSecret ?? undefined, scope.projectId, 'live') : null;
 		const bindings: AppHostBinding[] = [

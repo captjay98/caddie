@@ -701,6 +701,9 @@ test('Publish puts the checked app on the web in one click, then unpublishes it 
 	await expect(panel).toHaveAttribute('data-state', 'live');
 	const live = panel.getByTestId('publish-live');
 	await expect(live.getByRole('link', { name: 'todo-board.caddieapps.test' })).toHaveAttribute('href', 'https://todo-board.caddieapps.test/');
+	await expect(panel.getByTestId('publish-install-hint')).toHaveText(
+		'To put it on a phone, open the link there. Android: Install app in Chrome’s menu. iPhone: Share, then Add to Home Screen.',
+	);
 	expect(state.publish.calls).toEqual(['approval', 'publish']);
 	expect(state.publish.approvals).toEqual([
 		{ intent: { projectId: 'proj-workflow', action: 'deploy-production', resourceId: 'app:proj-workflow', revisionHash: 'sha-manifest#1', policyVersion: 'publish/2026-10-18' }, decision: 'approved' },

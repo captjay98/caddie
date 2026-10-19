@@ -212,13 +212,18 @@ export function PublishApp(props: { actorId: string; projectId: string }): React
       ) : (
         <>
           {publication?.status === "live" ? (
-            <p className="state-detail publish-live" data-testid="publish-live">
-              Live at{" "}
-              <a href={publication.url} target="_blank" rel="noopener noreferrer">
-                {hostOf(publication.url)}
-              </a>
-              <span className="publish-meta"> · published {when(publication.publishedAt)}</span>
-            </p>
+            <>
+              <p className="state-detail publish-live" data-testid="publish-live">
+                Live at{" "}
+                <a href={publication.url} target="_blank" rel="noopener noreferrer">
+                  {hostOf(publication.url)}
+                </a>
+                <span className="publish-meta"> · published {when(publication.publishedAt)}</span>
+              </p>
+              <p className="publish-meta" data-testid="publish-install-hint">
+                To put it on a phone, open the link there. Android: Install app in Chrome&rsquo;s menu. iPhone: Share, then Add to Home Screen.
+              </p>
+            </>
           ) : publication?.status === "paused" ? (
             <p className="state-detail" data-testid="publish-paused">
               Not on the web right now. Its data is kept; publish again to bring it back at {hostOf(publication.url)}.

@@ -237,8 +237,10 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/web-risk.test.ts',
 			'tests/report-page.test.ts',
 			'tests/operator.test.ts',
+			'tests/published-page.test.ts',
+			'tests/app-icons.test.ts',
 		],
-		browser: [],
+		browser: ['tests/browser/app-install.spec.ts'],
 		live: [],
 	},
 	KEYS: {

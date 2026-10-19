@@ -278,8 +278,8 @@ such rather than omitted.
 
 | Surface | Status | What backs it |
 | :--- | :--- | :--- |
-| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1518 pass, 0 fail, 112 files — run at the time of writing. |
-| Browser acceptance suite (`bun run test:browser`) | **LOCAL VERIFIED** (2026-10-19) | `bun run test:browser -- --all` against the composed build: 23 packets PASS, 0 FAIL, 22 have no browser spec (named, not counted). Six cases had failed earlier the same day; every one was a spec that no longer matched the shipped client, now updated, with one root-caused stub-ordering bug (`docs/release-evidence.md`). CI now runs this suite. |
+| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1541 pass, 0 fail, 114 files — run at the time of writing. |
+| Browser acceptance suite (`bun run test:browser`) | **LOCAL VERIFIED** (2026-10-19) | `bun run test:browser -- --all` against the composed build: 24 packets PASS, 0 FAIL, 22 have no browser spec (named, not counted), at the last full run (2026-10-19, with the PWA spec). PUBLISH has since gained `tests/browser/app-install.spec.ts`; it and BUILD's spec pass on their own runs. Six cases had failed earlier the same day; every one was a spec that no longer matched the shipped client, now updated, with one root-caused stub-ordering bug (`docs/release-evidence.md`). CI now runs this suite. |
 | Typecheck (`bun run typecheck`) | **LOCAL VERIFIED** | exit 0 (root project + `apps/app`). |
 | Build composition (`bun run build`) | **LOCAL VERIFIED** | One composed Workers assets tree from the Astro landing + Vite SPA. |
 | Direct model calls on Nebius Token Factory | **LIVE VERIFIED** (probes recorded 2026-10-18, re-probed 2026-10-19) | Owner-authorized calls recorded in `docs/release-evidence.md` and the execution ledger (P05); the route/pricing table is refreshed from a live `GET /v1/models?verbose=true` listing (2026-10-18) and `scripts/probe-lightning.ts` re-probed the routed roles on 2026-10-19. |
@@ -290,6 +290,7 @@ such rather than omitted.
 | Judge access by code (`S06`) | **LOCAL VERIFIED** | `tests/judge-access.test.ts`; the gate, rate limits and refusals are tested. Not exercised against a deployed Worker. |
 | Judge limits (`S07`) | **LOCAL VERIFIED** | `apps/app/src/server/judge-limits.ts`, `tests/judge-limits.test.ts`; the four limits (projects, build starts, messages, discovery lookups) are enforced server-side and refused before any write. Not exercised against a deployed Worker. |
 | Install Caddie on a phone (web app) | **LOCAL VERIFIED** in Chromium; **not tried on a phone** | `apps/app/public/manifest.webmanifest`, `apps/app/public/sw.js`, `tests/pwa.test.ts`, `tests/browser/pwa.spec.ts`. Opened with no connection, the app says it is offline (it no longer shows sign-in). A link shared to Caddie from another app lands in the chat box and is never sent for you. The service worker never caches `/api` or `/agents`. Not yet installed on a real Android phone or iPhone. |
+| Install a published app on a phone | **LOCAL VERIFIED** in Chromium; **not tried on a phone**, publishing not deployed | `apps/app/src/server/published-page.ts`, `app-icons.ts`, `tests/published-page.test.ts`, `tests/app-icons.test.ts`, `tests/browser/app-install.spec.ts`. Every publish adds a web app manifest and home-screen icons (the app's first letter on a colour picked for it), so Chrome on Android offers Install app and an iPhone's Add to Home Screen opens it full screen. Chromium's own install check passes on the exact published files under the dispatch Worker's CSP. No service worker, so a new publish is never hidden behind a cached copy. |
 | Landing page product art / workspace illustrations | **SIMULATED** | Labelled on the page itself: illustrative compositions, not live captures. |
 | **Hosted demo (the judge URL)** | **NOT BUILT / not deployed** | Production deploy is owner-gated. There is no demo URL yet. |
 | App publishing (Workers for Platforms) | **Not deployed** | The dispatch Worker is **PROPOSED** (`workers/dispatch/wrangler.jsonc`); the publish service and `/api` routes exist locally. |
@@ -323,7 +324,7 @@ app runs and fails closed with visible gaps.
 
 | Command | What it is | Last observed |
 | :--- | :--- | :--- |
-| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1518 pass, 0 fail, 7462 expect() calls, 112 files** |
+| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1541 pass, 0 fail, 7664 expect() calls, 114 files** |
 | `bun run typecheck` | Root project + `apps/app` typecheck | exit 0 |
 | `bun run build` | Astro + Vite + asset composition into one Workers assets tree (no deploy) | exit 0 (LOCAL VERIFIED) |
 | `bun run verify:packet Pxx` | That packet's mapped tests; fails when a mapped test file is missing or empty | — |
