@@ -22,9 +22,10 @@
  *   - the route's own `modelId` and `maxTokens` from the frozen registry,
  *     resolved by ROLE, so this tests whatever the roles currently point at.
  *
- * Six probes in total: two rules-reading calls (the route leaving the helper
- * role, and whatever the helper role points at now) and four app calls (plain,
- * json, a bigger JSON schema, and a long input).
+ * Seven probes in total: two rules-reading calls (the route leaving the helper
+ * role, and whatever the helper role points at now) and five app calls (plain,
+ * json, a bigger JSON schema, a long input, and — the owner's follow-up probe —
+ * json over a long input, which is the exact shape that broke the helper role).
  *
  * `--budget-usd` (default 0.01) aborts before the first call if the worst-case
  * estimate exceeds it. Live calls require `CADDIE_LIVE_AUTHORIZED=1`; without it
@@ -86,7 +87,7 @@ const budgetUsd = (() => {
 	return Number.isFinite(value) && value > 0 ? value : 0.01;
 })();
 
-/** `--only=b,c` runs a subset (labels: a1, a2, b, c, d, e). Default: all. */
+/** `--only=b,c` runs a subset (labels: a1, a2, b, c, d, e, f). Default: all. */
 const only = (() => {
 	const arg = process.argv.find((a) => a.startsWith('--only='));
 	return arg ? new Set(arg.slice('--only='.length).split(',').map((s) => s.trim())) : null;
@@ -365,7 +366,7 @@ const appWorstUsd = usd(appRoute, { input: excerpt.length / 3 + 300, output: APP
 const worstCaseUsd =
 	(want('a1') ? usd(lightningRoute, { input: excerpt.length / 3, output: lightningRoute.maxTokens }) : 0) +
 	(want('a2') ? usd(helperRoute, { input: excerpt.length / 3, output: helperRoute.maxTokens }) : 0) +
-	['b', 'c', 'd', 'e'].filter(want).length * appWorstUsd;
+	['b', 'c', 'd', 'e', 'f'].filter(want).length * appWorstUsd;
 if (worstCaseUsd > budgetUsd) {
 	console.error(
 		`probe-lightning: BLOCKED — worst-case estimate $${worstCaseUsd.toFixed(4)} exceeds the $${budgetUsd.toFixed(4)} budget. ` +
@@ -445,6 +446,28 @@ if (want('e')) {
 			{ role: 'user', content: `Summarise who may enter this hackathon:\n\n${excerpt}` },
 		],
 		false,
+	);
+	report(o.name, o.pass, o.lines);
+}
+// F (owner review follow-up, 2026-10-19): the LONG INPUT **and** the app path's
+// `json` rule together — the combination that made the helper role unusable on
+// Lightning. app-ai does `JSON.parse(reply.text)` and shows `reply.text` to a
+// person, so a model that narrates its reasoning into `content` breaks the app,
+// and the long input is what provoked that on the rules-reading probe (b/‘d’
+// alone are easy prompts). Budget: the owner capped this single call at $0.002,
+// which the worst-case estimate below is checked against before any spend.
+if (want('f')) {
+	const o = await appCase(
+		appRoute,
+		`json:true over a long input on ${appRoute.id} (app)`,
+		[
+			{ role: 'system', content: `You are the assistant inside a research app.\n\n${jsonRule}` },
+			{
+				role: 'user',
+				content: `Summarise who may enter this hackathon. Answer as {"eligible":true,"who":["…"],"why":"…"}.\n\nRules text:\n\n${excerpt}`,
+			},
+		],
+		true,
 	);
 	report(o.name, o.pass, o.lines);
 }
