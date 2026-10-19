@@ -45,6 +45,22 @@ describe("parsing helpers", () => {
     expect(parseTestCounts("error: Cannot find module 'react'")).toBeNull();
   });
 
+  test("reads flutter test's summary line, its last one, and failures", () => {
+    expect(parseTestCounts("00:01 +0: loading\n00:02 +1: first\n00:03 +2: All tests passed!")).toEqual({ passed: 2, failed: 0 });
+    expect(parseTestCounts("00:02 +1: ok\n00:03 +1 -1: broken [E]\n00:04 +3 -1: Some tests failed.")).toEqual({ passed: 3, failed: 1 });
+    expect(parseTestCounts("00:04 +2 ~1: All tests passed!")).toEqual({ passed: 2, failed: 0 });
+    // A test file that does not compile: nothing passes, one failure.
+    expect(parseTestCounts("00:05 +0 -1: Some tests failed.")).toEqual({ passed: 0, failed: 1 });
+    // "Test directory test/app not found": no summary at all.
+    expect(parseTestCounts('Test directory "test/app" not found.')).toBeNull();
+  });
+
+  test("sums a Flutter app's widget tests and its server's tests (caddie/run-tests.sh runs both)", () => {
+    const both = "00:03 +4: All tests passed!\nbun test v1.4.2\n\n 3 pass\n 1 fail\n 9 expect() calls";
+    expect(parseTestCounts(both)).toEqual({ passed: 7, failed: 1 });
+    expect(parseTestCounts("00:03 +4: All tests passed!\n\n 3 pass\n 0 fail")).toEqual({ passed: 7, failed: 0 });
+  });
+
   test("recognises test commands, including after a cd prefix", () => {
     expect(isTestCommand(`cd ${ROOT} && bun test src/ 2>&1 | head -80`)).toBe(true);
     expect(isTestCommand("bun run test")).toBe(true);

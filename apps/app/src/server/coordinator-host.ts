@@ -2,7 +2,7 @@ import type { AuthEnv } from "./auth.ts";
 import type { RunBindingRecord } from "@caddie/contracts";
 import type { CoordinatorHostContext } from "../agents/coordinator.ts";
 import type { SandboxToolDeps } from "../agents/tools.ts";
-import { BUILD_RUNTIME_ENV, DEFAULT_BASE_IMAGE, buildSandboxFromEnv } from "./build-sandbox.ts";
+import { buildSandboxFromEnv, stackRuntime } from "./build-sandbox.ts";
 import { previewDocument, readBuiltApp } from "./built-app.ts";
 import { type SandboxDriver, SandboxError } from "./adapters/sandbox.ts";
 import { bytesToBase64, base64ToBytes } from "./adapters/contree.ts";
@@ -34,7 +34,9 @@ import {
 import { stackCatalog } from "./stacks.ts";
 import { recordBuildActivity } from "./build-activity.ts";
 import { checkServerStarts, type WorkerLoaderLike } from "./preview-runtime.ts";
-import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS } from "../../../../stacks/react-hono/scaffold.ts";
+import { SCAFFOLD_FILES } from "../../../../stacks/react-hono/scaffold.ts";
+import { FLUTTER_SCAFFOLD_FILES } from "../../../../stacks/flutter/scaffold.ts";
+import { hostCheckCommands, testsPassed } from "./host-checks.ts";
 import { projectScopeForUser, ScopeError } from "./scope.ts";
 import { requestAppSecret } from "./app-secrets.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
@@ -48,7 +50,7 @@ import {
   testsBaseline,
 } from "./build-features.ts";
 import { openWorkingCopy } from "./working-copy.ts";
-import { runVerifiedInstall, VERIFIED_INSTALL_COMMAND } from "./verified-install.ts";
+import { runVerifiedInstall } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { FEATURE_BLOCK_GUIDE, parsePlanFeatures } from "@caddie/contracts";
 import { collectSourceSnapshot } from "./source-export.ts";
@@ -117,6 +119,8 @@ export interface CoordinatorEnvironment {
   CONTREE_API_TOKEN?: string;
   CONTREE_PROJECT_ID?: string;
   CONTREE_IMAGE?: string;
+  /** Flutter apps' image (Track 3); defaults to DEFAULT_FLUTTER_IMAGE in build-sandbox.ts. */
+  CONTREE_FLUTTER_IMAGE?: string;
   /** Worker Loader (backend previews + the runs-on-Cloudflare check). Absent: the check is skipped honestly. */
   LOADER?: WorkerLoaderLike;
 }
@@ -164,7 +168,11 @@ export async function createCoordinatorContext(
   let planRevision = run.planRevision;
   const sessionId = `session:${runId}`;
   const root = `/workspace/${scope.projectId}`;
-  const runtimeEnv = BUILD_RUNTIME_ENV;
+  // Track 3: an Android app (stackId 'flutter') builds in the Flutter image,
+  // with its own scaffold, commands and builder instructions.
+  const stack: "react-hono" | "flutter" = run.stackId === "flutter" ? "flutter" : "react-hono";
+  const runtime = stackRuntime(stack, env);
+  const runtimeEnv = runtime.env;
   let driver: SandboxDriver | null = null;
   let sessionReady: Promise<string> | null = null;
   const ensureSession = async () => {
@@ -198,7 +206,7 @@ export async function createCoordinatorContext(
       scope,
       runId,
       sessionKey: sessionId,
-      baseImage: env.CONTREE_IMAGE ?? DEFAULT_BASE_IMAGE,
+      baseImage: runtime.image,
       root,
       env: runtimeEnv,
     }).catch((error: unknown) => {
@@ -213,6 +221,7 @@ export async function createCoordinatorContext(
   // (stacks/react-hono/scaffold.ts), identical to what the evaluation journey
   // uses — a green fixture journey and a real chat build now run the same setup.
   let scaffoldReady: Promise<void> | null = null;
+  const scaffoldFiles = stack === "flutter" ? FLUTTER_SCAFFOLD_FILES : SCAFFOLD_FILES;
   const scaffold = () =>
     (scaffoldReady ??= (async () => {
       const { driver, id } = await ensureSession();
@@ -220,14 +229,14 @@ export async function createCoordinatorContext(
       const setupStarted = new Date().toISOString();
       await driver.uploadFiles(
         id,
-        Object.entries(SCAFFOLD_FILES).map(([path, text]) => ({
+        Object.entries(scaffoldFiles).map(([path, text]) => ({
           path: `${root}/${path}`,
           contentBase64: bytesToBase64(new TextEncoder().encode(text)),
         })),
       );
       await recordBuildActivity(env.DB, {
         projectId: scope.projectId, runId, kind: "setup",
-        subject: `react-hono scaffold (${Object.keys(SCAFFOLD_FILES).length} files)`,
+        subject: `${stack} scaffold (${Object.keys(scaffoldFiles).length} files)`,
         outcome: "ok", startedAt: setupStarted, finishedAt: new Date().toISOString(),
         key: "setup:scaffold",
       });
@@ -367,11 +376,7 @@ export async function createCoordinatorContext(
     await scaffold();
     await guardBudget();
     const { driver, id } = await ensureSession();
-    const commands = [
-      { check: "dependencies", command: VERIFIED_INSTALL_COMMAND },
-      { check: "behavior-tests", command: SCAFFOLD_COMMANDS.test.join(" && ") },
-      { check: "browser-bundle", command: SCAFFOLD_COMMANDS.build.join(" && ") },
-    ];
+    const commands = hostCheckCommands(stack);
     const receipts = [];
     for (const check of commands) {
       const operationKey = `${mode}:${runId}:${plan.id}:${attempt}:${check.check}`;
@@ -396,7 +401,7 @@ export async function createCoordinatorContext(
               command: check.command,
               operationKey,
               signal,
-              timeoutMs: 120_000,
+              timeoutMs: check.timeoutMs,
               cwd: root,
               env: runtimeEnv,
             });
@@ -411,8 +416,7 @@ export async function createCoordinatorContext(
         receipt.exitCode === 0 &&
         !receipt.timedOut &&
         !receipt.outputTruncated &&
-        (check.check !== "behavior-tests" ||
-          /[1-9]\d* pass/.test(receipt.stdout + "\n" + receipt.stderr)),
+        (check.check !== "behavior-tests" || testsPassed(receipt.stdout + "\n" + receipt.stderr)),
       );
       await recordVerification(env.DB, scope, workflow.runId, {
         check: check.check,
@@ -612,6 +616,12 @@ export async function createCoordinatorContext(
       );
     // Backend apps: the server bundle and the migrations travel with the
     // checked output (previews and publishing read them from there).
+    if (stack === "flutter")
+      return {
+        passed: false,
+        receipts,
+        next: "Every check passed, but Android apps cannot publish a preview yet (Track 3 stage D). Tell the user the app builds and its tests pass; do not retry verify_build.",
+      };
     const { js, css, server, migrations } = await readBuiltApp(driver, id, root);
     // The version history: the app's source as checked (same skip rules as the
     // GitHub save — no dependencies, build output or secrets). Never fails the
@@ -721,6 +731,7 @@ export async function createCoordinatorContext(
     driver: deps,
     sessionId,
     runId,
+    stackId: stack,
     projectId: scope.projectId,
     homeOverview,
     actorContext: actor.text,

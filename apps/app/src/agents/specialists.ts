@@ -38,6 +38,8 @@ import { FEATURE_BLOCK_GUIDE } from '@caddie/contracts';
 export interface SpecialistBuildContext {
   /** Full current request; delegation summaries must not drop user feedback. */
   currentRequest?: string;
+  /** The run's kind of app: 'flutter' for an Android app (Track 3), else a web app. */
+  stackId?: string;
  verifyBuild?: (operationKey:string, signal?:AbortSignal)=>Promise<unknown>;
 	/** Host-run project checks for build roles (run_checks); never publishes a preview. */
 	runChecks?: (operationKey: string, signal?: AbortSignal) => Promise<unknown>;
@@ -102,6 +104,29 @@ export const BUILD_RECIPE_INSTRUCTION =
 	'During a build the coordinator hands you ONE feature with its doneWhen checks: build only that feature, keep earlier features working, and add at least one test in src/*.test.tsx for each doneWhen check (the host refuses to finish a feature that adds no new passing tests). ' +
 	'The host creates the scaffold only after approval. Read the full brief, prd, spec and feedback. Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass.';
 
+/**
+ * The Flutter build recipe (Track 3): an Android app, also previewed in the
+ * browser, with the same Hono server as web apps. Matches
+ * stacks/flutter/scaffold.ts and the host checks in server/host-checks.ts.
+ */
+export const FLUTTER_RECIPE_INSTRUCTION =
+	'Flutter recipe: this app is an Android app (Caddie also runs it in the browser for the preview). lib/main.dart starts it with runApp(const App()); put screens and widgets in lib/. Package name: caddie_app. ' +
+	'Call the server with apiUri("/api/...") from lib/api.dart and a package:http client: apiUri resolves against the page in the preview and against the app\'s published address in the Android build. Pass the http.Client into the widgets that need it, so tests can answer for the server. ' +
+	'Write widget tests in test/app/*_test.dart with flutter_test (testWidgets, pumpWidget, find, expect) and MockClient from package:http/testing.dart; flutter_test blocks real network calls. test/examples/widget_example_test.dart shows the pattern but does not count: the host runs `flutter test test/app`. ' +
+	'Run tests ONLY with run_checks: it sets up the Android and web projects, installs packages, runs the app\'s tests (and the server\'s tests in src/, when there are any) and builds exactly as the host verifies. Shell test commands (flutter test, dart test) are refused, and every failing run_checks counts toward the repair limit, so read the failure and fix its cause before running again. ' +
+	'Add packages with `flutter pub add <name>` (pure Dart or Android-supported packages only; never iOS-only or desktop-only ones) and keep pubspec.lock. Never edit anything under caddie/, analysis_options.yaml, or the generated android/ and web/ project files unless a feature needs an Android setting. ' +
+	'Every app also has a server: src/server.ts is a Hono app whose routes all live under /api (it already answers GET /api/health). Data the app must keep or share goes through the server and env.DB (Cloudflare D1: c.env.DB.prepare(sql).bind(...).all() / first() / run()). Create tables with a NEW migrations/NNNN_name.sql file (0001_init.sql, then 0002_..., plain SQLite) and never edit an existing migration. ' +
+	'Test server routes in src/*.test.ts with createTestEnv() from test/setup/d1.ts and app.request("/api/...", init, env); test/examples/server.example.test.ts shows the pattern. In src/server.ts use only Web APIs (fetch, Request, Response, URL, crypto), never Bun.* or Node fs/child_process/net: the server runs on Cloudflare Workers and the build refuses them. ' +
+	'When the app needs a key for an outside service, call request_app_key and call that service ONLY from src/server.ts with c.env.<NAME>; never put a key in Dart code, a file, a test or a log. When a feature needs AI, call c.env.CADDIE.ai({ messages: [{ role, content }], json? }) from src/server.ts (Caddie pays; no key), returning 503 with reply.message when ok is false; caddie/ai.ts shows the shapes and test/setup/ai.ts the test double. ' +
+	'Keep the app usable in a phone-sized window: one column, no fixed widths, large touch targets. The browser preview may only fetch the app\'s own /api routes. ' +
+	'During a build the coordinator hands you ONE feature with its doneWhen checks: build only that feature, keep earlier features working, and add at least one test in test/app/*_test.dart (or src/*.test.ts for a server-only check) for each doneWhen check (the host refuses to finish a feature that adds no new passing tests). ' +
+	'The host creates the scaffold only after approval. Read the full brief, prd, spec and feedback. Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass.';
+
+/** The build recipe for a run's kind of app. */
+export function recipeInstructionFor(stackId: string | undefined): string {
+	return stackId === 'flutter' ? FLUTTER_RECIPE_INSTRUCTION : BUILD_RECIPE_INSTRUCTION;
+}
+
 /** Role-specific instruction text (kept here so tests can audit it). */
 export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> = {
 	product:
@@ -158,7 +183,7 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 				'After the PRD is approved you author ONE design brief (write_plan_note kind:"design"), then STOP for review — never build. The brief carries NO caddie-features block, covers every section the design skill lists, and includes one titled `html-mock` fenced block per key screen and state (the key screen, its empty state, its error state), static and styled only with design-system tokens, so the review card can show each one.',
 			);
     if (context.currentRequest?.trim()) useInstruction(`Current user request, carried forward by the host: ${context.currentRequest}\nRespect the approved plan and your role permissions; this request does not bypass review or spending gates.`);
- useInstruction(BUILD_RECIPE_INSTRUCTION);
+ useInstruction(recipeInstructionFor(context.stackId));
 		return SPECIALIST_INSTRUCTIONS[role];
 	};
 }
