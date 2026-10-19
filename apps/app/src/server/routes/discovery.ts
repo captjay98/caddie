@@ -162,11 +162,13 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 		return c.json({ feed }, 201);
 	});
 
-	// Deliberately NOT judge-limited: the GETs below read stored rows (feed
-	// history, candidates, one candidate, the detail pane, the cached digest);
-	// none runs a live Tavily/Nebius call, so none spends money per click. Only
-	// the two POSTs that DO — this feed refresh and check-eligibility below —
-	// are capped. Do not add a limit to a GET.
+	// The GETs below read stored rows (feed history, candidates, one
+	// candidate) and spend nothing per click, so they are not limited. The two
+	// exceptions are the detail pane's digest (/detail without ?digest=defer,
+	// and /digest): on a cache MISS they run the paid digest model, so a
+	// judge spends one discovery lookup then, and only then (review F02).
+	// The POSTs that sweep or read rules (feed refresh, check-eligibility)
+	// spend one per call.
 	router.get('/projects/:projectId/discovery/feed', async (c) => {
 		const scope = await requireProjectScope(
 			c.env.DB,
@@ -232,7 +234,10 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 				{ country: stored?.country ?? null },
 				c.env.NEBIUS_API_KEY,
 				digestProfileFrom(stored),
-				{ deferDigest: c.req.query('digest') === 'defer' },
+				{
+					deferDigest: c.req.query('digest') === 'defer',
+					admitDigest: () => admitJudgeDiscovery(c.env.DB, scope.actorId, c.env),
+				},
 			),
 		);
 	});
@@ -256,6 +261,7 @@ export function createDiscoveryRouter(): Hono<{ Bindings: Env }> {
 			{ country: stored?.country ?? null },
 			c.env.NEBIUS_API_KEY,
 			digestProfileFrom(stored),
+			{ admitDigest: () => admitJudgeDiscovery(c.env.DB, scope.actorId, c.env) },
 		);
 		return c.json({ digest: detail.digest, digestGap: detail.digestGap });
 	});

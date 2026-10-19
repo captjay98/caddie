@@ -1741,7 +1741,11 @@ export async function candidateDetail(
 	 * the rules come back immediately with `digestPending: true` and the client
 	 * fetches the digest separately. A cache HIT is still returned inline.
 	 */
-	options?: { readonly deferDigest?: boolean },
+	options?: {
+		readonly deferDigest?: boolean;
+		/** Run before a paid digest call on a cache miss; a ScopeError it throws becomes the digest gap. */
+		readonly admitDigest?: () => Promise<unknown>;
+	},
 ): Promise<CandidateDetail> {
 	const { candidate, fit, eligibility } = await evaluateCandidate(db, scope, candidateId, profile);
 
@@ -1803,18 +1807,34 @@ export async function candidateDetail(
 		// Rules first: the client fetches the digest in a second request.
 		digestPending = true;
 	} else {
-		const computed = await digestCandidate({
-			apiKey: digestApiKey,
-			profile: digestProfile,
-			candidate: { id: candidate.id, url: candidate.url, title: candidate.title, summary: candidate.summary },
-			facts,
-			overview,
-		});
-		digest = computed.digest;
-		digestGap = computed.gap;
-		// Store only a real digest — a fail-soft gap is not cached, so the next
-		// open retries (e.g. once the model key is configured).
-		if (digest) await putCachedDigest(db, scope, candidate.id, contentHash, digest);
+		// A cache miss with a key is a paid model call: a judge spends one
+		// discovery lookup first (review F02). A refusal becomes the visible
+		// gap, so the verbatim rules still show and no call is made.
+		let refusal: string | null = null;
+		if (digestApiKey && options?.admitDigest) {
+			try {
+				await options.admitDigest();
+			} catch (error) {
+				if (!(error instanceof ScopeError)) throw error;
+				refusal = error.message;
+			}
+		}
+		if (refusal !== null) {
+			digestGap = refusal;
+		} else {
+			const computed = await digestCandidate({
+				apiKey: digestApiKey,
+				profile: digestProfile,
+				candidate: { id: candidate.id, url: candidate.url, title: candidate.title, summary: candidate.summary },
+				facts,
+				overview,
+			});
+			digest = computed.digest;
+			digestGap = computed.gap;
+			// Store only a real digest — a fail-soft gap is not cached, so the next
+			// open retries (e.g. once the model key is configured).
+			if (digest) await putCachedDigest(db, scope, candidate.id, contentHash, digest);
+		}
 	}
 
 	return { candidate, fit, eligibility, digest, digestGap, digestPending, groups };

@@ -1754,3 +1754,33 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "Review 2026-10-19 F02 + F03, and build-quota semantics (owner chose 'Fix all five review findings next'; the build-quota change is Slice 1 of the owner's pasted prompt)",
+  "status": "LOCAL VERIFIED in-process over the real migrations: real services, a real Better Auth session for the guard and route cases, fetch replaced by a recorder that fails every call. No provider was called.",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "bun test tests/judge-limits.test.ts (before the fix)", "exitCode": 1, "receipt": "9 of 30 failed as intended: 3 simultaneous creates got through at 2 of 3; plan approval used a build; change requests and a plan resume counted nothing; chat discover/research at a 0 limit ran; a digest cache miss at 0 attempted the model ('AI digest failed (request error)'); the /digest route did the same; /agents/hello answered a judge 200."},
+    {"command": "bun test tests/judge-limits.test.ts (after)", "exitCode": 0, "receipt": "30 pass / 0 fail."},
+    {"command": "bun mutate.ts (scratch): undo one fix at a time, then restore", "exitCode": 0, "receipt": "M1 check-then-insert (the original race), M2 chat discover without admission, M3 digest miss without admission, M4 /agents/hello open to judges, M5 plan change request uncounted: each fails exactly its own test (M3 fails both digest tests); every file restored byte-identical; the working-tree diff hash is unchanged."},
+    {"command": "bun run typecheck; bun run test", "exitCode": 0, "receipt": "typecheck 0; 1463 pass / 0 fail / 109 files."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/judge-limits.ts", "note": "One shared count subquery (JUDGE_PROJECT_COUNT) for counting and for the insert condition; judgeProjectCap (null for non-judges), judgeProjectRoom, judgeProjectRefusal."},
+    {"path": "apps/app/src/server/projects.ts", "note": "createProject inserts a judge's project with `insert ... select ... where <room>`, one statement; 0 changes is the refusal."},
+    {"path": "apps/app/src/server/build-workflow.ts", "note": "Chat create: the project row is conditional on the cap, and the run and intake rows on that project row existing; a twin request with the same intake key is recognised. Plan approval is no longer a build start (it only starts the design turn); design approval and Retry are. A plan or design change request and resuming a stopped plan each admit one Caddie message before any write; a re-click that dispatches nothing is not counted (decidedBefore)."},
+    {"path": "apps/app/src/server/judge-paid-tools.ts (new), coordinator-host.ts", "note": "The chat's find-hackathons, research and hackathon-details tools in one module; for a judge, discover and research spend one discovery lookup before any provider call, and details spend one only on a digest cache miss."},
+    {"path": "apps/app/src/server/discovery.ts, coordinator-context.ts, routes/discovery.ts", "note": "candidateDetail runs an optional admitDigest before a paid digest call on a cache miss; a refusal becomes the digest gap and the verbatim rules still show. The /detail and /digest routes pass it. The route comment that said no GET spends money is corrected: a digest cache miss does."},
+    {"path": "apps/app/src/server/routes/runs.ts", "note": "/agents/hello (P00 scaffold, helper model, used by no screen) refuses judge accounts with 403 JUDGE_ACCOUNT; other signed-in users still reach it (the routing probe keeps working)."},
+    {"path": "README.md, docs/submission/devpost.md, docs/setup/owner-inputs.md, docs/setup/auth.md", "note": "What each limit counts now matches the code. auth.md also said 0 meant the default and listed three env vars; corrected to 0 means none and four."}
+  ],
+  "environment": "Local Mac only.",
+  "providerCalls": "none",
+  "limitations": [
+    "Concurrency was proven on the in-process SQLite fixture (real interleaving across awaits; single-statement atomicity is SQLite's). Repeat on deployed D1 in S11.",
+    "A malformed chat discover/research call still spends one lookup (admission runs before the tool validates its input).",
+    "In-app AI in judges' apps stays bounded by each app's monthly allowance (APP_AI_MONTHLY_LIMIT_CENTS), not by these limits."
+  ]
+}
+```

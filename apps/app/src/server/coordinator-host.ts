@@ -14,7 +14,8 @@ import {
 import { createPlanDocRevision, listProjectsForActor } from "./projects.ts";
 import { requestApproval as requestApprovalOnServer } from "./approvals.ts";
 import { proposeProject as proposeProjectOnServer } from "./project-proposals.ts";
-import { actorContext, discoverForActor, hackathonDetailsForActor, researchForActor } from "./coordinator-context.ts";
+import { actorContext } from "./coordinator-context.ts";
+import { paidDiscoveryTools } from "./judge-paid-tools.ts";
 import { upsertProfile } from "./profiles.ts";
 import { proposeMemoryFact } from "./memory.ts";
 import { listImports } from "./repositories.ts";
@@ -715,6 +716,7 @@ export async function createCoordinatorContext(
       next: "The project card shows the working preview. Build checks passed; ask the user to try the behavior.",
     };
   };
+  const tools = paidDiscoveryTools(env, scope);
   return {
     driver: deps,
     sessionId,
@@ -724,9 +726,9 @@ export async function createCoordinatorContext(
     actorContext: actor.text,
     currentPlanRevision: () => planRevision,
     listStacks: async () => STACK_CATALOG,
-    discover: (input) => discoverForActor(env.DB, scope, input, { tavilyApiKey: env.TAVILY_API_KEY, nebiusApiKey: env.NEBIUS_API_KEY }),
-    research: (input) => researchForActor(env.DB, scope, input, { tavilyApiKey: env.TAVILY_API_KEY }),
-    hackathonDetails: (input) => hackathonDetailsForActor(env.DB, scope, input, { nebiusApiKey: env.NEBIUS_API_KEY }),
+    discover: tools.discover,
+    research: tools.research,
+    hackathonDetails: tools.hackathonDetails,
     updateProfile: async (input) => {
       // Only the fields the model may set from conversation; the service
       // re-verifies the actor and merges (undefined keeps the current value).

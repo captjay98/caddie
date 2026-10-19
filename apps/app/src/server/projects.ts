@@ -2,7 +2,7 @@ import * as v from 'valibot';
 import type { Scope } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { ScopeError, assertProjectScope, assertWorkspaceScope } from './scope.ts';
-import { admitJudgeProject } from './judge-limits.ts';
+import { judgeProjectCap, judgeProjectRefusal, judgeProjectRoom } from './judge-limits.ts';
 import {
 	ArtifactCreateInputSchema,
 	ArtifactRevisionSchema,
@@ -251,30 +251,46 @@ export async function createProject(
 		createdAt: nowIso(),
 		updatedAt: nowIso(),
 	};
-	// S07 judge limits: refused BEFORE the insert, so a refused 4th project
-	// leaves nothing behind.
-	await admitJudgeProject(db, verified.actorId, limits);
-	await insertProject(db, project);
+	// S07 judge limits (review F03): a judge's project is inserted only while
+	// the allowance still has room, in ONE statement, so creates racing for
+	// the last place cannot both win. A refused project leaves nothing behind.
+	const cap = await judgeProjectCap(db, verified.actorId, limits);
+	if (cap === null) await insertProject(db, project);
+	else if (!(await insertProjectWithinCap(db, project, verified.actorId, cap))) throw judgeProjectRefusal(cap);
 	return project;
+}
+
+const PROJECT_COLUMNS = '("id","workspaceId","name","description","contestId","contestUrl","status","kind","createdAt","updatedAt")';
+
+function projectValues(project: Project): unknown[] {
+	return [
+		project.id,
+		project.workspaceId,
+		project.name,
+		project.description,
+		project.contestId,
+		project.contestUrl,
+		project.status,
+		project.kind,
+		project.createdAt,
+		project.updatedAt,
+	];
+}
+
+/** Insert `project` only while `userId`'s judge allowance has room; false when it did not fit. */
+async function insertProjectWithinCap(db: D1Database, project: Project, userId: string, cap: number): Promise<boolean> {
+	const room = judgeProjectRoom(userId, cap);
+	const result = (await db
+		.prepare(`insert into "projects" ${PROJECT_COLUMNS} select ?,?,?,?,?,?,?,?,?,? where ${room.sql}`)
+		.bind(...projectValues(project), ...room.params)
+		.run()) as { meta?: { changes?: number } };
+	return Number(result?.meta?.changes ?? 0) > 0;
 }
 
 async function insertProject(db: D1Database, project: Project): Promise<void> {
 	await db
-		.prepare(
-			'insert into "projects" ("id","workspaceId","name","description","contestId","contestUrl","status","kind","createdAt","updatedAt") values (?,?,?,?,?,?,?,?,?,?)',
-		)
-		.bind(
-			project.id,
-			project.workspaceId,
-			project.name,
-			project.description,
-			project.contestId,
-			project.contestUrl,
-			project.status,
-			project.kind,
-			project.createdAt,
-			project.updatedAt,
-		)
+		.prepare(`insert into "projects" ${PROJECT_COLUMNS} values (?,?,?,?,?,?,?,?,?,?)`)
+		.bind(...projectValues(project))
 		.run();
 }
 

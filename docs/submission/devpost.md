@@ -198,13 +198,12 @@ screenshot, or the video.
 > **Demo limits (so a few dozen judges can't exhaust it):** each judge account
 > may have **3 projects**, start **3 builds per 24 hours**, send **300 Caddie
 > messages per 24 hours**, and run **20 paid discovery lookups per 24 hours**
-> (the two Find actions that call out live — "check the sources again" and
-> "check this contest's eligibility"; browsing the feed and a contest's cited
-> rules is free and uncounted). Approving a plan, approving the design and
-> retrying a stopped build each count once toward the build limit, so one full
-> build that needs a retry costs two. There are **at most 40 judge accounts**
-> in total, and **judge access closes on 2026-12-16**. Judge accounts cannot
-> publish apps.
+> (each search that calls out live, from the Discover page or in chat; browsing
+> the feed and a contest's cited rules is free and uncounted). A build starts
+> when you approve the design, and retrying a stopped build is another start.
+> Asking for changes to a plan or a design counts as a message. There are
+> **at most 40 judge accounts** in total, and **judge access closes on
+> 2026-12-16**. Judge accounts cannot publish apps.
 
 **Notes on these limits (not for the form, for the owner):** these are the
 defaults in code — `apps/app/src/server/judge-limits.ts` (3 projects / 3 builds /

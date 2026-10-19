@@ -81,15 +81,20 @@ The hosted demo is capped so a few dozen judges cannot exhaust it:
 
 - **3 projects** per judge account (the automatic home conversation is not one,
   and neither is the example below).
-- **3 build starts per 24 hours** per judge account. Approving a plan, approving
-  the design and retrying a stopped build each count as one, so a full build
-  that needs a retry costs two.
-- **300 Caddie messages per 24 hours** per judge account. Messages Caddie sends
-  itself do not count.
-- **20 discovery lookups per 24 hours** per judge account — the two Find actions
-  that reach out and spend per click ("check the sources again" and "check this
-  contest's eligibility"). Opening the feed, a contest's detail pane and its
-  cited rules costs nothing and is not counted.
+- **3 build starts per 24 hours** per judge account. A build starts when the
+  design is approved, and retrying a stopped build is another start, so a full
+  build costs one and a build that needs a retry costs two. Approving a plan
+  only starts the design and does not count.
+- **300 Caddie messages per 24 hours** per judge account. Asking for changes to
+  a plan or a design, and resuming a stopped plan, each count as one, because
+  Caddie writes a new version in reply. Messages Caddie sends itself do not
+  count.
+- **20 discovery lookups per 24 hours** per judge account: every search that
+  reaches out and spends per call. That means "check the sources again", "check
+  this contest's eligibility", a search or page read Caddie runs in chat, and a
+  contest's AI summary the first time it is written. Opening the feed, a
+  contest's detail pane, its cited rules or an already-written summary costs
+  nothing and is not counted.
 - **At most 40 judge accounts** in total (the code's default when
   `JUDGE_ACCESS_MAX_ACCOUNTS` is unset is `40` —
   `apps/app/src/server/judge-access.ts`).

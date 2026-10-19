@@ -742,7 +742,7 @@ export async function hackathonDetailsForActor(
 	db: D1Database,
 	scope: Scope,
 	input: HackathonDetailsInput,
-	options: { nebiusApiKey?: string } = {},
+	options: { nebiusApiKey?: string; admitDigest?: () => Promise<unknown> } = {},
 ): Promise<unknown> {
 	const verified = await assertProjectScope(db, scope);
 	const parsed = v.safeParse(HackathonDetailsInputSchema, input);
@@ -767,6 +767,7 @@ export async function hackathonDetailsForActor(
 		{ country: profile?.country ?? null },
 		options.nebiusApiKey,
 		digestProfileFrom(profile),
+		{ admitDigest: options.admitDigest },
 	);
 	const rulesRead = detail.groups.length > 0;
 	const rules = detail.groups

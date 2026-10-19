@@ -8,7 +8,7 @@ import {
   ScopeError,
 } from "./scope.ts";
 import { createRun, isRunPaused, lookupRunByConversation } from "./runs.ts";
-import { admitJudgeBuildStart, admitJudgeProject } from "./judge-limits.ts";
+import { admitJudgeBuildStart, admitJudgeMessage, judgeProjectCap, judgeProjectRefusal, judgeProjectRoom } from "./judge-limits.ts";
 import {
   getProject,
   listPlanDocRevisions,
@@ -123,32 +123,29 @@ export async function startProjectFromChat(
   const projectId = `proj_${digest.slice(0, 32)}`,
     runId = `run_${digest.slice(0, 32)}`;
   const conversationId = `conv_${digest.slice(0, 32)}`;
-  // S07 judge limits: only a NEW project is counted (a replay above already
-  // returned the same project), and the refusal lands before the batch, so a
-  // refused 4th project creates no project, run or intake.
-  if (!existing[0]) await admitJudgeProject(db, scope.actorId, limits);
+  // S07 judge limits (review F03): only a NEW project is counted (a replay
+  // above already returned the same project). For a judge, the project row is
+  // inserted only while the allowance has room, in the same statement, and the
+  // run and intake rows only if that project row exists, so a refused project
+  // creates no project, run or intake, and racing creates cannot pass the cap.
+  const cap = existing[0] ? null : await judgeProjectCap(db, scope.actorId, limits);
+  const room = cap === null ? null : judgeProjectRoom(scope.actorId, cap);
+  const projectExists = { sql: "exists (select 1 from projects where id = ?)", params: [projectId] };
+  const insert = (head: string, values: unknown[], when: { sql: string; params: unknown[] } | null) =>
+    when
+      ? db.prepare(`${head} select ${values.map(() => "?").join(",")} where ${when.sql}`).bind(...values, ...when.params)
+      : db.prepare(`${head} values (${values.map(() => "?").join(",")})`).bind(...values);
   const route = findModelRouteForRole("build");
   const stamp = now();
-  await db.batch([
-    db
-      .prepare(
-        "insert or ignore into projects (id,workspaceId,name,description,status,kind,createdAt,updatedAt) values (?,?,?,?,?,?,?,?)",
-      )
-      .bind(
-        projectId,
-        scope.workspaceId,
-        input.name.trim(),
-        input.description ?? input.brief,
-        "active",
-        "standard",
-        stamp,
-        stamp,
-      ),
-    db
-      .prepare(
-        "insert or ignore into run_bindings (runId,projectId,conversationId,submissionId,planRevision,stackId,payerId,modelRouteId,pricingVersion,createdBy,createdAt) values (?,?,?,?,?,?,?,?,?,?,?)",
-      )
-      .bind(
+  const results = await db.batch([
+    insert(
+      "insert or ignore into projects (id,workspaceId,name,description,status,kind,createdAt,updatedAt)",
+      [projectId, scope.workspaceId, input.name.trim(), input.description ?? input.brief, "active", "standard", stamp, stamp],
+      room,
+    ),
+    insert(
+      "insert or ignore into run_bindings (runId,projectId,conversationId,submissionId,planRevision,stackId,payerId,modelRouteId,pricingVersion,createdBy,createdAt)",
+      [
         runId,
         projectId,
         conversationId,
@@ -160,12 +157,12 @@ export async function startProjectFromChat(
         route.pricingVersion,
         scope.actorId,
         stamp,
-      ),
-    db
-      .prepare(
-        "insert or ignore into build_workflows (projectId,runId,conversationId,sourceConversationId,intakeKey,brief,phase,pendingKey,pendingBody,updatedAt) values (?,?,?,?,?,?,?,?,?,?)",
-      )
-      .bind(
+      ],
+      room ? projectExists : null,
+    ),
+    insert(
+      "insert or ignore into build_workflows (projectId,runId,conversationId,sourceConversationId,intakeKey,brief,phase,pendingKey,pendingBody,updatedAt)",
+      [
         projectId,
         runId,
         conversationId,
@@ -176,8 +173,17 @@ export async function startProjectFromChat(
         `intake:${digest}`,
         `Prepare a clear plan for this request. Do not build until the plan is approved using the review controls.\n\n${input.brief}`,
         stamp,
-      ),
+      ],
+      room ? projectExists : null,
+    ),
   ]);
+  if (cap !== null) {
+    const inserted = Number((results[0] as { meta?: { changes?: number } } | undefined)?.meta?.changes ?? 0) > 0;
+    // Nothing inserted: the allowance was full, unless a twin request with the
+    // same intake key created this very project first.
+    if (!inserted && !(await rows(db, "select 1 from projects where id = ?", projectId)).length)
+      throw judgeProjectRefusal(cap);
+  }
   const target = await projectScopeForUser(db, scope.actorId, projectId);
   return {
     project: await getProject(db, target),
@@ -288,6 +294,18 @@ export async function workflowSnapshot(db: D1Database, scope: Scope) {
     : null;
   return { workflow, plan, approval, design, designApproval };
 }
+/** Whether this actor already recorded `decision` on this plan or design revision (a re-click). */
+async function decidedBefore(db: D1Database, scope: Scope, revisionId: string, decision: "approved" | "changes") {
+  const found = await rows(
+    db,
+    "select 1 from plan_decisions where projectId = ? and planRevisionId = ? and decidedBy = ? and decision = ? limit 1",
+    scope.projectId,
+    revisionId,
+    scope.actorId,
+    decision,
+  );
+  return found.length > 0;
+}
 export async function decideWorkflow(
   db: D1Database,
   scope: Scope,
@@ -315,11 +333,18 @@ export async function decideWorkflow(
       "feedback_required",
       "Describe the change in 2000 characters or fewer.",
     );
-  // S07 judge limits: approving a plan is one build start, refused BEFORE any
-  // write (no approval, no plan decision, no phase change). A re-click on an
-  // already-approved plan is in phase 'design' and is not counted again.
-  if (input.decision === "approved" && workflow!.phase === "review")
-    await admitJudgeBuildStart(db, scope.actorId, limits);
+  // S07 judge limits. Approving the plan only starts the DESIGN step (one
+  // model turn, no sandbox), so it is not a build start: the build starts when
+  // the design is approved (decideDesign). A change request makes Caddie
+  // rewrite the plan, so it counts as one Caddie message (review F02: these
+  // turns used to count against nothing). Refused before any write; a
+  // re-click that dispatches nothing is not counted again.
+  if (
+    input.decision === "rejected" &&
+    (workflow!.phase === "review" || (workflow!.phase === "planning" && workflow!.pendingKey === null)) &&
+    !(await decidedBefore(db, scope, plan.id, "changes"))
+  )
+    await admitJudgeMessage(db, scope.actorId, limits);
   const approval = await recordDecision(db, scope.actorId, {
     intent: planIntent(scope.projectId, plan),
     decision: input.decision,
@@ -405,8 +430,15 @@ export async function decideDesign(
     );
   // S07 judge limits: approving the design brief starts the actual build, and
   // is refused before any write. Only the transition from design-review counts.
+  // A change request makes Caddie rewrite the brief: one Caddie message.
   if (input.decision === "approved" && workflow!.phase === "design-review")
     await admitJudgeBuildStart(db, scope.actorId, limits);
+  if (
+    input.decision === "rejected" &&
+    workflow!.phase === "design-review" &&
+    !(await decidedBefore(db, scope, design.id, "changes"))
+  )
+    await admitJudgeMessage(db, scope.actorId, limits);
   const approval = await recordDecision(db, scope.actorId, {
     intent: designIntent(scope.projectId, design),
     decision: input.decision,
@@ -906,9 +938,13 @@ async function resumePlanning(
   planId: string | null,
   key: string,
   request?: string,
+  limits?: unknown,
 ) {
   const previous = await rows(db, "select id from workflow_resumes where projectId=? and id=?", scope.projectId, key);
   if (previous.length) return workflowSnapshot(db, scope);
+  // S07 judge limits (review F02): resuming makes Caddie plan again, one
+  // Caddie message, refused before the resume row and the phase change.
+  await admitJudgeMessage(db, scope.actorId, limits);
   const feedback = planId
     ? await rows(
         db,
@@ -956,7 +992,7 @@ export async function retryWorkflow(db: D1Database, scope: Scope, key: string, r
   // require an approved plan and resume the build, so a stuck plan had no way
   // back at all (FarmLog AI, 2026-10-15).
   if (workflow.phase === "blocked" && !(await planWasApproved(db, scope, plan?.id ?? null)))
-    return resumePlanning(db, scope, workflow, plan?.id ?? null, key, request);
+    return resumePlanning(db, scope, workflow, plan?.id ?? null, key, request, limits);
   if (!plan)
     throw new ScopeError(409, "NO_PLAN", "Prepare a plan before continuing.");
   await checkApprovalForEffect(db, {

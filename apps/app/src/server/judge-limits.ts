@@ -164,15 +164,39 @@ async function isActiveJudge(db: D1Database, userId: string): Promise<boolean> {
  * import_previews row carries the example prefix, and it is left out here.
  */
 export async function countJudgeProjects(db: D1Database, userId: string): Promise<number> {
-	return countRows(
-		db,
-		`select count(distinct p."id") as "n" from "projects" p
-		 join "workspace_memberships" m on m."workspaceId" = p."workspaceId"
-		 where m."userId" = ? and p."kind" <> 'home'
-		   and not exists (select 1 from "import_previews" x where x."projectId" = p."id" and x."repoFullName" like ?)`,
-		userId,
-		`${EXAMPLE_PREFIX}%`,
-	);
+	return countRows(db, `select ${JUDGE_PROJECT_COUNT} as "n"`, userId, `${EXAMPLE_PREFIX}%`);
+}
+
+/**
+ * The judge's counted projects, as a scalar subquery taking (userId, example
+ * prefix). One definition for the count and for the atomic insert below, so
+ * they can never disagree about what counts.
+ */
+const JUDGE_PROJECT_COUNT = `(select count(distinct p."id") from "projects" p
+	 join "workspace_memberships" m on m."workspaceId" = p."workspaceId"
+	 where m."userId" = ? and p."kind" <> 'home'
+	   and not exists (select 1 from "import_previews" x where x."projectId" = p."id" and x."repoFullName" like ?))`;
+
+/**
+ * A judge's project allowance, or null for anyone who is not a judge (never
+ * limited). A caller that gets a number must insert the project with
+ * {@link judgeProjectRoom} as the insert's own condition, so two creates
+ * racing for the last place cannot both win (review F03): checking first and
+ * inserting later let five simultaneous creates through a cap of three.
+ */
+export async function judgeProjectCap(db: D1Database, userId: string, env?: unknown): Promise<number | null> {
+	if (!(await isActiveJudge(db, userId))) return null;
+	return judgeLimits(env).projects;
+}
+
+/** The condition (with its parameters) under which one more project still fits `cap`. A cap of 0 never fits. */
+export function judgeProjectRoom(userId: string, cap: number): { sql: string; params: unknown[] } {
+	return { sql: `${JUDGE_PROJECT_COUNT} < ?`, params: [userId, `${EXAMPLE_PREFIX}%`, cap] };
+}
+
+/** The refusal for a project that did not fit. */
+export function judgeProjectRefusal(cap: number): ScopeError {
+	return new ScopeError(403, 'JUDGE_LIMIT_PROJECTS', judgeProjectLimitMessage(cap));
 }
 
 /** How many admitted events of `kind` this judge has inside the rolling window. */

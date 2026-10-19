@@ -5,6 +5,7 @@ import { lookupRunByConversation } from "../runs.ts";
 import { readWorkflow } from "../build-workflow.ts";
 import { createRun, recordRepairRound, runSnapshot } from "../runs.ts";
 import { admitJudgeMessage } from "../judge-limits.ts";
+import { isJudgeAccount } from "../judge-access.ts";
 import { isInternalDispatch } from "../internal-dispatch.ts";
 
 /**
@@ -216,11 +217,15 @@ export function conversationGuard(): Hono<{ Bindings: Env }> {
   // The P00 scaffold agent (/agents/hello) proves the DO + router wiring. It
   // has no bound conversation to membership-check, but it must NOT be an
   // unauthenticated LLM endpoint — require a verified session before it is
-  // reached. Any other non-coordinator agent path is likewise gated.
+  // reached. Any other non-coordinator agent path is likewise gated. It calls
+  // the helper model outside every judge limit and no screen uses it, so
+  // judge accounts are refused outright (review F02).
   guard.all("/hello/*", async (c, next) => {
     const userId = await sessionUserId(c.env, c.req.raw.headers);
     if (!userId)
       throw new ScopeError(401, "unauthenticated", "a verified session is required");
+    if (await isJudgeAccount(c.env.DB, userId))
+      throw new ScopeError(403, "JUDGE_ACCOUNT", "This isn't available to judge accounts.");
     await next();
   });
 
