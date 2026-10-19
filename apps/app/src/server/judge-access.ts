@@ -198,7 +198,13 @@ export async function isJudgeAccount(db: D1Database, userId: string): Promise<bo
 	return rows.length > 0;
 }
 
-/** How many judge places are taken (every row counts, active or in progress). */
+/**
+ * How many judge accounts exist (every row counts, active or in progress).
+ *
+ * This is a DIAGNOSTIC count, not the gate: {@link startJudge} does NOT read it
+ * before reserving a place. The cap is enforced atomically by the conditional
+ * reservation INSERT, so this number can be stale by the time a caller sees it.
+ */
 export async function judgeAccountCount(db: D1Database): Promise<number> {
 	const rows = await all(db, 'select count(*) as "n" from "judge_accounts"');
 	return Number(rows[0]?.['n'] ?? 0);
@@ -302,21 +308,28 @@ export async function startJudge(db: D1Database, input: JudgeStartInput, identit
 	if (!(await judgeCodeMatches(typeof input.code === 'string' ? input.code : '', input.config.code ?? '', input.secret))) {
 		throw new ScopeError(403, 'judge_code', "That access code isn't right.");
 	}
-	if ((await judgeAccountCount(db)) >= maxJudgeAccounts(input.config)) {
-		throw new ScopeError(403, 'judge_full', 'All the judge places are taken.');
-	}
 	if (await judgeNameBlocked(db, name, now)) {
 		throw new ScopeError(409, 'name_taken', 'That judge name is taken. Try another.');
 	}
 
 	const email = judgeEmail(name);
 	// Clear any stale reservation for this name, then reserve it. The fresh row
-	// is what the invite gate reads; it admits nothing else.
+	// is what the invite gate reads; it admits nothing else. The reservation is
+	// also where the places are counted: the INSERT takes a slot only while the
+	// roster is still below the cap, all in one statement, so two simultaneous
+	// starts can never both read a count below the cap and both reserve one.
 	await db.prepare('delete from "judge_accounts" where lower("judgeName") = ? and "state" = \'starting\'').bind(name.toLowerCase()).run();
-	await db
-		.prepare('insert into "judge_accounts" ("judgeName","state","createdAt","lastSignInAt") values (?,?,?,null)')
-		.bind(name, 'starting', now)
-		.run();
+	const reserved = (await db
+		.prepare(
+			`insert into "judge_accounts" ("judgeName","state","createdAt","lastSignInAt")
+			 select ?,?,?,null
+			 where (select count(*) from "judge_accounts") < ?`,
+		)
+		.bind(name, 'starting', now, maxJudgeAccounts(input.config))
+		.run()) as { meta?: { changes?: number } };
+	if (Number(reserved?.meta?.changes ?? 0) < 1) {
+		throw new ScopeError(403, 'judge_full', 'All the judge places are taken.');
+	}
 
 	const created = await identity.createUser({ email, name });
 	await identity.setPassword(created.id, password);

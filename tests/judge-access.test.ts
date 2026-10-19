@@ -10,8 +10,10 @@ import {
 	judgeNameFromEmail,
 	signInJudge,
 	startJudge,
+	type JudgeIdentity,
 } from '../apps/app/src/server/judge-access.ts';
 import { createJudgeAccessRouter } from '../apps/app/src/server/routes/judge-access.ts';
+import { ScopeError } from '../apps/app/src/server/scope.ts';
 import { addUser, migratedDatabase } from './fixtures/sqlite-d1.ts';
 
 /**
@@ -308,7 +310,13 @@ describe('judge access: the sign-up / sign-in rules stay closed for everyone els
 				body: JSON.stringify({ email: 'owner@example.com', password: 'the-right-password' }),
 			}),
 		);
-		expect(res.status).toBe(401);
+		// `disabledPaths` now refuses this native path outright for EVERYONE
+		// before the before-hook guard runs, so the shape is the router's
+		// disabled-path answer; the property the guard protected is unchanged:
+		// a non-judge address never gets a session here.
+		expect(res.status).not.toBe(200);
+		expect(setCookieHeader(res)).not.toContain('better-auth.session_token');
+		expect(sqlite.prepare('select count(*) as "n" from "session"').get()).toEqual({ n: 0 });
 	});
 
 	test('an uninvited email is still refused by the invite gate (regression)', async () => {
@@ -365,6 +373,174 @@ describe('judge access: the sign-up / sign-in rules stay closed for everyone els
 		expect(await judgeCodeMatches(expected.slice(0, -1), expected, SECRET)).toBe(false);
 		expect(await judgeCodeMatches(`${expected}EXTRA`, expected, SECRET)).toBe(false);
 		expect(await judgeCodeMatches('', expected, SECRET)).toBe(false);
+	});
+});
+
+describe('judge access: the native email/password sign-in door is closed', () => {
+	let sqlite: Database;
+	let db: D1Database;
+	const router = createJudgeAccessRouter();
+
+	beforeEach(() => {
+		const migrated = migratedDatabase();
+		sqlite = migrated.sqlite;
+		db = withRealD1Batch(migrated.db);
+	});
+	afterEach(() => sqlite.close());
+
+	const env = () =>
+		({
+			DB: db,
+			BETTER_AUTH_SECRET: SECRET,
+			BETTER_AUTH_URL: ORIGIN,
+			INVITE_ALLOWLIST: 'owner@example.com',
+			JUDGE_ACCESS_CODE: CODE,
+			JUDGE_ACCESS_UNTIL: '2099-01-01',
+		}) as never;
+
+	const post = (path: string, body: unknown, e: never, ip = '203.0.113.7') =>
+		router.request(`${ORIGIN}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': ip }, body: JSON.stringify(body) }, e);
+
+	const nativeSignIn = (e: never, email: string, password: string) =>
+		createAuth(e, { database: db }).handler(
+			new Request(`${ORIGIN}/api/auth/sign-in/email`, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', origin: ORIGIN },
+				body: JSON.stringify({ email, password }),
+			}),
+		);
+
+	test('POST /api/auth/sign-in/email can no longer sign a judge in with the RIGHT password', async () => {
+		const e = env();
+		// The account is created through the product route, so its password is
+		// real: this is exactly the reviewer's probe that used to return 200.
+		const started = await post('/judge/start', { code: CODE, name: 'Judge-One', password: 'a-long-enough-password' }, e);
+		expect(started.status).toBe(200);
+		// `/judge/start` signs in too, so one session exists before the probe.
+		const sessionsBefore = sqlite.prepare('select count(*) as "n" from "session"').get();
+
+		const res = await nativeSignIn(e, `judge-one@${JUDGE_EMAIL_DOMAIN}`, 'a-long-enough-password');
+		expect(res.status).not.toBe(200);
+		expect(setCookieHeader(res)).not.toContain('better-auth.session_token');
+		expect(sqlite.prepare('select count(*) as "n" from "session"').get()).toEqual(sessionsBefore);
+	});
+
+	test('/api/judge/sign-in still signs the same judge in through the server-side API', async () => {
+		const e = env();
+		await post('/judge/start', { code: CODE, name: 'Judge-One', password: 'a-long-enough-password' }, e);
+		// The judge route signs in with `auth.api.signInEmail`, which never
+		// enters the disabled HTTP router — so a 200 proves the server-side API
+		// still works and the limiter is the judge's only door.
+		const res = await post('/judge/sign-in', { name: 'Judge-One', password: 'a-long-enough-password' }, e, '198.51.100.20');
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({ ok: true, name: 'Judge-One' });
+		expect(setCookieHeader(res)).toContain('better-auth.session_token');
+	});
+});
+
+describe('judge access: the account cap is enforced by the reservation INSERT', () => {
+	let sqlite: Database;
+	let db: D1Database;
+	beforeEach(() => {
+		const migrated = migratedDatabase();
+		sqlite = migrated.sqlite;
+		db = withRealD1Batch(migrated.db);
+	});
+	afterEach(() => sqlite.close());
+
+	const config = { code: CODE, until: '2099-01-01' };
+
+	/** A JudgeIdentity that records every call, so a refusal can be proven to
+	 *  stop before any Better Auth user is created. */
+	function recordingIdentity() {
+		const calls = { createUser: 0, setPassword: 0, signIn: 0 };
+		const identity: JudgeIdentity = {
+			async createUser() {
+				calls.createUser += 1;
+				return { id: `user-${calls.createUser}` };
+			},
+			async setPassword() {
+				calls.setPassword += 1;
+			},
+			async signIn() {
+				calls.signIn += 1;
+				return new Headers({ 'set-cookie': 'better-auth.session_token=stub' });
+			},
+		};
+		return { identity, calls };
+	}
+
+	function seedActive(name: string, userId: string): void {
+		sqlite
+			.prepare('insert into "judge_accounts" ("judgeName","state","createdAt","lastSignInAt","userId") values (?,?,?,null,?)')
+			.run(name, 'active', new Date().toISOString(), userId);
+	}
+
+	test('a full roster refuses the start with judge_full and creates no user', async () => {
+		seedActive('Judge-One', 'existing-user');
+		const { identity, calls } = recordingIdentity();
+		let error: unknown;
+		try {
+			await startJudge(
+				db,
+				{ code: CODE, name: 'Judge-Two', password: 'a-long-enough-password', secret: SECRET, ipHash: 'hash-full', config: { ...config, maxAccounts: '1' } },
+				identity,
+			);
+		} catch (thrown) {
+			error = thrown;
+		}
+		expect(error).toBeInstanceOf(ScopeError);
+		const refusal = error as ScopeError;
+		expect(refusal.status).toBe(403);
+		expect(refusal.code).toBe('judge_full');
+		expect(refusal.message).toBe('All the judge places are taken.');
+		expect(calls.createUser).toBe(0);
+	});
+
+	test('a refusal at the cap leaves no starting row behind for that name', async () => {
+		seedActive('Judge-One', 'existing-user');
+		const { identity } = recordingIdentity();
+		await expect(
+			startJudge(db, { code: CODE, name: 'Judge-Two', password: 'a-long-enough-password', secret: SECRET, ipHash: 'hash-full', config: { ...config, maxAccounts: '1' } }, identity),
+		).rejects.toThrow('All the judge places are taken.');
+		const starting = sqlite.prepare('select count(*) as "n" from "judge_accounts" where "state" = \'starting\'').get();
+		expect(starting).toEqual({ n: 0 });
+		const mine = sqlite.prepare('select count(*) as "n" from "judge_accounts" where lower("judgeName") = ?').get('judge-two');
+		expect(mine).toEqual({ n: 0 });
+	});
+
+	test('a start with room left still succeeds and flips to active', async () => {
+		const { identity, calls } = recordingIdentity();
+		const started = await startJudge(
+			db,
+			{ code: CODE, name: 'Judge-One', password: 'a-long-enough-password', secret: SECRET, ipHash: 'hash-room', config: { ...config, maxAccounts: '2' } },
+			identity,
+		);
+		expect(started.name).toBe('Judge-One');
+		expect(calls.createUser).toBe(1);
+		const row = sqlite.prepare('select "state","userId" from "judge_accounts" where "judgeName" = ?').get('Judge-One') as { state: string; userId: string } | null;
+		expect(row?.state).toBe('active');
+		expect(row?.userId).toBe('user-1');
+		expect(sqlite.prepare('select count(*) as "n" from "judge_accounts" where "state" = \'starting\'').get()).toEqual({ n: 0 });
+	});
+
+	test('a stale reservation for the same name is cleared before the cap is counted', async () => {
+		// A crashed start leaves a stale 'starting' row. Retrying the SAME name
+		// must not be refused for a place this start is about to reclaim: the
+		// stale row is deleted BEFORE the conditional INSERT counts the roster.
+		// (The old code counted first, so a stale row consumed a place forever.)
+		sqlite
+			.prepare('insert into "judge_accounts" ("judgeName","state","createdAt","lastSignInAt") values (?,?,?,null)')
+			.run('Judge-One', 'starting', new Date(Date.now() - 20 * 60_000).toISOString());
+		const { identity, calls } = recordingIdentity();
+		const started = await startJudge(
+			db,
+			{ code: CODE, name: 'Judge-One', password: 'a-long-enough-password', secret: SECRET, ipHash: 'hash-stale', config: { ...config, maxAccounts: '1' } },
+			identity,
+		);
+		expect(started.name).toBe('Judge-One');
+		expect(calls.createUser).toBe(1);
+		expect(sqlite.prepare('select count(*) as "n" from "judge_accounts"').get()).toEqual({ n: 1 });
 	});
 });
 

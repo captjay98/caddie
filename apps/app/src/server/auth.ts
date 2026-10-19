@@ -204,7 +204,18 @@ export function createAuth(env: AuthEnv, overrides: CreateAuthOverrides = {}) {
 		// against 1.7.10 in tests/judge-access.test.ts); judge accounts are
 		// created server-side by the judge service through the same invite
 		// gate as everyone else. The minimum length matches the judge form.
+		//
+		// `disabledPaths` closes Better Auth's OWN native email/password
+		// sign-in (`POST /api/auth/sign-in/email`). That route accepted judge
+		// addresses whenever the password matched but never passed through the
+		// judge service's 20-sign-ins-per-hour limit, so it was a rate-limit
+		// bypass. In 1.7.10 the option is checked only in the HTTP router's
+		// onRequest (it answers 404), so the server-side `auth.api.signInEmail`
+		// call the judge route depends on is untouched and the judge route's
+		// limiter stays the only door. The hooks.before guard below remains a
+		// second, independent fence for any address that does reach this path.
 		emailAndPassword: { enabled: true, disableSignUp: true, minPasswordLength: 10 },
+		disabledPaths: ['/sign-in/email'],
 		session: {
 			expiresIn: ttlSeconds,
 			// keep updateAge below expiresIn so short fixture TTLs stay valid
