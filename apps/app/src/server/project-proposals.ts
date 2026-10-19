@@ -2,6 +2,7 @@ import type { Scope } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { assertProjectScope, ScopeError } from './scope.ts';
 import { startProjectFromChat } from './build-workflow.ts';
+import { type AppStackId, flutterAppsEnabled } from './stacks.ts';
 
 /**
  * Project proposals: Caddie suggests, the user decides.
@@ -25,6 +26,8 @@ export interface ProjectProposal {
 	readonly hackathonUrl: string | null;
 	readonly track: string | null;
 	readonly firstStep: string | null;
+	/** 'react-hono' (a web app) or 'flutter' (an Android app, Track 3). */
+	readonly stackId: AppStackId;
 	readonly status: ProposalStatus;
 	readonly projectId: string | null;
 	readonly createdAt: string;
@@ -39,7 +42,21 @@ export interface ProposeProjectInput {
 	readonly hackathonUrl?: string | null;
 	readonly track?: string | null;
 	readonly firstStep?: string | null;
+	/** Omitted means a web app. 'flutter' needs FLUTTER_APPS_ENABLED=1. */
+	readonly stackId?: AppStackId;
 	readonly sourceConversationId: string;
+}
+
+const ANDROID_OFF = "Android apps aren't switched on for this Caddie yet. Caddie can build it as a web app, which also installs on phones from the browser.";
+
+/** Refuse an unknown app type, or an Android app while that is switched off. */
+export function checkAppStack(stackId: unknown, env: unknown): AppStackId {
+	const stack = stackId ?? 'react-hono';
+	if (stack !== 'react-hono' && stack !== 'flutter') {
+		throw new ScopeError(400, 'invalid_proposal', 'A project is a web app or an Android app.');
+	}
+	if (stack === 'flutter' && !flutterAppsEnabled(env)) throw new ScopeError(409, 'android_apps_off', ANDROID_OFF);
+	return stack;
 }
 
 const now = () => new Date().toISOString();
@@ -60,6 +77,7 @@ function fromRow(row: Record<string, unknown>): ProjectProposal {
 		hackathonUrl: (row['hackathonUrl'] as string | null) ?? null,
 		track: (row['track'] as string | null) ?? null,
 		firstStep: (row['firstStep'] as string | null) ?? null,
+		stackId: row['stackId'] === 'flutter' ? 'flutter' : 'react-hono',
 		status: row['status'] as ProposalStatus,
 		projectId: (row['projectId'] as string | null) ?? null,
 		createdAt: String(row['createdAt']),
@@ -68,7 +86,7 @@ function fromRow(row: Record<string, unknown>): ProjectProposal {
 }
 
 /** Store a proposal for the Home chat card. Creates NO project. */
-export async function proposeProject(db: D1Database, scope: Scope, input: ProposeProjectInput): Promise<ProjectProposal> {
+export async function proposeProject(db: D1Database, scope: Scope, input: ProposeProjectInput, env?: unknown): Promise<ProjectProposal> {
 	const verified = await assertProjectScope(db, scope);
 	const name = clean(input.name, 100);
 	const idea = clean(input.idea, 600);
@@ -76,13 +94,14 @@ export async function proposeProject(db: D1Database, scope: Scope, input: Propos
 	if (!name || !idea || !brief) {
 		throw new ScopeError(400, 'invalid_proposal', 'A proposal needs a name, a short idea and a brief.');
 	}
+	const stackId = checkAppStack(input.stackId, env);
 	const url = clean(input.hackathonUrl, 500);
 	if (url && !/^https?:\/\//i.test(url)) throw new ScopeError(400, 'invalid_proposal', 'The hackathon link must be an http(s) URL.');
 	const id = `prop_${crypto.randomUUID()}`;
 	const stamp = now();
 	await db
 		.prepare(
-			'insert into "project_proposals" ("id","actorId","workspaceId","homeProjectId","sourceConversationId","name","idea","brief","hackathonTitle","hackathonUrl","track","firstStep","status","projectId","createdAt","updatedAt") values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+			'insert into "project_proposals" ("id","actorId","workspaceId","homeProjectId","sourceConversationId","name","idea","brief","hackathonTitle","hackathonUrl","track","firstStep","stackId","status","projectId","createdAt","updatedAt") values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
 		)
 		.bind(
 			id,
@@ -97,6 +116,7 @@ export async function proposeProject(db: D1Database, scope: Scope, input: Propos
 			url,
 			clean(input.track, 120),
 			clean(input.firstStep, 400),
+			stackId,
 			'proposed',
 			null,
 			stamp,
@@ -150,6 +170,8 @@ export async function acceptProposal(
 		brief: proposal.brief,
 		operationKey: `proposal:${proposal.id}`,
 		sourceConversationId,
+		// Re-checked here: the switch may have gone off since the card was shown.
+		stackId: checkAppStack(proposal.stackId, limits),
 	}, limits);
 	await setStatus(db, proposal.id, 'accepted', started.project.id);
 	return {

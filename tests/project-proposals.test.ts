@@ -59,6 +59,41 @@ const IDEA = {
 };
 
 describe('project proposals: Caddie proposes, the user creates', () => {
+	test('an Android app proposal starts a Flutter project; everything else stays a web app', async () => {
+		const w = await world();
+		try {
+			const android = await proposeProject(w.db, w.scope, { ...IDEA, stackId: 'flutter', sourceConversationId: w.conversationId }, { FLUTTER_APPS_ENABLED: '1' });
+			expect(android.stackId).toBe('flutter');
+			const started = await acceptProposal(w.db, w.scope, android.id, { FLUTTER_APPS_ENABLED: '1' });
+			const bound = w.sqlite.prepare('select stackId from run_bindings where projectId = ?').get(started.project.id) as { stackId: string };
+			expect(bound.stackId).toBe('flutter');
+
+			const web = await proposeProject(w.db, w.scope, { ...IDEA, name: 'HerdWatch web', sourceConversationId: w.conversationId });
+			expect(web.stackId).toBe('react-hono');
+			const webStarted = await acceptProposal(w.db, w.scope, web.id);
+			expect((w.sqlite.prepare('select stackId from run_bindings where projectId = ?').get(webStarted.project.id) as { stackId: string }).stackId).toBe('react-hono');
+		} finally { w.sqlite.close(); }
+	});
+
+	test('while Android apps are switched off, an Android proposal is refused and nothing is stored', async () => {
+		const w = await world();
+		try {
+			await expect(proposeProject(w.db, w.scope, { ...IDEA, stackId: 'flutter', sourceConversationId: w.conversationId })).rejects.toThrow("Android apps aren't switched on");
+			expect(Number((w.sqlite.prepare('select count(*) as n from project_proposals').get() as { n: number }).n)).toBe(0);
+			// One stored while the switch was on cannot be started after it goes off.
+			const stored = await proposeProject(w.db, w.scope, { ...IDEA, stackId: 'flutter', sourceConversationId: w.conversationId }, { FLUTTER_APPS_ENABLED: '1' });
+			await expect(acceptProposal(w.db, w.scope, stored.id, {})).rejects.toThrow("Android apps aren't switched on");
+			expect(w.projectCount()).toBe(0);
+		} finally { w.sqlite.close(); }
+	});
+
+	test('an unknown app type is refused', async () => {
+		const w = await world();
+		try {
+			await expect(proposeProject(w.db, w.scope, { ...IDEA, stackId: 'laravel-inertia' as never, sourceConversationId: w.conversationId }, { FLUTTER_APPS_ENABLED: '1' })).rejects.toThrow('web app or an Android app');
+		} finally { w.sqlite.close(); }
+	});
+
 	test('proposing stores a card and creates NO project, run or planning intake', async () => {
 		const w = await world();
 		try {

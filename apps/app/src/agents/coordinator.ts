@@ -74,6 +74,8 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     hackathonUrl?: string;
     track?: string;
     firstStep?: string;
+    /** 'flutter' = an Android app (Track 3); omitted = a web app. */
+    stackId?: "react-hono" | "flutter";
   }) => Promise<{ id: string; homeProjectId: string; status: string }>;
   listStacks: () => Promise<
     readonly { id: string; status: string; note?: string }[]
@@ -386,6 +388,14 @@ export function Coordinator({ id }: AgentProps) {
       hackathonUrl: v.optional(v.string()),
       track: v.optional(v.string()),
       firstStep: v.optional(v.string()),
+      app: v.optional(
+        v.pipe(
+          v.picklist(["web", "android"]),
+          v.description(
+            "Leave out for a web app (the default; web apps also install on phones from the browser). Use \"android\" only when the user asked for an Android app they install on their phone: Caddie then builds it with Flutter and offers the app as a download. Check list_stacks first: if flutter is not enabled, do not offer an Android app.",
+          ),
+        ),
+      ),
     }),
     async run(ctx) {
       const authority = await resolve();
@@ -395,8 +405,10 @@ export function Coordinator({ id }: AgentProps) {
       // most realistic"), not the request — prefixing it made it the first
       // line of the saved brief. Only a direct request is kept verbatim.
       const brainstorming = ideationTurnsLeft > 0;
+      const { app, ...proposalInput } = ctx.data;
       const proposal = await authority.proposeProject({
-        ...ctx.data,
+        ...proposalInput,
+        ...(app === "android" ? { stackId: "flutter" as const } : {}),
         brief: original && !brainstorming
           ? `${original}\n\nProject brief: ${ctx.data.brief}`
           : ctx.data.brief,

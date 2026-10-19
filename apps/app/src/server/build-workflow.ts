@@ -72,6 +72,8 @@ export async function startProjectFromChat(
     brief: string;
     operationKey: string;
     sourceConversationId: string;
+    /** 'react-hono' (default) or 'flutter'; callers check FLUTTER_APPS_ENABLED (project-proposals.ts). */
+    stackId?: "react-hono" | "flutter";
   },
   limits?: unknown,
 ) {
@@ -151,7 +153,7 @@ export async function startProjectFromChat(
         conversationId,
         `sub_${digest.slice(0, 32)}`,
         "rev-0",
-        "react-hono",
+        input.stackId === "flutter" ? "flutter" : "react-hono",
         scope.actorId,
         route.id,
         route.pricingVersion,

@@ -31,7 +31,7 @@ import {
   workflowRepairPause,
   continueProjectFromChat,
 } from "./build-workflow.ts";
-import { STACK_CATALOG } from "./stacks.ts";
+import { stackCatalog } from "./stacks.ts";
 import { recordBuildActivity } from "./build-activity.ts";
 import { checkServerStarts, type WorkerLoaderLike } from "./preview-runtime.ts";
 import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS } from "../../../../stacks/react-hono/scaffold.ts";
@@ -725,7 +725,7 @@ export async function createCoordinatorContext(
     homeOverview,
     actorContext: actor.text,
     currentPlanRevision: () => planRevision,
-    listStacks: async () => STACK_CATALOG,
+    listStacks: async () => stackCatalog(env),
     discover: tools.discover,
     research: tools.research,
     hackathonDetails: tools.hackathonDetails,
@@ -806,7 +806,7 @@ export async function createCoordinatorContext(
       const proposal = await proposeProjectOnServer(env.DB, scope, {
         ...input,
         sourceConversationId: run.conversationId,
-      });
+      }, env);
       return { id: proposal.id, homeProjectId: proposal.homeProjectId, status: proposal.status };
     },
     workflowState: async () => {
