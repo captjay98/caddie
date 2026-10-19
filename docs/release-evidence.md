@@ -66,8 +66,8 @@ are closed: `tests/live/sandbox.spec.ts` (P04) and
 | Preflight | `bun scripts/deploy-preflight.ts --owner-only` — 18 PASS, 2 WARN (reused-local Nebius/Tavily/Contree keys, flagged for rotation; untracked files), 0 FAIL |
 | D1 | `caddie` → `f6315eae-99da-4afc-93d0-356afcd511a0`, migrations 0001–0035 applied remotely before the deploy |
 | Smoke | P17 live 5/5 PASS (receipt above); landing, /app shell, sign-in status, JSON 404 |
-| Sign-in round trip | BLOCKED (external): GitHub renders its Authorize button `disabled` for its new "trust context" gate ("Created less than a day ago", "Fewer than 10 GitHub users"). Caddie's side is proven up to the authorize page (correct app, redirect `https://caddie.jamalibrahim.dev`, read-only scopes; `/api/integrations/health` reports `github: true`; account email verified). Retry the authorize click once the app ages out of the gate, then record the round trip here. |
-| Judge access | OFF by design until the owner sign-in lands, then two `wrangler secret put`s (JUDGE_ACCESS_CODE, JUDGE_ACCESS_UNTIL=2026-12-16) with no rebuild, then one judge account in a private window |
+| Sign-in round trip | LIVE VERIFIED (user-performed, 2026-10-19): owner signed in via GitHub against the production origin; D1 `user` count 1. GitHub's new-app trust gate had blocked the consent button earlier in the day; it lifted within hours. |
+| Judge access | LIVE VERIFIED: `JUDGE_ACCESS_CODE` + `JUDGE_ACCESS_UNTIL=2026-12-16` uploaded as secrets (no rebuild); `GET /api/judge/access` → `{"open":true,"canStart":true}`. Remaining: owner starts one judge account in a private window before the code is shared. |
 
 ## Verification net (S01, 2026-10-18)
 

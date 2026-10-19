@@ -96,8 +96,11 @@ makes it work from any folder.
 | Replace a leaked judge code | a new `JUDGE_ACCESS_CODE`; existing judges still sign in with their name and password |
 
 For example: `bunx wrangler secret put JUDGE_ACCESS_ENABLED --name caddie-app`,
-then type `0`. To stop all AI spend at once, revoke the Nebius key in
-Nebius's console.
+then type `0`. If the wrangler token holds more than one Cloudflare account,
+prefix every `secret` command with
+`CLOUDFLARE_ACCOUNT_ID=<Caddie's account id>` — `--name` alone reads no
+config file, so wrangler cannot pick an account and refuses. To stop all AI
+spend at once, revoke the Nebius key in Nebius's console.
 
 ## Rollback
 
