@@ -100,6 +100,23 @@ const manifest = {
 };
 writeFileSync(MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
 
+// --- 6. deployable Worker config ----------------------------------------------
+// @cloudflare/vite-plugin 1.39.2 (bundling wrangler 4.97) writes
+// `"legacy_env": true` into the generated config. The repo's wrangler 4.113
+// refuses that file ("The legacy_env field is no longer supported ... removing
+// the field will not change how your Worker is deployed"), so every
+// `wrangler deploy`/`secret`/`rollback` run from apps/app would fail. Drop it.
+const WORKER_CONFIG = join(WORKER_DIR, 'wrangler.json');
+let legacyEnvRemoved = false;
+if (existsSync(WORKER_CONFIG)) {
+	const workerConfig = JSON.parse(readFileSync(WORKER_CONFIG, 'utf8')) as Record<string, unknown>;
+	if ('legacy_env' in workerConfig) {
+		delete workerConfig.legacy_env;
+		writeFileSync(WORKER_CONFIG, `${JSON.stringify(workerConfig)}\n`);
+		legacyEnvRemoved = true;
+	}
+}
+
 console.log(
-	`compose-assets: composed ${relocated.length} relocated SPA + ${unchanged.length} SPA asset + ${landingEntries.length} landing files; collisions: 0; manifest: ${relative(REPO_ROOT, MANIFEST_PATH)}`,
+	`compose-assets: composed ${relocated.length} relocated SPA + ${unchanged.length} SPA asset + ${landingEntries.length} landing files; collisions: 0; manifest: ${relative(REPO_ROOT, MANIFEST_PATH)}${legacyEnvRemoved ? '; legacy_env removed from the Worker config' : ''}`,
 );

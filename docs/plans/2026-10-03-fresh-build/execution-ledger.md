@@ -1718,3 +1718,39 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "S10 production deploy, prepared (owner chose 'Prepare the production deploy (S10)'); the deploy itself is G4 and was not run",
+  "status": "LOCAL VERIFIED: config, preflight, procedure and CI fix. A full rehearsal in a throwaway worktree used a dummy D1 id and domain and uploaded nothing. Remote steps (D1 create and migrations, secrets, deploy, smoke) are BLOCKED on the owner's account, domain and values.",
+  "owner": "Integration lead",
+  "commits": ["695e57c (env.production, preflight, template, tests)", "this commit (compose fix, owner-only mode, fixture setup, runbook)"],
+  "commands": [
+    {"command": "bun test tests/deploy-preflight.test.ts", "exitCode": 0, "receipt": "28 pass / 0 fail. Includes: the committed config's only FAILs are the two owner placeholders; no finding contains a value on any FAIL/WARN branch (18 scenarios); the template lists exactly the keys the preflight knows; git ignores apps/app/.prod.vars."},
+    {"command": "three temporary mutations of scripts/deploy-preflight.ts, each restored and cmp-checked", "exitCode": 1, "receipt": "Dropping the forbidden-key check fails the test-only-switch case; dropping the public-assets check fails the vars-file case; printing BETTER_AUTH_URL in a finding fails both no-value tests."},
+    {"command": "rehearsal worktree at 695e57c: bun install --frozen-lockfile; CLOUDFLARE_ENV=production bun run build", "exitCode": 0, "receipt": "Flattened dist/caddie_app/wrangler.json: name caddie-app, workers_dev false, preview_urls false, the custom-domain route, DB with the env id and migrations_dir, LOADER, PREVIEW_DB plus Flue's FLUE_COORDINATOR_AGENT and FLUE_HELLO_AGENT bindings, DO migrations v1-v3, the 5-minute cron, Workers Logs and traces on."},
+    {"command": "bunx wrangler deploy --dry-run (repo wrangler 4.113.0, WRANGLER_SEND_METRICS=false, no credentials)", "exitCode": 1, "receipt": "FAILED before the fix: 'The \"legacy_env\" field is no longer supported'. @cloudflare/vite-plugin 1.39.2 bundles wrangler 4.97, which writes legacy_env: true into the generated config. Every deploy, secret and rollback command run from apps/app would have failed the same way."},
+    {"command": "same dry-run after scripts/compose-assets.ts strips legacy_env", "exitCode": 0, "receipt": "202 asset files, 9282 KiB (1891 KiB gzip); bindings PREVIEW_DB, FLUE_COORDINATOR_AGENT, FLUE_HELLO_AGENT, DB (caddie), ASSETS, LOADER; '--dry-run: exiting now'. A marker .dev.vars copied into dist/caddie_app by the Vite plugin is not in the upload (0 files)."},
+    {"command": "bun scripts/deploy-preflight.ts (rehearsal values: random, not real)", "exitCode": 0, "receipt": "18 PASS, 1 WARN (the worktree's edited config), 0 FAIL."},
+    {"command": "bunx wrangler d1 migrations apply caddie --local --config wrangler.jsonc --env production --persist-to <tmp>", "exitCode": 0, "receipt": "0001-0035 applied to a fresh local D1 through the production env's binding and migrations_dir, with wrangler 4.113 and again with 4.97: d1_migrations holds 35 rows, 86 tables; a second list says no migrations to apply."},
+    {"command": "default build + vite preview on 127.0.0.1:4199 without legacy_env, then the full Playwright suite in the worktree", "exitCode": 0, "receipt": "/, /app/, /api/auth/status, /api/judge/access 200; unknown /api route JSON 404. Playwright: 209 passed; 1 failed and 2 did not run in forge-journey.spec.ts, because the fixture app could not start (\"Cannot find module 'hono/bun'\"). After `bun run fixtures:setup`: forge-journey 3/3 and the fixture's routes.test.ts 4/4."},
+    {"command": "bun run test; bun run typecheck; bun scripts/release-check.ts (main checkout)", "exitCode": 0, "receipt": "1456 pass / 0 fail / 109 files; typecheck 0; release-check 47 PASS 0 FAIL 1 BLOCKED 4 PROVISIONED."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/wrangler.jsonc", "note": "env.production: restated bindings, preview_urls false, Workers Logs on, placeholders <PRODUCTION_D1_DATABASE_ID> and <CADDIE_DOMAIN>. Chosen at build time with CLOUDFLARE_ENV=production; never wrangler deploy --env."},
+    {"path": "apps/app/.prod.vars.example, .gitignore", "note": "Every production key with how to make it; apps/app/.prod.vars (the --secrets-file) is gitignored. Nothing identifying is committed: client ids, emails and the judge code are uploaded as secrets."},
+    {"path": "scripts/deploy-preflight.ts", "note": "Local, read-only, never prints a value. Reads the values file with wrangler's own dotenv regex (parse16) and checks the keyring with the Worker's parseKeyring. --owner-only leaves judge access off and fails if a judge code is present."},
+    {"path": "scripts/compose-assets.ts", "note": "Removes legacy_env from the generated Worker config. The preflight fails a build that still has it."},
+    {"path": "package.json (fixtures:setup), .github/workflows/ci.yml, README.md", "note": "A fresh clone (CI included) could not start the P09 fixture app: it has its own lock file and needs a built client. CI now runs fixtures:setup right after install; the README's setup lists it."},
+    {"path": "docs/runbooks/production-deploy.md (+ pointers in operations.md, owner-inputs.md and the plan's S10)", "note": "Owner procedure: once-only setup, judge access off until review findings F02/F03 are fixed, every-deploy steps (migrations before code), settings without a rebuild, rollback limits (code only; migrations 0024/0035 rebuild tables; Durable Object migrations block rollback), and failure signatures."}
+  ],
+  "environment": "Local Mac only. No Cloudflare credentials, no remote call; wrangler telemetry off.",
+  "providerCalls": "none",
+  "limitations": [
+    "Nothing remote ran: Workers Paid plan, Worker Loader on the real account, custom-domain provisioning, remote migrations, secrets upload and the deploy are untested until the owner runs G4.",
+    "The rehearsal values were random placeholders, so the preflight's comparisons against local values were not exercised there (the unit tests cover them).",
+    "Judge access should stay off in production until review findings F02 (chat discovery and /agents/hello bypass judge limits) and F03 (concurrent project creation exceeds the cap) are fixed. F01 (an interrupted handoff can drop a pending message) and F05 (live receipts are not tied to a release) are also open. All four were checked against the cited code; the fixes are not part of S10.",
+    "A local dev server (port 5176) and, earlier, the other agent's preview (port 4173) were running in the main checkout; neither was touched, and main's apps/app/dist was not rebuilt."
+  ]
+}
+```

@@ -273,7 +273,7 @@ such rather than omitted.
 
 | Surface | Status | What backs it |
 | :--- | :--- | :--- |
-| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1428 pass, 0 fail, 108 files — run at the time of writing. |
+| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1456 pass, 0 fail, 109 files — run at the time of writing. |
 | Browser acceptance suite (`bun run test:browser`) | **LOCAL VERIFIED** (2026-10-19) | `bun run test:browser -- --all` against the composed build: 23 packets PASS, 0 FAIL, 22 have no browser spec (named, not counted). Six cases had failed earlier the same day; every one was a spec that no longer matched the shipped client, now updated, with one root-caused stub-ordering bug (`docs/release-evidence.md`). CI now runs this suite. |
 | Typecheck (`bun run typecheck`) | **LOCAL VERIFIED** | exit 0 (root project + `apps/app`). |
 | Build composition (`bun run build`) | **LOCAL VERIFIED** | One composed Workers assets tree from the Astro landing + Vite SPA. |
@@ -303,6 +303,7 @@ print secrets.
 export PATH="$HOME/.bun/bin:$PATH"
 
 bun install
+bun run fixtures:setup             # the P09 fixture app some tests start
 cp .dev.vars.example .dev.vars     # then fill in what you need
 bun run db:migrate:local           # local D1
 bun run dev                        # dev server pinned to http://localhost:5176
@@ -316,7 +317,7 @@ app runs and fails closed with visible gaps.
 
 | Command | What it is | Last observed |
 | :--- | :--- | :--- |
-| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1428 pass, 0 fail, 6780 expect() calls, 108 files** |
+| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1456 pass, 0 fail, 7143 expect() calls, 109 files** |
 | `bun run typecheck` | Root project + `apps/app` typecheck | exit 0 |
 | `bun run build` | Astro + Vite + asset composition into one Workers assets tree (no deploy) | exit 0 (LOCAL VERIFIED) |
 | `bun run verify:packet Pxx` | That packet's mapped tests; fails when a mapped test file is missing or empty | — |

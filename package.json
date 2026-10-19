@@ -11,6 +11,7 @@
 		"dev:site": "bun --cwd=apps/site run dev",
 		"build": "rm -rf apps/app/dist && bun --cwd=apps/site run build && bun --cwd=apps/app run build && bun run compose:assets",
 		"compose:assets": "bun scripts/compose-assets.ts",
+		"fixtures:setup": "bun --cwd=tests/fixtures/forge-task-tracker install --frozen-lockfile && bun --cwd=tests/fixtures/forge-task-tracker run build",
 		"db:migrate:local": "bun scripts/migrate-local.ts",
 		"typecheck": "tsc --noEmit && bun --cwd=apps/app run check:types",
 		"test": "bun test tests/ --no-orphans --path-ignore-patterns='**/tests/browser/**' --path-ignore-patterns='**/tests/live/**'",

@@ -199,6 +199,18 @@ describe('S10 preflight: the production values', () => {
 		expect(fails(findings).join(' ')).toContain('no owner sign-in');
 	});
 
+	test('owner-only: the judge keys are not required, and a judge code present fails', async () => {
+		const values = goodValues();
+		values.delete('JUDGE_ACCESS_CODE');
+		values.delete('JUDGE_ACCESS_UNTIL');
+		const ownerOnly = await checkProductionValues(values, { target: TARGET, local: LOCAL, now: NOW, ownerOnly: true });
+		expect(fails(ownerOnly)).toEqual([]);
+		expect(ownerOnly.some((f) => f.level === 'PASS' && f.detail.includes('judge access: off'))).toBe(true);
+		expect(fails(await check(values)).join(' ')).toContain('JUDGE_ACCESS_CODE');
+		const withCode = await checkProductionValues(goodValues(), { target: TARGET, local: LOCAL, now: NOW, ownerOnly: true });
+		expect(fails(withCode).join(' ')).toContain('--owner-only, but JUDGE_ACCESS_CODE is set');
+	});
+
 	test('test-only switches fail; the live-fetch switch warns', async () => {
 		const values = goodValues();
 		values.set('AUTH_TEST_MODE', '1');
@@ -347,6 +359,11 @@ describe('S10 preflight: the production build and the migrations', () => {
 		const detail = fails(checkProductionBuild(buildTree(productionBuild(), ['.dev.vars', '.env.production']), TARGET)).join(' ');
 		expect(detail).toContain('dist/client/.dev.vars');
 		expect(detail).toContain('dist/client/.env.production');
+	});
+
+	test('a build that still has legacy_env fails (the repo\'s wrangler 4.113 refuses to deploy it)', () => {
+		const withLegacy = { ...productionBuild(), legacy_env: true } as WorkerConfig;
+		expect(fails(checkProductionBuild(buildTree(withLegacy), TARGET)).join(' ')).toContain('legacy_env');
 	});
 
 	test('a local build (placeholder D1 id) or an unbound Durable Object class fails', () => {

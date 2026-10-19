@@ -11,6 +11,7 @@
  *
  *   bun scripts/deploy-preflight.ts                # everything
  *   bun scripts/deploy-preflight.ts --skip-build   # before building
+ *   bun scripts/deploy-preflight.ts --owner-only   # judge access deliberately off
  *   bun scripts/deploy-preflight.ts --vars <file>  # another values file
  *
  * Exits 1 when anything FAILs. WARN lines are decisions to read, not blockers.
@@ -323,7 +324,12 @@ export interface ValuesContext {
 	readonly now: Date;
 	/** The raw file, for the `#` check. */
 	readonly text?: string;
+	/** A deploy with judge access deliberately off (no JUDGE_ACCESS_CODE). */
+	readonly ownerOnly?: boolean;
 }
+
+/** The judge keys an owner-only deploy leaves out. */
+const JUDGE_ACCESS_KEYS = ['JUDGE_ACCESS_CODE', 'JUDGE_ACCESS_UNTIL'] as const;
 
 /** Check the production values file. Findings name keys only, never values. */
 export async function checkProductionValues(values: ReadonlyMap<string, string>, ctx: ValuesContext): Promise<Finding[]> {
@@ -338,9 +344,14 @@ export async function checkProductionValues(values: ReadonlyMap<string, string>,
 	const cut = ctx.text ? keysCutByHash(ctx.text) : [];
 	if (cut.length > 0) add('FAIL', `a # inside an unquoted value cuts it short; put these values in quotes: ${cut.join(', ')}`);
 
-	const missing = REQUIRED_KEYS.filter((key) => !has(key));
+	const required = ctx.ownerOnly ? REQUIRED_KEYS.filter((key) => !(JUDGE_ACCESS_KEYS as readonly string[]).includes(key)) : REQUIRED_KEYS;
+	const missing = required.filter((key) => !has(key));
 	if (missing.length > 0) add('FAIL', `missing: ${missing.join(', ')}`);
-	else add('PASS', `all ${REQUIRED_KEYS.length} required values are set`);
+	else add('PASS', `all ${required.length} required values are set${ctx.ownerOnly ? ' for an owner-only deploy' : ''}`);
+	if (ctx.ownerOnly) {
+		if (has('JUDGE_ACCESS_CODE')) add('FAIL', '--owner-only, but JUDGE_ACCESS_CODE is set: judge access would open; delete that line');
+		else add('PASS', 'judge access: off (owner-only deploy)');
+	}
 
 	const forbidden = FORBIDDEN_KEYS.filter((key) => values.has(key));
 	if (forbidden.length > 0) add('FAIL', `test-only switches must not reach production: ${forbidden.join(', ')}`);
@@ -466,6 +477,9 @@ export function checkProductionBuild(appDir: string, target: ProductionTarget): 
 
 	const builtHosts = (built.routes ?? []).map(routeHost);
 	if (target.hosts.some((host) => !builtHosts.includes(host))) add('FAIL', 'the build does not carry the production routes: rebuild');
+	if ('legacy_env' in built) {
+		add('FAIL', 'the build still has legacy_env, which the repo\'s wrangler refuses to deploy: rebuild with `bun run build` (its compose step removes it)');
+	}
 
 	const bound = new Set((built.durable_objects?.bindings ?? []).map((binding) => binding.class_name));
 	const classes = (built.migrations ?? []).flatMap((entry) => [...(entry.new_sqlite_classes ?? []), ...(entry.new_classes ?? [])]);
@@ -517,6 +531,7 @@ async function main(): Promise<void> {
 	const varsIndex = args.indexOf('--vars');
 	const varsPath = varsIndex >= 0 && args[varsIndex + 1] ? resolve(args[varsIndex + 1]!) : join(appDir, '.prod.vars');
 	const skipBuild = args.includes('--skip-build');
+	const ownerOnly = args.includes('--owner-only');
 
 	const findings: Finding[] = [];
 	const git = (...argv: string[]) => Bun.spawnSync(['git', ...argv], { cwd: root }).stdout.toString().trim();
@@ -544,7 +559,7 @@ async function main(): Promise<void> {
 		for (const path of [join(root, '.dev.vars'), join(appDir, '.dev.vars')]) {
 			for (const [key, value] of readValuesFile(path)?.values ?? []) local.set(key, value);
 		}
-		findings.push(...(await checkProductionValues(file.values, { target, local, now: new Date(), text: file.text })));
+		findings.push(...(await checkProductionValues(file.values, { target, local, now: new Date(), text: file.text, ownerOnly })));
 	}
 	if (!skipBuild) findings.push(...checkProductionBuild(appDir, target));
 

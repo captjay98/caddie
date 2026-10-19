@@ -491,6 +491,13 @@ Judges get a working app in their first minute, before they start their own.
 
 ### S10 Production deploy (G4; the owner runs it or authorizes each step)
 
+**Procedure (2026-10-19):** `docs/runbooks/production-deploy.md`, checked by
+`bun scripts/deploy-preflight.ts`. It replaces the three steps below: the
+build needs `CLOUDFLARE_ENV=production`, the migrations need
+`--config wrangler.jsonc --env production`, and secrets ship with
+`wrangler deploy --secrets-file`. Following the 2026-10-19 pre-final review
+(F02, F03), the first deploy leaves judge access off.
+
 **Owner prerequisites (D6):**
 
 - Cloudflare paid Workers plan (Worker Loader runs the previews of apps with

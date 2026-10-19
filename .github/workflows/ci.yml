@@ -17,6 +17,11 @@ jobs:
       # A drifted lock file fails here instead of silently installing a
       # different version than the one every gate was run against.
       - run: bun install --frozen-lockfile
+      # The P09 journey spec starts the fixture app (tests/fixtures/
+      # forge-task-tracker), which has its own lock file and a built client.
+      # A fresh checkout has neither, so the spec could not start it.
+      - name: Fixture app for the P09 journey spec
+        run: bun run fixtures:setup
       - run: bun run build
       - run: bun run typecheck
       - name: Per-packet verification (every packet in scripts/packet-list.ts)

@@ -37,4 +37,7 @@ is the checklist and the record.
 
 Secrets go directly into `.dev.vars` (gitignored). Never in chat, never in
 artifacts. That includes the judge access code: this document records only the
-input name and its default, never a real value.
+input name and its default, never a real value. Production values go in
+`apps/app/.prod.vars` (gitignored; template `apps/app/.prod.vars.example`),
+checked by `bun scripts/deploy-preflight.ts` and deployed per
+`docs/runbooks/production-deploy.md`.

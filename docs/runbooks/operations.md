@@ -29,6 +29,9 @@ bun scripts/release-check.ts  # the full local gate before any release request
 
 ## Deployment gates (ALL required, in order)
 
+The production procedure is `docs/runbooks/production-deploy.md`; its
+preflight is `bun scripts/deploy-preflight.ts`.
+
 1. `bun scripts/release-check.ts` exits 0 (all local checks PASS).
 2. Every live gate either BLOCKED-and-accepted or LIVE VERIFIED with receipts.
 3. Concrete owner approval against the specific release SHA.
