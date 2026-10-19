@@ -122,6 +122,33 @@ count. Both are owner calls, so they are surfaced here rather than silently
 rewritten. Any fix must come with a CI step that runs `test:browser`, or the
 next regression will hide in the same place.
 
+### Resolved (2026-10-19, later the same day)
+
+| Check | Classification | Receipt |
+|---|---|---|
+| `bun run test:browser -- --all` | LOCAL VERIFIED | 45 packets — **23 PASS, 0 FAIL**, 22 NOT APPLICABLE, against a fresh `bun run build` |
+
+Every one of the six was a spec that no longer matched the shipped client; no
+client code changed. The specs now assert what ships:
+
+- **Discover (four cases).** The dense row's chip reads `Can enter` with the full verdict `You can enter` as its title; a saved row shows its `Saved` button; the fit reason sits in the row's collapsed "Why it fits" fold and cites `evidence: cl-team-1`; feed gaps read "Some sources failed"; the country line reads "Entry checked for United States"; a projects row is opened by its title button (it now also has "Continue with Caddie"). "No invented links" is now checked as: every outbound link on the page is a recorded candidate URL.
+- **Theme keyboard case.** It walks `PALETTES` imported from `theme.ts` instead of a hand-copied list of four, so a new palette cannot leave it stale again.
+- **`brief.spec.ts:265`, root-caused.** A spec bug, not a product bug. The catch-all stub `**/api/projects/**` was registered after the `**/api/projects/**/runs` stub, and Playwright runs the last-registered matching route first, so the run POST got `{}` from the catch-all and never reached the counter (the welcome action did send it; the draft showed "Not sent" because `{}` carries no run). The runs stub is now registered last and answers the POST with a real run. Side effect: the "opening tabs never POSTs a run" case in the same file now actually observes run POSTs; before, it could never see one.
+
+**Open product question (owner's call, not settled by a test):** since the
+2026-10-15 card, the Discover row's "Why it fits" fold lists **supported**
+claims only. An *unknown* fit claim's recorded assumption (the fixture's
+"region rule assumed unrestricted absent a recorded rule") is no longer shown
+anywhere in the list; the 2026-10-10 card showed every claim with its verdict,
+evidence ids and assumptions. The spec now asserts only what ships and names
+this in a comment.
+
+**CI now runs the browser suite.** `.github/workflows/ci.yml` gained
+`bunx playwright install --with-deps chromium` and `bun run test:browser -- --all`
+after `verify:packet --all`. The file was also re-indented with spaces: it was
+tab-indented, which YAML does not allow, so as committed GitHub could not have
+parsed it at all. That fix has not run on GitHub (there is no remote yet).
+
 ## Stack availability (frozen scope, feature-ledger)
 
 | Stack | ID | Status |

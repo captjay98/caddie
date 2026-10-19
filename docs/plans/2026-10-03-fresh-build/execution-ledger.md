@@ -1546,3 +1546,35 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "Browser acceptance: the six failing cases resolved, and CI runs the browser suite (follow-up to the 2026-10-19 browser record above)",
+  "status": "LOCAL VERIFIED. bun run test:browser -- --all: 23 PASS / 0 FAIL / 22 NOT APPLICABLE against a fresh bun run build. No client code changed; the CI change has not run on GitHub (no remote).",
+  "owner": "Integration lead (the owner handed the browser decision to the lead: 'take over from here')",
+  "commands": [
+    {"command": "git rev-parse --short <branch>:<file> for the four specs, Results.tsx, ThemePicker.tsx and theme.ts on all 8 branches", "exitCode": 0, "receipt": "Byte-identical on main, feat/chat-ui-polish, feat/publish-on-cloudflare and the five wt/* worktrees (all clean, all containing fb1c43d4), so no other branch or worktree could have passed them. The theme spec could never have passed: theme.ts had five palettes in the commit that wrote it (47e0287e)."},
+    {"command": "bun run test:browser -- U04 (after reordering the stubs in brief.spec.ts)", "exitCode": 0, "receipt": "brief.spec.ts 14 passed, conversation.spec.ts 11 passed. Root cause of brief.spec.ts:265: the catch-all **/api/projects/** stub was registered after the **/api/projects/**/runs stub; Playwright runs the last-registered matching route first, so the welcome action's run POST got {} and never reached the counter. The page snapshot showed the draft 'Not sent', consistent with a reply carrying no run."},
+    {"command": "bunx playwright test tests/browser/discovery.spec.ts tests/browser/discovery-journey.spec.ts tests/browser/theme-picker.spec.ts", "exitCode": 0, "receipt": "All pass after the updates. Fixing the first stale assertion in each Discover case exposed further stale ones behind it (the collapsed 'Why it fits' fold, 'Some sources failed', 'Entry checked for United States', the removed 'Can you enter?' detail, a projects row with two buttons); each was checked against the shipped component before the spec was changed."},
+    {"command": "bun run test:browser -- --all", "exitCode": 0, "receipt": "45 packets: 23 PASS, 0 FAIL, 22 NOT APPLICABLE."},
+    {"command": "Bun.YAML.parse(.github/workflows/ci.yml)", "exitCode": 0, "receipt": "Before: 'Tab characters cannot be used as indentation' (the file was tab-indented in every committed version, ee48a506 onward, so GitHub could never have parsed it). After: parses; steps install, build, typecheck, verify:packet --all, playwright install chromium, test:browser -- --all, release-check."},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "root + apps/app (the specs are typechecked by the root project)."}
+  ],
+  "artifacts": [
+    {"path": "tests/browser/discovery.spec.ts, tests/browser/discovery-journey.spec.ts", "note": "Assert the shipped v2 card: short chip with the full verdict as its title, the Saved button, the Why-it-fits fold with its evidence id, the named feed gap, the country line, the title button that opens a project, and 'every outbound link is a recorded candidate URL'."},
+    {"path": "tests/browser/theme-picker.spec.ts", "note": "Imports PALETTES from theme.ts instead of a hand-copied list."},
+    {"path": "tests/browser/brief.spec.ts", "note": "The runs stub is registered last and answers the POST with a real run binding."},
+    {"path": ".github/workflows/ci.yml", "note": "Re-indented with spaces (it was invalid YAML) and runs the browser suite."},
+    {"path": "docs/release-evidence.md, README.md", "note": "The dated failure record stays; a 'Resolved' section follows it. README row now LOCAL VERIFIED."}
+  ],
+  "environment": "Local Mac: vite preview of the composed build on 127.0.0.1:4173, Chromium from @playwright/test 1.63.0, /api stubbed by the specs. No deploy, no live call.",
+  "providerCalls": "none",
+  "specReview": "PENDING independent review",
+  "qualityReview": "Each spec change was made only after reading the shipped component it asserts against; no assertion was deleted without replacing its intent, except the one named below.",
+  "limitations": [
+    "OPEN PRODUCT QUESTION: since the 2026-10-15 card, 'Why it fits' lists supported claims only, so an unknown fit claim's recorded assumption is no longer shown anywhere in the Discover list (the 2026-10-10 card showed it). The spec no longer asserts the assumption text; this is the owner's call, not a test fix.",
+    "The CI workflow change has not run on GitHub: there is no remote. Its parse was checked locally with Bun.YAML only.",
+    "22 packets have no browser spec at all; that is a coverage gap, not a pass."
+  ]
+}
+```

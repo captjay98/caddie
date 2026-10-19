@@ -229,11 +229,6 @@ async function stubAccount(
 			asOf: NOW,
 		});
 	});
-	// Count paid-run attempts: opening tabs must never POST a run.
-	await context.route('**/api/projects/**/runs', (route) => {
-		if (route.request().method() === 'POST') runPosts.n += 1;
-		return json(route, 200, { runBindings: [] });
-	});
 	await context.route('**/api/projects/**', (route) => {
 		const path = new URL(route.request().url()).pathname;
 		if (path.endsWith('/run-bindings')) return json(route, 200, { runBindings: [] });
@@ -244,6 +239,30 @@ async function stubAccount(
 		if (path.endsWith('/discovery/candidates')) return json(route, 200, { evaluations: [], ranked: [], profileCountry: null });
 		if (path.endsWith('/discovery/feed')) return json(route, 200, { runs: [] });
 		return json(route, 200, {});
+	});
+	// Count paid-run attempts: opening tabs must never POST a run. Registered
+	// AFTER the catch-all on purpose: Playwright runs the last-registered
+	// matching route first, so registered before it this one never saw a
+	// request and the welcome case could not count its run.
+	await context.route('**/api/projects/**/runs', (route) => {
+		if (route.request().method() !== 'POST') return json(route, 200, { runBindings: [] });
+		runPosts.n += 1;
+		const projectId = new URL(route.request().url()).pathname.split('/')[3] ?? 'home-1';
+		return json(route, 200, {
+			run: {
+				runId: `run-${runPosts.n}`,
+				projectId,
+				conversationId: `conv-${runPosts.n}`,
+				submissionId: `sub-${runPosts.n}`,
+				planRevision: 'rev-0',
+				stackId: 'react-hono',
+				payerId: actorId,
+				modelRouteId: 'chat',
+				pricingVersion: 'test',
+				createdBy: actorId,
+				createdAt: NOW,
+			},
+		});
 	});
 	return { reads, runPosts };
 }

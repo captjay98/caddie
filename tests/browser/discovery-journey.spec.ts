@@ -260,7 +260,7 @@ test.describe('discovery-first acceptance journey (composed build, one account, 
 		// cand-2 is hard-ineligible: hidden by default behind the named reveal.
 		await page.getByTestId('discovery-reveal-ineligible').click();
 		await page.getByTestId('save-candidate-cand-2').click();
-		await expect(page.getByTestId('discovery-results')).toContainText('· saved');
+		await expect(page.getByTestId('unsave-candidate-cand-2')).toHaveText('Saved');
 		expect(created).toHaveLength(0); // no POST /api/projects from a save
 
 		// ---- D. Explore commits exactly one project + retargets the conversation --
@@ -295,7 +295,8 @@ test.describe('discovery-first acceptance journey (composed build, one account, 
 		await expect(page.getByTestId('project-row-home-1')).toHaveCount(0);
 
 		// ---- G. Composer drafts scope to the project; a bad id is MISSING ---------
-		await page.getByTestId('project-row-proj-committed').getByRole('button').click();
+		// The row's title opens the project; "Continue with Caddie" sits beside it.
+		await page.getByTestId('project-row-proj-committed').getByRole('button', { name: 'Solar Hackweek' }).click();
 		await expect(page).toHaveURL(/\/app\/project\?project=proj-committed$/);
 		await page.getByTestId('composer-input').fill('Draft a plan for Solar Hackweek');
 		await page.getByTestId('composer-send').click();

@@ -1,29 +1,37 @@
 name: CI
 
 on:
-	push:
-		branches: [main]
-	pull_request:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
-	verify:
-		runs-on: ubuntu-latest
-		steps:
-			- uses: actions/checkout@v4
-			- uses: oven-sh/setup-bun@v2
-				with:
-					bun-version: 1.4.0
-			# --frozen-lockfile: CI must resolve exactly what was verified locally.
-			# A drifted lock file fails here instead of silently installing a
-			# different version than the one every gate was run against.
-			- run: bun install --frozen-lockfile
-			- run: bun run build
-			- run: bun run typecheck
-			- name: Per-packet verification (every packet in scripts/packet-list.ts)
-				run: bun run verify:packet --all
-			- name: Release readiness
-				run: bun scripts/release-check.ts
-				env:
-					# CI has no live credentials: every live gate reports BLOCKED,
-					# which never fails the build.
-					CI: 'true'
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      # --frozen-lockfile: CI must resolve exactly what was verified locally.
+      # A drifted lock file fails here instead of silently installing a
+      # different version than the one every gate was run against.
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run typecheck
+      - name: Per-packet verification (every packet in scripts/packet-list.ts)
+        run: bun run verify:packet --all
+      # The browser acceptance specs run against the composed build above
+      # (vite preview on 127.0.0.1:4173, /api stubbed by the specs). Before
+      # this step, six cases had failed unnoticed for days because nothing
+      # ran them.
+      - name: Install the Playwright browser
+        run: bunx playwright install --with-deps chromium
+      - name: Browser acceptance (every packet's browser specs)
+        run: bun run test:browser -- --all
+      - name: Release readiness
+        run: bun scripts/release-check.ts
+        env:
+          # CI has no live credentials: every live gate reports BLOCKED,
+          # which never fails the build.
+          CI: 'true'

@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { PALETTES } from '../../apps/app/src/client/theme.ts';
 
 /**
  * Theme-picker browser click-through — the LIVE verification that
@@ -107,7 +108,7 @@ test.afterAll(async () => {
 	if (linkCreated) rmSync(join(HARNESS_DIR, 'node_modules'), { force: true, recursive: true });
 });
 
-const PALETTES = ['caddie', 'clearcut', 'onesecos', 'farmhand'] as const;
+// The palette list is theme.ts's own (imported above), never a copy here.
 
 function htmlAttr(page: import('@playwright/test').Page, name: string) {
 	return page.evaluate((n) => document.documentElement.getAttribute(n), name);
@@ -169,30 +170,33 @@ test.describe('ThemePicker live click-through (real component + real theme.ts)',
 		await caddie.focus();
 		await expect(caddie).toBeFocused();
 
-		// ArrowRight selects + focuses the next palette, and so on round the row.
+		// ArrowRight selects + focuses the next palette, in theme.ts order, and
+		// so on round the row. The list comes from theme.ts, so a new palette
+		// can never leave this test asserting a stale count.
+		const first = PALETTES[0];
+		const last = PALETTES[PALETTES.length - 1];
 		await page.keyboard.press('ArrowRight');
-		await expect(page.getByTestId('theme-swatch-clearcut')).toBeFocused();
-		expect(await htmlAttr(page, 'data-palette')).toBe('clearcut');
-
-		await page.keyboard.press('ArrowRight');
-		expect(await htmlAttr(page, 'data-palette')).toBe('onesecos');
-		await page.keyboard.press('ArrowRight');
-		expect(await htmlAttr(page, 'data-palette')).toBe('farmhand');
+		await expect(page.getByTestId(`theme-swatch-${PALETTES[1]}`)).toBeFocused();
+		expect(await htmlAttr(page, 'data-palette')).toBe(PALETTES[1]);
+		for (const palette of PALETTES.slice(2)) {
+			await page.keyboard.press('ArrowRight');
+			expect(await htmlAttr(page, 'data-palette')).toBe(palette);
+		}
 
 		// rolls around to the first
 		await page.keyboard.press('ArrowRight');
-		await expect(page.getByTestId('theme-swatch-caddie')).toBeFocused();
-		expect(await htmlAttr(page, 'data-palette')).toBe('caddie');
+		await expect(page.getByTestId(`theme-swatch-${first}`)).toBeFocused();
+		expect(await htmlAttr(page, 'data-palette')).toBe(first);
 
 		// ArrowLeft wraps backwards to the last
 		await page.keyboard.press('ArrowLeft');
-		expect(await htmlAttr(page, 'data-palette')).toBe('farmhand');
+		expect(await htmlAttr(page, 'data-palette')).toBe(last);
 
 		// End jumps to last, Home to first
 		await page.keyboard.press('Home');
-		expect(await htmlAttr(page, 'data-palette')).toBe('caddie');
+		expect(await htmlAttr(page, 'data-palette')).toBe(first);
 		await page.keyboard.press('End');
-		expect(await htmlAttr(page, 'data-palette')).toBe('farmhand');
+		expect(await htmlAttr(page, 'data-palette')).toBe(last);
 
 		// the mode group is an independent roving group
 		await page.getByTestId('theme-mode-dark').focus();
@@ -217,7 +221,7 @@ test.describe('ThemePicker live click-through (real component + real theme.ts)',
 			expect(value, `--bg-canvas should resolve for ${palette}`).not.toBe('');
 			seen.add(value);
 		}
-		// At least three distinct canvas colours across the four palettes
+		// At least three distinct canvas colours across the palettes
 		// (two palettes could coincidentally share a dark canvas; three proves
 		// the attribute is really driving the cascade).
 		expect(seen.size).toBeGreaterThanOrEqual(3);

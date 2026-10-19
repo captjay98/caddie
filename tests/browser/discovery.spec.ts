@@ -418,31 +418,38 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 
 		await expect(page.getByTestId('discovery-results')).toBeVisible();
 		await expect(page.getByText('Solar Hackweek')).toBeVisible();
-		// v2 verdict words (§6): plain, never jargon. The hard-ineligible row is
-		// hidden until the named reveal is used.
-		await expect(page.getByText('You can enter', { exact: true })).toBeVisible();
+		// v2 verdict words (§6): plain, never jargon. A dense row shows the short
+		// chip and carries the full verdict as its title (hackathon-format.ts).
+		// The hard-ineligible row is hidden until the named reveal is used.
+		await expect(page.getByTestId('eligibility-cand-1')).toHaveText('Can enter');
+		await expect(page.getByTestId('eligibility-cand-1')).toHaveAttribute('title', 'You can enter');
 		await expect(page.getByText("Can't enter", { exact: true })).toHaveCount(0);
 		await page.getByTestId('discovery-reveal-ineligible').click();
 		await expect(page.getByText("Can't enter", { exact: true })).toBeVisible();
-		// One reason it fits: the first evidenced claim's statement.
-		await expect(page.getByText('The recorded rules state teams of 1-4 may enter.').first()).toBeVisible();
+		// One reason it fits: the first evidenced claim's statement, in the
+		// row's "Why it fits" fold (collapsed by default since the 2026-10-15 card).
+		await page.getByTestId('disc-fit-cand-1').locator('summary').click();
+		await expect(page.getByTestId('disc-fit-cand-1').getByText('The recorded rules state teams of 1-4 may enter.')).toBeVisible();
 
 		// Partial feed failure is a VISIBLE, NAMED gap — never silently dropped.
-		const gaps = page.getByRole('status').filter({ hasText: 'Feed gaps' });
+		const gaps = page.getByRole('status').filter({ hasText: 'Some sources failed' });
 		await expect(gaps).toBeVisible();
 		await expect(gaps).toContainText('devpost failed — upstream returned 503 (recorded receipt)');
 
-		await expect(page.getByTestId('discovery-country')).toContainText('Checking United States eligibility');
+		await expect(page.getByTestId('discovery-country')).toContainText('Entry checked for United States');
 
-		// Fit detail cites the evidence claim id, or records its assumption.
-		await page.getByRole('button', { name: 'Can you enter?' }).first().click();
-		await expect(page.getByText('SUPPORTED — The recorded rules state teams of 1-4 may enter.')).toBeVisible();
-		await expect(page.getByText('evidence: cl-team-1')).toBeVisible();
-		await expect(page.getByText('assumption: region rule assumed unrestricted absent a recorded rule')).toBeVisible();
+		// The fit reason cites its evidence claim id. Since the 2026-10-15 card
+		// the fold lists SUPPORTED claims only, so an unknown claim's recorded
+		// assumption is no longer shown in the list (an open product question,
+		// recorded in docs/release-evidence.md, not settled by this test).
+		await expect(page.getByTestId('disc-fit-cand-1')).toContainText('evidence: cl-team-1');
 
-		// The only rendered link is the candidate's real recorded URL — and no
-		// win probability exists anywhere in this surface.
-		await expect(page.locator(`a[href="${CAND_1_URL}"]`)).toHaveCount(1);
+		// No invented links: every outbound link on the page is a recorded
+		// candidate URL — and no win probability exists anywhere in this surface.
+		const outbound = await page.locator('a[href^="http"]').evaluateAll((links) => links.map((a) => a.getAttribute('href')));
+		const fixture = WITH_CANDIDATES as { evaluations: { candidate: { url: string } }[] };
+		const recorded = new Set(fixture.evaluations.map((evaluation) => evaluation.candidate.url));
+		for (const href of outbound) expect(recorded.has(href ?? '')).toBe(true);
 		const body = await page.locator('body').innerText();
 		expect(body).not.toMatch(/win (rate|probability|chance)/i);
 		await context.close();
@@ -478,7 +485,8 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		// B01: saving hits the real save route — never the accept route, never
 		// a project creation.
 		await page.getByTestId('save-candidate-cand-1').click();
-		await expect(page.getByText('source local-seed · saved')).toBeVisible();
+		// The v2 row marks a saved event with its Saved (unsave) button.
+		await expect(page.getByTestId('unsave-candidate-cand-1')).toHaveText('Saved');
 		expect(state.acceptedCalls).toHaveLength(0);
 		expect(state.savedCalls).toHaveLength(1);
 		expect(new URL(state.savedCalls[0]!.url).pathname).toBe(
@@ -535,7 +543,8 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 
 		// Save cand-1 (B01: the real saved bookmark, never an accept).
 		await page.getByTestId('save-candidate-cand-1').click();
-		await expect(page.getByText('source local-seed · saved')).toBeVisible();
+		// The v2 row marks a saved event with its Saved (unsave) button.
+		await expect(page.getByTestId('unsave-candidate-cand-1')).toHaveText('Saved');
 
 		// The Saved segment isolates the bookmark; unsave returns it to For you.
 		await page.getByTestId('discovery-view-saved').click();
