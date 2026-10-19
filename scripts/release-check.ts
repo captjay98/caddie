@@ -11,10 +11,12 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { LIVE_RECEIPTS_PATH, readLiveReceipts } from './live-receipts.ts';
+import { LIVE_RECEIPTS_PATH, changedSince, classifyReceipt, gitState, liveGateStatus, readLiveReceipts, specDigest } from './live-receipts.ts';
 import { PACKET_KEYS, PACKET_MAP } from './packet-list.ts';
 
 const REPO = import.meta.dir === undefined ? process.cwd() : join(import.meta.dir, '..');
+/** The commit this check is about; live receipts are compared against it. */
+const releaseHead = gitState(REPO).commit;
 
 // Load .dev.vars into the environment so credential-gated checks reflect the
 // actual provisioning state (gitignored; values never printed).
@@ -84,18 +86,25 @@ const liveGates: { name: string; packet: string; env: string; configured: boolea
 for (const gate of liveGates) {
 	const receipt = liveReceipts.get(gate.packet);
 	const mappedLive = PACKET_MAP[gate.packet]?.live ?? [];
-	const detail = receipt
-		? `live receipt recorded ${receipt.at} — ${receipt.files.length} spec(s), ${receipt.passed} test(s) passed`
-		: !gate.configured
-			? `BLOCKED — provision ${gate.env} (owner input)`
-			: mappedLive.length === 0
-				? `PROVISIONED, never PASS — ${gate.env} is present but ${gate.packet} maps no live spec, so only the owner's recorded run (docs/release-evidence.md) can assert this gate`
-				: `PROVISIONED, never PASS — ${gate.env} is present but no live receipt exists; run \`bun run test:live -- ${gate.packet}\``;
-	checks.push({
-		name: gate.name,
-		status: receipt ? 'PASS' : gate.configured ? 'PROVISIONED' : 'BLOCKED',
-		detail,
+	// F05: a receipt counts only for the code, specs and target it tested.
+	const verdict = receipt
+		? classifyReceipt(receipt, {
+				mappedFiles: mappedLive,
+				specDigest: specDigest(REPO, mappedLive),
+				head: releaseHead,
+				changedSince: (commit) => changedSince(commit, REPO),
+				expectedTarget: 'local',
+			})
+		: null;
+	const { status, detail } = liveGateStatus({
+		configured: gate.configured,
+		env: gate.env,
+		packet: gate.packet,
+		receipt,
+		verdict,
+		mappedLive: mappedLive.length,
 	});
+	checks.push({ name: gate.name, status, detail });
 }
 
 // 5. Deployment authorization is ALWAYS an explicit human gate

@@ -151,9 +151,18 @@ function verifyPacket(packetId: string, category: PacketCategory, quiet: boolean
 	}
 
 	// A green live packet is evidence: record the receipt release-check reads.
+	// It names what the run hit: the deployed origin for a hosted smoke
+	// (CADDIE_RELEASE_URL), otherwise this machine.
 	if (category === 'live') {
-		const receipt = recordLiveReceipt({ packet: packetId, files: mapped, passed });
-		if (!quiet) console.log(`verify-packet: recorded live receipt for ${packetId} (${receipt.files.length} spec(s), ${receipt.passed} test(s), ${receipt.at})`);
+		const releaseUrl = process.env.CADDIE_RELEASE_URL;
+		const target = releaseUrl ? new URL(releaseUrl).origin : 'local';
+		const receipt = recordLiveReceipt({ packet: packetId, files: mapped, passed, target });
+		if (!quiet) {
+			console.log(
+				`verify-packet: recorded live receipt ${receipt.id} for ${packetId} at ${receipt.commit?.slice(0, 12)} against ${receipt.target}` +
+					` (${receipt.files.length} spec(s), ${receipt.passed} test(s)${receipt.dirty ? ', UNCOMMITTED changes: it will read as stale' : ''})`,
+			);
+		}
 	}
 	if (!quiet) console.log(`verify-packet: ${packetId} ${category}: all ${checks.length} check(s) PASS`);
 	return { packet: packetId, status: 'PASS', detail: `${checks.length} check(s) PASS`, passed };

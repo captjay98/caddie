@@ -1784,3 +1784,28 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "Review 2026-10-19 F05: live receipts bound to the release they tested",
+  "status": "LOCAL VERIFIED (unit tests over temporary receipt files and an injected git view; release-check run end to end). No live run was made, so docs/live-receipts.json is still absent.",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "bun test tests/live-receipts.test.ts (before)", "exitCode": 1, "receipt": "Export named 'classifyReceipt' not found: receipts had no commit, target or spec identity to check."},
+    {"command": "bun test tests/live-receipts.test.ts tests/packet-completeness.test.ts (after)", "exitCode": 0, "receipt": "12 pass / 0 fail (6 receipt cases, 6 completeness)."},
+    {"command": "bun mutate.ts (scratch), 3 mutations", "exitCode": 0, "receipt": "Ignoring code changes, passing without credentials, and counting a dirty run each fail their own test; files restored byte-identical."},
+    {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "47 PASS, 0 FAIL, 1 BLOCKED, 4 PROVISIONED (unchanged; the four live gates now say 'no current receipt')."}
+  ],
+  "artifacts": [
+    {"path": "scripts/live-receipts.ts", "note": "A receipt records id, commit, dirty (tracked or untracked changes outside docs), specDigest (sha256 of spec paths and contents), target and runtime, and refuses passed <= 0. classifyReceipt: current only if the run was clean, the spec set and text match, the target matches, and nothing but documentation changed since its commit. Documentation is docs/**, top-level *.md and LICENSE; markdown under apps/ is code (the agents import SKILL.md). Old-format receipts stay in the file as history and read as stale. liveGateStatus: PASS needs a current receipt AND the credentials still provisioned."},
+    {"path": "scripts/release-check.ts", "note": "Classifies each live gate's receipt against HEAD and names a stale receipt's reason."},
+    {"path": "scripts/verify-packet.ts", "note": "A live run records its target: the CADDIE_RELEASE_URL origin for a hosted smoke, otherwise 'local', and says when a dirty tree will make the receipt stale."},
+    {"path": "scripts/packet-list.ts", "note": "tests/live-receipts.test.ts mapped to P17."}
+  ],
+  "environment": "Local Mac only.",
+  "providerCalls": "none",
+  "limitations": [
+    "release-check's four gates expect target 'local'. The hosted P17 smoke records its origin but is not one of release-check's live gates; S11 records it in docs/release-evidence.md."
+  ]
+}
+```

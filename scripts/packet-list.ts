@@ -157,7 +157,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 		live: [],
 	},
 	P17: {
-		tests: ['tests/deploy-preflight.test.ts'],
+		tests: ['tests/deploy-preflight.test.ts', 'tests/live-receipts.test.ts'],
 		browser: ['tests/browser/release.spec.ts'],
 		live: ['tests/live/release.spec.ts'],
 	},
