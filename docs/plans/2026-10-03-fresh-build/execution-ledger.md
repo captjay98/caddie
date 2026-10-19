@@ -1611,3 +1611,28 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "Owner decision: Discover's 'Why it fits' shows unconfirmed claims and their assumptions again (closes the open question in the browser-suite record above)",
+  "status": "LOCAL VERIFIED in the real component against the composed build (stubbed /api).",
+  "owner": "Integration lead, on the owner's ruling 'Show the assumptions in Why it fits again'",
+  "commands": [
+    {"command": "bunx playwright test tests/browser/discovery.spec.ts tests/browser/discovery-journey.spec.ts", "exitCode": 0, "receipt": "12 passed. discovery.spec.ts asserts the open-claims group for cand-1: 'Not confirmed yet', 'Open to international entrants · no rule on record yet', 'Assumption: region rule assumed unrestricted absent a recorded rule'."},
+    {"command": "bun run test:browser -- P11 && bun run test:browser -- U05", "exitCode": 0, "receipt": "P11 1/1 PASS, U05 4/4 PASS."},
+    {"command": "CADDIE_SHOTS=<dir> [CADDIE_SHOTS_MOBILE=1] bunx playwright test tests/browser/discovery.spec.ts -g 'candidates render eligibility'", "exitCode": 0, "receipt": "Desktop and 390px row screenshots, reviewed: the warn rule marks the unconfirmed claim; nothing overflows at 390px."},
+    {"command": "bun test tests/hackathon-card.test.ts tests/tavily.test.ts tests/sentinel.test.ts tests/hackathon-card-builder.test.ts; bun run typecheck", "exitCode": 0, "receipt": "58 pass / 0 fail; typecheck 0."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/client/discovery/Results.tsx", "note": "The fold renders supported reasons first, then every other fit claim (unknown / conflict / unmatched) with its requirement, a plain status ('no rule on record yet' / 'the sources disagree' / 'not met'), any evidence ids, and each recorded assumption. Titled 'Not confirmed yet' when nothing is confirmed."},
+    {"path": "apps/app/src/client/workspace.css", "note": ".disc-open-claims, .disc-open-title, .disc-claim[data-verdict] (warn left rule), .disc-claim-status."}
+  ],
+  "environment": "Local Mac, composed build on vite preview 127.0.0.1:4173, /api stubbed by the spec.",
+  "providerCalls": "none",
+  "specReview": "PENDING independent review",
+  "qualityReview": "Checked against the server's real fit evaluator (discovery.ts computeFit): its assumption text is technical ('the project holds no evidence claim of type X - capture the rule before treating this as met'), so the requirement line uses the contest's own requirement text and a plain status, and the assumption is shown as recorded.",
+  "limitations": [
+    "The assumption strings the server writes are not plain words; they are shown as recorded. Rewording them is a server change to the fit evaluator and was not made."
+  ]
+}
+```

@@ -135,13 +135,16 @@ client code changed. The specs now assert what ships:
 - **Theme keyboard case.** It walks `PALETTES` imported from `theme.ts` instead of a hand-copied list of four, so a new palette cannot leave it stale again.
 - **`brief.spec.ts:265`, root-caused.** A spec bug, not a product bug. The catch-all stub `**/api/projects/**` was registered after the `**/api/projects/**/runs` stub, and Playwright runs the last-registered matching route first, so the run POST got `{}` from the catch-all and never reached the counter (the welcome action did send it; the draft showed "Not sent" because `{}` carries no run). The runs stub is now registered last and answers the POST with a real run. Side effect: the "opening tabs never POSTs a run" case in the same file now actually observes run POSTs; before, it could never see one.
 
-**Open product question (owner's call, not settled by a test):** since the
-2026-10-15 card, the Discover row's "Why it fits" fold lists **supported**
-claims only. An *unknown* fit claim's recorded assumption (the fixture's
-"region rule assumed unrestricted absent a recorded rule") is no longer shown
-anywhere in the list; the 2026-10-10 card showed every claim with its verdict,
-evidence ids and assumptions. The spec now asserts only what ships and names
-this in a comment.
+**Product question, decided by the owner (2026-10-19): show them again.** Since
+the 2026-10-15 card, the Discover row's "Why it fits" fold had listed
+**supported** claims only, so an *unknown* fit claim's recorded assumption was
+shown nowhere in the list (the 2026-10-10 card showed every claim). The fold now
+lists the reasons it fits, then "Not confirmed yet": each unconfirmed
+requirement in plain words ("no rule on record yet", "the sources disagree",
+"not met") with the assumption Caddie recorded. When nothing is confirmed, the
+fold is titled "Not confirmed yet" instead of "Why it fits".
+`discovery.spec.ts` asserts the fixture's "Open to international entrants · no
+rule on record yet" and its assumption.
 
 **CI now runs the browser suite.** `.github/workflows/ci.yml` gained
 `bunx playwright install --with-deps chromium` and `bun run test:browser -- --all`

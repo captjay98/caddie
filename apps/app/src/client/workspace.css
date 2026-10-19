@@ -4304,6 +4304,29 @@ a.btn-ghost.topbar-nav-link {
 	color: var(--color-warn);
 }
 
+/* Fit claims Caddie could not confirm, under the reasons it fits. */
+.disc-open-claims {
+	display: grid;
+	gap: 0.45rem;
+	margin-top: 0.45rem;
+}
+
+.disc-open-title {
+	margin: 0;
+	font-size: var(--r-meta);
+	font-weight: 600;
+	color: var(--color-muted);
+}
+
+.disc-claim[data-verdict] {
+	padding-left: 8px;
+	border-left: 2px solid var(--color-warn);
+}
+
+.disc-claim-status {
+	color: var(--color-muted);
+}
+
 .disc-rules {
 	font-size: var(--r-meta);
 	color: var(--color-muted);

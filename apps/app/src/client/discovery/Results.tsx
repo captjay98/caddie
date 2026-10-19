@@ -82,6 +82,13 @@ export interface DiscoveryFeedRecord {
 /** Rows shown before "Show N more". */
 const FIRST_PAGE = 12;
 
+/** Plain words for a fit claim Caddie could not confirm (shown with its recorded assumption). */
+const OPEN_CLAIM_WORDS: Record<Exclude<DiscoveryFitClaim['verdict'], 'supported'>, string> = {
+	unknown: 'no rule on record yet',
+	conflict: 'the sources disagree',
+	unmatched: 'not met',
+};
+
 function classifyFailure(status: number, message: string): string {
 	if (status === 401 || status === 403) return `Denied: ${message}`;
 	return message || `Request failed (${status})`;
@@ -388,7 +395,13 @@ export function DiscoveryResults(props: {
 						{shown.map((row) => {
 							const saved = isSaved(row);
 							const status = evaluations.get(row.id)?.candidate.status ?? 'new';
-							const fitClaims = (evaluations.get(row.id)?.fit.claims ?? []).filter((claim) => claim.verdict === 'supported');
+							const claims = evaluations.get(row.id)?.fit.claims ?? [];
+							const fitClaims = claims.filter((claim) => claim.verdict === 'supported');
+							// Everything else is shown too, with the assumption Caddie
+							// recorded, so a fit is never presented as more certain than it is.
+							const openClaims = claims.filter(
+								(claim): claim is DiscoveryFitClaim & { verdict: keyof typeof OPEN_CLAIM_WORDS } => claim.verdict !== 'supported',
+							);
 							const facts = metaParts(row);
 							const eligibility = eligibilityView(row);
 							return (
@@ -414,9 +427,9 @@ export function DiscoveryResults(props: {
 													))}
 												</ul>
 											) : null}
-											{fitClaims.length > 0 ? (
+											{fitClaims.length > 0 || openClaims.length > 0 ? (
 												<details className="hk-why" data-testid={`disc-fit-${row.id}`}>
-													<summary>Why it fits</summary>
+													<summary>{fitClaims.length > 0 ? 'Why it fits' : 'Not confirmed yet'}</summary>
 													{fitClaims.map((claim) => (
 														<div key={`${claim.claimType}:${claim.requirement}`} className="disc-claim">
 															<div className="disc-claim-line">{claim.statement}</div>
@@ -430,11 +443,36 @@ export function DiscoveryResults(props: {
 															) : null}
 															{claim.assumptions.map((assumption) => (
 																<div key={assumption} className="disc-assumption">
-																	assumption: {assumption}
+																	Assumption: {assumption}
 																</div>
 															))}
 														</div>
 													))}
+													{openClaims.length > 0 ? (
+														<div className="disc-open-claims" data-testid={`disc-open-claims-${row.id}`}>
+															{fitClaims.length > 0 ? <p className="disc-open-title">Not confirmed yet</p> : null}
+															{openClaims.map((claim) => (
+																<div key={`${claim.claimType}:${claim.requirement}`} className="disc-claim" data-verdict={claim.verdict}>
+																	<div className="disc-claim-line">
+																		{claim.requirement} <span className="disc-claim-status">· {OPEN_CLAIM_WORDS[claim.verdict]}</span>
+																	</div>
+																	{claim.evidenceClaimIds.length > 0 ? (
+																		<div className="disc-claim-evidence">
+																			evidence:{' '}
+																			{claim.evidenceClaimIds.map((id) => (
+																				<code key={id}>{id}</code>
+																			))}
+																		</div>
+																	) : null}
+																	{claim.assumptions.map((assumption) => (
+																		<div key={assumption} className="disc-assumption">
+																			Assumption: {assumption}
+																		</div>
+																	))}
+																</div>
+															))}
+														</div>
+													) : null}
 												</details>
 											) : null}
 										</div>

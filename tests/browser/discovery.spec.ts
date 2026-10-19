@@ -438,11 +438,23 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 
 		await expect(page.getByTestId('discovery-country')).toContainText('Entry checked for United States');
 
-		// The fit reason cites its evidence claim id. Since the 2026-10-15 card
-		// the fold lists SUPPORTED claims only, so an unknown claim's recorded
-		// assumption is no longer shown in the list (an open product question,
-		// recorded in docs/release-evidence.md, not settled by this test).
-		await expect(page.getByTestId('disc-fit-cand-1')).toContainText('evidence: cl-team-1');
+		// The fit reason cites its evidence claim id, and a claim Caddie could
+		// not confirm is shown under it with the assumption it recorded, so a
+		// fit is never presented as more certain than it is.
+		const fit = page.getByTestId('disc-fit-cand-1');
+		await expect(fit).toContainText('evidence: cl-team-1');
+		const open = page.getByTestId('disc-open-claims-cand-1');
+		await expect(open).toBeVisible();
+		await expect(open).toContainText('Not confirmed yet');
+		await expect(open).toContainText('Open to international entrants · no rule on record yet');
+		await expect(open).toContainText('Assumption: region rule assumed unrestricted absent a recorded rule');
+		// Review screenshot of the open fold (same switch as interactive-preview.spec.ts).
+		if (process.env.CADDIE_SHOTS) {
+			if (process.env.CADDIE_SHOTS_MOBILE) await page.setViewportSize({ width: 390, height: 844 });
+			await page.getByTestId('disc-row-cand-1').screenshot({
+				path: join(process.env.CADDIE_SHOTS, `why-it-fits${process.env.CADDIE_SHOTS_MOBILE ? '-mobile' : ''}.png`),
+			});
+		}
 
 		// No invented links: every outbound link on the page is a recorded
 		// candidate URL — and no win probability exists anywhere in this surface.
