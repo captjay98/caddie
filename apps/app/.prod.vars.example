@@ -1,0 +1,85 @@
+# Caddie production values (S10). Copy to apps/app/.prod.vars (gitignored),
+# fill it in, and check it with `bun scripts/deploy-preflight.ts`.
+# `wrangler deploy --secrets-file .prod.vars` uploads every line as a secret.
+# NEVER commit .prod.vars. Never paste its values into chat or docs.
+# Quote any value that contains a # (dotenv cuts unquoted values at #).
+# Procedure: docs/runbooks/production-deploy.md. Meanings: docs/setup/owner-inputs.md.
+
+# --- Required ---------------------------------------------------------------
+
+# Caddie's own sign-in. New for production: openssl rand -base64 32
+BETTER_AUTH_SECRET=
+# The production origin exactly, e.g. https://caddie.example.com (no trailing slash)
+BETTER_AUTH_URL=
+# Who may sign in with Google/GitHub: your address, comma-separated
+INVITE_ALLOWLIST=
+# Who may open /operator (each must also be in INVITE_ALLOWLIST)
+OPERATOR_EMAILS=
+
+# Models (Nebius Token Factory). A separate production key is better.
+NEBIUS_API_KEY=
+# Discovery search
+TAVILY_API_KEY=
+
+# Build sandbox (TF Sandboxes)
+CONTREE_BASE_URL=
+CONTREE_API_TOKEN=
+CONTREE_PROJECT_ID=
+
+# Keyring for app keys: printf 'k1:%s' "$(openssl rand -base64 32)"
+APP_SECRETS_KEYS=
+
+# Judge access: openssl rand -base64 24 (at least 16 characters).
+# This is the code for Devpost's testing instructions.
+JUDGE_ACCESS_CODE=
+JUDGE_ACCESS_UNTIL=2026-12-16
+
+# --- Owner sign-in: at least one pair, from PRODUCTION OAuth apps ------------
+# Google callback: <BETTER_AUTH_URL>/api/auth/callback/google
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+# GitHub callback: <BETTER_AUTH_URL>/api/auth/callback/github
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
+# --- Optional: uncomment to change a default ---------------------------------
+# Judges (defaults: 40 accounts; 3 projects, 3 builds, 300 messages and
+# 20 discovery lookups per judge per day). 0 means none.
+# JUDGE_ACCESS_MAX_ACCOUNTS=40
+# JUDGE_MAX_PROJECTS=3
+# JUDGE_MAX_BUILDS_PER_DAY=3
+# JUDGE_MAX_MESSAGES_PER_DAY=300
+# JUDGE_MAX_DISCOVERY_PER_DAY=20
+# Kill switch for NEW judge starts (0 = off). Change it later with
+# `bunx wrangler secret put JUDGE_ACCESS_ENABLED --name caddie-app`.
+# JUDGE_ACCESS_ENABLED=
+# A project of yours with a checked build, copied into each new judge's workspace
+# JUDGE_EXAMPLE_PROJECT_ID=
+
+# AI inside apps: monthly allowance per app in US cents (default 100)
+# APP_AI_MONTHLY_LIMIT_CENTS=100
+# Sandbox base image (default tag:tt-base:1)
+# CONTREE_IMAGE=
+# Hosts apps' servers may never call, comma-separated
+# EGRESS_DENY_HOSTS=
+
+# Emails (sign-in codes for published apps, abuse reports): both or neither
+# RESEND_API_KEY=
+# RESEND_FROM=
+# ABUSE_INBOX=
+
+# GitHub App ("Back up to GitHub", "Start from my GitHub repo"): ID and key together
+# GITHUB_APP_ID=
+# GITHUB_APP_PRIVATE_KEY=
+# GITHUB_APP_SLUG=
+# GITHUB_WEBHOOK_SECRET=
+
+# Publishing (Workers for Platforms): all six or none. Off by default for judging.
+# CLOUDFLARE_API_TOKEN=
+# CLOUDFLARE_ACCOUNT_ID=
+# CLOUDFLARE_DISPATCH_NAMESPACE=
+# CLOUDFLARE_ROUTES_KV_ID=
+# CLOUDFLARE_APPS_ZONE_ID=
+# APPS_DOMAIN=
+# Daily recheck of published apps
+# WEB_RISK_API_KEY=

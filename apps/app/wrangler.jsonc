@@ -40,5 +40,39 @@
 		"binding": "ASSETS",
 		"not_found_handling": "none",
 		"run_worker_first": ["/api", "/api/*", "/agents", "/agents/*", "/app", "/app/*", "/report", "/operator", "/operator/*"]
+	},
+	// Production (S10, docs/runbooks/production-deploy.md). It is chosen at
+	// BUILD time, never with `wrangler deploy --env`:
+	//   CLOUDFLARE_ENV=production bun run build
+	// The Vite plugin flattens this block into dist/caddie_app/wrangler.json,
+	// which `wrangler deploy` (run from apps/app) uploads. An environment does
+	// not inherit bindings, so each binding above is restated here. The two
+	// <...> values are owner inputs; scripts/deploy-preflight.ts fails while
+	// either is still a placeholder. No value lives in this file: secrets,
+	// emails, client ids and the judge code go in the gitignored
+	// apps/app/.prod.vars, uploaded with `wrangler deploy --secrets-file`.
+	"env": {
+		"production": {
+			"name": "caddie-app",
+			// One public address. preview_urls would add per-version
+			// workers.dev addresses where sign-in cannot work.
+			"workers_dev": false,
+			"preview_urls": false,
+			"routes": [{ "pattern": "<CADDIE_DOMAIN>", "custom_domain": true }],
+			// Workers Logs on for judging, alongside the traces above.
+			"observability": { "enabled": true, "traces": { "enabled": true } },
+			"worker_loaders": [{ "binding": "LOADER" }],
+			"durable_objects": {
+				"bindings": [{ "name": "PREVIEW_DB", "class_name": "PreviewDatabase" }]
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "caddie",
+					"database_id": "<PRODUCTION_D1_DATABASE_ID>",
+					"migrations_dir": "migrations"
+				}
+			]
+		}
 	}
 }
