@@ -13,7 +13,10 @@ jobs:
 			- uses: oven-sh/setup-bun@v2
 				with:
 					bun-version: 1.4.0
-			- run: bun install
+			# --frozen-lockfile: CI must resolve exactly what was verified locally.
+			# A drifted lock file fails here instead of silently installing a
+			# different version than the one every gate was run against.
+			- run: bun install --frozen-lockfile
 			- run: bun run build
 			- run: bun run typecheck
 			- name: Per-packet verification (every packet in scripts/packet-list.ts)
