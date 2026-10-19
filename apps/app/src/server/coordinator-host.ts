@@ -47,6 +47,7 @@ import {
   testsBaseline,
 } from "./build-features.ts";
 import { openWorkingCopy } from "./working-copy.ts";
+import { runVerifiedInstall, VERIFIED_INSTALL_COMMAND } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { FEATURE_BLOCK_GUIDE, parsePlanFeatures } from "@caddie/contracts";
 import { collectSourceSnapshot } from "./source-export.ts";
@@ -198,7 +199,6 @@ export async function createCoordinatorContext(
       sessionKey: sessionId,
       baseImage: env.CONTREE_IMAGE ?? DEFAULT_BASE_IMAGE,
       root,
-      installCommand: SCAFFOLD_COMMANDS.install.join(" && "),
       env: runtimeEnv,
     }).catch((error: unknown) => {
       sessionReady = null;
@@ -367,7 +367,7 @@ export async function createCoordinatorContext(
     await guardBudget();
     const { driver, id } = await ensureSession();
     const commands = [
-      { check: "dependencies", command: SCAFFOLD_COMMANDS.install.join(" && ") },
+      { check: "dependencies", command: VERIFIED_INSTALL_COMMAND },
       { check: "behavior-tests", command: SCAFFOLD_COMMANDS.test.join(" && ") },
       { check: "browser-bundle", command: SCAFFOLD_COMMANDS.build.join(" && ") },
     ];
@@ -376,15 +376,29 @@ export async function createCoordinatorContext(
       const operationKey = `${mode}:${runId}:${plan.id}:${attempt}:${check.check}`;
       await requireBuildApproval(env.DB, scope);
       const checkStarted = new Date().toISOString();
-      const result = await driver.execute({
-        sessionId: id,
-        command: check.command,
-        operationKey,
-        signal,
-        timeoutMs: 120_000,
-        cwd: root,
-        env: runtimeEnv,
-      });
+      // The dependencies check is the ONE verified install step: fetch every
+      // pinned tarball, verify its sha512 against bun.lock, extract it, then
+      // run the frozen install last (recorded under `operationKey`, so the
+      // receipt below still names `bun install --frozen-lockfile`). Test and
+      // build are the recipe's unchanged commands.
+      const result =
+        check.check === "dependencies"
+          ? await runVerifiedInstall(driver, {
+              sessionId: id,
+              cwd: root,
+              env: runtimeEnv,
+              operationKey,
+              signal,
+            })
+          : await driver.execute({
+              sessionId: id,
+              command: check.command,
+              operationKey,
+              signal,
+              timeoutMs: 120_000,
+              cwd: root,
+              env: runtimeEnv,
+            });
       const receipt = await driver.getOperationReceipt(operationKey);
       const passed = Boolean(
         receipt &&

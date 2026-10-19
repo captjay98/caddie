@@ -1218,6 +1218,14 @@ describe("build runtime environment", () => {
         expect(command.env?.PATH?.split(":" )).toContain("/root/.bun/bin");
         expect(JSON.stringify(command)).not.toContain("local-runtime-token");
       }
+      // The dependencies check is the verified install: the sha512 check runs first, with the same env.
+      const spawned = stub.requests.filter(r => r.method === "POST" && r.path === "/v1/instances")
+        .map(r => r.body as { command: string; env?: Record<string,string> });
+      const check = spawned.findIndex(r => r.command.includes("caddie-verified-install"));
+      expect(check).toBeGreaterThanOrEqual(0);
+      expect(check).toBeLessThan(spawned.findIndex(r => r.command === "bun install --frozen-lockfile"));
+      expect(spawned[check]!.env?.PATH?.split(":")).toContain("/root/.bun/bin");
+      expect(JSON.stringify(spawned[check])).not.toContain("local-runtime-token");
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 });
@@ -1719,6 +1727,10 @@ describe("host-driven feature loop", () => {
         expect(await later.driver.readFile({ sessionId: later.sessionId, path: `${root}/src/feed.ts` })).toBe("export const feed = 'saved';");
         // The new working copy got its dependencies installed again (versions never keep them).
         expect(stub.spawnedCommands().slice(spawnsBefore)).toContain(install);
+        const restarted = stub.spawnedCommands().slice(spawnsBefore);
+        const check = restarted.findIndex((command) => command.includes("caddie-verified-install"));
+        expect(check).toBeGreaterThanOrEqual(0);
+        expect(check).toBeLessThan(restarted.indexOf(install));
         expect(w.sqlite.query("select reason from build_sandbox_sessions").get()).toEqual({ reason: `seeded:${version.commitId}` });
         expect(feature(w, "log-feed").status).toBe("passed");
         expect(feature(w, "view-dashboard").status).toBe("passed");

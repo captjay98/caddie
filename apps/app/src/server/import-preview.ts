@@ -11,6 +11,7 @@ import { readVersionFiles } from './code-versions.ts';
 import { checkServerStarts, type WorkerLoaderLike } from './preview-runtime.ts';
 import { assertProjectScope, projectScopeForUser } from './scope.ts';
 import { SCAFFOLD_COMMANDS } from '../../../../stacks/react-hono/scaffold.ts';
+import { runVerifiedInstall } from './verified-install.ts';
 
 /**
  * "Start from my GitHub repo", the part the user sees first: right after the
@@ -191,7 +192,9 @@ export async function checkImportedApp(deps: ImportPreviewDeps, scope: Scope): P
 			await driver.uploadFiles(sessionId, files.map((file) => ({ path: `${root}/${file.path}`, contentBase64: file.contentBase64 })));
 		}
 		const command = { sessionId, cwd: root, env: BUILD_RUNTIME_ENV };
-		const install = await driver.execute({ ...command, command: SCAFFOLD_COMMANDS.install.join(' && '), operationKey: installKey, timeoutMs: 300_000 });
+		// The ONE verified install step (fetch + sha512 check + GNU tar, then the
+		// frozen install), shared with every other install path.
+		const install = await runVerifiedInstall(driver, { ...command, operationKey: installKey });
 		if (install.exitCode !== 0) return finish({ status: 'failed', message: IMPORT_PREVIEW_MESSAGES.buildFailed(seq), detail: logTail(install) });
 		const build = await driver.execute({ ...command, command: SCAFFOLD_COMMANDS.build.join(' && '), operationKey: buildKey, timeoutMs: 120_000 });
 		if (build.exitCode !== 0) return finish({ status: 'failed', message: IMPORT_PREVIEW_MESSAGES.buildFailed(seq), detail: logTail(build) });

@@ -278,6 +278,8 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/plan-features.test.ts',
 			'tests/workflow-dispatch.test.ts',
 			'tests/stopped-turn.test.ts',
+			// Owner review item 3: the one install step every install path uses.
+			'tests/verified-install.test.ts',
 		],
 		browser: ['tests/browser/project-workflow.spec.ts'],
 		live: [],

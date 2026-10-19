@@ -1512,3 +1512,37 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   ]
 }
 ```
+
+```json
+{
+  "packet": "Owner review item 3, option (a): the verified install step, finished, tested and live-probed (plan docs/plans/2026-10-18-submission-build-plan.md)",
+  "status": "LIVE VERIFIED for the template every new app starts from: one real sandbox session on tag:tt-base:1 installed through the product's own step and built. LOCAL VERIFIED for the step's logic and its three call sites. A full build through the product (coordinator -> run_checks in a real session) has NOT been run live.",
+  "owner": "Integration lead (took over the uncommitted item-3 work after the previous lead stopped; reworked the script, wrote the tests, ran the probe)",
+  "commands": [
+    {"command": "bun test tests/verified-install.test.ts", "exitCode": 0, "receipt": "17 pass / 0 fail. The script that ships (VERIFIED_INSTALL_SCRIPT) is imported from a temp file and run against a registry on 127.0.0.1 serving real gzip tarballs: lock-key -> folder mapping (nested, scoped, traversal keys refused), JSONC parsing, platform skip, a swapped tarball refused and never unpacked with no hash printed, a missing sha512 refusing before any download, 404/no lock/unreadable lock, a second run downloading nothing, an older copy replaced while its nested packages survive, the here-document round trip through sh with the exit code reaching the shell, and the host step's order (check, then the frozen install; a failed check never reaches it)."},
+    {"command": "temporary mutation: skip the sha512 comparison in placePackage, run the file, restore (cmp-identical)", "exitCode": 1, "receipt": "Exactly the tamper case failed (16 pass / 1 fail), so the security-relevant test bites; the source was restored and confirmed byte-identical."},
+    {"command": "bun test tests/verified-install.test.ts tests/import-preview.test.ts tests/build-workflow.test.ts tests/packet-completeness.test.ts tests/single-recipe.test.ts tests/sandbox-durability.test.ts", "exitCode": 0, "receipt": "116 pass / 0 fail. New wiring assertions against the sandbox stand-in: the copied-app preview, run_checks and the working-copy restart each dispatch the check before `bun install --frozen-lockfile` (same env, no token); a failed check in the copied-app preview runs neither the install nor the build and keeps the package name in the stored detail."},
+    {"command": "CADDIE_LIVE_AUTHORIZED=1 bun scripts/probe-sandbox-scaffold.ts (run 1)", "exitCode": 1, "receipt": "install PASS and install-again PASS; the new third step FAILED only because it ran `bun run test` (= `bun test src/`), which fails on a bare scaffold by design. Probe corrected to run the example tests (`bun test test/examples`, as scripts/refresh-scaffold-lock.ts does) and re-run."},
+    {"command": "CADDIE_LIVE_AUTHORIZED=1 bun scripts/probe-sandbox-scaffold.ts (run 2)", "exitCode": 0, "receipt": "Session on tag:tt-base:1, Bun 1.4.2, Debian 12. install PASS (13120 ms): 'verified-install: 63 pinned package(s) match bun.lock (63 downloaded and checked, 0 already checked)', then Bun 'Checked 63 installs across 64 packages (no changes)'. install-again PASS (4160 ms): '0 downloaded and checked, 63 already checked'. example-tests PASS: 8 pass / 0 fail across 4 files. build PASS: main.js 0.97 MB, server.js 47164 bytes, 'server bundle: ok for Cloudflare Workers'. node_modules/react-dom unpacked: yes. No credential text in either log."},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1416 pass / 0 fail / 6719 expect() calls / 107 files (was 1397 / 106)."},
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "root project + apps/app."}
+  ],
+  "artifacts": [
+    {"path": "apps/app/src/server/verified-install.ts", "note": "Reworked from the previous lead's uncommitted draft. Changes: every lock key is unpacked into its OWN folder (the draft unpacked one copy per package name at the top level and left nested entries to Bun's extractor, the very thing that fails in the sandbox; with the draft, Bun still installed 2 packages itself); entries for another OS/CPU are skipped as Bun skips them; a .caddie-verified marker per folder makes repeat checks download nothing (the draft re-downloaded all 63 tarballs on every run_checks, about 20 s each time locally); 8 downloads in parallel; tar --no-same-owner; an older copy is cleared before unpacking, keeping the folder's own node_modules; workspace/file/git/URL refs and custom registries are left to Bun, which checks those downloads itself; keys that are not plain package paths are never written. The step's summary line is now kept in the result so the build's activity log shows the check."},
+    {"path": "tests/verified-install.test.ts", "note": "New; mapped into packet BUILD in scripts/packet-list.ts."},
+    {"path": "tests/import-preview.test.ts, tests/build-workflow.test.ts", "note": "Ordering and fail-closed assertions for the three call sites."},
+    {"path": "scripts/probe-sandbox-scaffold.ts", "note": "Installs through runVerifiedInstall, then runs the step a second time and the template's example tests before the build."},
+    {"path": "README.md", "note": "The sandbox install row moves from FAILED to LIVE VERIFIED for the template, with the full product build path stated as not yet run live; suite counts updated."}
+  ],
+  "environment": "Local Mac for the tests (Bun 1.4.0, a fake registry on 127.0.0.1). One real Contree session per probe run on tag:tt-base:1 (two runs), downloading from the real npm registry inside the sandbox. Owner pre-authorized live runs ('you can run anything you need to, do not do more than is required').",
+  "providerCalls": "Contree sandbox only: two probe sessions. No model calls.",
+  "specReview": "PENDING independent review",
+  "qualityReview": "Before writing tests, the previous lead's draft was run locally on the template: it verified 61 packages and Bun then installed the 2 nested ones itself, which in the sandbox would have gone through the failing extractor. That observation, not the draft's comments, drove the rework. The tamper test was proven to fail when the check is removed.",
+  "limitations": [
+    "The live receipt covers the TEMPLATE (what every new app starts from) through the product's own step. A real build through the coordinator in a live session, with a model writing code, has not been run.",
+    "The builder's own shell `bun add` still goes straight to Bun, which checks what it downloads against the registry's integrity; if Bun cannot unpack that package in the sandbox, the next run_checks unpacks it through this step only if Bun recorded it in bun.lock. Not proven live.",
+    "Three call sites cover the four install paths: run_checks (a new app's first install and every later check), the working-copy restart, and the copied-app preview. A new app's scaffold upload itself installs nothing; its first install is run_checks.",
+    "Correction to the S09 record above: the tracked secrets file was the root `.dev.vars` (git log --all --diff-filter=A), not `apps/app/.dev.vars`; and the owner's review did not rule ROTATE. It said rotation is not required if the history is rewritten before the first push, optional for the Nebius and Resend dev keys."
+  ]
+}
+```

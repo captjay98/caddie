@@ -139,6 +139,28 @@ describe('the copied app, right after the copy', () => {
 		expect(await listCodeVersions(db, scope)).toHaveLength(1);
 	});
 
+	test('every pinned package is checked against bun.lock before Bun installs', async () => {
+		await copiedApp();
+		builds({ [`${root()}/dist/main.js`]: 'app()' });
+		expect(await checkImportedApp(deps(), scope)).toMatchObject({ status: 'ready' });
+		const spawned = stub.spawnedCommands();
+		const check = spawned.findIndex((command) => command.includes('caddie-verified-install'));
+		expect(check).toBeGreaterThanOrEqual(0);
+		expect(check).toBeLessThan(spawned.indexOf('bun install --frozen-lockfile'));
+	});
+
+	test('a package that fails its check is never installed, and nothing is built', async () => {
+		await copiedApp();
+		stub.setBehavior('caddie-verified-install', {
+			exitCode: 1,
+			stderr: 'verified-install: 1 package(s) failed, so nothing more was installed:\n  - react-dom@19.2.0: the downloaded tarball does not match the sha512 in bun.lock, so it was not unpacked',
+		});
+		const failed = await checkImportedApp(deps(), scope);
+		expect(failed).toMatchObject({ status: 'failed', outputId: null, message: IMPORT_PREVIEW_MESSAGES.buildFailed(1) });
+		expect(commands()).toEqual([]);
+		expect(String(sqlite.query('select detail from import_previews').get()?.['detail' as never])).toContain('react-dom@19.2.0');
+	});
+
 	test('two calls at once: one builds, the other just reports "checking", and nothing runs twice', async () => {
 		await copiedApp();
 		stub.setBehavior('bun install', { stdout: 'installed', delayMs: 400 });

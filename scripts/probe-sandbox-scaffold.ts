@@ -29,6 +29,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { InMemorySandboxPersistence, SandboxDriver } from '../apps/app/src/server/adapters/sandbox.ts';
 import { BUILD_RUNTIME_ENV, DEFAULT_BASE_IMAGE } from '../apps/app/src/server/build-sandbox.ts';
+import { VERIFIED_INSTALL_COMMAND, runVerifiedInstall } from '../apps/app/src/server/verified-install.ts';
 import { SCAFFOLD_COMMANDS, SCAFFOLD_FILES } from '../stacks/react-hono/scaffold.ts';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -90,6 +91,23 @@ const driver = new SandboxDriver(
 
 const failures: string[] = [];
 
+/** Print a step's own receipt and record it when it failed. */
+function report(
+	label: string,
+	commandLine: string,
+	result: { exitCode: number | null; stdout: string; stderr: string; ms: number },
+	verdict: (result: { exitCode: number | null; stdout: string; stderr: string; ms: number }) => { ok: boolean; note?: string },
+): boolean {
+	const { ok, note } = verdict(result);
+	console.log(`\n=== ${label}: ${ok ? 'PASS' : 'FAIL'} (exit ${result.exitCode}, ${result.ms}ms) ===`);
+	console.log(`  $ ${commandLine}`);
+	if (result.stdout.trim()) console.log(`  stdout: ${tail(result.stdout, 2000)}`);
+	if (result.stderr.trim()) console.log(`  stderr: ${tail(result.stderr, 2000)}`);
+	if (note) console.log(`  → ${note}`);
+	if (!ok) failures.push(label);
+	return ok;
+}
+
 async function run(
 	sessionId: string,
 	label: string,
@@ -106,21 +124,13 @@ async function run(
 		operationKey: `${RUN_ID}:${label}`,
 		timeoutMs: COMMAND_TIMEOUT_MS,
 	});
-	const output = { ...result, ms: Date.now() - startedAt };
-	const { ok, note } = verdict(output);
-	console.log(`\n=== ${label}: ${ok ? 'PASS' : 'FAIL'} (exit ${result.exitCode}, ${output.ms}ms) ===`);
-	console.log(`  $ ${command}${cwd ? `   (cwd ${cwd})` : ''}`);
-	if (result.stdout.trim()) console.log(`  stdout: ${tail(result.stdout, 2000)}`);
-	if (result.stderr.trim()) console.log(`  stderr: ${tail(result.stderr, 2000)}`);
-	if (note) console.log(`  → ${note}`);
-	if (!ok) failures.push(label);
-	return ok;
+	return report(label, command + (cwd ? `   (cwd ${cwd})` : ''), { ...result, ms: Date.now() - startedAt }, verdict);
 }
 
 const { sessionId } = await driver.ensureSession({ sessionKey: `session:${RUN_ID}`, image: IMAGE, projectId: 'caddie-live-probe', runId: RUN_ID });
 console.log(`probe-sandbox-scaffold: session ${sessionId} on image ${IMAGE}`);
 console.log(`  scaffold: ${Object.keys(SCAFFOLD_FILES).length} files, bun.lock lockfileVersion ${lockfileVersion}`);
-console.log(`  recipe install: ${SCAFFOLD_COMMANDS.install.join(' && ')}; build: ${SCAFFOLD_COMMANDS.build.join(' && ')}`);
+console.log(`  install step: sha512-verify + GNU-tar extract every pinned tarball, then "${VERIFIED_INSTALL_COMMAND}"; build: ${SCAFFOLD_COMMANDS.build.join(' && ')}`);
 
 // 1. The environment facts the diagnosis needs: the base image's Bun, its disk,
 //    its memory, its OS. All free, and none of them guesswork.
@@ -142,19 +152,61 @@ const uploaded = await driver.uploadFiles(
 );
 console.log(`\nuploaded ${uploaded.saved} scaffold files under ${APP_DIR}/`);
 
-// 3. The recipe's own install — the step that fails if the lock is unreadable
-//    or a package cannot be extracted.
-const installOk = await run(sessionId, 'install', SCAFFOLD_COMMANDS.install.join(' && '), APP_DIR, (r) => {
-	const text = `${r.stdout}${r.stderr}`;
-	return {
-		ok: r.exitCode === 0,
-		note: /lockfileVersion|Unrecognized lockfile|expected a lockfile/i.test(text)
-			? 'the LOCK itself was rejected (lockfileVersion problem)'
-			: /Fail extracting tarball from (\S+)/.exec(text)
-				? `a tarball could not be extracted: ${/Fail extracting tarball from (\S+)/.exec(text)![1]}`
-				: undefined,
-	};
+// 3. THE shared verified install step — the exact function every production
+//    install path calls. It fetches each tarball pinned in bun.lock, checks
+//    its sha512 BEFORE extracting, extracts with GNU tar, and only then runs
+//    the recipe's frozen install. A failure here is the step's own diagnosis
+//    (a broken lock, an unverifiable package, or an unreachable registry),
+//    not a guess.
+const installStartedAt = Date.now();
+const installResult = await runVerifiedInstall(driver, {
+	sessionId,
+	cwd: APP_DIR,
+	env: BUILD_RUNTIME_ENV,
+	operationKey: `${RUN_ID}:install`,
+	timeoutMs: COMMAND_TIMEOUT_MS,
 });
+const installOk = report(
+	'install',
+	`verified step: pre-extract pinned tarballs (sha512-checked) then "${VERIFIED_INSTALL_COMMAND}"`,
+	{ ...installResult, ms: Date.now() - installStartedAt },
+	(r) => {
+		const text = `${r.stdout}${r.stderr}`;
+		return {
+			ok: r.exitCode === 0,
+			note: /lockfileVersion|Unrecognized lockfile|expected a lockfile/i.test(text)
+				? 'the LOCK itself was rejected (lockfileVersion problem)'
+				: /Fail extracting tarball from (\S+)/.exec(text)
+					? `a tarball could not be extracted: ${/Fail extracting tarball from (\S+)/.exec(text)![1]}`
+					: /verified-install: .*failed|no sha512|could not be read|no bun\.lock/.test(text)
+						? 'the verified step refused a package before extracting it (its own message is above)'
+						: undefined,
+		};
+	},
+);
+
+if (installOk) {
+	// 3b. The same step again, as every later check runs it: each folder's
+	//     marker matches its lock entry, so nothing is downloaded twice.
+	const againStartedAt = Date.now();
+	const again = await runVerifiedInstall(driver, {
+		sessionId,
+		cwd: APP_DIR,
+		env: BUILD_RUNTIME_ENV,
+		operationKey: `${RUN_ID}:install-again`,
+		timeoutMs: COMMAND_TIMEOUT_MS,
+	});
+	report('install-again', 'the verified step a second time, as every later check runs it', { ...again, ms: Date.now() - againStartedAt }, (r) => ({
+		ok: r.exitCode === 0 && /\(0 downloaded and checked/.test(r.stdout),
+		note: /\(0 downloaded and checked/.test(r.stdout) ? 'nothing downloaded again' : 'the second run downloaded packages again',
+	}));
+	// 3c. The template's own example tests on that tree (DOM, Testing Library,
+	//     sign-in, AI). Not `bun run test`: that is `bun test src/`, which fails
+	//     on a bare scaffold by design (the gate needs the builder's tests).
+	await run(sessionId, 'example-tests', 'bun test test/examples', APP_DIR, (r) => ({
+		ok: r.exitCode === 0 && /[1-9]\d* pass/.test(`${r.stdout}\n${r.stderr}`) && !/[1-9]\d* fail/.test(`${r.stdout}\n${r.stderr}`),
+	}));
+}
 
 if (!installOk) {
 	// Three causes, three different fixes. Run them all and let the evidence

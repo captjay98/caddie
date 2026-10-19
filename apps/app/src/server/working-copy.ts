@@ -6,6 +6,7 @@ import { listCodeVersions, readVersionFiles } from './code-versions.ts';
 import { buildSessionOverride, listBuildFeatures } from './build-features.ts';
 import { recordBuildActivity } from './build-activity.ts';
 import { readWorkflow } from './build-workflow.ts';
+import { runVerifiedInstall } from './verified-install.ts';
 
 /**
  * Working copies that are no longer kept (Publish programme stage 1).
@@ -42,7 +43,6 @@ export interface WorkingCopyContext {
 	baseImage: string;
 	/** The app's folder in the sandbox. */
 	root: string;
-	installCommand: string;
 	env: Record<string, string>;
 }
 
@@ -122,13 +122,13 @@ async function fillWorkingCopy(ctx: WorkingCopyContext, sessionKey: string, reas
 			await driver.uploadFiles(sessionId, files.map((file) => ({ path: `${ctx.root}/${file.path}`, contentBase64: file.contentBase64 })));
 		}
 		// A failed install is not fatal: the code is right, and the next check installs again and reports.
-		const install = await driver.execute({
+		// THE verified install step: every pinned tarball is fetched, checked
+		// against its sha512 in bun.lock and extracted before the frozen install.
+		const install = await runVerifiedInstall(driver, {
 			sessionId,
-			command: ctx.installCommand,
-			operationKey: `seed-install:${sessionKey}`,
-			timeoutMs: 300_000,
 			cwd: ctx.root,
 			env: ctx.env,
+			operationKey: `seed-install:${sessionKey}`,
 		});
 		installed = install.exitCode === 0;
 	}
