@@ -240,6 +240,16 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   would need GitHub App user sign-in.
 - [ ] 6.2 Memory learns: facts carry the project in a project chat; a stated
   lasting preference is proposed after the turn (still needs Confirm). Unit.
+  Part 1 done: in a project's chat, `remember` keeps what is about the
+  project (`about: 'project'`, or a fact given no owner) with that project:
+  it lists under the project's "What Caddie knows" and, once confirmed, only
+  that project's chats are given it. What is about the person (`about:
+  'you'`, or a preference) stays with their account; Home has no project of
+  its own. Caddie is told to call remember with about 'project' for lasting
+  things said about a project. Part 2: a lasting preference the person states
+  ("always…", "never…", "I prefer…", "from now on…") is proposed after the
+  turn even when Caddie didn't call remember, shown in the chat with Confirm
+  and Not now, and kept only on Confirm.
 
 ## 7. Land the live fixes
 

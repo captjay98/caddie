@@ -756,10 +756,17 @@ export async function createCoordinatorContext(
       // Everything the model proposes starts as a PROPOSAL (status 'proposed');
       // only user confirmation moves it into future context. sourceRunId stamps
       // provenance so a proposal is always traceable to this run.
+      // In a project's chat, what is about the project (said so, or a fact
+      // given no owner) is kept with that project: it lists under the
+      // project's "What Caddie knows" and only its chats are given it. What is
+      // about the person stays with their account; Home has no project of its
+      // own (plan 6.2).
+      const aboutProject = !isHome && (input.about === "project" || (input.about === undefined && input.kind === "fact"));
       await proposeMemoryFact(env.DB, scope.actorId, {
         kind: input.kind,
         content: input.content,
         sourceRunId: runId,
+        projectId: aboutProject ? scope.projectId : null,
       });
       return { proposed: true };
     },
