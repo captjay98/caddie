@@ -25,7 +25,7 @@ import { ScopeError } from './scope.ts';
 import { decideWorkflow, workflowSnapshot, type BuildWorkflow } from './build-workflow.ts';
 
 /** The sentinel stopWorkflow writes into detail; distinguishes stop from repair/infra block. */
-const STOP_SENTINEL = 'Stop requested.';
+export const STOP_SENTINEL = 'Stop requested.';
 
 /** Derive a monotonic version from the workflow's updatedAt (no new column). */
 function versionOf(workflow: BuildWorkflow | null): number {

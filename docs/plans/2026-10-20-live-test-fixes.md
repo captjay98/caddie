@@ -77,8 +77,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 
 ## 3. Build status from one record
 
-- [ ] 3.1 The "paused this build" brief appears only when the build is really
-  stopped (`build_workflows.phase = 'blocked'`). Unit test.
+- [x] 3.1 The "paused this build" brief appears only when the build is really
+  stopped (`build_workflows.phase = 'blocked'`). Unit test. Done: only while
+  Caddie has the build paused (not the person's own stop), and only for that
+  build's run; projects without a build keep the old rule. Both brief tests
+  now build the full schema (every migration).
 - [ ] 3.2 Both Stop buttons stop the running turn and the workflow, with one
   label; stopping settles any feature still "Building now". Unit + browser.
 - [ ] 3.3 Check history in words, never raw JSON (new rows store a sentence, old
