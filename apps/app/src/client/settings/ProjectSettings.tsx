@@ -380,6 +380,14 @@ function originLabel(origin: 'created' | 'adopted' | 'connected'): string {
 }
 
 /**
+ * This project's Code section: GitHub's return after connecting comes back
+ * here (plan 6.1); the section opens from the hash.
+ */
+function codeSectionPath(projectId: string): string {
+	return `/app/project/settings?project=${encodeURIComponent(projectId)}#code`;
+}
+
+/**
  * Create-new or connect-existing a repo for THIS project, over the real
  * /github/repos and /github/repo/connect routes (same as the guided card).
  * A create needs a bound installation, surfaced by the RepositoryPicker.
@@ -441,7 +449,11 @@ function RepoLinkForm(props: {
 	if (props.mode === 'connect') {
 		return (
 			<div className="ps-code-connect" data-testid="ps-code-connect-form">
-				<RepositoryPicker workspaceId={props.project.workspaceId} onSelected={(sel) => void connectRepo(sel)} />
+				<RepositoryPicker
+					workspaceId={props.project.workspaceId}
+					onSelected={(sel) => void connectRepo(sel)}
+					returnTo={codeSectionPath(props.project.id)}
+				/>
 				{error ? (
 					<div role="alert" className="sign-in-error" data-testid="ps-code-error">
 						<b>Could not connect.</b> <span>{error}</span>
@@ -465,7 +477,11 @@ function RepoLinkForm(props: {
 				void createRepo();
 			}}
 		>
-			<RepositoryPicker workspaceId={props.project.workspaceId} onSelected={(sel) => setInstallationId(sel.installationId)} />
+			<RepositoryPicker
+				workspaceId={props.project.workspaceId}
+				onSelected={(sel) => setInstallationId(sel.installationId)}
+				returnTo={codeSectionPath(props.project.id)}
+			/>
 			<label className="kicker" htmlFor="ps-repo-name">
 				Repo name
 			</label>

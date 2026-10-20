@@ -8,7 +8,10 @@ import { failureKind, StatePanel } from '../states.tsx';
  * App routes:
  *
  *   GET  /api/github/installations?workspaceId=…   installations of the workspace
- *   POST /api/github/installations/bind            explicit binding by installation id
+ *   GET  /api/github/app?workspaceId=…&returnTo=…   the Connect GitHub link, carrying
+ *                                                  Caddie's signed request; GitHub's
+ *                                                  return connects (plan 6.1)
+ *   POST /api/github/installations/bind            explicit binding by installation id (fallback)
  *   GET  /api/github/installations/:id/repos       selected repositories
  *
  * Honesty rules mirrored from the server: only installations explicitly bound
@@ -42,8 +45,13 @@ export function RepositoryPicker(props: {
 	workspaceId: string;
 	/** Called when the user picks a selected repository. */
 	onSelected?: (selection: SelectedRepository) => void;
+	/**
+	 * The Caddie page GitHub's return comes back to (plan 6.1); defaults to
+	 * this page. A page whose section lives in the hash names it here.
+	 */
+	returnTo?: string;
 }): ReactElement {
-	const { workspaceId } = props;
+	const { workspaceId, returnTo } = props;
 	const [installations, setInstallations] = useState<InstallationView[] | null>(null);
 	const [loadError, setLoadError] = useState<Error | null>(null);
 	const [reloadKey, setReloadKey] = useState(0);
@@ -79,12 +87,18 @@ export function RepositoryPicker(props: {
 		void load();
 	}, [load, reloadKey]);
 
-	// Best-effort: learn the App's install URL so we can lead with an Install
-	// button. A failure (or an unconfigured slug) just leaves installUrl null —
+	// Best-effort: learn the App's install URL so we can lead with Connect
+	// GitHub. It carries Caddie's own signed request for this workspace and
+	// page, which GitHub hands back so its return connects in one click (plan
+	// 6.1). A failure (or an unconfigured slug) just leaves installUrl null —
 	// the id-paste fallback below still works.
 	useEffect(() => {
 		let live = true;
-		void fetchJson<{ installUrl: string | null }>('/api/github/app')
+		const page =
+			returnTo ??
+			(typeof window === 'undefined' ? '/app/' : `${window.location.pathname}${window.location.search}${window.location.hash}`);
+		const query = new URLSearchParams({ workspaceId, returnTo: page });
+		void fetchJson<{ installUrl: string | null }>(`/api/github/app?${query.toString()}`)
 			.then((body) => {
 				if (live) setInstallUrl(body.installUrl);
 			})
@@ -94,7 +108,7 @@ export function RepositoryPicker(props: {
 		return () => {
 			live = false;
 		};
-	}, []);
+	}, [workspaceId, returnTo]);
 
 	const openRepos = useCallback(async (installationId: string): Promise<void> => {
 		setOpenInstallation(installationId);
@@ -187,7 +201,7 @@ export function RepositoryPicker(props: {
 				<StatePanel
 					kind="empty"
 					title="No GitHub App installation is bound to this workspace"
-					detail="Install the Caddie GitHub App on your account below, then come back and bind it — Caddie reads only what you grant."
+					detail="Connect GitHub below: GitHub asks what Caddie may read, then brings you back here. Caddie reads only what you grant."
 				/>
 			) : (
 				<ul className="repository-picker__installations" data-testid="installation-list">
@@ -301,18 +315,12 @@ export function RepositoryPicker(props: {
 				</p>
 				{installUrl ? (
 					<p className="repository-picker__install">
-						<a
-							className="btn-key"
-							data-testid="github-install-link"
-							href={installUrl}
-							target="_blank"
-							rel="noreferrer noopener"
-						>
-							Install the Caddie GitHub App on GitHub
+						{/* The same tab: GitHub's return lands back on this page (plan 6.1). */}
+						<a className="btn-key" data-testid="github-install-link" href={installUrl}>
+							Connect GitHub
 						</a>
 						<span className="repository-picker__meta">
-							Opens GitHub in a new tab. Choose the account and repositories to grant, then come
-							back and reload — the installation appears above.
+							GitHub asks which account and repositories Caddie may use, then brings you back here.
 						</span>
 					</p>
 				) : (
@@ -323,7 +331,7 @@ export function RepositoryPicker(props: {
 				)}
 
 				<details className="repository-picker__bind-fallback">
-					<summary data-testid="bind-fallback-toggle">Already installed? Bind by installation id</summary>
+					<summary data-testid="bind-fallback-toggle">Connect by installation number instead</summary>
 					<form
 						className="repository-picker__bind"
 						onSubmit={(event) => {

@@ -65,6 +65,7 @@ import { QuickSearch, useQuickSearchHotkey } from '../search/QuickSearch.tsx';
 import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
 import { WORDS } from '../copy.ts';
 import { sessionShareStorage, takeSharedDraft } from '../share-target.ts';
+import { GithubReturnNotice } from '../repositories/GithubReturnNotice.tsx';
 import { StatePanel, failureKind } from '../states.tsx';
 import { applyTheme, browserStorage, currentTheme, saveThemeChoice, type Palette, type ThemeChoice, type ThemeMode } from '../theme.ts';
 import {
@@ -684,7 +685,11 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 							data-signed-out={authenticated || authOffline ? undefined : 'true'}
 						>
 							{authenticated ? (
-								props.children
+								<>
+									{/* GitHub's return, said once (plan 6.1). */}
+									<GithubReturnNotice />
+									{props.children}
+								</>
 							) : authOffline ? (
 								<div className="shell-loading" data-testid="offline-launch">
 									<StatePanel

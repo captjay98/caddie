@@ -221,23 +221,23 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 
 ## 6. GitHub and memory
 
-- [ ] 6.1 GitHub connects in one click: handle GitHub's return after install
+- [x] 6.1 GitHub connects in one click: handle GitHub's return after install
   (`installation_id`, `setup_action`) and bind; the id form becomes a fallback.
   Unit + browser. Owner: set `GITHUB_APP_SLUG` and the App's Setup URL.
-  Part 1 done: `GET /api/github/app?workspaceId&returnTo` gives members an
-  install link carrying a signed state (`github-connect.ts`, 30 minutes, no
-  table); `GET /api/github/setup` is the Setup URL. GitHub warns its
+  Done: `GET /api/github/app?workspaceId&returnTo` gives members an install
+  link carrying a signed state (`github-connect.ts`, 30 minutes, no table);
+  `GET /api/github/setup` is the Setup URL. GitHub warns its
   `installation_id` can be spoofed, so the return binds only with a state
   Caddie signed for the same signed-in person, then checks the installation
   as the by-id form does and goes back to that person's page with
-  `?github=connected` (or one plain outcome: requested, not_signed_in,
-  expired, not_found, suspended, missing_permissions, already_bound,
-  not_configured, failed). `docs/setup/github-app.md` names the Setup URL.
-  Part 2: the picker's Install link opens in the same tab with that state, the
-  page words the outcome, and the by-id form stays a fold labelled as the
-  fallback. Known, unchanged: the by-id form can claim any unbound
-  installation of the App; proving the installer would need GitHub App user
-  sign-in.
+  `?github=<outcome>`. The picker's "Connect GitHub" opens GitHub in the same
+  tab with that state (project settings come back to the Code section); the
+  outcome leaves the address before the router reads it and the page says it
+  once in plain words (`github-return.ts`, `GithubReturnNotice`); "Connect by
+  installation number instead" is the folded fallback.
+  `docs/setup/github-app.md` names the Setup URL. Known, unchanged: the by-id
+  form can claim any unbound installation of the App; proving the installer
+  would need GitHub App user sign-in.
 - [ ] 6.2 Memory learns: facts carry the project in a project chat; a stated
   lasting preference is proposed after the turn (still needs Confirm). Unit.
 
