@@ -80,6 +80,7 @@ export function scopedCoordinatorContext(
     workflowState: async () => (await resolve()).workflowState(),
     continueProject: async (input) => (await resolve()).continueProject(input),
     continueNamedProject: async (input) => (await resolve()).continueNamedProject(input),
+    projectStatus: async (input) => (await resolve()).projectStatus(input),
     startProject: async (input) => (await resolve()).startProject(input),
     proposeProject: async (input) => (await resolve()).proposeProject(input),
     listStacks: async () => (await resolve()).listStacks(),

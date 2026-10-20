@@ -51,6 +51,7 @@ import { openWorkingCopy } from "./working-copy.ts";
 import { runVerifiedInstall, VERIFIED_INSTALL_COMMAND } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { checkSentence, newTestsSentence } from "./round-detail.ts";
+import { projectStatusForActor } from "./project-experience.ts";
 import { FEATURE_BLOCK_GUIDE, parsePlanFeatures } from "@caddie/contracts";
 import { collectSourceSnapshot } from "./source-export.ts";
 import { recordCodeVersion } from "./code-versions.ts";
@@ -155,7 +156,7 @@ export async function createCoordinatorContext(
     ? await listProjectsForActor(env.DB, scope.actorId)
     : [];
   const homeOverview = isHome
-    ? "This is Home. Your project cards keep work inside this conversation. Existing projects: " +
+    ? "This is Home. Your project cards keep work inside this conversation. Before you say how a project is going, call project_status with its id. Existing projects: " +
       JSON.stringify(
         projects
           .filter((p) => p.kind !== "home")
@@ -782,6 +783,7 @@ export async function createCoordinatorContext(
       };
     },
     continueProject: (input) => continueProjectFromChat(env.DB, scope, { ...input, resumeBlocked: false }),
+    projectStatus: (input) => projectStatusForActor(env.DB, scope.actorId, input.projectId),
     continueNamedProject: async (input) => {
       // A clear request to continue one owned named project is a routing fact,
       // not a capability decision the Home model needs to make.

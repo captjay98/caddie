@@ -124,8 +124,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   five stage tiles are one checklist (full labels, what happened on the
   right), feature rows and the files/commands panels are plain rows and
   sections under hairlines. Before/after screenshots sent to the owner.
-- [ ] 3.7 Home Caddie can say how a project's build is going (read-only, own
-  projects only). Unit.
+- [x] 3.7 Home Caddie can say how a project's build is going (read-only, own
+  projects only). Unit. Done: a `project_status` tool (every chat, Home
+  included) returns the stage, the project page's own message, features done
+  and the build's latest line, without ids; another account's project or Home
+  itself is "not found"; Home's overview says to call it before answering.
 
 ## 4. Plans use the platform, the hackathon's rules and the user's words
 

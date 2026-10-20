@@ -17,6 +17,7 @@ import {
 } from "../apps/app/src/server/build-workflow.ts";
 import { recordRepairRound } from "../apps/app/src/server/runs.ts";
 import { buildActivity, recordBuildActivity } from "../apps/app/src/server/build-activity.ts";
+import { projectExperience, projectStatusForActor } from "../apps/app/src/server/project-experience.ts";
 import { splitSqlStatements } from "./fixtures/controls-harness.ts";
 
 /**
@@ -234,5 +235,39 @@ describe("buildActivity — honest build-progress projection", () => {
     await expect(
       recordBuildActivity(db, { projectId: "p", runId: "r", kind: "file", subject: "a.ts", outcome: "ok", startedAt: "2026-10-15T00:00:00.000Z", finishedAt: "2026-10-15T00:00:01.000Z" }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("Home Caddie can say how one of your projects is going (plan 3.7)", () => {
+  // Live, Home Caddie could only say a project existed (its overview lists
+  // names), not how its build was going. project_status reads it, read-only.
+  test("an owned project's status comes back in words: stage, the project page's message, features, no record ids", async () => {
+    const w = await world();
+    const item = await w.planned();
+    await w.toBuilding(item.scope, item.plan.id);
+    const reply = await projectStatusForActor(w.db, item.scope.actorId, item.scope.projectId);
+    const experience = await projectExperience(w.db, item.scope);
+    expect(reply).toMatchObject({ found: true, name: "Todo app", stage: "building", message: experience.message });
+    expect(JSON.stringify(reply)).not.toMatch(/\b(?:proj|run|pdr|conv|plan)[_-][0-9a-z]/i);
+  });
+
+  test("another account's project is never read, and Home itself is not a project", async () => {
+    const w = await world();
+    const item = await w.planned();
+    const stranger = await projectStatusForActor(w.db, "bob", item.scope.projectId);
+    expect(stranger.found).toBe(false);
+    expect(JSON.stringify(stranger)).not.toContain("Todo app");
+    const home = await ensureHomeProject(w.db, item.scope.actorId);
+    expect((await projectStatusForActor(w.db, item.scope.actorId, home.id)).found).toBe(false);
+  });
+
+  test("the tool is mounted where Home can use it, forwarded by the host, and Home is told to use it", () => {
+    const read = (path: string) => readFileSync(new URL(`../apps/app/src/${path}`, import.meta.url), "utf8");
+    const coordinator = read("agents/coordinator.ts");
+    const shared = coordinator.indexOf("useTool(makeListStacks({ listStacks: context.listStacks }));");
+    expect(shared).toBeGreaterThan(0);
+    expect(coordinator.indexOf('name: "project_status"')).toBeGreaterThan(shared); // with the tools every chat gets, Home included
+    expect(read("agents/host-context.ts")).toContain("projectStatus: async (input) => (await resolve()).projectStatus(input)");
+    expect(read("server/coordinator-host.ts")).toContain("project_status");
   });
 });

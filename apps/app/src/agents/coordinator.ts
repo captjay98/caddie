@@ -11,6 +11,7 @@ import {
   type CoordinatorSnapshot,
 } from "./host-context.ts";
 import type { CoordinatorEnvironment } from "../server/coordinator-host.ts";
+import type { ProjectStatusReply } from "../server/project-experience.ts";
 import {
   useAgentFinish,
   useAgentStart,
@@ -59,6 +60,8 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     resumeBlocked?: boolean;
   }) => Promise<{ project: { id: string; name: string }; workflow: unknown }>;
   continueNamedProject: (input: { request: string; operationKey: string }) => Promise<{ project: { id: string; name: string }; workflow: unknown } | null>;
+  /** Read-only: how one of the person's own projects is going, in words (plan 3.7). */
+  projectStatus: (input: { projectId: string }) => Promise<ProjectStatusReply>;
   startProject: (input: {
     name: string;
     description?: string;
@@ -411,6 +414,16 @@ export function Coordinator({ id }: AgentProps) {
           next: "The proposal card is shown. NOTHING has been created: the user decides with the card's \"Start this project\" or \"Keep refining\" button. Do not say the project was created, started or queued. Write at most one short sentence (e.g. they can start it from the card, or tell you what to change).",
         }),
       };
+    },
+  });
+  useTool({
+    name: "project_status",
+    description:
+      "Read how one of the person's own projects is going (its stage, the latest from its build, how many features are done) without changing anything. Call it whenever they ask about a project's progress, before you answer; never guess. Takes an id from the list of existing projects.",
+    input: v.object({ projectId: v.string() }),
+    async run(ctx) {
+      const authority = await resolve();
+      return { output: JSON.stringify(await authority.projectStatus({ projectId: ctx.data.projectId })) };
     },
   });
   useTool({
