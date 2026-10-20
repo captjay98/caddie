@@ -1,3 +1,4 @@
+import { ICON_PALETTE, iconColor, iconLetter } from '@caddie/contracts';
 import type { AppHostFile } from './app-host.ts';
 import { GLYPHS, GLYPH_CANVAS, GLYPH_CAP } from './app-icon-glyphs.ts';
 
@@ -20,11 +21,11 @@ import { GLYPHS, GLYPH_CANVAS, GLYPH_CAP } from './app-icon-glyphs.ts';
  */
 
 /**
- * Eight clearly different hues (700 shades), so two apps on one home screen
- * rarely look alike; each passes WCAG 4.5:1 against the white letter.
- * indigo, sky, teal, green, amber, rose, fuchsia, slate.
+ * Eight clearly different hues, the letter rule and the colour rule now live in
+ * @caddie/contracts (app-icon.ts), shared with the Projects card's tile (plan
+ * 5.7); re-exported here for the renderer's callers.
  */
-export const ICON_PALETTE = ['#4338ca', '#0369a1', '#0f766e', '#15803d', '#b45309', '#be123c', '#a21caf', '#334155'] as const;
+export { ICON_PALETTE, iconColor, iconLetter };
 
 export type IconPurpose = 'any' | 'maskable' | 'apple';
 
@@ -38,23 +39,6 @@ export const ICON_FILES: readonly { path: string; size: number; purpose: IconPur
 /** Capital height as a share of the icon; smaller in the maskable icon so a wide W stays in the safe circle. */
 const CAP_SHARE: Record<IconPurpose, number> = { any: 0.44, maskable: 0.36, apple: 0.44 };
 const CORNER_SHARE = 0.22;
-
-/** The first Latin letter or digit in the name, accents removed; null when there is none. */
-export function iconLetter(name: string): string | null {
-	const plain = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-	for (const ch of plain) if (Object.hasOwn(GLYPHS, ch)) return ch;
-	return null;
-}
-
-/** A palette colour chosen from the seed (the project id), so renaming the app keeps its colour. */
-export function iconColor(seed: string): string {
-	let hash = 0x811c9dc5;
-	for (let i = 0; i < seed.length; i++) {
-		hash ^= seed.charCodeAt(i);
-		hash = Math.imul(hash, 0x01000193) >>> 0;
-	}
-	return ICON_PALETTE[hash % ICON_PALETTE.length]!;
-}
 
 export async function appIconFiles(app: { name: string; seed: string }): Promise<AppHostFile[]> {
 	const letter = iconLetter(app.name);

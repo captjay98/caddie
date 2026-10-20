@@ -1,7 +1,7 @@
 import type { Scope } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { assertProjectScope } from './scope.ts';
-import { ensureHomeProject } from './projects.ts';
+import { ensureHomeProject, listProjectsForActor } from './projects.ts';
 import { evaluateCandidateEligibility, listCandidates, parseEventDates, UNVERIFIED_OPEN_LABEL } from './discovery.ts';
 import { matchCandidateByTitle } from './coordinator-context.ts';
 import { getProfile } from './profiles.ts';
@@ -117,4 +117,83 @@ export async function projectHackathon(db: D1Database, scope: Scope, nowMs = Dat
 		ended: remaining?.ended ?? false,
 		eligibility: evaluation.verdict,
 	};
+}
+
+/** A project card's hackathon line (plan 5.7): the title and, when known, the deadline. */
+export interface ProjectHackathonLine {
+	readonly title: string;
+	/** ISO date (YYYY-MM-DD) of the submission deadline, or null when unknown. */
+	readonly deadline: string | null;
+	readonly daysLeft: number | null;
+	readonly ended: boolean;
+}
+
+/**
+ * The hackathon and its deadline for each of a person's own projects, for the
+ * Projects list (plan 5.7): one read of their accepted proposals and one of
+ * their Home discovery catalogue for every card, matched exactly as
+ * projectHackathon matches (the started proposal first, then the project's
+ * contestUrl). No eligibility check here (the project page has it). A project
+ * with no hackathon is left out; projects the person is not a member of never
+ * appear.
+ */
+export async function projectHackathonsForActor(
+	db: D1Database,
+	actorId: string,
+	nowMs = Date.now(),
+): Promise<Record<string, ProjectHackathonLine>> {
+	const projects = (await listProjectsForActor(db, actorId)).filter((project) => project.kind !== 'home');
+	if (projects.length === 0) return {};
+	const proposals = (
+		await db
+			.prepare(
+				'select "projectId","hackathonTitle","hackathonUrl","homeProjectId" from "project_proposals" where "actorId" = ? and "status" = \'accepted\' and "projectId" is not null order by "updatedAt" desc',
+			)
+			.bind(actorId)
+			.all<Record<string, unknown>>()
+	).results ?? [];
+	const latest = new Map<string, Record<string, unknown>>();
+	for (const row of proposals) if (!latest.has(String(row['projectId']))) latest.set(String(row['projectId']), row);
+
+	const linked = projects.flatMap((project) => {
+		const proposal = latest.get(project.id);
+		const title = typeof proposal?.['hackathonTitle'] === 'string' ? (proposal['hackathonTitle'] as string) : null;
+		const url = (typeof proposal?.['hackathonUrl'] === 'string' ? (proposal['hackathonUrl'] as string) : null) ?? (project.contestUrl || null);
+		return title || url ? [{ projectId: project.id, title, url, homeProjectId: proposal?.['homeProjectId'] }] : [];
+	});
+	if (linked.length === 0) return {};
+
+	// The catalogue lives on the person's Home project (where discovery ran).
+	const home = await ensureHomeProject(db, actorId);
+	const homeProjectId = linked.map((item) => item.homeProjectId).find((id): id is string => typeof id === 'string') ?? home.id;
+	let stored: Awaited<ReturnType<typeof listCandidates>> = [];
+	try {
+		stored = await listCandidates(db, { actorId, workspaceId: home.workspaceId, projectId: homeProjectId });
+	} catch {
+		stored = []; // Home in another workspace or not a member: titles only.
+	}
+
+	const lines: Record<string, ProjectHackathonLine> = {};
+	for (const item of linked) {
+		const candidate =
+			(item.url ? stored.find((c) => sameEvent(c.url, item.url!)) : undefined) ??
+			(item.title ? matchCandidateByTitle(stored, item.title) : null) ??
+			null;
+		if (!candidate) {
+			lines[item.projectId] = { title: item.title ?? item.url!, deadline: null, daysLeft: null, ended: false };
+			continue;
+		}
+		const summary = candidate.summary.startsWith(UNVERIFIED_OPEN_LABEL)
+			? candidate.summary.slice(UNVERIFIED_OPEN_LABEL.length)
+			: candidate.summary;
+		const deadline = parseEventDates(summary).deadline;
+		const remaining = deadline ? daysUntil(deadline, nowMs) : null;
+		lines[item.projectId] = {
+			title: item.title ?? candidate.title,
+			deadline,
+			daysLeft: remaining?.daysLeft ?? null,
+			ended: remaining?.ended ?? false,
+		};
+	}
+	return lines;
 }

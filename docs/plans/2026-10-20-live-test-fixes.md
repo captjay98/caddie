@@ -209,6 +209,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 - [ ] 5.7 Project card = variants B + C: the app's picture (its letter tile
   until real screenshots exist), the 4 steps, the hackathon and its deadline
   (added to the project list). Unit + browser + a screenshot for the owner.
+  Part 1 done: `GET /api/project-hackathons` gives every one of the person's
+  projects its hackathon and deadline in one request
+  (`projectHackathonsForActor`, the same matching as the project page); the
+  letter-and-colour rule moved to `@caddie/contracts` (app-icon.ts) so the
+  card's tile matches the app's home-screen icon. Part 2: the card itself.
 
 ## 6. GitHub and memory
 

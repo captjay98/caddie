@@ -566,4 +566,5 @@ export * from './projects.ts';
 export * from './experience.ts';
 export * from './interests.ts';
 export * from './features.ts';
+export * from './app-icon.ts';
 export * from './publish.ts';

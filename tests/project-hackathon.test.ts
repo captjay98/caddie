@@ -8,7 +8,7 @@ import { createRun } from '../apps/app/src/server/runs.ts';
 import { findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
 import { acceptProposal, proposeProject } from '../apps/app/src/server/project-proposals.ts';
 import { createLocalSeedAdapter, runDiscoveryFeed, seedCandidates } from '../apps/app/src/server/discovery.ts';
-import { daysUntil, projectHackathon } from '../apps/app/src/server/project-hackathon.ts';
+import { daysUntil, projectHackathon, projectHackathonsForActor } from '../apps/app/src/server/project-hackathon.ts';
 import { projectScopeForUser } from '../apps/app/src/server/scope.ts';
 
 /**
@@ -120,5 +120,41 @@ describe('daysUntil', () => {
 		expect(daysUntil(`${YEAR}-10-30`, NOW)).toEqual({ daysLeft: 15, ended: false });
 		expect(daysUntil(`${YEAR}-10-15`, NOW)).toEqual({ daysLeft: 0, ended: false });
 		expect(daysUntil(`${YEAR}-10-14`, NOW)).toEqual({ daysLeft: 0, ended: true });
+	});
+});
+
+describe('the hackathon on each project card (plan 5.7)', () => {
+	test("one read gives each of a person's projects its hackathon and days left; a project without one is left out", async () => {
+		const w = await world();
+		try {
+			await seedCandidates(w.db, [
+				{ source: 'devpost', url: 'https://nebiusglobalaihackathon.devpost.com/', title: 'Nebius x NVIDIA Global AI Hackathon', summary: `By Nebius · Oct 01 - Oct 30, ${YEAR} · 23400 registered · Online` },
+			]);
+			await runDiscoveryFeed(w.db, w.homeScope, { adapters: [createLocalSeedAdapter(w.db, 'devpost')] });
+			const linked = await w.startFrom(NEBIUS);
+			const plain = await w.startFrom({});
+			const lines = await projectHackathonsForActor(w.db, 'alice', NOW);
+			expect(lines).toEqual({
+				[linked.projectId]: { title: 'Nebius x NVIDIA Global AI Hackathon', deadline: `${YEAR}-10-30`, daysLeft: 15, ended: false },
+			});
+			expect(lines[plain.projectId]).toBeUndefined();
+		} finally { w.sqlite.close(); }
+	});
+
+	test("an event Caddie never stored has no guessed deadline, and another person's projects never appear", async () => {
+		const w = await world();
+		try {
+			const linked = await w.startFrom(NEBIUS);
+			expect(await projectHackathonsForActor(w.db, 'alice', NOW)).toEqual({
+				[linked.projectId]: { title: NEBIUS.hackathonTitle, deadline: null, daysLeft: null, ended: false },
+			});
+			expect(await projectHackathonsForActor(w.db, 'bob', NOW)).toEqual({});
+		} finally { w.sqlite.close(); }
+	});
+
+	test('the signed-in person reads them in one request', () => {
+		const routes = readFileSync(new URL('../apps/app/src/server/routes/build-workflow.ts', import.meta.url), 'utf8');
+		expect(routes).toContain('router.get("/project-hackathons"');
+		expect(routes).toContain('projectHackathonsForActor(c.env.DB, userId)');
 	});
 });
