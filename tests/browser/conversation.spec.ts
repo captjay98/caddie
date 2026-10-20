@@ -126,6 +126,47 @@ test.describe('P05/P06 conversation surface', () => {
 });
 
 test.describe('U04 — unsent messages and restored drafts (v2 §3.6)', () => {
+	test('a reply streamed in pieces around its thinking reads as one paragraph, first word included (live finding, 2026-10-20)', async ({ browser }) => {
+		const OFFSET = '0000000000000000_0000000000000001';
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		await context.route('**/api/projects/proj_conversation/run-bindings', (route) =>
+			json(route, 200, {
+				runBindings: [{
+					runId: 'run-pieces', projectId: 'proj_conversation', conversationId: 'conv-pieces', submissionId: 's', planRevision: 'rev-0',
+					stackId: 'react-hono', payerId: 'actor-test', modelRouteId: 'route', pricingVersion: 'v1', createdBy: 'actor-test', createdAt: '2026-10-20T00:00:00.000Z',
+				}],
+			}),
+		);
+		const reply = {
+			id: 'm-pieces', role: 'assistant', purpose: 'assistant', display: 'visible', timestamp: '2026-10-20T00:00:00.000Z',
+			parts: [
+				{ type: 'text', text: 'The', state: 'done' },
+				{ type: 'reasoning', text: 'Checking the eligibility rules.', state: 'done' },
+				{ type: 'text', text: ' Nebius x NVIDIA Global AI Hackathon is open to you.', state: 'done' },
+			],
+		};
+		await context.route('**/agents/coordinator/**', async (route) => {
+			const url = new URL(route.request().url());
+			if (url.searchParams.get('view') === 'updates') {
+				return route.fulfill({ contentType: 'text/event-stream', body: `event: control\ndata: {"streamNextOffset":"${OFFSET}","upToDate":true}\n\n` });
+			}
+			return route.fulfill({
+				contentType: 'application/json',
+				headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' },
+				body: JSON.stringify({ v: 1, conversationId: 'conv-pieces', offset: OFFSET, messages: [reply], settlements: [] }),
+			});
+		});
+		const page = await context.newPage();
+		await openProjectPage(page);
+
+		const answer = page.getByTestId('msg-assistant').locator('.turn-answer');
+		await expect(answer).toBeVisible();
+		await expect(answer.locator('.md-body')).toHaveCount(1);
+		await expect(answer.locator('.md-body p')).toHaveText(['The Nebius x NVIDIA Global AI Hackathon is open to you.']);
+		await context.close();
+	});
 	test('a message on its way says "Sending…" with no buttons, and goes once Caddie has it (live finding, 2026-10-20)', async ({ browser }) => {
 		// Live, every message showed "Not sent · key … — resends reuse it" with
 		// Send again / Edit / Discard until the server admitted it.

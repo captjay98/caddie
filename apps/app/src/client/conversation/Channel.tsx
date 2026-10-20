@@ -2,6 +2,7 @@ import { ProjectWorkflow } from './ProjectWorkflow.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { FlueConversationMessage, FlueConversationPart } from '@flue/react';
+import { answerParts } from './answer-parts.ts';
 import { safeParse } from 'valibot';
 import { DecisionCardSchema, type DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { HackathonResultsCardSchema } from '@caddie/contracts';
@@ -479,9 +480,9 @@ function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversa
 	const reasoning = allParts.filter((part): part is ReasoningPart => part.type === 'reasoning');
 	const tools = allParts.filter((part): part is ToolPart => part.type === 'dynamic-tool');
 	// The answer: everything that is neither reasoning nor a tool call, in order
-	// (text, cards, files, data disclosures). AssistantPart returns null for the
-	// hoisted kinds, so filtering here keeps the key order clean.
-	const answer = allParts.filter((part) => part.type !== 'reasoning' && part.type !== 'dynamic-tool');
+	// (text, cards, files, data disclosures), with the pieces of one streamed
+	// answer joined (answer-parts.ts).
+	const answer = answerParts(messages);
 	const hasFolded = reasoning.length > 0 || tools.length > 0;
 	const hasAnswer = answer.some((part) => part.type !== 'text' || cleanAssistantText(part.text).trim().length > 0);
 

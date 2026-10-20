@@ -224,7 +224,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 	B02: { tests: ['tests/search-isolation.test.ts'], browser: [], live: [] },
 	B03: { tests: ['tests/stack-notify.integration.test.ts'], browser: [], live: [] },
 	B04: { tests: ['tests/plan-decisions.integration.test.ts'], browser: [], live: [] },
-	B05: { tests: ['tests/conversation-scope.test.ts'], browser: ['tests/browser/conversation.spec.ts'], live: [] },
+	B05: { tests: ['tests/conversation-scope.test.ts', 'tests/answer-parts.test.ts'], browser: ['tests/browser/conversation.spec.ts'], live: [] },
 	B06: { tests: ['tests/approval-card.test.ts'], browser: [], live: [] },
 	// --- App surface waves (0028–0032): publish, keys, versions, apps in-app --
 	PUBLISH: {
