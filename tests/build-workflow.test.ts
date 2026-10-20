@@ -1378,6 +1378,8 @@ describe("specialist repair boundaries", () => {
       const first = (await host.runChecks!("failure-one")) as { passed: boolean; receipts: { check: string }[] };
       expect(first.passed).toBe(false);
       expect(first.receipts.at(-1)?.check).toBe("behavior-tests");
+      // New rows store the sentence the check history shows, never the raw receipt (plan 3.3).
+      expect((w.sqlite.prepare("select detail from run_rounds where outcome='failed'").get() as { detail: string }).detail).toBe("The app's own tests: 0 of 1 passed.");
       // Recovery of the same logical delivery must not consume another attempt.
       const restored = await resolveCoordinatorContext(env, item.workflow.conversationId);
       await restored.runChecks!("failure-one");

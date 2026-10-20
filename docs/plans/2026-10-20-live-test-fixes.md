@@ -103,8 +103,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   first, then the running turn, by the same abort request the browser made);
   both say "Stop build"; a feature reads "Building now" only while the build
   is building (stopped, paused or re-planned: "Up next").
-- [ ] 3.3 Check history in words, never raw JSON (new rows store a sentence, old
-  rows are formatted). Unit + browser.
+- [x] 3.3 Check history in words, never raw JSON (new rows store a sentence, old
+  rows are formatted). Unit + browser. Done: `round-detail.ts` words a check
+  result ("The app's own tests: 7 of 9 passed.", "Building the app failed.");
+  the host stores that sentence, the build view and the judge's friction log
+  word old rows when read, and the page never shows a detail that is raw data.
 - [ ] 3.4 Check counts per attempt ("Attempt 3: 1 of 2 passed"); "Run its own
   tests" shows the behaviour-tests count. Unit (`build-timeline`).
 - [ ] 3.5 The Build tab shows the same status as the chat card; record ids only

@@ -50,6 +50,7 @@ import {
 import { openWorkingCopy } from "./working-copy.ts";
 import { runVerifiedInstall, VERIFIED_INSTALL_COMMAND } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
+import { checkSentence, newTestsSentence } from "./round-detail.ts";
 import { FEATURE_BLOCK_GUIDE, parsePlanFeatures } from "@caddie/contracts";
 import { collectSourceSnapshot } from "./source-export.ts";
 import { recordCodeVersion } from "./code-versions.ts";
@@ -442,7 +443,7 @@ export async function createCoordinatorContext(
           operationKey,
           round: "repair_attempt",
           outcome: "failed",
-          detail: JSON.stringify(receipts.at(-1)),
+          detail: checkSentence(receipts.at(-1) ?? {}),
         });
         const paused = (await workflowRepairPause(env.DB, workflow.runId))
           .paused;
@@ -534,7 +535,7 @@ export async function createCoordinatorContext(
         operationKey: `feature:${runId}:${plan.id}:${featureId}:${attempt}:new-tests`,
         round: "repair_attempt",
         outcome: "failed",
-        detail: JSON.stringify({ passing, baseline }),
+        detail: newTestsSentence(passing, baseline),
       });
       await recordFeatureAttempt(env.DB, current, round.paused);
       if (round.paused)
@@ -661,7 +662,7 @@ export async function createCoordinatorContext(
           operationKey,
           round: "repair_attempt",
           outcome: "failed",
-          detail: JSON.stringify(receipt),
+          detail: checkSentence(receipt),
         });
         const paused = (await workflowRepairPause(env.DB, workflow.runId)).paused;
         if (paused)

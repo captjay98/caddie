@@ -162,6 +162,32 @@ describe("buildActivity — honest build-progress projection", () => {
     expect(activity.openIssues).toBe(1);
   });
 
+  test("check history is in words: old rows that stored a raw check result read as one sentence (plan 3.3)", async () => {
+    const w = await world();
+    const item = await w.planned();
+    await w.toBuilding(item.scope, item.plan.id);
+    const runId = (await workflowSnapshot(w.db, item.scope)).workflow!.runId;
+    // Exactly what coordinator-host stored before plan 3.3 (live: shown after "Tried a fix —").
+    const stored = [
+      JSON.stringify({ check: "behavior-tests", passed: false, exitCode: 1, stdout: " 7 pass\n 2 fail\n", stderr: "", operationKey: "k1" }),
+      JSON.stringify({ check: "browser-bundle", passed: false, exitCode: 1, stdout: "", stderr: "error: Could not resolve \"x\"", operationKey: "k2" }),
+      JSON.stringify({ passing: 9, baseline: 9 }),
+      JSON.stringify({ something: "else" }),
+      "Reload drops the saved tasks.",
+    ];
+    for (const [index, detail] of stored.entries()) {
+      await recordRepairRound(w.db, item.scope, runId, { issue: `issue-${index}`, round: "repair_attempt", outcome: "failed", detail, operationKey: `op-${index}` });
+    }
+    const details = (await buildActivity(w.db, item.scope)).rounds.map((round) => round.detail);
+    expect(details).toEqual([
+      "The app's own tests: 7 of 9 passed.",
+      "Building the app failed.",
+      "This feature has no new passing test yet (9 passing, the same as before).",
+      null,
+      "Reload drops the saved tasks.",
+    ]);
+  });
+
   test("blocked mid-build: check is where it stuck, preview never shown", async () => {
     const w = await world();
     const item = await w.planned();

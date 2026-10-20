@@ -21,7 +21,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }>; imported?: { status: 'checking' | 'ready' | 'failed'; noWorkflow?: boolean; checksUntilReady?: number; message?: string; example?: boolean } } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; rounds?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }>; imported?: { status: 'checking' | 'ready' | 'failed'; noWorkflow?: boolean; checksUntilReady?: number; message?: string; example?: boolean } } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -256,7 +256,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 			return json(route, 200, snapshot());
 		}
 		if (path.endsWith('/activity')) return json(route, 200, {
-			projectId: PROJECT.id, phase: workflow.phase, building: workflow.phase === 'building', steps: [], rounds: [], openIssues: 0, features,
+			projectId: PROJECT.id, phase: workflow.phase, building: workflow.phase === 'building', steps: [], rounds: options.rounds ?? [], openIssues: 0, features,
 			timeline: { phase: workflow.phase, startedAt: NOW, lastActivityAt: NOW, elapsedMs: 60_000, idleMs: 5_000, quiet: false, summary: 'Caddie is writing the app.', stages: [], scope: [], files: [], fileAreas: { app: 0, test: 0, style: 0, config: 0, server: 0 }, commands: [], tests: null, checks: [] },
 		});
 		if (path.endsWith('/workflow/stop')) {
@@ -952,6 +952,21 @@ test('Stop build is one request (the server stops the running turn) and retains 
   // stops the workflow and then the running turn on the server.
   expect(fx.stops).toEqual(['/api/projects/proj-workflow/workflow/stop']);
   expect(fx.admissions).toHaveLength(0);
+});
+
+test('the check history is in words: a raw check result is never shown (plan 3.3)', async ({ context, page }) => {
+  await fixture(context, { phase: 'building', rounds: [
+    { issue: 'feature-2:behavior-tests', round: 'repair_attempt', outcome: 'failed', detail: "The app's own tests: 7 of 9 passed.", at: NOW },
+    // A payload from before plan 3.3: the server now words these, and the page never shows one either.
+    { issue: 'feature-2:browser-bundle', round: 'repair_attempt', outcome: 'failed', detail: '{"check":"browser-bundle","passed":false,"exitCode":1,"stdout":"","stderr":"error"}', at: NOW },
+  ] });
+  await page.goto('/app/?pane=channel');
+  const history = page.getByTestId('build-history');
+  await history.locator('summary').click();
+  await expect(history.getByTestId('build-history-item')).toHaveCount(2);
+  await expect(history).toContainText("Tried a fix — The app's own tests: 7 of 9 passed.");
+  await expect(history).not.toContainText('{');
+  await expect(history).not.toContainText('exitCode');
 });
 
 test('a plan stuck before approval reads as a plan to continue, never as a failed build', async ({ context, page }) => {

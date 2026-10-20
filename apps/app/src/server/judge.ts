@@ -4,6 +4,7 @@ import { ScopeError, assertProjectScope } from './scope.ts';
 import { deriveEvidenceId, sha256Hex } from './evidence/identity.ts';
 import { isSourceAuthority, authorityRank } from './evidence/authority.ts';
 import { listClaims, type ClaimRecord } from './evidence/claims.ts';
+import { roundDetailText } from './round-detail.ts';
 
 /**
  * P13 slice 1 — judge coaching (feature-ledger C15, IMPROVE over the
@@ -774,7 +775,7 @@ export async function buildCoachingMaterials(
 			id: String(row['id']),
 			issue: String(row['issue']),
 			outcome: String(row['outcome']) as FrictionEntry['outcome'],
-			detail: row['detail'] == null ? null : String(row['detail']),
+			detail: roundDetailText(row['detail'] == null ? null : String(row['detail'])),
 			occurredAt: String(row['createdAt']),
 		}),
 	);
