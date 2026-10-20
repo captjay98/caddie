@@ -2028,3 +2028,72 @@ describe("host-driven feature loop", () => {
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 });
+
+describe("a paused build tells its owner once per run (plan 5.4)", () => {
+  // Live finding (2026-10-20): a build Caddie paused only showed up if the
+  // owner happened to open the Brief; nothing was raised where it paused.
+  function withNotifications(w: Awaited<ReturnType<typeof world>>) {
+    const ddl = readFileSync(new URL("../apps/app/migrations/0007_schedules.sql", import.meta.url), "utf8");
+    for (const statement of splitSqlStatements(ddl)) w.sqlite.exec(statement);
+  }
+  const notes = (w: Awaited<ReturnType<typeof world>>) =>
+    w.sqlite.query('select "userId", "projectId", "kind", "title", "body", "dedupeKey" from "notifications"').all();
+
+  test("Caddie pausing the build notifies its owner once, with the reason, and never again for the same run", async () => {
+    const w = await world();
+    try {
+      withNotifications(w);
+      const item = await approved(w);
+      const reason = "Caddie could not get the app checks passing after three attempts. Your plan and files are saved. The app is not ready to try yet.";
+      await setWorkflowBlocker(w.db, item.scope, reason);
+      await setWorkflowBlocker(w.db, item.scope, "Caddie used this build's step budget without getting the checks to pass, so the build was paused.");
+      expect(notes(w)).toEqual([
+        {
+          userId: "alice",
+          projectId: item.project.id,
+          kind: "build_paused",
+          title: "Caddie paused the build of Todo app",
+          body: reason,
+          dedupeKey: `brief:${item.workflow.runId}:blocked`,
+        },
+      ]);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("a build that stops making progress notifies its owner too", async () => {
+    const w = await world();
+    try {
+      withNotifications(w);
+      const item = await approved(w);
+      const started = Date.parse((await readWorkflow(w.db, item.scope))!.updatedAt);
+      expect(await reconcileStalledBuild(w.db, item.project.id, started + BUILD_STALL_MS + 1)).toBe(true);
+      const [note] = notes(w) as { userId: string; title: string; body: string; dedupeKey: string }[];
+      expect(note?.userId).toBe("alice");
+      expect(note?.title).toBe("Caddie paused the build of Todo app");
+      expect(note?.body).toContain("stopped making progress on the build");
+      expect(note?.dedupeKey).toBe(`brief:${item.workflow.runId}:blocked`);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("the person's own Stop never notifies", async () => {
+    const w = await world();
+    try {
+      withNotifications(w);
+      const item = await approved(w);
+      await stopWorkflow(w.db, item.scope);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
+      expect(notes(w)).toEqual([]);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("a notification that cannot be saved never undoes or hides the pause", async () => {
+    const w = await world();
+    try {
+      // No notifications table at all: the pause is still recorded.
+      const item = await approved(w);
+      await setWorkflowBlocker(w.db, item.scope, "Caddie paused the build.");
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
+      expect((await readWorkflow(w.db, item.scope))?.detail).toBe("Caddie paused the build.");
+    } finally { w.sqlite.close(); }
+  });
+});

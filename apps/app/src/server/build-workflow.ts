@@ -8,6 +8,7 @@ import {
   ScopeError,
 } from "./scope.ts";
 import { createRun, isRunPaused, lookupRunByConversation } from "./runs.ts";
+import { createNotification } from "./notifications.ts";
 import { admitJudgeBuildStart, admitJudgeMessage, judgeProjectCap, judgeProjectRefusal, judgeProjectRoom } from "./judge-limits.ts";
 import {
   getProject,
@@ -521,6 +522,38 @@ export async function setWorkflowBlocker(
     )
     .bind("blocked", detail.slice(0, 2000), now(), scope.projectId)
     .run();
+  await notifyBuildPaused(db, scope.projectId, detail);
+}
+
+/**
+ * Caddie paused this build and needs its owner (plan 5.4). Besides the Brief
+ * card, the owner gets ONE notification per run, raised here where the pause
+ * is recorded (the dedupe key arbitrates repeats). Only Caddie's own pauses
+ * come here: the person's Stop (stopWorkflow) never does. A notification that
+ * cannot be saved never undoes or hides the pause.
+ */
+async function notifyBuildPaused(db: D1Database, projectId: string, detail: string): Promise<void> {
+  try {
+    const found = await rows(
+      db,
+      'select w."runId", w."conversationId", p."name" from build_workflows w join "projects" p on p."id" = w."projectId" where w."projectId" = ?',
+      projectId,
+    );
+    const workflow = found[0];
+    if (!workflow) return;
+    const run = await lookupRunByConversation(db, String(workflow.conversationId));
+    if (!run?.createdBy) return;
+    await createNotification(db, {
+      userId: run.createdBy,
+      projectId,
+      kind: "build_paused",
+      title: `Caddie paused the build of ${String(workflow.name)}`,
+      body: detail.slice(0, 600),
+      dedupeKey: `brief:${String(workflow.runId)}:blocked`,
+    });
+  } catch (error) {
+    console.warn("build-paused notification not saved", error);
+  }
 }
 /**
  * A `building` run with no recorded progress for this long is stopped
@@ -574,7 +607,9 @@ export async function reconcileStalledBuild(
     )
     .bind(detail, new Date(nowMs).toISOString(), projectId, workflow.updatedAt)
     .run();
-  return Number((result as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
+  const paused = Number((result as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
+  if (paused) await notifyBuildPaused(db, projectId, detail);
+  return paused;
 }
 
 /** Cron sweep: stop every stalled build. Returns how many were stopped. */

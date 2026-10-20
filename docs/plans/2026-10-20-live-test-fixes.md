@@ -186,6 +186,12 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   in place of the two-box fold. Button-styled links lose their underline.
 - [ ] 5.4 A brief that needs the owner also arrives as a notification, once per
   run, raised where the failure is recorded.
+  Part 1 done: every pause Caddie records (`setWorkflowBlocker`, the stall
+  watchdog) raises one `build_paused` notification per run for the build's
+  owner (`brief:<runId>:blocked`); the person's own Stop never does; a
+  notification that cannot be saved never undoes the pause. Part 2: no screen
+  shows notifications yet (only `GET /api/notifications`), so a bell in the top
+  bar lists unread ones; opening one marks it read and opens its project.
 - [ ] 5.5 Audit trail becomes "Details" in words; ids under "For developers".
 - [ ] 5.6 Page-shaped loading skeletons for Home, Projects, Plan and Build.
 - [ ] 5.7 Project card = variants B + C: the app's picture (its letter tile
