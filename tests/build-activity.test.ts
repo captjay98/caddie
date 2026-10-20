@@ -178,14 +178,15 @@ describe("buildActivity — honest build-progress projection", () => {
     for (const [index, detail] of stored.entries()) {
       await recordRepairRound(w.db, item.scope, runId, { issue: `issue-${index}`, round: "repair_attempt", outcome: "failed", detail, operationKey: `op-${index}` });
     }
-    const details = (await buildActivity(w.db, item.scope)).rounds.map((round) => round.detail);
-    expect(details).toEqual([
-      "The app's own tests: 7 of 9 passed.",
-      "Building the app failed.",
-      "This feature has no new passing test yet (9 passing, the same as before).",
-      null,
-      "Reload drops the saved tasks.",
-    ]);
+    // By issue: rounds saved in the same millisecond have no guaranteed order.
+    const details = Object.fromEntries((await buildActivity(w.db, item.scope)).rounds.map((round) => [round.issue, round.detail]));
+    expect(details).toEqual({
+      "issue-0": "The app's own tests: 7 of 9 passed.",
+      "issue-1": "Building the app failed.",
+      "issue-2": "This feature has no new passing test yet (9 passing, the same as before).",
+      "issue-3": null,
+      "issue-4": "Reload drops the saved tasks.",
+    });
   });
 
   test("blocked mid-build: check is where it stuck, preview never shown", async () => {

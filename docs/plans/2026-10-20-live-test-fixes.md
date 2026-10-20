@@ -108,8 +108,12 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   result ("The app's own tests: 7 of 9 passed.", "Building the app failed.");
   the host stores that sentence, the build view and the judge's friction log
   word old rows when read, and the page never shows a detail that is raw data.
-- [ ] 3.4 Check counts per attempt ("Attempt 3: 1 of 2 passed"); "Run its own
-  tests" shows the behaviour-tests count. Unit (`build-timeline`).
+- [x] 3.4 Check counts per attempt ("Attempt 3: 1 of 2 passed"); "Run its own
+  tests" shows the behaviour-tests count. Unit (`build-timeline`). Done: host
+  checks are grouped into attempts (never mixed), the stage names the attempt
+  once there is more than one, and the app's own test count also comes from
+  Caddie's behaviour-tests check (shell test runs are refused, so most builds
+  only run them there).
 - [ ] 3.5 The Build tab shows the same status as the chat card; record ids only
   under "For developers". Browser.
 - [ ] 3.6 One build card, no card inside a card (chat and the project's Now),

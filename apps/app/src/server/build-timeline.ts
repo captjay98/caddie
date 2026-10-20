@@ -320,17 +320,24 @@ export function buildTimeline(input: {
 		.reverse();
 
 	const testRuns = commandRows.filter((r) => r.testsPassed !== null || r.testsFailed !== null || isTestCommand(r.subject));
-	const countedRun = [...testRuns].reverse().find((r) => r.testsPassed !== null || r.testsFailed !== null) ?? null;
+	// The app's own tests also run inside Caddie's own check, and since shell
+	// test runs are refused that is where most builds run them (plan 3.4).
+	const behaviourChecks = rows.filter((r) => r.kind === 'check' && r.subject === 'behavior-tests');
+	const testSources = rows.filter((r) => testRuns.includes(r) || behaviourChecks.includes(r));
+	const countedRun = [...testSources].reverse().find((r) => r.testsPassed !== null || r.testsFailed !== null) ?? null;
 	const tests = countedRun
 		? { passed: countedRun.testsPassed ?? 0, failed: countedRun.testsFailed ?? 0, at: countedRun.finishedAt }
 		: null;
 
-	// Host checks: the latest attempt is the run of check rows after the last
-	// non-check action (a new attempt starts after more work happened).
-	const checkRows = rows.filter((r) => r.kind === 'check');
-	const lastNonCheck = [...rows].reverse().find((r) => r.kind !== 'check') ?? null;
-	const latestAttempt = checkRows.filter((r) => !lastNonCheck || ms(r.startedAt) >= ms(lastNonCheck.finishedAt));
-	const attemptRows = latestAttempt.length > 0 ? latestAttempt : checkRows.slice(-3);
+	// Host checks, in attempts: a new attempt starts once more work happened
+	// between checks. Counts are per attempt and never mix two (plan 3.4).
+	const checkAttempts: ActivityRow[][] = [];
+	for (const [index, r] of rows.entries()) {
+		if (r.kind !== 'check') continue;
+		if (checkAttempts.length === 0 || rows[index - 1]?.kind !== 'check') checkAttempts.push([r]);
+		else checkAttempts.at(-1)!.push(r);
+	}
+	const attemptRows = checkAttempts.at(-1) ?? [];
 	const checks: TimelineCheck[] = attemptRows.map((r) => ({
 		name: r.subject,
 		label: CHECK_LABELS[r.subject] ?? r.subject,
@@ -352,7 +359,7 @@ export function buildTimeline(input: {
 	const checksFailed = checks.length > 0 && checks.some((c) => !c.passed);
 
 	const stage = (key: Exclude<StageKey, 'preview'>): TimelineStage => {
-		const own = rows.filter(kindFor[key]);
+		const own = key === 'test' ? testSources : rows.filter(kindFor[key]);
 		const startedAtStage = own[0]?.startedAt ?? null;
 		const endedAtStage = own.length ? own.reduce((a, r) => (ms(r.finishedAt) > ms(a) ? r.finishedAt : a), own[0]!.finishedAt) : null;
 		let state: StageState = own.length === 0 ? 'pending' : 'done';
@@ -384,7 +391,8 @@ export function buildTimeline(input: {
 		}
 		if (key === 'check' && checks.length > 0) {
 			const passed = checks.filter((c) => c.passed).length;
-			detail = `${passed} of ${checks.length} passed`;
+			const counted = `${passed} of ${checks.length} passed`;
+			detail = checkAttempts.length > 1 ? `Attempt ${checkAttempts.length}: ${counted}` : counted;
 		}
 		return { key, label: STAGE_LABELS[key], state, startedAt: startedAtStage, endedAt: endedAtStage, durationMs, detail };
 	};

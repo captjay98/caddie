@@ -208,6 +208,50 @@ describe("buildTimeline — stages, timing and honesty", () => {
     expect(t.summary).toBe("A final check failed (behaviour tests). Caddie is fixing it.");
   });
 
+  test("host checks are counted per attempt, the stage says which attempt, and attempts never mix (plan 3.4)", () => {
+    const attempt = (start: number, testsPass: boolean) => [
+      row({ kind: "check", subject: "dependencies" }, start, 30_000),
+      row({ kind: "check", subject: "behavior-tests", outcome: testsPass ? "ok" : "failed", exitCode: testsPass ? 0 : 1 }, start + 1, 20_000),
+      ...(testsPass ? [row({ kind: "check", subject: "browser-bundle" }, start + 2, 10_000)] : []),
+    ];
+    const rows = [
+      ...writing,
+      ...attempt(20, true),
+      row({ kind: "file", subject: `${ROOT}/src/App.tsx`, bytes: 1200 }, 24),
+      ...attempt(25, false),
+      row({ kind: "file", subject: `${ROOT}/src/App.tsx`, bytes: 1300 }, 28),
+      ...attempt(29, false),
+    ];
+    const t = buildTimeline({ phase: "building", rows, nowMs: T0 + 31 * 60_000 });
+    expect(t.checks.map((c) => [c.label, c.passed])).toEqual([["Install packages", true], ["Behaviour tests", false]]);
+    expect(t.stages.find((s) => s.key === "check")!.detail).toBe("Attempt 3: 1 of 2 passed");
+    // More work after the attempt: still that attempt's own checks, never a mix with the one before.
+    const after = buildTimeline({ phase: "building", rows: [...rows, row({ kind: "file", subject: `${ROOT}/src/App.tsx`, bytes: 1400 }, 32)], nowMs: T0 + 33 * 60_000 });
+    expect(after.checks).toHaveLength(2);
+    expect(after.stages.find((s) => s.key === "check")!.detail).toBe("Attempt 3: 1 of 2 passed");
+  });
+
+  test("'Run its own tests' counts the app's own tests from Caddie's check, since shell test runs are refused (plan 3.4)", () => {
+    const rows = [
+      row({ kind: "file", subject: `${ROOT}/src/App.tsx`, bytes: 900 }, 1),
+      row({ kind: "check", subject: "dependencies" }, 5, 30_000),
+      row({ kind: "check", subject: "behavior-tests", outcome: "failed", exitCode: 1, testsPassed: 7, testsFailed: 2 }, 6, 20_000),
+    ];
+    const failing = buildTimeline({ phase: "blocked", rows, nowMs: T0 + 8 * 60_000 });
+    expect(failing.tests).toEqual({ passed: 7, failed: 2, at: rows[2]!.finishedAt });
+    const stage = failing.stages.find((s) => s.key === "test")!;
+    expect([stage.state, stage.detail]).toEqual(["failed", "7 passing · 2 failing"]);
+    const fixed = [
+      ...rows,
+      row({ kind: "file", subject: `${ROOT}/src/App.tsx`, bytes: 950 }, 9),
+      row({ kind: "check", subject: "dependencies" }, 10, 30_000),
+      row({ kind: "check", subject: "behavior-tests", testsPassed: 9, testsFailed: 0 }, 11, 20_000),
+    ];
+    const passing = buildTimeline({ phase: "building", rows: fixed, nowMs: T0 + 12 * 60_000 });
+    expect(passing.stages.find((s) => s.key === "test")!.detail).toBe("9 passing");
+    expect(passing.stages.find((s) => s.key === "test")!.state).toBe("done");
+  });
+
   test("ready: every recorded stage is done, the preview is ready, elapsed stops at the last action", () => {
     const rows = [
       ...writing,
