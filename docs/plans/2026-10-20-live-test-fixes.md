@@ -199,7 +199,13 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   its button does ("“Review the design” opens it for you to review; nothing
   changes until you decide."); the run, evidence, card, project and action ids
   sit in a closed "For developers — record ids" fold.
-- [ ] 5.6 Page-shaped loading skeletons for Home, Projects, Plan and Build.
+- [x] 5.6 Page-shaped loading skeletons for Home, Projects, Plan and Build.
+  Done: `PageSkeleton` (states.tsx): the thinking character and one line
+  ("Reading your brief…", "Loading your projects…", "Reading your plan…",
+  "Reading your builds…") over blocks laid out like the page (Brief cards,
+  project rows, the decision bar and plan, the build status and its stages);
+  Plan and Build use it while the project list loads too. Still under
+  reduced motion.
 - [ ] 5.7 Project card = variants B + C: the app's picture (its letter tile
   until real screenshots exist), the 4 steps, the hackathon and its deadline
   (added to the project list). Unit + browser + a screenshot for the owner.

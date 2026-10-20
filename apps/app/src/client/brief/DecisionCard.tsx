@@ -4,7 +4,7 @@ import type { ReactElement } from 'react';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { formatTimeAgo } from '@caddie/ui/time';
 import { Mascot } from '@caddie/ui/Mascot';
-import { StatePanel, StaleChip, failureKind, type StateKind } from '../states.tsx';
+import { PageSkeleton, StatePanel, StaleChip, failureKind, type StateKind } from '../states.tsx';
 import { Icon } from '../icons.tsx';
 
 /**
@@ -418,7 +418,9 @@ export function AccountBriefV2(props: {
 
 	if (state.kind !== 'empty' || props.feedError || props.feedPending) {
 		let content: ReactElement;
-		if (state.kind !== 'empty') {
+		if (state.kind === 'loading') {
+			content = <PageSkeleton page="home" label="Reading your brief…" />;
+		} else if (state.kind !== 'empty') {
 			content = (
 				<StatePanel
 					kind={state.kind}
@@ -435,7 +437,7 @@ export function AccountBriefV2(props: {
 				/>
 			);
 		} else {
-			content = <StatePanel kind="loading" title="Reading your brief…" />;
+			content = <PageSkeleton page="home" label="Reading your brief…" />;
 		}
 		return <div data-testid="account-brief-lane">{content}</div>;
 	}

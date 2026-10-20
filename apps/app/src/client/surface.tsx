@@ -6,7 +6,7 @@ import { ProjectExperienceSchema } from '@caddie/contracts';
 import type { ApprovalRecord, DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
 import { SignInScreen } from './sign-in.tsx';
 import { Markdown } from '@caddie/ui/Markdown';
-import { failureKind, StatePanel } from './states.tsx';
+import { failureKind, PageSkeleton, StatePanel, type SkeletonPage } from './states.tsx';
 import { formatMinorUnits, formatNextRun } from './settings/settings-model.ts';
 import { DiscoveryResults, type DiscoveryCandidateRecord } from './discovery/Results.tsx';
 import { JudgeScorecard } from './judge/Scorecard.tsx';
@@ -88,10 +88,20 @@ function ProjectGateSoft(props: { children: (projectId: string) => ReactElement 
 	return props.children(chrome.effectiveProjectId);
 }
 
-function ProjectGate(props: { children: (projectId: string) => ReactElement }): ReactElement | null {
+function ProjectGate(props: {
+	children: (projectId: string) => ReactElement;
+	/** Wait for the project list in this page's own shape (plan 5.6). */
+	skeleton?: { page: SkeletonPage; label: string };
+}): ReactElement | null {
 	const chrome = useWorkspaceChrome();
 	if (!chrome.authenticated) return <SignInScreen />;
-	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
+	if (chrome.projectsPending) {
+		return props.skeleton ? (
+			<PageSkeleton page={props.skeleton.page} label={props.skeleton.label} />
+		) : (
+			<StatePanel kind="loading" title="Fetching your projects…" />
+		);
+	}
 	if (chrome.projectsError) {
 		return (
 			<StatePanel
@@ -558,7 +568,7 @@ function ProjectList(): ReactElement {
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const brief = useAccountBrief(actor);
 	if (!chrome.authenticated) return <SignInScreen />;
-	if (chrome.projectsPending) return <StatePanel kind="loading" title="Loading your projects…" />;
+	if (chrome.projectsPending) return <PageSkeleton page="projects" label="Loading your projects…" />;
 	if (chrome.projectsError) {
 		return (
 			<StatePanel
@@ -1041,7 +1051,7 @@ export function DesignReviewPage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="plan" />
-					<ProjectGate>{(projectId) => <DesignReviewBody projectId={projectId} />}</ProjectGate>
+					<ProjectGate skeleton={{ page: 'plan', label: 'Reading your plan…' }}>{(projectId) => <DesignReviewBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
 		</>
@@ -1090,7 +1100,7 @@ export function RunsPage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="build" />
-					<ProjectGate>{(projectId) => <RunsBody projectId={projectId} />}</ProjectGate>
+					<ProjectGate skeleton={{ page: 'build', label: 'Reading your builds…' }}>{(projectId) => <RunsBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
 		</>
@@ -1112,6 +1122,8 @@ function RunsBody(props: { projectId: string }): ReactElement {
 	const artifactRevisions = useArtifactRevisions<ViewerRevision>(actor, props.projectId);
 	const [changeOpen, setChangeOpen] = useState(false);
 	const [changeText, setChangeText] = useState('');
+	// The first read of this project's builds: the Build page's own shape (plan 5.6).
+	if (runBindings.isPending) return <PageSkeleton page="build" label="Reading your builds…" />;
 	return (
 		<div className="settings-stack">
 			{/* The build's status from its own record, exactly as the chat card and

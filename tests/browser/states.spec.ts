@@ -163,12 +163,12 @@ test.describe('page states with the character (U03)', () => {
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/projects`);
 
-		const loading = page.getByTestId('state-loading').first();
+		const loading = page.getByTestId('page-skeleton-projects');
 		await expect(loading).toBeVisible();
 		// The thinking character, not a blank.
 		await expect(loading.locator('.mascot[data-state="thinking"]')).toBeVisible();
-		// Shaped placeholders, not an empty box.
-		await expect(loading.locator('.state-skeleton span').first()).toBeVisible();
+		// Shaped placeholders, not an empty box: the page's own rows (plan 5.6).
+		await expect(loading.locator('.skel').first()).toBeVisible();
 		release();
 		await expect(page.getByTestId('project-list')).toBeVisible({ timeout: 10_000 });
 		await context.close();
@@ -353,4 +353,48 @@ test.describe('getting your workspace ready (plan 5.1)', () => {
 		await expect(onboarding.locator('p[role="status"]', { hasText: 'Getting your workspace ready' })).toHaveCount(0);
 		await context.close();
 	});
+});
+
+test.describe('pages load in their own shape (plan 5.6)', () => {
+	// Live finding (2026-10-20): every page loaded behind the same generic
+	// "Fetching the latest state…" box, then jumped into a different layout.
+	const PLAN_PATH = '/app/design-review?project=proj-a';
+	const BUILD_PATH = '/app/runs?project=proj-a';
+	const cases = [
+		{ page: 'home', path: '/app/', hold: '**/api/brief', line: 'Reading your brief…', shapes: '.skel-card', loaded: 'account-brief-lane' },
+		{ page: 'projects', path: '/app/projects', hold: '**/api/projects', line: 'Loading your projects…', shapes: '.skel-row', loaded: 'project-list' },
+		{ page: 'plan', path: PLAN_PATH, hold: '**/api/projects/proj-a/plan-docs', line: 'Reading your plan…', shapes: '.skel-card', loaded: 'design-review' },
+		{ page: 'build', path: BUILD_PATH, hold: '**/api/projects/proj-a/run-bindings', line: 'Reading your builds…', shapes: '.skel-row', loaded: 'project-tabs' },
+		{ page: 'build', path: BUILD_PATH, hold: '**/api/projects', line: 'Reading your builds…', shapes: '.skel-row', loaded: 'project-tabs' },
+	] as const;
+
+	for (const item of cases) {
+		test(`${item.path} waiting on ${item.hold.replace('**', '')} shows the ${item.page} page's shape, then the page`, async ({ browser }) => {
+			const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+			await stubAccount(context);
+			let release: () => void = () => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			await context.route(item.hold, async (route) => {
+				await held;
+				await route.fallback();
+			});
+			const page = await context.newPage();
+			await page.goto(`${BASE}${item.path}`);
+
+			const skeleton = page.getByTestId(`page-skeleton-${item.page}`);
+			await expect(skeleton).toBeVisible();
+			await expect(skeleton).toHaveAttribute('aria-busy', 'true');
+			await expect(skeleton.locator('.page-skeleton-line')).toHaveText(item.line);
+			await expect(skeleton.locator('.mascot[data-state="thinking"]')).toBeVisible();
+			expect(await skeleton.locator(item.shapes).count()).toBeGreaterThanOrEqual(2);
+			// Never the generic box on these pages (the chat beside them has its own states).
+			await expect(page.locator('main#main').getByTestId('state-loading')).toHaveCount(0);
+			release();
+			await expect(page.getByTestId(item.loaded).first()).toBeVisible({ timeout: 10_000 });
+			await expect(skeleton).toHaveCount(0);
+			await context.close();
+		});
+	}
 });

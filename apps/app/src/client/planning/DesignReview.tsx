@@ -8,7 +8,7 @@ import { PlanFeatureList } from "../project/FeatureChecklist.tsx";
 import type { ReactElement } from "react";
 import { formatTimeAgo } from "@caddie/ui/time";
 import { postJson } from "../api.ts";
-import { StatePanel, failureKind } from "../states.tsx";
+import { PageSkeleton, StatePanel, failureKind } from "../states.tsx";
 import { CopyableId } from "../copyable.tsx";
 import type { WorkflowPhase } from "../workspace/project-status.ts";
 
@@ -231,7 +231,7 @@ export function DesignReview(props: {
   if (props.isPending) {
     return (
       <div data-testid="design-review">
-        <StatePanel kind="loading" />
+        <PageSkeleton page="plan" label="Reading your plan…" />
       </div>
     );
   }
