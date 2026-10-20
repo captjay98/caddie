@@ -65,6 +65,63 @@ function isPlanningLeak(sentence: string): boolean {
 	return DELIBERATION.test(s) && MACHINERY.test(s);
 }
 
+/**
+ * A coordinator step written out as text instead of being called (live
+ * finding, 2026-10-20: the model printed propose_project's arguments, twice,
+ * and no card appeared). An object carrying ALL of a card-making step's
+ * required inputs is never shown; any other JSON is left alone.
+ */
+const TOOL_ARGUMENT_SIGNATURES: readonly (readonly string[])[] = [['name', 'idea', 'brief']];
+
+function isToolArguments(candidate: string): boolean {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(candidate);
+	} catch {
+		return false;
+	}
+	if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+	const keys = new Set(Object.keys(parsed));
+	return TOOL_ARGUMENT_SIGNATURES.some((signature) => signature.every((key) => keys.has(key)));
+}
+
+/** Where the JSON object starting at `start` ends (exclusive), or -1 when it does not close. */
+function objectEnd(text: string, start: number): number {
+	let depth = 0;
+	let inString = false;
+	for (let i = start; i < text.length; i++) {
+		const ch = text[i];
+		if (inString) {
+			if (ch === '\\') i++;
+			else if (ch === '"') inString = false;
+			continue;
+		}
+		if (ch === '"') inString = true;
+		else if (ch === '{') depth++;
+		else if (ch === '}' && --depth === 0) return i + 1;
+	}
+	return -1;
+}
+
+function stripToolArguments(input: string): { text: string; stripped: boolean } {
+	let stripped = false;
+	// Fenced blocks first (```json … ```), then bare objects that start a line.
+	let text = input.replace(/```[A-Za-z]*[ \t]*\n([\s\S]*?)\n?```/g, (block, body: string) => {
+		if (!isToolArguments(body.trim())) return block;
+		stripped = true;
+		return '';
+	});
+	for (let at = text.indexOf('{'); at >= 0; at = text.indexOf('{', at + 1)) {
+		if (at > 0 && text[at - 1] !== '\n') continue;
+		const end = objectEnd(text, at);
+		if (end < 0 || !isToolArguments(text.slice(at, end))) continue;
+		text = text.slice(0, at) + text.slice(end);
+		stripped = true;
+		at -= 1;
+	}
+	return { text, stripped };
+}
+
 export interface SanitizeResult {
 	/** The cleaned text (may be empty — render NOTHING, not a placeholder). */
 	text: string;
@@ -94,6 +151,13 @@ export function sanitizeAssistantText(input: string): SanitizeResult {
 	if (RAW_SVG.test(text)) {
 		stripped.push('raw-svg');
 		text = text.replace(RAW_SVG, '');
+	}
+	{
+		const tool = stripToolArguments(text);
+		if (tool.stripped) {
+			stripped.push('tool-arguments');
+			text = tool.text;
+		}
 	}
 
 	// Untagged planning leakage: strip the LEADING run of scratchpad sentences

@@ -1,7 +1,8 @@
 import { ProjectWorkflow } from './ProjectWorkflow.tsx';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { FlueConversationMessage, FlueConversationPart } from '@flue/react';
+import { answerParts } from './answer-parts.ts';
 import { safeParse } from 'valibot';
 import { DecisionCardSchema, type DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { HackathonResultsCardSchema } from '@caddie/contracts';
@@ -12,13 +13,18 @@ import { metaParts } from './hackathon-format.ts';
 import { ApprovalCardData, ApprovalCardView } from './ApprovalCard.tsx';
 import { ProjectProposalCard, ProjectProposalData } from './ProjectProposalCard.tsx';
 import { GuidedStepsCardData, GuidedStepsCardView } from './GuidedStepsCard.tsx';
-import { Markdown } from '@caddie/ui/Markdown';
 import { StatePanel } from '../states.tsx';
 import { Icon } from '../icons.tsx';
 import { DecisionCardView } from '../brief/DecisionCard.tsx';
 import { Composer } from './Composer.tsx';
 import type { ChannelDraft, ChannelSource } from './channel-store.ts';
-import { cleanAssistantText } from './response-hygiene.ts';
+import { cleanAssistantText, sanitizeAssistantText } from './response-hygiene.ts';
+import { ReplyText } from './ReplyText.tsx';
+import { MemoryOffers } from './MemoryOffers.tsx';
+
+/** What a turn may do from inside the transcript. The rows are memoized, so
+ *  the action travels by context instead of props. */
+const TurnActions = createContext<{ ask: (text: string) => void } | null>(null);
 import { attachedFileNames, stripAttachedFileText } from './image-attachments.ts';
 import { settlementNotice } from './settlement-notice.ts';
 import { quotaRefusalMessage } from './send-failure.ts';
@@ -131,7 +137,7 @@ const TOOL_ACTION_LABELS: Record<string, { working: string; done: string }> = {
 	start_brainstorm: { working: 'Thinking about ideas with you', done: 'Thinking about ideas with you' },
 	continue_project: { working: 'Updating your project', done: 'Updated your project' },
 	update_profile: { working: 'Noting your preferences', done: 'Noted your preferences' },
-	remember: { working: 'Remembering that', done: 'Remembered that' },
+	remember: { working: 'Noting that', done: 'Noted for you to confirm' },
 	inspect_repository: { working: 'Looking at your code', done: 'Looked at your code' },
 	list_stacks: { working: 'Checking available stacks', done: 'Checked available stacks' },
 	verify_build: { working: 'Verifying the build', done: 'Verified the build' },
@@ -282,9 +288,9 @@ function TurnReasoning({ parts }: { parts: readonly ReasoningPart[] }): ReactEle
 function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement | null {
 	if (part.type === 'text') {
 		// R04 hygiene: strip reasoning tags / raw svg / serialization fragments /
-		// empty placeholder chains that leak INSIDE a text part before Markdown.
-		const clean = cleanAssistantText(part.text);
-		return clean ? <Markdown text={clean} /> : null;
+		// empty placeholder chains that leak INSIDE a text part before Markdown;
+		// a design mockup in it is drawn in the preview frame (plan 4.5).
+		return <ReplyText text={part.text} streaming={part.state === 'streaming'} />;
 	}
 		if (part.type === 'reasoning') {
 			// Reasoning is hoisted to the TURN level (TurnReasoning) so every pass
@@ -473,6 +479,7 @@ function UserRow({ message, followsSameAuthor }: { message: FlueConversationMess
  * A specialist DIAGNOSTIC turn renders as its own foldable row instead.
  */
 function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversationMessage[]; followsSameAuthor?: boolean }): ReactElement | null {
+	const actions = useContext(TurnActions);
 	const first = messages[0];
 	if (!first) return null;
 	const clock = turnClock(first.timestamp);
@@ -480,11 +487,14 @@ function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversa
 	const reasoning = allParts.filter((part): part is ReasoningPart => part.type === 'reasoning');
 	const tools = allParts.filter((part): part is ToolPart => part.type === 'dynamic-tool');
 	// The answer: everything that is neither reasoning nor a tool call, in order
-	// (text, cards, files, data disclosures). AssistantPart returns null for the
-	// hoisted kinds, so filtering here keeps the key order clean.
-	const answer = allParts.filter((part) => part.type !== 'reasoning' && part.type !== 'dynamic-tool');
+	// (text, cards, files, data disclosures), with the pieces of one streamed
+	// answer joined (answer-parts.ts).
+	const answer = answerParts(messages);
 	const hasFolded = reasoning.length > 0 || tools.length > 0;
 	const hasAnswer = answer.some((part) => part.type !== 'text' || cleanAssistantText(part.text).trim().length > 0);
+	// A proposal the model wrote out instead of making is hidden by hygiene;
+	// say so plainly rather than leaving an empty or misleading reply.
+	const hiddenProposal = answer.some((part) => part.type === 'text' && sanitizeAssistantText(part.text).stripped.includes('tool-arguments'));
 
 	const body = (
 		<>
@@ -496,6 +506,16 @@ function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversa
 						<AssistantPart key={index} part={part} />
 					))}
 				</div>
+			) : null}
+			{hiddenProposal ? (
+				<p className="tool-banner" data-testid="proposal-not-shown">
+					Caddie tried to put this idea on a card, but it didn't come through.{' '}
+					{actions ? (
+						<button type="button" className="btn-ghost" onClick={() => actions.ask('Please show that idea as a project card.')}>
+							Ask Caddie to try again
+						</button>
+					) : null}
+				</p>
 			) : null}
 		</>
 	);
@@ -516,6 +536,16 @@ function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversa
 	);
 }
 
+/** The words of a user message, as Flue's own copy of a send carries them. */
+function userText(message: FlueConversationMessage): string {
+	return message.parts.map((part) => (part.type === 'text' ? part.text : '')).join('');
+}
+
+/** A draft and a message are the same send (attached file text may follow the words). */
+function sameSend(messageText: string, draftText: string): boolean {
+	return messageText === draftText || messageText.startsWith(`${draftText}\n`);
+}
+
 function DraftRow(props: {
 	draft: ChannelDraft;
 	transportLive: boolean;
@@ -525,18 +555,17 @@ function DraftRow(props: {
 }): ReactElement {
 	const { draft } = props;
 	return (
-		<div className="draft-row" data-state={draft.state} data-testid="draft-row">
-			<span className="mono-id">
-				{draft.state === 'cancelled'
-					? 'cancelled — kept for reference'
-					: 'Not sent'}{' '}
-				{/* attempts counts FAILED TRANSPORT ATTEMPTS (the rejection handler
-				    increments it) — display the true count, no +1: the original
-				    send IS attempt one now that a transport exists. */}
-				{draft.attempts > 0
-					? ` · ${draft.attempts} ${draft.attempts === 1 ? 'attempt' : 'attempts'}`
-					: ''}
-				{' '}· key {draft.idempotencyKey.slice(5, 13)} — resends reuse it, so the server can never double-submit
+		<div
+			className="draft-row"
+			data-state={draft.state}
+			data-attempts={draft.attempts}
+			data-key={draft.idempotencyKey.slice(5, 13)}
+			data-testid="draft-row"
+		>
+			{/* Plain words only: the idempotency key and the attempt count stay
+			    in data attributes, never in front of the person sending. */}
+			<span className="draft-status" aria-live="polite">
+				{draft.state === 'cancelled' ? 'cancelled — kept for reference' : draft.state === 'sending' ? 'Sending…' : 'Not sent'}
 			</span>
 			<span className="draft-text">{draft.text}</span>
 			{draft.state === 'unsent' ? (
@@ -623,13 +652,42 @@ export function Channel(props: {
 		if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
 	}, [source.messages, props.drafts, source.status]);
 
+	// One copy of each message (live finding, 2026-10-20). Flue shows its own
+	// copy the moment a message is sent (an id starting "local:"). While it is
+	// on its way that copy IS the message, so the matching draft row is hidden;
+	// once the send has failed, the draft row (with Send again) is the message,
+	// so Flue's failed copy is hidden instead.
+	const failedIds = useMemo(() => new Set(source.failedSends.map((send) => send.id)), [source.failedSends]);
+	const unsentKey = props.drafts.filter((d) => d.state === 'unsent').map((d) => d.text).join('\u0000');
+	const shownMessages = useMemo(() => {
+		const unsent = unsentKey ? unsentKey.split('\u0000') : [];
+		if (unsent.length === 0 || failedIds.size === 0) return source.messages;
+		return source.messages.filter(
+			(message) => !(message.role === 'user' && failedIds.has(String(message.id)) && unsent.some((text) => sameSend(userText(message), text))),
+		);
+	}, [source.messages, failedIds, unsentKey]);
+	const visibleDrafts = useMemo(() => {
+		const onTheirWay = source.messages
+			.filter((message) => message.role === 'user' && String(message.id).startsWith('local:') && !failedIds.has(String(message.id)))
+			.map(userText);
+		if (onTheirWay.length === 0) return props.drafts;
+		return props.drafts.filter((draft) => !(draft.state === 'sending' && onTheirWay.some((text) => sameSend(text, draft.text))));
+	}, [source.messages, failedIds, props.drafts]);
+
 	// THE navigation performance fix: the rows (and every Markdown block in
 	// them) are built only when the messages or drafts actually change. Without
 	// this, every chrome re-render — i.e. every route change — re-parsed the
 	// whole conversation transcript in react-markdown (~8.5s blocking on long
 	// histories, measured).
+	const onSendRef = useRef(props.onSend);
+	onSendRef.current = props.onSend;
+	const turnActions = useMemo(() => ({ ask: (text: string) => onSendRef.current(text, []) }), []);
 	const transcriptRows = useMemo(
-		() => buildTranscriptRows(groupTurns(source.messages)),
+		() => buildTranscriptRows(groupTurns(shownMessages)),
+		[shownMessages],
+	);
+	const admittedUserMessages = useMemo(
+		() => source.messages.filter((message) => message.role === 'user' && !String(message.id).startsWith('local:')).length,
 		[source.messages],
 	);
 
@@ -701,7 +759,7 @@ export function Channel(props: {
 						}
 					/>
 ) : (
-						transcriptRows
+						<TurnActions.Provider value={turnActions}>{transcriptRows}</TurnActions.Provider>
 					)}
 
 				{settledFailed.map((settlement) => {
@@ -719,6 +777,11 @@ export function Channel(props: {
 						</p>
 					);
 				})}
+
+				{/* What Caddie can remember, for the person's OK (plan 6.2). Read again
+				    each time another of their messages is admitted (Flue's own
+				    "local:" copy is not yet admitted). */}
+				<MemoryOffers projectId={projectId} refreshKey={admittedUserMessages} />
 
 				<ProjectWorkflow key={projectId} projectId={projectId} showTranscript={false}/>
 				{live ? (
@@ -749,7 +812,7 @@ export function Channel(props: {
 					</div>
 				) : null}
 
-				{props.drafts.map((draft) => (
+				{visibleDrafts.map((draft) => (
 					<DraftRow
 						key={draft.id}
 						draft={draft}

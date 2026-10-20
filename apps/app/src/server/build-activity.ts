@@ -28,6 +28,7 @@ import type { D1Database } from './auth.ts';
 import { assertProjectScope } from './scope.ts';
 import { reconcileStalledBuild, workflowSnapshot } from './build-workflow.ts';
 import { featureViewsFor } from './build-features.ts';
+import { roundDetailText } from './round-detail.ts';
 import {
 	buildTimeline,
 	isTestCommand,
@@ -226,7 +227,7 @@ export async function buildActivity(db: D1Database, scope: Scope, nowMs: number 
 		issue: String(row['issue']),
 		round: String(row['round']),
 		outcome: String(row['outcome']),
-		detail: row['detail'] == null ? null : String(row['detail']),
+		detail: roundDetailText(row['detail'] == null ? null : String(row['detail'])),
 		at: String(row['createdAt']),
 	}));
 

@@ -25,6 +25,11 @@ export interface ProjectProposal {
 	readonly hackathonUrl: string | null;
 	readonly track: string | null;
 	readonly firstStep: string | null;
+	/** The hackathon's rule naming what entries must use, quoted (plan 4.2). */
+	readonly requiredTech: string | null;
+	/** Who it's for and the problem, in the person's own words (plan 4.3). */
+	readonly audience: string | null;
+	readonly problem: string | null;
 	readonly status: ProposalStatus;
 	readonly projectId: string | null;
 	readonly createdAt: string;
@@ -39,10 +44,23 @@ export interface ProposeProjectInput {
 	readonly hackathonUrl?: string | null;
 	readonly track?: string | null;
 	readonly firstStep?: string | null;
+	readonly requiredTech?: string | null;
+	readonly audience?: string | null;
+	readonly problem?: string | null;
 	readonly sourceConversationId: string;
 }
 
 const now = () => new Date().toISOString();
+
+/**
+ * Words that belong in the brief, not in the idea a person reads on the card
+ * (plan 4.4). Words that are also ordinary English only count capitalised
+ * ("React", not "react fast"); "workers", "bun" and "dart" are left out.
+ */
+const STACK_WORDS: readonly RegExp[] = [
+	/\b(?:hono|vite|next\.?js|node\.?js|typescript|javascript|sqlite|sql\.js|postgres(?:ql)?|mysql|mongodb|supabase|firebase|redis|tailwind|ollama|graphql|cloudflare|wrangler|back-?end|front-?end)\b/i,
+	/\b(?:React|Flutter|APIs?|REST|D1|PWA)\b/,
+];
 const clean = (value: string | null | undefined, max: number): string | null => {
 	if (typeof value !== 'string') return null;
 	const text = value.replace(/\s+/g, ' ').trim().slice(0, max);
@@ -60,6 +78,9 @@ function fromRow(row: Record<string, unknown>): ProjectProposal {
 		hackathonUrl: (row['hackathonUrl'] as string | null) ?? null,
 		track: (row['track'] as string | null) ?? null,
 		firstStep: (row['firstStep'] as string | null) ?? null,
+		requiredTech: (row['requiredTech'] as string | null) ?? null,
+		audience: (row['audience'] as string | null) ?? null,
+		problem: (row['problem'] as string | null) ?? null,
 		status: row['status'] as ProposalStatus,
 		projectId: (row['projectId'] as string | null) ?? null,
 		createdAt: String(row['createdAt']),
@@ -76,13 +97,20 @@ export async function proposeProject(db: D1Database, scope: Scope, input: Propos
 	if (!name || !idea || !brief) {
 		throw new ScopeError(400, 'invalid_proposal', 'A proposal needs a name, a short idea and a brief.');
 	}
+	if (STACK_WORDS.some((pattern) => pattern.test(idea))) {
+		throw new ScopeError(
+			400,
+			'invalid_proposal',
+			'Keep the idea in plain words for the person: what the app does for them. Put the stack (frameworks, databases, hosting, APIs) in the brief.',
+		);
+	}
 	const url = clean(input.hackathonUrl, 500);
 	if (url && !/^https?:\/\//i.test(url)) throw new ScopeError(400, 'invalid_proposal', 'The hackathon link must be an http(s) URL.');
 	const id = `prop_${crypto.randomUUID()}`;
 	const stamp = now();
 	await db
 		.prepare(
-			'insert into "project_proposals" ("id","actorId","workspaceId","homeProjectId","sourceConversationId","name","idea","brief","hackathonTitle","hackathonUrl","track","firstStep","status","projectId","createdAt","updatedAt") values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+			'insert into "project_proposals" ("id","actorId","workspaceId","homeProjectId","sourceConversationId","name","idea","brief","hackathonTitle","hackathonUrl","track","firstStep","status","projectId","createdAt","updatedAt","requiredTech","audience","problem") values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
 		)
 		.bind(
 			id,
@@ -101,6 +129,9 @@ export async function proposeProject(db: D1Database, scope: Scope, input: Propos
 			null,
 			stamp,
 			stamp,
+			clean(input.requiredTech, 600),
+			clean(input.audience, 400),
+			clean(input.problem, 400),
 		)
 		.run();
 	return getProposal(db, verified, id);
@@ -144,10 +175,19 @@ export async function acceptProposal(
 		.bind(proposal.id)
 		.all<Record<string, unknown>>();
 	const sourceConversationId = String(row.results?.[0]?.['sourceConversationId'] ?? '');
+	// The person's own words and the hackathon's own rule travel with the
+	// brief, word for word, so the plan is written on them (plans 4.2, 4.3).
+	// The brief keeps within the start limit.
+	const lines = [
+		proposal.audience ? `Who it's for, in their words: “${proposal.audience}”` : null,
+		proposal.problem ? `The problem, in their words: “${proposal.problem}”` : null,
+		proposal.requiredTech ? `Required by the hackathon (${proposal.hackathonTitle ?? 'its rules'}): “${proposal.requiredTech}”` : null,
+	].filter((line): line is string => line !== null);
+	const extra = lines.length > 0 ? `\n\n${lines.join('\n')}` : '';
 	const started = await startProjectFromChat(db, scope, {
 		name: proposal.name,
 		description: proposal.idea,
-		brief: proposal.brief,
+		brief: `${proposal.brief.slice(0, 16000 - extra.length)}${extra}`,
 		operationKey: `proposal:${proposal.id}`,
 		sourceConversationId,
 	}, limits);

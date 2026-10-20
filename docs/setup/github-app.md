@@ -16,6 +16,7 @@ GitHub Apps → New GitHub App) with:
 | Homepage URL | Your Caddie origin (e.g. `https://app.example.com`) |
 | Callback URL | `https://app.example.com/api/auth/callback/github` (P01 sign-in only — optional; repo access does not use OAuth callbacks) |
 | Webhook URL | `https://app.example.com/api/github/webhook` |
+| Setup URL | `https://app.example.com/api/github/setup` (GitHub's return after install connects the installation in one click; tick **Redirect on update** too). Leave **Request user authorization (OAuth) during installation** off: it replaces the Setup URL. |
 | Webhook secret | A dedicated random secret (`GITHUB_WEBHOOK_SECRET`) — use a secret manager, not chat |
 | Permissions → Repository → Contents | **Read & write** (`contents:write`) |
 | Permissions → Repository → Pull requests | **Read & write** (`pull_requests:write`) |

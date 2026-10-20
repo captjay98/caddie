@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { createFlueClient } from "@flue/sdk";
 import { useFlueAgent } from "@flue/react";
 import { Markdown } from "@caddie/ui/Markdown";
 import type { PlanDocRevision, ApprovalRecord } from "@caddie/contracts";
@@ -13,6 +12,7 @@ import { useProjectRepo, useSourceSave, type ProjectRepoView, type SourceSaveVie
 import { Icon } from "../icons.tsx";
 import { InteractivePreview } from "../artifacts/InteractivePreview.tsx";
 import { DesignMockPreview } from "../artifacts/DesignMockPreview.tsx";
+import { ReplyText } from "./ReplyText.tsx";
 import { BuildProgress } from "../project/BuildProgress.tsx";
 import { PlanFeatureList, SavedFeatures } from "../project/FeatureChecklist.tsx";
 import { AppKeys } from "../project/AppKeys.tsx";
@@ -243,7 +243,8 @@ export function ProjectWorkflow({
         <button type="button" className="btn-ghost" disabled={busy} onClick={async () => {
           setBusy(true); setError(null);
           try {
-            await createFlueClient({ url: `/agents/coordinator/${encodeURIComponent(workflow.conversationId)}` }).abort();
+            // One Stop for every button (plan 3.2): the server stops the
+            // workflow, then the running turn.
             await postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow/stop`, {});
             await state.refetch();
           } catch (cause) { setError(cause instanceof Error ? cause.message : "The stop request failed."); }
@@ -487,7 +488,7 @@ export function ProjectWorkflow({
           {latestMessage.parts
             .filter((p) => p.type === "text")
             .map((p, i) =>
-              p.type === "text" ? <Markdown key={i} text={p.text} /> : null,
+              p.type === "text" ? <ReplyText key={i} text={p.text} streaming={p.state === "streaming"} /> : null,
             )}
         </details>
       ) : null}

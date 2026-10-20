@@ -9,6 +9,7 @@ import { listProjectsForActor } from './projects.ts';
 import { listCandidates } from './discovery.ts';
 import { listPreviews } from './previews.ts';
 import { listPackages, getReadiness } from './submission.ts';
+import { STOP_SENTINEL } from './project-experience.ts';
 
 /**
  * UI review board screen 05/06 — the brief feed. `GET /api/projects/:id/brief`
@@ -168,14 +169,20 @@ async function staleArtifactCards(db: D1Database, scope: Scope): Promise<Decisio
 }
 
 async function failedRunCards(db: D1Database, projectId: string): Promise<DecisionCard[]> {
+	// A project with a build: the build's own record says whether it stopped.
+	// A failed repair round is part of a working build (the builder repairs
+	// and goes on), so the card shows only while Caddie has the build paused,
+	// never for the person's own stop, and only for this build's run.
+	const build = (await queryAll(db, `select "runId", "phase", "detail" from "build_workflows" where "projectId" = ?`, projectId))[0];
+	if (build && (build.phase !== 'blocked' || String(build.detail ?? '').startsWith(STOP_SENTINEL))) return [];
 	// Latest failed round per run — the repair ledger's honest failure rows.
 	const rows = await queryAll(
 		db,
 		`select "runId", "issue", "createdAt"
 		   from "run_rounds"
-		  where "projectId" = ? and "outcome" = 'failed'
+		  where "projectId" = ? and "outcome" = 'failed'${build ? ` and "runId" = ?` : ''}
 		  order by "createdAt" desc`,
-		projectId,
+		...(build ? [projectId, String(build.runId)] : [projectId]),
 	);
 	const seen = new Set<string>();
 	const cards: DecisionCard[] = [];

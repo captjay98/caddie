@@ -30,6 +30,9 @@ interface ProposalView {
 	hackathonUrl: string | null;
 	track: string | null;
 	firstStep: string | null;
+	/** In the person's own words (plan 4.3); absent on proposals made before. */
+	audience?: string | null;
+	problem?: string | null;
 	status: 'proposed' | 'accepted' | 'dismissed';
 	projectId: string | null;
 }
@@ -73,6 +76,18 @@ export function ProjectProposalCard({ data }: { data: ProjectProposalPayload }):
 			<h3 className="proposal-title">{p.name}</h3>
 			<p className="proposal-idea">{p.idea}</p>
 			<dl className="proposal-facts">
+				{p.audience ? (
+					<div data-testid="proposal-audience">
+						<dt>Who it's for</dt>
+						<dd>“{p.audience}”</dd>
+					</div>
+				) : null}
+				{p.problem ? (
+					<div data-testid="proposal-problem">
+						<dt>The problem</dt>
+						<dd>“{p.problem}”</dd>
+					</div>
+				) : null}
 				{p.hackathonTitle ? (
 					<div>
 						<dt>Hackathon</dt>

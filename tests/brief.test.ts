@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeParse } from 'valibot';
 import type { Scope } from '@caddie/contracts';
@@ -23,21 +23,13 @@ import { projectBrief } from '../apps/app/src/server/brief.ts';
  */
 
 const REPO_ROOT = join(import.meta.dir, '..');
-const MIGRATION_PATHS = [
-	'0001_product.sql',
-	'0002_controls.sql',
-	'0003_artifacts.sql',
-	'0004_evidence.sql',
-	'0005_runs.sql',
-	'0007_schedules.sql',
-	'0009_discovery.sql',
-	'0010_judge.sql',
-	'0011_home_project.sql',
-	'0012_brief_read.sql',
-	'0013_discovery_saved.sql',
-	'0014_stack_notify.sql',
-	'0015_plan_decisions.sql',
-].map((name) => join(REPO_ROOT, 'apps', 'app', 'migrations', name));
+// The real schema: every migration, in order. The brief reads the build's own
+// state (build_workflows) since plan 3.1, so a hand-picked prefix no longer fits.
+const MIGRATIONS_DIR = join(REPO_ROOT, 'apps', 'app', 'migrations');
+const MIGRATION_PATHS = readdirSync(MIGRATIONS_DIR)
+	.filter((name) => /^\d+_.*\.sql$/.test(name))
+	.sort()
+	.map((name) => join(MIGRATIONS_DIR, name));
 
 function wrapSqliteAsD1(sqlite: Database): D1Database {
 	return {
@@ -382,4 +374,61 @@ test('groupCards dedupes on (projectId, kind, targetId) — newest wins, nothing
 	expect(p1!.headline).toBe('newer');
 	expect(grouped.some((c) => c.projectId === 'p2')).toBe(true);
 	expect(grouped.some((c) => c.primaryAction.targetId === 'x-2')).toBe(true);
+});
+
+describe('the "paused this build" card follows the build itself (live finding, 2026-10-20)', () => {
+	// Live, FarmLog's brief said "Caddie hit a problem and paused this build"
+	// while the build was still going (it went on to finish all 7 features).
+	// A failed repair round is part of a working build: the builder repairs
+	// and goes on. Only the build's own record says whether it stopped.
+	const PAUSED = 'Caddie hit a problem and paused this build';
+	function withBuild(phase: string, detail: string | null = null): World {
+		const world = makeWorld();
+		world.sqlite
+			.prepare(
+				`insert into "build_workflows" (projectId, runId, conversationId, intakeKey, brief, phase, detail, updatedAt)
+				 values ('unit-proj-a','unit-run-build','unit-conv-build','unit-intake-a','Build a farm log.',?,?,'${ISO}')`,
+			)
+			.run(phase, detail);
+		world.sqlite.exec(`
+			insert into "run_rounds" ("id","runId","projectId","issue","round","outcome","detail","createdAt") values
+				('unit-rb-old','unit-run-old','unit-proj-a','an earlier run failed','repair_attempt','failed',null,'2026-10-04T08:00:00.000Z'),
+				('unit-rb-1','unit-run-build','unit-proj-a','feature-2:behavior-tests','repair_attempt','failed',null,'2026-10-04T09:00:00.000Z'),
+				('unit-rb-2','unit-run-build','unit-proj-a','feature-2:browser-bundle','repair_attempt','failed',null,'2026-10-04T09:05:00.000Z');
+		`);
+		return world;
+	}
+	const paused = async (world: World) => (await projectBrief(world.db, world.aliceScope)).filter((card) => card.headline === PAUSED);
+
+	test('a build that is planning, waiting for review, building or finished shows no "paused" card', async () => {
+		for (const phase of ['planning', 'review', 'design', 'design-review', 'building', 'ready']) {
+			const world = withBuild(phase);
+			try {
+				expect({ phase, cards: (await paused(world)).length }).toEqual({ phase, cards: 0 });
+			} finally {
+				world.sqlite.close();
+			}
+		}
+	});
+
+	test('a build Caddie really paused shows one card, for this build, naming the newest failed check', async () => {
+		const world = withBuild('blocked', '“Daily log” failed its checks three times, so the build is paused.');
+		try {
+			const cards = await paused(world);
+			expect(cards.length).toBe(1);
+			expect(cards[0]!.primaryAction.targetId).toBe('unit-run-build');
+			expect(cards[0]!.summary).toContain('feature-2:browser-bundle');
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a build the person stopped is not reported as a problem Caddie hit', async () => {
+		const world = withBuild('blocked', 'Stop requested. Your plan and files are retained. Wait for Caddie to stop before retrying.');
+		try {
+			expect((await paused(world)).length).toBe(0);
+		} finally {
+			world.sqlite.close();
+		}
+	});
 });

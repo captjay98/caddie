@@ -6,6 +6,7 @@ import { createProjectsRouter } from './projects.ts';
 import { ScopeError, sessionUserId } from '../scope.ts';
 import { getProfile, upsertProfile } from '../profiles.ts';
 import { searchContent } from '../search.ts';
+import { memoryOffers } from '../stated-preference.ts';
 import {
 	addMemoryFact,
 	confirmMemoryFact,
@@ -137,6 +138,14 @@ export function createProfileRouter(): Hono<{ Bindings: Env }> {
 		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
 		const facts = await memoryForInjection(c.env.DB, actorId, c.req.query('projectId') ?? null);
 		return c.json({ facts });
+	});
+
+	// What the chat offers to remember for this person's OK (plan 6.2).
+	router.get('/memory/offers', async (c) => {
+		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+		const projectId = c.req.query('projectId');
+		if (!projectId) throw new ScopeError(400, 'invalid_request', 'projectId is required');
+		return c.json({ offers: await memoryOffers(c.env.DB, actorId, projectId) });
 	});
 
 	router.post('/memory/proposals', async (c) => {

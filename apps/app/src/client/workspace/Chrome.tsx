@@ -49,7 +49,9 @@ import type { ReactElement, ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
-import { authClient, SignInPanel } from '../auth.ts';
+import { authClient } from '../auth.ts';
+import { SignInScreen } from '../sign-in.tsx';
+import { NotificationsBell } from './NotificationsBell.tsx';
 import { Icon } from '../icons.tsx';
 import { Composer } from '../conversation/Composer.tsx';
 import { Channel } from '../conversation/Channel.tsx';
@@ -63,6 +65,7 @@ import { QuickSearch, useQuickSearchHotkey } from '../search/QuickSearch.tsx';
 import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
 import { WORDS } from '../copy.ts';
 import { sessionShareStorage, takeSharedDraft } from '../share-target.ts';
+import { GithubReturnNotice } from '../repositories/GithubReturnNotice.tsx';
 import { StatePanel, failureKind } from '../states.tsx';
 import { applyTheme, browserStorage, currentTheme, saveThemeChoice, type Palette, type ThemeChoice, type ThemeMode } from '../theme.ts';
 import {
@@ -179,8 +182,9 @@ interface WorkspaceChromeContextValue {
 	/** The channel store + run transport, bound to the conversation scope. */
 	channel: {
 		drafts: readonly ChannelDraft[];
-		addDraft: (text: string) => ChannelDraft | null;
-		retryDraft: (id: string) => void;
+		addDraft: (text: string, options?: { sending?: boolean }) => ChannelDraft | null;
+		failDraft: (id: string) => void;
+		resendDraft: (id: string) => void;
 		discardDraft: (id: string) => void;
 		resolveDraft: (id: string) => void;
 		/** Unsent typing, scoped actor+conversation, survives navigation (F01). */
@@ -361,7 +365,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		// A message is text, attachments, or both. The draft text keeps a visible
 		// label when only attachments were sent, so the optimistic row is honest.
 		const draftText = text || (attachments.length ? `(${attachments.length} attachment${attachments.length === 1 ? '' : 's'})` : '');
-		const draft = channel.addDraft(draftText);
+		const draft = channel.addDraft(draftText, { sending: transport !== null });
 		if (draft && transport) {
 			// The transport carries attachments alongside the text when its send
 			// accepts them (Flue message parts); the idempotency key still guards
@@ -373,7 +377,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 			) => Promise<unknown>;
 			send(text, draft.idempotencyKey, attachments.length ? { attachments } : undefined).then(
 				() => channel.resolveDraft(draft.id),
-				() => channel.retryDraft(draft.id),
+				() => channel.failDraft(draft.id),
 			);
 		}
 		// On mobile, jump to the conversation so the sent message and its reply
@@ -674,9 +678,18 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								{props.crumbs}
 							</div>
 						) : null}
-						<main id="main" className="shell-main" data-hidden={conversationKind !== 'none' && mobileConversation && !isDesktop}>
+						<main
+							id="main"
+							className="shell-main"
+							data-hidden={conversationKind !== 'none' && mobileConversation && !isDesktop}
+							data-signed-out={authenticated || authOffline ? undefined : 'true'}
+						>
 							{authenticated ? (
-								props.children
+								<>
+									{/* GitHub's return, said once (plan 6.1). */}
+									<GithubReturnNotice />
+									{props.children}
+								</>
 							) : authOffline ? (
 								<div className="shell-loading" data-testid="offline-launch">
 									<StatePanel
@@ -689,26 +702,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 									/>
 								</div>
 							) : (
-								<div className="signin-view" data-testid="sign-in-gate">
-									<div className="signin-col">
-										<div className="signin-brand">
-											<Mascot mood="ready" size={56} live />
-											<h1 className="signin-title">Sign in to Caddie</h1>
-											<p className="signin-lede">
-												Use the account you already have
-												<br />
-												it&rsquo;s free to start.
-											</p>
-										</div>
-										<div className="signin-card">
-											<SignInPanel callbackURL="/app/" />
-										</div>
-										<p className="signin-note">
-											Signing in doesn&rsquo;t give Caddie your code. It asks separately, only if you
-											bring code in.
-										</p>
-									</div>
-								</div>
+								<SignInScreen />
 							)}
 						</main>
 					</section>
@@ -886,14 +880,17 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								resolving={conversationResolving}
 								onSend={sendText}
 								onRetryDraft={(id) => {
-									channel.retryDraft(id);
 									const draft: ChannelDraft | undefined = channel.drafts.find((d) => d.id === id);
-									if (draft && transport) {
-										transport.send(draft.text, draft.idempotencyKey).then(
-											() => channel.resolveDraft(id),
-											() => {},
-										);
+									if (!draft) return;
+									if (!transport) {
+										channel.failDraft(id);
+										return;
 									}
+									channel.resendDraft(id);
+									transport.send(draft.text, draft.idempotencyKey).then(
+										() => channel.resolveDraft(id),
+										() => channel.failDraft(id),
+									);
 								}}
 								onEditDraft={channel.editDraft}
 								onDiscardDraft={channel.discardDraft}
@@ -998,6 +995,7 @@ function NavCapsule(props: {
 			>
 				<Icon name="search" title="Search" />
 			</button>
+			<NotificationsBell />
 			<button
 				type="button"
 				className="capsule-icon theme-toggle-btn"
@@ -1082,6 +1080,7 @@ function MobileHeader(props: {
 			)}
 			<span className="mobile-header-spacer" />
 			{action}
+			<NotificationsBell />
 			<AccountMenu accountOpen={props.accountOpen} setAccountOpen={props.setAccountOpen} displayName={props.displayName} />
 		</header>
 	);

@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { safeParse } from "valibot";
 import { BriefSummarySchema } from "@caddie/contracts";
@@ -14,12 +14,12 @@ import { accountBrief, summariseBrief, markBriefRead } from "../apps/app/src/ser
  */
 
 const REPO = join(import.meta.dir, "..");
-const MIGRATIONS = [
-  "0001_product.sql", "0002_controls.sql", "0003_artifacts.sql", "0004_evidence.sql",
-  "0005_runs.sql", "0007_schedules.sql", "0009_discovery.sql", "0010_judge.sql",
-  "0011_home_project.sql", "0012_brief_read.sql", "0013_discovery_saved.sql",
-  "0014_stack_notify.sql", "0015_plan_decisions.sql",
-].map((n) => join(REPO, "apps", "app", "migrations", n));
+// The real schema: every migration, in order (the brief reads build_workflows).
+const MIGRATIONS_DIR = join(REPO, "apps", "app", "migrations");
+const MIGRATIONS = readdirSync(MIGRATIONS_DIR)
+  .filter((n) => /^\d+_.*\.sql$/.test(n))
+  .sort()
+  .map((n) => join(MIGRATIONS_DIR, n));
 
 const ISO = "2026-10-05T00:00:00.000Z";
 

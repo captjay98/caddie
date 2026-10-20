@@ -178,7 +178,9 @@ export function featureViews(
 		title: row.title,
 		doneWhen: row.doneWhen,
 		position: row.position,
-		status: row.status,
+		// "Building now" only while the build is building: a stopped, paused or
+		// re-planned build leaves its row at 'building' until it resumes (plan 3.2).
+		status: row.status === 'building' && phase !== 'building' ? 'pending' : row.status,
 		attempts: row.attempts,
 		testsPassed: row.testsPassed,
 		passedAt: row.passedAt,

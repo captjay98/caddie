@@ -8,6 +8,7 @@ import {
   ScopeError,
 } from "./scope.ts";
 import { createRun, isRunPaused, lookupRunByConversation } from "./runs.ts";
+import { createNotification } from "./notifications.ts";
 import { admitJudgeBuildStart, admitJudgeMessage, judgeProjectCap, judgeProjectRefusal, judgeProjectRoom } from "./judge-limits.ts";
 import {
   getProject,
@@ -521,6 +522,38 @@ export async function setWorkflowBlocker(
     )
     .bind("blocked", detail.slice(0, 2000), now(), scope.projectId)
     .run();
+  await notifyBuildPaused(db, scope.projectId, detail);
+}
+
+/**
+ * Caddie paused this build and needs its owner (plan 5.4). Besides the Brief
+ * card, the owner gets ONE notification per run, raised here where the pause
+ * is recorded (the dedupe key arbitrates repeats). Only Caddie's own pauses
+ * come here: the person's Stop (stopWorkflow) never does. A notification that
+ * cannot be saved never undoes or hides the pause.
+ */
+async function notifyBuildPaused(db: D1Database, projectId: string, detail: string): Promise<void> {
+  try {
+    const found = await rows(
+      db,
+      'select w."runId", w."conversationId", p."name" from build_workflows w join "projects" p on p."id" = w."projectId" where w."projectId" = ?',
+      projectId,
+    );
+    const workflow = found[0];
+    if (!workflow) return;
+    const run = await lookupRunByConversation(db, String(workflow.conversationId));
+    if (!run?.createdBy) return;
+    await createNotification(db, {
+      userId: run.createdBy,
+      projectId,
+      kind: "build_paused",
+      title: `Caddie paused the build of ${String(workflow.name)}`,
+      body: detail.slice(0, 600),
+      dedupeKey: `brief:${String(workflow.runId)}:blocked`,
+    });
+  } catch (error) {
+    console.warn("build-paused notification not saved", error);
+  }
 }
 /**
  * A `building` run with no recorded progress for this long is stopped
@@ -574,7 +607,9 @@ export async function reconcileStalledBuild(
     )
     .bind(detail, new Date(nowMs).toISOString(), projectId, workflow.updatedAt)
     .run();
-  return Number((result as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
+  const paused = Number((result as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
+  if (paused) await notifyBuildPaused(db, projectId, detail);
+  return paused;
 }
 
 /** Cron sweep: stop every stalled build. Returns how many were stopped. */
@@ -603,6 +638,28 @@ export async function stopWorkflow(db: D1Database, scope: Scope) {
   await db.prepare("update build_workflows set phase='blocked',pendingKey=null,pendingBody=null,detail=?,updatedAt=? where projectId=? and phase='building'")
     .bind("Stop requested. Your plan and files are retained. Wait for Caddie to stop before retrying.", now(), scope.projectId).run();
   return workflowSnapshot(db, scope);
+}
+
+/**
+ * Every Stop button (the chat card and the project page) ends here (plan 3.2):
+ * the workflow is marked stopped FIRST, so nothing that runs after the abort
+ * sees a building workflow, then the build's running turn is stopped. A
+ * failed abort keeps the stop: the builder's next step finds the build stopped.
+ */
+export async function stopBuild(
+  db: D1Database,
+  scope: Scope,
+  abort: ((conversationId: string) => Promise<boolean>) | null,
+) {
+  const snapshot = await stopWorkflow(db, scope);
+  if (abort && snapshot.workflow) {
+    try {
+      await abort(snapshot.workflow.conversationId);
+    } catch (error) {
+      console.error("stop: the running turn could not be stopped:", error);
+    }
+  }
+  return snapshot;
 }
 /** What a checked build carries besides its preview page (manifest v1, stored by content hash). */
 export interface BuildBundleInput {
@@ -739,11 +796,20 @@ async function prepareOutput(
   input: { html: string; image: string; bundle?: BuildBundleInput },
 ) {
   const bytes = new TextEncoder().encode(input.html);
-  if (!input.html.toLowerCase().includes("<html") || bytes.length > 500_000)
+  if (!input.html.toLowerCase().includes("<html"))
     throw new ScopeError(
       422,
       "INVALID_PREVIEW",
-      "A complete HTML preview of at most 500 KB is required.",
+      "A complete HTML preview of at most 2 MB is required.",
+    );
+  // The page carries the whole app (its code and styles inlined), so its
+  // limit is storage's own, not a smaller guess: a finished build with
+  // sql.js once got no preview at 500 KB (live finding, 2026-10-20).
+  if (bytes.length > D1_MAX_VALUE_BYTES)
+    throw new ScopeError(
+      422,
+      "INVALID_PREVIEW",
+      `This app's preview page is ${(bytes.length / 1_000_000).toFixed(1)} MB, and a preview can be at most ${D1_MAX_VALUE_BYTES / 1_000_000} MB. Make the app's code smaller (load big files only when needed) and check again.`,
     );
   const content = await createD1ContentStore(db).put(bytes);
   const manifestSha256 = input.bundle ? await storeBundleManifest(db, input.bundle) : null;

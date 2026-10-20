@@ -352,3 +352,72 @@ test.describe('Projects v2 (U05)', () => {
 		await context.close();
 	});
 });
+
+test.describe('the project card shows the app, its steps and its hackathon (plan 5.7)', () => {
+	// The owner chose variants B + C (2026-10-20): the app's picture (its letter
+	// tile until real screenshots exist), the four steps, and the hackathon with
+	// its deadline.
+	const PROJ_C = project('proj-c', 'Notes', 'standard', { description: 'Quick notes for the farm' });
+	const building = (projectId: string) => ({
+		projectId, version: 1_760_090_000_000, stage: 'building',
+		plan: { id: 'pdr-1', revision: '1', approved: true }, preview: null,
+		message: 'Caddie is building your app.', actions: [],
+	});
+
+	test('a building project for a hackathon: letter tile, contest and days left, and where it is in four steps', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+		await stubAccount(context);
+		await context.route('**/api/projects', (route) => json(route, 200, { projects: [HOME, PROJ_A, PROJ_C] }));
+		await context.route('**/api/projects/proj-a/experience', (route) => json(route, 200, building('proj-a')));
+		await context.route('**/api/projects/proj-c/experience', (route) => json(route, 200, building('proj-c')));
+		await context.route('**/api/project-hackathons', (route) =>
+			json(route, 200, { hackathons: { 'proj-a': { title: 'Nebius x NVIDIA Global AI Hackathon', deadline: '2026-10-29', daysLeft: 4, ended: false } } }),
+		);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/projects`);
+
+		const row = page.getByTestId('project-row-proj-a');
+		const tile = row.getByTestId('project-tile-proj-a');
+		await expect(tile).toHaveText('P');
+		// The same colour the published app's home-screen icon gets for this project.
+		const { iconColor } = await import('../../packages/contracts/src/app-icon.ts');
+		const hex = iconColor('proj-a');
+		const rgb = `rgb(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)})`;
+		await expect(tile).toHaveCSS('background-color', rgb);
+		await expect(row.getByTestId('project-contest-proj-a')).toHaveText('Nebius x NVIDIA Global AI Hackathon · Due in 4 days');
+		const steps = row.getByTestId('project-journey-proj-a').locator('li');
+		await expect(steps).toHaveCount(4);
+		expect(await steps.evaluateAll((items) => items.map((li) => `${li.querySelector('.project-journey-label')?.textContent}:${li.getAttribute('data-state')}`))).toEqual([
+			'Plan:done', 'Build:now', 'Check:todo', 'Submit:todo',
+		]);
+		await expect(steps.nth(1)).toHaveAttribute('aria-current', 'step');
+
+		// A personal project: no hackathon line, and its last step is Share.
+		const notes = page.getByTestId('project-row-proj-c');
+		await expect(notes.getByTestId('project-tile-proj-c')).toHaveText('N');
+		await expect(notes.getByTestId('project-contest-proj-c')).toHaveCount(0);
+		await expect(notes.getByTestId('project-journey-proj-c').locator('.project-journey-label').last()).toHaveText('Share');
+		if (process.env.CARD_SHOTS) await page.getByTestId('project-list').screenshot({ path: `${process.env.CARD_SHOTS}/project-card-desktop.png` });
+		await context.close();
+	});
+
+	test('on a phone the card keeps the tile, the contest line and the four steps', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await stubAccount(context);
+		await context.route('**/api/projects/proj-a/experience', (route) => json(route, 200, building('proj-a')));
+		await context.route('**/api/project-hackathons', (route) =>
+			json(route, 200, { hackathons: { 'proj-a': { title: 'Nebius x NVIDIA Global AI Hackathon', deadline: '2026-10-29', daysLeft: 0, ended: false } } }),
+		);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/projects`);
+
+		const row = page.getByTestId('project-row-proj-a');
+		await expect(row.getByTestId('project-tile-proj-a')).toBeVisible();
+		await expect(row.getByTestId('project-contest-proj-a')).toHaveText('Nebius x NVIDIA Global AI Hackathon · Due today');
+		await expect(row.getByTestId('project-journey-proj-a').locator('li')).toHaveCount(4);
+		const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+		expect(overflow).toBe(0);
+		if (process.env.CARD_SHOTS) await row.screenshot({ path: `${process.env.CARD_SHOTS}/project-card-phone.png` });
+		await context.close();
+	});
+});

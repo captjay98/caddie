@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { OnboardingGate, useOnboarding, onboardingKey, returnKey, type OnboardingStatus } from './onboarding/Gate.tsx';
 import { postJson } from './api.ts';
-import { SignInPanel } from './auth.ts';
+import { SignInScreen } from './sign-in.tsx';
 import { Link, Outlet, createBrowserHistory, createRootRoute, createRoute, createRouter, redirect, useMatches } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
 import { WorkspaceChrome, type WorkspaceNavId } from './workspace/Chrome.tsx';
@@ -95,10 +95,18 @@ function OnboardingFlow(): ReactElement {
    throw new Error('We couldn’t finish setup. Please try again.');
   } finally { setBusy(false); }
  }
+ // Signed out here too: the one sign-in screen, filling the page (plan 5.2).
+ if (!auth.data?.authenticated) {
+  return (
+   <main id="main" className="signin-page" data-testid="onboarding-page">
+    <SignInScreen callbackURL="/app/onboarding" />
+   </main>
+  );
+ }
  return (
   <main id="main" data-testid="onboarding-page" style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 'clamp(16px, 4vw, 48px)' }}><div style={{ width: '100%', maxWidth: 720 }}>
-   {!auth.data?.authenticated ? <SignInPanel callbackURL="/app/onboarding" /> : status.data?.completedAt ? (
-    <p role="status" aria-live="polite">Getting your workspace ready…</p>
+   {status.data?.completedAt ? (
+    <StatePanel kind="loading" title="Getting your workspace ready…" />
    ) : (
     <><fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0 }}>
      {atProfile && actor.data ? <OnboardingProfile actorId={actor.data} onDone={finish} /> : <WelcomeIntro onDone={() => setAtProfile(true)} />}

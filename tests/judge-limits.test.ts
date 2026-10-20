@@ -905,3 +905,38 @@ describe('judge limits: paid discovery outside the two Discover buttons', () => 
 		expect(allowed.status).toBe(200);
 	});
 });
+
+describe('the conversation guard offers a stated lasting preference to remember (plan 6.2)', () => {
+	let sqlite: BunDatabase;
+	afterEach(() => sqlite?.close());
+
+	test("the person's own message is read for it, Caddie's own dispatch is not, and a failure never stops the message", async () => {
+		const world = await guardWorld({ judge: false });
+		sqlite = world.sqlite;
+		const send = (body: string, headers: Record<string, string> = {}) =>
+			world.app.request(
+				`${ORIGIN}/coordinator/${world.conversationId}`,
+				{
+					method: 'POST',
+					headers: { cookie: world.cookie, 'content-type': 'application/json', ...headers },
+					body: JSON.stringify({ idempotencyKey: `msg-${crypto.randomUUID()}`, kind: 'user', body }),
+				},
+				world.env,
+			);
+		const facts = () =>
+			sqlite.prepare('select "content","kind","status","sourceRunId" from "memory_facts" where "userId" = ?').all(world.user.id);
+		const run = sqlite.prepare('select "runId" from "run_bindings" where "conversationId" = ?').get(world.conversationId) as { runId: string };
+
+		expect((await send('Always use TypeScript. Build the list next.')).status).toBe(200);
+		expect(facts()).toEqual([{ content: 'Always use TypeScript.', kind: 'preference', status: 'proposed', sourceRunId: `stated:${run.runId}` }]);
+
+		// A message the server dispatched itself is not the person speaking.
+		const signature = await internalDispatchSignature(SECRET, world.conversationId);
+		expect((await send('Never use emojis.', { [INTERNAL_DISPATCH_HEADER]: signature })).status).toBe(200);
+		expect(facts()).toHaveLength(1);
+
+		// Memory that cannot be written never blocks the message.
+		sqlite.exec('drop table "memory_facts"');
+		expect((await send('From now on keep replies short.')).status).toBe(200);
+	});
+});

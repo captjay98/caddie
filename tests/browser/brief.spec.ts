@@ -119,6 +119,7 @@ interface BriefCard {
 	status: 'needs-you' | 'changed' | 'blocked' | 'handled';
 	updatedAt: string;
 	primaryAction: { label: string; kind: 'review' | 'inspect' | 'preview'; targetId: string };
+	runId?: string;
 	key?: string;
 	seen?: boolean;
 }
@@ -534,6 +535,46 @@ test.describe('U04 — the v2 brief layout', () => {
 		// project settings section since U08).
 		await page.getByTestId('brief-deadline-action').click();
 		await expect(page).toHaveURL(/\/app\/project\/settings\?project=proj-b#routines$/);
+		await context.close();
+	});
+});
+
+test.describe('card details in words (plan 5.5)', () => {
+	// Live finding (2026-10-20): "Audit trail" opened a list of raw ids
+	// (run …, card …, project …, action → inspect (run-9)).
+	test('Details say what the card rests on and what its button does; ids only under For developers', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, {
+			cards: [{ ...BLOCKED_A, runId: 'run-9' }, { ...APPROVAL_A, evidenceIds: ['ev-1', 'ev-2'] }],
+			unseenCount: 0,
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/`);
+
+		const blocked = page.getByTestId('decision-card').filter({ hasText: 'Run stopped' });
+		const toggle = blocked.getByTestId('card-detail-toggle');
+		await expect(toggle).toHaveText('Details');
+		await toggle.click();
+		await expect(toggle).toHaveText('Hide details');
+		const details = blocked.getByTestId('card-details');
+		await expect(details.getByTestId('card-details-words').locator('li')).toHaveText([
+			'No evidence is attached yet.',
+			'“Read the failure” opens what happened so you can look before deciding.',
+		]);
+		// The ids are there for developers, folded away.
+		const dev = details.getByTestId('card-details-dev');
+		await expect(dev).not.toHaveAttribute('open');
+		await expect(details.getByText('card brf_failed-run_run-9')).toBeHidden();
+		await dev.locator('summary').click();
+		await expect(details.getByText('card brf_failed-run_run-9')).toBeVisible();
+		await expect(details.getByText('run run-9')).toBeVisible();
+
+		const approval = page.getByTestId('decision-card').filter({ hasText: 'Design review is waiting on you' });
+		await approval.getByTestId('card-detail-toggle').click();
+		await expect(approval.getByTestId('card-details-words').locator('li')).toHaveText([
+			'It rests on 2 pieces of evidence.',
+			'“Review the design” opens it for you to review; nothing changes until you decide.',
+		]);
 		await context.close();
 	});
 });

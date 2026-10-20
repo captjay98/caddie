@@ -83,6 +83,22 @@ async function refusal(task: Promise<unknown>): Promise<ScopeError> {
 }
 
 describe('save the code to GitHub — what may leave the sandbox', () => {
+	test("Caddie's scratch folder at the app root is never saved; a user's own scratch/ folder still is", async () => {
+		expect(classifySourceDirectory('.caddie-scratch')).toBe('scratch');
+		expect(classifySourceDirectory('scratch')).toBeNull();
+		expect(classifySourceDirectory('src/.caddie-scratch')).toBeNull();
+		const tree = memoryTree({
+			'src/App.tsx': 'export const App = () => null;\n',
+			'scratch/notes.md': '# my own notes\n',
+			'.caddie-scratch/probe.ts': 'console.log("probe");\n',
+			'.caddie-scratch/deep/check.ts': 'console.log("check");\n',
+		});
+		const snapshot = await collectSourceSnapshot(tree.reader, ROOT, CAPS);
+		expect(snapshot.files.map((f) => f.path).sort()).toEqual(['scratch/notes.md', 'src/App.tsx']);
+		expect(snapshot.skipped).toContainEqual({ path: '.caddie-scratch/', reason: 'scratch' });
+		expect(tree.read.some((path) => path.includes('.caddie-scratch'))).toBe(false);
+	});
+
 	test('folder rules: dependencies, caches and VCS anywhere; build output only at the app root', () => {
 		expect(classifySourceDirectory('node_modules')).toBe('dependencies');
 		expect(classifySourceDirectory('packages/web/node_modules')).toBe('dependencies');

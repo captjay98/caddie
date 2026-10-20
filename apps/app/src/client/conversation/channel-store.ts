@@ -45,10 +45,12 @@ export interface ChannelDraft {
 	text: string;
 	createdAt: string;
 	attempts: number;
-	state: 'unsent' | 'cancelled';
+	/** sending: on its way (no buttons) · unsent: failed, offer Send again ·
+	 *  cancelled: discarded, kept for reference. */
+	state: 'sending' | 'unsent' | 'cancelled';
 }
 
-function newDraft(text: string): ChannelDraft {
+function newDraft(text: string, state: 'sending' | 'unsent'): ChannelDraft {
 	const id = crypto.randomUUID();
 	return {
 		id: `draft-${id}`,
@@ -56,7 +58,7 @@ function newDraft(text: string): ChannelDraft {
 		text,
 		createdAt: new Date().toISOString(),
 		attempts: 0,
-		state: 'unsent',
+		state,
 	};
 }
 
@@ -85,15 +87,19 @@ function loadDrafts(key: string): ChannelDraft[] {
 		if (!raw) return [];
 		const parsed: unknown = JSON.parse(raw);
 		if (!Array.isArray(parsed)) return [];
-		return parsed.filter(
-			(item): item is ChannelDraft =>
-				item !== null &&
-				typeof item === 'object' &&
-				typeof (item as ChannelDraft).id === 'string' &&
-				typeof (item as ChannelDraft).idempotencyKey === 'string' &&
-				typeof (item as ChannelDraft).text === 'string' &&
-				((item as ChannelDraft).state === 'unsent' || (item as ChannelDraft).state === 'cancelled'),
-		);
+		return parsed
+			.filter(
+				(item): item is ChannelDraft =>
+					item !== null &&
+					typeof item === 'object' &&
+					typeof (item as ChannelDraft).id === 'string' &&
+					typeof (item as ChannelDraft).idempotencyKey === 'string' &&
+					typeof (item as ChannelDraft).text === 'string' &&
+					['sending', 'unsent', 'cancelled'].includes((item as ChannelDraft).state),
+			)
+			// A draft still on its way when the page went away may or may not
+			// have reached Caddie: offer Send again (its key makes a repeat a no-op).
+			.map((draft) => (draft.state === 'sending' ? { ...draft, state: 'unsent' as const } : draft));
 	} catch {
 		return [];
 	}
@@ -162,22 +168,28 @@ export function useChannelStore(options: {
 
 	/** Creates the optimistic draft and returns it (null for empty input) —
 	 *  the caller sends it through the transport with the draft's own key. */
-	const addDraft = useCallback((text: string): ChannelDraft | null => {
+	const addDraft = useCallback((text: string, options: { sending?: boolean } = {}): ChannelDraft | null => {
 		const trimmed = text.trim();
 		if (!trimmed) return null;
-		const draft = newDraft(trimmed);
+		const draft = newDraft(trimmed, options.sending ? 'sending' : 'unsent');
 		setDrafts((existing) => [...existing, draft]);
 		return draft;
 	}, []);
 
-	const retryDraft = useCallback((id: string) => {
+	/** A send failed (or there was nothing to send it through): offer Send again. */
+	const failDraft = useCallback((id: string) => {
 		setDrafts((existing) =>
 			existing.map((draft) =>
-				draft.id === id && draft.state === 'unsent'
-					? { ...draft, attempts: draft.attempts + 1 }
+				draft.id === id && draft.state !== 'cancelled'
+					? { ...draft, state: 'unsent', attempts: draft.attempts + 1 }
 					: draft,
 			),
 		);
+	}, []);
+
+	/** Send again: the same key, so the server can never take it twice. */
+	const resendDraft = useCallback((id: string) => {
+		setDrafts((existing) => existing.map((draft) => (draft.id === id && draft.state === 'unsent' ? { ...draft, state: 'sending' } : draft)));
 	}, []);
 
 	const discardDraft = useCallback((id: string) => {
@@ -214,5 +226,5 @@ export function useChannelStore(options: {
 		setDrafts((existing) => existing.filter((draft) => draft.id !== id));
 	}, []);
 
-	return { drafts, addDraft, retryDraft, discardDraft, editDraft, resolveDraft, composerText, setComposerText, appendComposerText };
+	return { drafts, addDraft, failDraft, resendDraft, discardDraft, editDraft, resolveDraft, composerText, setComposerText, appendComposerText };
 }

@@ -21,11 +21,13 @@ import type {
 	Scope,
 } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
-import { ScopeError } from './scope.ts';
+import { projectScopeForUser, ScopeError } from './scope.ts';
 import { decideWorkflow, workflowSnapshot, type BuildWorkflow } from './build-workflow.ts';
+import { getProject } from './projects.ts';
+import { buildActivity } from './build-activity.ts';
 
 /** The sentinel stopWorkflow writes into detail; distinguishes stop from repair/infra block. */
-const STOP_SENTINEL = 'Stop requested.';
+export const STOP_SENTINEL = 'Stop requested.';
 
 /** Derive a monotonic version from the workflow's updatedAt (no new column). */
 function versionOf(workflow: BuildWorkflow | null): number {
@@ -130,7 +132,7 @@ function actionsOf(
 		case 'checking':
 		case 'repairing':
 			return [
-				{ kind: 'stop', label: 'Stop work', enabled: true, primary: true },
+				{ kind: 'stop', label: 'Stop build', enabled: true, primary: true },
 				...(hasPreview
 					? [{ kind: 'open_preview' as const, label: 'View last preview', enabled: true, primary: false }]
 					: []),
@@ -236,4 +238,47 @@ export async function approvePlan(
 		throw error;
 	}
 	return { outcome: 'applied', experience: await projectExperience(db, scope) };
+}
+
+/** What Caddie may say about one of the person's own projects (plan 3.7). */
+export type ProjectStatusReply =
+	| {
+			found: true;
+			name: string;
+			stage: ProjectExperience['stage'];
+			/** The same sentence the project page shows. */
+			message: string;
+			/** "3 of 7 features done", or null before the build has features. */
+			features: string | null;
+			/** The build's latest line while it runs or is stopped, else null. */
+			latest: string | null;
+	  }
+	| { found: false; message: string };
+
+/**
+ * Home Caddie's read of a project's progress: read-only, the person's own
+ * projects only (the same membership check every project route makes), in
+ * words and without record ids.
+ */
+export async function projectStatusForActor(db: D1Database, actorId: string, projectId: string): Promise<ProjectStatusReply> {
+	let scope: Scope;
+	try {
+		scope = await projectScopeForUser(db, actorId, projectId);
+	} catch (error) {
+		if (error instanceof ScopeError) return { found: false, message: 'None of your projects has that id; use one from the list of existing projects.' };
+		throw error;
+	}
+	const project = await getProject(db, scope);
+	if (project.kind === 'home') return { found: false, message: 'That is Home, not a project.' };
+	const experience = await projectExperience(db, scope);
+	const activity = await buildActivity(db, scope);
+	const done = activity.features.filter((feature) => feature.status === 'passed').length;
+	return {
+		found: true,
+		name: project.name,
+		stage: experience.stage,
+		message: experience.message,
+		features: activity.features.length > 0 ? `${done} of ${activity.features.length} features done` : null,
+		latest: activity.building || activity.phase === 'blocked' ? activity.timeline.summary : null,
+	};
 }

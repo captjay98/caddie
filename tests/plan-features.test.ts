@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_DESIGN_MOCK_TITLE, MAX_PLAN_FEATURES, parsePlanFeatures, splitDesignMocks, splitFeatureBlock } from "../packages/contracts/src/features.ts";
-import { featuresForPlan } from "../apps/app/src/server/build-features.ts";
+import { readFileSync } from "node:fs";
+import { MAX_DESIGN_MOCK_TITLE, MAX_PLAN_FEATURES, parsePlanFeatures, splitChatMocks, splitDesignMocks, splitFeatureBlock } from "../packages/contracts/src/features.ts";
+import { featuresForPlan, featureViews, type BuildFeatureRow } from "../apps/app/src/server/build-features.ts";
 
 /** The PRD's `caddie-features` block: what the user approves is what gets built. */
 const block = (json: string, fence = "```") => `# Plan\n\nProse first.\n\n${fence}caddie-features\n${json}\n${fence}\n\nClosing note.`;
@@ -96,5 +97,74 @@ describe("design brief mockup extraction", () => {
   test("an overlong title is cut to the picker's limit", () => {
     const { mocks } = splitDesignMocks(fenceBlock(`html-mock ${"x".repeat(200)}`, "<b>x</b>"));
     expect(mocks[0]?.title).toHaveLength(MAX_DESIGN_MOCK_TITLE);
+  });
+});
+
+describe("a stopped build never says a feature is \"Building now\" (plan 3.2)", () => {
+  const row = (featureId: string, position: number, status: BuildFeatureRow["status"], attempts = 0): BuildFeatureRow => ({
+    projectId: "p", runId: "r", planId: "plan", featureId, position, title: featureId, doneWhen: ["it works"],
+    status, attempts, testsPassed: status === "passed" ? 3 : null, checkpointRef: status === "passed" ? "ref" : null, passedAt: null,
+  });
+  const rows = [row("f1", 1, "passed"), row("f2", 2, "building", 1), row("f3", 3, "pending")];
+
+  test("while building, the feature in progress shows as building", () => {
+    expect(featureViews({ rows }, "building").map((view) => view.status)).toEqual(["passed", "building", "pending"]);
+  });
+
+  test("once the build is stopped, paused, finished or back in planning, it is up next again", () => {
+    for (const phase of ["blocked", "ready", "planning", "review", "design", "design-review"] as const) {
+      expect({ phase, statuses: featureViews({ rows }, phase).map((view) => view.status) }).toEqual({ phase, statuses: ["passed", "pending", "pending"] });
+    }
+  });
+});
+
+describe("a design mock that lands in a chat reply is drawn, never printed as HTML (plan 4.5)", () => {
+  const SCREEN = '<main class="screen">\n  <h1>Herd today</h1>\n  <p>3 goats need a look</p>\n</main>';
+
+  test("a bare screen and a fenced one come out as mocks, in order, with the prose kept around them", () => {
+    const reply = `Here is the home screen.\n\n${SCREEN}\n\nAnd when nothing is logged yet:\n\n\`\`\`html-mock Home · empty\n<main><p>No animals yet</p></main>\n\`\`\`\n\nTell me what to change.`;
+    const { before, after, mocks, drawing } = splitChatMocks(reply);
+    expect(mocks).toEqual([
+      { title: "Screen 1", html: SCREEN },
+      { title: "Home · empty", html: "<main><p>No animals yet</p></main>" },
+    ]);
+    expect(before).toBe("Here is the home screen.");
+    expect(after).toBe("And when nothing is logged yet:\n\nTell me what to change.");
+    expect(drawing).toBe(false);
+  });
+
+  test("a whole page, an html block and a style sheet before the screen are all part of the mock", () => {
+    const page = "<!doctype html>\n<html><body><main><h1>Log feed</h1></main></body></html>";
+    expect(splitChatMocks(`Look:\n\n${page}`).mocks).toEqual([{ title: "Screen 1", html: page }]);
+    expect(splitChatMocks("```html\n<div class=\"card\"><b>12 kg</b></div>\n```").mocks).toEqual([{ title: "Screen 1", html: '<div class="card"><b>12 kg</b></div>' }]);
+    const styled = "<style>h1{color:var(--color-action)}</style>\n<main><h1>Eggs</h1></main>";
+    expect(splitChatMocks(styled)).toMatchObject({ before: "", after: "", mocks: [{ title: "Screen 1", html: styled }] });
+  });
+
+  test("code in another language and a tag named inside a sentence stay as they are", () => {
+    const prose = "The `<main>` tag holds the page.\n\n```js\nconst page = `<main>hi</main>`;\n```";
+    expect(splitChatMocks(prose)).toEqual({ before: prose, after: "", mocks: [], drawing: false });
+  });
+
+  test("a mock still being written is cut from the prose; once the reply is done it is drawn as it stands", () => {
+    const streaming = splitChatMocks("Drawing it now.\n\n```html-mock Today\n<main><h1>Herd to", { complete: false });
+    expect(streaming).toEqual({ before: "Drawing it now.", after: "", mocks: [], drawing: true });
+    expect(splitChatMocks("Drawing it now.\n\n<main><h1>Herd to", { complete: false })).toMatchObject({ before: "Drawing it now.", mocks: [], drawing: true });
+    expect(splitChatMocks("Done.\n\n```html-mock Today\n<main><h1>Herd today</h1>")).toEqual({
+      before: "Done.", after: "", mocks: [{ title: "Today", html: "<main><h1>Herd today</h1>" }], drawing: false,
+    });
+  });
+});
+
+describe("mockups have one way onto the screen (plan 4.5)", () => {
+  const read = (path: string) => readFileSync(new URL(`../apps/app/src/${path}`, import.meta.url), "utf8");
+
+  test("chat replies and the build card's latest update draw their mockups", () => {
+    expect(read("client/conversation/Channel.tsx")).toMatch(/<ReplyText text=\{part\.text\} streaming=\{part\.state === 'streaming'\} \/>/);
+    expect(read("client/conversation/ProjectWorkflow.tsx")).toMatch(/<ReplyText key=\{i\} text=\{p\.text\} streaming=\{p\.state === "streaming"\} \/>/);
+  });
+
+  test("Caddie keeps mockups in the design brief and never pastes HTML into a reply", () => {
+    expect(read("agents/coordinator.ts")).toContain("Never paste a mockup or any HTML into a reply: the card draws the brief's mockups");
   });
 });

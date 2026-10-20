@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { ReactElement } from 'react';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
-import { SignInPanel } from '../auth.ts';
+import { SignInScreen } from '../sign-in.tsx';
 import { Mascot } from '@caddie/ui/Mascot';
 import { Icon } from '../icons.tsx';
 import { AccountBriefV2 } from '../brief/DecisionCard.tsx';
@@ -39,7 +39,7 @@ function BriefBody(): ReactElement {
 	const brief = useAccountBrief(actor);
 	const markRead = useMarkBriefRead(actor);
 
-	if (!chrome.authenticated) return <SignInWall />;
+	if (!chrome.authenticated) return <SignInScreen />;
 
 	// Every card routes by its OWN identity (briefActionRoute): kind picks the
 	// surface, projectId scopes it, targetId is the exact revision/claim/
@@ -126,26 +126,6 @@ function BriefBody(): ReactElement {
 					onBrowse={() => chrome.goProjectTab('/discover', {})}
 				/>
 			</section>
-		</div>
-	);
-}
-
-function SignInWall(): ReactElement {
-	return (
-		<div className="signin-view" data-testid="sign-in-wall">
-			<div className="signin-col">
-				<div className="signin-brand">
-					<Mascot mood="ready" size={56} live />
-					<h1 className="signin-title">Sign in to Caddie</h1>
-					<p className="signin-lede">Use the account you already have<br />it&rsquo;s free to start.</p>
-				</div>
-				<div className="signin-card">
-					<SignInPanel callbackURL="/app/" />
-				</div>
-				<p className="signin-note">
-					Signing in doesn&rsquo;t give Caddie your code. It asks separately, only if you bring code in.
-				</p>
-			</div>
 		</div>
 	);
 }

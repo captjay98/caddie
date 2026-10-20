@@ -183,3 +183,91 @@ export function StaleChip({ stale }: { stale: boolean }): ReactElement | null {
 		</span>
 	);
 }
+
+/** The pages that load in their own shape (plan 5.6). */
+export type SkeletonPage = 'home' | 'projects' | 'plan' | 'build';
+
+const Bar = (props: { kind: string }) => <span className={`skel ${props.kind}`} />;
+
+/** A card of placeholder lines: kicker, title, two lines, a button. */
+function SkelCard(props: { lines?: number; button?: boolean }): ReactElement {
+	return (
+		<div className="card-surface skel-card">
+			<Bar kind="skel-kicker" />
+			<Bar kind="skel-title" />
+			{Array.from({ length: props.lines ?? 2 }, (_, i) => (
+				<Bar key={i} kind={i === (props.lines ?? 2) - 1 ? 'skel-text skel-short' : 'skel-text'} />
+			))}
+			{props.button === false ? null : <Bar kind="skel-button" />}
+		</div>
+	);
+}
+
+/** A list card of placeholder rows (a title and a line, a dot or a button). */
+function SkelRows(props: { rows: number; lead?: 'dot'; trail?: 'button' }): ReactElement {
+	return (
+		<div className="card-surface skel-list">
+			{Array.from({ length: props.rows }, (_, i) => (
+				<div key={i} className="skel-row">
+					{props.lead === 'dot' ? <Bar kind="skel-dot" /> : null}
+					<span className="skel-row-text">
+						<Bar kind="skel-title" />
+						<Bar kind="skel-text skel-short" />
+					</span>
+					{props.trail === 'button' ? <Bar kind="skel-button" /> : null}
+				</div>
+			))}
+		</div>
+	);
+}
+
+const SHAPES: Record<SkeletonPage, () => ReactElement> = {
+	// Home: the Brief's cards.
+	home: () => (
+		<>
+			<SkelCard />
+			<SkelCard />
+			<SkelCard lines={1} />
+		</>
+	),
+	// Projects: the list of projects, each with its next step.
+	projects: () => <SkelRows rows={4} trail="button" />,
+	// Plan: the decision bar, then the plan itself.
+	plan: () => (
+		<>
+			<SkelCard lines={2} />
+			<SkelCard lines={5} button={false} />
+		</>
+	),
+	// Build: the build's status, then its stages.
+	build: () => (
+		<>
+			<SkelCard lines={1} />
+			<SkelRows rows={5} lead="dot" />
+		</>
+	),
+};
+
+/**
+ * A loading placeholder shaped like the page that is on its way (plan 5.6):
+ * the same cards and rows in the same places, so nothing jumps when the page
+ * arrives. The thinking character and one specific line say what is loading
+ * (the U03 loading grammar); the blocks are decoration for screen readers.
+ */
+export function PageSkeleton(props: { page: SkeletonPage; label: string }): ReactElement {
+	return (
+		<div className="page-skeleton" data-testid={`page-skeleton-${props.page}`} data-state="loading" aria-busy="true">
+			<div className="page-skeleton-head">
+				<span className="state-mascot" aria-hidden="true">
+					<Mascot mood="thinking" size={22} />
+				</span>
+				<p className="page-skeleton-line" role="status">
+					{props.label}
+				</p>
+			</div>
+			<div className="page-skeleton-blocks" aria-hidden="true">
+				{SHAPES[props.page]()}
+			</div>
+		</div>
+	);
+}

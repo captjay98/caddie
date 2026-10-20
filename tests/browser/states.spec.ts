@@ -163,12 +163,12 @@ test.describe('page states with the character (U03)', () => {
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/projects`);
 
-		const loading = page.getByTestId('state-loading').first();
+		const loading = page.getByTestId('page-skeleton-projects');
 		await expect(loading).toBeVisible();
 		// The thinking character, not a blank.
 		await expect(loading.locator('.mascot[data-state="thinking"]')).toBeVisible();
-		// Shaped placeholders, not an empty box.
-		await expect(loading.locator('.state-skeleton span').first()).toBeVisible();
+		// Shaped placeholders, not an empty box: the page's own rows (plan 5.6).
+		await expect(loading.locator('.skel').first()).toBeVisible();
 		release();
 		await expect(page.getByTestId('project-list')).toBeVisible({ timeout: 10_000 });
 		await context.close();
@@ -280,4 +280,121 @@ test.describe('page states with the character (U03)', () => {
 		expect(await rPage.evaluate(() => document.getAnimations().length)).toBe(0);
 		await reduce.close();
 	});
+});
+
+test.describe('getting your workspace ready (plan 5.1)', () => {
+	// Live finding (2026-10-20): while Caddie checked the welcome progress the
+	// whole page was one bare line of text on an unpainted page.
+	test('while Caddie checks your welcome progress, a styled loading screen fills the page, not a bare line', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context);
+		let release: () => void = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await context.unroute('**/api/onboarding');
+		await context.route('**/api/onboarding', async (route) => {
+			await held;
+			return json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' });
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/projects`);
+
+		const screen = page.getByTestId('workspace-ready');
+		await expect(screen).toBeVisible();
+		const panel = screen.getByTestId('state-loading');
+		await expect(panel.locator('.state-title')).toHaveText('Getting your workspace ready…');
+		await expect(panel.locator('.mascot[data-state="thinking"]')).toBeVisible();
+		await expect(panel).toHaveClass(/card-surface/);
+		const box = await screen.boundingBox();
+		expect(box?.height ?? 0).toBeGreaterThanOrEqual((page.viewportSize()?.height ?? 0) - 1);
+		if (process.env.GATE_SHOTS) await page.screenshot({ path: `${process.env.GATE_SHOTS}/workspace-ready.png` });
+		release();
+		await expect(page.getByTestId('project-list')).toBeVisible({ timeout: 10_000 });
+		await expect(screen).toHaveCount(0);
+		await context.close();
+	});
+
+	test('if that check fails, a styled error offers Try again, and trying again opens the workspace', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context);
+		let calls = 0;
+		await context.unroute('**/api/onboarding');
+		await context.route('**/api/onboarding', (route) => {
+			calls += 1;
+			return calls === 1 ? json(route, 500, { error: 'unavailable' }) : json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' });
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/projects`);
+
+		const panel = page.getByTestId('workspace-ready').getByTestId('state-error');
+		await expect(panel.locator('.state-title')).toHaveText('We couldn’t check your welcome progress');
+		await expect(panel.locator('.mascot[data-state="stuck"]')).toBeVisible();
+		// The conversation is not open yet, so there is no "Ask Caddie" dead end.
+		await expect(panel.getByTestId('state-ask-caddie')).toHaveCount(0);
+		await expect(panel.getByTestId('state-retry-error')).toHaveText('Try again');
+		await panel.getByTestId('state-retry-error').click();
+		await expect(page.getByTestId('project-list')).toBeVisible({ timeout: 10_000 });
+		await context.close();
+	});
+
+	test('a finished welcome shows the same styled screen while it opens the workspace', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context);
+		const page = await context.newPage();
+		// Answer the hand-off into the app with 204 No Content: the browser then
+		// stays on the onboarding page (a held navigation would also hold every
+		// Playwright wait on this page).
+		await page.route(`${BASE}/app/`, (route) => route.fulfill({ status: 204 }));
+		await page.goto(`${BASE}/app/onboarding`);
+
+		const onboarding = page.getByTestId('onboarding-page');
+		await expect(onboarding.getByTestId('state-loading').locator('.state-title')).toHaveText('Getting your workspace ready…');
+		await expect(onboarding.locator('p[role="status"]', { hasText: 'Getting your workspace ready' })).toHaveCount(0);
+		await context.close();
+	});
+});
+
+test.describe('pages load in their own shape (plan 5.6)', () => {
+	// Live finding (2026-10-20): every page loaded behind the same generic
+	// "Fetching the latest state…" box, then jumped into a different layout.
+	const PLAN_PATH = '/app/design-review?project=proj-a';
+	const BUILD_PATH = '/app/runs?project=proj-a';
+	const cases = [
+		{ page: 'home', path: '/app/', hold: '**/api/brief', line: 'Reading your brief…', shapes: '.skel-card', loaded: 'account-brief-lane' },
+		{ page: 'projects', path: '/app/projects', hold: '**/api/projects', line: 'Loading your projects…', shapes: '.skel-row', loaded: 'project-list' },
+		{ page: 'plan', path: PLAN_PATH, hold: '**/api/projects/proj-a/plan-docs', line: 'Reading your plan…', shapes: '.skel-card', loaded: 'design-review' },
+		{ page: 'build', path: BUILD_PATH, hold: '**/api/projects/proj-a/run-bindings', line: 'Reading your builds…', shapes: '.skel-row', loaded: 'project-tabs' },
+		{ page: 'build', path: BUILD_PATH, hold: '**/api/projects', line: 'Reading your builds…', shapes: '.skel-row', loaded: 'project-tabs' },
+	] as const;
+
+	for (const item of cases) {
+		test(`${item.path} waiting on ${item.hold.replace('**', '')} shows the ${item.page} page's shape, then the page`, async ({ browser }) => {
+			const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+			await stubAccount(context);
+			let release: () => void = () => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			await context.route(item.hold, async (route) => {
+				await held;
+				await route.fallback();
+			});
+			const page = await context.newPage();
+			await page.goto(`${BASE}${item.path}`);
+
+			const skeleton = page.getByTestId(`page-skeleton-${item.page}`);
+			await expect(skeleton).toBeVisible();
+			await expect(skeleton).toHaveAttribute('aria-busy', 'true');
+			await expect(skeleton.locator('.page-skeleton-line')).toHaveText(item.line);
+			await expect(skeleton.locator('.mascot[data-state="thinking"]')).toBeVisible();
+			expect(await skeleton.locator(item.shapes).count()).toBeGreaterThanOrEqual(2);
+			// Never the generic box on these pages (the chat beside them has its own states).
+			await expect(page.locator('main#main').getByTestId('state-loading')).toHaveCount(0);
+			release();
+			await expect(page.getByTestId(item.loaded).first()).toBeVisible({ timeout: 10_000 });
+			await expect(skeleton).toHaveCount(0);
+			await context.close();
+		});
+	}
 });

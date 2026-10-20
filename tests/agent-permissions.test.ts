@@ -13,7 +13,8 @@ import {
 	isProtectedPath,
 	isShellTestCommand,
 } from '../apps/app/src/agents/permissions';
-import { BUILD_RECIPE_INSTRUCTION, SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
+import { BUILD_RECIPE_INSTRUCTION, PLATFORM_AI_RULE, SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
+import { CADDIE_SCRATCH_DIR } from '../apps/app/src/server/source-export.ts';
 import { findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
 import {
 	makeRecordAcceptance,
@@ -146,6 +147,19 @@ describe('P05 permission matrix', () => {
 		expect(BUILD_RECIPE_INSTRUCTION).toContain('test/setup/');
 		expect(BUILD_RECIPE_INSTRUCTION).not.toContain('global-jsdom');
 		expect(BUILD_RECIPE_INSTRUCTION).not.toContain('initialize jsdom');
+	});
+
+	test("probes go in Caddie's scratch folder, and a failure inside Caddie's own steps is reported, not debugged (live finding, 2026-10-20)", () => {
+		// The FarmLog build left scratch-*.ts probes in the app and spent its
+		// repairs reading /tmp/caddie-verified-install.mjs after Caddie's own
+		// installer crashed.
+		expect(BUILD_RECIPE_INSTRUCTION).toContain(`only in ${CADDIE_SCRATCH_DIR}/`);
+		expect(BUILD_RECIPE_INSTRUCTION).toContain('never in the app root or src/');
+		for (const sign of ['/tmp/caddie-', 'could not be unpacked', 'the registry could not be reached']) {
+			expect(BUILD_RECIPE_INSTRUCTION).toContain(sign);
+		}
+		expect(BUILD_RECIPE_INSTRUCTION).toContain("that is Caddie's problem, not your code");
+		expect(BUILD_RECIPE_INSTRUCTION).toContain('stop that repair');
 	});
 
 	test('every tool name in every policy is a known tool', () => {
@@ -738,4 +752,26 @@ test('Flue cancellation reaches specialist execution and QA verification', async
   await (verify as unknown as RawTool).run({data:{},toolCallId:'qa-id',signal:controller.signal});
   expect(executionSignal).toBe(controller.signal);
   expect(verificationSignal).toBe(controller.signal);
+});
+
+describe("plans use the app's built-in AI (plan 4.1)", () => {
+	// Before plan 4.1 neither the coordinator nor the planners were told that a
+	// built app's AI is Caddie's own c.env.CADDIE.ai(...).
+	test('one rule names the platform AI and rules out Ollama, local models and AI keys', () => {
+		for (const fact of ['c.env.CADDIE.ai(', 'NVIDIA Nemotron', 'Nebius Token Factory', 'no AI key']) expect(PLATFORM_AI_RULE).toContain(fact);
+		for (const banned of ['Ollama', 'a local or self-hosted model', 'a third-party AI key']) expect(PLATFORM_AI_RULE).toContain(banned);
+	});
+
+	test('the planners and the coordinator (Home proposals and project PRDs alike) are given it', () => {
+		expect(SPECIALIST_INSTRUCTIONS.product).toContain(PLATFORM_AI_RULE);
+		expect(SPECIALIST_INSTRUCTIONS['tech-lead']).toContain(PLATFORM_AI_RULE);
+		const coordinator = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
+		const shared = coordinator.indexOf('useInstruction(HACKATHON_IDEATION_INSTRUCTION);');
+		const rule = coordinator.indexOf('useInstruction(PLATFORM_AI_RULE);');
+		const homeOnly = coordinator.indexOf('Your final role is Home intake');
+		expect(shared).toBeGreaterThan(0);
+		// In the instructions every conversation gets, after the shared ones and before the Home/project split.
+		expect(rule).toBeGreaterThan(shared);
+		expect(rule).toBeLessThan(homeOnly);
+	});
 });

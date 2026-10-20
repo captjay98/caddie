@@ -282,3 +282,65 @@ test.describe('Project settings (U08)', () => {
 		await context.close();
 	});
 });
+
+test.describe('GitHub connects in one click (plan 6.1)', () => {
+	test("Connect GitHub goes to GitHub in this tab with Caddie's own request, to come back to the Code section", async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context);
+		await context.route('**/api/github/installations**', (route) => json(route, 200, { installations: [] }));
+		const asked: string[] = [];
+		await context.route('**/api/github/app**', (route) => {
+			asked.push(route.request().url());
+			return json(route, 200, { installUrl: 'https://github.com/apps/caddie-forge/installations/new?state=signed-by-caddie' });
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project/settings?project=proj-a`);
+		await page.getByTestId('ps-tab-code').click();
+		await page.getByTestId('ps-code-connect').click();
+		const link = page.getByTestId('github-install-link');
+		await expect(link).toHaveText('Connect GitHub');
+		await expect(link).toHaveAttribute('href', 'https://github.com/apps/caddie-forge/installations/new?state=signed-by-caddie');
+		// The same tab, so GitHub's return lands back in Caddie.
+		expect(await link.getAttribute('target')).toBeNull();
+		const query = new URL(asked.at(-1)!).searchParams;
+		expect(query.get('workspaceId')).toBe('ws-1');
+		expect(query.get('returnTo')).toBe('/app/project/settings?project=proj-a#code');
+		// Typing the installation number is the fallback, folded away.
+		await expect(page.getByTestId('bind-fallback-toggle')).toHaveText('Connect by installation number instead');
+		await expect(page.locator('details.repository-picker__bind-fallback')).not.toHaveAttribute('open');
+		await context.close();
+	});
+
+	test('coming back from GitHub says so once, in plain words, on the Code section', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project/settings?project=proj-a&github=connected#code`);
+		const notice = page.getByTestId('github-return');
+		await expect(notice).toHaveAttribute('data-outcome', 'connected');
+		await expect(notice).toContainText('GitHub is connected.');
+		await expect(page.getByTestId('ps-code')).toBeVisible();
+		expect(page.url()).not.toContain('github=');
+		expect(new URL(page.url()).hash).toBe('#code');
+		// A reload never repeats it.
+		await page.reload();
+		await expect(page.getByTestId('ps-code')).toBeVisible();
+		await expect(page.getByTestId('github-return')).toHaveCount(0);
+		await context.close();
+	});
+
+	test("a return Caddie didn't start says nothing was connected; anything else is ignored", async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project/settings?project=proj-a&github=expired`);
+		await expect(page.getByTestId('github-return')).toContainText('nothing was connected');
+		await page.getByTestId('github-return-dismiss').click();
+		await expect(page.getByTestId('github-return')).toHaveCount(0);
+		await page.goto(`${BASE}/app/project/settings?project=proj-a&github=%3Cb%3Eboom%3C%2Fb%3E`);
+		await expect(page.getByTestId('ps-general')).toBeVisible();
+		await expect(page.getByTestId('github-return')).toHaveCount(0);
+		expect(page.url()).not.toContain('github=');
+		await context.close();
+	});
+});

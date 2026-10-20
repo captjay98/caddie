@@ -427,7 +427,9 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
         await expect(page.getByRole('button', { name: 'Continue with Caddie' })).toBeVisible();
         // Markdown is a real list rather than literal source text.
         await expect(page.getByTestId('plan-body-content').locator('li')).toContainText('render a live chart');
-        await expect(page.getByTestId('design-review-scope')).not.toHaveAttribute('open');
+        // What approving means is one plain sentence; the approved plan folds.
+        await expect(page.getByTestId('approve-meaning')).toBeVisible();
+        await expect(page.getByTestId('design-review-plan-body')).not.toHaveAttribute('open');
         await page.screenshot({ path: '/tmp/caddie-plan-review.png' });
 
 		// No earlier versions → no "Earlier versions · 0" noise fold.
@@ -480,6 +482,100 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
         await expect(page.getByTestId('plan-approve-open')).toHaveCount(0);
         await context.close();
     });
+
+	test('the Now panel is one card too: nothing inside it is drawn as a card of its own (plan 3.6)', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, {
+			experience: {
+				projectId: 'proj-a', version: Date.parse('2026-10-19T12:00:00.000Z'), stage: 'building',
+				plan: { id: 'plan-r2', revision: '2', approved: true }, preview: null, message: 'Caddie is building your app.',
+				actions: [{ kind: 'stop', label: 'Stop build', enabled: true, primary: true }],
+			},
+		});
+		const feature = (id: string, title: string, position: number, status: string) =>
+			({ id, title, doneWhen: ['check'], position, status, attempts: status === 'building' ? 1 : 0, testsPassed: status === 'passed' ? 1 : null, passedAt: status === 'passed' ? NOW : null, canRollBack: false });
+		await context.route('**/api/projects/proj-a/activity', (route) =>
+			json(route, 200, {
+				projectId: 'proj-a', phase: 'building', building: true, steps: [], rounds: [], openIssues: 0,
+				features: [feature('log-feed', 'Log daily feed', 1, 'passed'), feature('view-dashboard', 'See the feed dashboard', 2, 'building')],
+				timeline: {
+					phase: 'building', startedAt: NOW, lastActivityAt: NOW, elapsedMs: 60_000, idleMs: 5_000, quiet: false, summary: 'Caddie is writing the app.',
+					stages: [
+						{ key: 'setup', label: 'Get the workspace ready', state: 'done', startedAt: NOW, endedAt: NOW, durationMs: 20_000, detail: null },
+						{ key: 'write', label: 'Write the app', state: 'active', startedAt: NOW, endedAt: null, durationMs: 40_000, detail: '2 files' },
+						{ key: 'test', label: 'Run its own tests', state: 'pending', startedAt: null, endedAt: null, durationMs: null, detail: null },
+						{ key: 'check', label: 'Final checks by Caddie', state: 'pending', startedAt: null, endedAt: null, durationMs: null, detail: null },
+						{ key: 'preview', label: 'Make the preview', state: 'pending', startedAt: null, endedAt: null, durationMs: null, detail: null },
+					],
+					scope: [], files: [{ path: 'src/App.tsx', area: 'app', writes: 1, lastAt: NOW, bytes: 4200, role: 'frontend' }],
+					fileAreas: { app: 1, test: 0, style: 0, config: 0, server: 0 },
+					commands: [{ command: 'bun run build', outcome: 'ok', exitCode: 0, testsPassed: null, testsFailed: null, at: NOW, durationMs: 4_000, role: 'frontend' }],
+					tests: null, checks: [],
+				},
+			}),
+		);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/runs?project=proj-a`);
+		const now = page.getByTestId('overview-now');
+		await expect(now.getByTestId('build-stages')).toBeVisible();
+		await expect(now.getByTestId('build-features')).toBeVisible();
+		const found = await now.evaluate((card) => {
+			const boxes: string[] = [];
+			for (const el of Array.from(card.querySelectorAll('*'))) {
+				if (el.closest('button, a, input, textarea, select, summary, iframe, [role="button"]')) continue;
+				const s = getComputedStyle(el);
+				if (!/^(block|flex|grid|list-item)$/.test(s.display)) continue;
+				const boxed = ['top', 'right', 'bottom', 'left'].every((side) => parseFloat(s.getPropertyValue(`border-${side}-width`)) >= 1 && s.getPropertyValue(`border-${side}-style`) !== 'none');
+				const box = el.getBoundingClientRect();
+				if (boxed && parseFloat(s.borderTopLeftRadius) >= 6 && box.width >= 120 && box.height >= 36) boxes.push(String(el.className || el.tagName));
+			}
+			return boxes;
+		});
+		expect(found).toEqual([]);
+		await context.close();
+	});
+
+	test('Build shows the same status as the chat card, and record ids only under For developers (plan 3.5)', async ({ browser }) => {
+		// Live, the Build tab said nothing about a paused build (its banner
+		// followed this browser's chat connection, not the build) and showed the
+		// plan's record id among the plain facts.
+		const context = await browser.newContext();
+		await stubAccount(context, {
+			experience: {
+				projectId: 'proj-a',
+				version: Date.parse('2026-10-19T12:00:00.000Z'),
+				stage: 'blocked',
+				plan: { id: 'plan-r2', revision: '2', approved: true },
+				preview: null,
+				message: 'Caddie stopped making progress on the build for 12 minutes, so it was paused. Your plan and files are saved.',
+				actions: [{ kind: 'retry', label: 'Retry build', enabled: true, primary: true }],
+			},
+		});
+		await context.unroute('**/api/projects/proj-a/run-bindings');
+		await context.route('**/api/projects/proj-a/run-bindings', (route) =>
+			json(route, 200, {
+				runBindings: [
+					{
+						runId: 'run-01HZX', projectId: 'proj-a', conversationId: 'conv-01HZX', submissionId: 'sub-01HZX', planRevision: 'plan-r2',
+						stackId: 'react-hono', payerId: 'payer-1', modelRouteId: 'route-1', pricingVersion: 'v1', createdBy: 'actor-test', createdAt: NOW,
+					},
+				],
+			}),
+		);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/runs?project=proj-a`);
+		const now = page.getByTestId('overview-now');
+		await expect(now).toHaveAttribute('data-stage', 'blocked');
+		await expect(now).toContainText('Caddie stopped making progress on the build for 12 minutes');
+		await expect(now.getByRole('button', { name: 'Retry build' })).toBeVisible();
+		await page.getByTestId('run-detail-toggle').click();
+		const details = page.getByTestId('run-details');
+		await expect(details).toContainText('Built with');
+		await expect(details.getByText('plan-r2')).toBeHidden();
+		await details.locator('summary', { hasText: 'For developers' }).click();
+		await expect(details.getByText('plan-r2')).toBeVisible();
+		await context.close();
+	});
 
 	test('Build: Activity and Files tabs; past builds as sentences; change-request drafts into the chat', async ({ browser }) => {
 		const context = await browser.newContext();
@@ -541,4 +637,59 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await expect(page.getByTestId('artifact-viewer')).toBeVisible();
 		await context.close();
 	});
+});
+
+test.describe('the Plan tab follows the build (plan 5.3)', () => {
+	// Live findings (2026-10-20): the Plan tab was narrower than the other tabs,
+	// the long plan stayed open after approval, the badge still said "Plan
+	// approved" with "Continue with Caddie" while the app was being built, and
+	// what approving means sat in a fold of boxes.
+	const PLAN = { id: 'pdr-follow', projectId: 'proj-a', kind: 'prd', revision: 1, body: '# FarmLog AI\n\n- Log daily feed', bodyHash: 'sha256-follow', createdAt: NOW };
+	const APPROVED = { resourceId: 'pdr-follow', revisionHash: 'sha256-follow', status: 'approved', expiresAt: '2027-01-01T00:00:00Z' };
+	const MEANING = 'Approving lets Caddie build exactly this plan in a private workspace; putting it online or changing real data always asks you first.';
+
+	test('before a decision: as wide as the other tabs, one plain sentence on approving, the plan open to read', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+		await stubAccount(context, { planDocs: [PLAN] });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/design-review?project=proj-a`);
+
+		const panel = page.getByTestId('design-review');
+		await expect(panel).toBeVisible();
+		const column = await page.locator('.page-col').first().boundingBox();
+		const box = await panel.boundingBox();
+		expect(Math.round(box!.width)).toBe(Math.round(column!.width));
+		await expect(page.getByTestId('approve-meaning')).toHaveText(MEANING);
+		await expect(page.getByTestId('approval-scope')).toHaveCount(0);
+		await expect(page.getByTestId('design-review-plan-body')).toHaveAttribute('open', '');
+		await expect(page.getByTestId('plan-body-content')).toBeVisible();
+		await context.close();
+	});
+
+	for (const [phase, badge, action] of [
+		['building', 'Building now · version 1', 'See build progress'],
+		['blocked', 'Build paused · version 1', 'See what’s needed'],
+		['ready', 'App built · version 1', 'See your app'],
+	] as const) {
+		test(`approved and ${phase}: the badge and the button follow the build, and the plan is folded`, async ({ browser }) => {
+			const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+			await stubAccount(context, { planDocs: [PLAN], approval: APPROVED, workflowPhase: phase });
+			const page = await context.newPage();
+			await page.goto(`${BASE}/app/design-review?project=proj-a`);
+
+			const outcome = page.getByTestId('design-review-outcome');
+			await expect(outcome).toHaveText(badge);
+			await expect(outcome).toHaveAttribute('data-decision', 'approved');
+			await expect(page.getByRole('button', { name: 'Continue with Caddie' })).toHaveCount(0);
+			await expect(page.getByTestId('design-review-plan-body')).not.toHaveAttribute('open');
+			const go = page.getByTestId('plan-see-build');
+			await expect(go).toHaveText(action);
+			// It is a link to the Build tab, drawn as a button: no underline.
+			await expect(go).toHaveCSS('text-decoration-line', 'none');
+			if (process.env.PLAN_SHOTS) await page.screenshot({ path: `${process.env.PLAN_SHOTS}/plan-tab-${phase}.png` });
+			await go.click();
+			await expect(page).toHaveURL(/\/app\/runs\?project=proj-a/);
+			await context.close();
+		});
+	}
 });

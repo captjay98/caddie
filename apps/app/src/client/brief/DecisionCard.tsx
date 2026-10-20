@@ -4,7 +4,7 @@ import type { ReactElement } from 'react';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { formatTimeAgo } from '@caddie/ui/time';
 import { Mascot } from '@caddie/ui/Mascot';
-import { StatePanel, StaleChip, failureKind, type StateKind } from '../states.tsx';
+import { PageSkeleton, StatePanel, StaleChip, failureKind, type StateKind } from '../states.tsx';
 import { Icon } from '../icons.tsx';
 
 /**
@@ -16,9 +16,9 @@ import { Icon } from '../icons.tsx';
  * server-side id handed to `onAction` for authorized resolution — the UI
  * never parses display prose into an action or an identity.
  *
- * UI review board screen 06: the audit trail (run + evidence ids) is promoted
- * into the card body instead of hiding behind the details toggle; the toggle
- * keeps the card/project/action identifiers. The summary carries the
+ * UI review board screen 06, reworded by plan 5.5: "Details" say in words
+ * what the card rests on and what its button does; the run, evidence, card,
+ * project and action ids fold under "For developers". The summary carries the
  * "Approving this authorises …" scope inline on approval cards.
  */
 
@@ -28,6 +28,19 @@ const KIND_LABEL: Record<DecisionCardType['kind'], string> = {
 	deadline: 'Clock · Deadline',
 	result: 'Result · Verified output',
 };
+
+/** What a card's button does, in words (plan 5.5). */
+const ACTION_WORDS: Record<DecisionCardType['primaryAction']['kind'], string> = {
+	review: 'opens it for you to review; nothing changes until you decide.',
+	inspect: 'opens what happened so you can look before deciding.',
+	preview: 'opens the app so you can try it.',
+};
+
+/** What a card rests on, in words (plan 5.5); the ids stay for developers. */
+function evidenceWords(count: number): string {
+	if (count === 0) return 'No evidence is attached yet.';
+	return `It rests on ${count} ${count === 1 ? 'piece' : 'pieces'} of evidence.`;
+}
 
 /**
  * Plain-language pill text, by card kind + status. The raw contract status
@@ -109,21 +122,32 @@ export function DecisionCardView(props: {
 					data-testid="card-detail-toggle"
 					onClick={() => setDetailOpen((open) => !open)}
 				>
-					{detailOpen ? 'Hide audit trail' : 'Audit trail'}
+					{detailOpen ? 'Hide details' : 'Details'}
 				</button>
 			</div>
 			{detailOpen ? (
 				<div className="card-details" data-testid="card-details">
-					{card.runId ? <span className="mono-id">run {card.runId}</span> : null}
-					<span className="mono-id">
-						evidence {card.evidenceIds.length > 0 ? card.evidenceIds.slice(0, 3).join(' · ') : 'none attached'}
-						{card.evidenceIds.length > 3 ? ` · +${card.evidenceIds.length - 3} more` : ''}
-					</span>
-					<span className="mono-id">card {card.id}</span>
-					<span className="mono-id">project {card.projectId}</span>
-					<span className="mono-id">
-						action → {card.primaryAction.kind} ({card.primaryAction.targetId})
-					</span>
+					<ul className="card-details-words" data-testid="card-details-words">
+						<li>{evidenceWords(card.evidenceIds.length)}</li>
+						<li>
+							“{card.primaryAction.label}” {ACTION_WORDS[card.primaryAction.kind]}
+						</li>
+					</ul>
+					<details className="ev-devdetail" data-testid="card-details-dev">
+						<summary className="kicker">For developers — record ids</summary>
+						<div className="card-details-ids">
+							{card.runId ? <span className="mono-id">run {card.runId}</span> : null}
+							<span className="mono-id">
+								evidence {card.evidenceIds.length > 0 ? card.evidenceIds.slice(0, 3).join(' · ') : 'none attached'}
+								{card.evidenceIds.length > 3 ? ` · +${card.evidenceIds.length - 3} more` : ''}
+							</span>
+							<span className="mono-id">card {card.id}</span>
+							<span className="mono-id">project {card.projectId}</span>
+							<span className="mono-id">
+								action → {card.primaryAction.kind} ({card.primaryAction.targetId})
+							</span>
+						</div>
+					</details>
 				</div>
 			) : null}
 		</article>
@@ -394,7 +418,9 @@ export function AccountBriefV2(props: {
 
 	if (state.kind !== 'empty' || props.feedError || props.feedPending) {
 		let content: ReactElement;
-		if (state.kind !== 'empty') {
+		if (state.kind === 'loading') {
+			content = <PageSkeleton page="home" label="Reading your brief…" />;
+		} else if (state.kind !== 'empty') {
 			content = (
 				<StatePanel
 					kind={state.kind}
@@ -411,7 +437,7 @@ export function AccountBriefV2(props: {
 				/>
 			);
 		} else {
-			content = <StatePanel kind="loading" title="Reading your brief…" />;
+			content = <PageSkeleton page="home" label="Reading your brief…" />;
 		}
 		return <div data-testid="account-brief-lane">{content}</div>;
 	}

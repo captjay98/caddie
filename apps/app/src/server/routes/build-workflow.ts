@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AuthEnv } from "../auth.ts";
-import { ScopeError, requireProjectScope } from "../scope.ts";
+import { ScopeError, requireProjectScope, sessionUserId } from "../scope.ts";
 import { resolveAppSecrets } from "../app-secrets.ts";
 import { SecretBoxError, keyringFromEnv } from "../secret-box.ts";
 import { appAuthSecret, clearTestInbox, listTestInbox } from "../app-sign-in.ts";
@@ -13,7 +13,7 @@ import {
   readBuildOutput,
   readBuildBundle,
   retryWorkflow,
-  stopWorkflow,
+  stopBuild,
 } from "../build-workflow.ts";
 import {
   PreviewRuntimeError,
@@ -28,13 +28,14 @@ import {
   dispatchPendingWorkflow,
   recoverStalledDispatch,
   workerSelfDeliver,
+  workerSelfAbort,
   type CoordinatorDeliver,
 } from "../workflow-dispatch.ts";
 import { projectExperience, approvePlan } from "../project-experience.ts";
 import { buildActivity } from "../build-activity.ts";
 import { checkImportedApp, importPreviewDepsFromEnv, readImportPreview, type ImportPreviewEnv } from "../import-preview.ts";
 import { acceptProposal, dismissProposal, getProposal } from "../project-proposals.ts";
-import { projectHackathon } from "../project-hackathon.ts";
+import { projectHackathon, projectHackathonsForActor } from "../project-hackathon.ts";
 import { ApprovePlanCommandSchema } from "@caddie/contracts";
 import * as v from "valibot";
 
@@ -70,6 +71,23 @@ export function createBuildWorkflowRouter(
       executionCtx = undefined;
     }
     return workerSelfDeliver(app, origin, c.req.raw.headers.get("cookie"), c.env, executionCtx);
+  }
+
+  /** The abort boundary for this request (same self-fetch rules), or null without self-fetch. */
+  function abortFor(c: {
+    req: { raw: Request; url: string };
+    env: AuthEnv;
+    executionCtx?: unknown;
+  }) {
+    const app = selfFetch?.();
+    if (!app) return null;
+    let executionCtx: unknown;
+    try {
+      executionCtx = c.executionCtx;
+    } catch {
+      executionCtx = undefined;
+    }
+    return workerSelfAbort(app, new URL(c.req.url).origin, c.req.raw.headers.get("cookie"), c.env, executionCtx);
   }
 
   router.onError((error, c) => {
@@ -154,6 +172,14 @@ export function createBuildWorkflowRouter(
       c.req.param("projectId"),
     );
     return c.json({ hackathon: await projectHackathon(c.env.DB, scope) });
+  });
+
+  // Each of the person's projects with its hackathon and deadline, in one
+  // request for the Projects list (plan 5.7). Only their own projects.
+  router.get("/project-hackathons", async (c) => {
+    const userId = await sessionUserId(c.env, c.req.raw.headers);
+    if (!userId) throw new ScopeError(401, "unauthenticated", "a verified session is required");
+    return c.json({ hackathons: await projectHackathonsForActor(c.env.DB, userId) });
   });
 
   // R01/R06: the approve-plan command — buttons AND an unambiguous
@@ -265,7 +291,7 @@ export function createBuildWorkflowRouter(
   });
   router.post("/projects/:projectId/workflow/stop", async (c) => {
     const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
-    return c.json(await stopWorkflow(c.env.DB, scope));
+    return c.json(await stopBuild(c.env.DB, scope, abortFor(c)));
   });
   // Roll a settled build back to a feature's save point (owner-only, idempotent
   // on key). Nothing runs here: the next build step starts from that image.

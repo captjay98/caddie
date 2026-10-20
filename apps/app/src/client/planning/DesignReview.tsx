@@ -1,5 +1,6 @@
 import { resumeWorkflow } from "../conversation/workflow-dispatch.ts";
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Markdown } from "@caddie/ui/Markdown";
 import type { ApprovalRecord } from "@caddie/contracts";
 import { splitFeatureBlock } from "@caddie/contracts";
@@ -7,9 +8,9 @@ import { PlanFeatureList } from "../project/FeatureChecklist.tsx";
 import type { ReactElement } from "react";
 import { formatTimeAgo } from "@caddie/ui/time";
 import { postJson } from "../api.ts";
-import { StatePanel, failureKind } from "../states.tsx";
-import { Icon } from "../icons.tsx";
+import { PageSkeleton, StatePanel, failureKind } from "../states.tsx";
 import { CopyableId } from "../copyable.tsx";
+import type { WorkflowPhase } from "../workspace/project-status.ts";
 
 /**
  * DesignReview — approve/reject the LATEST plan revision through the REAL
@@ -55,6 +56,24 @@ interface DecisionRecord {
   at: string;
 }
 
+/** What approving means, in one plain sentence (plan 5.3). */
+export const APPROVE_MEANING =
+  "Approving lets Caddie build exactly this plan in a private workspace; putting it online or changing real data always asks you first.";
+
+/**
+ * Once the plan is approved, the badge and the button follow the build itself
+ * (plan 5.3), not only the approval: "Plan approved · Continue with Caddie"
+ * stays for the phases before the build.
+ */
+function buildFollow(
+  phase: WorkflowPhase | null | undefined,
+): { badge: string; tone: "action" | "warn" | "ok"; action: string } | null {
+  if (phase === "building") return { badge: "Building now", tone: "action", action: "See build progress" };
+  if (phase === "blocked") return { badge: "Build paused", tone: "warn", action: "See what’s needed" };
+  if (phase === "ready") return { badge: "App built", tone: "ok", action: "See your app" };
+  return null;
+}
+
 export function DesignReview(props: {
   projectId: string;
   autoBuild?: boolean;
@@ -68,6 +87,8 @@ export function DesignReview(props: {
   retryApproval?: () => void;
   onDecisionSaved?: () => void;
   onContinue?: () => void;
+  /** The build's own phase; once the plan is approved the badge and button follow it. */
+  buildPhase?: WorkflowPhase | null;
   isPending?: boolean;
   error?: unknown;
   retry?: () => void;
@@ -210,7 +231,7 @@ export function DesignReview(props: {
   if (props.isPending) {
     return (
       <div data-testid="design-review">
-        <StatePanel kind="loading" />
+        <PageSkeleton page="plan" label="Reading your plan…" />
       </div>
     );
   }
@@ -264,6 +285,8 @@ export function DesignReview(props: {
       expired ||
       (persisted && persisted.status !== "pending"),
     );
+  const approved = latestRecord?.decision === "approved";
+  const follow = approved ? buildFollow(props.buildPhase) : null;
 
   return (
     <div
@@ -282,21 +305,18 @@ export function DesignReview(props: {
               {latestRecord ? "YOUR PLAN" : "IS THIS OK?"}
             </p>
             <h2 className="ev-title">Plan version {latest.revision}</h2>
-            <p className="page-lede">
-              Review what Caddie proposes to make, then approve the plan or
-              request changes.
+            <p className="page-lede" data-testid="approve-meaning">
+              {APPROVE_MEANING}
             </p>
           </div>
           {latestRecord ? (
             <span
               className="badge"
-              data-tone={latestRecord.decision === "approved" ? "ok" : "danger"}
+              data-tone={follow ? follow.tone : approved ? "ok" : "danger"}
               data-testid="design-review-outcome"
               data-decision={latestRecord.decision}
             >
-              {latestRecord.decision === "approved"
-                ? "Plan approved"
-                : "Changes requested"}{" "}
+              {follow ? follow.badge : approved ? "Plan approved" : "Changes requested"}{" "}
               · version {latest.revision}
             </span>
           ) : (
@@ -316,7 +336,16 @@ export function DesignReview(props: {
           )}
         </div>
         <div className="row-actions">
-          {latestRecord && props.onContinue ? (
+          {follow ? (
+            <Link
+              to="/runs"
+              search={(prev: Record<string, unknown>) => ({ ...prev })}
+              className="btn-key"
+              data-testid="plan-see-build"
+            >
+              {follow.action}
+            </Link>
+          ) : latestRecord && props.onContinue ? (
             <button
               type="button"
               className="btn-key"
@@ -512,13 +541,17 @@ export function DesignReview(props: {
         />
       ) : null}
 
-      <section
-        className="card-surface settings-panel"
+      {/* The plan to read. It folds once approved (plan 5.3), so the decision
+          and the build lead the page; what approving means is the bar's one
+          sentence. */}
+      <details
+        className="card-surface settings-panel plan-review-details"
         data-testid="design-review-plan-body"
+        open={!approved}
       >
-        <h3 className="ev-head">
+        <summary className="ev-head">
           What you're making — plan version {latest.revision}
-        </h3>
+        </summary>
         {latest.body.trim() === "" ? (
           <p className="state-detail">This revision carries no plan text.</p>
         ) : (
@@ -527,29 +560,6 @@ export function DesignReview(props: {
             <PlanFeatureList body={latest.body} />
           </div>
         )}
-      </section>
-
-      <details
-        className="card-surface settings-panel plan-review-details"
-        data-testid="design-review-scope"
-      >
-        <summary className="ev-head">What approving means</summary>
-        <div className="approval-scope" data-testid="approval-scope">
-          <div className="approval-scope-row" data-tone="ok">
-            <span className="approval-scope-mark" aria-hidden="true"><Icon name="check" title="" /></span>
-            <div>
-              <b>What it allows</b>
-              <p>Caddie builds exactly this version of the plan in a private sandbox. If the plan changes, Caddie comes back for a fresh OK before building again.</p>
-            </div>
-          </div>
-          <div className="approval-scope-row" data-tone="danger">
-            <span className="approval-scope-mark" aria-hidden="true"><Icon name="x" title="" /></span>
-            <div>
-              <b>What it never does</b>
-              <p>No publishing live, no changes to a real database, no merging into your repository. Each of those asks you separately, every time.</p>
-            </div>
-          </div>
-        </div>
         <details className="ev-devdetail">
           <summary className="kicker">For developers — exact revision hash</summary>
           <div className="ev-field">

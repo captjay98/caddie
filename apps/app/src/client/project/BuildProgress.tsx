@@ -176,7 +176,7 @@ export function BuildProgress(props: {
 								</span>
 								<span className="build-history-text">
 									<b>{roundLabel(round.round)}</b>
-									{round.detail ? <span className="build-history-detail"> — {round.detail}</span> : null}
+									{round.detail && !/^\s*[{[]/.test(round.detail) ? <span className="build-history-detail"> — {round.detail}</span> : null}
 								</span>
 							</li>
 						))}

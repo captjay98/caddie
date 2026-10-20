@@ -376,12 +376,15 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		const draft = page.getByTestId('draft-row');
 		await expect(draft).toBeVisible();
 		await expect(draft).toContainText('Not sent'); // v2 §3.6 wording
-		await expect(draft).toContainText(/key [0-9a-z]/); // generated idempotency key rendered short
+		// The generated idempotency key stays out of the words (live finding,
+		// 2026-10-20) but is still there, short, for anyone debugging.
+		await expect(draft).toHaveAttribute('data-key', /^[0-9a-z]{8}$/);
+		await expect(draft).not.toContainText('resends reuse it');
 		await expect(page.getByTestId('draft-retry')).toBeVisible();
 
 		// Retry bumps the failed-attempt count without duplicating the draft.
 		await page.getByTestId('draft-retry').click();
-		await expect(page.getByTestId('draft-row')).toContainText('2 attempts');
+		await expect(page.getByTestId('draft-row')).toHaveAttribute('data-attempts', '2');
 		await expect(page.getByTestId('draft-row')).toHaveCount(1);
 
 		// Discard keeps the row for reference, struck through as cancelled.

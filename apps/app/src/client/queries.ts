@@ -454,6 +454,42 @@ export function useMarkBriefRead(actor: ActorScope) {
 	});
 }
 
+/** One of the person's notifications (mirrors server NotificationRecord). */
+export interface AppNotification {
+	id: string;
+	projectId: string | null;
+	kind: string;
+	title: string;
+	body: string;
+	createdAt: string;
+}
+
+/**
+ * The person's unread notifications (plan 5.4) — what Caddie raised while they
+ * were away, such as a build it paused. Polled so a new one shows up without a
+ * reload; a failed read simply shows none.
+ */
+export function useUnreadNotifications(actor: ActorScope) {
+	return useQuery({
+		queryKey: ['notifications', 'unread', actor.actorId ?? 'pending'],
+		queryFn: () => fetchJson<{ notifications: AppNotification[] }>('/api/notifications?unread=1'),
+		enabled: actor.actorId !== null,
+		refetchInterval: 30_000,
+		select: (data) => data.notifications,
+	});
+}
+
+/** Mark one notification read; the unread list refreshes. */
+export function useMarkNotificationRead(actor: ActorScope) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (id: string) => postJson<unknown>(`/api/notifications/${encodeURIComponent(id)}/read`, {}),
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: ['notifications', 'unread', actor.actorId ?? 'pending'] });
+		},
+	});
+}
+
 /**
  * The actor's P14 profile — read from the real GET /api/profile. Home uses it
  * to state personalisation honestly (incomplete vs. complete), never to invent
@@ -611,4 +647,27 @@ export function watchAuthTransitions(queryClient: QueryClient): {
 			});
 		},
 	};
+}
+
+/** A project card's hackathon line (mirrors server ProjectHackathonLine). */
+export interface ProjectHackathonLine {
+	title: string;
+	deadline: string | null;
+	daysLeft: number | null;
+	ended: boolean;
+}
+
+/**
+ * Every one of the person's projects with its hackathon and deadline, in one
+ * read for the Projects list (plan 5.7). A failed read simply leaves the
+ * cards without the contest line.
+ */
+export function useProjectHackathons(actor: ActorScope) {
+	return useQuery({
+		queryKey: ['project-hackathons', actor.actorId ?? 'pending'],
+		queryFn: () => fetchJson<{ hackathons: Record<string, ProjectHackathonLine> }>('/api/project-hackathons'),
+		enabled: actor.actorId !== null,
+		staleTime: 60_000,
+		select: (data) => data.hackathons,
+	});
 }

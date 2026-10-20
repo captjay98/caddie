@@ -54,7 +54,8 @@ export type IconName =
 	| 'collapse'
 	| 'key'
 	| 'sparkle'
-	| 'mail';
+	| 'mail'
+	| 'bell';
 
 interface IconProps {
 	name: IconName;
@@ -280,6 +281,12 @@ const PATHS: Record<IconName, ReactElement> = {
 		<>
 			<rect x="2" y="3.5" width="12" height="9" rx="1.5" fill="none" stroke="currentColor" />
 			<path d="M2.5 4.5 8 9l5.5-4.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />
+		</>
+	),
+	bell: (
+		<>
+			<path d="M4 11.5V7.5a4 4 0 0 1 8 0v4l1 1.5H3l1-1.5z" fill="none" stroke="currentColor" strokeLinejoin="round" />
+			<path d="M6.5 14a1.6 1.6 0 0 0 3 0" fill="none" stroke="currentColor" strokeLinecap="round" />
 		</>
 	),
 };

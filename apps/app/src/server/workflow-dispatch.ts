@@ -259,4 +259,30 @@ export function workerSelfDeliver(
 	};
 }
 
+/** Stop the coordinator's running turn for one conversation. True when accepted. */
+export type CoordinatorAbort = (conversationId: string) => Promise<boolean>;
+
+/**
+ * The abort the browser's Flue client sends (`POST <conversation>/abort`, no
+ * body), made by the server so every Stop button stops the running turn, not
+ * only the one that happens to know the conversation (plan 3.2). Same cookie
+ * and bindings rules as workerSelfDeliver; the /agents guard checks ownership,
+ * and an abort is not a message, so it costs a judge nothing.
+ */
+export function workerSelfAbort(
+	app: { fetch(request: Request, env?: unknown, executionCtx?: unknown): Promise<Response> | Response },
+	origin: string,
+	cookieHeader: string | null,
+	env: unknown,
+	executionCtx?: unknown,
+): CoordinatorAbort {
+	return async (conversationId) => {
+		const url = new URL(`/agents/coordinator/${encodeURIComponent(conversationId)}/abort`, origin);
+		const headers: Record<string, string> = {};
+		if (cookieHeader) headers['cookie'] = cookieHeader;
+		const response = await app.fetch(new Request(url.href, { method: 'POST', headers }), env, executionCtx);
+		return response.ok;
+	};
+}
+
 export type { BuildWorkflow };

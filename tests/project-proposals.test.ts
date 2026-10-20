@@ -116,3 +116,119 @@ describe('project proposals: Caddie proposes, the user creates', () => {
 		} finally { w.sqlite.close(); }
 	});
 });
+
+describe('only the Start button starts a new project (live finding, 2026-10-20)', () => {
+	// Live, a build began after the owner typed "start it" and could not see a
+	// card. Read every path that starts a project: none may skip the card.
+	const read = (path: string) => readFileSync(new URL(`../apps/app/src/${path}`, import.meta.url), 'utf8');
+
+	test('no chat tool can start a project: create_project is not mounted and startProject is never called', () => {
+		const coordinator = read('agents/coordinator.ts');
+		expect(coordinator).not.toContain('makeCreateProject');
+		expect(coordinator).not.toMatch(/authority\.startProject\(|\.startProject\(\{/);
+		expect(read('agents/host-context.ts')).not.toMatch(/startProject\(input\)[^\n]*\n[^\n]*useTool/);
+	});
+
+	test('acceptProposal runs only from its authenticated route, and the client calls that route only from the Start buttons', () => {
+		const callers = ['server/routes/build-workflow.ts', 'server/coordinator-host.ts', 'agents/coordinator.ts', 'agents/host-context.ts', 'agents/tools.ts']
+			.filter((path) => /acceptProposal\(/.test(read(path)));
+		expect(callers).toEqual(['server/routes/build-workflow.ts']);
+		const card = read('client/conversation/ProjectProposalCard.tsx');
+		expect(card.match(/act\('accept'\)/g)?.length).toBe(2); // "Start this project" and "Start it anyway"
+		expect(card).not.toContain('useEffect(() => { void act(');
+	});
+
+	test('a home chat message is only ever routed to an EXISTING project, by name, with an explicit continue verb', () => {
+		const host = read('server/coordinator-host.ts');
+		expect(host).toContain('(?:continue|resume|retry|finish|fix|repair)');
+		expect(/(?:continue\|resume\|retry\|finish\|fix\|repair)/.test('start it')).toBe(false);
+	});
+});
+
+describe("the hackathon's required tech travels from the proposal to the brief and the plan (plan 4.2)", () => {
+	// Live, a hackathon's rules were used only to judge whether it fits; what
+	// it requires entries to use never reached the brief or the plan.
+	const RULE = 'Projects must use NVIDIA Nemotron models served through Nebius Token Factory.';
+
+	test('the quoted rule is kept on the proposal and lands in the started project\'s brief, word for word', async () => {
+		const w = await world();
+		try {
+			const proposal = await proposeProject(w.db, w.scope, { ...IDEA, requiredTech: `  ${RULE}\n`, sourceConversationId: w.conversationId });
+			expect(proposal.requiredTech).toBe(RULE);
+			const started = await acceptProposal(w.db, w.scope, proposal.id);
+			const brief = (w.sqlite.prepare('select brief from build_workflows where projectId = ?').get(started.project.id) as { brief: string }).brief;
+			expect(brief).toContain(IDEA.brief);
+			expect(brief).toContain(`Required by the hackathon (${IDEA.hackathonTitle}): “${RULE}”`);
+		} finally { w.sqlite.close(); }
+	});
+
+	test('without a rule the brief is exactly the proposal\'s', async () => {
+		const w = await world();
+		try {
+			const proposal = await proposeProject(w.db, w.scope, { ...IDEA, sourceConversationId: w.conversationId });
+			expect(proposal.requiredTech).toBeNull();
+			const started = await acceptProposal(w.db, w.scope, proposal.id);
+			const brief = (w.sqlite.prepare('select brief from build_workflows where projectId = ?').get(started.project.id) as { brief: string }).brief;
+			expect(brief).not.toContain('Required by the hackathon');
+		} finally { w.sqlite.close(); }
+	});
+
+	test('the proposal tool asks for the rule, and the plan instruction keeps it word for word', () => {
+		const coordinator = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
+		expect(coordinator).toMatch(/requiredTech: v\.optional\(/);
+		expect(coordinator).toContain('Required by the hackathon');
+		expect(coordinator).toContain('word for word');
+	});
+});
+
+describe("who it's for and the problem stay in the person's own words (plan 4.3)", () => {
+	const AUDIENCE = 'farmers like my uncle who keep goats and cannot read English well';
+	const PROBLEM = 'by the time the vet comes the animal is already dead';
+
+	test('they are kept on the proposal as said, and reach the started project\'s brief', async () => {
+		const w = await world();
+		try {
+			const proposal = await proposeProject(w.db, w.scope, { ...IDEA, audience: ` ${AUDIENCE} `, problem: PROBLEM, sourceConversationId: w.conversationId });
+			expect([proposal.audience, proposal.problem]).toEqual([AUDIENCE, PROBLEM]);
+			const started = await acceptProposal(w.db, w.scope, proposal.id);
+			const brief = (w.sqlite.prepare('select brief from build_workflows where projectId = ?').get(started.project.id) as { brief: string }).brief;
+			expect(brief).toContain(`Who it's for, in their words: “${AUDIENCE}”`);
+			expect(brief).toContain(`The problem, in their words: “${PROBLEM}”`);
+		} finally { w.sqlite.close(); }
+	});
+
+	test('the proposal tool asks for them in the person\'s own words', () => {
+		const coordinator = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
+		expect(coordinator).toMatch(/audience: v\.optional\(/);
+		expect(coordinator).toMatch(/problem: v\.optional\(/);
+		expect(coordinator).toContain("in the person's own words");
+	});
+});
+
+describe('the idea stays in plain words; the stack lives only in the brief (plan 4.4)', () => {
+	test('an idea naming the stack is refused with plain guidance, and the brief may name it freely', async () => {
+		const w = await world();
+		try {
+			for (const idea of [
+				'A React + Hono app on Cloudflare D1 that logs feed for farmers.',
+				'A Flutter app with a Supabase backend for farm records.',
+				'Track daily eggs with a REST API and SQLite.',
+			]) {
+				await expect(proposeProject(w.db, w.scope, { ...IDEA, idea, sourceConversationId: w.conversationId })).rejects.toThrow('Keep the idea in plain words');
+			}
+			const proposal = await proposeProject(w.db, w.scope, {
+				...IDEA,
+				idea: 'Helps farmers react fast when an animal falls sick, from a voice note.',
+				brief: 'Build it on the React + Hono recipe with Cloudflare D1 and the platform AI.',
+				sourceConversationId: w.conversationId,
+			});
+			expect(proposal.idea).toBe('Helps farmers react fast when an animal falls sick, from a voice note.');
+			expect(proposal.brief).toContain('React + Hono');
+		} finally { w.sqlite.close(); }
+	});
+
+	test('the proposal tool says so before the model writes the idea', () => {
+		const coordinator = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
+		expect(coordinator).toContain('The idea is for the person: plain words on what the app does for them');
+	});
+});

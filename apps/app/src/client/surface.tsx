@@ -2,12 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import * as v from 'valibot';
-import { ProjectExperienceSchema } from '@caddie/contracts';
+import { ProjectExperienceSchema, iconColor, iconLetter } from '@caddie/contracts';
 import type { ApprovalRecord, DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
-import { SignInPanel } from './auth.ts';
-import { Mascot } from '@caddie/ui/Mascot';
+import { SignInScreen } from './sign-in.tsx';
 import { Markdown } from '@caddie/ui/Markdown';
-import { failureKind, StatePanel } from './states.tsx';
+import { failureKind, PageSkeleton, StatePanel, type SkeletonPage } from './states.tsx';
 import { formatMinorUnits, formatNextRun } from './settings/settings-model.ts';
 import { DiscoveryResults, type DiscoveryCandidateRecord } from './discovery/Results.tsx';
 import { JudgeScorecard } from './judge/Scorecard.tsx';
@@ -31,6 +30,9 @@ import {
 	usePlanDocRevisions,
 	useProjectExperience,
 	useRunBindings,
+	useWorkflowPhase,
+	useProjectHackathons,
+	type ProjectHackathonLine,
 } from './queries.ts';
 import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from './api.ts';
@@ -38,8 +40,18 @@ import { useWorkspaceChrome } from './workspace/Chrome.tsx';
 import { NowPanel } from './project/NowPanel.tsx';
 import { relativeUpdated } from './project/now-panel.ts';
 import { ProjectTabs } from './workspace/ProjectTabs.tsx';
-import { projectCardFromCopiedApp, projectCardFromExperience, projectStatus, type CopiedAppSummary } from './workspace/project-status.ts';
+import { journeyFromExperience, projectCardFromCopiedApp, projectCardFromExperience, projectStatus, type CopiedAppSummary } from './workspace/project-status.ts';
+import { Icon } from './icons.tsx';
 import { overviewAppState } from './project/overview-app.ts';
+
+/** A hackathon's deadline in words for its project card (plan 5.7); null when unknown. */
+function dueWords(hackathon: ProjectHackathonLine): string | null {
+	if (hackathon.ended) return 'Ended';
+	if (hackathon.daysLeft === null) return null;
+	if (hackathon.daysLeft === 0) return 'Due today';
+	if (hackathon.daysLeft === 1) return 'Due tomorrow';
+	return `Due in ${hackathon.daysLeft} days`;
+}
 
 /**
  * The routed surfaces for the discovery-first shell.
@@ -75,52 +87,6 @@ const EXPLORE_QUICK_PROMPTS: ReadonlyArray<{ id: string; label: string; text: st
 	{ id: 'win', label: 'A standout project to win', text: 'Help me come up with an ambitious, standout project with a real shot at winning this hackathon — lean into what makes it impressive to judges.' },
 ];
 
-function SignInGate(): ReactElement {
-	return (
-		<div className="signin-split" data-testid="sign-in-gate">
-			{/* LEFT: brand / mascot hero — a signed-out screen has no live session,
-			    so this is an honest static hero (what Caddie does), never a faked
-			    live feed. Themed entirely via tokens so it tracks mode + palette. */}
-			<div className="signin-hero" aria-hidden="true">
-				<div className="signin-hero-grid" />
-				<p className="signin-hero-brand">CADDIE</p>
-				<div className="signin-hero-center">
-					<Mascot mood="ready" size={88} live />
-					<div className="signin-hero-copy">
-						<h2 className="signin-hero-title">Your caddie for the whole round.</h2>
-						<p className="signin-hero-lede">
-							Caddie finds the hackathons that fit you, plans the build, and ships it with you — step by
-							step, nothing without your say-so.
-						</p>
-					</div>
-					<ul className="signin-hero-chips">
-						<li>Finds contests</li>
-						<li>Plans the build</li>
-						<li>Ships with you</li>
-					</ul>
-				</div>
-				<p className="signin-hero-foot">Built for solo builders. Free to start.</p>
-			</div>
-
-			{/* RIGHT: the real sign-in form, vertically centered. */}
-			<div className="signin-form">
-				<div className="signin-col">
-					<div className="signin-brand">
-						<h1 className="signin-title">Sign in to Caddie</h1>
-						<p className="signin-lede">Use the account you already have — it&rsquo;s free to start.</p>
-					</div>
-					<div className="signin-card">
-						<SignInPanel callbackURL="/app/" />
-					</div>
-					<p className="signin-note">
-						Signing in doesn&rsquo;t give Caddie your code. It asks separately, only if you bring code in.
-					</p>
-				</div>
-			</div>
-		</div>
-	);
-}
-
 /**
  * Reads the resolved project scope from the chrome and renders the honest
  * states, then hands the concrete project id to the body. No fetch of project
@@ -134,10 +100,20 @@ function ProjectGateSoft(props: { children: (projectId: string) => ReactElement 
 	return props.children(chrome.effectiveProjectId);
 }
 
-function ProjectGate(props: { children: (projectId: string) => ReactElement }): ReactElement | null {
+function ProjectGate(props: {
+	children: (projectId: string) => ReactElement;
+	/** Wait for the project list in this page's own shape (plan 5.6). */
+	skeleton?: { page: SkeletonPage; label: string };
+}): ReactElement | null {
 	const chrome = useWorkspaceChrome();
-	if (!chrome.authenticated) return <SignInGate />;
-	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
+	if (!chrome.authenticated) return <SignInScreen />;
+	if (chrome.projectsPending) {
+		return props.skeleton ? (
+			<PageSkeleton page={props.skeleton.page} label={props.skeleton.label} />
+		) : (
+			<StatePanel kind="loading" title="Fetching your projects…" />
+		);
+	}
 	if (chrome.projectsError) {
 		return (
 			<StatePanel
@@ -258,7 +234,7 @@ function DiscoverBody(): ReactElement {
 			);
 	}
 
-	if (!chrome.authenticated) return <SignInGate />;
+	if (!chrome.authenticated) return <SignInScreen />;
 	if (chrome.homeProject) {
 		return (
 			<>
@@ -603,8 +579,9 @@ function ProjectList(): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const brief = useAccountBrief(actor);
-	if (!chrome.authenticated) return <SignInGate />;
-	if (chrome.projectsPending) return <StatePanel kind="loading" title="Loading your projects…" />;
+	const hackathons = useProjectHackathons(actor);
+	if (!chrome.authenticated) return <SignInScreen />;
+	if (chrome.projectsPending) return <PageSkeleton page="projects" label="Loading your projects…" />;
 	if (chrome.projectsError) {
 		return (
 			<StatePanel
@@ -639,7 +616,7 @@ function ProjectList(): ReactElement {
 					const fallback = brief.isPending || brief.error
                         ? { label: brief.error ? 'Updates unavailable' : 'Loading updates…', detail: brief.error ? 'Open your project or retry loading its updates.' : 'Checking the latest decisions and progress.', next: null }
                         : projectStatus(cardsByProject.get(project.id) ?? []);
-					return <ProjectCard key={project.id} project={project} fallback={fallback} />;
+					return <ProjectCard key={project.id} project={project} fallback={fallback} hackathon={hackathons.data?.[project.id] ?? null} />;
 				})}
 			</ul>
 			{archived.length > 0 ? (
@@ -676,6 +653,8 @@ function whenIso(iso: string): string {
 function ProjectCard(props: {
 	project: Project;
 	fallback: { label: string; detail: string; next: DecisionCardType | null };
+	/** The project's hackathon and deadline, when it has one (plan 5.7). */
+	hackathon?: ProjectHackathonLine | null;
 }): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
@@ -683,6 +662,10 @@ function ProjectCard(props: {
 	const { project, fallback } = props;
 	const parsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
 	const fromWorkflow = parsed?.success ? projectCardFromExperience(parsed.output) : null;
+	const hackathon = props.hackathon ?? null;
+	const personal = !hackathon && !project.contestUrl;
+	const journey = parsed?.success ? journeyFromExperience(parsed.output, { personal }) : null;
+	const letter = iconLetter(project.name);
 	// No workflow yet: a copied app (a judge's example, or a GitHub copy) may
 	// already be ready to try. Read it from the same /workflow answer the
 	// project page uses; only asked for once the projection says "no workflow".
@@ -700,22 +683,51 @@ function ProjectCard(props: {
 
 	return (
 		<li className="project-row project-card card-surface" data-testid={`project-row-${project.id}`} data-working={card?.working ? 'true' : 'false'}>
-			<div className="project-card-head">
-				<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
-					{project.name}
-				</button>
-				<span
-					className="badge project-card-pill"
-					data-tone={card ? card.tone : fallback.next?.status === 'blocked' ? 'danger' : fallback.next ? 'warn' : 'neutral'}
-					data-testid={`project-step-text-${project.id}`}
-				>
-					{card?.working ? <span className="project-card-live" aria-hidden="true" /> : null}
-					{card ? card.label : fallback.label}
+			<div className="project-card-main">
+				{/* The app's picture: its letter tile, the same letter and colour as
+				    the published app's home-screen icon, until real screenshots exist. */}
+				<span className="project-card-tile" style={{ background: iconColor(project.id) }} data-testid={`project-tile-${project.id}`} aria-hidden="true">
+					{letter ?? '•'}
 				</span>
+				<div className="project-card-body">
+					<div className="project-card-head">
+						<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
+							{project.name}
+						</button>
+						<span
+							className="badge project-card-pill"
+							data-tone={card ? card.tone : fallback.next?.status === 'blocked' ? 'danger' : fallback.next ? 'warn' : 'neutral'}
+							data-testid={`project-step-text-${project.id}`}
+						>
+							{card?.working ? <span className="project-card-live" aria-hidden="true" /> : null}
+							{card ? card.label : fallback.label}
+						</span>
+					</div>
+					{hackathon ? (
+						<p className="project-card-contest" data-testid={`project-contest-${project.id}`}>
+							<Icon name="trophy" title="" />
+							{hackathon.title}
+							{dueWords(hackathon) ? <span className="project-card-due">{` · ${dueWords(hackathon)}`}</span> : null}
+						</p>
+					) : null}
+					<p className="project-card-purpose" title={purpose}>
+						{purpose}
+					</p>
+				</div>
 			</div>
-			<p className="project-card-purpose" title={purpose}>
-				{purpose}
-			</p>
+			{journey ? (
+				<ol className="project-journey" data-testid={`project-journey-${project.id}`} aria-label="Where this project is">
+					{journey.map((step) => (
+						<li key={step.id} className="project-journey-step" data-state={step.state} aria-current={step.state === 'now' || step.state === 'stop' ? 'step' : undefined}>
+							<span className="project-journey-dot" aria-hidden="true">
+								{step.state === 'done' ? '✓' : step.state === 'stop' ? '✕' : ''}
+							</span>
+							<span className="project-journey-label">{step.label}</span>
+							<span className="project-journey-sub">{step.sub}</span>
+						</li>
+					))}
+				</ol>
+			) : null}
 			<p className="project-card-detail">{card ? card.detail : fallback.detail}</p>
 			<div className="project-card-foot">
 				<span className="project-card-updated">{updated ?? ''}</span>
@@ -1089,7 +1101,7 @@ export function DesignReviewPage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="plan" />
-					<ProjectGate>{(projectId) => <DesignReviewBody projectId={projectId} />}</ProjectGate>
+					<ProjectGate skeleton={{ page: 'plan', label: 'Reading your plan…' }}>{(projectId) => <DesignReviewBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
 		</>
@@ -1100,6 +1112,8 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const planDocs = usePlanDocRevisions(actor, props.projectId);
+	// The build's own phase: once the plan is approved, the Plan tab follows it (plan 5.3).
+	const buildPhase = useWorkflowPhase(actor, props.projectId);
 	// PRD revisions share a counter; spec/note counters are incomparable.
     const revisions = [...(planDocs.data?.revisions ?? [])].filter((revision) => revision.kind === 'prd').sort((a, b) => b.revision - a.revision);
     const latest = revisions[0];
@@ -1118,6 +1132,7 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
             retryApproval={() => void approval.refetch()}
             onDecisionSaved={() => { void approval.refetch(); chrome.refreshAll(); }}
             onContinue={() => chrome.openProject(props.projectId, true)}
+            buildPhase={buildPhase.data ?? null}
 			projectId={props.projectId}
 			planRevisions={revisions}
 			isPending={planDocs.isPending}
@@ -1135,7 +1150,7 @@ export function RunsPage(): ReactElement {
 			<div className="shell-loading shell-page">
 				<div className="page-col">
 					<ProjectTabs current="build" />
-					<ProjectGate>{(projectId) => <RunsBody projectId={projectId} />}</ProjectGate>
+					<ProjectGate skeleton={{ page: 'build', label: 'Reading your builds…' }}>{(projectId) => <RunsBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
 		</>
@@ -1155,25 +1170,16 @@ function RunsBody(props: { projectId: string }): ReactElement {
 	const tab = search.tab === 'files' ? 'files' : 'activity';
 	const runBindings = useRunBindings(actor, props.projectId);
 	const artifactRevisions = useArtifactRevisions<ViewerRevision>(actor, props.projectId);
-	const buildLive = chrome.transport?.source.status === 'streaming' || chrome.transport?.source.status === 'submitted';
 	const [changeOpen, setChangeOpen] = useState(false);
 	const [changeText, setChangeText] = useState('');
+	// The first read of this project's builds: the Build page's own shape (plan 5.6).
+	if (runBindings.isPending) return <PageSkeleton page="build" label="Reading your builds…" />;
 	return (
 		<div className="settings-stack">
-			{buildLive ? (
-				<section className="card-surface settings-panel build-live" data-testid="build-status" role="status">
-					<p className="now-head">
-						<span className="now-live" aria-hidden="true" />
-						<span className="kicker" data-tone="action">
-							Building now
-						</span>
-					</p>
-					<p className="page-lede">
-						Caddie is building your app in this project's chat. Step-by-step progress lives in “Now” on
-						the project home — when it finishes, the result shows up in the list below.
-					</p>
-				</section>
-			) : null}
+			{/* The build's status from its own record, exactly as the chat card and
+			    the project home show it (plan 3.5). It once followed this browser's
+			    chat connection, so a paused build said nothing here. */}
+			<NowPanel projectId={props.projectId} fallback={<></>} />
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">
@@ -1535,7 +1541,7 @@ export function RepositoriesPage(): ReactElement {
  */
 function RepositoriesGate(): ReactElement {
 	const chrome = useWorkspaceChrome();
-	if (!chrome.authenticated) return <SignInGate />;
+	if (!chrome.authenticated) return <SignInScreen />;
 	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
 	if (chrome.projectsError) {
 		return (
@@ -1651,7 +1657,7 @@ export function SearchPage(): ReactElement {
 // WorkspaceChrome").
 function SearchEnabled(): ReactElement {
 	const chrome = useWorkspaceChrome();
-	return chrome.authenticated ? <Search /> : <SignInGate />;
+	return chrome.authenticated ? <Search /> : <SignInScreen />;
 }
 
 export function AutomationsPage(): ReactElement {
@@ -1724,7 +1730,7 @@ export function AutomationsBody(): ReactElement {
 		};
 	}, [chrome.authenticated, chrome.buildProjects]);
 
-	if (!chrome.authenticated) return <SignInGate />;
+	if (!chrome.authenticated) return <SignInScreen />;
 	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
 	if (chrome.buildProjects.length === 0) {
 		return <StatePanel kind="empty" title="No routines yet" detail="Routines are checks Caddie runs for a project on a schedule — like watching a hackathon deadline. Start a project first." />;
@@ -1821,7 +1827,7 @@ export function UsageBody(): ReactElement {
 		enabled: chrome.authenticated && chrome.actorId !== null,
 	});
 
-	if (!chrome.authenticated) return <SignInGate />;
+	if (!chrome.authenticated) return <SignInScreen />;
 	if (usage.isPending) {
 		return (
 			<section className="settings-section-body" data-testid="usage-panel">

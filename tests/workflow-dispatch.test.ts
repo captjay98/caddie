@@ -11,6 +11,7 @@ import {
   decideDesign,
   workflowSnapshot,
   stopWorkflow,
+  stopBuild,
   readWorkflow,
 } from "../apps/app/src/server/build-workflow.ts";
 import {
@@ -19,6 +20,7 @@ import {
   recoverStalledDispatch,
   REDELIVERY_AFTER_MS,
   workerSelfDeliver,
+  workerSelfAbort,
   type CoordinatorDeliver,
 } from "../apps/app/src/server/workflow-dispatch.ts";
 import { getOperation, markDispatched, prepareOperation, recordReceipt } from "../apps/app/src/server/operations.ts";
@@ -415,5 +417,40 @@ describe("workerSelfDeliver — the real self-fetch boundary", () => {
     // siblings). The nested { message: {...} } shape this test once pinned was
     // the second cause of the stuck "Planning your app" card.
     expect(JSON.parse(seen[0]!.body)).toEqual({ idempotencyKey: "intake:k", kind: "user", body: "Prepare a plan" });
+  });
+});
+
+describe("one Stop for every Stop button: the workflow, then the running turn (plan 3.2)", () => {
+  // Live, the project page's "Stop work" only stopped the workflow, while the
+  // chat's "Stop build" also aborted the running turn from the browser. The
+  // server now does both for every caller.
+  test("workerSelfAbort makes the browser's own abort request, with this request's cookie and bindings", async () => {
+    const seen: { url: string; method: string; env: unknown; cookie: string | null; body: string }[] = [];
+    const app = {
+      async fetch(request: Request, env?: unknown) {
+        seen.push({ url: request.url, method: request.method, env, cookie: request.headers.get("cookie"), body: await request.text() });
+        return new Response("{}", { status: 200 });
+      },
+    };
+    const env = { DB: {} };
+    const abort = workerSelfAbort(app, "http://localhost:5176", "session=abc", env);
+    expect(await abort("conv_1")).toBe(true);
+    expect(seen).toEqual([{ url: "http://localhost:5176/agents/coordinator/conv_1/abort", method: "POST", env, cookie: "session=abc", body: "" }]);
+  });
+
+  test("stopBuild marks the build stopped before it stops the build's turn, and a failed abort keeps the stop", async () => {
+    const w = await world();
+    const { scope } = await w.buildingProject();
+    const phaseNow = () => (w.sqlite.prepare("select phase from build_workflows where projectId = ?").get(scope.projectId) as { phase: string }).phase;
+    const conversationId = (await readWorkflow(w.db, scope))!.conversationId;
+    expect(phaseNow()).toBe("building");
+    const seen: { conversationId: string; phase: string }[] = [];
+    const result = await stopBuild(w.db, scope, async (id) => {
+      seen.push({ conversationId: id, phase: phaseNow() });
+      throw new Error("the agent could not be reached");
+    });
+    expect(seen).toEqual([{ conversationId, phase: "blocked" }]);
+    expect(result.workflow?.phase).toBe("blocked");
+    expect(result.workflow?.detail?.startsWith("Stop requested.")).toBe(true);
   });
 });

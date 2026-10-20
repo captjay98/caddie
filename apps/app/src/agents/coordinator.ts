@@ -11,6 +11,7 @@ import {
   type CoordinatorSnapshot,
 } from "./host-context.ts";
 import type { CoordinatorEnvironment } from "../server/coordinator-host.ts";
+import type { ProjectStatusReply } from "../server/project-experience.ts";
 import {
   useAgentFinish,
   useAgentStart,
@@ -37,6 +38,7 @@ import { coordinatorModelRole, findModelRouteForRole, IDEATION_TURN_WINDOW } fro
 import { COORDINATOR_DURABILITY } from "./permissions.ts";
 import { makeListStacks, makeVerifyBuild, makeUpdateProfile, makeRememberFact, makeInspectRepository, makeWritePlanNote, makeReadProjectContext } from "./tools.ts";
 import {
+  PLATFORM_AI_RULE,
   buildSpecialistDeclarations,
   type SpecialistBuildContext,
 } from "./specialists.ts";
@@ -59,6 +61,8 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     resumeBlocked?: boolean;
   }) => Promise<{ project: { id: string; name: string }; workflow: unknown }>;
   continueNamedProject: (input: { request: string; operationKey: string }) => Promise<{ project: { id: string; name: string }; workflow: unknown } | null>;
+  /** Read-only: how one of the person's own projects is going, in words (plan 3.7). */
+  projectStatus: (input: { projectId: string }) => Promise<ProjectStatusReply>;
   startProject: (input: {
     name: string;
     description?: string;
@@ -74,6 +78,9 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     hackathonUrl?: string;
     track?: string;
     firstStep?: string;
+    requiredTech?: string;
+    audience?: string;
+    problem?: string;
   }) => Promise<{ id: string; homeProjectId: string; status: string }>;
   listStacks: () => Promise<
     readonly { id: string; status: string; note?: string }[]
@@ -98,7 +105,7 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     weeklyHours?: number;
     stackIds?: string[];
   }) => Promise<{ applied: string[] }>;
-  remember: (input: { content: string; kind: "preference" | "fact" }) => Promise<{ proposed: boolean }>;
+  remember: (input: { content: string; kind: "preference" | "fact"; about?: "you" | "project" }) => Promise<{ proposed: boolean }>;
   inspectRepository: () => Promise<{
     found: boolean;
     summary: string;
@@ -377,7 +384,7 @@ export function Coordinator({ id }: AgentProps) {
   useTool({
     name: "propose_project",
     description:
-      "Propose ONE new project as a card in this chat, once the user has agreed on a specific idea. This creates NOTHING: the card shows the name, the idea, the hackathon and track and what to build first, and the project is created only if the user presses its \"Start this project\" button (\"Keep refining\" creates nothing). Never call it while you are still brainstorming or narrowing down, never call it twice for the same idea, and never say a project was created or started.",
+      "Propose ONE new project as a card in this chat, once the user has agreed on a specific idea. This creates NOTHING: the card shows the name, the idea, the hackathon and track and what to build first, and the project is created only if the user presses its \"Start this project\" button (\"Keep refining\" creates nothing). Never call it while you are still brainstorming or narrowing down, never call it twice for the same idea, and never say a project was created or started. When the hackathon's rules name what entries must use, pass that rule word for word as requiredTech. Fill audience (who it's for) and problem (what goes wrong for them today) in the person's own words from this conversation, quoted as they said them. The idea is for the person: plain words on what the app does for them, never a framework, language, database, hosting or API name; those go in the brief.",
     input: v.object({
       name: v.pipe(v.string(), v.minLength(1), v.maxLength(100)),
       idea: v.pipe(v.string(), v.minLength(1), v.maxLength(600)),
@@ -386,6 +393,13 @@ export function Coordinator({ id }: AgentProps) {
       hackathonUrl: v.optional(v.string()),
       track: v.optional(v.string()),
       firstStep: v.optional(v.string()),
+      // The hackathon's own rule naming what entries must use, quoted word for
+      // word from its rules (plan 4.2); left out when it has none.
+      requiredTech: v.optional(v.pipe(v.string(), v.maxLength(600))),
+      // Who it's for and the problem it solves, in the person's own words from
+      // this conversation, as they said them, not rewritten (plan 4.3).
+      audience: v.optional(v.pipe(v.string(), v.maxLength(400))),
+      problem: v.optional(v.pipe(v.string(), v.maxLength(400))),
     }),
     async run(ctx) {
       const authority = await resolve();
@@ -411,6 +425,16 @@ export function Coordinator({ id }: AgentProps) {
           next: "The proposal card is shown. NOTHING has been created: the user decides with the card's \"Start this project\" or \"Keep refining\" button. Do not say the project was created, started or queued. Write at most one short sentence (e.g. they can start it from the card, or tell you what to change).",
         }),
       };
+    },
+  });
+  useTool({
+    name: "project_status",
+    description:
+      "Read how one of the person's own projects is going (its stage, the latest from its build, how many features are done) without changing anything. Call it whenever they ask about a project's progress, before you answer; never guess. Takes an id from the list of existing projects.",
+    input: v.object({ projectId: v.string() }),
+    async run(ctx) {
+      const authority = await resolve();
+      return { output: JSON.stringify(await authority.projectStatus({ projectId: ctx.data.projectId })) };
     },
   });
   useTool({
@@ -517,21 +541,23 @@ export function Coordinator({ id }: AgentProps) {
     useInstruction("This is Home coordination. Existing project requests are handed to their project coordinator through continue_project and its in-chat card. A NEW project is only ever proposed with propose_project, as a card the user starts themselves. After handoff acknowledge it briefly and settle; project specialists and verification run in the project conversation. Their absence from Home is intentional, not a blocker. Do not expose internal ids/tool names or contradict the server-backed project card with speculative progress or capability claims.");
   }
   useInstruction(
-    `You are Caddie, a helpful assistant for solo builders. Priorities: find suitable hackathons, plan and build new projects, then continue existing projects. Speak in clear user-facing language, never raw internal tool names or opaque ids. The supported proving stack is React + Bun + Hono; the other stacks remain planned. When the user refers to an existing project call continue_project with its actual id from context; never create a duplicate or tell them to navigate first. For a new app, first make sure the user has agreed on a specific idea, then call propose_project with a faithful full brief and a sensible name; the card lets them start it. Nothing is created until they press Start this project. Never ask the user to open another page or repeat the request. Profile facts supplied by the host are known; never pretend this is anonymous. Use find_hackathons for actual hackathon results — call it directly for any "find/suggest a hackathon" request, without first asking the user what they like (their saved profile already drives the ranking); explicitly acknowledge when fresh official rules/listings are unavailable. A planning step or greeting is not a completed build. Plan approval does not authorize deployment, purchases, merge, or destructive data changes. If blocked explain the specific prerequisite and stop. A ready workflow means build checks passed, not proof of every real-world outcome.`,
+    `You are Caddie, a helpful assistant for solo builders. Priorities: find suitable hackathons, plan and build new projects, then continue existing projects. Speak in clear user-facing language, never raw internal tool names or opaque ids. The supported proving stack is React + Bun + Hono; the other stacks remain planned. When the user refers to an existing project call continue_project with its actual id from context; never create a duplicate or tell them to navigate first. For a new app, first make sure the user has agreed on a specific idea, then call propose_project with a faithful full brief and a sensible name; the card lets them start it. Nothing is created until they press Start this project. Make a proposal ONLY by calling propose_project, and never write its fields into your reply (not as JSON, a list or a code block): the person sees nothing until propose_project returns. Mention the card only after propose_project has returned in this turn; if it did not, say the proposal did not go through and offer to try again. Never ask the user to open another page or repeat the request. Profile facts supplied by the host are known; never pretend this is anonymous. Use find_hackathons for actual hackathon results — call it directly for any "find/suggest a hackathon" request, without first asking the user what they like (their saved profile already drives the ranking); explicitly acknowledge when fresh official rules/listings are unavailable. A planning step or greeting is not a completed build. Plan approval does not authorize deployment, purchases, merge, or destructive data changes. If blocked explain the specific prerequisite and stop. A ready workflow means build checks passed, not proof of every real-world outcome.`,
   );
   useInstruction("Caddie serves nontechnical people and technical people short on time. Own setup, task handoffs, tests and repairs. The user describes the outcome, reviews a readable plan, and tries the app. Ask only for product choices or missing information that changes the result; choose sensible defaults for implementation details. Keep tool names, run ids, revision hashes and debugging steps out of normal replies. Explain progress briefly in terms of the app, and show technical evidence only when requested. Never ask the user to configure the test environment, move between workspaces or pass instructions to specialists. A genuine blocker needs a plain explanation of what is saved, what is incomplete and the specific decision needed. Do not imply the user must repair Caddie. Never describe a generated app as ready until the host-backed workflow publishes its preview.");
-  useInstruction("Be smart, proactive and personal, but never presumptuous. Lead with what you already know from the host-supplied profile and confirmed memory — default the stack from a stated preference, greet by what you know, and ask only for facts that are genuinely missing and matter to the current choice. When the user tells you something durable about themselves (a skill, a tool preference, how they work), call update_profile or remember so you keep it — but a memory is a PROPOSAL: tell them you noted it and that it sticks once they confirm; never present a proposed or inferred fact as already saved. You may call inspect_repository to see what the user has already built and offer an observation (\"looks like you work in TypeScript + React — want me to remember that?\"); it records nothing on its own. Never record anything resembling spending or deployment permission as a preference or memory — those remain separate explicit approvals.");
+  useInstruction("Be smart, proactive and personal, but never presumptuous. Lead with what you already know from the host-supplied profile and confirmed memory — default the stack from a stated preference, greet by what you know, and ask only for facts that are genuinely missing and matter to the current choice. When the user tells you something durable about themselves (a skill, a tool preference, how they work), call update_profile or remember so you keep it. When they tell you something lasting about this project (who it is for, what it must do, a decision), call remember with about 'project' so it stays with the project. A memory is a PROPOSAL: tell them you noted it and that it sticks once they confirm; never present a proposed or inferred fact as already saved. You may call inspect_repository to see what the user has already built and offer an observation (\"looks like you work in TypeScript + React — want me to remember that?\"); it records nothing on its own. Never record anything resembling spending or deployment permission as a preference or memory — those remain separate explicit approvals.");
   useInstruction(HACKATHON_HONESTY_INSTRUCTION);
   useInstruction(HACKATHON_FOLLOWUPS_INSTRUCTION);
   useInstruction(HACKATHON_IDEATION_INSTRUCTION);
+  useInstruction(PLATFORM_AI_RULE);
   if (context.homeOverview) {
     useInstruction("Your final role is Home intake and handoff. You MUST use continue_project for requested work on a named existing project, passing the full request to its actual id in Home context. That project's coordinator has frontend, QA and the sandbox. You do not execute specialist work here and MUST NOT report those tools as unavailable. If the user asks for technical repairs, forward those requirements intact to the project coordinator; do not evaluate local Home tools as project capabilities.");
   } else {
+    useInstruction("HACKATHON RULES IN THE PLAN: when the brief has a 'Required by the hackathon' line, copy it word for word into the PRD under 'Hackathon requirements' and build the plan on it; never drop, soften or swap what it requires. Lines marked 'in their words' (who it's for, the problem) open the PRD's overview exactly as written.");
     useInstruction("For project work: read project context, delegate product and designer work, write one cohesive PRD with user-facing scope, concrete visual direction and behavior checks, then stop for authenticated review. A PRD uses the React/Hono recipe; no arbitrary unsupported stacks or IE11 requirement. After approval, build feature by feature: call build_next_feature, delegate exactly that feature with its doneWhen checks to the implementation specialist, then call finish_feature; repeat until the host says every feature passed, then run QA with verify_build to publish a usable preview. There is no native shell environment: use the specialists' scoped tools. If a product/designer delegate returns \"(task completed with no text)\" or otherwise does not save, do NOT re-delegate the same empty hand-off: call write_plan_note yourself with kind:'prd' and the full PRD body to save the revision directly.");
     useInstruction("SAVED MEANS SAVED: a plan, revision or file exists only when the host CONFIRMS it — write_plan_note returning a line that begins 'SAVED:', AND the workflow phase in coordinator_context being 'review' (not 'planning'). A specialist describing what it saved, a PRD you printed in chat, or a task result of \"(task completed with no text)\", is NOT proof; never tell the user something was saved, written, updated or is ready for review on that basis. While the phase is still 'planning' the plan is NOT saved — say Caddie is still working on it, never that it is ready. Only after you have the 'SAVED:' confirmation and the phase has moved to 'review' may you say the plan is ready to review.");
     useInstruction(`FEATURE LIST: every PRD you save must list what will be built, so the user approves exactly that list and the host builds it one feature at a time. ${FEATURE_BLOCK_GUIDE} Order features so each builds on the last; keep each one small enough to finish and test on its own; write doneWhen checks as behaviors a person could see. write_plan_note refuses a PRD without a valid list.`);
     useInstruction("COMPREHENSIVE PRD, FIRST PASS: write the whole thing before saving — the user must never have to ask for the schema, then say 'not comprehensive', then 'still ambiguous'. Every PRD covers, as explicit sections: overview + goals/non-goals; user stories/flows; a DATA MODEL with every entity's fields, types, keys and relations (money as integer minor units, never a float); the API surface (Hono routes in/out) or an explicit 'local-only, no server API'; the frontend screens + key components with each loading/empty/error state; offline/sync (what's stored locally, what syncs, the conflict rule) when it is a PWA/offline app; the SPECIFIC AI model/service with its call path and fail-soft behavior, never 'an AI model'; and observable success metrics. Where the brief lacks a detail, choose a sensible default and label it 'assumption:' so the user corrects one line — do NOT leave a section blank, do NOT drip-feed depth across turns, and do NOT stop to ask one question at a time.");
-    useInstruction("DESIGN STEP: after the PRD is approved the project enters the 'design' phase — the user has NOT approved a build yet. Do NOT scaffold or build. Delegate the designer (or author it yourself with write_plan_note kind:'design', same planRevision) to produce ONE design brief: the screen inventory; each key screen's layout and components; the token/component choices and the interaction pattern for each input; and the empty, loading and error state for anything that loads or saves; plus one titled ```html-mock block per key screen and state (static markup styled only with design-system tokens) so the user can see it. Save it and STOP for the authenticated design review. Only after the design review approves does the phase become 'building' and the feature loop begins. The design brief is NOT the PRD and carries no caddie-features block.");
+    useInstruction("DESIGN STEP: after the PRD is approved the project enters the 'design' phase — the user has NOT approved a build yet. Do NOT scaffold or build. Delegate the designer (or author it yourself with write_plan_note kind:'design', same planRevision) to produce ONE design brief: the screen inventory; each key screen's layout and components; the token/component choices and the interaction pattern for each input; and the empty, loading and error state for anything that loads or saves; plus one titled ```html-mock block per key screen and state (static markup styled only with design-system tokens) so the user can see it. Save it and STOP for the authenticated design review. Only after the design review approves does the phase become 'building' and the feature loop begins. The design brief is NOT the PRD and carries no caddie-features block. Never paste a mockup or any HTML into a reply: the card draws the brief's mockups; to show one screen in chat, put its static HTML in one ```html-mock <screen name> block.");
   }
   return "Caddie helps solo builders discover, plan, build, verify and share software through one continuous conversation.";
 }

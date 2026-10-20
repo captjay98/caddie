@@ -102,6 +102,93 @@ export function splitDesignMocks(body: string): { display: string; mocks: Design
 	return { display, mocks };
 }
 
+/** A chat reply split around its mockups (plan 4.5). */
+export interface ChatMockSplit {
+	/** Prose before the first mockup (all of it when there is none). */
+	before: string;
+	/** Prose after the first mockup, with every later mockup taken out. */
+	after: string;
+	/** Every mockup in the reply, in the order it appears. */
+	mocks: DesignMock[];
+	/** A mockup is still being written at the end of the reply. */
+	drawing: boolean;
+}
+
+// Any closed fenced block: its info string and its body.
+const ANY_FENCE = /^(`{3,}|~{3,})([^\r\n]*)\r?\n(?:([\s\S]*?)\r?\n)?\1[ \t]*$/gm;
+// The info string of a fence that holds a screen: html-mock (the designer's)
+// or html, with an optional screen title after it.
+const MOCK_FENCE_INFO = /^[ \t]*(?:html-mock|html?)(?![\w-])[ \t]*(.*?)[ \t]*$/i;
+// A screen written straight into the reply, which Markdown would print as raw
+// HTML: a whole page, a <body> or a <main>, with an optional <style> before it.
+const BARE_SCREEN =
+	/^[ \t]*((?:<style\b[^>]*>[\s\S]*?<\/style>\s*)?(?:<!doctype\s+html\b[^>]*>[\s\S]*?<\/html>|<html\b[\s\S]*?<\/html>|<body\b[\s\S]*?<\/body>|<main\b[\s\S]*?<\/main>))/gim;
+// The start of a mockup that has not been closed yet.
+const OPEN_MOCK_FENCE = /^(`{3,}|~{3,})[ \t]*(?:html-mock|html?)(?![\w-])([^\r\n]*)(?:\r?\n([\s\S]*))?$/im;
+const OPEN_BARE_SCREEN =
+	/^[ \t]*(?:(?:<style\b[^>]*>[\s\S]*?<\/style>\s*)?<(?:!doctype\s+html|html|body|main)\b|<style\b(?![\s\S]*<\/style>))/im;
+
+/**
+ * Split a chat reply around the design mockups in it (plan 4.5), so each is
+ * drawn in the styled preview frame and never printed as HTML: a titled
+ * ```html-mock block, an ```html block (Caddie's readers are not developers:
+ * HTML in a reply is a screen to look at, not code to copy), or a screen
+ * written straight into the reply. Code in any other language, and a tag named
+ * inside a sentence, stay as they are. A mockup still being written at the end
+ * is cut from the prose and flagged `drawing`; once the reply is `complete`
+ * (the default) it is drawn as it stands.
+ */
+export function splitChatMocks(text: string, options: { complete?: boolean } = {}): ChatMockSplit {
+	const complete = options.complete ?? true;
+	const mocks: DesignMock[] = [];
+	const MARK = '\u0000mock\u0000';
+	const add = (title: string | undefined, html: string | undefined): string => {
+		const markup = (html ?? '').trim();
+		if (!markup) return '';
+		const named = (title ?? '').trim().slice(0, MAX_DESIGN_MOCK_TITLE);
+		mocks.push({ title: named || `Screen ${mocks.length + 1}`, html: markup });
+		return MARK;
+	};
+	// Set every closed fence and every bare screen aside (indexed), so a screen
+	// inside code is never looked at and mockups are numbered in reading order.
+	const fences: { info: string; body: string | undefined; block: string }[] = [];
+	const bare: string[] = [];
+	let masked = text.replace(ANY_FENCE, (block: string, _fence: string, info: string, body: string | undefined) => {
+		fences.push({ info, body, block });
+		return `\u0000F${fences.length - 1}\u0000`;
+	});
+	masked = masked.replace(BARE_SCREEN, (_whole: string, screen: string) => {
+		bare.push(screen);
+		return `\u0000B${bare.length - 1}\u0000`;
+	});
+	// A mockup still open at the end: whichever opens first.
+	let tail: { title: string | undefined; html: string | undefined } | null = null;
+	const fence = OPEN_MOCK_FENCE.exec(masked);
+	const screen = OPEN_BARE_SCREEN.exec(masked);
+	const cut = Math.min(fence?.index ?? Infinity, screen?.index ?? Infinity);
+	if (cut !== Infinity) {
+		tail = cut === fence?.index ? { title: fence[2], html: fence[3] } : { title: undefined, html: masked.slice(cut) };
+		masked = masked.slice(0, cut);
+	}
+	const restore = (part: string) => part.replace(/\u0000F(\d+)\u0000/g, (_m: string, i: string) => fences[Number(i)]!.block);
+	const restoreAll = (part: string) => restore(part).replace(/\u0000B(\d+)\u0000/g, (_m: string, i: string) => bare[Number(i)]!);
+	let joined = masked.replace(/\u0000([FB])(\d+)\u0000/g, (whole: string, kind: string, i: string) => {
+		if (kind === 'B') return add(undefined, bare[Number(i)]);
+		const entry = fences[Number(i)]!;
+		const info = MOCK_FENCE_INFO.exec(entry.info);
+		return info ? add(info[1], entry.body) : whole;
+	});
+	let drawing = false;
+	if (tail) {
+		if (complete) joined += add(tail.title, restoreAll(tail.html ?? ''));
+		else drawing = true;
+	}
+	const tidy = (part: string) => restore(part).replace(/\n{3,}/g, '\n\n').trim();
+	const at = joined.indexOf(MARK);
+	if (at === -1) return { before: tidy(joined), after: '', mocks, drawing };
+	return { before: tidy(joined.slice(0, at)), after: tidy(joined.slice(at + MARK.length).split(MARK).join('')), mocks, drawing };
+}
+
 export type FeatureParse = { ok: true; features: PlanFeature[] } | { ok: false; error: string };
 
 /** Parse and validate the PRD's feature block. Never throws. */

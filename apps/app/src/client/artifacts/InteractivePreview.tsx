@@ -8,8 +8,10 @@ const FETCH_KIND = "caddie-preview-fetch";
 const FETCH_RESULT_KIND = "caddie-preview-fetch-result";
 const MAX_RELAY_BODY = Math.ceil((1024 * 1024) / 3) * 4 + 4;
 const MAX_IN_FLIGHT = 8;
+// 'wasm-unsafe-eval' lets the app compile WebAssembly (sql.js and the like);
+// JavaScript eval stays blocked (owner OK, 2026-10-20).
 const CSP =
-  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+  "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 function storageKey(actorId: string, projectId: string): string {
   return `caddie:preview:${encodeURIComponent(actorId)}:${encodeURIComponent(projectId)}`;

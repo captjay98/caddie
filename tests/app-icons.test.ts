@@ -216,3 +216,15 @@ describe('the icon files', async () => {
 		for (let i = 0; i < files.length; i++) expect(Buffer.from(again[i]!.bytes).equals(Buffer.from(files[i]!.bytes))).toBe(true);
 	});
 });
+
+describe("the Projects card's tile matches the app's icon (plan 5.7)", () => {
+	test('one letter rule and one palette, shared by the icon and the card', async () => {
+		const shared = await import('../packages/contracts/src/app-icon.ts');
+		expect(shared.ICON_PALETTE).toEqual(ICON_PALETTE);
+		for (const name of ['farm log', 'élan', '  123 go', '农场 Farm', '农场', '']) expect(shared.iconLetter(name)).toBe(iconLetter(name));
+		for (let i = 0; i < 32; i++) expect(shared.iconColor(`proj-${i}`)).toBe(iconColor(`proj-${i}`));
+		// One source: the server's renderer uses the shared helpers, not a copy.
+		expect(iconColor).toBe(shared.iconColor);
+		expect(iconLetter).toBe(shared.iconLetter);
+	});
+});

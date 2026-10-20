@@ -173,6 +173,9 @@ describe('dispatch Worker', () => {
 		expect(appCsp(ORIGIN)).toContain("connect-src 'self'");
 		expect(appCsp(ORIGIN)).toContain("form-action 'self'");
 		expect(appCsp(ORIGIN)).toContain(`frame-ancestors 'self' ${ORIGIN}`);
+		// WebAssembly may run (owner OK, 2026-10-20); JavaScript eval still may not.
+		expect(appCsp(ORIGIN)).toContain("script-src 'self' 'wasm-unsafe-eval'");
+		expect(appCsp(ORIGIN)).not.toContain("'unsafe-eval'");
 		expect(res.headers.get('x-content-type-options')).toBe('nosniff');
 		expect(res.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
 		expect(res.headers.get('content-length')).toBeNull();
