@@ -337,7 +337,13 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   had normalized to an absolute path; that is fixed and regression-covered.
   Installing that exact APK on an arm64 emulator also launches it
   (`docs/evidence/2026-10-20-kiro-integration/android-release-launch.png`).
-- [ ] 9.3 After deploy: one chat-to-plan-to-build journey through Caddie.
+- [x] 9.3 After deploy: one chat-to-plan-to-build journey through Caddie.
+  LIVE VERIFIED 2026-10-20 on `proj_8283699be23f794c19c4ad63a89faa0b`:
+  5/5 features passed, workflow `ready`, preview
+  `out_58ea4eb55559d5586e43324713421419`; the owner browser opened the
+  preview, saw the Habit Tracker render, added "Walk 10 minutes", marked it
+  done and saw "Done today" — no console or network errors. Screenshots and
+  the full record: `docs/evidence/2026-10-20-acceptance-preview/README.md`.
 
 ## Owner actions
 
