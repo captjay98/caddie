@@ -243,7 +243,8 @@ expect(install.code, install.output.slice(-1500)).toBe(0);
 With that, the journey passes end to end: real debug APK built, installed,
 launched and captured on the emulator. Changed `tests/live/stacks/flutter.spec.ts`
 only. First two attempts recorded as **FAILED** (this cause); the passing run is
-**LIVE VERIFIED** with its receipt in `docs/live-receipts.json`.
+**LIVE VERIFIED** — receipt `lr_602f8532232b3019` at `9af594f396d3`, 2 tests
+passed.
 
 ### Complete native packaging and delivery
 
@@ -342,6 +343,7 @@ composed build with a fresh, fully migrated scratch D1 (all 39 migrations).
 | `bun scripts/release-check.ts` | 49 PASS, 0 FAIL, 1 BLOCKED (deployment authorization, by design), 4 PROVISIONED | LOCAL VERIFIED; live gates remain PROVISIONED/BLOCKED |
 | Fresh local D1 | all 39 migrations applied in numeric order | LOCAL VERIFIED |
 | Two packet gates run concurrently (harness robustness check) | both: 43 PASS, 0 FAIL, P00 clean in both | LOCAL VERIFIED |
+| `bun run test:live -- P15d` | 2 tests passed; receipt `lr_602f8532232b3019` at `9af594f396d3` | LIVE VERIFIED (local toolchain + emulator) |
 
 Push identity: see "Push" below.
 

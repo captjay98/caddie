@@ -223,4 +223,5 @@ no paid call beyond the recorded phase 9 probes.
 | Track 3 Android apps: Flutter scaffold + locked installs, Flutter web preview, stack-aware build loop, the APK as a non-blocking native check | LOCAL VERIFIED | `stacks/flutter/`, `tests/flutter-*.test.ts`, `tests/android-app.test.ts` |
 | The APK is built and read back inside the production Flutter sandbox image | LIVE VERIFIED | phase 9.2 probe: 14,884,096 bytes, sha256 `5631cde4…0c53f4`; evidence `docs/evidence/2026-10-20-kiro-integration/` |
 | Download and publish an Android app: private 30-minute link, QR, published download page carrying the APK hash/size/API base | LOCAL VERIFIED; hosting SIMULATED | `tests/browser/project-workflow.spec.ts`, publish/page tests |
+| Installs and launches on a real Android device: the recipe's own debug APK is built, installed, started and captured on an arm64 emulator | LIVE VERIFIED | P15d live receipt `lr_602f8532232b3019` at `9af594f396d3` (`tests/live/stacks/flutter.spec.ts`, 2 tests) |
 | Flutter's never-landed migrations renumbered to 0038/0039 so 0036/0037 keep their meanings | LOCAL VERIFIED | all 39 migrations apply in order to a fresh local D1 |

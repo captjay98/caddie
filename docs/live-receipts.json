@@ -5,10 +5,10 @@
 			"tests/live/stacks/flutter.spec.ts"
 		],
 		"passed": 2,
-		"at": "2026-10-20T10:13:39.247Z",
-		"id": "lr_91a30ad792228a8c",
-		"commit": "afeebad3c08a90030f521319131212298f64f48b",
-		"dirty": true,
+		"at": "2026-10-20T10:15:20.307Z",
+		"id": "lr_602f8532232b3019",
+		"commit": "9af594f396d3c7542a6f5fee76839355de23138a",
+		"dirty": false,
 		"specDigest": "2dcecd5a393ecb38f2c3e7c9d443a45af9d00db5470030036804815f9ed024f4",
 		"target": "local",
 		"runtime": "bun 1.4.0"

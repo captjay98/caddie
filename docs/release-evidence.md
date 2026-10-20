@@ -46,7 +46,7 @@ Recorded 2026-10-06 on branch `p15-p17-completion`, with the owner's
 | P15a | TanStack Start template flow | LIVE VERIFIED | `tests/live/stacks/tanstack-start.spec.ts` — real `bun install` / `bun test src/` / `bun run build` in a temp dir, production server answers 200 with the SSR markers |
 | P15b | Laravel + Inertia journey | BLOCKED | `tests/live/stacks/laravel-inertia.spec.ts` gates honestly: needs `CADDIE_LIVE_AUTHORIZED=1` (composer install is a network effect) + composer/php/npm present |
 | P15c | FastAPI + React journey | BLOCKED | `tests/live/stacks/fastapi-react.spec.ts`: needs `CADDIE_LIVE_AUTHORIZED=1` + uv/python/bun present |
-| P15d | Flutter journey (APK + emulator) | BLOCKED | `tests/live/stacks/flutter.spec.ts`: needs `CADDIE_LIVE_AUTHORIZED=1` + flutter + adb + a booted emulator; acceptance bar is a real APK launch + interaction capture, never a web screenshot |
+| P15d | Flutter journey (APK + emulator) | LIVE VERIFIED | `tests/live/stacks/flutter.spec.ts` — real `dart caddie/setup.dart` + locked `flutter pub get` + `flutter test test/examples` + `flutter build apk --debug`, then install, launch and capture on an arm64 emulator; receipt `lr_602f8532232b3019` at `9af594f396d3` (2026-10-20), 2 tests passed. Requires `CADDIE_LIVE_AUTHORIZED=1` + flutter + adb + a booted emulator, and clears a stale differently signed install of the same app id first |
 | P17 | Hosted acceptance smoke | LIVE VERIFIED | `tests/live/release.spec.ts` against `https://caddie.jamalibrahim.dev` — 5/5 PASS, receipt `lr_1445a409fddf0a19` at build `a58adabd406a`, 2026-10-19 |
 
 Intentionally-absent live specs stay honest holes, not fake passes:
@@ -185,6 +185,7 @@ probe the owner approved. Per-defect reproductions live in
 | `bun scripts/release-check.ts` | LOCAL VERIFIED | **49 PASS, 0 FAIL, 1 BLOCKED, 4 PROVISIONED** |
 | fresh local D1 | LOCAL VERIFIED | all 39 migrations applied in numeric order |
 | phase 9.2 Flutter sandbox probe | LIVE VERIFIED | real release APK, 14,884,096 bytes, sha256 `5631cde4441037cb8bffd194ed0e78895b9139d87fbf7bb0373b7754010c53f4`, read back and disposed |
+| P15d live Flutter journey (debug APK → emulator) | LIVE VERIFIED | real `flutter build apk --debug` in a temp scaffold, installed, launched and captured on an arm64 emulator; receipt `lr_602f8532232b3019` at `9af594f396d3`, 2 tests passed |
 
 Two defects were found by this gate and fixed rather than recorded: memory
 offers were ordered by a random id after `createdAt`, so two offers written in
@@ -193,7 +194,9 @@ deterministic regression), and the P00 routing spec's preview-port handling
 used an `lsof` spelling that is a usage error on macOS lsof 4.91 — so its
 "reap a stale listener" step never reaped anything and SIGKILL'd whatever it
 found (now it walks to the first free port and never kills a listener it does
-not own).
+not own). A third, in the live Flutter journey, is recorded with the P15d
+receipt above: a debug build could not install over the differently signed
+release APK already on the emulator.
 
 ## Stack availability (frozen scope, feature-ledger)
 
