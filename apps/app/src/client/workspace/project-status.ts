@@ -170,3 +170,65 @@ export function activeStep(phase: WorkflowPhase | null): ProjectStepId | null {
 	if (phase === 'ready') return 'check';
 	return null;
 }
+
+/** One of the card's four steps (plan 5.7). */
+export interface JourneyStep {
+	readonly id: ProjectStepId;
+	readonly label: string;
+	/** A few plain words under the step. */
+	readonly sub: string;
+	/** done ✓, now (the step the work is on), stop ✕ (paused there), todo. */
+	readonly state: 'done' | 'now' | 'stop' | 'todo';
+}
+
+/**
+ * Where a project is in Plan → Build → Check → Submit (Share for a personal
+ * project), from the shared ProjectExperience stage (plan 5.7, variant B), so
+ * the card and the project page tell the same story. Null when the project has
+ * no workflow yet. Nothing is marked done unless its stage says so: a build
+ * can only run on an approved plan, so a build stage implies Plan is done.
+ */
+export function journeyFromExperience(experience: ProjectExperience, opts: { personal: boolean }): JourneyStep[] | null {
+	if (experience.version === 0) return null;
+	const last = opts.personal ? 'Share' : 'Submit';
+	const later = {
+		check: opts.personal ? 'After it’s built' : 'Before you submit',
+		submission: opts.personal ? 'Optional' : 'Hand in when ready',
+	};
+	const steps = (
+		plan: [JourneyStep['state'], string],
+		build: [JourneyStep['state'], string],
+		check: [JourneyStep['state'], string] = ['todo', later.check],
+	): JourneyStep[] => [
+		{ id: 'plan', label: 'Plan', state: plan[0], sub: plan[1] },
+		{ id: 'build', label: 'Build', state: build[0], sub: build[1] },
+		{ id: 'check', label: 'Check', state: check[0], sub: check[1] },
+		{ id: 'submission', label: last, state: 'todo', sub: later.submission },
+	];
+	const waitBuild: [JourneyStep['state'], string] = ['todo', 'After you approve'];
+	switch (experience.stage) {
+		case 'planning':
+			return steps(['now', 'Caddie is drafting it'], waitBuild);
+		case 'planning_blocked':
+			return steps(['stop', 'Needs another pass'], waitBuild);
+		case 'review':
+			return steps(['now', 'Ready for you to review'], waitBuild);
+		case 'design':
+			return steps(['now', 'Caddie is designing the screens'], waitBuild);
+		case 'design_review':
+			return steps(['now', 'Design ready for you'], waitBuild);
+		case 'building':
+		case 'checking':
+			return steps(['done', 'Approved'], ['now', 'Caddie is building it']);
+		case 'repairing':
+			return steps(['done', 'Approved'], ['now', 'Fixing a problem']);
+		case 'blocked':
+			return steps(['done', 'Approved'], ['stop', 'Needs your help']);
+		case 'stopped':
+			return experience.plan?.approved
+				? steps(['done', 'Approved'], ['stop', 'Paused'])
+				: steps(['stop', 'Paused'], waitBuild);
+		case 'ready':
+			return steps(['done', 'Approved'], ['done', 'Ready to try'], ['now', 'Ready when you are']);
+	}
+}

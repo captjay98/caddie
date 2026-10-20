@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import type { ExperienceStage, ProjectExperience } from "@caddie/contracts";
-import { projectCardFromExperience } from "../apps/app/src/client/workspace/project-status.ts";
+import { journeyFromExperience, projectCardFromExperience } from "../apps/app/src/client/workspace/project-status.ts";
 
 /**
  * LOCAL VERIFIED: the Projects-list card reads the project's REAL workflow
@@ -43,5 +43,29 @@ describe("projectCardFromExperience", () => {
       expect(card.label.length).toBeGreaterThan(0);
       expect(card.action.label.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("the card's four steps (plan 5.7)", () => {
+  const states = (stage: ExperienceStage, personal = false) =>
+    journeyFromExperience(exp(stage), { personal })!.map((step) => `${step.label}:${step.state}`);
+
+  test("building: Plan is done, Build is now, Check and Submit wait", () => {
+    expect(states("building")).toEqual(["Plan:done", "Build:now", "Check:todo", "Submit:todo"]);
+    const build = journeyFromExperience(exp("building"), { personal: false })![1]!;
+    expect(build.sub).toBe("Caddie is building it");
+  });
+
+  test("a paused build stops at Build; a ready app moves on to Check; a plan in review is Plan now", () => {
+    expect(states("blocked")).toEqual(["Plan:done", "Build:stop", "Check:todo", "Submit:todo"]);
+    expect(states("planning_blocked")).toEqual(["Plan:stop", "Build:todo", "Check:todo", "Submit:todo"]);
+    expect(states("ready")).toEqual(["Plan:done", "Build:done", "Check:now", "Submit:todo"]);
+    expect(states("review")).toEqual(["Plan:now", "Build:todo", "Check:todo", "Submit:todo"]);
+    expect(states("design_review")).toEqual(["Plan:now", "Build:todo", "Check:todo", "Submit:todo"]);
+  });
+
+  test("a personal project's last step is Share; no workflow yet means no steps", () => {
+    expect(states("building", true).at(-1)).toBe("Share:todo");
+    expect(journeyFromExperience(exp("planning", 0), { personal: false })).toBeNull();
   });
 });

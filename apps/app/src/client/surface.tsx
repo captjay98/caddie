@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import * as v from 'valibot';
-import { ProjectExperienceSchema } from '@caddie/contracts';
+import { ProjectExperienceSchema, iconColor, iconLetter } from '@caddie/contracts';
 import type { ApprovalRecord, DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
 import { SignInScreen } from './sign-in.tsx';
 import { Markdown } from '@caddie/ui/Markdown';
@@ -31,6 +31,8 @@ import {
 	useProjectExperience,
 	useRunBindings,
 	useWorkflowPhase,
+	useProjectHackathons,
+	type ProjectHackathonLine,
 } from './queries.ts';
 import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from './api.ts';
@@ -38,8 +40,18 @@ import { useWorkspaceChrome } from './workspace/Chrome.tsx';
 import { NowPanel } from './project/NowPanel.tsx';
 import { relativeUpdated } from './project/now-panel.ts';
 import { ProjectTabs } from './workspace/ProjectTabs.tsx';
-import { projectCardFromCopiedApp, projectCardFromExperience, projectStatus, type CopiedAppSummary } from './workspace/project-status.ts';
+import { journeyFromExperience, projectCardFromCopiedApp, projectCardFromExperience, projectStatus, type CopiedAppSummary } from './workspace/project-status.ts';
+import { Icon } from './icons.tsx';
 import { overviewAppState } from './project/overview-app.ts';
+
+/** A hackathon's deadline in words for its project card (plan 5.7); null when unknown. */
+function dueWords(hackathon: ProjectHackathonLine): string | null {
+	if (hackathon.ended) return 'Ended';
+	if (hackathon.daysLeft === null) return null;
+	if (hackathon.daysLeft === 0) return 'Due today';
+	if (hackathon.daysLeft === 1) return 'Due tomorrow';
+	return `Due in ${hackathon.daysLeft} days`;
+}
 
 /**
  * The routed surfaces for the discovery-first shell.
@@ -567,6 +579,7 @@ function ProjectList(): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const brief = useAccountBrief(actor);
+	const hackathons = useProjectHackathons(actor);
 	if (!chrome.authenticated) return <SignInScreen />;
 	if (chrome.projectsPending) return <PageSkeleton page="projects" label="Loading your projects…" />;
 	if (chrome.projectsError) {
@@ -603,7 +616,7 @@ function ProjectList(): ReactElement {
 					const fallback = brief.isPending || brief.error
                         ? { label: brief.error ? 'Updates unavailable' : 'Loading updates…', detail: brief.error ? 'Open your project or retry loading its updates.' : 'Checking the latest decisions and progress.', next: null }
                         : projectStatus(cardsByProject.get(project.id) ?? []);
-					return <ProjectCard key={project.id} project={project} fallback={fallback} />;
+					return <ProjectCard key={project.id} project={project} fallback={fallback} hackathon={hackathons.data?.[project.id] ?? null} />;
 				})}
 			</ul>
 			{archived.length > 0 ? (
@@ -640,6 +653,8 @@ function whenIso(iso: string): string {
 function ProjectCard(props: {
 	project: Project;
 	fallback: { label: string; detail: string; next: DecisionCardType | null };
+	/** The project's hackathon and deadline, when it has one (plan 5.7). */
+	hackathon?: ProjectHackathonLine | null;
 }): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
@@ -647,6 +662,10 @@ function ProjectCard(props: {
 	const { project, fallback } = props;
 	const parsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
 	const fromWorkflow = parsed?.success ? projectCardFromExperience(parsed.output) : null;
+	const hackathon = props.hackathon ?? null;
+	const personal = !hackathon && !project.contestUrl;
+	const journey = parsed?.success ? journeyFromExperience(parsed.output, { personal }) : null;
+	const letter = iconLetter(project.name);
 	// No workflow yet: a copied app (a judge's example, or a GitHub copy) may
 	// already be ready to try. Read it from the same /workflow answer the
 	// project page uses; only asked for once the projection says "no workflow".
@@ -664,22 +683,51 @@ function ProjectCard(props: {
 
 	return (
 		<li className="project-row project-card card-surface" data-testid={`project-row-${project.id}`} data-working={card?.working ? 'true' : 'false'}>
-			<div className="project-card-head">
-				<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
-					{project.name}
-				</button>
-				<span
-					className="badge project-card-pill"
-					data-tone={card ? card.tone : fallback.next?.status === 'blocked' ? 'danger' : fallback.next ? 'warn' : 'neutral'}
-					data-testid={`project-step-text-${project.id}`}
-				>
-					{card?.working ? <span className="project-card-live" aria-hidden="true" /> : null}
-					{card ? card.label : fallback.label}
+			<div className="project-card-main">
+				{/* The app's picture: its letter tile, the same letter and colour as
+				    the published app's home-screen icon, until real screenshots exist. */}
+				<span className="project-card-tile" style={{ background: iconColor(project.id) }} data-testid={`project-tile-${project.id}`} aria-hidden="true">
+					{letter ?? '•'}
 				</span>
+				<div className="project-card-body">
+					<div className="project-card-head">
+						<button type="button" className="row-title r-link" onClick={() => chrome.openProject(project.id)}>
+							{project.name}
+						</button>
+						<span
+							className="badge project-card-pill"
+							data-tone={card ? card.tone : fallback.next?.status === 'blocked' ? 'danger' : fallback.next ? 'warn' : 'neutral'}
+							data-testid={`project-step-text-${project.id}`}
+						>
+							{card?.working ? <span className="project-card-live" aria-hidden="true" /> : null}
+							{card ? card.label : fallback.label}
+						</span>
+					</div>
+					{hackathon ? (
+						<p className="project-card-contest" data-testid={`project-contest-${project.id}`}>
+							<Icon name="trophy" title="" />
+							{hackathon.title}
+							{dueWords(hackathon) ? <span className="project-card-due">{` · ${dueWords(hackathon)}`}</span> : null}
+						</p>
+					) : null}
+					<p className="project-card-purpose" title={purpose}>
+						{purpose}
+					</p>
+				</div>
 			</div>
-			<p className="project-card-purpose" title={purpose}>
-				{purpose}
-			</p>
+			{journey ? (
+				<ol className="project-journey" data-testid={`project-journey-${project.id}`} aria-label="Where this project is">
+					{journey.map((step) => (
+						<li key={step.id} className="project-journey-step" data-state={step.state} aria-current={step.state === 'now' || step.state === 'stop' ? 'step' : undefined}>
+							<span className="project-journey-dot" aria-hidden="true">
+								{step.state === 'done' ? '✓' : step.state === 'stop' ? '✕' : ''}
+							</span>
+							<span className="project-journey-label">{step.label}</span>
+							<span className="project-journey-sub">{step.sub}</span>
+						</li>
+					))}
+				</ol>
+			) : null}
 			<p className="project-card-detail">{card ? card.detail : fallback.detail}</p>
 			<div className="project-card-foot">
 				<span className="project-card-updated">{updated ?? ''}</span>

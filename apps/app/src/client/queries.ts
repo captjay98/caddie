@@ -648,3 +648,26 @@ export function watchAuthTransitions(queryClient: QueryClient): {
 		},
 	};
 }
+
+/** A project card's hackathon line (mirrors server ProjectHackathonLine). */
+export interface ProjectHackathonLine {
+	title: string;
+	deadline: string | null;
+	daysLeft: number | null;
+	ended: boolean;
+}
+
+/**
+ * Every one of the person's projects with its hackathon and deadline, in one
+ * read for the Projects list (plan 5.7). A failed read simply leaves the
+ * cards without the contest line.
+ */
+export function useProjectHackathons(actor: ActorScope) {
+	return useQuery({
+		queryKey: ['project-hackathons', actor.actorId ?? 'pending'],
+		queryFn: () => fetchJson<{ hackathons: Record<string, ProjectHackathonLine> }>('/api/project-hackathons'),
+		enabled: actor.actorId !== null,
+		staleTime: 60_000,
+		select: (data) => data.hackathons,
+	});
+}
