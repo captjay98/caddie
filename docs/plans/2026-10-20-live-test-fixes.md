@@ -119,8 +119,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   panel (the same project record the chat card and project home read; it
   used to follow this browser's chat connection), and the plan's record id
   joined the other ids in the developer fold.
-- [ ] 3.6 One build card, no card inside a card (chat and the project's Now),
-  with a clearer hierarchy. Browser + a screenshot for the owner.
+- [x] 3.6 One build card, no card inside a card (chat and the project's Now),
+  with a clearer hierarchy. Browser + a screenshot for the owner. Done: the
+  five stage tiles are one checklist (full labels, what happened on the
+  right), feature rows and the files/commands panels are plain rows and
+  sections under hairlines. Before/after screenshots sent to the owner.
 - [ ] 3.7 Home Caddie can say how a project's build is going (read-only, own
   projects only). Unit.
 

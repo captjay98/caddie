@@ -21,7 +21,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; rounds?: Record<string, unknown>[]; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }>; imported?: { status: 'checking' | 'ready' | 'failed'; noWorkflow?: boolean; checksUntilReady?: number; message?: string; example?: boolean } } = {}) {
+async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; rounds?: Record<string, unknown>[]; timeline?: Record<string, unknown>; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }>; imported?: { status: 'checking' | 'ready' | 'failed'; noWorkflow?: boolean; checksUntilReady?: number; message?: string; example?: boolean } } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -257,7 +257,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		}
 		if (path.endsWith('/activity')) return json(route, 200, {
 			projectId: PROJECT.id, phase: workflow.phase, building: workflow.phase === 'building', steps: [], rounds: options.rounds ?? [], openIssues: 0, features,
-			timeline: { phase: workflow.phase, startedAt: NOW, lastActivityAt: NOW, elapsedMs: 60_000, idleMs: 5_000, quiet: false, summary: 'Caddie is writing the app.', stages: [], scope: [], files: [], fileAreas: { app: 0, test: 0, style: 0, config: 0, server: 0 }, commands: [], tests: null, checks: [] },
+			timeline: { phase: workflow.phase, startedAt: NOW, lastActivityAt: NOW, elapsedMs: 60_000, idleMs: 5_000, quiet: false, summary: 'Caddie is writing the app.', stages: [], scope: [], files: [], fileAreas: { app: 0, test: 0, style: 0, config: 0, server: 0 }, commands: [], tests: null, checks: [], ...options.timeline },
 		});
 		if (path.endsWith('/workflow/stop')) {
       stops.push(path); workflow.phase = 'blocked'; workflow.pendingKey = null; workflow.pendingBody = null;
@@ -938,6 +938,70 @@ test('repeated project handoffs keep one live card and one preview', async ({ co
   await expect(page.frameLocator('iframe[title="Your app preview"]').getByRole('heading', { name: 'Todoer' })).toBeVisible();
 });
 
+
+/** Elements inside `root` drawn as cards of their own: a rounded box with all four borders, bigger than a chip. */
+async function nestedCards(root: import('@playwright/test').Locator): Promise<string[]> {
+	return root.evaluate((card) => {
+		const found: string[] = [];
+		for (const el of Array.from(card.querySelectorAll('*'))) {
+			if (el.closest('button, a, input, textarea, select, summary, iframe, [role="button"]')) continue;
+			const s = getComputedStyle(el);
+			if (!/^(block|flex|grid|list-item)$/.test(s.display)) continue;
+			const boxed = (['Top', 'Right', 'Bottom', 'Left'] as const).every(
+				(side) => parseFloat(s.getPropertyValue(`border-${side.toLowerCase()}-width`)) >= 1 && s.getPropertyValue(`border-${side.toLowerCase()}-style`) !== 'none',
+			);
+			const box = el.getBoundingClientRect();
+			if (boxed && parseFloat(s.borderTopLeftRadius) >= 6 && box.width >= 120 && box.height >= 36) found.push(String(el.className || el.tagName));
+		}
+		return found;
+	});
+}
+
+test('the build card is one card: nothing inside it is drawn as a card of its own (plan 3.6)', async ({ page, context }) => {
+	await fixture(context, {
+		phase: 'building',
+		approved: true,
+		planBody: FEATURE_PLAN,
+		features: [
+			featureView('log-feed', 'Log daily feed', 1),
+			featureView('view-dashboard', 'See the feed dashboard', 2, { status: 'building', attempts: 1, testsPassed: null, passedAt: null }),
+		],
+		timeline: {
+			summary: 'Caddie is fixing a failing test in “See the feed dashboard”.',
+			stages: [
+				{ key: 'setup', label: 'Get the workspace ready', state: 'done', startedAt: NOW, endedAt: NOW, durationMs: 20_000, detail: null },
+				{ key: 'write', label: 'Write the app', state: 'done', startedAt: NOW, endedAt: NOW, durationMs: 240_000, detail: '14 files' },
+				{ key: 'test', label: 'Run its own tests', state: 'failed', startedAt: NOW, endedAt: NOW, durationMs: 30_000, detail: '7 passing · 2 failing' },
+				{ key: 'check', label: 'Final checks by Caddie', state: 'active', startedAt: NOW, endedAt: null, durationMs: 50_000, detail: 'Attempt 2: 1 of 2 passed' },
+				{ key: 'preview', label: 'Make the preview', state: 'pending', startedAt: null, endedAt: null, durationMs: null, detail: null },
+			],
+			files: [
+				{ path: 'src/App.tsx', area: 'app', writes: 3, lastAt: NOW, bytes: 4200, role: 'frontend' },
+				{ path: 'src/App.test.tsx', area: 'test', writes: 2, lastAt: NOW, bytes: 1800, role: 'frontend' },
+			],
+			fileAreas: { app: 1, test: 1, style: 0, config: 0, server: 0 },
+			commands: [{ command: 'bun run build', outcome: 'ok', exitCode: 0, testsPassed: null, testsFailed: null, at: NOW, durationMs: 4_000, role: 'frontend' }],
+		},
+	});
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'building');
+	await expect(card.getByTestId('build-stages')).toBeVisible();
+	await expect(card.getByTestId('build-features')).toBeVisible();
+	await expect(card.getByTestId('build-files')).toBeVisible();
+	// Evidence only: CADDIE_SHOTS=<dir> saves the card, desktop and 390px wide.
+	const dir = process.env.CADDIE_SHOTS;
+	if (dir) {
+		await card.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+		await card.screenshot({ path: `${dir}/build-card-desktop.png` });
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto(`${BASE}/app/?pane=channel`);
+		await expect(card.getByTestId('build-stages')).toBeVisible();
+		await card.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+		await card.screenshot({ path: `${dir}/build-card-mobile.png` });
+	}
+	expect(await nestedCards(card)).toEqual([]);
+});
 
 test('Stop build is one request (the server stops the running turn) and retains the stopped project', async ({ context, page }) => {
   const fx = await fixture(context, { phase: 'building' });

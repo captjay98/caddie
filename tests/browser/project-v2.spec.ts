@@ -467,6 +467,58 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
         await context.close();
     });
 
+	test('the Now panel is one card too: nothing inside it is drawn as a card of its own (plan 3.6)', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, {
+			experience: {
+				projectId: 'proj-a', version: Date.parse('2026-10-19T12:00:00.000Z'), stage: 'building',
+				plan: { id: 'plan-r2', revision: '2', approved: true }, preview: null, message: 'Caddie is building your app.',
+				actions: [{ kind: 'stop', label: 'Stop build', enabled: true, primary: true }],
+			},
+		});
+		const feature = (id: string, title: string, position: number, status: string) =>
+			({ id, title, doneWhen: ['check'], position, status, attempts: status === 'building' ? 1 : 0, testsPassed: status === 'passed' ? 1 : null, passedAt: status === 'passed' ? NOW : null, canRollBack: false });
+		await context.route('**/api/projects/proj-a/activity', (route) =>
+			json(route, 200, {
+				projectId: 'proj-a', phase: 'building', building: true, steps: [], rounds: [], openIssues: 0,
+				features: [feature('log-feed', 'Log daily feed', 1, 'passed'), feature('view-dashboard', 'See the feed dashboard', 2, 'building')],
+				timeline: {
+					phase: 'building', startedAt: NOW, lastActivityAt: NOW, elapsedMs: 60_000, idleMs: 5_000, quiet: false, summary: 'Caddie is writing the app.',
+					stages: [
+						{ key: 'setup', label: 'Get the workspace ready', state: 'done', startedAt: NOW, endedAt: NOW, durationMs: 20_000, detail: null },
+						{ key: 'write', label: 'Write the app', state: 'active', startedAt: NOW, endedAt: null, durationMs: 40_000, detail: '2 files' },
+						{ key: 'test', label: 'Run its own tests', state: 'pending', startedAt: null, endedAt: null, durationMs: null, detail: null },
+						{ key: 'check', label: 'Final checks by Caddie', state: 'pending', startedAt: null, endedAt: null, durationMs: null, detail: null },
+						{ key: 'preview', label: 'Make the preview', state: 'pending', startedAt: null, endedAt: null, durationMs: null, detail: null },
+					],
+					scope: [], files: [{ path: 'src/App.tsx', area: 'app', writes: 1, lastAt: NOW, bytes: 4200, role: 'frontend' }],
+					fileAreas: { app: 1, test: 0, style: 0, config: 0, server: 0 },
+					commands: [{ command: 'bun run build', outcome: 'ok', exitCode: 0, testsPassed: null, testsFailed: null, at: NOW, durationMs: 4_000, role: 'frontend' }],
+					tests: null, checks: [],
+				},
+			}),
+		);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/runs?project=proj-a`);
+		const now = page.getByTestId('overview-now');
+		await expect(now.getByTestId('build-stages')).toBeVisible();
+		await expect(now.getByTestId('build-features')).toBeVisible();
+		const found = await now.evaluate((card) => {
+			const boxes: string[] = [];
+			for (const el of Array.from(card.querySelectorAll('*'))) {
+				if (el.closest('button, a, input, textarea, select, summary, iframe, [role="button"]')) continue;
+				const s = getComputedStyle(el);
+				if (!/^(block|flex|grid|list-item)$/.test(s.display)) continue;
+				const boxed = ['top', 'right', 'bottom', 'left'].every((side) => parseFloat(s.getPropertyValue(`border-${side}-width`)) >= 1 && s.getPropertyValue(`border-${side}-style`) !== 'none');
+				const box = el.getBoundingClientRect();
+				if (boxed && parseFloat(s.borderTopLeftRadius) >= 6 && box.width >= 120 && box.height >= 36) boxes.push(String(el.className || el.tagName));
+			}
+			return boxes;
+		});
+		expect(found).toEqual([]);
+		await context.close();
+	});
+
 	test('Build shows the same status as the chat card, and record ids only under For developers (plan 3.5)', async ({ browser }) => {
 		// Live, the Build tab said nothing about a paused build (its banner
 		// followed this browser's chat connection, not the build) and showed the

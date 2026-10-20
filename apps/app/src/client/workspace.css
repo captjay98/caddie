@@ -7619,34 +7619,36 @@ mark {
 	list-style: none;
 	margin: 0;
 	padding: 0;
-	display: grid;
-	grid-template-columns: repeat(5, 1fr);
-	gap: 0.5rem;
-}
-.build-stage {
-	background: var(--color-panel);
-	border: 1px solid var(--color-line);
-	border-radius: 10px;
-	padding: 0.55rem 0.6rem;
 	display: flex;
 	flex-direction: column;
-	gap: 0.3rem;
+}
+/* One row of the build's checklist, never a card of its own inside the build
+   card (plan 3.6): mark and full label on the left, what happened on the right. */
+.build-stage {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	column-gap: 0.75rem;
+	row-gap: 0.1rem;
+	padding: 0.4rem 0;
+	border-bottom: 1px solid var(--color-line-soft);
 	min-width: 0;
+}
+.build-stage:last-child {
+	border-bottom: 0;
 }
 .build-stage[data-state='pending'] {
 	opacity: 0.55;
 }
-.build-stage[data-state='active'] {
-	border-color: var(--color-action);
-	box-shadow: 0 0 0 1px var(--color-action);
-}
-.build-stage[data-state='failed'] {
-	border-color: var(--color-danger);
+.build-stage[data-state='active'] .build-stage-label {
+	color: var(--color-action);
+	font-weight: 600;
 }
 .build-stage-top {
 	display: flex;
 	align-items: center;
 	gap: 0.4rem;
+	flex: 1 1 12rem;
 	min-width: 0;
 }
 .build-stage-mark {
@@ -7787,26 +7789,24 @@ mark {
 	font-size: var(--r-meta);
 	color: var(--color-muted-strong, var(--color-muted));
 }
+/* A row of the feature list, not a card of its own (plan 3.6). */
+.build-features-list {
+	gap: 0;
+}
 .build-feature {
-	background: var(--color-panel);
-	border: 1px solid var(--color-line);
-	border-radius: 10px;
-	padding: 0.5rem 0.6rem;
+	padding: 0.45rem 0;
+	border-bottom: 1px solid var(--color-line-soft);
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 0.5rem;
 	min-width: 0;
 }
+.build-feature:last-child {
+	border-bottom: 0;
+}
 .build-feature[data-status='pending'] {
 	opacity: 0.6;
-}
-.build-feature[data-status='building'] {
-	border-color: var(--color-action);
-	box-shadow: 0 0 0 1px var(--color-action);
-}
-.build-feature[data-status='failed'] {
-	border-color: var(--color-danger);
 }
 .build-feature-mark {
 	display: inline-flex;
@@ -7879,11 +7879,10 @@ mark {
 	grid-template-columns: 1fr 1fr;
 	gap: 0.6rem;
 }
+/* Plain sections under a hairline, not two cards inside the build card (plan 3.6). */
 .build-detail-card {
-	background: var(--color-panel);
-	border: 1px solid var(--color-line);
-	border-radius: 10px;
-	padding: 0.65rem 0.7rem;
+	border-top: 1px solid var(--color-line-soft);
+	padding-top: 0.6rem;
 	min-width: 0;
 }
 .build-detail-head {
@@ -8000,12 +7999,9 @@ mark {
 		border-top-color: color-mix(in srgb, var(--color-action) 35%, transparent);
 	}
 }
-/* Phones: the five stage cards and the two drill-down columns stack rather
-   than cram. The stages go to a 2-wide grid; files/commands go single column. */
+/* Phones: the two drill-down columns stack rather than cram (the stages are
+   already one list). */
 @media (max-width: 640px) {
-	.build-stages {
-		grid-template-columns: repeat(2, 1fr);
-	}
 	.build-detail {
 		grid-template-columns: 1fr;
 	}
