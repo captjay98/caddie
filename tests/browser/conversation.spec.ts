@@ -180,6 +180,94 @@ test.describe('U04 — unsent messages and restored drafts (v2 §3.6)', () => {
 		await expect(page.getByTestId('draft-row')).toHaveCount(0);
 		await context.close();
 	});
+
+	test('in a conversation that already exists, a message on its way shows once, not twice (live finding, 2026-10-20)', async ({ browser }) => {
+		// With a run already bound, Flue shows its own copy of the message the
+		// moment it is sent; the draft row must not repeat it underneath.
+		const OFFSET = '0000000000000000_0000000000000001';
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		await context.route('**/api/projects/proj_conversation/run-bindings', (route) =>
+			json(route, 200, {
+				runBindings: [{
+					runId: 'run-existing', projectId: 'proj_conversation', conversationId: 'conv-existing', submissionId: 's', planRevision: 'rev-0',
+					stackId: 'react-hono', payerId: 'actor-test', modelRouteId: 'route', pricingVersion: 'v1', createdBy: 'actor-test', createdAt: '2026-10-20T00:00:00.000Z',
+				}],
+			}),
+		);
+		let admit = () => {};
+		const admitted = new Promise<void>((resolve) => {
+			admit = resolve;
+		});
+		await context.route('**/agents/coordinator/**', async (route) => {
+			const request = route.request();
+			const url = new URL(request.url());
+			if (request.method() === 'POST') {
+				await admitted;
+				return json(route, 202, { streamUrl: url.href, offset: OFFSET, submissionId: 'sub-existing', uid: 'uid-existing' });
+			}
+			if (url.searchParams.get('view') === 'updates') {
+				return route.fulfill({ contentType: 'text/event-stream', body: `event: control\ndata: {"streamNextOffset":"${OFFSET}","upToDate":true}\n\n` });
+			}
+			return route.fulfill({
+				contentType: 'application/json',
+				headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' },
+				body: JSON.stringify({ v: 1, conversationId: 'conv-existing', offset: OFFSET, messages: [], settlements: [] }),
+			});
+		});
+		const page = await context.newPage();
+		await openProjectPage(page);
+
+		await page.getByTestId('composer-input').fill('only once, please');
+		await page.keyboard.press('Enter');
+		await expect(page.getByTestId('msg-user').filter({ hasText: 'only once, please' })).toHaveCount(1);
+		await expect(page.getByText('only once, please', { exact: true })).toHaveCount(1);
+		await expect(page.getByTestId('draft-row')).toHaveCount(0);
+
+		admit();
+		await expect(page.getByText('only once, please', { exact: true })).toHaveCount(1);
+		await context.close();
+	});
+
+	test('in a conversation that already exists, a failed message shows once, as "Not sent" with Send again (live finding, 2026-10-20)', async ({ browser }) => {
+		const OFFSET = '0000000000000000_0000000000000001';
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		await context.route('**/api/projects/proj_conversation/run-bindings', (route) =>
+			json(route, 200, {
+				runBindings: [{
+					runId: 'run-existing', projectId: 'proj_conversation', conversationId: 'conv-existing', submissionId: 's', planRevision: 'rev-0',
+					stackId: 'react-hono', payerId: 'actor-test', modelRouteId: 'route', pricingVersion: 'v1', createdBy: 'actor-test', createdAt: '2026-10-20T00:00:00.000Z',
+				}],
+			}),
+		);
+		await context.route('**/agents/coordinator/**', async (route) => {
+			const request = route.request();
+			const url = new URL(request.url());
+			if (request.method() === 'POST') return json(route, 503, { error: 'unavailable', message: 'refused in this spec' });
+			if (url.searchParams.get('view') === 'updates') {
+				return route.fulfill({ contentType: 'text/event-stream', body: `event: control\ndata: {"streamNextOffset":"${OFFSET}","upToDate":true}\n\n` });
+			}
+			return route.fulfill({
+				contentType: 'application/json',
+				headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' },
+				body: JSON.stringify({ v: 1, conversationId: 'conv-existing', offset: OFFSET, messages: [], settlements: [] }),
+			});
+		});
+		const page = await context.newPage();
+		await openProjectPage(page);
+
+		await page.getByTestId('composer-input').fill('this one fails');
+		await page.keyboard.press('Enter');
+		const row = page.getByTestId('draft-row');
+		await expect(row).toHaveAttribute('data-state', 'unsent');
+		await expect(row.getByTestId('draft-retry')).toBeVisible();
+		await expect(page.getByText('this one fails', { exact: true })).toHaveCount(1);
+		await expect(page.getByTestId('msg-user').filter({ hasText: 'this one fails' })).toHaveCount(0);
+		await context.close();
+	});
 	test('an unsent message offers Send again · Edit · Discard; Edit returns the text to the composer', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubSession(context);

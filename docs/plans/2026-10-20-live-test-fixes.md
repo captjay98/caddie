@@ -48,7 +48,7 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   sent" with Send again / Edit / Discard only after a failure; no key jargon; a
   reload restores an in-flight draft as not sent. Browser cases in
   `tests/browser/conversation.spec.ts`: slow admission, failure, resend.
-- [ ] 2.2 No double copy of a message while it sends (Flue shows its own).
+- [x] 2.2 No double copy of a message while it sends (Flue shows its own).
 - [ ] 2.3 One paragraph per reply: join neighbouring text parts before
   rendering. Unit test with parts `"The"`, reasoning, `" Nebius…"`.
 - [ ] 2.4 Tool calls written as text: find the hook in `docs/flue-contracts.md`;

@@ -515,6 +515,16 @@ function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversa
 	);
 }
 
+/** The words of a user message, as Flue's own copy of a send carries them. */
+function userText(message: FlueConversationMessage): string {
+	return message.parts.map((part) => (part.type === 'text' ? part.text : '')).join('');
+}
+
+/** A draft and a message are the same send (attached file text may follow the words). */
+function sameSend(messageText: string, draftText: string): boolean {
+	return messageText === draftText || messageText.startsWith(`${draftText}\n`);
+}
+
 function DraftRow(props: {
 	draft: ChannelDraft;
 	transportLive: boolean;
@@ -621,14 +631,36 @@ export function Channel(props: {
 		if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
 	}, [source.messages, props.drafts, source.status]);
 
+	// One copy of each message (live finding, 2026-10-20). Flue shows its own
+	// copy the moment a message is sent (an id starting "local:"). While it is
+	// on its way that copy IS the message, so the matching draft row is hidden;
+	// once the send has failed, the draft row (with Send again) is the message,
+	// so Flue's failed copy is hidden instead.
+	const failedIds = useMemo(() => new Set(source.failedSends.map((send) => send.id)), [source.failedSends]);
+	const unsentKey = props.drafts.filter((d) => d.state === 'unsent').map((d) => d.text).join('\u0000');
+	const shownMessages = useMemo(() => {
+		const unsent = unsentKey ? unsentKey.split('\u0000') : [];
+		if (unsent.length === 0 || failedIds.size === 0) return source.messages;
+		return source.messages.filter(
+			(message) => !(message.role === 'user' && failedIds.has(String(message.id)) && unsent.some((text) => sameSend(userText(message), text))),
+		);
+	}, [source.messages, failedIds, unsentKey]);
+	const visibleDrafts = useMemo(() => {
+		const onTheirWay = source.messages
+			.filter((message) => message.role === 'user' && String(message.id).startsWith('local:') && !failedIds.has(String(message.id)))
+			.map(userText);
+		if (onTheirWay.length === 0) return props.drafts;
+		return props.drafts.filter((draft) => !(draft.state === 'sending' && onTheirWay.some((text) => sameSend(text, draft.text))));
+	}, [source.messages, failedIds, props.drafts]);
+
 	// THE navigation performance fix: the rows (and every Markdown block in
 	// them) are built only when the messages or drafts actually change. Without
 	// this, every chrome re-render — i.e. every route change — re-parsed the
 	// whole conversation transcript in react-markdown (~8.5s blocking on long
 	// histories, measured).
 	const transcriptRows = useMemo(
-		() => buildTranscriptRows(groupTurns(source.messages)),
-		[source.messages],
+		() => buildTranscriptRows(groupTurns(shownMessages)),
+		[shownMessages],
 	);
 
 	const live = source.status === 'connecting' || source.status === 'submitted' || source.status === 'streaming';
@@ -747,7 +779,7 @@ export function Channel(props: {
 					</div>
 				) : null}
 
-				{props.drafts.map((draft) => (
+				{visibleDrafts.map((draft) => (
 					<DraftRow
 						key={draft.id}
 						draft={draft}
