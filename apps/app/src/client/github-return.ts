@@ -23,6 +23,8 @@ export const GITHUB_RETURN_OUTCOMES = [
 	'missing_permissions',
 	'already_bound',
 	'not_configured',
+	'github_identity_required',
+	'installation_ownership_unverified',
 	'failed',
 ] as const;
 
@@ -90,6 +92,16 @@ export interface GithubReturnWords {
 }
 
 const WORDS: Record<GithubReturnOutcome, GithubReturnWords> = {
+	github_identity_required: {
+		tone: 'warn',
+		title: 'Sign in with GitHub to connect it.',
+		detail: 'Sign in to this same Caddie account with GitHub, then connect your personal GitHub installation again.',
+	},
+	installation_ownership_unverified: {
+		tone: 'danger',
+		title: 'GitHub ownership could not be verified.',
+		detail: 'Connect the personal installation belonging to your linked GitHub account. Organisation installations are not supported yet.',
+	},
 	connected: {
 		tone: 'ok',
 		title: 'GitHub is connected.',

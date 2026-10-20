@@ -60,6 +60,9 @@ GITHUB_CLIENT_SECRET=
 # APP_AI_MONTHLY_LIMIT_CENTS=100
 # Sandbox base image (default tag:tt-base:1)
 # CONTREE_IMAGE=
+# Android builds use the verified Flutter image by default. Override after rebuilding it
+# (the default untagged image may expire about 2027-04-17; see docs/setup/sandbox.md).
+# CONTREE_FLUTTER_IMAGE=
 # Hosts apps' servers may never call, comma-separated
 # EGRESS_DENY_HOSTS=
 

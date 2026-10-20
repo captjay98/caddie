@@ -118,6 +118,8 @@ export interface StubPullRequest {
 export interface StubInstallation {
 	installationId: string;
 	accountLogin: string;
+	accountId: string;
+	accountType: string;
 	permissions: Record<string, string>;
 	appSlug: string;
 	suspended: boolean;
@@ -223,12 +225,16 @@ export class GithubStub {
 	registerInstallation(input: {
 		installationId: string;
 		accountLogin: string;
+		accountId?: string;
+		accountType?: string;
 		permissions?: Record<string, string>;
 		appSlug?: string;
 	}): void {
 		this.installations.set(String(input.installationId), {
 			installationId: String(input.installationId),
 			accountLogin: input.accountLogin,
+			accountId: input.accountId ?? '',
+			accountType: input.accountType ?? 'User',
 			// GitHub requires Contents write for every git-data write and merge;
 			// tests that need a read-only App pass permissions explicitly.
 			permissions: input.permissions ?? { contents: 'write', pull_requests: 'write' },
@@ -500,7 +506,7 @@ export class GithubStub {
 				if (!installation) return this.json(res, 404, { message: 'Not Found' });
 				return this.json(res, 200, {
 					id: Number(installation.installationId),
-					account: { login: installation.accountLogin },
+					account: { login: installation.accountLogin, id: installation.accountId, type: installation.accountType },
 					permissions: installation.permissions,
 					app_slug: installation.appSlug,
 					suspended_at: installation.suspended ? new Date(this.now()).toISOString() : null,

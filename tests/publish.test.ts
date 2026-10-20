@@ -1,3 +1,4 @@
+import { putLarge } from "../apps/app/src/server/large-content.ts";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import type { Database } from 'bun:sqlite';
 import type { ApprovalIntent, Scope } from '@caddie/contracts';
@@ -240,6 +241,25 @@ describe('publish service', () => {
 		expect(probes).toEqual([`https://farm-log.${APPS}/`]);
 		expect(routeOf('farm-log').hasServer).toBe(false);
 	});
+
+  test('Flutter publishing deploys its checked server and Android download page, and rejects an APK swapped after approval', async () => {
+    const target = ready(); const apk = new Uint8Array(1_100_000); apk.set([0x50, 0x4b, 3, 4]);
+    const output = await storeBuildOutput(db, scope, { html: '<html>Android app</html>', image: 'flutter-checked-image', planId: target.planId, runId: target.runId,
+      bundle: { server: SERVER, migrations: [INIT], flutterWeb: '<html>Flutter browser preview</html>', android: { ...(await putLarge(db, apk)), apiBase: `https://caddie.test/a/${scope.projectId}` } } });
+    const before = await status();
+    expect(before.current!.publishable).toBe(true);
+    await approve(before.current!.intent);
+    const hash = sqlite.prepare('select apkSha256 from workflow_outputs where id = ?').get(output.outputId) as { apkSha256: string };
+    sqlite.prepare('update workflow_outputs set apkSha256 = ? where id = ?').run('replacement', output.outputId);
+    await rejects(publishApp(db, deps, scope, { outputId: output.outputId }), 'APK_MISMATCH');
+    expect(stub.scripts.size).toBe(0);
+    sqlite.prepare('update workflow_outputs set apkSha256 = ? where id = ?').run(hash.apkSha256, output.outputId);
+    await publishApp(db, deps, scope, { outputId: output.outputId });
+    expect((await status()).publication).toMatchObject({ status: 'live', outputId: output.outputId, hasServer: true });
+    const upload = (await status()).runs[0]!.steps.find(s => s.step === 'upload');
+    expect(upload?.detail).toBe('3 files and the server');
+    expect(probes).toEqual([`https://farm-log.${APPS}/`, `https://farm-log.${APPS}/api/health`]);
+  });
 
 	test('keys the app asked for must be saved first; nothing is uploaded until they are', async () => {
 		const outputId = await checkedBuild(ready(), { server: SERVER, migrations: [INIT] }, 'sha256:img-keys');

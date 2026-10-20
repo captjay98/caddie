@@ -129,6 +129,12 @@ describe("the chat offers what is waiting for the person's OK (plan 6.2)", () =>
     await proposeMemoryFact(db, "alice", { kind: "fact", content: "Builds apps for goat farmers", sourceRunId: run.runId });
     // Proposals from outside this project's chats are not offered here.
     await proposeMemoryFact(db, "alice", { kind: "fact", content: "From an import", sourceRunId: "import:abc" });
+    // The two offers were written in the same millisecond, and their ids sort
+    // the opposite way round: the chat still shows them in the order they
+    // were written, never in the order the random ids happen to fall.
+    await db.prepare('update "memory_facts" set "createdAt" = ?').bind("2026-10-20T00:00:00.000Z").run();
+    await db.prepare('update "memory_facts" set "id" = ? where "content" = ?').bind("mem_z", "Always use TypeScript.").run();
+    await db.prepare('update "memory_facts" set "id" = ? where "content" = ?').bind("mem_a", "Builds apps for goat farmers").run();
     const offers = await memoryOffers(db, "alice", home.id);
     expect(offers.map((o) => o.content)).toEqual(["Always use TypeScript.", "Builds apps for goat farmers"]);
     expect(Object.keys(offers[0]!).sort()).toEqual(["content", "id"]);

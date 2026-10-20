@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS, SCAFFOLD_PACKAGE, SCAFFOLD_TEST_HARNESS } from "../stacks/react-hono/scaffold.ts";
@@ -26,7 +26,12 @@ describe("R03 single recipe — chat build uses the shared recipe", () => {
     // The chat host must import the ONE shared source...
     expect(src).toContain("scaffold.ts");
     expect(src).toContain("SCAFFOLD_FILES");
-    expect(src).toContain("SCAFFOLD_COMMANDS");
+    // ...and take its check commands from host-checks.ts, which builds them
+    // from the stacks' recipes (Track 3 added the Flutter recipe beside it).
+    expect(src).toContain('from "./host-checks.ts"');
+    const checks = readFileSync(join(dirname(HOST), "host-checks.ts"), "utf8");
+    expect(checks).toContain("SCAFFOLD_COMMANDS");
+    expect(checks).toContain("FLUTTER_SCAFFOLD_COMMANDS");
     // ...and must NOT re-hardcode the old inline package.json literal.
     expect(src).not.toContain('name: "caddie-project",\n          private: true,');
   });

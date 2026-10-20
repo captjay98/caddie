@@ -172,6 +172,9 @@ export async function verifyWebhookSignature(
 export interface GithubInstallationInfo {
 	installationId: string;
 	accountLogin: string;
+	/** Provider-resolved immutable owner identity; never taken from the callback. */
+	accountId: string;
+	accountType: string;
 	permissions: Record<string, string>;
 	appSlug: string;
 	suspended: boolean;
@@ -444,7 +447,7 @@ export class GithubRestClient {
 			{ auth: 'app' },
 		)) as {
 			id?: unknown;
-			account?: { login?: unknown } | null;
+			account?: { login?: unknown; id?: unknown; type?: unknown } | null;
 			permissions?: unknown;
 			app_slug?: unknown;
 			suspended_at?: unknown;
@@ -453,6 +456,10 @@ export class GithubRestClient {
 		return {
 			installationId: String(body.id ?? installationId),
 			accountLogin: login,
+			accountId: typeof body.account?.id === 'number' && Number.isSafeInteger(body.account.id) && body.account.id > 0
+				? String(body.account.id)
+				: typeof body.account?.id === 'string' && /^[1-9]\d*$/.test(body.account.id) ? body.account.id : '',
+			accountType: typeof body.account?.type === 'string' ? body.account.type : '',
 			permissions:
 				body.permissions && typeof body.permissions === 'object'
 					? (body.permissions as Record<string, string>)

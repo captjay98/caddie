@@ -477,7 +477,10 @@ async function deployOutput(
 		if (pending.length === 0) await run.step('migration', 'skipped', 'no new migrations');
 
 		current = 'upload';
-		const assets = await publishedAssets({ name: project.name, seed: scope.projectId }, bundle);
+		const assets = await publishedAssets({ name: project.name, seed: scope.projectId }, {
+      js: bundle.js, css: bundle.css,
+      ...(bundle.android ? { android: { downloadUrl: `${bundle.android.apiBase}/app.apk?v=${encodeURIComponent(input.outputId)}`, bytes: bundle.android.bytes } } : {}),
+    });
 		// The app's own sign-in secret (template caddie/auth.ts), derived per project; never stored.
 		const authSecret = bundle.server !== null ? await appAuthSecret(deps.authSecret ?? undefined, scope.projectId, 'live') : null;
 		const bindings: AppHostBinding[] = [

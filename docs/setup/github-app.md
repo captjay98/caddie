@@ -14,7 +14,7 @@ GitHub Apps → New GitHub App) with:
 | Setting | Value |
 | --- | --- |
 | Homepage URL | Your Caddie origin (e.g. `https://app.example.com`) |
-| Callback URL | `https://app.example.com/api/auth/callback/github` (P01 sign-in only — optional; repo access does not use OAuth callbacks) |
+| Callback URL | `https://app.example.com/api/auth/callback/github` (P01 GitHub sign-in establishes the linked identity used to verify a personal installation's owner; repository access still comes from the App installation) |
 | Webhook URL | `https://app.example.com/api/github/webhook` |
 | Setup URL | `https://app.example.com/api/github/setup` (GitHub's return after install connects the installation in one click; tick **Redirect on update** too). Leave **Request user authorization (OAuth) during installation** off: it replaces the Setup URL. |
 | Webhook secret | A dedicated random secret (`GITHUB_WEBHOOK_SECRET`) — use a secret manager, not chat |
@@ -73,14 +73,26 @@ api.route('/', createGithubRouter());
 
 ## 3. Install and bind
 
-1. A workspace owner installs the App on their account/organization and
+1. A workspace owner signs in to their Caddie account with GitHub, then installs the App on their personal account and
    selects the repositories to share. GitHub immediately POSTs
    `installation.created` and `installation_repositories` webhooks; Caddie
    records the installation **unbound** (binding is always an explicit user
    action) and maintains the selection set.
 2. The owner binds the installation to their workspace:
    `POST /api/github/installations/bind` with `{installationId, workspaceId}`.
-   Metadata is resolved live from the App API; one installation serves exactly
+   Metadata is resolved live from the App API. Before a new or unbound
+   installation is claimed, its immutable `account.id` must match the signed-in
+   person's Better Auth GitHub `accountId`, and its `account.type` must be
+   `User`. A signed setup state identifies the Caddie actor/workspace; it does
+   not prove ownership of `installation_id`. The automatic setup return and
+   manual number form enforce the same ownership check. Google-only users
+   must first sign in to the same Caddie account with GitHub; an unlinked
+   account receives `github_identity_required`. Organisation installations and
+   mismatched/missing owner identities fail closed with
+   `installation_ownership_unverified` until provider-backed organisation
+   authority verification is supported. Existing workspace bindings remain
+   available to their members; reconnect does not retroactively establish
+   ownership of historical bindings. One installation serves exactly
    one workspace (a second binding attempt is `installation_already_bound` —
    the imported-existing-app case is a typed conflict, never a takeover).
 3. Repository selections sync via `installation_repositories` events. Only

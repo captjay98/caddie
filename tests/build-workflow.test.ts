@@ -1,3 +1,4 @@
+import { putLarge } from "../apps/app/src/server/large-content.ts";
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
@@ -32,6 +33,8 @@ import {
   requireBuildApproval,
   storeBuildOutput,
   readBuildOutput,
+  readOutputManifest,
+  readPublishBundle,
   readBuildBundle,
   setWorkflowBlocker,
   stopWorkflow,
@@ -44,6 +47,7 @@ import {
   sweepStalledBuilds,
   BUILD_STALL_MS,
 } from "../apps/app/src/server/build-workflow.ts";
+import { androidDownloadView, createAndroidAppRouter } from "../apps/app/src/server/android-app.ts";
 import { buildActivity } from "../apps/app/src/server/build-activity.ts";
 import { rollbackToFeature } from "../apps/app/src/server/build-features.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, ROLE_TOOL_POLICY } from "../apps/app/src/agents/permissions.ts";
@@ -125,6 +129,9 @@ async function world() {
     "0024_design_phase.sql",
     "0026_code_versions.sql",
     "0027_app_secrets.sql",
+    "0028_app_publishing.sql",
+    // Track 3: the large-file store (an Android app's preview page and APK).
+    "0039_large_content.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -921,9 +928,72 @@ describe("approved output and preview identity", () => {
         runId: item.workflow.runId,
       });
       expect(new TextDecoder().decode(await readBuildOutput(w.db, item.scope, output.outputId))).toBe(page);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("an Android app's preview page (bigger than one D1 value) is kept whole and served instead of the stand-in", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      const page = `<!doctype html><html><body><script type="application/json">${"x".repeat(3_000_000)}</script></body></html>`;
+      const output = await storeBuildOutput(w.db, item.scope, {
+        html: "<!doctype html><html><body>stand-in</body></html>",
+        image: "sha256:flutter-image",
+        planId: item.plan.id,
+        runId: item.workflow.runId,
+        bundle: { server: "export default {};", migrations: [], flutterWeb: page },
+      });
+      const served = new TextDecoder().decode(await readBuildOutput(w.db, item.scope, output.outputId));
+      expect(served).toBe(page);
+      expect((await readOutputManifest(w.db, item.scope, output.outputId))?.kind).toBe("flutter");
+      expect(w.count("large_content")).toBe(1);
+      expect(w.count("large_content_chunks")).toBe(2);
+      // Nothing over D1's value limit went into the ordinary content table.
+      expect(w.count("artifact_content", "size > 2000000")).toBe(0);
     } finally {
       w.sqlite.close();
     }
+  });
+
+  test("a Flutter publication binds the APK checksum to the approved immutable manifest", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      const apk = new Uint8Array(1_100_000); apk.set([0x50, 0x4b, 3, 4]);
+      const output = await storeBuildOutput(w.db, item.scope, {
+        html: "<html>Android app</html>", image: "flutter-apk-image", planId: item.plan.id, runId: item.workflow.runId,
+        bundle: { server: "export default {};", migrations: [], flutterWeb: "<html>Flutter</html>", android: { ...(await putLarge(w.db, apk)), apiBase: "https://caddie.test/a/project" } },
+      });
+      expect((await readOutputManifest(w.db, item.scope, output.outputId))?.publishable).toBe(true);
+      const publication = await readPublishBundle(w.db, item.scope, output.outputId);
+      expect(publication.android?.bytes).toBe(apk.length);
+      expect(publication.android?.sha256).toHaveLength(64);
+      expect(publication.android?.apiBase).toBe("https://caddie.test/a/project");
+      const origin = "https://caddie.test"; const secret = "test-only-android-link-secret";
+      const metadata = await androidDownloadView(w.db, item.scope, origin, secret);
+      expect(metadata?.bytes).toBe(apk.length);
+      expect(metadata?.url).toBeNull();
+      expect(metadata?.backendLive).toBe(false);
+      const signed = await androidDownloadView(w.db, item.scope, origin, secret, true);
+      expect(signed?.url).toContain("/app.apk?t=");
+      expect(Date.parse(signed!.expiresAt!) - Date.now()).toBeGreaterThan(29 * 60_000);
+      const reply = await createAndroidAppRouter().request(signed!.url!, {}, { DB: w.db, BETTER_AUTH_SECRET: secret });
+      expect(reply.status).toBe(200);
+      expect(new Uint8Array(await reply.arrayBuffer())).toEqual(apk);
+      await expect(androidDownloadView(w.db, { ...item.scope, actorId: "bob" }, origin, secret, true)).rejects.toThrow("member");
+      w.sqlite.prepare('delete from workspace_memberships where workspaceId = ? and userId = ?').run(item.scope.workspaceId, item.scope.actorId);
+      await expect(androidDownloadView(w.db, item.scope, origin, secret, true)).rejects.toThrow("member");
+      w.sqlite.prepare('insert into workspace_memberships (id,workspaceId,userId,role,createdAt) values (?, ?,?,?,?)').run("restore-member", item.scope.workspaceId, item.scope.actorId, "owner", new Date().toISOString());
+
+      // Store another complete, valid APK so the old metadata-only route
+      // would serve wrong bytes (rather than fail because the blob is absent).
+      const replacementApk = apk.slice(); replacementApk[100] = 42;
+      const replacement = await putLarge(w.db, replacementApk);
+      w.sqlite.prepare('update workflow_outputs set apkSha256 = ?, apkBytes = ? where id = ?').run(replacement.sha256, replacement.bytes, output.outputId);
+      await expect(readPublishBundle(w.db, item.scope, output.outputId)).rejects.toThrow("Android package");
+      expect((await createAndroidAppRouter().request(signed!.url!, {}, { DB: w.db, BETTER_AUTH_SECRET: secret })).status).toBe(404);
+      await expect(androidDownloadView(w.db, item.scope, origin, secret, true)).rejects.toThrow('no checked Android package');
+    } finally { w.sqlite.close(); }
   });
 
   test("a server bundle over 2 MB is refused at check time (production D1 would reject the write)", async () => {
@@ -1718,6 +1788,37 @@ describe("host-driven feature loop", () => {
       expect(activity.features.map((f) => [f.id, f.status])).toEqual([["log-feed", "passed"], ["view-dashboard", "passed"]]);
       // Nothing is offered for rollback while the build is still running.
       expect(activity.features.some((f) => f.canRollBack)).toBe(false);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("verify_build keeps a working Flutter preview when saving the Android package fails", async () => {
+    const w = await world(); const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+    stub.seedImage("tag:feature:1"); stub.setBehavior("sh caddie/run-tests.sh", { stdout: "1 pass\n0 fail" }); await stub.start();
+    try {
+      const item = await featureBuild(w); const root = `/workspace/${item.scope.projectId}`;
+      w.sqlite.prepare("update run_bindings set stackId = 'flutter' where runId = ?").run(item.workflow.runId);
+      const host = await resolveCoordinatorContext({ ...env(w, stub), CONTREE_FLUTTER_IMAGE: 'tag:feature:1', BETTER_AUTH_URL: 'https://caddie.test' }, item.workflow.conversationId);
+      await host.buildNextFeature();
+      w.sqlite.prepare("update build_features set status='passed',testsPassed=1 where projectId = ?").run(item.scope.projectId);
+      stub.setBehavior("flutter build web --release", { stdout: 'built', writes: { [`${root}/build/web/main.dart.js`]: 'console.log("flutter")', [`${root}/dist/server.js`]: 'export default { fetch() { return new Response("ok"); } };' } });
+      stub.setBehavior("flutter build apk --release", { stdout: 'built APK', writes: { [`${root}/build/app/outputs/flutter-apk/app-release.apk`]: 'PK\x03\x04' + 'x'.repeat(1_100_000) } });
+      const prepare = w.db.prepare.bind(w.db);
+      w.db.prepare = ((sql: string) => {
+        const statement = prepare(sql);
+        if (!sql.includes('insert or ignore into "large_content_chunks"')) return statement;
+        return { ...statement, bind: (...args: unknown[]) => {
+          if ((args[2] as Uint8Array)?.byteLength > 1_000_000) throw new Error('Injected APK storage quota failure');
+          return statement.bind(...args);
+        } };
+      }) as typeof w.db.prepare;
+      const result = await host.verifyBuild('native-storage-failure') as { passed: boolean; outputId: string; receipts: Array<{ check: string; passed: boolean }> };
+      expect(result.passed).toBe(true);
+      expect(result.receipts.find(r => r.check === 'android-app')?.passed).toBe(false);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe('ready');
+      expect(new TextDecoder().decode(await readBuildOutput(w.db, item.scope, result.outputId))).toContain('caddie-flutter-app');
+      const saved = w.sqlite.prepare('select apkSha256,apkBytes from workflow_outputs where id = ?').get(result.outputId);
+      expect(saved).toEqual({ apkSha256: null, apkBytes: null });
+      expect(stub.spawnedCommands().some(command => command.startsWith('flutter build apk --release'))).toBe(true);
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 

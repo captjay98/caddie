@@ -3,7 +3,7 @@
 A licence audit of Caddie's shipped **production** dependencies: their declared
 licence, and whether it falls outside the set this project accepts.
 
-- Generated: 2026-10-19T17:49:26.868Z
+- Generated: 2026-10-20T09:42:02.751Z
 - Regenerate with: `bun scripts/license-audit.ts`
 - Never edit this file by hand; the script rewrites it.
 
@@ -31,7 +31,7 @@ licence, and whether it falls outside the set this project accepts.
 
 ## Summary
 
-24 production dependencies audited across 5 locations: 24 allowed, 0 flagged, 0 unresolved.
+25 production dependencies audited across 5 locations: 25 allowed, 0 flagged, 0 unresolved.
 
 ### apps/app
 
@@ -52,6 +52,7 @@ Declared in: `apps/app/package.json`.
 | `hono` | 4.13.12 | MIT | `^4.12.32` |
 | `isomorphic-git` | 1.44.2 | MIT | `1.44.2` |
 | `nanoid` | 5.1.16 | MIT | `^5.1.16` |
+| `qrcode-generator` | 2.0.4 | MIT | `2.0.4` |
 | `react` | 19.3.0 | MIT | `^19.2.0` |
 | `react-dom` | 19.3.0 | MIT | `^19.2.0` |
 | `react-markdown` | 10.1.0 | MIT | `10.1.0` |

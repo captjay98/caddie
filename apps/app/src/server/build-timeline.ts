@@ -132,9 +132,11 @@ const STAGE_LABELS: Record<StageKey, string> = {
 };
 
 const CHECK_LABELS: Record<string, string> = {
+	'app-setup': 'Set up the Android app',
 	dependencies: 'Install packages',
 	'behavior-tests': 'Behaviour tests',
 	'browser-bundle': 'Build for the browser',
+	'android-app': 'Build the Android app',
 };
 
 // --- small pure helpers --------------------------------------------------------
@@ -145,10 +147,19 @@ const CHECK_LABELS: Record<string, string> = {
  * null when no count was printed — never a guess.
  */
 export function parseTestCounts(output: string): { passed: number; failed: number } | null {
+	// flutter test (Flutter apps): every progress line is "+N[ ~S][ -F]: ...", and
+	// the LAST one ends with "All tests passed!" or "Some tests failed.".
+	const flutterSummaries = [...output.matchAll(/\+(\d+)(?: ~\d+)?(?: -(\d+))?: (?:All tests passed!|Some tests failed\.)/g)];
+	const flutter = flutterSummaries.at(-1);
 	const bunPass = /^\s*(\d+)\s+pass\s*$/m.exec(output);
 	const bunFail = /^\s*(\d+)\s+fail\s*$/m.exec(output);
-	if (bunPass || bunFail) {
-		return { passed: Number(bunPass?.[1] ?? 0), failed: Number(bunFail?.[1] ?? 0) };
+	if (flutter || bunPass || bunFail) {
+		// caddie/run-tests.sh runs a Flutter app's widget tests, then its server's
+		// bun tests: the counts add up.
+		return {
+			passed: Number(flutter?.[1] ?? 0) + Number(bunPass?.[1] ?? 0),
+			failed: Number(flutter?.[2] ?? 0) + Number(bunFail?.[1] ?? 0),
+		};
 	}
 	const passed = /(\d+)\s+passed\b/i.exec(output);
 	const failed = /(\d+)\s+failed\b/i.exec(output);

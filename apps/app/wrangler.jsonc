@@ -34,12 +34,13 @@
 	// Composed static assets (Astro landing + React SPA) written by
 	// scripts/compose-assets.ts. run_worker_first keeps /api, /agents and
 	// /app in the Worker so API 404s stay JSON and /app deep links fall back
-	// to the SPA shell; the landing tree at / is served directly.
+	// to the SPA shell; /a/* is the Android apps' server address and APK
+	// download; the landing tree at / is served directly.
 	"assets": {
 		"directory": "./dist/client",
 		"binding": "ASSETS",
 		"not_found_handling": "none",
-		"run_worker_first": ["/api", "/api/*", "/agents", "/agents/*", "/app", "/app/*", "/report", "/operator", "/operator/*"]
+		"run_worker_first": ["/api", "/api/*", "/agents", "/agents/*", "/app", "/app/*", "/report", "/operator", "/operator/*", "/a/*"]
 	},
 	// Production (S10, docs/runbooks/production-deploy.md). It is chosen at
 	// BUILD time, never with `wrangler deploy --env`:

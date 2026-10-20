@@ -24,6 +24,7 @@ import { createVersionsRouter } from './server/routes/versions.ts';
 import { createAppAiRouter } from './server/routes/app-ai.ts';
 import { createReportRouter } from './server/routes/report.ts';
 import { createOperatorRouter } from './server/routes/operator.ts';
+import { createAndroidAppRouter } from './server/android-app.ts';
 import { SandboxError } from './server/adapters/sandbox.ts';
 import { ScopeError } from './server/scope.ts';
 import type { AuthEnv } from './server/auth.ts';
@@ -131,6 +132,11 @@ app.route('/agents/hello', createAgentRouter(Hello));
 // operator's page for answering reports (OPERATOR_EMAILS only).
 app.route('/', createReportRouter());
 app.route('/', createOperatorRouter());
+// Android apps (Track 3): an APK's server address and its download, public
+// by design (a phone has no Caddie session). /a/<project>/api/* forwards only
+// to that project's own published app; app.apk needs a signed link or a
+// live publication (server/android-app.ts).
+app.route('/', createAndroidAppRouter());
 
 app.get('/app', (c) => c.redirect('/app/', 307));
 app.get('/app/*', async (c) => {

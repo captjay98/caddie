@@ -54,6 +54,7 @@ const copy = (scope: Scope, repo: string) => importRepoSnapshot(db, client, scop
 beforeAll(async () => {
 	({ sqlite, db } = migratedDatabase());
 	addUser(sqlite, 'alice', 'alice@example.com');
+	sqlite.exec(`insert into account (id,accountId,providerId,userId,createdAt,updatedAt) values ('github-alice','101','github','alice','now','now')`);
 	const { publicKey, privateKey } = generateKeyPairSync('rsa', {
 		modulusLength: 2048,
 		publicKeyEncoding: { type: 'spki', format: 'pem' },
@@ -61,7 +62,7 @@ beforeAll(async () => {
 	});
 	github = new GithubStub({ appPublicKeyPem: publicKey.toString() });
 	await github.start(await freePort());
-	github.registerInstallation({ installationId: INSTALLATION, accountLogin: ACCOUNT, permissions: { contents: 'read', pull_requests: 'write' } });
+	github.registerInstallation({ installationId: INSTALLATION, accountLogin: ACCOUNT, accountId: '101', permissions: { contents: 'read', pull_requests: 'write' } });
 	github.seedRepo({ fullName: `${ACCOUNT}/farm-log`, files: CADDIE_APP, accessInstallationId: INSTALLATION });
 	github.seedRepo({
 		fullName: `${ACCOUNT}/vite-app`,

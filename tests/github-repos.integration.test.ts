@@ -9,6 +9,7 @@ import {
 	Jar,
 	StubProvider,
 	applyMigrations,
+	d1Exec,
 	freePort,
 	makeWorker,
 	signIn,
@@ -104,11 +105,13 @@ beforeAll(async () => {
 	stub.registerInstallation({
 		installationId: INSTALL_ADMIN,
 		accountLogin: ACCOUNT_ADMIN,
+		accountId: '101',
 		permissions: { contents: 'write', pull_requests: 'write', administration: 'write' },
 	});
 	stub.registerInstallation({
 		installationId: INSTALL_NOADMIN,
 		accountLogin: ACCOUNT_NOADMIN,
+		accountId: '101',
 		permissions: { contents: 'read', pull_requests: 'write' }, // no administration
 	});
 	// A pre-existing repo under the admin account, for the connect + adopt cases.
@@ -141,6 +144,11 @@ beforeAll(async () => {
 	]);
 
 	ALICE = await signIn(worker, idp, ALICE_EMAIL, 'alice-repos', 'Alice');
+	// Trusted test-only linked identity; both installation fixtures exercise
+	// Alice's personal account with different permission grants, not a claim
+	// based on a display name or client-supplied installation number.
+	await d1Exec(WORKER_BASE, `insert into account (id,accountId,providerId,userId,createdAt,updatedAt)
+	 select 'github-alice','101','github',id,'now','now' from user where email='${ALICE_EMAIL}'`);
 	const ws = await worker(ALICE, '/api/workspaces', {
 		method: 'POST',
 		headers: jsonHeaders,

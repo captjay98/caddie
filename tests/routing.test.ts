@@ -17,7 +17,29 @@ const DIST_DIR = join(APP_DIR, 'dist');
 const CLIENT_DIR = join(DIST_DIR, 'client');
 const MANIFEST_PATH = join(DIST_DIR, 'composition-manifest.json');
 
-const PORT = 9400 + (process.pid % 300);
+/**
+ * The PIDs listening on a TCP port, if any. `lsof -ti -sTCP:LISTEN tcp:N`
+ * (the spelling this used to use) is a usage error on macOS lsof 4.91: it
+ * writes to stderr and reports nothing on stdout, so it always looked free.
+ */
+function portOwners(port: number): string[] {
+	const owner = Bun.spawnSync(['lsof', '-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t']);
+	return owner.stdout.toString().trim().split('\n').filter(Boolean);
+}
+
+/**
+ * The first port nothing is listening on, from a PID-derived base that keeps
+ * separate runs apart. A crashed run's leftover listener — or another gate
+ * running at the same time — is walked past, never killed.
+ */
+function freePort(from: number): number {
+	for (let port = from; port < from + 50; port++) {
+		if (portOwners(port).length === 0) return port;
+	}
+	throw new Error(`no free preview port in ${from}..${from + 49}`);
+}
+
+const PORT = freePort(9400 + (process.pid % 300));
 const BASE = `http://127.0.0.1:${PORT}`;
 const PREVIEW_LOG = `/tmp/caddie-p00-preview-${PORT}.log`;
 
@@ -44,11 +66,6 @@ async function waitForServer(timeoutMs: number): Promise<string | undefined> {
 }
 
 beforeAll(async () => {
-	// Reap any listener left on the derived port by a previously crashed run
-	// so this test talks to the server it spawns itself.
-	const stale = Bun.spawnSync(['lsof', '-ti', '-sTCP:LISTEN', `tcp:${PORT}`]);
-	const stalePids = stale.stdout.toString().trim();
-	if (stalePids) Bun.spawnSync(['kill', '-9', ...stalePids.split('\n')]);
 	if (!existsSync(join(DIST_DIR, 'caddie_app', 'index.js'))) {
 		throw new Error(
 			'Worker bundle missing — run `bun run build` before tests/routing.test.ts',
@@ -80,10 +97,9 @@ afterAll(() => {
 	try {
 		Bun.spawnSync(['pkill', '-f', `vite preview --port ${PORT}`]);
 		for (let attempt = 0; attempt < 2; attempt++) {
-			const owner = Bun.spawnSync(['lsof', '-ti', '-sTCP:LISTEN', `tcp:${PORT}`]);
-			const pids = owner.stdout.toString().trim();
-			if (!pids) return;
-			Bun.spawnSync(['kill', attempt === 0 ? '-15' : '-9', ...pids.split('\n')]);
+			const pids = portOwners(PORT);
+			if (pids.length === 0) return;
+			Bun.spawnSync(['kill', attempt === 0 ? '-15' : '-9', ...pids]);
 			Bun.sleepSync(500);
 		}
 	} catch {
@@ -223,5 +239,36 @@ describe('P00 routing composition', () => {
 		// React root (not the Astro hero). Each keeps its own document.
 		expect(landing).not.toContain('id="root"');
 		expect(spa).not.toContain('build with evidence');
+	});
+
+	test('the preview port picker walks past a port in use instead of killing its owner', async () => {
+		// Another gate running at the same time — or a crashed run's leftover —
+		// may hold the derived port. Picking must move on to the next free one,
+		// and the listener it walked past must still be alive afterwards.
+		const held = freePort(9900);
+		const other = Bun.spawn(
+			[
+				'bun',
+				'-e',
+				`Bun.serve({ port: ${held}, hostname: '127.0.0.1', fetch: () => new Response('held') });`,
+			],
+			{ stdout: 'ignore', stderr: 'ignore' },
+		);
+		try {
+			const deadline = Date.now() + 10_000;
+			let up = false;
+			while (Date.now() < deadline && !up) {
+				try {
+					up = (await fetch(`http://127.0.0.1:${held}/`)).ok;
+				} catch {
+					await Bun.sleep(100);
+				}
+			}
+			expect(up).toBe(true);
+			expect(freePort(held)).not.toBe(held);
+			expect(await (await fetch(`http://127.0.0.1:${held}/`)).text()).toBe('held');
+		} finally {
+			other.kill();
+		}
 	});
 });

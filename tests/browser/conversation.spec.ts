@@ -660,6 +660,64 @@ test.describe('Stage 3/4 — image/file attach + voice dictation composer states
 });
 
 test.describe('memory learns: the chat offers what Caddie can remember (plan 6.2)', () => {
+	test('a model memory offer appears when its turn settles without another user message', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		await context.route('**/api/projects/proj_conversation/run-bindings', (route) => json(route, 200, {
+			runBindings: [{ runId: 'run-memory', projectId: PROJECT.id, conversationId: 'conv-memory', submissionId: 'sub-memory', planRevision: 'rev-0', stackId: 'react-hono', payerId: 'actor-test', modelRouteId: 'route', pricingVersion: 'v1', createdBy: 'actor-test', createdAt: PROJECT.createdAt }],
+		}));
+		const offset = '0000000000000000_0000000000000001';
+		const nextOffset = '0000000000000000_0000000000000002';
+		let releaseSettlement!: () => void;
+		const settlementReady = new Promise<void>((resolve) => { releaseSettlement = resolve; });
+		let modelRemembered = false;
+		let offerReads = 0;
+		let userPosts = 0;
+		let releaseHistory!: () => void;
+		const initialOffersRead = new Promise<void>((resolve) => { releaseHistory = resolve; });
+		await context.route('**/api/memory/offers?**', (route) => {
+			offerReads++;
+			releaseHistory();
+			return json(route, 200, { offers: modelRemembered ? [{ id: 'mem-model', content: 'The app is for goat farmers.' }] : [] });
+		});
+		await context.route('**/agents/coordinator/conv-memory**', async (route) => {
+			const url = new URL(route.request().url());
+			if (route.request().method() === 'POST') {
+				userPosts++;
+				return json(route, 500, { error: 'unexpected_user_message' });
+			}
+			if (url.searchParams.get('view') === 'updates') {
+				// Keep the original admitted user message fixed. The only change
+				// arriving through the real Flue hook is the model turn settling.
+				await settlementReady;
+				const settled = { type: 'submission-settled', conversationId: 'conv-memory', submissionId: 'sub-memory', outcome: 'completed', timestamp: '2026-10-20T00:01:00.000Z', position: { batch: 2, index: 0 } };
+				return route.fulfill({ contentType: 'text/event-stream', body: `event: data\ndata:${JSON.stringify([settled])}\n\nevent: control\ndata:${JSON.stringify({ streamNextOffset: nextOffset, upToDate: true })}\n\n` });
+			}
+			// Resolve the initial empty offers read before admitting the user
+			// history, so its separate admission-triggered read also returns empty.
+			await initialOffersRead;
+			return route.fulfill({ contentType: 'application/json', headers: { 'stream-next-offset': offset, 'stream-up-to-date': 'true' }, body: JSON.stringify({
+				v: 1, conversationId: 'conv-memory', offset, settlements: [], messages: [{
+					id: 'user-memory', role: 'user', purpose: 'user', display: 'visible', timestamp: '2026-10-20T00:00:00.000Z', parts: [{ type: 'text', state: 'done', text: 'This app is for goat farmers.' }],
+				}],
+			}) });
+		});
+		const page = await context.newPage();
+		await openProjectPage(page);
+		await expect(page.getByTestId('msg-user')).toHaveCount(1);
+		await expect.poll(() => offerReads).toBeGreaterThanOrEqual(2);
+		await expect(page.getByTestId('memory-offer')).toHaveCount(0);
+		const readsBeforeSettlement = offerReads;
+		modelRemembered = true;
+		releaseSettlement();
+		await expect(page.getByTestId('memory-offer')).toContainText('The app is for goat farmers.');
+		await expect.poll(() => offerReads).toBeGreaterThan(readsBeforeSettlement);
+		await expect(page.getByTestId('msg-user')).toHaveCount(1);
+		expect(userPosts).toBe(0);
+		await context.close();
+	});
+
 	async function offersPage(browser: Browser, offers: { id: string; content: string }[]) {
 		const context = await browser.newContext();
 		await stubSession(context);

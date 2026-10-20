@@ -1,4 +1,9 @@
+import { writeFileSync } from 'node:fs';
 import { expect, test, type BrowserContext, type Route } from '@playwright/test';
+import { flutterProbePage } from './support/flutter-probe.ts';
+import jsQR from 'jsqr';
+import { androidQrSvg } from '../../apps/app/src/server/android-qr.ts';
+import { decodePng } from './support/png.ts';
 
 /** Real composed SPA + real Flue SDK HTTP requests; auth, workflows, model
  * transcript and generated HTML are SIMULATED at their network boundaries.
@@ -21,7 +26,7 @@ type Phase = 'planning' | 'review' | 'design' | 'design-review' | 'building' | '
 interface Admission { conversationId: string; body: Record<string, unknown> }
 function json(route: Route, status: number, value: unknown) { return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) }); }
 
-async function fixture(context: BrowserContext, options: { phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; rounds?: Record<string, unknown>[]; timeline?: Record<string, unknown>; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }>; imported?: { status: 'checking' | 'ready' | 'failed'; noWorkflow?: boolean; checksUntilReady?: number; message?: string; example?: boolean } } = {}) {
+async function fixture(context: BrowserContext, options: { android?: boolean; phase?: Phase; pending?: boolean; failAdmission?: number; failPreview?: number; repeatHandoff?: boolean; planBody?: string; features?: Record<string, unknown>[]; rounds?: Record<string, unknown>[]; timeline?: Record<string, unknown>; approved?: boolean; designBody?: string; github?: boolean; keys?: boolean; publish?: boolean; versions?: number; ai?: { calls: number; usedPercent: number; limitReached: boolean }; inbox?: Array<{ to: string; code: string; createdAt: string }>; imported?: { status: 'checking' | 'ready' | 'failed'; noWorkflow?: boolean; checksUntilReady?: number; message?: string; example?: boolean }; flutter?: { page: string; relayed: Array<{ method: string; path: string }> } } = {}) {
 	let currentPlan = options.planBody ? { ...plan(1), body: options.planBody } : plan(1);
 	let features = options.features ?? [];
 	const rollbacks: Record<string, unknown>[] = [];
@@ -56,7 +61,7 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 	const design = options.designBody
 		? { id: 'design-1', projectId: PROJECT.id, kind: 'design', revision: 2, bodyHash: 'sha256-design-1', body: options.designBody, createdBy: 'actor-workflow', createdAt: NOW }
 		: null;
-	const snapshot = () => ({ workflow: options.imported?.noWorkflow ? null : { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null, design, designApproval: null, ...(options.keys || options.inbox ? { previewHasServer: true } : {}), importPreview: imported });
+	const snapshot = () => ({ workflow: options.imported?.noWorkflow ? null : { ...workflow }, plan: currentPlan, approval: options.approved ? { id: 'apr-workflow', status: 'approved' } : null, design, designApproval: null, ...(options.keys || options.inbox ? { previewHasServer: true } : {}), ...(options.flutter ? { previewHasServer: true, previewKind: 'flutter' } : {}), importPreview: imported });
 	// App keys for a backend app: names and status only, exactly like the server.
 	const keys = {
 		list: [
@@ -225,6 +230,11 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 	};
 	await context.route('**/api/**', async route => {
 		const request = route.request(), path = new URL(request.url()).pathname;
+    if (path.endsWith('/android') || path.endsWith('/android/link')) {
+      const url = 'https://caddie.test/a/proj-workflow/app.apk?t=out_123.1792497600000.0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+      const mint = path.endsWith('/link');
+      return json(route, 200, { android: options.android ? { outputId: 'output-workflow', bytes: 1_500_000, url: mint ? url : null, expiresAt: mint ? '2026-10-20T12:30:00.000Z' : null, backendLive: false, message: 'You can download the Android app. Its server works after you publish; until then, try it in the browser.' } : null, qrSvg: mint ? androidQrSvg(url) : null });
+    }
 		const githubReply = githubRoute(route, request.method(), path);
 		if (githubReply) return githubReply;
 		const keysReply = keysRoute(route, request.method(), path);
@@ -299,6 +309,14 @@ async function fixture(context: BrowserContext, options: { phase?: Phase; pendin
 		if (path.includes('/workflow/preview/')) {
 			previewReads++;
 			if (failedPreviews-- > 0) return json(route, 403, { error: 'preview_denied' });
+			// Track 3: an Android app's preview page, and its /api relay.
+			if (options.flutter && request.method() === 'POST' && path.endsWith('/app')) {
+				const relayed = request.postDataJSON() as { method: string; path: string };
+				options.flutter.relayed.push({ method: relayed.method, path: relayed.path });
+				const answer = relayed.path.startsWith('/api/health') ? { ok: true } : { seen: true };
+				return json(route, 200, { status: 200, headers: [['content-type', 'application/json']], body: Buffer.from(JSON.stringify(answer)).toString('base64') });
+			}
+			if (options.flutter) return route.fulfill({ contentType: 'text/html', body: options.flutter.page });
 			return route.fulfill({ contentType: 'text/html', body: TODO });
 		}
 		if (path.endsWith('/workflow')) return json(route, 200, path.includes(HOME.id) ? { workflow: null, plan: null, approval: null } : snapshot());
@@ -613,6 +631,56 @@ test('a finished build saves its code as a pull request and merges it only after
 		decision: 'approved',
 	}]);
 	expect(state.github.merges).toEqual([{ repoFullName: 'octo/todoer', headSha: 'abc1234def5678abc1234def5678abc1234def56' }]);
+});
+
+// Track 3: a REAL Flutter web build (the scaffold plus a probe app), in the
+// real composed client's preview frame with its real policy and shim. Only
+// the API is stubbed. CanvasKit and Roboto load from Google's Flutter CDNs.
+test('an Android app runs its real Flutter web build in the preview frame and reaches its own server', async ({ page, context }) => {
+	test.setTimeout(360_000);
+	const probe = await flutterProbePage();
+	test.skip(probe.blocked !== null, probe.blocked ?? '');
+	const relayed: Array<{ method: string; path: string }> = [];
+	await fixture(context, { phase: 'ready', flutter: { page: probe.page, relayed } });
+	const blocked: string[] = [];
+	const consoleLines: string[] = [];
+	page.on('console', (message) => {
+		consoleLines.push(`[${message.type()}] ${message.text()}`);
+		if (/Content Security Policy|Refused to/i.test(message.text())) blocked.push(message.text());
+	});
+	page.on('pageerror', (error) => consoleLines.push(`[pageerror] ${error.message}`));
+	await page.goto(`${BASE}/app/`);
+	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(card).toHaveAttribute('data-phase', 'ready');
+	const frame = card.locator('iframe[data-kind="flutter"]');
+	await expect(frame).toBeVisible();
+	await expect(frame).toHaveAttribute('sandbox', 'allow-scripts allow-forms');
+	// The Dart code ran, asked its server through the bridge, and reported the answer.
+	await expect.poll(() => relayed.map((r) => r.path), { timeout: 120_000 }).toContain('/api/seen?health=ok');
+	expect(relayed[0]).toEqual({ method: 'GET', path: '/api/health' });
+	// And Flutter drew the screen: the probe's indigo background fills the
+	// frame and its white status text is drawn on it (the Roboto font loaded).
+	await page.waitForTimeout(1500);
+	const png = await frame.screenshot();
+	if (process.env.CADDIE_SHOTS) {
+		writeFileSync(`${process.env.CADDIE_SHOTS}/flutter-preview.png`, png);
+		writeFileSync(`${process.env.CADDIE_SHOTS}/flutter-preview-console.txt`, consoleLines.join('\n'));
+	}
+	const shot = decodePng(png);
+	let indigo = 0;
+	let white = 0;
+	let sampled = 0;
+	for (let y = 2; y < shot.height - 2; y += 3) {
+		for (let x = 2; x < shot.width - 2; x += 3) {
+			const [r, g, b] = shot.pixel(x, y);
+			sampled++;
+			if (Math.abs(r - 0x39) < 12 && Math.abs(g - 0x49) < 12 && Math.abs(b - 0xab) < 12) indigo++;
+			if (r > 230 && g > 230 && b > 230) white++;
+		}
+	}
+	expect(indigo / sampled).toBeGreaterThan(0.5);
+	expect(white).toBeGreaterThan(30);
+	expect(blocked).toEqual([]);
 });
 
 test('an app with a server lists the keys it needs; a key is pasted once and never shown again', async ({ page, context }) => {
@@ -1123,4 +1191,36 @@ test("a copy Caddie couldn't build says why in plain words", async ({ page, cont
 	await expect(card.getByTestId('imported-app-failed')).toHaveText(message);
 	await expect(card.locator('iframe')).toHaveCount(0);
 	expect(state.importChecks).toHaveLength(0);
+});
+
+
+for (const device of [
+  { name: 'desktop', userAgent: 'Mozilla/5.0 Desktop', label: 'Download Android app (1.5 MB)', qr: true },
+  { name: 'iOS', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', label: 'Download Android app (1.5 MB)', qr: true },
+  { name: 'Android', userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8)', label: 'Install on this phone (.apk)', qr: false },
+]) test(`Android download on ${device.name} uses a private version link and truthful backend status`, async ({ browser }) => {
+  const context = await browser.newContext({ userAgent: device.userAgent, acceptDownloads: true });
+  try {
+    await fixture(context, { phase: 'ready', android: true, flutter: { page: '<html><body>Browser preview</body></html>', relayed: [] } });
+    await context.route('https://caddie.test/a/**', route => route.fulfill({ contentType: 'application/vnd.android.package-archive', headers: { 'content-disposition': 'attachment; filename="test.apk"' }, body: Buffer.from([0x50, 0x4b, 3, 4]) }));
+    const page = await context.newPage(); await page.goto(`${BASE}/app/`);
+    const panel = page.getByTestId('channel').getByTestId('android-download');
+    await expect(panel).toContainText('Its server works after you publish');
+    const download = page.waitForEvent('download');
+    await panel.getByRole('button', { name: device.label, exact: true }).click();
+    expect((await download).url()).toContain('/a/proj-workflow/app.apk?t=out_123.');
+    const toggle = panel.getByRole('button', { name: 'Scan to install on Android' });
+    if (device.qr) {
+      await toggle.click();
+      const image = panel.getByRole('img', { name: 'Scan to download this Android app' });
+      await expect(image).toBeVisible();
+      const png = decodePng(await image.screenshot());
+      const rgba = new Uint8ClampedArray(png.width * png.height * 4);
+      for (let y = 0; y < png.height; y++) for (let x = 0; x < png.width; x++) { const offset = (y * png.width + x) * 4; rgba.set([...png.pixel(x, y), 255], offset); }
+      const decoded = jsQR(rgba, png.width, png.height);
+      expect(decoded?.data).toBe('https://caddie.test/a/proj-workflow/app.apk?t=out_123.1792497600000.0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef');
+      await expect(panel).toContainText('expires in 30 minutes');
+      await toggle.click(); await expect(image).toBeHidden();
+    } else await expect(toggle).toHaveCount(0);
+  } finally { await context.close(); }
 });

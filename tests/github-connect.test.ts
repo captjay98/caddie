@@ -10,6 +10,11 @@ import {
 } from '../apps/app/src/server/github-connect.ts';
 import { GithubError } from '../apps/app/src/server/adapters/github.ts';
 import { ScopeError } from '../apps/app/src/server/scope.ts';
+import { Database } from 'bun:sqlite';
+import { readFileSync } from 'node:fs';
+import type { D1Database } from '../apps/app/src/server/auth.ts';
+import { bindInstallation } from '../apps/app/src/server/repositories.ts';
+import type { GithubRestClient } from '../apps/app/src/server/adapters/github.ts';
 
 /**
  * Plan 6.1: GitHub connects in one click. GitHub sends the person back to the
@@ -21,6 +26,60 @@ import { ScopeError } from '../apps/app/src/server/scope.ts';
 const SECRET = 'unit-secret-0123456789abcdef0123456789abcdef';
 const NOW = Date.parse('2026-10-20T04:00:00Z');
 const REQUEST = { actorId: 'user-alice', workspaceId: 'ws-alice', returnTo: '/app/settings?project=p1&tab=github' };
+
+function bindingWorld(linkedId: string | null = '101', accountType = 'User', providerAccountId = '101') {
+	const sqlite = new Database(':memory:');
+	for (const migration of ['0001_product.sql', '0006_github.sql']) {
+		sqlite.exec(readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), 'utf8'));
+	}
+	sqlite.exec(`insert into user values ('alice','Alice','alice@example.com',1,null,'now','now');
+	 insert into workspaces values ('ws','Alice','now'),('other-ws','Other','now');
+	 insert into workspace_memberships values ('m','ws','alice','owner','now'),('m2','other-ws','alice','owner','now');`);
+	if (linkedId) sqlite.prepare('insert into account (id,accountId,providerId,userId,createdAt,updatedAt) values (?,?,?,?,?,?)').run('github-alice', linkedId, 'github', 'alice', 'now', 'now');
+	function statement(sql: string, args: unknown[] = []) {
+		return {
+			bind: (...values: unknown[]) => statement(sql, values),
+			all: async () => ({ results: sqlite.prepare(sql).all(...args as never[]) }),
+			run: async () => ({ meta: { changes: sqlite.prepare(sql).run(...args as never[]).changes } }),
+		};
+	}
+	const db = { prepare: statement } as unknown as D1Database;
+	const client = {
+		config: { privateKeyPem: 'local-test-fingerprint-input' },
+		getInstallation: async () => ({ installationId: '700', accountLogin: 'alice', accountId: providerAccountId, accountType, permissions: { contents: 'write', pull_requests: 'write' }, appSlug: 'caddie', suspended: false }),
+	} as unknown as GithubRestClient;
+	const scope = { actorId: 'alice', workspaceId: 'ws' };
+	return { sqlite, db, client, scope };
+}
+
+describe('installation binding proves the actor owns the provider account', () => {
+	test('a linked GitHub user can bind their personal installation and reconnect idempotently', async () => {
+		const w = bindingWorld();
+		const bound = await bindInstallation(w.db, w.client, w.scope, '700');
+		expect(bound.installationId).toBe('700');
+		expect((await bindInstallation(w.db, w.client, w.scope, '700')).installationId).toBe('700');
+		expect(w.sqlite.query('select count(*) as n from github_installations').get()).toEqual({ n: 1 });
+		await expect(bindInstallation(w.db, w.client, { ...w.scope, workspaceId: 'other-ws' }, '700')).rejects.toMatchObject({ code: 'installation_already_bound' });
+		w.sqlite.close();
+	});
+
+	for (const [label, linkedId, type, accountId, code] of [
+		['another GitHub user', '202', 'User', '101', 'installation_ownership_unverified'],
+		['a Google-only account', null, 'User', '101', 'github_identity_required'],
+		['an organisation', '101', 'Organization', '101', 'installation_ownership_unverified'],
+		['missing provider identity metadata', '101', '', '', 'installation_ownership_unverified'],
+	] as const) {
+		test(`${label} cannot claim a new or webhook-recorded installation`, async () => {
+			const w = bindingWorld(linkedId, type, accountId);
+			await expect(bindInstallation(w.db, w.client, w.scope, '700')).rejects.toMatchObject({ code });
+			expect(w.sqlite.query('select count(*) as n from github_installations').get()).toEqual({ n: 0 });
+			w.sqlite.exec(`insert into github_installations values ('pending','700','alice','caddie','{}',null,null,'active','now','now')`);
+			await expect(bindInstallation(w.db, w.client, w.scope, '700')).rejects.toMatchObject({ code });
+			expect(w.sqlite.query('select workspaceId,boundBy from github_installations').get()).toEqual({ workspaceId: null, boundBy: null });
+			w.sqlite.close();
+		});
+	}
+});
 
 describe("GitHub's return is Caddie's own request (plan 6.1)", () => {
 	test('a state Caddie signed reads back as the same person, workspace and page', async () => {
@@ -87,6 +146,8 @@ describe("GitHub's return is Caddie's own request (plan 6.1)", () => {
 		expect(setupOutcome(new ScopeError(409, 'installation_already_bound', 'x'))).toBe('already_bound');
 		expect(setupOutcome(new ScopeError(409, 'installation_suspended', 'x'))).toBe('suspended');
 		expect(setupOutcome(new ScopeError(409, 'installation_missing_permissions', 'x'))).toBe('missing_permissions');
+		expect(setupOutcome(new ScopeError(403, 'github_identity_required', 'x'))).toBe('github_identity_required');
+		expect(setupOutcome(new ScopeError(403, 'installation_ownership_unverified', 'x'))).toBe('installation_ownership_unverified');
 		expect(setupOutcome(new GithubError(503, 'GITHUB_NOT_CONFIGURED', 'x'))).toBe('not_configured');
 		expect(setupOutcome(new ScopeError(403, 'not_a_member', 'x'))).toBe('failed');
 		expect(setupOutcome(new Error('boom'))).toBe('failed');

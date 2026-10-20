@@ -143,10 +143,12 @@ beforeAll(async () => {
 	stub.registerInstallation({
 		installationId: GITHUB_APP_INSTALLATION_A,
 		accountLogin: GITHUB_ACCOUNT_A,
+		accountId: '101',
 	});
 	stub.registerInstallation({
 		installationId: GITHUB_APP_INSTALLATION_B,
 		accountLogin: GITHUB_ACCOUNT_B,
+		accountId: '202',
 	});
 
 	idp = new StubProvider();
@@ -181,6 +183,12 @@ beforeAll(async () => {
 
 	ALICE = await signIn(worker, idp, ALICE_EMAIL, 'alice-p08', 'Alice');
 	BOB = await signIn(worker, idp, BOB_EMAIL, 'bob-p08', 'Bob');
+	// Test-only server-side OAuth identity seed. Provider account IDs and the
+	// installation's account IDs agree; a login/display name is never proof.
+	for (const [id, accountId, email] of [['github-alice', '101', ALICE_EMAIL], ['github-bob', '202', BOB_EMAIL]]) {
+		await d1Exec(WORKER_BASE, `insert into account (id,accountId,providerId,userId,createdAt,updatedAt)
+		 select '${id}','${accountId}','github',id,'now','now' from user where email='${email}'`);
+	}
 	const wsA = await worker(ALICE, '/api/workspaces', {
 		method: 'POST',
 		headers: jsonHeaders,
@@ -992,7 +1000,7 @@ describe('P08 slice 2 — import + receipt-backed export', () => {
 	test('revocation denies every future operation (webhook installation.deleted)', async () => {
 		// Fresh installation C: webhook-created, explicitly bound, repo selected.
 		const C = '4756421';
-		stub.registerInstallation({ installationId: C, accountLogin: 'octocat-c' });
+		stub.registerInstallation({ installationId: C, accountLogin: 'octocat-c', accountId: '101' });
 		stub.seedRepo({
 			fullName: 'octocat-c/c-repo',
 			files: { 'README.md': 'c\n' },
@@ -1183,8 +1191,8 @@ describe("GitHub's return after install connects in one click (plan 6.1)", () =>
 	let bobUserId = '';
 
 	beforeAll(async () => {
-		stub.registerInstallation({ installationId: INSTALLATION_C, accountLogin: 'octocat-c' });
-		stub.registerInstallation({ installationId: INSTALLATION_D, accountLogin: 'octocat-d' });
+		stub.registerInstallation({ installationId: INSTALLATION_C, accountLogin: 'octocat-c', accountId: '101' });
+		stub.registerInstallation({ installationId: INSTALLATION_D, accountLogin: 'octocat-d', accountId: '202' });
 		aliceUserId = String((await d1Rows(`select "id" from "user" where "email" = '${ALICE_EMAIL}'`))[0]?.['id']);
 		bobUserId = String((await d1Rows(`select "id" from "user" where "email" = '${BOB_EMAIL}'`))[0]?.['id']);
 	});
@@ -1230,6 +1238,20 @@ describe("GitHub's return after install connects in one click (plan 6.1)", () =>
 		expect(bare.headers.get('location')).toBe('/app/?github=expired');
 		const unsigned = await setup(ALICE, { installation_id: INSTALLATION_D, setup_action: 'install', state: 'AB12t' });
 		expect(unsigned.headers.get('location')).toBe('/app/?github=expired');
+		expect(await boundTo(INSTALLATION_D)).toBeNull();
+	});
+
+	test('own signed state cannot claim another GitHub user’s unbound installation through either binding path', async () => {
+		const state = await connectState(FIXTURE_SECRET, { actorId: aliceUserId, workspaceId: aliceWorkspaceId, returnTo: '/app/' });
+		const callback = await setup(ALICE, { installation_id: INSTALLATION_D, setup_action: 'install', state });
+		expect(callback.status).toBe(302);
+		expect(callback.headers.get('location')).toBe('/app/?github=installation_ownership_unverified');
+		const manual = await worker(ALICE, '/api/github/installations/bind', {
+			method: 'POST', headers: jsonHeaders,
+			body: JSON.stringify({ installationId: INSTALLATION_D, workspaceId: aliceWorkspaceId }),
+		});
+		expect(manual.status).toBe(403);
+		expect((await manual.json() as { error: string }).error).toBe('installation_ownership_unverified');
 		expect(await boundTo(INSTALLATION_D)).toBeNull();
 	});
 

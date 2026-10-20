@@ -63,14 +63,14 @@ describe("GitHub's return is said once, in plain words (plan 6.1)", () => {
 
 	test('every outcome reads as one plain sentence; only a connection is good news', () => {
 		expect([...GITHUB_RETURN_OUTCOMES].sort()).toEqual(
-			['already_bound', 'connected', 'expired', 'failed', 'missing_permissions', 'not_configured', 'not_found', 'not_signed_in', 'requested', 'suspended'],
+			['already_bound', 'connected', 'expired', 'failed', 'github_identity_required', 'installation_ownership_unverified', 'missing_permissions', 'not_configured', 'not_found', 'not_signed_in', 'requested', 'suspended'],
 		);
 		for (const outcome of GITHUB_RETURN_OUTCOMES) {
 			const words = githubReturnWords(outcome);
 			expect(words.title.length).toBeGreaterThan(0);
 			// Plain words: no outcome codes, ids or underscores reach the page.
 			expect(`${words.title} ${words.detail}`).not.toMatch(/_|installation id|setup_action|state=/i);
-			expect(words.tone).toBe(outcome === 'connected' ? 'ok' : outcome === 'requested' ? 'warn' : 'danger');
+			expect(words.tone).toBe(outcome === 'connected' ? 'ok' : ['requested', 'github_identity_required'].includes(outcome) ? 'warn' : 'danger');
 		}
 		expect(githubReturnWords('connected').title).toBe('GitHub is connected.');
 		expect(githubReturnWords('expired').detail).toContain('nothing was connected');

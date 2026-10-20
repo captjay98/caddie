@@ -8736,3 +8736,8 @@ mark {
 .memory-explainer {
 	margin: 8px 0 0;
 }
+
+/* Checked Android output downloads and private phone-install QR. */
+.android-download { margin-block: 16px; }
+.android-download-qr { margin-top: 16px; max-width: 320px; }
+.android-download-qr img { display: block; max-width: 100%; height: auto; background: white; border-radius: 12px; }

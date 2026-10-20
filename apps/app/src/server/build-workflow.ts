@@ -22,6 +22,7 @@ import {
 } from "./approvals.ts";
 import { recordPlanDecision } from "./planning.ts";
 import { createD1ContentStore, D1_MAX_VALUE_BYTES } from "./artifacts.ts";
+import { getLarge, putLarge } from "./large-content.ts";
 import { findModelRouteForRole } from "../agents/providers.ts";
 
 export type WorkflowPhase =
@@ -73,6 +74,8 @@ export async function startProjectFromChat(
     brief: string;
     operationKey: string;
     sourceConversationId: string;
+    /** 'react-hono' (default) or 'flutter'; callers check FLUTTER_APPS_ENABLED (project-proposals.ts). */
+    stackId?: "react-hono" | "flutter";
   },
   limits?: unknown,
 ) {
@@ -152,7 +155,7 @@ export async function startProjectFromChat(
         conversationId,
         `sub_${digest.slice(0, 32)}`,
         "rev-0",
-        "react-hono",
+        input.stackId === "flutter" ? "flutter" : "react-hono",
         scope.actorId,
         route.id,
         route.pricingVersion,
@@ -673,6 +676,13 @@ export interface BuildBundleInput {
    * may only run scripts from its own origin (the dispatch Worker's CSP).
    */
   client?: { js: string; css: string };
+  /**
+   * Android apps (Track 3): the whole browser preview page (flutter-preview.ts),
+   * kept in the large-file store because it is bigger than one D1 value.
+   */
+  flutterWeb?: string;
+  /** Validated native package, bound to this manifest and approval. */
+  android?: { sha256: string; bytes: number; apiBase: string };
 }
 
 export interface BuildManifest {
@@ -680,6 +690,9 @@ export interface BuildManifest {
   server: { sha256: string; bytes: number } | null;
   migrations: { name: string; sha256: string }[];
   client?: { js: { sha256: string; bytes: number }; css: { sha256: string; bytes: number } };
+  /** Android apps: the browser preview page in the large-file store (large-content.ts). */
+  flutterWeb?: { sha256: string; bytes: number };
+  android?: { sha256: string; bytes: number; apiBase: string };
 }
 
 // A build file is stored as one D1 BLOB, capped at 2 MB in production
@@ -718,7 +731,18 @@ async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Pr
     };
     client = { js: await part(bundle.client.js, "script"), css: await part(bundle.client.css, "styles") };
   }
-  const manifest: BuildManifest = { v: 1, server, migrations, ...(client ? { client } : {}) };
+  let flutterWeb: BuildManifest["flutterWeb"];
+  if (bundle.flutterWeb !== undefined) {
+    const page = await putLarge(db, new TextEncoder().encode(bundle.flutterWeb));
+    flutterWeb = { sha256: page.sha256, bytes: page.bytes };
+  }
+  const android = bundle.android;
+  if (android) {
+    const { androidApiBase } = await import('./android-app.ts');
+    const head = await rows(db, 'select "bytes" from "large_content" where "sha256" = ?', android.sha256);
+    if (!bundle.flutterWeb || !androidApiBase(android.apiBase, 'check') || !head[0] || Number(head[0].bytes) !== android.bytes) throw new ScopeError(422, 'INVALID_APK', 'The Android package has not been stored for this build.');
+  }
+  const manifest: BuildManifest = { v: 1, server, migrations, ...(android ? { android } : {}), ...(client ? { client } : {}), ...(flutterWeb ? { flutterWeb } : {}) };
   return (await store.put(new TextEncoder().encode(JSON.stringify(manifest)))).contentHash;
 }
 
@@ -735,10 +759,11 @@ export async function storeBuildOutput(
       "Checks no longer match the current plan.",
     );
   const { id, contentHash, manifestSha256 } = await prepareOutput(db, scope.projectId, plan.id, input);
+  const android = input.bundle?.android ?? null;
   await db.batch([
     db
       .prepare(
-        "insert or ignore into workflow_outputs (id,projectId,runId,planId,image,sha256,manifestSha256,createdAt) values (?,?,?,?,?,?,?,?)",
+        "insert or ignore into workflow_outputs (id,projectId,runId,planId,image,sha256,manifestSha256,createdAt,apkSha256,apkBytes) values (?,?,?,?,?,?,?,?,?,?)",
       )
       .bind(
         id,
@@ -749,6 +774,8 @@ export async function storeBuildOutput(
         contentHash,
         manifestSha256,
         now(),
+        android?.sha256 ?? null,
+        android?.bytes ?? null,
       ),
     db
       .prepare(
@@ -872,6 +899,8 @@ export interface OutputManifestView {
   manifestSha256: string;
   publishable: boolean;
   hasServer: boolean;
+  /** "flutter": an Android app's browser preview (Track 3). */
+  kind: "web" | "flutter";
   migrations: { name: string; sha256: string }[];
 }
 
@@ -881,14 +910,15 @@ export async function readOutputManifest(db: D1Database, scope: Scope, id: strin
   const found = await rows(db, 'select "manifestSha256" from workflow_outputs where id = ? and projectId = ?', id, scope.projectId);
   if (!found[0]) return null;
   const manifestHash = found[0].manifestSha256;
-  if (manifestHash === null || manifestHash === undefined) return { manifestSha256: "", publishable: false, hasServer: false, migrations: [] };
+  if (manifestHash === null || manifestHash === undefined) return { manifestSha256: "", publishable: false, hasServer: false, kind: "web", migrations: [] };
   const bytes = await createD1ContentStore(db).get(String(manifestHash));
   if (!bytes) return null;
   const manifest = JSON.parse(new TextDecoder().decode(bytes)) as BuildManifest;
   return {
     manifestSha256: String(manifestHash),
-    publishable: manifest.v === 1 && Boolean(manifest.client),
+    publishable: manifest.v === 1 && Boolean(manifest.client || (manifest.flutterWeb && manifest.android && manifest.server)),
     hasServer: manifest.server !== null,
+    kind: manifest.flutterWeb ? "flutter" : "web",
     migrations: manifest.migrations.map((m) => ({ name: m.name, sha256: m.sha256 })),
   };
 }
@@ -898,6 +928,7 @@ export interface PublishBundle {
   manifestSha256: string;
   js: string;
   css: string;
+  android?: { sha256: string; bytes: number; apiBase: string };
   server: string | null;
   migrations: { name: string; sha256: string; sql: string }[];
 }
@@ -909,7 +940,7 @@ export interface PublishBundle {
  */
 export async function readPublishBundle(db: D1Database, scope: Scope, id: string): Promise<PublishBundle> {
   await assertProjectScope(db, scope);
-  const found = await rows(db, 'select "manifestSha256" from workflow_outputs where id = ? and projectId = ?', id, scope.projectId);
+  const found = await rows(db, 'select "manifestSha256", "apkSha256", "apkBytes" from workflow_outputs where id = ? and projectId = ?', id, scope.projectId);
   if (!found[0]) throw new ScopeError(404, "preview_not_found", "No such version in this project.");
   const manifestHash = found[0].manifestSha256;
   const rebuild = () =>
@@ -922,13 +953,15 @@ export async function readPublishBundle(db: D1Database, scope: Scope, id: string
     return new TextDecoder().decode(bytes);
   };
   const manifest = JSON.parse(await text(String(manifestHash))) as BuildManifest;
-  if (manifest.v !== 1 || !manifest.client) throw rebuild();
+  if (manifest.v !== 1 || (!manifest.client && !(manifest.flutterWeb && manifest.android && manifest.server))) throw rebuild();
+  if (manifest.android && (manifest.android.sha256 !== found[0].apkSha256 || manifest.android.bytes !== found[0].apkBytes)) throw new ScopeError(409, 'APK_MISMATCH', 'The Android package does not match the approved build. Build a new version.');
   const migrations = [];
   for (const file of manifest.migrations) migrations.push({ name: file.name, sha256: file.sha256, sql: await text(file.sha256) });
   return {
     manifestSha256: String(manifestHash),
-    js: await text(manifest.client.js.sha256),
-    css: await text(manifest.client.css.sha256),
+    js: manifest.client ? await text(manifest.client.js.sha256) : "",
+    css: manifest.client ? await text(manifest.client.css.sha256) : "",
+    ...(manifest.android ? { android: manifest.android } : {}),
     server: manifest.server ? await text(manifest.server.sha256) : null,
     migrations,
   };
@@ -942,7 +975,7 @@ export async function readBuildOutput(
   await assertProjectScope(db, scope);
   const found = await rows(
     db,
-    "select sha256 from workflow_outputs where id = ? and projectId = ?",
+    "select sha256, manifestSha256 from workflow_outputs where id = ? and projectId = ?",
     id,
     scope.projectId,
   );
@@ -952,7 +985,19 @@ export async function readBuildOutput(
       "preview_not_found",
       "No such preview in this project.",
     );
-  const bytes = await createD1ContentStore(db).get(String(found[0].sha256));
+  const store = createD1ContentStore(db);
+  // Android apps (Track 3): the stored HTML is a small stand-in; the real page
+  // is in the large-file store, named by the build manifest.
+  if (found[0].manifestSha256) {
+    const manifestBytes = await store.get(String(found[0].manifestSha256));
+    const manifest = manifestBytes ? (JSON.parse(new TextDecoder().decode(manifestBytes)) as BuildManifest) : null;
+    if (manifest?.flutterWeb) {
+      const page = await getLarge(db, manifest.flutterWeb.sha256);
+      if (!page) throw new ScopeError(404, "preview_missing", "Preview content is unavailable.");
+      return page;
+    }
+  }
+  const bytes = await store.get(String(found[0].sha256));
   if (!bytes)
     throw new ScopeError(
       404,

@@ -11,6 +11,7 @@ is the checklist and the record.
 | GitHub App (P08: contents read-only + PR write, webhook secret) | P08 live | deferred until P08 merge |
 | Nebius API key (`NEBIUS_API_KEY`) | P05 live round-trips, P09 journey | PROVISIONED via aside (in `.dev.vars`) |
 | TF Sandboxes credentials (`CONTREE_BASE_URL`, `CONTREE_API_TOKEN`, `CONTREE_PROJECT_ID`) | P04 live probes, P09 sandbox phases | PROVISIONED via aside (in `.dev.vars`; whoami verified) |
+| Optional `CONTREE_FLUTTER_IMAGE` | Android builds | defaults to the 2026-10-19 image; rebuild/override before its possible 180-day expiry (about 2027-04-17). See `sandbox.md`. APK download needs an HTTPS Caddie origin; its server needs approved publishing. No additional storage binding is required (hash-verified D1 chunks). |
 | Real contact address for landing mailto | P16 public deployment | RESOLVED: captjay98@gmail.com (owner's address, set directly) |
 | Live-test authorization (`CADDIE_LIVE_AUTHORIZED=1` + budget) | all live runs | owner decision per run |
 | App keys keyring (`APP_SECRETS_KEYS` = `kid:base64-32-bytes[,kid:...]`, e.g. `k1:$(openssl rand -base64 32)`; first entry seals; keep older entries until `rotateAppSecrets` has re-sealed) | saving app keys, keys in previews and published apps | not provided — locally the Keys card says saving keys isn't set up |

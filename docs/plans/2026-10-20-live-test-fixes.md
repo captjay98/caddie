@@ -235,9 +235,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   outcome leaves the address before the router reads it and the page says it
   once in plain words (`github-return.ts`, `GithubReturnNotice`); "Connect by
   installation number instead" is the folded fallback.
-  `docs/setup/github-app.md` names the Setup URL. Known, unchanged: the by-id
-  form can claim any unbound installation of the App; proving the installer
-  would need GitHub App user sign-in.
+  `docs/setup/github-app.md` names the Setup URL. Integration review found
+  that signed state alone did not prove ownership. Both binding paths now
+  require the installation's personal GitHub account id to match the signed-in
+  person's linked GitHub identity. Google-only, mismatched and organisation
+  claims fail closed. The real local-worker exploit regressions pass.
 - [x] 6.2 Memory learns: facts carry the project in a project chat; a stated
   lasting preference is proposed after the turn (still needs Confirm). Unit.
   Part 1 done: in a project's chat, `remember` keeps what is about the
@@ -259,30 +261,62 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   stated, and what Caddie proposed with remember): "Caddie can remember this
   for next time: “…”" with Remember it and No thanks (declined, it is never
   offered again), read again each time another of their messages is admitted
+  or the assistant's turn settles (integration fix: model-proposed offers
+  otherwise appeared only after the next user message)
   (`GET /api/memory/offers`, `MemoryOffers.tsx`). The remember tool's line in
   the chat now reads "Noted for you to confirm".
 
 ## 7. Land the live fixes
 
-- [ ] 7.1 Full gate: license audit, scaffold lock check, typecheck, build, test,
-  `verify:packet --all`, `test:browser -- --all`, release-check; execution
-  ledger and README counts.
-- [ ] 7.2 Merge into main locally, only if main's checkout has no uncommitted
-  tracked changes (else ask the owner). No push. Owner: push and deploy.
+- [x] 7.1 Full gate. Run 2026-10-20 on the merged tree, after the merge and the
+  two integration fixes recorded in `docs/evidence/2026-10-20-kiro-integration/`:
+  license audit CLEAN (25 production dependencies across 5 locations, 0
+  flagged, 0 unresolved); `refresh-scaffold-lock.ts --check` OK;
+  `refresh-flutter-scaffold-lock.ts --check` OK (lockfiles sha256
+  `9e47e703…97bc818`); typecheck exit 0; build exit 0 (composition: 0
+  collisions); `bun run test` **1,696 pass / 0 fail** (127 files);
+  `verify:packet --all` **43 PASS / 0 FAIL / 4 NOT APPLICABLE**;
+  `test:browser -- --all` **25 PASS / 0 FAIL / 22 NOT APPLICABLE**, and the
+  whole browser suite **275 passed / 1 skipped** (the skip is the
+  evidence-only screenshot spec, gated on `CADDIE_SHOTS`); release-check **49
+  PASS / 0 FAIL / 1 BLOCKED** (deployment authorization, by design) **/ 4
+  PROVISIONED**. Execution ledger entry and this file carry the counts.
+- [x] 7.2 Merge into main locally. Done 2026-10-20: `fix/live-test-findings`
+  (`e70e534`) merged as `afeebad`, keeping the earlier chat-limit and
+  idle-project fixes from `14aa1a7`; `feat/track3-flutter` (`2d176fa`) merged
+  after it, conflict-resolved to keep main's proposal fields
+  (`requiredTech`, `audience`, `problem`), the platform-AI rule, both preview
+  policies and both preview-size tests. The owner then asked for the push, so
+  the "no push" line no longer stands; deployment remains the owner's call.
 
 ## 8. Track 3 (Android apps), in its worktree
 
-- [ ] 8.1 E3: the final checks build the APK (a non-blocking "Android app"
-  check) and keep it with the build.
-- [ ] 8.2 E4: publishing an Android app publishes its server plus a simple
-  download page (APK link and QR).
-- [ ] 8.3 F: "Download Android app (X MB)" / "Install on this phone" and a QR
-  code (SVG, signed 30-minute link). Browser tests.
-- [ ] 8.4 Rebase on main, full gate with Flutter on PATH, docs (`sandbox.md`,
+- [x] 8.1 E3: the final checks build the APK (a non-blocking "Android app"
+  check) and keep it with the build. Done: an HTTPS relay address is embedded
+  and the curated arm64 release build runs after the browser/source
+  checkpoints; APK bytes, hash and size go to the chunked store
+  (`server/android-app.ts`, `large-content.ts`, migration 0039). APK
+  persistence failure is contained: it records a failed native check and still
+  stores the checked preview.
+- [x] 8.2 E4: publishing an Android app publishes its server plus a simple
+  download page (APK link and QR). Done: the immutable manifest carries APK
+  hash, size and API base; the approved output yields the backend plus a
+  download page, CSS and a local SVG QR (`publish.ts`, `published-page.ts`).
+- [x] 8.3 F: "Download Android app (X MB)" / "Install on this phone" and a QR
+  code (SVG, signed 30-minute link). Browser tests. Done:
+  `client/project/AndroidDownload.tsx`; the link is minted only on explicit
+  POST, project/output bound and private/no-store; desktop and iOS show the QR.
+  Covered by `tests/browser/project-workflow.spec.ts` ("Android download on
+  desktop / iOS / Android"), all passing.
+- [x] 8.4 Rebase on main, full gate with Flutter on PATH, docs (`sandbox.md`,
   `owner-inputs.md`, `.prod.vars.example`, ledger), merge locally as in 7.2.
   Main now has 0036 and 0037 (plans 4.2, 4.3): renumber Track 3's 0036/0037
   after main's last migration before merging, and add the 1.3 sentences to
-  `FLUTTER_RECIPE_INSTRUCTION`.
+  `FLUTTER_RECIPE_INSTRUCTION`. Done: Flutter's never-landed migrations became
+  0038/0039 (0036/0037 keep their meanings; all 39 apply in order locally),
+  the 1.3 sentences are in `FLUTTER_RECIPE_INSTRUCTION`, docs updated, and
+  `refresh-flutter-scaffold-lock.ts --check` plus `refresh-scaffold-lock.ts
+  --check` both pass with the SDK on PATH.
 
 ## 9. Live checks: paid, OK'd by the owner on 2026-10-20 (run each when ready)
 
@@ -292,14 +326,25 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   pinned packages downloaded, checked and unpacked in 9.3 s, the frozen install
   found no changes, sql.js loaded its wasm and answered a query. The old code
   was not re-run, so the EBADF itself is still unexplained.
-- [ ] 9.2 Track 3: scaffold, a probe test and the APK build in the Flutter image.
+- [x] 9.2 Track 3: scaffold, a probe test and the APK build in the Flutter
+  image. LIVE VERIFIED 2026-10-20 with
+  `CADDIE_LIVE_AUTHORIZED=1 bun scripts/probe-sandbox-flutter.ts
+  --apk-output …`: locked installs, the probe test and the web/server builds
+  run, then the real release APK is built and read back — 14,884,096 bytes,
+  sha256 `5631cde4441037cb8bffd194ed0e78895b9139d87fbf7bb0373b7754010c53f4`
+  — and the session is disposed. The first run of that probe reported FAILED
+  because the new helper rejected a successful receipt whose `cwd` the driver
+  had normalized to an absolute path; that is fixed and regression-covered.
+  Installing that exact APK on an arm64 emulator also launches it
+  (`docs/evidence/2026-10-20-kiro-integration/android-release-launch.png`).
 - [ ] 9.3 After deploy: one chat-to-plan-to-build journey through Caddie.
 
 ## Owner actions
 
 - Given: OK for phase 9 (2026-10-20 00:50); OK for 1.5, WebAssembly in
   previews and published apps (2026-10-20 01:58).
-- Still to do: GitHub settings (6.1); push and deploy after 7.2 and 8.4;
-  re-plan FarmLog AI once phase 4 is live; optional: clear `~/.gradle/caches`.
+- Still to do: GitHub settings (6.1); deploy the integrated SHA, then the
+  after-deploy journey (9.3) and re-plan FarmLog AI once phase 4 is live;
+  optional: clear `~/.gradle/caches`.
 - Known limit: judges can't publish, so a judge's APK has no live server; they
   get the browser preview.

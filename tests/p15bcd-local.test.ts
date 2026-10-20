@@ -10,7 +10,9 @@ type Stack = (typeof STACKS)[number];
 const REQUIRED_FILES: Record<Stack, string[]> = {
 	'laravel-inertia': ['template/composer.json'],
 	'fastapi-react': ['template/pyproject.toml'],
-	flutter: ['template/pubspec.yaml'],
+	// Track 3 replaced the placeholder template folder with a scaffold module
+	// (stacks/flutter/scaffold.ts) and its lockfiles.
+	flutter: ['scaffold.ts', 'scaffold-lock.ts'],
 };
 
 const SKILL_ASSERTS: Record<Stack, string> = {
@@ -46,19 +48,23 @@ describe('P15b/c/d local scaffolding', () => {
 		});
 	}
 
-	test('flutter defaults to the proven Hono backend (per the frozen scope)', () => {
-		const pubspec = readFileSync(
-			join(REPO, 'stacks', 'flutter', 'template', 'pubspec.yaml'),
-			'utf8',
-		);
-		// The pairing is at the recipe/skill level; the template's API client
-		// dependency set is minimal (http) — no alternate backend assumed.
-		expect(pubspec).toContain('http: ');
+	test('flutter defaults to the proven Hono backend (per the frozen scope)', async () => {
+		const { FLUTTER_SCAFFOLD_FILES } = await import(join(REPO, 'stacks', 'flutter', 'scaffold.ts'));
+		// The app's API client is plain http, and the scaffold ships the same
+		// Hono server every react-hono app gets.
+		expect(FLUTTER_SCAFFOLD_FILES['pubspec.yaml']).toContain('http: ');
+		expect(FLUTTER_SCAFFOLD_FILES['src/server.ts']).toContain('new Hono');
 	});
 
-	test('flutter recipe uses android-emulator preview (real device evidence bar)', async () => {
+	test('flutter previews its web build and exports a release APK at verify time (Track 3)', async () => {
 		const { recipe } = await import(join(REPO, 'stacks', 'flutter', 'recipe.ts'));
-		expect(recipe.preview).toBe('android-emulator');
-		expect(recipe.build.join(' ')).toContain('apk');
+		const { flutterApkCommand } = await import(join(REPO, 'stacks', 'flutter', 'scaffold.ts'));
+		// Before Track 3 the placeholder previewed only on an emulator. Now the
+		// web build (with the app's server) is the in-Caddie preview, the APK is
+		// built once the app's address is known, and real-device evidence stays
+		// the bar for marking the stack verified (the skill and P15d live spec).
+		expect(recipe.preview).toBe('server');
+		expect(recipe.build.join(' ')).toContain('flutter build web');
+		expect(flutterApkCommand('https://app.example.com')).toContain('flutter build apk --release');
 	});
 });

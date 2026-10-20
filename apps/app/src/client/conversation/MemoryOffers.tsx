@@ -15,7 +15,7 @@ interface MemoryOffer {
 	readonly content: string;
 }
 
-export function MemoryOffers(props: { projectId: string; refreshKey: number }): ReactElement | null {
+export function MemoryOffers(props: { projectId: string; refreshKey: string | number }): ReactElement | null {
 	const queryClient = useQueryClient();
 	const offers = useQuery({
 		queryKey: ['memory-offers', props.projectId, props.refreshKey],

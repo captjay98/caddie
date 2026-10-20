@@ -2,8 +2,11 @@ import type { AuthEnv } from "./auth.ts";
 import type { RunBindingRecord } from "@caddie/contracts";
 import type { CoordinatorHostContext } from "../agents/coordinator.ts";
 import type { SandboxToolDeps } from "../agents/tools.ts";
-import { BUILD_RUNTIME_ENV, DEFAULT_BASE_IMAGE, buildSandboxFromEnv } from "./build-sandbox.ts";
-import { previewDocument, readBuiltApp } from "./built-app.ts";
+import { buildSandboxFromEnv, stackRuntime } from "./build-sandbox.ts";
+import { previewDocument, readBuiltApp, readBuiltServer } from "./built-app.ts";
+import { putLarge } from "./large-content.ts";
+import { buildAndroidPackage } from "./android-app.ts";
+import { flutterPreviewDocument, readFlutterWebBuild } from "./flutter-preview.ts";
 import { type SandboxDriver, SandboxError } from "./adapters/sandbox.ts";
 import { bytesToBase64, base64ToBytes } from "./adapters/contree.ts";
 import {
@@ -31,10 +34,12 @@ import {
   workflowRepairPause,
   continueProjectFromChat,
 } from "./build-workflow.ts";
-import { STACK_CATALOG } from "./stacks.ts";
+import { stackCatalog } from "./stacks.ts";
 import { recordBuildActivity } from "./build-activity.ts";
 import { checkServerStarts, type WorkerLoaderLike } from "./preview-runtime.ts";
-import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS } from "../../../../stacks/react-hono/scaffold.ts";
+import { SCAFFOLD_FILES } from "../../../../stacks/react-hono/scaffold.ts";
+import { FLUTTER_SCAFFOLD_FILES } from "../../../../stacks/flutter/scaffold.ts";
+import { hostCheckCommands, testsPassed } from "./host-checks.ts";
 import { projectScopeForUser, ScopeError } from "./scope.ts";
 import { requestAppSecret } from "./app-secrets.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
@@ -48,7 +53,7 @@ import {
   testsBaseline,
 } from "./build-features.ts";
 import { openWorkingCopy } from "./working-copy.ts";
-import { runVerifiedInstall, VERIFIED_INSTALL_COMMAND } from "./verified-install.ts";
+import { runVerifiedInstall } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { checkSentence, newTestsSentence } from "./round-detail.ts";
 import { projectStatusForActor } from "./project-experience.ts";
@@ -109,6 +114,8 @@ const tail = (text: string | undefined, limit = 4000) =>
   !text ? "" : text.length > limit ? `…${text.slice(-limit)}` : text;
 export interface CoordinatorEnvironment {
   DB: AuthEnv["DB"];
+  /** Public HTTPS Caddie origin for the installed Android app backend relay. */
+  BETTER_AUTH_URL?: string;
   /** Cloudflare Artifacts (owner input): app versions live there when bound, in D1 otherwise. */
   ARTIFACTS?: ArtifactsBinding;
   /** Tavily search key — the required PRIMARY discovery source + research tool (see AuthEnv). */
@@ -119,6 +126,8 @@ export interface CoordinatorEnvironment {
   CONTREE_API_TOKEN?: string;
   CONTREE_PROJECT_ID?: string;
   CONTREE_IMAGE?: string;
+  /** Flutter apps' image (Track 3); defaults to DEFAULT_FLUTTER_IMAGE in build-sandbox.ts. */
+  CONTREE_FLUTTER_IMAGE?: string;
   /** Worker Loader (backend previews + the runs-on-Cloudflare check). Absent: the check is skipped honestly. */
   LOADER?: WorkerLoaderLike;
 }
@@ -166,7 +175,11 @@ export async function createCoordinatorContext(
   let planRevision = run.planRevision;
   const sessionId = `session:${runId}`;
   const root = `/workspace/${scope.projectId}`;
-  const runtimeEnv = BUILD_RUNTIME_ENV;
+  // Track 3: an Android app (stackId 'flutter') builds in the Flutter image,
+  // with its own scaffold, commands and builder instructions.
+  const stack: "react-hono" | "flutter" = run.stackId === "flutter" ? "flutter" : "react-hono";
+  const runtime = stackRuntime(stack, env);
+  const runtimeEnv = runtime.env;
   let driver: SandboxDriver | null = null;
   let sessionReady: Promise<string> | null = null;
   const ensureSession = async () => {
@@ -200,7 +213,7 @@ export async function createCoordinatorContext(
       scope,
       runId,
       sessionKey: sessionId,
-      baseImage: env.CONTREE_IMAGE ?? DEFAULT_BASE_IMAGE,
+      baseImage: runtime.image,
       root,
       env: runtimeEnv,
     }).catch((error: unknown) => {
@@ -215,6 +228,7 @@ export async function createCoordinatorContext(
   // (stacks/react-hono/scaffold.ts), identical to what the evaluation journey
   // uses — a green fixture journey and a real chat build now run the same setup.
   let scaffoldReady: Promise<void> | null = null;
+  const scaffoldFiles = stack === "flutter" ? FLUTTER_SCAFFOLD_FILES : SCAFFOLD_FILES;
   const scaffold = () =>
     (scaffoldReady ??= (async () => {
       const { driver, id } = await ensureSession();
@@ -222,14 +236,14 @@ export async function createCoordinatorContext(
       const setupStarted = new Date().toISOString();
       await driver.uploadFiles(
         id,
-        Object.entries(SCAFFOLD_FILES).map(([path, text]) => ({
+        Object.entries(scaffoldFiles).map(([path, text]) => ({
           path: `${root}/${path}`,
           contentBase64: bytesToBase64(new TextEncoder().encode(text)),
         })),
       );
       await recordBuildActivity(env.DB, {
         projectId: scope.projectId, runId, kind: "setup",
-        subject: `react-hono scaffold (${Object.keys(SCAFFOLD_FILES).length} files)`,
+        subject: `${stack} scaffold (${Object.keys(scaffoldFiles).length} files)`,
         outcome: "ok", startedAt: setupStarted, finishedAt: new Date().toISOString(),
         key: "setup:scaffold",
       });
@@ -369,12 +383,8 @@ export async function createCoordinatorContext(
     await scaffold();
     await guardBudget();
     const { driver, id } = await ensureSession();
-    const commands = [
-      { check: "dependencies", command: VERIFIED_INSTALL_COMMAND },
-      { check: "behavior-tests", command: SCAFFOLD_COMMANDS.test.join(" && ") },
-      { check: "browser-bundle", command: SCAFFOLD_COMMANDS.build.join(" && ") },
-    ];
-    const receipts = [];
+    const commands = hostCheckCommands(stack);
+    const receipts: { check: string; passed: boolean; exitCode: number | null; stdout: string; stderr: string; operationKey: string }[] = [];
     for (const check of commands) {
       const operationKey = `${mode}:${runId}:${plan.id}:${attempt}:${check.check}`;
       await requireBuildApproval(env.DB, scope);
@@ -398,7 +408,7 @@ export async function createCoordinatorContext(
               command: check.command,
               operationKey,
               signal,
-              timeoutMs: 120_000,
+              timeoutMs: check.timeoutMs,
               cwd: root,
               env: runtimeEnv,
             });
@@ -413,8 +423,7 @@ export async function createCoordinatorContext(
         receipt.exitCode === 0 &&
         !receipt.timedOut &&
         !receipt.outputTruncated &&
-        (check.check !== "behavior-tests" ||
-          /[1-9]\d* pass/.test(receipt.stdout + "\n" + receipt.stderr)),
+        (check.check !== "behavior-tests" || testsPassed(receipt.stdout + "\n" + receipt.stderr)),
       );
       await recordVerification(env.DB, scope, workflow.runId, {
         check: check.check,
@@ -613,8 +622,14 @@ export async function createCoordinatorContext(
         "Files changed after the build. Run checks again.",
       );
     // Backend apps: the server bundle and the migrations travel with the
-    // checked output (previews and publishing read them from there).
-    const { js, css, server, migrations } = await readBuiltApp(driver, id, root);
+    // checked output (previews and publishing read them from there). Android
+    // apps (Track 3) have the same server and a Flutter web build for the
+    // browser preview, carried as one page (flutter-preview.ts).
+    const built =
+      stack === "flutter"
+        ? { kind: "flutter" as const, ...(await readBuiltServer(driver, id, root)), page: flutterPreviewDocument(await readFlutterWebBuild(driver, id, root)) }
+        : { kind: "web" as const, ...(await readBuiltApp(driver, id, root)) };
+    const { server, migrations } = built;
     // The version history: the app's source as checked (same skip rules as the
     // GitHub save — no dependencies, build output or secrets). Never fails the
     // build: a version that can't be saved is logged and the preview still lands.
@@ -680,14 +695,41 @@ export async function createCoordinatorContext(
         };
       }
     }
-    const html = previewDocument({ js, css });
+    // Native packaging follows all preview/checkpoint checks. It cannot turn a
+    // useful, checked browser preview into a failed build.
+    const androidStarted = new Date().toISOString();
+    const androidKey = `verify:${runId}:${plan.id}:${attempt}:android-app`;
+    let android = built.kind === "flutter" ? await buildAndroidPackage(driver, {
+      origin: env.BETTER_AUTH_URL ?? "", projectId: scope.projectId, runId: workflow.runId,
+      sessionId: id, root, operationKey: androidKey, env: runtimeEnv, expectedInputImage: final.resultImage, ...(signal ? { signal } : {}),
+    }) : null;
+    let storedAndroid: { sha256: string; bytes: number; apiBase: string } | null = null;
+    if (android?.apk && android.apiBase) {
+      try { storedAndroid = { ...(await putLarge(env.DB, android.apk)), apiBase: android.apiBase }; }
+      catch (error) {
+        android = { ...android, apk: null, message: 'The Android package could not be saved. You can still use the browser preview.', evidence: JSON.stringify({ receipt: android.evidence, storageError: error instanceof Error ? error.message : String(error) }) };
+      }
+    }
+    if (android) {
+      await recordVerification(env.DB, scope, workflow.runId, { check: "android-app", passed: android.apk !== null, evidence: android.evidence || android.message, planRevision: plan.id });
+      await recordBuildActivity(env.DB, { projectId: scope.projectId, runId: workflow.runId, kind: "check", subject: "android-app", outcome: android.apk ? "ok" : "failed", bytes: android.apk?.byteLength ?? null, startedAt: androidStarted, finishedAt: new Date().toISOString(), key: androidKey });
+      receipts.push({ check: "android-app", passed: android.apk !== null, exitCode: android.apk ? 0 : 1, stdout: android.message, stderr: "", operationKey: androidKey });
+    }
+    const outputImage = android?.image ?? final.resultImage;
+    const html =
+      built.kind === "flutter"
+        ? "<!doctype html><html><body><p>An Android app built by Caddie. Open it in Caddie to try it in the browser.</p></body></html>"
+        : previewDocument({ js: built.js, css: built.css });
     signal?.throwIfAborted();
     const output = await storeBuildOutput(env.DB, scope, {
       html,
-      image: final.resultImage,
+      image: outputImage,
       planId: plan.id,
       runId: workflow.runId,
-      bundle: { server, migrations, client: { js, css } },
+      bundle:
+        built.kind === "flutter"
+          ? { server, migrations, flutterWeb: built.page, ...(storedAndroid ? { android: storedAndroid } : {}) }
+          : { server, migrations, client: { js: built.js, css: built.css } },
     });
     if (source) {
       try {
@@ -703,7 +745,7 @@ export async function createCoordinatorContext(
           })),
           skipped: source.skipped,
           planId: plan.id,
-          image: final.resultImage,
+          image: outputImage,
           outputId: output.outputId,
           actorId: scope.actorId,
         });
@@ -723,11 +765,12 @@ export async function createCoordinatorContext(
     driver: deps,
     sessionId,
     runId,
+    stackId: stack,
     projectId: scope.projectId,
     homeOverview,
     actorContext: actor.text,
     currentPlanRevision: () => planRevision,
-    listStacks: async () => STACK_CATALOG,
+    listStacks: async () => stackCatalog(env),
     discover: tools.discover,
     research: tools.research,
     hackathonDetails: tools.hackathonDetails,
@@ -816,7 +859,7 @@ export async function createCoordinatorContext(
       const proposal = await proposeProjectOnServer(env.DB, scope, {
         ...input,
         sourceConversationId: run.conversationId,
-      });
+      }, env);
       return { id: proposal.id, homeProjectId: proposal.homeProjectId, status: proposal.status };
     },
     workflowState: async () => {

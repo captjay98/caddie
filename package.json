@@ -20,10 +20,11 @@
 		"test:browser": "bun scripts/verify-packet.ts --browser"
 	},
 	"devDependencies": {
+		"@playwright/test": "^1.55.0",
 		"@types/bun": "^1.2.0",
+		"jsqr": "1.4.0",
 		"typescript": "^7.0.2",
-		"valibot": "^1.1.0",
-		"@playwright/test": "^1.55.0"
+		"valibot": "^1.1.0"
 	},
 	"patchedDependencies": {
 		"agents@0.20.1": "patches/agents@0.20.1.patch",

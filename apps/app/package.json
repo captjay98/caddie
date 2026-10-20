@@ -24,6 +24,7 @@
 		"hono": "^4.12.32",
 		"isomorphic-git": "1.44.2",
 		"nanoid": "^5.1.16",
+		"qrcode-generator": "2.0.4",
 		"react": "^19.2.0",
 		"react-dom": "^19.2.0",
 		"react-markdown": "10.1.0",

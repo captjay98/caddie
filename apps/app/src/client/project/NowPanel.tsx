@@ -7,6 +7,7 @@ import { useProjectExperience } from '../queries.ts';
 import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
 import { nowPanelModel, type NowButton } from './now-panel.ts';
 import { BuildProgress } from './BuildProgress.tsx';
+import { AndroidDownload } from './AndroidDownload.tsx';
 import { SavedFeatures } from './FeatureChecklist.tsx';
 
 /**
@@ -93,6 +94,7 @@ export function NowPanel(props: { projectId: string; fallback: ReactElement }): 
 			{(stage === 'ready' || stage === 'blocked' || stage === 'stopped') && chrome.actorId ? (
 				<SavedFeatures actorId={chrome.actorId} projectId={props.projectId} />
 			) : null}
+			{stage === 'ready' && chrome.actorId ? <AndroidDownload actorId={chrome.actorId} projectId={props.projectId} /> : null}
 			{model.buttons.length ? (
 				<div className="row-actions">
 					{model.buttons.map((button) => (

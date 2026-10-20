@@ -1,3 +1,4 @@
+import { androidQrSvg } from './android-qr.ts';
 import type { AppHostFile } from './app-host.ts';
 import { ICON_FILES, appIconFiles } from './app-icons.ts';
 
@@ -86,8 +87,19 @@ export function appManifest(name: string): AppManifest {
  * files only (the dispatch Worker's CSP forbids inline scripts). `seed` (the
  * project id) picks the icon colour, so renaming the app keeps it.
  */
-export async function publishedAssets(app: { name: string; seed: string }, bundle: { js: string; css: string }): Promise<AppHostFile[]> {
+export async function publishedAssets(app: { name: string; seed: string }, bundle: { js: string; css: string; android?: { downloadUrl: string; bytes: number } }): Promise<AppHostFile[]> {
 	const title = app.name.slice(0, 120);
+  if (bundle.android) {
+    const url = new URL(bundle.android.downloadUrl);
+    if (url.protocol !== 'https:' || url.username || url.password) throw new Error('An Android download needs a plain HTTPS address.');
+    const encode = (value: string) => new TextEncoder().encode(value);
+    const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>' + escapeText(title) + '</title><link rel="stylesheet" href="/android.css"></head><body><main><h1>' + escapeText(title) + '</h1><p>An Android app built with Caddie.</p><a href="' + escapeAttr(url.href) + '">Download Android app (' + (bundle.android.bytes / 1_000_000).toFixed(1) + ' MB)</a><p>Scan on your Android phone to download.</p><img src="/android-qr.svg" width="256" height="256" alt="Scan to download this Android app"><p>Android may ask you to allow installation from your browser. Only install apps you trust.</p></main></body></html>';
+    return [
+      { path: '/index.html', bytes: encode(html), contentType: 'text/html; charset=utf-8' },
+      { path: '/android.css', bytes: encode('body{font:18px system-ui,sans-serif;background:#f6f5f0;color:#17221b;margin:0;padding:32px}main{max-width:560px;margin:32px auto}a{display:inline-block;background:#225d3c;color:white;padding:14px 20px;border-radius:12px}img{display:block;background:white;max-width:100%;height:auto}p{line-height:1.5}'), contentType: 'text/css; charset=utf-8' },
+      { path: '/android-qr.svg', bytes: encode(androidQrSvg(url.href)), contentType: 'image/svg+xml' },
+    ];
+  }
 	const html =
 		'<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
 		`<title>${escapeText(title)}</title>\n` +

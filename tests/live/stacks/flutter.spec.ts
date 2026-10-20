@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { FLUTTER_SCAFFOLD_FILES } from '../../../stacks/flutter/scaffold.ts';
 
 /**
  * P15d live Flutter journey — the REAL template flow behind explicit
@@ -25,8 +26,7 @@ import { spawnSync } from 'node:child_process';
 
 const authorized = process.env.CADDIE_LIVE_AUTHORIZED === '1';
 const REPO = join(import.meta.dir, '..', '..', '..');
-const TEMPLATE = join(REPO, 'stacks', 'flutter', 'template');
-const APP_ID = 'dev.forge.forge_flutter_template';
+const APP_ID = 'dev.caddie.app.caddie_app';
 
 function adbPath(): string | null {
 	for (const envKey of ['ANDROID_HOME', 'ANDROID_SDK_ROOT']) {
@@ -96,23 +96,21 @@ describe('P15d live Flutter journey (BLOCKED without toolchain/emulator/authoriz
 
 			const dir = mkdtempSync(join(tmpdir(), 'p15d-flutter-'));
 			try {
-				cpSync(TEMPLATE, dir, { recursive: true });
+				// The scaffold every Flutter app starts from (stacks/flutter/scaffold.ts),
+				// with its own setup creating the Android project and its lockfile pins.
+				for (const [path, text] of Object.entries(FLUTTER_SCAFFOLD_FILES)) {
+					mkdirSync(dirname(join(dir, path)), { recursive: true });
+					writeFileSync(join(dir, path), text);
+				}
 
-				const pubGet = run(['flutter', 'pub', 'get'], dir);
+				const setup = run(['dart', 'caddie/setup.dart'], dir);
+				expect(setup.code, setup.output.slice(-2000)).toBe(0);
+				const pubGet = run(['flutter', 'pub', 'get', '--enforce-lockfile'], dir);
 				expect(pubGet.code, pubGet.output.slice(-2000)).toBe(0);
 
-				const tests = run(['flutter', 'test'], dir);
+				const tests = run(['flutter', 'test', 'test/examples'], dir);
 				expect(tests.code, tests.output.slice(-2500)).toBe(0);
 				expect(tests.output).toMatch(/All tests passed!/);
-
-				// The platform host folder is generated, not vendored; template
-				// files are copied again so the authored app always wins.
-				const create = run(
-					['flutter', 'create', '--platforms=android', '--org', 'dev.forge', '--project-name', 'forge_flutter_template', '.'],
-					dir,
-				);
-				expect(create.code, create.output.slice(-2000)).toBe(0);
-				cpSync(TEMPLATE, dir, { recursive: true });
 
 				const build = run(['flutter', 'build', 'apk', '--debug'], dir);
 				expect(build.code, build.output.slice(-2500)).toBe(0);
@@ -122,7 +120,15 @@ describe('P15d live Flutter journey (BLOCKED without toolchain/emulator/authoriz
 				expect(apkBytes.length).toBeGreaterThan(1_000_000); // a real APK, not a stub
 				const apkSha = createHash('sha256').update(apkBytes).digest('hex').slice(0, 16);
 
-				const install = run([adb, '-s', serial, 'install', '-r', apk], dir);
+				let install = run([adb, '-s', serial, 'install', '-r', apk], dir);
+				if (install.code !== 0 && install.output.includes('INSTALL_FAILED_UPDATE_INCOMPATIBLE')) {
+					// The device already carries this app id signed by another key —
+					// a release APK from the app's own download journey, for one. Drop
+					// that stale install and put the fresh debug build in its place.
+					// The acceptance bar (a real launch) is unchanged.
+					run([adb, '-s', serial, 'uninstall', APP_ID], dir);
+					install = run([adb, '-s', serial, 'install', '-r', apk], dir);
+				}
 				expect(install.code, install.output.slice(-1500)).toBe(0);
 
 				const launch = run([adb, '-s', serial, 'shell', 'monkey', '-p', APP_ID, '1'], dir);

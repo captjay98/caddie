@@ -103,3 +103,19 @@ describe('the published files', async () => {
 		for (const icon of manifest.icons) expect(byPath.get(icon.src)?.contentType).toBe('image/png');
 	});
 });
+
+
+test('a published Android app is a download page for its exact checked version, with a local SVG QR', async () => {
+  const files = await publishedAssets({ name: 'Farm <Log>', seed: 'proj-farm' }, {
+    js: '', css: '', android: { downloadUrl: 'https://caddie.test/a/proj-farm/app.apk?v=out_1', bytes: 1_500_000 },
+  });
+  const page = text(files.find(f => f.path === '/index.html')!.bytes);
+  expect(page).toContain('Farm &lt;Log&gt;');
+  expect(page).toContain('https://caddie.test/a/proj-farm/app.apk?v=out_1');
+  expect(page).toContain('Download Android app');
+  expect(page).toContain('src="/android-qr.svg"');
+  expect(page).not.toContain('/main.js');
+  const qr = files.find(f => f.path === '/android-qr.svg')!;
+  expect(qr.contentType).toBe('image/svg+xml');
+  expect(text(qr.bytes)).toContain('<svg');
+});

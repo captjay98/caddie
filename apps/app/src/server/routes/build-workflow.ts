@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { androidDownloadView, androidQrSvg } from "../android-app.ts";
 import type { AuthEnv } from "../auth.ts";
 import { ScopeError, requireProjectScope, sessionUserId } from "../scope.ts";
 import { resolveAppSecrets } from "../app-secrets.ts";
@@ -12,6 +13,7 @@ import {
   acknowledgeDispatch,
   readBuildOutput,
   readBuildBundle,
+  readOutputManifest,
   retryWorkflow,
   stopBuild,
 } from "../build-workflow.ts";
@@ -110,9 +112,24 @@ export function createBuildWorkflowRouter(
     const snapshot = await workflowSnapshot(c.env.DB, scope);
     const previewId = snapshot.workflow?.previewId ?? null;
     const previewHasServer = previewId ? (await readBuildBundle(c.env.DB, scope, previewId).catch(() => null)) !== null : false;
+    const previewKind = previewId ? ((await readOutputManifest(c.env.DB, scope, previewId).catch(() => null))?.kind ?? "web") : "web";
     // "Start from my GitHub repo": the copied app, shown until the first build has a preview of its own.
     const importPreview = await readImportPreview(c.env.DB, scope);
-    return c.json({ ...snapshot, previewHasServer, importPreview });
+    return c.json({ ...snapshot, previewHasServer, previewKind, importPreview });
+  });
+
+  // The signed phone link is a bearer capability: return it only to the
+  // scoped browser on explicit request, and keep it out of caches/logging.
+  router.get("/projects/:projectId/android", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    c.header("Cache-Control", "private, no-store");
+    return c.json({ android: await androidDownloadView(c.env.DB, scope, c.env.BETTER_AUTH_URL, c.env.BETTER_AUTH_SECRET) });
+  });
+  router.post("/projects/:projectId/android/link", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const view = await androidDownloadView(c.env.DB, scope, c.env.BETTER_AUTH_URL, c.env.BETTER_AUTH_SECRET, true);
+    c.header("Cache-Control", "private, no-store");
+    return c.json({ android: view, qrSvg: view?.url ? androidQrSvg(view.url) : null });
   });
 
   // Carry the copied app's build forward (import-preview.ts). The card calls

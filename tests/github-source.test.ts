@@ -149,6 +149,7 @@ beforeAll(async () => {
 		.prepare('insert into user (id,name,email,emailVerified,createdAt,updatedAt) values (?,?,?,0,?,?)')
 		.run('alice', 'alice', 'alice@example.com', '2026-10-17T00:00:00.000Z', '2026-10-17T00:00:00.000Z');
 	db = d1Adapter(sqlite);
+	sqlite.exec(`insert into account (id,accountId,providerId,userId,createdAt,updatedAt) values ('github-alice','101','github','alice','now','now')`);
 
 	const { publicKey, privateKey } = generateKeyPairSync('rsa', {
 		modulusLength: 2048,
@@ -160,6 +161,7 @@ beforeAll(async () => {
 	github.registerInstallation({
 		installationId: INSTALLATION,
 		accountLogin: ACCOUNT,
+		accountId: '101',
 		permissions: { contents: 'write', pull_requests: 'write' },
 	});
 	github.seedRepo({

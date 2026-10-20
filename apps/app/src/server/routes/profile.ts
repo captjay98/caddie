@@ -17,9 +17,9 @@ import {
 	retractMemoryFact,
 } from '../memory.ts';
 import {
-	STACK_CATALOG,
 	StackNotifyError,
 	listStackNotifySubscriptions,
+	stackCatalog,
 	subscribeStackNotify,
 	unsubscribeStackNotify,
 } from '../stacks.ts';
@@ -263,7 +263,7 @@ export function createProfileRouter(): Hono<{ Bindings: Env }> {
 
 	// --- enabled stacks (honest, no inherited pricing or fake availability) -----
 
-	router.get('/stacks', (c) => c.json({ stacks: STACK_CATALOG }));
+	router.get('/stacks', (c) => c.json({ stacks: stackCatalog(c.env) }));
 
 	// B03 — "Tell me when it's ready" for a planned stack. Subscribing to an
 	// enabled stack is a typed 409 (the notification would never fire).

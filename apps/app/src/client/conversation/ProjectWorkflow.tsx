@@ -15,6 +15,7 @@ import { DesignMockPreview } from "../artifacts/DesignMockPreview.tsx";
 import { ReplyText } from "./ReplyText.tsx";
 import { BuildProgress } from "../project/BuildProgress.tsx";
 import { PlanFeatureList, SavedFeatures } from "../project/FeatureChecklist.tsx";
+import { AndroidDownload } from "../project/AndroidDownload.tsx";
 import { AppKeys } from "../project/AppKeys.tsx";
 import { PublishApp } from "../project/PublishApp.tsx";
 import { AppVersions } from "../project/AppVersions.tsx";
@@ -31,6 +32,8 @@ interface Snapshot {
   designApproval: ApprovalRecord | null;
   /** The checked build has a server (relay /api calls; offer Reset test data). */
   previewHasServer?: boolean;
+  /** "flutter": an Android app's browser preview (Track 3). */
+  previewKind?: "web" | "flutter";
   /** "Start from my GitHub repo": the copied app, until the first build has its own preview. */
   importPreview?: ImportPreviewView | null;
 }
@@ -502,6 +505,7 @@ export function ProjectWorkflow({
             projectId={projectId}
             artifactId={workflow.previewId}
             contentUrl={`/api/projects/${encodeURIComponent(projectId)}/workflow/preview/${encodeURIComponent(workflow.previewId)}`}
+            {...(state.data?.previewKind === "flutter" ? { kind: "flutter" as const } : {})}
             {...(state.data?.previewHasServer
               ? {
                   appRequestUrl: `/api/projects/${encodeURIComponent(projectId)}/workflow/preview/${encodeURIComponent(workflow.previewId)}/app`,
@@ -514,6 +518,7 @@ export function ProjectWorkflow({
           {state.data?.previewHasServer ? <TestInbox actorId={chrome.actorId} projectId={projectId} /> : null}
           <AppKeys actorId={chrome.actorId} projectId={projectId} hasServer={Boolean(state.data?.previewHasServer)} />
           <PublishApp actorId={chrome.actorId} projectId={projectId} />
+          {state.data?.previewKind === "flutter" ? <AndroidDownload actorId={chrome.actorId} projectId={projectId} /> : null}
           <AppVersions actorId={chrome.actorId} projectId={projectId} onRestored={() => state.refetch()} />
           <AppAi actorId={chrome.actorId} projectId={projectId} />
           <SaveToGithub

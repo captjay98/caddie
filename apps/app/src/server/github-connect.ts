@@ -37,6 +37,8 @@ export type GithubReturnOutcome =
 	| 'missing_permissions'
 	| 'already_bound'
 	| 'not_configured'
+	| 'github_identity_required'
+	| 'installation_ownership_unverified'
 	| 'failed';
 
 const LABEL = 'caddie-github-connect:v1|';
@@ -137,6 +139,8 @@ export function setupOutcome(error: unknown): GithubReturnOutcome {
 			installation_already_bound: 'already_bound',
 			installation_suspended: 'suspended',
 			installation_missing_permissions: 'missing_permissions',
+			github_identity_required: 'github_identity_required',
+			installation_ownership_unverified: 'installation_ownership_unverified',
 		};
 		return outcomes[error.code] ?? 'failed';
 	}

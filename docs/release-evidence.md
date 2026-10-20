@@ -165,6 +165,36 @@ after `verify:packet --all`. The file was also re-indented with spaces: it was
 tab-indented, which YAML does not allow, so as committed GitHub could not have
 parsed it at all. That fix has not run on GitHub (there is no remote yet).
 
+## Integrated gate (2026-10-20): live fixes + Track 3
+
+Recorded on `main` after merging `fix/live-test-findings` (`e70e534`) and
+`feat/track3-flutter` (`2d176fa`), keeping the two earlier chat-limit and
+idle-project fixes. Nothing deploys; the only paid run is the phase 9.2 sandbox
+probe the owner approved. Per-defect reproductions live in
+`docs/evidence/2026-10-20-kiro-integration/README.md`.
+
+| Check | Classification | Receipt |
+|---|---|---|
+| `bun run typecheck`, `bun run build` | LOCAL VERIFIED | exit 0 both; composition 0 collisions |
+| `bun run test` | LOCAL VERIFIED | **1,696 pass, 0 fail, 127 files** |
+| `bun run verify:packet --all` | LOCAL VERIFIED | 47 packets — **43 PASS, 0 FAIL**, 4 NOT APPLICABLE |
+| `bun run test:browser -- --all` | LOCAL VERIFIED | 47 packets — **25 PASS, 0 FAIL**, 22 NOT APPLICABLE |
+| whole browser suite (`bunx playwright test`) | LOCAL VERIFIED | **275 passed, 1 skipped** (evidence-only screenshot spec) |
+| `bun scripts/license-audit.ts` | LOCAL VERIFIED | 25 production dependencies, 0 flagged, 0 unresolved, CLEAN |
+| React + Flutter scaffold lock checks | LOCAL VERIFIED | exit 0 both (Flutter lockfiles sha256 `9e47e703…97bc818`) |
+| `bun scripts/release-check.ts` | LOCAL VERIFIED | **49 PASS, 0 FAIL, 1 BLOCKED, 4 PROVISIONED** |
+| fresh local D1 | LOCAL VERIFIED | all 39 migrations applied in numeric order |
+| phase 9.2 Flutter sandbox probe | LIVE VERIFIED | real release APK, 14,884,096 bytes, sha256 `5631cde4441037cb8bffd194ed0e78895b9139d87fbf7bb0373b7754010c53f4`, read back and disposed |
+
+Two defects were found by this gate and fixed rather than recorded: memory
+offers were ordered by a random id after `createdAt`, so two offers written in
+the same millisecond came back in either order (now `rowid`, with a
+deterministic regression), and the P00 routing spec's preview-port handling
+used an `lsof` spelling that is a usage error on macOS lsof 4.91 — so its
+"reap a stale listener" step never reaped anything and SIGKILL'd whatever it
+found (now it walks to the first free port and never kills a listener it does
+not own).
+
 ## Stack availability (frozen scope, feature-ledger)
 
 | Stack | ID | Status |

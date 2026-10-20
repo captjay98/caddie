@@ -199,3 +199,28 @@ lists now derive from the filesystem. Pre-existing `coordinator-context` test
 ("CHECKED verdict / rulesRead") fixed by scoping an authoritative eligibility
 claim to its own candidate (or a standalone rules host) rather than every
 candidate in the project. Full unit suite **1054 pass / 0 fail**.
+
+Live-test fixes and Track 3 integration (2026-10-20, merged on `main`): the
+owner's live walkthrough findings landed on `fix/live-test-findings`
+(`e70e534`, plan `docs/plans/2026-10-20-live-test-fixes.md`) and were merged at
+`afeebad` together with the two earlier chat-limit and idle-status fixes; Track 3
+Android apps (`feat/track3-flutter`, `2d176fa`, plan
+`docs/plans/2026-10-19-pwa-flutter-apk-monetization-plan.md`) were merged after
+it. Everything below is LOCAL VERIFIED (fixture, stub or local workerd) unless a
+row says otherwise; provider behaviour at the edges is SIMULATED; no deploy and
+no paid call beyond the recorded phase 9 probes.
+
+| Capability | Status | Evidence |
+|---|---|---|
+| A message reads "Sending…" then "Not sent" (with the server's own reason, e.g. a judge limit), never duplicated and never shown as a second copy | LOCAL VERIFIED | commits on `fix/live-test-findings`; `tests/browser/conversation.spec.ts`, `tests/send-failure.test.ts` |
+| Replies read as prose: neighbouring text parts joined; a tool call written as text is explained, never rendered as the proposal itself | LOCAL VERIFIED | conversation UI + coordinator instructions; `tests/browser/conversation.spec.ts` |
+| One build record: the "paused" brief, both Stop buttons, the Build tab and the chat card agree; check history is sentences, counts are per attempt | LOCAL VERIFIED | plan 3.1–3.6; build-workflow/build-timeline tests, `tests/browser/project-workflow.spec.ts` |
+| Plans use the platform's AI, the hackathon's quoted rules and the person's own words (`requiredTech`, `audience`, `problem`; migrations 0036/0037) | LOCAL VERIFIED | proposals/coordinator + `tests/project-proposals.test.ts` |
+| Polish wave: styled workspace gate, one shared split sign-in, page-shaped skeletons, plain-words "Details", project card variants B+C | LOCAL VERIFIED | plan 5.1–5.7; browser specs |
+| GitHub connects in one click, and an installation can only be bound by the GitHub account that owns it (both routes fail closed) | LOCAL VERIFIED; GitHub/OAuth SIMULATED | `tests/github.integration.test.ts` on local workerd (45 pass, incl. both exploit paths) |
+| Memory learns: project chats keep project facts, a stated lasting preference is offered once for confirmation, and what waits appears under the message (also when a model proposes it after the turn) | LOCAL VERIFIED | plan 6.2; `tests/stated-preference.test.ts`, memory browser spec |
+| Memory offers keep the order they were written, even when two arrive in the same millisecond (ordering was by random id, so the chat's order drifted) | LOCAL VERIFIED | fixed in `stated-preference.ts` (`rowid` tiebreak); deterministic regression in `tests/stated-preference.test.ts` |
+| Track 3 Android apps: Flutter scaffold + locked installs, Flutter web preview, stack-aware build loop, the APK as a non-blocking native check | LOCAL VERIFIED | `stacks/flutter/`, `tests/flutter-*.test.ts`, `tests/android-app.test.ts` |
+| The APK is built and read back inside the production Flutter sandbox image | LIVE VERIFIED | phase 9.2 probe: 14,884,096 bytes, sha256 `5631cde4…0c53f4`; evidence `docs/evidence/2026-10-20-kiro-integration/` |
+| Download and publish an Android app: private 30-minute link, QR, published download page carrying the APK hash/size/API base | LOCAL VERIFIED; hosting SIMULATED | `tests/browser/project-workflow.spec.ts`, publish/page tests |
+| Flutter's never-landed migrations renumbered to 0038/0039 so 0036/0037 keep their meanings | LOCAL VERIFIED | all 39 migrations apply in order to a fresh local D1 |

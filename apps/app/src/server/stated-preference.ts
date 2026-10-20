@@ -123,7 +123,10 @@ export async function memoryOffers(db: D1Database, actorId: string, projectId: s
 			      select r."runId" from "run_bindings" r where r."projectId" = ? and r."createdBy" = ?
 			      union all
 			      select ? || r."runId" from "run_bindings" r where r."projectId" = ? and r."createdBy" = ?)
-			  order by f."createdAt" asc, f."id" asc`,
+			  -- Oldest first, in the order they were written. Two proposals made
+			  -- in the same millisecond share a "createdAt"; rowid keeps the
+			  -- chat's order stable where the random ids would not.
+			  order by f."createdAt" asc, f."rowid" asc`,
 		)
 		.bind(actorId, projectId, actorId, STATED_SOURCE_PREFIX, projectId, actorId)
 		.all();

@@ -457,6 +457,19 @@ export async function bindInstallation(
 
 	const now = nowIso();
 	const existing = await queryAll(db, 'select * from "github_installations" where "installationId" = ?', id);
+	// A signed callback state proves the Caddie actor and workspace, not
+	// ownership of its separately supplied installation_id. Both callback and
+	// manual binding must prove the GitHub owner before claiming an installation.
+	// Existing workspace bindings retain their membership-scoped reconnect/read.
+	if (existing[0]?.['workspaceId'] == null) {
+		const identities = await queryAll(db, 'select "accountId" from "account" where "userId" = ? and "providerId" = ?', verified.actorId, GITHUB_PROVIDER);
+		if (identities.length === 0) {
+			throw new ScopeError(403, 'github_identity_required', 'Sign in to this Caddie account with GitHub before connecting a personal GitHub installation.');
+		}
+		if (info.accountType !== 'User' || !info.accountId || !identities.some((identity) => identity['accountId'] === info.accountId)) {
+			throw new ScopeError(403, 'installation_ownership_unverified', 'Caddie could not verify that this personal installation belongs to your linked GitHub account. Organisation installations are not supported yet.');
+		}
+	}
 	if (existing[0]) {
 		const boundWorkspace =
 			existing[0]['workspaceId'] === null || existing[0]['workspaceId'] === undefined

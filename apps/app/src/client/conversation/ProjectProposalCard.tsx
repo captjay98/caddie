@@ -33,6 +33,7 @@ interface ProposalView {
 	/** In the person's own words (plan 4.3); absent on proposals made before. */
 	audience?: string | null;
 	problem?: string | null;
+	stackId?: 'react-hono' | 'flutter';
 	status: 'proposed' | 'accepted' | 'dismissed';
 	projectId: string | null;
 }
@@ -112,6 +113,12 @@ export function ProjectProposalCard({ data }: { data: ProjectProposalPayload }):
 					<div>
 						<dt>Build first</dt>
 						<dd>{p.firstStep}</dd>
+					</div>
+				) : null}
+				{p.stackId === 'flutter' ? (
+					<div data-testid="proposal-android">
+						<dt>App</dt>
+						<dd>Android app you can download and install, also runs in the browser</dd>
 					</div>
 				) : null}
 			</dl>

@@ -23,6 +23,26 @@ export const STACK_CATALOG: readonly StackCatalogEntry[] = [
 	{ id: 'flutter', status: 'planned' },
 ];
 
+/** The two kinds of app a project can start as: a web app or an Android app. */
+export type AppStackId = 'react-hono' | 'flutter';
+
+/**
+ * Android apps (Track 3: Flutter, built in the Flutter sandbox image, exported
+ * as an APK) are off unless the owner sets FLUTTER_APPS_ENABLED=1, so the
+ * feature can ship dark and be switched on after its live check.
+ */
+export function flutterAppsEnabled(env: unknown): boolean {
+	return (env as { FLUTTER_APPS_ENABLED?: string } | null | undefined)?.FLUTTER_APPS_ENABLED === '1';
+}
+
+/** The catalog as this deployment actually offers it. */
+export function stackCatalog(env: unknown): readonly StackCatalogEntry[] {
+	if (!flutterAppsEnabled(env)) return STACK_CATALOG;
+	return STACK_CATALOG.map((entry) =>
+		entry.id === 'flutter' ? { id: 'flutter', status: 'enabled', note: 'Android apps (Flutter), new' } : entry,
+	);
+}
+
 // --- B03: "Tell me when it's ready" -------------------------------------------------
 
 /** One actor's subscription for a planned stack. */

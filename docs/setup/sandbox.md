@@ -28,7 +28,27 @@ Files:
 | `CONTREE_API_TOKEN` | yes | IAM bearer token (secret). Sent ONLY as `Authorization: Bearer …` — the driver refuses to place it in any sandbox-visible command text or env (`CREDENTIAL_IN_ENV` guard, test-proven). Store with `wrangler secret put CONTREE_API_TOKEN`; never in the repo. |
 | `CONTREE_PROJECT_ID` | yes | Platform project id sent as the `Project` header. |
 | `CONTREE_IMAGE` | no | Base image reference sessions bootstrap from. Default `tag:tt-base:1` (the adjudication-proven image). |
-| `CONTREE_FLUTTER_IMAGE` | no (Track 3, not wired yet) | The Flutter build image, `1864960e-7449-4d26-ab77-9582989efc2e`, built 2026-10-19 by `scripts/build-flutter-image.ts` from `tag:tt-base:1`: OpenJDK 17, Flutter 3.44.8, Android SDK (platform 36, build-tools 36.0.0, NDK 28.2.13676358), with Gradle and pub caches warmed by a release build of `stacks/flutter/template`. Untagged: Contree may delete it 180 days after creation (about 2027-04-17), so re-run the script before relying on it past that. Build with Gradle's heap capped (`-Xmx1536m`): the sandbox has about 3.8 GB of memory. |
+| `CONTREE_FLUTTER_IMAGE` | no | Android builds default to `1864960e-7449-4d26-ab77-9582989efc2e`, built 2026-10-19 by `scripts/build-flutter-image.ts` from `tag:tt-base:1`: OpenJDK 17, Flutter 3.44.8, Android SDK (platform 36, build-tools 36.0.0, NDK 28.2.13676358), with warm Gradle and pub caches. Untagged: Contree may delete it 180 days after creation (about 2027-04-17), so rebuild and set this override before then. Gradle is capped at 1.5 GB and two workers for the approximately 3.8 GB sandbox. |
+
+Android projects use the locked Flutter/Hono scaffold in `stacks/flutter/scaffold.ts`.
+Host checks run setup, locked installs, app tests, and web/server builds. The final
+native check builds an arm64 release APK and validates its command receipt, ZIP
+header and minimum size. Native failure leaves the checked browser preview usable.
+An HTTPS Caddie origin is required for the APK's stable backend address; local HTTP
+deliberately skips the native build with an explanation. The backend serves requests
+only after publishing; judges cannot publish.
+
+APK bytes live in hash-verified D1 chunks (`large_content`, migration 0039), with
+metadata and an immutable manifest in the build output (migration 0038). No R2
+binding is required for this implementation. Signed download links expire after
+30 minutes and identify one exact output. Publishing binds the APK hash and API
+base to the approved output and adds a download page with a locally generated QR.
+This is download support; Android still asks the person to approve installation.
+
+Reproduce phase 9.2 with `CADDIE_LIVE_AUTHORIZED=1 bun scripts/probe-sandbox-flutter.ts`
+only with authorization for one paid disposable sandbox session. It prints command
+receipts, artifact sizes and the APK hash, never credentials. A successful probe
+does not prove a phone installation or a deployed backend.
 
 No value may be printed or committed. Local tests never read these: they use
 an obviously fake token against the 127.0.0.1 stub.

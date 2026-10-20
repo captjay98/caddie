@@ -2053,3 +2053,38 @@ packet commits (`feat(u01)` … `feat(b06)`). No deploys, no paid calls.
   "providerCalls": "one sandbox run plus two file downloads."
 }
 ```
+
+```json
+{
+  "packet": "Integration: Kiro's live fixes + Track 3 Android apps merged on main, full gate green, pushed",
+  "status": "LOCAL VERIFIED for every local gate; LIVE VERIFIED for the phase 9.2 APK inside the production Flutter image. No deploy: deployment authorization stays BLOCKED (owner decision) and phase 9.3's after-deploy journey is still BLOCKED on it.",
+  "owner": "Integration lead",
+  "commands": [
+    {"command": "bun run typecheck", "exitCode": 0, "receipt": "root project + apps/app project"},
+    {"command": "bun run build", "exitCode": 0, "receipt": "compose-assets: 1 relocated SPA + 104 SPA asset + 99 landing files; collisions: 0; sw.js build df640ece5c60"},
+    {"command": "bun run test", "exitCode": 0, "receipt": "1696 pass, 0 fail, 8370 expect() calls, 127 files, 68.3 s"},
+    {"command": "bun run verify:packet --all", "exitCode": 0, "receipt": "47 packets: 43 PASS, 0 FAIL, 4 NOT APPLICABLE (named, not faked); P00 maps contracts + routing (14 cases)"},
+    {"command": "bun run test:browser -- --all", "exitCode": 0, "receipt": "47 packets: 25 PASS, 0 FAIL, 22 NOT APPLICABLE"},
+    {"command": "bunx playwright test (whole browser suite, composed build, fresh scratch D1)", "exitCode": 0, "receipt": "275 passed, 1 skipped (evidence-only screenshot spec gated on CADDIE_SHOTS)"},
+    {"command": "bun scripts/license-audit.ts", "exitCode": 0, "receipt": "25 production dependencies across 5 locations — 25 allowed, 0 flagged, 0 unresolved, 2 first-party links skipped; docs/licenses.md written; CLEAN"},
+    {"command": "bun scripts/refresh-scaffold-lock.ts --check", "exitCode": 0, "receipt": "lockfile current; install, example tests, gate refusal and build verified"},
+    {"command": "FLUTTER=<sdk> bun scripts/refresh-flutter-scaffold-lock.ts --check", "exitCode": 0, "receipt": "lockfiles sha256 9e47e70332e2706f7ecb1242f9232780502a5227c2bcf96b54b413f4a97bc818; setup.dart idempotent, locked installs unchanged, 2 Flutter + 5 server examples, gate refuses the bare scaffold, flutter build web main.dart.js 1.73 MB, server bundle + Workers check, flutter analyze clean"},
+    {"command": "bun scripts/release-check.ts", "exitCode": 0, "receipt": "49 PASS, 0 FAIL, 1 BLOCKED (deployment authorization, by design), 4 PROVISIONED (credentials present, no current receipt) — PROVISIONED is never PASS"},
+    {"command": "wrangler d1 migrations apply (fresh local state)", "exitCode": 0, "receipt": "all 39 migrations applied in numeric order, including the renumbered 0038_flutter_apps.sql and 0039_large_content.sql"},
+    {"command": "CADDIE_LIVE_AUTHORIZED=1 bun scripts/probe-sandbox-flutter.ts --apk-output …", "exitCode": 0, "receipt": "phase 9.2: scaffold, probe test, web/server builds and the real release APK — 14,884,096 bytes, sha256 5631cde4441037cb8bffd194ed0e78895b9139d87fbf7bb0373b7754010c53f4 — read back with the verified image checked before and after; session disposed"},
+    {"command": "two concurrent `bun run verify:packet --all` runs", "exitCode": 0, "receipt": "both runs 43 PASS, 0 FAIL, P00 clean in both (harness port-ownership check)"}
+  ],
+  "corrections": [
+    "The first concurrent gate pair (verify:packet --all beside release-check) made P00 fail 12 of its 13 routing cases while P00 passed alone and serially. Investigating it showed the routing spec's port handling did not do what its comment claimed: `lsof -ti -sTCP:LISTEN tcp:<port>` is a usage error on macOS lsof 4.91 (writes to stderr, nothing on stdout), so the 'reap a stale listener' step never reaped anything, and it SIGKILL'd whatever it found. The spec now walks up to the first free port and never kills a listener it does not own; the new case 'the preview port picker walks past a port in use instead of killing its owner' pins it. The concurrent failure itself did not reproduce on demand and never reproduced serially: recorded as a harness artifact, not a product defect."
+  ],
+  "found": [
+    "The final gate caught a real ordering defect the earlier Kiro gate missed: memory offers were ordered by createdAt then the random mem_<uuid> id, so two proposals written in the same millisecond could come back in either order (2 of 3 runs failed). Now ordered by createdAt then rowid (write order), with a deterministic regression that forces the tie and reverses the ids."
+  ],
+  "notDone": [
+    "No deploy, no paid model call, no purchase, no provider publishing, no new remote. Existing origin was pointed at the owner's configured SSH alias github.com-captjay98 (captjay98/caddie.git), which was empty: this push creates main there.",
+    "Phase 9.3 (one real chat-to-plan-to-build journey against the deployed SHA) remains BLOCKED on the owner's deploy, and live gates stay PROVISIONED until a receipt exists.",
+    "Other local branches (feat/publish-on-cloudflare, feat/chat-ui-polish, feat/track3-flutter, fix/live-test-findings) were left local and unpushed."
+  ],
+  "providerCalls": "one paid Flutter sandbox run (phase 9.2, owner-approved on 2026-10-20)."
+}
+```

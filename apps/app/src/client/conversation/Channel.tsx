@@ -781,7 +781,8 @@ export function Channel(props: {
 				{/* What Caddie can remember, for the person's OK (plan 6.2). Read again
 				    each time another of their messages is admitted (Flue's own
 				    "local:" copy is not yet admitted). */}
-				<MemoryOffers projectId={projectId} refreshKey={admittedUserMessages} />
+				{/* The model can propose a memory after admission, during its turn. */}
+      <MemoryOffers projectId={projectId} refreshKey={`${admittedUserMessages}:${source.settlements.length}`} />
 
 				<ProjectWorkflow key={projectId} projectId={projectId} showTranscript={false}/>
 				{live ? (
