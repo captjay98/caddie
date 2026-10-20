@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { SCAFFOLD_FILES, SCAFFOLD_PACKAGE } from '../../stacks/react-hono/scaffold.ts';
+import { previewDocument } from '../../apps/app/src/server/built-app.ts';
 
 // REAL React component and browser sandbox; artifact bytes are SIMULATED fixtures.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -237,4 +239,33 @@ test('an app in the preview can run WebAssembly, but not JavaScript eval (owner 
 	await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/html', body: WASM_HTML }));
 	await page.goto(base);
 	await expect(page.frameLocator('iframe').getByRole('heading')).toHaveText('WebAssembly ran: 42, eval blocked');
+});
+
+test('an app built by the template carries its WebAssembly file into the preview (plan 1.6)', async ({ page }) => {
+	// The template's own client build and Caddie's embed helper, on a tiny app
+	// whose browser code needs a .wasm file (as sql.js does). sql.js itself is
+	// not installed here: the 39-byte module above stands in for it.
+	const app = mkdtempSync(join(tmpdir(), 'caddie-wasm-app-'));
+	try {
+		mkdirSync(join(app, 'caddie'));
+		mkdirSync(join(app, 'src'));
+		writeFileSync(join(app, 'caddie', 'embed.ts'), SCAFFOLD_FILES['caddie/embed.ts'] ?? '');
+		writeFileSync(join(app, 'src', 'answer.wasm'), new Uint8Array(JSON.parse(WASM_BYTES) as number[]));
+		writeFileSync(join(app, 'src', 'main.tsx'), [
+			'import { embedBase64 } from "../caddie/embed.ts" with { type: "macro" };',
+			'const bytes = Uint8Array.from(atob(embedBase64("src/answer.wasm")), (c) => c.charCodeAt(0));',
+			'WebAssembly.instantiate(bytes).then(({ instance }) => {',
+			'  document.getElementById("root")!.textContent = "WebAssembly ran: " + (instance.exports.answer as () => number)();',
+			'});',
+		].join('\n'));
+		const [command, ...args] = SCAFFOLD_PACKAGE.scripts.build.split('&&')[0]!.trim().split(/\s+/);
+		execFileSync(command!, args, { cwd: app, stdio: 'pipe' });
+		expect(readdirSync(join(app, 'dist'))).toEqual(['main.js']); // nothing left behind for Caddie to drop
+		const html = previewDocument({ js: readFileSync(join(app, 'dist', 'main.js'), 'utf8'), css: '' });
+		await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/html', body: html }));
+		await page.goto(base);
+		await expect(page.frameLocator('iframe').locator('#root')).toHaveText('WebAssembly ran: 42');
+	} finally {
+		rmSync(app, { recursive: true, force: true });
+	}
 });

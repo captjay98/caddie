@@ -52,13 +52,19 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   change first. Done (owner OK 2026-10-20 01:58): both policies carry it; a
   real browser runs a WebAssembly module and still refuses eval, in the
   preview frame and on a published page.
-- [ ] 1.6 A WebAssembly library finds its `.wasm` file. Caddie keeps only
+- [x] 1.6 A WebAssembly library finds its `.wasm` file. Caddie keeps only
   `dist/main.js` and `dist/main.css` (`readBuiltApp`), the preview frame has
   no network (`connect-src 'none'`), and publishing uploads only those files,
   so a `.wasm` fetched by URL (sql.js's default `locateFile`) never arrives.
   The bytes must travel inside the bundle (sql.js: `wasmBinary`). Read the
   template's build first; then fix the template, the builder's recipe, or
-  both. Test: a bundle using sql.js runs a query in the preview frame.
+  both. Test: a bundle using sql.js runs a query in the preview frame. Done:
+  the scaffold ships `caddie/embed.ts` (a Bun macro: the bytes go into
+  main.js at build time, and the app's tests see the same value), and the
+  builder's recipe says when and how. Bun's own `.wasm` base64 loader gave
+  an empty string, so it is not used. A tiny app built with the template's
+  own command runs its WebAssembly in the preview frame; sql.js itself is not
+  installed here, so a 39-byte module stands in for it.
 
 ## 2. Chat
 

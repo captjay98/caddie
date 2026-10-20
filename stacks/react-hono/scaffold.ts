@@ -190,6 +190,25 @@ const BASE_FILES: Readonly<Record<string, string>> = {
 		"",
 	].join("\n"),
 	"src/styles.css": "body{margin:0;font-family:system-ui,sans-serif}\n",
+	// Files the browser code needs at run time travel inside dist/main.js (plan 1.6).
+	"caddie/embed.ts": [
+		"// Caddie runtime file — do not edit. Caddie keeps only dist/main.js and",
+		"// dist/main.css from the build, so a file the browser code loads at run time",
+		"// (a .wasm, a font, a data file) is never there. Put its bytes in the bundle:",
+		"//",
+		'//   import { embedBase64 } from "../caddie/embed.ts" with { type: "macro" };',
+		'//   const bytes = Uint8Array.from(atob(embedBase64("node_modules/sql.js/dist/sql-wasm.wasm")), (c) => c.charCodeAt(0));',
+		"//   const SQL = await initSqlJs({ wasmBinary: bytes });",
+		"//",
+		"// It runs when the app is built and when its tests run, never in the browser.",
+		"// The path is from the app folder.",
+		'import { readFileSync } from "node:fs";',
+		"",
+		"export function embedBase64(path: string): string {",
+		'  return readFileSync(path).toString("base64");',
+		"}",
+		"",
+	].join("\n"),
 	// Backend-ready from the start (stacks/react-hono/server-files.ts).
 	...SERVER_FILES,
 	// Sign-in for the app's own users (stacks/react-hono/auth-files.ts).

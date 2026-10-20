@@ -6,6 +6,7 @@ import { readdirSync, statSync } from "node:fs";
 import { SCAFFOLD_FILES, SCAFFOLD_COMMANDS, SCAFFOLD_PACKAGE, SCAFFOLD_TEST_HARNESS } from "../stacks/react-hono/scaffold.ts";
 import { recipe } from "../stacks/react-hono/recipe.ts";
 import { PROTECTED_PATH_PREFIXES, isProtectedPath } from "../apps/app/src/agents/permissions.ts";
+import { BUILD_RECIPE_INSTRUCTION } from "../apps/app/src/agents/specialists.ts";
 
 /**
  * R03 LOCAL VERIFIED: the real chat scaffold and the evaluation journey use
@@ -196,5 +197,19 @@ describe("backend-ready from the start (Publish stage 2)", () => {
     for (const phrase of ["src/server.ts", "/api", "env.DB", "migrations/NNNN_name.sql", "createTestEnv()", "never Bun.*", "caddie/"]) {
       expect(BUILD_RECIPE_INSTRUCTION).toContain(phrase);
     }
+  });
+});
+
+describe("a file the browser code loads at run time travels inside the bundle (plan 1.6)", () => {
+  // Caddie keeps only dist/main.js and dist/main.css, the preview frame has no
+  // network and publishing uploads only those files, so a .wasm (or any file)
+  // the app fetches by URL is never there. caddie/embed.ts puts its bytes in
+  // the bundle at build time (a Bun macro, so `bun test` sees the same value).
+  test("the scaffold ships caddie/embed.ts and the builder is told when to use it", () => {
+    const embed = SCAFFOLD_FILES["caddie/embed.ts"];
+    expect(embed).toContain("export function embedBase64(path: string): string");
+    expect(isProtectedPath("caddie/embed.ts")).toBe(true);
+    expect(BUILD_RECIPE_INSTRUCTION).toContain('import { embedBase64 } from "../caddie/embed.ts" with { type: "macro" }');
+    expect(BUILD_RECIPE_INSTRUCTION).toContain("initSqlJs({ wasmBinary: bytes })");
   });
 });
