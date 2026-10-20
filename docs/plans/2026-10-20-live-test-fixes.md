@@ -193,7 +193,12 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   screen for notifications, so a bell now sits in the top bar (and the phone
   header): an unread count, the list in Caddie's words, and "Open the build"
   marks it read and goes to that project's Build tab.
-- [ ] 5.5 Audit trail becomes "Details" in words; ids under "For developers".
+- [x] 5.5 Audit trail becomes "Details" in words; ids under "For developers".
+  Done: the toggle reads "Details"; it says what the card rests on ("No
+  evidence is attached yet." / "It rests on N pieces of evidence.") and what
+  its button does ("“Review the design” opens it for you to review; nothing
+  changes until you decide."); the run, evidence, card, project and action ids
+  sit in a closed "For developers — record ids" fold.
 - [ ] 5.6 Page-shaped loading skeletons for Home, Projects, Plan and Build.
 - [ ] 5.7 Project card = variants B + C: the app's picture (its letter tile
   until real screenshots exist), the 4 steps, the hackathon and its deadline

@@ -1484,6 +1484,21 @@ a.btn-ghost.topbar-nav-link {
 	display: grid;
 	gap: 0.3rem;
 }
+/* Details in words first (plan 5.5); the record ids fold under "For developers". */
+.card-details-words {
+	margin: 0;
+	padding-left: 1.1rem;
+	display: grid;
+	gap: 0.2rem;
+	font-size: 13px;
+	line-height: 1.45;
+	color: var(--color-muted);
+}
+.card-details-ids {
+	display: grid;
+	gap: 0.3rem;
+	padding-top: 0.35rem;
+}
 
 /* --- empty / new-user Brief: one calm teaching card (v2) --------------------- */
 .decision-card.brief-teach {
