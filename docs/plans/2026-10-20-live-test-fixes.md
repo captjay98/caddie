@@ -114,8 +114,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   once there is more than one, and the app's own test count also comes from
   Caddie's behaviour-tests check (shell test runs are refused, so most builds
   only run them there).
-- [ ] 3.5 The Build tab shows the same status as the chat card; record ids only
-  under "For developers". Browser.
+- [x] 3.5 The Build tab shows the same status as the chat card; record ids only
+  under "For developers". Browser. Done: the Build tab opens with the Now
+  panel (the same project record the chat card and project home read; it
+  used to follow this browser's chat connection), and the plan's record id
+  joined the other ids in the developer fold.
 - [ ] 3.6 One build card, no card inside a card (chat and the project's Now),
   with a clearer hierarchy. Browser + a screenshot for the owner.
 - [ ] 3.7 Home Caddie can say how a project's build is going (read-only, own

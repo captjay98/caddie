@@ -467,6 +467,48 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
         await context.close();
     });
 
+	test('Build shows the same status as the chat card, and record ids only under For developers (plan 3.5)', async ({ browser }) => {
+		// Live, the Build tab said nothing about a paused build (its banner
+		// followed this browser's chat connection, not the build) and showed the
+		// plan's record id among the plain facts.
+		const context = await browser.newContext();
+		await stubAccount(context, {
+			experience: {
+				projectId: 'proj-a',
+				version: Date.parse('2026-10-19T12:00:00.000Z'),
+				stage: 'blocked',
+				plan: { id: 'plan-r2', revision: '2', approved: true },
+				preview: null,
+				message: 'Caddie stopped making progress on the build for 12 minutes, so it was paused. Your plan and files are saved.',
+				actions: [{ kind: 'retry', label: 'Retry build', enabled: true, primary: true }],
+			},
+		});
+		await context.unroute('**/api/projects/proj-a/run-bindings');
+		await context.route('**/api/projects/proj-a/run-bindings', (route) =>
+			json(route, 200, {
+				runBindings: [
+					{
+						runId: 'run-01HZX', projectId: 'proj-a', conversationId: 'conv-01HZX', submissionId: 'sub-01HZX', planRevision: 'plan-r2',
+						stackId: 'react-hono', payerId: 'payer-1', modelRouteId: 'route-1', pricingVersion: 'v1', createdBy: 'actor-test', createdAt: NOW,
+					},
+				],
+			}),
+		);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/runs?project=proj-a`);
+		const now = page.getByTestId('overview-now');
+		await expect(now).toHaveAttribute('data-stage', 'blocked');
+		await expect(now).toContainText('Caddie stopped making progress on the build for 12 minutes');
+		await expect(now.getByRole('button', { name: 'Retry build' })).toBeVisible();
+		await page.getByTestId('run-detail-toggle').click();
+		const details = page.getByTestId('run-details');
+		await expect(details).toContainText('Built with');
+		await expect(details.getByText('plan-r2')).toBeHidden();
+		await details.locator('summary', { hasText: 'For developers' }).click();
+		await expect(details.getByText('plan-r2')).toBeVisible();
+		await context.close();
+	});
+
 	test('Build: Activity and Files tabs; past builds as sentences; change-request drafts into the chat', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubAccount(context);

@@ -76,16 +76,17 @@ function RunRow(props: {
 						<span className="fk">When</span>
 						<span className="fv">{when}</span>
 					</span>
-					<span className="run-fact">
-						<span className="fk">Plan</span>
-						<CopyableId value={props.planRevision} label="plan revision id" />
-					</span>
 					<details
 						className="run-devdetail"
 						open={devOpen}
 						onToggle={(event) => setDevOpen((event.target as HTMLDetailsElement).open)}
 					>
 						<summary className="kicker">For developers — record ids</summary>
+						{/* Every record id lives here, the plan's too (plan 3.5). */}
+						<span className="run-fact">
+							<span className="fk">plan</span>
+							<CopyableId value={props.planRevision} label="plan revision id" />
+						</span>
 						<span className="run-fact">
 							<span className="fk">run</span>
 							<CopyableId value={props.runId} label="run id" />

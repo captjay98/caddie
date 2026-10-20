@@ -1153,25 +1153,14 @@ function RunsBody(props: { projectId: string }): ReactElement {
 	const tab = search.tab === 'files' ? 'files' : 'activity';
 	const runBindings = useRunBindings(actor, props.projectId);
 	const artifactRevisions = useArtifactRevisions<ViewerRevision>(actor, props.projectId);
-	const buildLive = chrome.transport?.source.status === 'streaming' || chrome.transport?.source.status === 'submitted';
 	const [changeOpen, setChangeOpen] = useState(false);
 	const [changeText, setChangeText] = useState('');
 	return (
 		<div className="settings-stack">
-			{buildLive ? (
-				<section className="card-surface settings-panel build-live" data-testid="build-status" role="status">
-					<p className="now-head">
-						<span className="now-live" aria-hidden="true" />
-						<span className="kicker" data-tone="action">
-							Building now
-						</span>
-					</p>
-					<p className="page-lede">
-						Caddie is building your app in this project's chat. Step-by-step progress lives in “Now” on
-						the project home — when it finishes, the result shows up in the list below.
-					</p>
-				</section>
-			) : null}
+			{/* The build's status from its own record, exactly as the chat card and
+			    the project home show it (plan 3.5). It once followed this browser's
+			    chat connection, so a paused build said nothing here. */}
+			<NowPanel projectId={props.projectId} fallback={<></>} />
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">
