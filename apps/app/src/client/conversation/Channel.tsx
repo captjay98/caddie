@@ -524,18 +524,17 @@ function DraftRow(props: {
 }): ReactElement {
 	const { draft } = props;
 	return (
-		<div className="draft-row" data-state={draft.state} data-testid="draft-row">
-			<span className="mono-id">
-				{draft.state === 'cancelled'
-					? 'cancelled — kept for reference'
-					: 'Not sent'}{' '}
-				{/* attempts counts FAILED TRANSPORT ATTEMPTS (the rejection handler
-				    increments it) — display the true count, no +1: the original
-				    send IS attempt one now that a transport exists. */}
-				{draft.attempts > 0
-					? ` · ${draft.attempts} ${draft.attempts === 1 ? 'attempt' : 'attempts'}`
-					: ''}
-				{' '}· key {draft.idempotencyKey.slice(5, 13)} — resends reuse it, so the server can never double-submit
+		<div
+			className="draft-row"
+			data-state={draft.state}
+			data-attempts={draft.attempts}
+			data-key={draft.idempotencyKey.slice(5, 13)}
+			data-testid="draft-row"
+		>
+			{/* Plain words only: the idempotency key and the attempt count stay
+			    in data attributes, never in front of the person sending. */}
+			<span className="draft-status" aria-live="polite">
+				{draft.state === 'cancelled' ? 'cancelled — kept for reference' : draft.state === 'sending' ? 'Sending…' : 'Not sent'}
 			</span>
 			<span className="draft-text">{draft.text}</span>
 			{draft.state === 'unsent' ? (

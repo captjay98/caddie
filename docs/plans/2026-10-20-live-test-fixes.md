@@ -44,7 +44,7 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 
 ## 2. Chat
 
-- [ ] 2.1 A message shows "Sending…" while in flight (no buttons), and "Not
+- [x] 2.1 A message shows "Sending…" while in flight (no buttons), and "Not
   sent" with Send again / Edit / Discard only after a failure; no key jargon; a
   reload restores an in-flight draft as not sent. Browser cases in
   `tests/browser/conversation.spec.ts`: slow admission, failure, resend.

@@ -2473,6 +2473,21 @@ a.btn-ghost.topbar-nav-link {
 	opacity: 0.65;
 }
 
+/* On its way: calm, no warning colour; only a failed send looks like one. */
+.draft-row[data-state='sending'] {
+	border-style: solid;
+	border-color: var(--color-line-soft);
+}
+
+.draft-row .draft-status {
+	font-size: var(--r-label);
+	color: var(--color-muted);
+}
+
+.draft-row[data-state='unsent'] .draft-status {
+	color: var(--color-warn);
+}
+
 .draft-row .draft-text {
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;

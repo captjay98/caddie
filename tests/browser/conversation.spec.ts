@@ -126,6 +126,60 @@ test.describe('P05/P06 conversation surface', () => {
 });
 
 test.describe('U04 — unsent messages and restored drafts (v2 §3.6)', () => {
+	test('a message on its way says "Sending…" with no buttons, and goes once Caddie has it (live finding, 2026-10-20)', async ({ browser }) => {
+		// Live, every message showed "Not sent · key … — resends reuse it" with
+		// Send again / Edit / Discard until the server admitted it.
+		const OFFSET = '0000000000000000_0000000000000001';
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		await context.route('**/api/projects/proj_conversation/runs', (route) =>
+			json(route, 200, {
+				run: {
+					runId: 'run-sending', projectId: 'proj_conversation', conversationId: 'conv-sending', submissionId: 's', planRevision: 'rev-0',
+					stackId: 'react-hono', payerId: 'actor-test', modelRouteId: 'route', pricingVersion: 'v1', createdBy: 'actor-test', createdAt: '2026-10-20T00:00:00.000Z',
+				},
+			}),
+		);
+		let admit = () => {};
+		const admitted = new Promise<void>((resolve) => {
+			admit = resolve;
+		});
+		await context.route('**/agents/coordinator/**', async (route) => {
+			const request = route.request();
+			const url = new URL(request.url());
+			if (request.method() === 'POST') {
+				await admitted;
+				return json(route, 202, { streamUrl: url.href, offset: OFFSET, submissionId: 'sub-sending', uid: 'uid-sending' });
+			}
+			if (url.searchParams.get('view') === 'updates') {
+				return route.fulfill({ contentType: 'text/event-stream', body: `event: control\ndata: {"streamNextOffset":"${OFFSET}","upToDate":true}\n\n` });
+			}
+			return route.fulfill({
+				contentType: 'application/json',
+				headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' },
+				body: JSON.stringify({ v: 1, conversationId: 'conv-sending', offset: OFFSET, messages: [], settlements: [] }),
+			});
+		});
+		const page = await context.newPage();
+		await openProjectPage(page);
+
+		await page.getByTestId('composer-input').fill('is this on its way?');
+		await page.keyboard.press('Enter');
+		const row = page.getByTestId('draft-row');
+		await expect(row).toHaveAttribute('data-state', 'sending');
+		await expect(row).toContainText('Sending…');
+		await expect(row).toContainText('is this on its way?');
+		await expect(row).not.toContainText('Not sent');
+		await expect(row).not.toContainText('resends reuse it');
+		await expect(row.getByTestId('draft-retry')).toHaveCount(0);
+		await expect(row.getByTestId('draft-edit')).toHaveCount(0);
+		await expect(row.getByTestId('draft-discard')).toHaveCount(0);
+
+		admit();
+		await expect(page.getByTestId('draft-row')).toHaveCount(0);
+		await context.close();
+	});
 	test('an unsent message offers Send again · Edit · Discard; Edit returns the text to the composer', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubSession(context);
@@ -141,6 +195,7 @@ test.describe('U04 — unsent messages and restored drafts (v2 §3.6)', () => {
 		const row = page.getByTestId('draft-row');
 		await expect(row).toBeVisible();
 		await expect(row).toContainText('Not sent');
+		await expect(row).not.toContainText('resends reuse it');
 		await expect(row.getByTestId('draft-retry')).toContainText('Send again');
 
 		// Edit: the failed row disappears and its text is back in the composer,

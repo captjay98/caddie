@@ -179,8 +179,9 @@ interface WorkspaceChromeContextValue {
 	/** The channel store + run transport, bound to the conversation scope. */
 	channel: {
 		drafts: readonly ChannelDraft[];
-		addDraft: (text: string) => ChannelDraft | null;
-		retryDraft: (id: string) => void;
+		addDraft: (text: string, options?: { sending?: boolean }) => ChannelDraft | null;
+		failDraft: (id: string) => void;
+		resendDraft: (id: string) => void;
 		discardDraft: (id: string) => void;
 		resolveDraft: (id: string) => void;
 		/** Unsent typing, scoped actor+conversation, survives navigation (F01). */
@@ -361,7 +362,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 		// A message is text, attachments, or both. The draft text keeps a visible
 		// label when only attachments were sent, so the optimistic row is honest.
 		const draftText = text || (attachments.length ? `(${attachments.length} attachment${attachments.length === 1 ? '' : 's'})` : '');
-		const draft = channel.addDraft(draftText);
+		const draft = channel.addDraft(draftText, { sending: transport !== null });
 		if (draft && transport) {
 			// The transport carries attachments alongside the text when its send
 			// accepts them (Flue message parts); the idempotency key still guards
@@ -373,7 +374,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 			) => Promise<unknown>;
 			send(text, draft.idempotencyKey, attachments.length ? { attachments } : undefined).then(
 				() => channel.resolveDraft(draft.id),
-				() => channel.retryDraft(draft.id),
+				() => channel.failDraft(draft.id),
 			);
 		}
 		// On mobile, jump to the conversation so the sent message and its reply
@@ -886,14 +887,17 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								resolving={conversationResolving}
 								onSend={sendText}
 								onRetryDraft={(id) => {
-									channel.retryDraft(id);
 									const draft: ChannelDraft | undefined = channel.drafts.find((d) => d.id === id);
-									if (draft && transport) {
-										transport.send(draft.text, draft.idempotencyKey).then(
-											() => channel.resolveDraft(id),
-											() => {},
-										);
+									if (!draft) return;
+									if (!transport) {
+										channel.failDraft(id);
+										return;
 									}
+									channel.resendDraft(id);
+									transport.send(draft.text, draft.idempotencyKey).then(
+										() => channel.resolveDraft(id),
+										() => channel.failDraft(id),
+									);
 								}}
 								onEditDraft={channel.editDraft}
 								onDiscardDraft={channel.discardDraft}
