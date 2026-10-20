@@ -162,3 +162,37 @@ describe('coordinator plan-save honesty (FarmLog AI rewrite fix)', () => {
 		expect(coordinatorSource).toContain("While the phase is still 'planning' the plan is NOT saved");
 	});
 });
+
+/**
+ * Guard for the design-save recovery fix (HerdVoice, 2026-10-20).
+ *
+ * Replay: after the PRD was approved, the coordinator delegated the design
+ * brief; the designer returned prose with no write_plan_note call, the turn
+ * settled with the workflow still in 'design', and the project sat there with
+ * no saved brief until a person sent a follow-up. The PRD path already had a
+ * direct-author recovery; design now has the same one, and the designer is
+ * told that describing the brief is not saving it.
+ */
+describe('coordinator design-save recovery', () => {
+	const specialistSource = readFileSync(new URL('../apps/app/src/agents/specialists.ts', import.meta.url), 'utf8');
+
+	test('the DESIGN STEP says to author directly when a delegate returns no SAVED:', () => {
+		expect(coordinatorSource).toContain('If the designer returns text without a SAVED: confirmation');
+		expect(coordinatorSource).toContain('do NOT stop and do NOT re-delegate the same hand-off');
+		expect(coordinatorSource).toContain("call write_plan_note yourself with kind:'design'");
+	});
+
+	test('the designer is told a description is not a saved brief', () => {
+		expect(specialistSource).toContain('A description of the brief in your reply is NOT a saved brief');
+		expect(specialistSource).toContain('return only after the host confirms SAVED');
+	});
+
+	test('a turn that settles in design with no saved brief is nudged, then blocked', () => {
+		expect(coordinatorSource).toContain('state.phase === "design"');
+		expect(coordinatorSource).toContain('type: "design_incomplete"');
+		expect(coordinatorSource).toContain("phase 'design-review'");
+		expect(coordinatorSource).toContain('The design brief was not saved.');
+		expect(coordinatorSource).toContain('setDesignContinuations(0)');
+		expect(coordinatorSource).toContain('setDesignContinuations(used + 1)');
+	});
+});

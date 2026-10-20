@@ -180,6 +180,16 @@ export function Coordinator({ id }: AgentProps) {
   );
   // Which feature the continuation budget is being spent on (per-feature reset).
   const [continuationFocus, setContinuationFocus] = usePersistentState("build-continuation-focus", "");
+  // The design brief has the same save-or-stop contract as the PRD; keep its
+  // retry budget separate so a design miss cannot consume the build's budget.
+  const [designContinuations, setDesignContinuations] = usePersistentState(
+    "design-continuations",
+    0,
+  );
+  const [designContinuationFocus, setDesignContinuationFocus] = usePersistentState(
+    "design-continuation-focus",
+    "",
+  );
   const writeProject = useDataWriter("projectWorkflow", {
     schema: v.object({ projectId: v.string(), name: v.string() }),
   });
@@ -477,6 +487,7 @@ export function Coordinator({ id }: AgentProps) {
     const authority = await resolve();
     setStoredContext(coordinatorSnapshot(id, authority));
     setContinuations(0);
+    setDesignContinuations(0);
     if (delivery.kind === "user") {
       setLastUserRequest(delivery.body);
       // One user turn spent from the brainstorm window (this turn's model was
@@ -520,6 +531,29 @@ export function Coordinator({ id }: AgentProps) {
       }
       setContinuations((n) => n + 1);
       ctx.append({ kind: "signal", type: "plan_incomplete", body: "Planning is unfinished: the host has NOT received a new PRD revision — nothing was saved, and the workflow phase is still 'planning', NOT 'review'. Do NOT tell the user a plan or revision was saved, written, updated or is awaiting review; that is FALSE right now and must not be said. A delegate result of \"(task completed with no text)\" means the specialist stopped WITHOUT saving — it is not a save, so never re-delegate the same empty hand-off expecting a different result. Instead, call write_plan_note yourself with kind:'prd' and the full revised PRD body (incorporate the user's feedback and the current brief), then STOP. write_plan_note returns a line beginning 'SAVED:' only when the host actually recorded the revision; only after you see that, and the next coordinator_context shows phase 'review', may you tell the user the plan is ready. If a real prerequisite is missing, call report_blocker. Until you have the 'SAVED:' confirmation, say Caddie is still working on the plan — never that it is saved or ready." });
+      return;
+    }
+    // A design brief in prose is not a saved, reviewable revision. The phase
+    // only advances to design-review when a new undecided brief is saved; a
+    // turn that settles with no brief would otherwise park the project forever
+    // (HerdVoice, 2026-10-20: the designer returned prose, the turn ended, and
+    // nothing moved until a person sent a follow-up).
+    if (state.phase === "design") {
+      const focus = `design:${state.planId ?? "none"}`;
+      const used = focus === designContinuationFocus ? designContinuations : 0;
+      if (used >= 2) {
+        await authority.blockBuild(
+          "The design brief was not saved. Ask Caddie to continue design; the approved PRD is retained.",
+        );
+        return;
+      }
+      setDesignContinuationFocus(focus);
+      setDesignContinuations(used + 1);
+      ctx.append({
+        kind: "signal",
+        type: "design_incomplete",
+        body: "Design is unfinished: the host has NOT received a design brief — nothing was saved, and the workflow phase is still 'design', NOT 'design-review'. Do NOT tell the user the design brief is saved, written or ready. A delegate result of \"(task completed with no text)\" or prose without a SAVED: confirmation means the designer stopped WITHOUT saving — never re-delegate the same empty hand-off expecting a different result. Instead, call write_plan_note yourself with kind:'design', the same planRevision, and the full brief (screen inventory; each key screen's layout and components; tokens and interaction patterns; empty, loading and error states; one titled ```html-mock block per key screen and state). Only after write_plan_note returns a line beginning 'SAVED:' and the next coordinator_context shows phase 'design-review' may you tell the user it is ready.",
+      });
       return;
     }
     // Review, ready and blocked may settle; readiness comes only from the host.
@@ -570,7 +604,7 @@ export function Coordinator({ id }: AgentProps) {
     useInstruction(`DEMO CONTRACT: completeness is not the bar — a judge watching for three minutes is. Every PRD must carry this section before the feature list, and the host refuses a PRD without one. ${DEMO_CONTRACT_GUIDE} The real integration must carry the core value, not decorate it: no Ollama, local model or third-party AI key, and a mock (price feed, seed data, rule table) may support the demo but never be the reason it is impressive. Order the features so the demo path is buildable end to end, and cut any feature that would not appear in the demo.`);
     useInstruction(`FEATURE LIST: every PRD you save must list what will be built, so the user approves exactly that list and the host builds it one feature at a time. ${FEATURE_BLOCK_GUIDE} Order features so each builds on the last; keep each one small enough to finish and test on its own; write doneWhen checks as behaviors a person could see. write_plan_note refuses a PRD without a valid list.`);
     useInstruction("COMPREHENSIVE PRD, FIRST PASS: write the whole thing before saving — the user must never have to ask for the schema, then say 'not comprehensive', then 'still ambiguous'. Every PRD covers, as explicit sections: overview + goals/non-goals; user stories/flows; a DATA MODEL with every entity's fields, types, keys and relations (money as integer minor units, never a float); the API surface (Hono routes in/out) or an explicit 'local-only, no server API'; the frontend screens + key components with each loading/empty/error state; offline/sync (what's stored locally, what syncs, the conflict rule) when it is a PWA/offline app; the SPECIFIC AI model/service with its call path and fail-soft behavior, never 'an AI model'; and observable success metrics. Where the brief lacks a detail, choose a sensible default and label it 'assumption:' so the user corrects one line — do NOT leave a section blank, do NOT drip-feed depth across turns, and do NOT stop to ask one question at a time.");
-    useInstruction("DESIGN STEP: after the PRD is approved the project enters the 'design' phase — the user has NOT approved a build yet. Do NOT scaffold or build. Delegate the designer (or author it yourself with write_plan_note kind:'design', same planRevision) to produce ONE design brief: the screen inventory; each key screen's layout and components; the token/component choices and the interaction pattern for each input; and the empty, loading and error state for anything that loads or saves; plus one titled ```html-mock block per key screen and state (static markup styled only with design-system tokens) so the user can see it. Save it and STOP for the authenticated design review. Only after the design review approves does the phase become 'building' and the feature loop begins. The design brief is NOT the PRD and carries no caddie-features block. Never paste a mockup or any HTML into a reply: the card draws the brief's mockups; to show one screen in chat, put its static HTML in one ```html-mock <screen name> block.");
+    useInstruction("DESIGN STEP: after the PRD is approved the project enters the 'design' phase — the user has NOT approved a build yet. Do NOT scaffold or build. Delegate the designer (or author it yourself with write_plan_note kind:'design', same planRevision) to produce ONE design brief: the screen inventory; each key screen's layout and components; the token/component choices and the interaction pattern for each input; and the empty, loading and error state for anything that loads or saves; plus one titled ```html-mock block per key screen and state (static markup styled only with design-system tokens) so the user can see it. If the designer returns text without a SAVED: confirmation, do NOT stop and do NOT re-delegate the same hand-off: call write_plan_note yourself with kind:'design', the same planRevision, and the full brief. Save it and STOP for the authenticated design review. Only after the design review approves does the phase become 'building' and the feature loop begins. The design brief is NOT the PRD and carries no caddie-features block. Never paste a mockup or any HTML into a reply: the card draws the brief's mockups; to show one screen in chat, put its static HTML in one ```html-mock <screen name> block.");
   }
   return "Caddie helps solo builders discover, plan, build, verify and share software through one continuous conversation.";
 }
