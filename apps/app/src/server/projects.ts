@@ -3,6 +3,7 @@ import type { Scope } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { ScopeError, assertProjectScope, assertWorkspaceScope } from './scope.ts';
 import { judgeProjectCap, judgeProjectRefusal, judgeProjectRoom } from './judge-limits.ts';
+import { assertNoBannedLocalModel } from './generated-app-policy.ts';
 import {
 	ArtifactCreateInputSchema,
 	ArtifactRevisionSchema,
@@ -534,6 +535,9 @@ export async function createPlanDocRevision(
 ): Promise<PlanDocRevision> {
 	const verified = await assertProjectScope(db, scope);
 	const parsed = parseOr400(PlanDocCreateInputSchema, input);
+	// Prompt rules are not a guarantee; refuse a local-model runtime before the
+	// revision exists (see generated-app-policy.ts for the FarmLog precedent).
+	assertNoBannedLocalModel(parsed.body);
 	const nextRows = await queryAll(
 		db,
 		'select coalesce(max("revision"), 0) + 1 as "next" from "plan_doc_revisions" where "projectId" = ? and "kind" = ?',

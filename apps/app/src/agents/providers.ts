@@ -258,23 +258,28 @@ export const MODEL_ROLES = {
 	ideation: 'nemotron-3-ultra',
 	/** Planning specialists (product, designer, tech-lead — the catalog's
 	 *  `planning` skill): the PRD, design and plan of record. Kept as its own
-	 *  role so planning can be re-routed in one line; it shares the build route
-	 *  today (owner decision 2026-10-15), leaving Ultra for ideation only. */
+	 *  role so planning can be re-routed in one line. Still GLM-5.3-Flash after
+	 *  the 2026-10-20 build re-route: that decision covered implementation, not
+	 *  the PRD/design, so planning keeps its 2026-10-15 owner route until a
+	 *  separate decision moves it. */
 	plan: 'glm-5.3-flash',
-	/** Implementation + QA specialists (frontend, backend, mobile, qa). Moved off
-	 *  Ultra ($0.50/$2.20 per Mtok) to GLM-5.3-Flash ($0.15/$0.50): tool calling
-	 *  live-verified 2026-10-15, and Nebius's own agentic-coding cookbook
-	 *  finished a coding task on it in 4 calls. The project RUN BINDING also
-	 *  records this route. */
-	build: 'glm-5.3-flash',
-	/** Cheap bounded helper calls (query shaping, summarization). REVERTED to
-	 *  Nano on 2026-10-19 by the live probe (scripts/probe-lightning.ts): on the
-	 *  real rules prompt at temperature 0 with its own 4,096 cap, Lightning
-	 *  spent every output token narrating a "thinking process" INSIDE `content`
-	 *  and never emitted JSON, so `parseClaims` returned null at both excerpt
-	 *  sizes tried (671 and 3,772 chars). Nano keeps its reasoning in
-	 *  `reasoning_content` and returns claims whose quotes are verbatim in the
-	 *  page — provided the output cap is generous, see its entry. */
+	/** Implementation + QA specialists (frontend, backend, mobile, qa). Moved
+	 *  off GLM-5.3-Flash to Nemotron-3.5-Super-VL on 2026-10-20 (owner
+	 *  direction): the cheap Flash route produced small, fixture-shaped apps,
+	 *  so the coding/QA loop now runs on the 3.5-tier generalist. Super VL is
+	 *  $0.30/$0.90 per Mtok vs Flash's $0.15/$0.50 — roughly 2x/1.8x, paid only
+	 *  on build turns. Tool calling is live-verified on this route (G1 probe,
+	 *  2026-10-18) and the project RUN BINDING records this route. */
+	build: 'nemotron-3.5-super-vl',
+	/** Cheap bounded helper calls (query shaping, summarization). LIBERATED AS
+	 *  AN EXPERIMENT ON 2026-10-20 (owner asked to try Nemotron-3.5-Lightning)
+	 *  and REVERTED AGAIN the same day: on the real rules prompt at temperature
+	 *  0 the model returned 17,867 chars of narrated reasoning and no JSON even
+	 *  at the route's 4,096 cap (`finish_reason: length`); the G1 probe at 512
+	 *  also failed. Nano keeps its reasoning in `reasoning_content` and returns
+	 *  claims whose quotes are verbatim in the page — provided the output cap is
+	 *  generous, see its entry. Both routes cost the same ($0.06/$0.24), so
+	 *  staying on Nano gives up no saving. */
 	helper: 'nemotron-3-nano',
 	/** AI inside generated apps (env.CADDIE.ai, app-ai.ts): a visitor waits on
 	 *  every reply, so the fast cheap tier — not a deep reasoning one. Caddie

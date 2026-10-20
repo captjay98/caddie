@@ -56,17 +56,20 @@ describe('model registry (providers.ts)', () => {
 		}
 	});
 
-	test('chat routes to the 3.5 mid tier; build/plan to GLM; helper stays on Nano', () => {
+	test('chat and build use the 3.5 mid tier; plan stays on GLM; helper stays on Nano', () => {
 		expect(findModelRouteForRole('chat').id).toBe('nemotron-3.5-super-vl');
-		expect(findModelRouteForRole('build').id).toBe('glm-5.3-flash');
+		expect(findModelRouteForRole('build').id).toBe('nemotron-3.5-super-vl');
 		expect(findModelRouteForRole('plan').id).toBe('glm-5.3-flash');
+		// The build move is a deliberate quality-for-cost trade: implementation
+		// turns now cost more than planning turns, the reverse of 2026-10-15.
+		expect(findModelRouteForRole('build').outputPriceMinorUnits)
+			.toBeGreaterThan(findModelRouteForRole('plan').outputPriceMinorUnits);
 		// The helper job is rules-reading: strict JSON out of a long page.
-		// Lightning was moved here on 2026-10-18 and moved back on 2026-10-19
-		// after the live probe (scripts/probe-lightning.ts): on the real prompt at
-		// temperature 0 it spent every output token narrating its thinking INSIDE
-		// `content` and never emitted JSON, at every excerpt size tried (671,
-		// 3,772 and 5,998 chars). Nano keeps its reasoning in `reasoning_content`
-		// and returned claims whose quotes were verbatim in the page.
+		// Lightning was tried again on 2026-10-20 at the route's real 4,096 cap:
+		// 17,867 chars of narrated reasoning, `finish_reason: length`, no JSON.
+		// At 512 (the G1 probe) it also failed. Nano keeps its reasoning in
+		// `reasoning_content` and returns claims whose quotes are verbatim in the
+		// page. Both routes cost $0.06/$0.24, so Nano gives up no saving.
 		expect(findModelRouteForRole('helper').id).toBe('nemotron-3-nano');
 		// the helper really is cheaper than the chat model (per-output rate).
 		expect(findModelRouteForRole('helper').outputPriceMinorUnits)

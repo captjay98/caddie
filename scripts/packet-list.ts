@@ -90,6 +90,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 	P11: {
 		tests: [
 			'tests/discovery.test.ts',
+			'tests/generated-app-policy.test.ts',
 			'tests/planning.integration.test.ts',
 			'tests/candidate-digest.test.ts',
 			'tests/candidate-inspection.test.ts',
