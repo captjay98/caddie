@@ -130,7 +130,7 @@ function actionsOf(
 		case 'checking':
 		case 'repairing':
 			return [
-				{ kind: 'stop', label: 'Stop work', enabled: true, primary: true },
+				{ kind: 'stop', label: 'Stop build', enabled: true, primary: true },
 				...(hasPreview
 					? [{ kind: 'open_preview' as const, label: 'View last preview', enabled: true, primary: false }]
 					: []),

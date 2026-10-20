@@ -188,6 +188,8 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     expect(exp.stage).toBe("building");
     expect(exp.plan!.approved).toBe(true);
     expect(exp.actions.find((a) => a.primary)!.kind).toBe("stop");
+    // One label for every Stop button (plan 3.2): the chat card says "Stop build" too.
+    expect(exp.actions.find((a) => a.kind === "stop")!.label).toBe("Stop build");
   });
 
   test("stopped: user stop -> stage stopped (distinct from blocked), resume primary", async () => {

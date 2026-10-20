@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { createFlueClient } from "@flue/sdk";
 import { useFlueAgent } from "@flue/react";
 import { Markdown } from "@caddie/ui/Markdown";
 import type { PlanDocRevision, ApprovalRecord } from "@caddie/contracts";
@@ -243,7 +242,8 @@ export function ProjectWorkflow({
         <button type="button" className="btn-ghost" disabled={busy} onClick={async () => {
           setBusy(true); setError(null);
           try {
-            await createFlueClient({ url: `/agents/coordinator/${encodeURIComponent(workflow.conversationId)}` }).abort();
+            // One Stop for every button (plan 3.2): the server stops the
+            // workflow, then the running turn.
             await postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow/stop`, {});
             await state.refetch();
           } catch (cause) { setError(cause instanceof Error ? cause.message : "The stop request failed."); }

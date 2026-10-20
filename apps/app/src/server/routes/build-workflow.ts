@@ -13,7 +13,7 @@ import {
   readBuildOutput,
   readBuildBundle,
   retryWorkflow,
-  stopWorkflow,
+  stopBuild,
 } from "../build-workflow.ts";
 import {
   PreviewRuntimeError,
@@ -28,6 +28,7 @@ import {
   dispatchPendingWorkflow,
   recoverStalledDispatch,
   workerSelfDeliver,
+  workerSelfAbort,
   type CoordinatorDeliver,
 } from "../workflow-dispatch.ts";
 import { projectExperience, approvePlan } from "../project-experience.ts";
@@ -70,6 +71,23 @@ export function createBuildWorkflowRouter(
       executionCtx = undefined;
     }
     return workerSelfDeliver(app, origin, c.req.raw.headers.get("cookie"), c.env, executionCtx);
+  }
+
+  /** The abort boundary for this request (same self-fetch rules), or null without self-fetch. */
+  function abortFor(c: {
+    req: { raw: Request; url: string };
+    env: AuthEnv;
+    executionCtx?: unknown;
+  }) {
+    const app = selfFetch?.();
+    if (!app) return null;
+    let executionCtx: unknown;
+    try {
+      executionCtx = c.executionCtx;
+    } catch {
+      executionCtx = undefined;
+    }
+    return workerSelfAbort(app, new URL(c.req.url).origin, c.req.raw.headers.get("cookie"), c.env, executionCtx);
   }
 
   router.onError((error, c) => {
@@ -265,7 +283,7 @@ export function createBuildWorkflowRouter(
   });
   router.post("/projects/:projectId/workflow/stop", async (c) => {
     const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
-    return c.json(await stopWorkflow(c.env.DB, scope));
+    return c.json(await stopBuild(c.env.DB, scope, abortFor(c)));
   });
   // Roll a settled build back to a feature's save point (owner-only, idempotent
   // on key). Nothing runs here: the next build step starts from that image.

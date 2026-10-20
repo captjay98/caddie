@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { MAX_DESIGN_MOCK_TITLE, MAX_PLAN_FEATURES, parsePlanFeatures, splitDesignMocks, splitFeatureBlock } from "../packages/contracts/src/features.ts";
-import { featuresForPlan } from "../apps/app/src/server/build-features.ts";
+import { featuresForPlan, featureViews, type BuildFeatureRow } from "../apps/app/src/server/build-features.ts";
 
 /** The PRD's `caddie-features` block: what the user approves is what gets built. */
 const block = (json: string, fence = "```") => `# Plan\n\nProse first.\n\n${fence}caddie-features\n${json}\n${fence}\n\nClosing note.`;
@@ -96,5 +96,23 @@ describe("design brief mockup extraction", () => {
   test("an overlong title is cut to the picker's limit", () => {
     const { mocks } = splitDesignMocks(fenceBlock(`html-mock ${"x".repeat(200)}`, "<b>x</b>"));
     expect(mocks[0]?.title).toHaveLength(MAX_DESIGN_MOCK_TITLE);
+  });
+});
+
+describe("a stopped build never says a feature is \"Building now\" (plan 3.2)", () => {
+  const row = (featureId: string, position: number, status: BuildFeatureRow["status"], attempts = 0): BuildFeatureRow => ({
+    projectId: "p", runId: "r", planId: "plan", featureId, position, title: featureId, doneWhen: ["it works"],
+    status, attempts, testsPassed: status === "passed" ? 3 : null, checkpointRef: status === "passed" ? "ref" : null, passedAt: null,
+  });
+  const rows = [row("f1", 1, "passed"), row("f2", 2, "building", 1), row("f3", 3, "pending")];
+
+  test("while building, the feature in progress shows as building", () => {
+    expect(featureViews({ rows }, "building").map((view) => view.status)).toEqual(["passed", "building", "pending"]);
+  });
+
+  test("once the build is stopped, paused, finished or back in planning, it is up next again", () => {
+    for (const phase of ["blocked", "ready", "planning", "review", "design", "design-review"] as const) {
+      expect({ phase, statuses: featureViews({ rows }, phase).map((view) => view.status) }).toEqual({ phase, statuses: ["passed", "pending", "pending"] });
+    }
   });
 });

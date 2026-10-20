@@ -604,6 +604,28 @@ export async function stopWorkflow(db: D1Database, scope: Scope) {
     .bind("Stop requested. Your plan and files are retained. Wait for Caddie to stop before retrying.", now(), scope.projectId).run();
   return workflowSnapshot(db, scope);
 }
+
+/**
+ * Every Stop button (the chat card and the project page) ends here (plan 3.2):
+ * the workflow is marked stopped FIRST, so nothing that runs after the abort
+ * sees a building workflow, then the build's running turn is stopped. A
+ * failed abort keeps the stop: the builder's next step finds the build stopped.
+ */
+export async function stopBuild(
+  db: D1Database,
+  scope: Scope,
+  abort: ((conversationId: string) => Promise<boolean>) | null,
+) {
+  const snapshot = await stopWorkflow(db, scope);
+  if (abort && snapshot.workflow) {
+    try {
+      await abort(snapshot.workflow.conversationId);
+    } catch (error) {
+      console.error("stop: the running turn could not be stopped:", error);
+    }
+  }
+  return snapshot;
+}
 /** What a checked build carries besides its preview page (manifest v1, stored by content hash). */
 export interface BuildBundleInput {
   /** dist/server.js — the app's server for Cloudflare Workers, or null for a client-only build. */

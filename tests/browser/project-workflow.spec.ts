@@ -939,7 +939,7 @@ test('repeated project handoffs keep one live card and one preview', async ({ co
 });
 
 
-test('Stop build sends durable abort and retains the stopped project', async ({ context, page }) => {
+test('Stop build is one request (the server stops the running turn) and retains the stopped project', async ({ context, page }) => {
   const fx = await fixture(context, { phase: 'building' });
   await page.goto('/app/?pane=channel');
   await page.getByRole('button', { name: 'Stop build', exact: true }).click();
@@ -948,7 +948,9 @@ test('Stop build sends durable abort and retains the stopped project', async ({ 
   // A user stop is a stopped BUILD (same rule as the server projection), never "the plan needs another pass".
   await expect(page.getByTestId('project-workflow').getByRole('button', { name: 'Retry build' })).toBeVisible();
   await expect(page.getByTestId('project-workflow').getByRole('button', { name: 'Continue the plan' })).toHaveCount(0);
-  expect(fx.stops).toEqual(['/agents/coordinator/conv-project-workflow/abort', '/api/projects/proj-workflow/workflow/stop']);
+  // Same path as the project page's Stop (plan 3.2): POST /workflow/stop, which
+  // stops the workflow and then the running turn on the server.
+  expect(fx.stops).toEqual(['/api/projects/proj-workflow/workflow/stop']);
   expect(fx.admissions).toHaveLength(0);
 });
 

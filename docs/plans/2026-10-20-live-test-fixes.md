@@ -97,8 +97,12 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   Caddie has the build paused (not the person's own stop), and only for that
   build's run; projects without a build keep the old rule. Both brief tests
   now build the full schema (every migration).
-- [ ] 3.2 Both Stop buttons stop the running turn and the workflow, with one
+- [x] 3.2 Both Stop buttons stop the running turn and the workflow, with one
   label; stopping settles any feature still "Building now". Unit + browser.
+  Done: one path for both, `POST /workflow/stop` → `stopBuild` (the workflow
+  first, then the running turn, by the same abort request the browser made);
+  both say "Stop build"; a feature reads "Building now" only while the build
+  is building (stopped, paused or re-planned: "Up next").
 - [ ] 3.3 Check history in words, never raw JSON (new rows store a sentence, old
   rows are formatted). Unit + browser.
 - [ ] 3.4 Check counts per attempt ("Attempt 3: 1 of 2 passed"); "Run its own
