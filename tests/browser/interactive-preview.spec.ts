@@ -221,3 +221,20 @@ test('a relay failure reaches the app as a network error, not a crash', async ({
 	// Caddie's own page keeps working around the preview.
 	await expect(page.getByRole('link', { name: 'Download app' })).toBeVisible();
 });
+
+// A tiny WebAssembly module whose answer() returns 42.
+const WASM_BYTES = '[0,97,115,109,1,0,0,0,1,5,1,96,0,1,127,3,2,1,0,7,10,1,6,97,110,115,119,101,114,0,0,10,6,1,4,0,65,42,11]';
+const WASM_HTML = `<!doctype html><html><head><title>WebAssembly fixture</title></head><body><h1>Waiting</h1><script>
+var heading = document.querySelector('h1');
+var evalState;
+try { eval('1 + 1'); evalState = 'eval ran'; } catch (error) { evalState = 'eval blocked'; }
+WebAssembly.instantiate(new Uint8Array(${WASM_BYTES})).then(
+	function (result) { heading.textContent = 'WebAssembly ran: ' + result.instance.exports.answer() + ', ' + evalState; },
+	function () { heading.textContent = 'WebAssembly blocked, ' + evalState; });
+</script></body></html>`;
+
+test('an app in the preview can run WebAssembly, but not JavaScript eval (owner OK, 2026-10-20)', async ({ page }) => {
+	await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/html', body: WASM_HTML }));
+	await page.goto(base);
+	await expect(page.frameLocator('iframe').getByRole('heading')).toHaveText('WebAssembly ran: 42, eval blocked');
+});

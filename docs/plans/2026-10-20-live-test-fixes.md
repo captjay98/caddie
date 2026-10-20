@@ -45,11 +45,20 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   preview page at 500 KB though stored files may be 2 MB (`D1_MAX_VALUE_BYTES`),
   and the page carries the whole app, so FarmLog (sql.js) never got one. Use the
   real limit and say the size in plain words. Test in `build-workflow.test.ts`.
-- [ ] 1.5 WebAssembly runs where the app runs: the preview frame's policy
+- [x] 1.5 WebAssembly runs where the app runs: the preview frame's policy
   (`script-src 'unsafe-inline'`) and published apps' (`script-src 'self'`) block
   it, so sql.js cannot start even with a preview. Add `'wasm-unsafe-eval'`
   (WebAssembly only, not JavaScript eval). Owner: OK this security-policy
-  change first.
+  change first. Done (owner OK 2026-10-20 01:58): both policies carry it; a
+  real browser runs a WebAssembly module and still refuses eval, in the
+  preview frame and on a published page.
+- [ ] 1.6 A WebAssembly library finds its `.wasm` file. Caddie keeps only
+  `dist/main.js` and `dist/main.css` (`readBuiltApp`), the preview frame has
+  no network (`connect-src 'none'`), and publishing uploads only those files,
+  so a `.wasm` fetched by URL (sql.js's default `locateFile`) never arrives.
+  The bytes must travel inside the bundle (sql.js: `wasmBinary`). Read the
+  template's build first; then fix the template, the builder's recipe, or
+  both. Test: a bundle using sql.js runs a query in the preview frame.
 
 ## 2. Chat
 
@@ -163,7 +172,9 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 
 ## Owner actions
 
-- OK for phase 9; GitHub settings (6.1); push and deploy after 7.2 and 8.4;
+- Given: OK for phase 9 (2026-10-20 00:50); OK for 1.5, WebAssembly in
+  previews and published apps (2026-10-20 01:58).
+- Still to do: GitHub settings (6.1); push and deploy after 7.2 and 8.4;
   re-plan FarmLog AI once phase 4 is live; optional: clear `~/.gradle/caches`.
 - Known limit: judges can't publish, so a judge's APK has no live server; they
   get the browser preview.

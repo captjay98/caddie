@@ -158,3 +158,21 @@ test('review sheet of icons for several apps', async ({ page }) => {
 	mkdirSync(process.env.CADDIE_SHOTS!, { recursive: true });
 	await page.screenshot({ path: join(process.env.CADDIE_SHOTS!, 'app-icons-sheet.png'), fullPage: true });
 });
+
+test('a published app can run WebAssembly, but not JavaScript eval (owner OK, 2026-10-20)', async ({ page }) => {
+	// A tiny WebAssembly module whose answer() returns 42, in the app's own script.
+	const js = `const root = document.getElementById("root");
+let evalState;
+try { eval("1 + 1"); evalState = "eval ran"; } catch { evalState = "eval blocked"; }
+WebAssembly.instantiate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,127,3,2,1,0,7,10,1,6,97,110,115,119,101,114,0,0,10,6,1,4,0,65,42,11])).then(
+	({ instance }) => { root.textContent = "WebAssembly ran: " + instance.exports.answer() + ", " + evalState; },
+	() => { root.textContent = "WebAssembly blocked, " + evalState; });`;
+	const files = await publishedAssets({ name: 'Wasm Check', seed: 'proj-wasm' }, { js, css: '' });
+	const { server, origin } = await serve(files);
+	try {
+		await page.goto(`${origin}/`);
+		await expect(page.locator('#root')).toHaveText('WebAssembly ran: 42, eval blocked');
+	} finally {
+		server.close();
+	}
+});
