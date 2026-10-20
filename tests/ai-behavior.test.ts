@@ -35,6 +35,23 @@ describe("R04 response hygiene (text-part leakage)", () => {
     expect(r.text).toBe("Working.\nDone.");
   });
 
+  test("never shows a project proposal written out as JSON instead of a card (live finding, 2026-10-20)", () => {
+    // The coordinator printed propose_project's arguments as its reply, twice,
+    // and no card appeared.
+    const farmlog =
+      '{"name": "FarmLog AI", "idea": "A daily logging app for Nigerian broiler and catfish farmers.", "brief": "FarmLog AI helps farmers log daily activities.", "hackathon": "Nebius x NVIDIA Global AI Hackathon", "track": "Personal AI Track"}';
+    const r = sanitizeAssistantText(`${farmlog}\n\n${farmlog}`);
+    expect(r.text).toBe("");
+    expect(r.stripped).toContain("tool-arguments");
+    // Fenced, pretty-printed, with prose around it: only the proposal goes.
+    const pretty = JSON.stringify(JSON.parse(farmlog), null, 2);
+    expect(cleanAssistantText(`Here it is:\n\`\`\`json\n${pretty}\n\`\`\`\nTell me what to change.`)).toBe("Here it is:\n\nTell me what to change.");
+    expect(cleanAssistantText(`Here it is:\n\n${pretty}\n\nTell me what to change.`)).toBe("Here it is:\n\nTell me what to change.");
+    // JSON the person asked for is left alone.
+    const prices = '```json\n{"commodity": "catfish", "price_kobo": 250000}\n```';
+    expect(cleanAssistantText(prices)).toBe(prices);
+  });
+
   test("an all-placeholder chain becomes empty (render nothing)", () => {
     const r = sanitizeAssistantText("•  —  -  ·");
     expect(r.stripped).toContain("empty-placeholder");
