@@ -894,6 +894,38 @@ describe("approved output and preview identity", () => {
     }
   });
 
+  test("a preview page up to 2 MB is kept and served; a bigger one is refused in plain words with its size (live finding, 2026-10-20)", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      // Over the real 2,000,000-byte limit: refused, saying how big it is.
+      const error = await storeBuildOutput(w.db, item.scope, {
+        html: `<html>${"x".repeat(2_100_000)}</html>`,
+        image: "sha256:huge-preview",
+        planId: item.plan.id,
+        runId: item.workflow.runId,
+      }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(ScopeError);
+      expect((error as ScopeError).code).toBe("INVALID_PREVIEW");
+      expect((error as ScopeError).message).toBe(
+        "This app's preview page is 2.1 MB, and a preview can be at most 2 MB. Make the app's code smaller (load big files only when needed) and check again.",
+      );
+
+      // FarmLog AI (with sql.js): the preview page carries the whole app, and
+      // it passed the old 500 KB cap, so a finished build got no preview.
+      const page = `<!doctype html><html><body><script>${"x".repeat(1_200_000)}</script></body></html>`;
+      const output = await storeBuildOutput(w.db, item.scope, {
+        html: page,
+        image: "sha256:large-preview",
+        planId: item.plan.id,
+        runId: item.workflow.runId,
+      });
+      expect(new TextDecoder().decode(await readBuildOutput(w.db, item.scope, output.outputId))).toBe(page);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
   test("a server bundle over 2 MB is refused at check time (production D1 would reject the write)", async () => {
     const w = await world();
     try {
@@ -984,7 +1016,7 @@ describe("approved output and preview identity", () => {
       await rejectsCode(
         storeBuildOutput(w.db, item.scope, {
           ...payload,
-          html: `<html>${"x".repeat(500001)}</html>`,
+          html: `<html>${"x".repeat(2_000_001)}</html>`,
         }),
         "INVALID_PREVIEW",
       );

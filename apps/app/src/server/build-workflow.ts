@@ -739,11 +739,20 @@ async function prepareOutput(
   input: { html: string; image: string; bundle?: BuildBundleInput },
 ) {
   const bytes = new TextEncoder().encode(input.html);
-  if (!input.html.toLowerCase().includes("<html") || bytes.length > 500_000)
+  if (!input.html.toLowerCase().includes("<html"))
     throw new ScopeError(
       422,
       "INVALID_PREVIEW",
-      "A complete HTML preview of at most 500 KB is required.",
+      "A complete HTML preview of at most 2 MB is required.",
+    );
+  // The page carries the whole app (its code and styles inlined), so its
+  // limit is storage's own, not a smaller guess: a finished build with
+  // sql.js once got no preview at 500 KB (live finding, 2026-10-20).
+  if (bytes.length > D1_MAX_VALUE_BYTES)
+    throw new ScopeError(
+      422,
+      "INVALID_PREVIEW",
+      `This app's preview page is ${(bytes.length / 1_000_000).toFixed(1)} MB, and a preview can be at most ${D1_MAX_VALUE_BYTES / 1_000_000} MB. Make the app's code smaller (load big files only when needed) and check again.`,
     );
   const content = await createD1ContentStore(db).put(bytes);
   const manifestSha256 = input.bundle ? await storeBundleManifest(db, input.bundle) : null;
