@@ -20,6 +20,7 @@ import { Composer } from './Composer.tsx';
 import type { ChannelDraft, ChannelSource } from './channel-store.ts';
 import { cleanAssistantText, sanitizeAssistantText } from './response-hygiene.ts';
 import { ReplyText } from './ReplyText.tsx';
+import { MemoryOffers } from './MemoryOffers.tsx';
 
 /** What a turn may do from inside the transcript. The rows are memoized, so
  *  the action travels by context instead of props. */
@@ -135,7 +136,7 @@ const TOOL_ACTION_LABELS: Record<string, { working: string; done: string }> = {
 	start_brainstorm: { working: 'Thinking about ideas with you', done: 'Thinking about ideas with you' },
 	continue_project: { working: 'Updating your project', done: 'Updated your project' },
 	update_profile: { working: 'Noting your preferences', done: 'Noted your preferences' },
-	remember: { working: 'Remembering that', done: 'Remembered that' },
+	remember: { working: 'Noting that', done: 'Noted for you to confirm' },
 	inspect_repository: { working: 'Looking at your code', done: 'Looked at your code' },
 	list_stacks: { working: 'Checking available stacks', done: 'Checked available stacks' },
 	verify_build: { working: 'Verifying the build', done: 'Verified the build' },
@@ -684,6 +685,10 @@ export function Channel(props: {
 		() => buildTranscriptRows(groupTurns(shownMessages)),
 		[shownMessages],
 	);
+	const admittedUserMessages = useMemo(
+		() => source.messages.filter((message) => message.role === 'user' && !String(message.id).startsWith('local:')).length,
+		[source.messages],
+	);
 
 	const live = source.status === 'connecting' || source.status === 'submitted' || source.status === 'streaming';
 	const latestSettlement = source.settlements.at(-1);
@@ -771,6 +776,11 @@ export function Channel(props: {
 						</p>
 					);
 				})}
+
+				{/* What Caddie can remember, for the person's OK (plan 6.2). Read again
+				    each time another of their messages is admitted (Flue's own
+				    "local:" copy is not yet admitted). */}
+				<MemoryOffers projectId={projectId} refreshKey={admittedUserMessages} />
 
 				<ProjectWorkflow key={projectId} projectId={projectId} showTranscript={false}/>
 				{live ? (

@@ -238,7 +238,7 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   `docs/setup/github-app.md` names the Setup URL. Known, unchanged: the by-id
   form can claim any unbound installation of the App; proving the installer
   would need GitHub App user sign-in.
-- [ ] 6.2 Memory learns: facts carry the project in a project chat; a stated
+- [x] 6.2 Memory learns: facts carry the project in a project chat; a stated
   lasting preference is proposed after the turn (still needs Confirm). Unit.
   Part 1 done: in a project's chat, `remember` keeps what is about the
   project (`about: 'project'`, or a fact given no owner) with that project:
@@ -254,9 +254,13 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   and long numbers are passed over; two at most) and proposes each once as a
   preference about the person (`stated:<runId>`). It does so when the message
   is admitted rather than after the turn, so the chat can show it under the
-  message; a failure never blocks the message. Part 2b: the chat shows that
-  run's proposals with Confirm and Not now (Not now retracts; a declined one is
-  never offered again).
+  message; a failure never blocks the message. Part 2b done: the chat shows
+  what is waiting for the person's OK from that project's chats (what they
+  stated, and what Caddie proposed with remember): "Caddie can remember this
+  for next time: “…”" with Remember it and No thanks (declined, it is never
+  offered again), read again each time another of their messages is admitted
+  (`GET /api/memory/offers`, `MemoryOffers.tsx`). The remember tool's line in
+  the chat now reads "Noted for you to confirm".
 
 ## 7. Land the live fixes
 

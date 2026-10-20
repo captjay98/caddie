@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 /**
  * Conversation surface acceptance for the composed build (P05/P06 shared).
@@ -624,6 +624,60 @@ test.describe('Stage 3/4 — image/file attach + voice dictation composer states
 			.evaluate((el) => getComputedStyle(el).animationName);
 		// Under reduced-motion the pulse keyframes are suppressed → 'none'.
 		expect(animation === 'none' || animation === '').toBeTruthy();
+		await context.close();
+	});
+});
+
+test.describe('memory learns: the chat offers what Caddie can remember (plan 6.2)', () => {
+	async function offersPage(browser: Browser, offers: { id: string; content: string }[]) {
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		let waiting = [...offers];
+		const actions: string[] = [];
+		await context.route('**/api/memory/offers?**', (route) => {
+			expect(new URL(route.request().url()).searchParams.get('projectId')).toBe('proj_conversation');
+			return json(route, 200, { offers: waiting });
+		});
+		await context.route('**/api/memory/*/confirm', (route) => {
+			const id = new URL(route.request().url()).pathname.split('/').at(-2)!;
+			actions.push(`confirm ${id}`);
+			waiting = waiting.filter((offer) => offer.id !== id);
+			return json(route, 200, { fact: { id, status: 'confirmed' } });
+		});
+		await context.route('**/api/memory/*/retract', (route) => {
+			const id = new URL(route.request().url()).pathname.split('/').at(-2)!;
+			actions.push(`retract ${id}`);
+			waiting = waiting.filter((offer) => offer.id !== id);
+			return json(route, 200, { fact: { id, status: 'retracted' } });
+		});
+		const page = await context.newPage();
+		await openProjectPage(page);
+		return { context, page, actions };
+	}
+
+	test('a waiting memory shows in the chat in plain words; Remember it keeps it and the offer goes', async ({ browser }) => {
+		const { context, page, actions } = await offersPage(browser, [{ id: 'mem_stated', content: 'Always use TypeScript.' }]);
+		const offer = page.getByTestId('memory-offer');
+		// The quote marks are drawn by the browser around <q>, so the text has none.
+		await expect(offer.locator('.memory-offer-text')).toHaveText('Caddie can remember this for next time: Always use TypeScript.');
+		await expect(offer.locator('q')).toHaveText('Always use TypeScript.');
+		await offer.getByRole('button', { name: 'Remember it' }).click();
+		await expect(page.getByTestId('memory-offer')).toHaveCount(0);
+		expect(actions).toEqual(['confirm mem_stated']);
+		await context.close();
+	});
+
+	test('No thanks declines it; nothing is kept', async ({ browser }) => {
+		const { context, page, actions } = await offersPage(browser, [
+			{ id: 'mem_a', content: 'Never use emojis.' },
+			{ id: 'mem_b', content: 'Builds apps for goat farmers' },
+		]);
+		await expect(page.getByTestId('memory-offer')).toHaveCount(2);
+		await page.getByTestId('memory-offer').first().getByRole('button', { name: 'No thanks' }).click();
+		await expect(page.getByTestId('memory-offer')).toHaveCount(1);
+		await expect(page.getByTestId('memory-offer')).toContainText('Builds apps for goat farmers');
+		expect(actions).toEqual(['retract mem_a']);
 		await context.close();
 	});
 });

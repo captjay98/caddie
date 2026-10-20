@@ -335,6 +335,39 @@ a.btn-ghost.topbar-nav-link {
 	flex: none;
 }
 
+/* What Caddie can remember, offered in the chat for the person's OK (plan 6.2). */
+.memory-offers {
+	display: grid;
+	gap: 0.5rem;
+	margin: 0.5rem 0;
+}
+
+.memory-offer {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem 0.75rem;
+	padding: 0.6rem 0.8rem;
+	background: var(--color-panel);
+	color: var(--color-bright);
+	border: 1px solid var(--color-line);
+	border-left: 3px solid var(--color-action);
+	border-radius: 8px;
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.memory-offer-text {
+	margin: 0;
+	flex: 1 1 16rem;
+}
+
+.memory-offer-actions {
+	display: flex;
+	gap: 0.4rem;
+}
+
 /* --- first-run voice (reference: today.ai brief cards, hacksteward wizard,
    the reference caddie's voice) ------------------------------------------- */
 
