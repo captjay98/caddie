@@ -246,10 +246,17 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   that project's chats are given it. What is about the person (`about:
   'you'`, or a preference) stays with their account; Home has no project of
   its own. Caddie is told to call remember with about 'project' for lasting
-  things said about a project. Part 2: a lasting preference the person states
-  ("always…", "never…", "I prefer…", "from now on…") is proposed after the
-  turn even when Caddie didn't call remember, shown in the chat with Confirm
-  and Not now, and kept only on Confirm.
+  things said about a project. Part 2a done: the conversation guard reads the
+  person's own message (never Caddie's own dispatches) for a lasting
+  preference (`stated-preference.ts`: an instruction that starts with
+  always/never, "from now on" / "going forward", "I prefer" / "I'd rather";
+  questions, "never mind", money, effects, permission, links, email addresses
+  and long numbers are passed over; two at most) and proposes each once as a
+  preference about the person (`stated:<runId>`). It does so when the message
+  is admitted rather than after the turn, so the chat can show it under the
+  message; a failure never blocks the message. Part 2b: the chat shows that
+  run's proposals with Confirm and Not now (Not now retracts; a declined one is
+  never offered again).
 
 ## 7. Land the live fixes
 

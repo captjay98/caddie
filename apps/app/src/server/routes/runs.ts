@@ -7,6 +7,7 @@ import { createRun, recordRepairRound, runSnapshot } from "../runs.ts";
 import { admitJudgeMessage } from "../judge-limits.ts";
 import { isJudgeAccount } from "../judge-access.ts";
 import { isInternalDispatch } from "../internal-dispatch.ts";
+import { captureStatedPreferences } from "../stated-preference.ts";
 
 /**
  * P05 run routes + the conversation guard.
@@ -209,7 +210,21 @@ export function conversationGuard(): Hono<{ Bindings: Env }> {
         c.req.raw.headers,
         conversationId,
       );
-      if (!fromServer) await admitJudgeMessage(c.env.DB, userId, c.env);
+      if (!fromServer) {
+        await admitJudgeMessage(c.env.DB, userId, c.env);
+        // A lasting preference the person states ("Always use TypeScript.")
+        // is offered to remember, for them to confirm (plan 6.2). It reads a
+        // copy of the message and never blocks or fails the message itself.
+        try {
+          await captureStatedPreferences(
+            c.env.DB,
+            { actorId: userId, runId: binding.runId },
+            await c.req.raw.clone().json(),
+          );
+        } catch (error) {
+          console.warn("stated preference not captured:", error);
+        }
+      }
     }
     await next();
   });
