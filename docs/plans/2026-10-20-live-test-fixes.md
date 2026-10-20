@@ -148,7 +148,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   `problem` (migration 0037), asked for "in the person's own words" by
   propose_project; the card shows them quoted; accepting carries them into
   the brief and the PRD opens its overview with them as written.
-- [ ] 4.4 The idea stays plain language; the stack lives only in the brief.
+- [x] 4.4 The idea stays plain language; the stack lives only in the brief.
+  Done: propose_project says so, and the server refuses an idea that names a
+  framework, language, database, hosting or API with one plain line telling
+  the model to put the stack in the brief (ordinary English such as "react
+  fast" or "farm workers" passes).
 - [ ] 4.5 Design mocks render only in the styled preview frame; one that lands
   in chat is shown there, never as raw HTML. Unit + browser.
 

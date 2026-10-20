@@ -204,3 +204,31 @@ describe("who it's for and the problem stay in the person's own words (plan 4.3)
 		expect(coordinator).toContain("in the person's own words");
 	});
 });
+
+describe('the idea stays in plain words; the stack lives only in the brief (plan 4.4)', () => {
+	test('an idea naming the stack is refused with plain guidance, and the brief may name it freely', async () => {
+		const w = await world();
+		try {
+			for (const idea of [
+				'A React + Hono app on Cloudflare D1 that logs feed for farmers.',
+				'A Flutter app with a Supabase backend for farm records.',
+				'Track daily eggs with a REST API and SQLite.',
+			]) {
+				await expect(proposeProject(w.db, w.scope, { ...IDEA, idea, sourceConversationId: w.conversationId })).rejects.toThrow('Keep the idea in plain words');
+			}
+			const proposal = await proposeProject(w.db, w.scope, {
+				...IDEA,
+				idea: 'Helps farmers react fast when an animal falls sick, from a voice note.',
+				brief: 'Build it on the React + Hono recipe with Cloudflare D1 and the platform AI.',
+				sourceConversationId: w.conversationId,
+			});
+			expect(proposal.idea).toBe('Helps farmers react fast when an animal falls sick, from a voice note.');
+			expect(proposal.brief).toContain('React + Hono');
+		} finally { w.sqlite.close(); }
+	});
+
+	test('the proposal tool says so before the model writes the idea', () => {
+		const coordinator = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
+		expect(coordinator).toContain('The idea is for the person: plain words on what the app does for them');
+	});
+});

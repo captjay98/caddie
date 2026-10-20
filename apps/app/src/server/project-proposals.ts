@@ -51,6 +51,16 @@ export interface ProposeProjectInput {
 }
 
 const now = () => new Date().toISOString();
+
+/**
+ * Words that belong in the brief, not in the idea a person reads on the card
+ * (plan 4.4). Words that are also ordinary English only count capitalised
+ * ("React", not "react fast"); "workers", "bun" and "dart" are left out.
+ */
+const STACK_WORDS: readonly RegExp[] = [
+	/\b(?:hono|vite|next\.?js|node\.?js|typescript|javascript|sqlite|sql\.js|postgres(?:ql)?|mysql|mongodb|supabase|firebase|redis|tailwind|ollama|graphql|cloudflare|wrangler|back-?end|front-?end)\b/i,
+	/\b(?:React|Flutter|APIs?|REST|D1|PWA)\b/,
+];
 const clean = (value: string | null | undefined, max: number): string | null => {
 	if (typeof value !== 'string') return null;
 	const text = value.replace(/\s+/g, ' ').trim().slice(0, max);
@@ -86,6 +96,13 @@ export async function proposeProject(db: D1Database, scope: Scope, input: Propos
 	const brief = typeof input.brief === 'string' ? input.brief.trim().slice(0, 16000) : '';
 	if (!name || !idea || !brief) {
 		throw new ScopeError(400, 'invalid_proposal', 'A proposal needs a name, a short idea and a brief.');
+	}
+	if (STACK_WORDS.some((pattern) => pattern.test(idea))) {
+		throw new ScopeError(
+			400,
+			'invalid_proposal',
+			'Keep the idea in plain words for the person: what the app does for them. Put the stack (frameworks, databases, hosting, APIs) in the brief.',
+		);
 	}
 	const url = clean(input.hackathonUrl, 500);
 	if (url && !/^https?:\/\//i.test(url)) throw new ScopeError(400, 'invalid_proposal', 'The hackathon link must be an http(s) URL.');
