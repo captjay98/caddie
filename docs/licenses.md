@@ -3,7 +3,7 @@
 A licence audit of Caddie's shipped **production** dependencies: their declared
 licence, and whether it falls outside the set this project accepts.
 
-- Generated: 2026-10-20T09:42:02.751Z
+- Generated: 2026-10-20T17:18:36.054Z
 - Regenerate with: `bun scripts/license-audit.ts`
 - Never edit this file by hand; the script rewrites it.
 
