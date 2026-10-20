@@ -1,4 +1,5 @@
 import { describe, test, expect } from "bun:test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { sanitizeAssistantText, cleanAssistantText } from "../apps/app/src/client/conversation/response-hygiene.ts";
 import { capabilityReport, capabilitySignals } from "../apps/app/src/server/coordinator-context.ts";
@@ -33,6 +34,21 @@ describe("R04 response hygiene (text-part leakage)", () => {
     const r = sanitizeAssistantText('Working.\n{"type":"text","text":""}\nDone.');
     expect(r.stripped).toContain("serialization-fragment");
     expect(r.text).toBe("Working.\nDone.");
+  });
+
+  test("the coordinator is told a proposal exists only when propose_project returned (live finding, 2026-10-20)", () => {
+    // It wrote the proposal out as JSON instead, then insisted three times
+    // that a card had been shown.
+    const source = readFileSync(new URL("../apps/app/src/agents/coordinator.ts", import.meta.url), "utf8");
+    for (const phrase of [
+      "Make a proposal ONLY by calling propose_project",
+      "never write its fields into your reply",
+      "the person sees nothing until propose_project returns",
+      "Mention the card only after propose_project has returned in this turn",
+      "say the proposal did not go through",
+    ]) {
+      expect(source).toContain(phrase);
+    }
   });
 
   test("never shows a project proposal written out as JSON instead of a card (live finding, 2026-10-20)", () => {
