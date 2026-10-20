@@ -41,6 +41,15 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 - [x] 1.3 Builder instruction: probes go in `.caddie-scratch/`; a failure inside
   Caddie's own installer or checks is reported as Caddie's problem, not
   debugged. Source-guard test.
+- [ ] 1.4 A preview can be as large as storage allows: `prepareOutput` caps the
+  preview page at 500 KB though stored files may be 2 MB (`D1_MAX_VALUE_BYTES`),
+  and the page carries the whole app, so FarmLog (sql.js) never got one. Use the
+  real limit and say the size in plain words. Test in `build-workflow.test.ts`.
+- [ ] 1.5 WebAssembly runs where the app runs: the preview frame's policy
+  (`script-src 'unsafe-inline'`) and published apps' (`script-src 'self'`) block
+  it, so sql.js cannot start even with a preview. Add `'wasm-unsafe-eval'`
+  (WebAssembly only, not JavaScript eval). Owner: OK this security-policy
+  change first.
 
 ## 2. Chat
 
