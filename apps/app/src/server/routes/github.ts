@@ -2,7 +2,15 @@ import { Hono } from 'hono';
 import { createAuthRouter } from './auth.ts';
 import { createProjectsRouter } from './projects.ts';
 import { createApprovalsRouter } from './approvals.ts';
-import { ScopeError, requireProjectScope, requireWorkspaceScope, sessionUserId } from '../scope.ts';
+import { ScopeError, requireProjectScope, requireWorkspaceScope, sessionUserId, workspaceScopeForUser } from '../scope.ts';
+import {
+	connectInstallUrl,
+	connectState,
+	readConnectState,
+	returnLocation,
+	safeReturnTo,
+	setupOutcome,
+} from '../github-connect.ts';
 import {
 	GithubError,
 	githubInstallUrl,
@@ -52,6 +60,15 @@ import {
  *                                               installation to a workspace
  *                                               (session + membership; metadata
  *                                               resolved live from the App API).
+ *   GET  /api/github/app?workspaceId&returnTo   the App's install link; with a
+ *                                               workspace it carries a signed
+ *                                               state (members only, plan 6.1).
+ *   GET  /api/github/setup                      the App's Setup URL: GitHub's
+ *                                               return after install binds the
+ *                                               installation, only for a state
+ *                                               Caddie signed for this same
+ *                                               person, then goes back to their
+ *                                               page with ?github=<outcome>.
  *   GET  /api/github/installations              installations of the scoped workspace
  *   GET  /api/github/installations/:id/repos    selected repositories (owning-workspace members only)
  *
@@ -121,6 +138,12 @@ async function requireSessionActorId(env: Env, headers: Headers): Promise<string
 	return userId;
 }
 
+/** Caddie's own server secret, which signs the connect state (plan 6.1). */
+function authSecret(env: unknown): string | null {
+	const secret = (env as { BETTER_AUTH_SECRET?: unknown } | undefined)?.BETTER_AUTH_SECRET;
+	return typeof secret === 'string' && secret.length > 0 ? secret : null;
+}
+
 async function readJson(request: Request): Promise<unknown> {
 	try {
 		return await request.json();
@@ -179,8 +202,46 @@ export function createGithubRouter(): Hono<{ Bindings: Env }> {
 	// --- app metadata (public, non-credential): where to install the App -------------
 	router.get('/github/app', async (c) => {
 		await requireSessionActorId(c.env, c.req.raw.headers);
+		const workspaceId = c.req.query('workspaceId');
 		// The slug is public; the install URL is null when unconfigured (never guessed).
-		return c.json({ installUrl: githubInstallUrl(c.env) });
+		if (!workspaceId) return c.json({ installUrl: githubInstallUrl(c.env) });
+		// The one-click link (plan 6.1): GitHub hands its state back on the
+		// Setup URL, so the return can connect. Members of the workspace only.
+		const scope = await requireWorkspaceScope(c.env.DB, c.env, c.req.raw.headers, workspaceId);
+		const secret = authSecret(c.env);
+		if (!secret) return c.json({ installUrl: null });
+		const state = await connectState(secret, {
+			actorId: scope.actorId,
+			workspaceId: scope.workspaceId,
+			returnTo: safeReturnTo(c.req.query('returnTo')),
+		});
+		return c.json({ installUrl: connectInstallUrl(c.env, state) });
+	});
+
+	// --- the App's Setup URL: GitHub's return after install (plan 6.1) ---------------
+	// GitHub warns installation_id can be spoofed, so nothing connects unless the
+	// state is one Caddie signed for this same signed-in person in the last 30
+	// minutes; the installation is then checked as the by-id bind checks it.
+	router.get('/github/setup', async (c) => {
+		const userId = await sessionUserId(c.env, c.req.raw.headers);
+		if (!userId) return c.redirect(returnLocation('/app/', 'not_signed_in'), 302);
+		const secret = authSecret(c.env);
+		const request = secret ? await readConnectState(secret, c.req.query('state')) : null;
+		if (!request || request.actorId !== userId) return c.redirect(returnLocation('/app/', 'expired'), 302);
+		// An organisation member asked its owner to approve the App: nothing to bind yet.
+		if (c.req.query('setup_action') === 'request') return c.redirect(returnLocation(request.returnTo, 'requested'), 302);
+		const installationId = c.req.query('installation_id') ?? '';
+		if (!/^\d{1,20}$/.test(installationId)) return c.redirect(returnLocation(request.returnTo, 'not_found'), 302);
+		try {
+			const scope = await workspaceScopeForUser(c.env.DB, userId, request.workspaceId);
+			// githubClientFromEnv -> readGithubConfig fails closed (typed 503) before any write.
+			await bindInstallation(c.env.DB, githubClientFromEnv(c.env), scope, installationId);
+			return c.redirect(returnLocation(request.returnTo, 'connected'), 302);
+		} catch (error) {
+			const outcome = setupOutcome(error);
+			if (outcome === 'failed') console.error('github setup return failed:', error);
+			return c.redirect(returnLocation(request.returnTo, outcome), 302);
+		}
 	});
 
 	// --- installation binding (explicit user action) ----------------------------------

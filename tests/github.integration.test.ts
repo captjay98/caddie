@@ -27,6 +27,7 @@ import {
 } from './fixtures/github-harness.ts';
 import { GithubStub } from './fixtures/github-stub.ts';
 import { githubInstallUrl, readGithubConfig, verifyWebhookSignature } from '../apps/app/src/server/adapters/github.ts';
+import { connectState } from '../apps/app/src/server/github-connect.ts';
 
 /**
  * P08 — GitHub App import and receipt-backed delivery, executed against a real
@@ -1162,5 +1163,95 @@ describe('P08 slice 2 — import + receipt-backed export', () => {
 
 	test('across the whole suite the provider never received a force-push', () => {
 		expect(stub.forceViolations).toBe(0);
+	});
+});
+
+// --- Plan 6.1: GitHub connects in one click (the App's Setup URL) ------------------------
+//
+// After an install, GitHub sends the person to the App's Setup URL with
+// installation_id, setup_action and the state the install link carried.
+// GitHub warns installation_id can be spoofed, so only a state Caddie signed
+// for this same signed-in person connects anything. Runs last, on its own
+// installations, so the slices above see exactly the state they assert.
+
+describe("GitHub's return after install connects in one click (plan 6.1)", () => {
+	// The fixture worker's BETTER_AUTH_SECRET (tests/fixtures/github-harness.ts).
+	const FIXTURE_SECRET = 'fixture-only-secret-0123456789abcdef0123456789abcdef';
+	const INSTALLATION_C = '4756431';
+	const INSTALLATION_D = '4756432';
+	let aliceUserId = '';
+	let bobUserId = '';
+
+	beforeAll(async () => {
+		stub.registerInstallation({ installationId: INSTALLATION_C, accountLogin: 'octocat-c' });
+		stub.registerInstallation({ installationId: INSTALLATION_D, accountLogin: 'octocat-d' });
+		aliceUserId = String((await d1Rows(`select "id" from "user" where "email" = '${ALICE_EMAIL}'`))[0]?.['id']);
+		bobUserId = String((await d1Rows(`select "id" from "user" where "email" = '${BOB_EMAIL}'`))[0]?.['id']);
+	});
+
+	const boundTo = async (installationId: string): Promise<unknown> =>
+		(await d1Rows(`select "workspaceId" from github_installations where "installationId" = '${installationId}'`))[0]?.[
+			'workspaceId'
+		] ?? null;
+
+	const setup = (jar: Jar | null, query: Record<string, string>): Promise<Response> => {
+		const path = `/api/github/setup?${new URLSearchParams(query)}`;
+		return jar ? worker(jar, path) : fetch(`${WORKER_BASE}${path}`, { redirect: 'manual' });
+	};
+
+	test('only a member gets a connect link for a workspace (none without a slug here)', async () => {
+		const bobs = await worker(BOB, `/api/github/app?workspaceId=${aliceWorkspaceId}`);
+		expect(bobs.status).toBe(403);
+		const own = await worker(ALICE, `/api/github/app?workspaceId=${aliceWorkspaceId}&returnTo=%2Fapp%2F`);
+		expect(own.status).toBe(200);
+		expect(((await own.json()) as { installUrl: string | null }).installUrl).toBeNull();
+	});
+
+	test("GitHub's return with Caddie's own state connects the installation and goes back to the page", async () => {
+		const state = await connectState(FIXTURE_SECRET, {
+			actorId: aliceUserId,
+			workspaceId: aliceWorkspaceId,
+			returnTo: '/app/settings?project=p1',
+		});
+		const res = await setup(ALICE, { installation_id: INSTALLATION_C, setup_action: 'install', state });
+		expect(res.status).toBe(302);
+		expect(res.headers.get('location')).toBe('/app/settings?project=p1&github=connected');
+		expect(await boundTo(INSTALLATION_C)).toBe(aliceWorkspaceId);
+	});
+
+	test('a link someone else made never connects their GitHub to your workspace', async () => {
+		// Bob's own state for Bob's workspace, opened by Alice: a crafted link.
+		const bobs = await connectState(FIXTURE_SECRET, { actorId: bobUserId, workspaceId: bobWorkspaceId, returnTo: '/app/' });
+		const crafted = await setup(ALICE, { installation_id: INSTALLATION_D, setup_action: 'install', state: bobs });
+		expect(crafted.status).toBe(302);
+		expect(crafted.headers.get('location')).toBe('/app/?github=expired');
+		// No state at all, or one Caddie never signed.
+		const bare = await setup(ALICE, { installation_id: INSTALLATION_D, setup_action: 'install' });
+		expect(bare.headers.get('location')).toBe('/app/?github=expired');
+		const unsigned = await setup(ALICE, { installation_id: INSTALLATION_D, setup_action: 'install', state: 'AB12t' });
+		expect(unsigned.headers.get('location')).toBe('/app/?github=expired');
+		expect(await boundTo(INSTALLATION_D)).toBeNull();
+	});
+
+	test("signed out, nothing connects; an organisation's pending request says so", async () => {
+		const state = await connectState(FIXTURE_SECRET, {
+			actorId: aliceUserId,
+			workspaceId: aliceWorkspaceId,
+			returnTo: '/app/projects',
+		});
+		const anon = await setup(null, { installation_id: INSTALLATION_D, setup_action: 'install', state });
+		expect(anon.status).toBe(302);
+		expect(anon.headers.get('location')).toBe('/app/?github=not_signed_in');
+		const requested = await setup(ALICE, { setup_action: 'request', state });
+		expect(requested.headers.get('location')).toBe('/app/projects?github=requested');
+		expect(await boundTo(INSTALLATION_D)).toBeNull();
+	});
+
+	test('an installation already serving another workspace comes back as a plain outcome', async () => {
+		const state = await connectState(FIXTURE_SECRET, { actorId: bobUserId, workspaceId: bobWorkspaceId, returnTo: '/app/' });
+		const res = await setup(BOB, { installation_id: INSTALLATION_C, setup_action: 'install', state });
+		expect(res.status).toBe(302);
+		expect(res.headers.get('location')).toBe('/app/?github=already_bound');
+		expect(await boundTo(INSTALLATION_C)).toBe(aliceWorkspaceId);
 	});
 });
