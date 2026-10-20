@@ -269,7 +269,7 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 ## 7. Land the live fixes
 
 - [x] 7.1 Full gate. Run 2026-10-20 on the merged tree, after the merge and the
-  two integration fixes recorded in `docs/evidence/2026-10-20-kiro-integration/`:
+  integration fixes recorded in `docs/evidence/2026-10-20-kiro-integration/`:
   license audit CLEAN (25 production dependencies across 5 locations, 0
   flagged, 0 unresolved); `refresh-scaffold-lock.ts --check` OK;
   `refresh-flutter-scaffold-lock.ts --check` OK (lockfiles sha256

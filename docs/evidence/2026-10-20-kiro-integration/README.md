@@ -360,8 +360,8 @@ behavior. No request was made to the embedded production API address.
 |---|---|
 | Remote | `git@github.com-captjay98:captjay98/caddie.git` — the owner's configured SSH host alias for the existing `captjay98/caddie` repository (public) |
 | Branch | `main` → `origin/main` |
-| Commits | `afeebad` → `9af594f` (the merge) → `fe6e68a` (receipts and docs). The remote repository was empty, so this was its first push |
-| Verified | `git ls-remote --heads origin` reports `fe6e68a1ac69…` on `refs/heads/main`; the GitHub API reports the same commit |
+| Commits | `afeebad` → `9af594f` (the merge) → receipt and docs commits. The remote repository was empty, so this was its first push |
+| Verified | `git ls-remote --heads origin` reports the same commit as local `main`; the GitHub API reported the same tip after each push |
 | Not pushed | the other local branches (`feat/publish-on-cloudflare`, `feat/chat-ui-polish`, `feat/track3-flutter`, `fix/live-test-findings`) and the pre-existing untracked review document |
 | Secrets | none tracked — `.dev.vars`/`.env` are gitignored, and a scan of tracked files for credential-shaped strings found only documentation text about PEM format |
 | Deploy | none; deployment authorization stays BLOCKED as an owner decision, and phase 9.3's after-deploy journey with it |
