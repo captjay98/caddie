@@ -40,14 +40,14 @@ Recorded 2026-10-06 on branch `p15-p17-completion`, with the owner's
 |---|---|---|---|
 | P05 | Model route round-trip (Nebius) | LIVE VERIFIED | real coordinator model call, ledger `P05-live` |
 | P09 | React+Hono journey end-to-end | LIVE VERIFIED | run-journey PASS on every manifest phase (seed → install → seeded tests → build → deliberate red → repair → server-start → browser-check → artifact); `bun run test:live -- P09` 2 passed |
-| P04 | contree sandbox session + remote exec | LIVE VERIFIED | contree CLI probe with real credentials (ledger `P04-live`); the REST adapter's assumed spellings are a tracked correction |
+| P04 | contree sandbox session + remote exec | LIVE VERIFIED | `tests/live/sandbox.spec.ts` against the real Contree service — 2 tests passed, receipt `lr_31a967c50ad3de16` at `702c97cab57b` (2026-10-20); earlier contree CLI probe in ledger `P04-live` |
 | P12 | Real outbound email (Resend) | LIVE VERIFIED | exactly one send to the owner's own address; provider receipt id `01a11346-68df-7538-8dc7-ee1b593ad5ef` |
 | P01 | OAuth sign-in round trips | LIVE VERIFIED (user-performed) | owner executed real Google + GitHub sign-in against the dev origin; the machine-rerunnable probes stay gated (release-check live gates) |
 | P15a | TanStack Start template flow | LIVE VERIFIED | `tests/live/stacks/tanstack-start.spec.ts` — real `bun install` / `bun test src/` / `bun run build` in a temp dir, production server answers 200 with the SSR markers |
 | P15b | Laravel + Inertia journey | BLOCKED | `tests/live/stacks/laravel-inertia.spec.ts` gates honestly: needs `CADDIE_LIVE_AUTHORIZED=1` (composer install is a network effect) + composer/php/npm present |
 | P15c | FastAPI + React journey | BLOCKED | `tests/live/stacks/fastapi-react.spec.ts`: needs `CADDIE_LIVE_AUTHORIZED=1` + uv/python/bun present |
 | P15d | Flutter journey (APK + emulator) | LIVE VERIFIED | `tests/live/stacks/flutter.spec.ts` — real `dart caddie/setup.dart` + locked `flutter pub get` + `flutter test test/examples` + `flutter build apk --debug`, then install, launch and capture on an arm64 emulator; receipt `lr_602f8532232b3019` at `9af594f396d3` (2026-10-20), 2 tests passed. Requires `CADDIE_LIVE_AUTHORIZED=1` + flutter + adb + a booted emulator, and clears a stale differently signed install of the same app id first |
-| P17 | Hosted acceptance smoke | LIVE VERIFIED | `tests/live/release.spec.ts` against `https://caddie.jamalibrahim.dev` — 5/5 PASS, receipt `lr_1445a409fddf0a19` at build `a58adabd406a`, 2026-10-19 |
+| P17 | Hosted acceptance smoke | LIVE VERIFIED | `tests/live/release.spec.ts` against `https://caddie.jamalibrahim.dev` — 5/5 PASS, receipt `lr_f01e5b354852f7bc` at `702c97cab57b`, 2026-10-20 (previous deploy: `lr_1445a409fddf0a19` at `a58adabd406a`) |
 
 Intentionally-absent live specs stay honest holes, not fake passes:
 `tests/live/github.spec.ts` (P08) is authored only against a real registered
@@ -68,6 +68,40 @@ are closed: `tests/live/sandbox.spec.ts` (P04) and
 | Smoke | P17 live 5/5 PASS (receipt above); landing, /app shell, sign-in status, JSON 404 |
 | Sign-in round trip | LIVE VERIFIED (user-performed, 2026-10-19/20): owner signed in via GitHub and via Google against the production origin; D1 shows 1 user with two `account` rows (github ×1, google ×1 — same-email linking). GitHub's new-app trust gate blocked the consent button earlier in the day; it lifted within hours. Google client: project `airy-cortex-512223-k2`, consent screen in **Testing** with the owner as test user (publishing to In production waits on Google's branding-page completion — cosmetic while only the owner signs in). |
 | Judge access | LIVE VERIFIED: `JUDGE_ACCESS_CODE` + `JUDGE_ACCESS_UNTIL=2026-12-16` uploaded as secrets (no rebuild); `GET /api/judge/access` → `{"open":true,"canStart":true}`. Remaining: owner starts one judge account in a private window before the code is shared. |
+
+## Production deploy (2026-10-20): live fixes + Track 3
+
+Owner-authorized deploy of `main` at `702c97c`, carrying Kiro's live fixes
+(`e70e534`) and Track 3 Flutter/Android apps (`2d176fa`) on top of the
+2026-10-19 production build.
+
+| Item | Value |
+|---|---|
+| URL | https://caddie.jamalibrahim.dev |
+| Version id | `e6531a20-21ee-4138-a86e-5ca6ff14469a` |
+| Commit | `702c97c` (tree carried one untracked docs-only review file; no code outside a commit) |
+| Release gate | the 2026-10-20 integrated gate above — 1,696 unit/service tests, 43/43 applicable packets, 275 browser tests, `release-check` 0 FAIL |
+| Preflight | `bun scripts/deploy-preflight.ts` — 18 PASS, 2 WARN (reused-local Nebius/Tavily/Contree keys, still flagged for rotation; untracked docs file), 0 FAIL |
+| Dry run | `wrangler deploy --dry-run` — DB, LOADER, PREVIEW_DB and both Flue agents listed; nothing uploaded |
+| D1 | `caddie` → `f6315eae-99da-4afc-93d0-356afcd511a0`; migrations `0036_proposal_required_tech`, `0037_proposal_audience_problem`, `0038_flutter_apps`, `0039_large_content` applied remotely **before** the code (`0001–0035` were already applied) |
+| Deploy | `wrangler deploy --secrets-file .prod.vars` → Uploaded `caddie-app` (21.58 s), triggers deployed (6.48 s): custom domain + `*/5 * * * *` schedule |
+| Build identity | live `/sw.js` reports `BUILD = 'df640ece5c60'`, byte-identical to the production build composed locally |
+| Smoke | P17 live 5/5 PASS, receipt `lr_f01e5b354852f7bc` at `702c97cab57b`; landing `200`, `/app/` `200`, `/api/auth/status` → `{"authenticated":false}`, `/api/judge/access` → `{"open":true,"canStart":true}`, unknown `/api/*` → JSON `404` |
+| Judge access | unchanged (`open:true`, `canStart:true`); the same secrets were re-uploaded, no setting changed |
+
+### Live gates after the deploy
+
+| Gate | Status | What ran |
+|---|---|---|
+| P04 sandbox | **LIVE VERIFIED** | `bun run test:live -- P04` against the real Contree service — 2 tests passed, receipt `lr_31a967c50ad3de16` at `702c97cab57b` |
+| P05 model route | **LIVE VERIFIED in part** | `tests/live/hackathon-followup-routing.spec.ts` on the real Nebius model — 3/3 trials called `hackathon_details` for the card's event, no `research` call. The full coordinator round-trip (`flue-lifecycle.spec.ts`) was **not** run: it needs a signed-in session cookie, which only the owner's browser can produce. No P05 receipt was written. |
+| P01 OAuth | **LIVE VERIFIED in part** | both provider handoffs answer `200` from the production origin and redirect with the production callback — GitHub → `github.com`, `redirect_uri=https://caddie.jamalibrahim.dev/api/auth/callback/github`, scopes `read:user user:email`; Google → `accounts.google.com`, `redirect_uri=…/api/auth/callback/google`, scopes `email profile openid`. The consent + callback leg remains owner-performed. |
+| P10 retrieval | **LIVE VERIFIED in part** | `fetchWithPolicy('https://example.com/')` with the Worker's own policy and `CADDIE_LIVE_AUTHORIZED=1` → `200 text/html`; `tavilySearch` with the production key → 2 ranked results. The route-level capture needs a signed-in project scope, so no P10 receipt exists. |
+
+`release-check` still reports P01/P05/P10 PROVISIONED: the machine gate only
+counts a recorded receipt for a packet with mapped live specs, and P01, P05
+(the full round-trip) and P10 need an interactive owner sign-in. P04 is now
+PASS from its receipt.
 
 ## Verification net (S01, 2026-10-18)
 
@@ -169,8 +203,9 @@ parsed it at all. That fix has not run on GitHub (there is no remote yet).
 
 Recorded on `main` after merging `fix/live-test-findings` (`e70e534`) and
 `feat/track3-flutter` (`2d176fa`), keeping the two earlier chat-limit and
-idle-project fixes. Nothing deploys; the only paid run is the phase 9.2 sandbox
-probe the owner approved. Per-defect reproductions live in
+idle-project fixes. This gate ran before any deploy; the owner then authorized
+the production deploy recorded above. The only paid run in the gate itself is
+the phase 9.2 sandbox probe the owner approved. Per-defect reproductions live in
 `docs/evidence/2026-10-20-kiro-integration/README.md`.
 
 | Check | Classification | Receipt |

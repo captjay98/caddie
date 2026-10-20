@@ -1,5 +1,19 @@
 [
 	{
+		"packet": "P04",
+		"files": [
+			"tests/live/sandbox.spec.ts"
+		],
+		"passed": 2,
+		"at": "2026-10-20T10:34:23.188Z",
+		"id": "lr_31a967c50ad3de16",
+		"commit": "702c97cab57b0893c262b646453d957dcf4ce504",
+		"dirty": false,
+		"specDigest": "6c36ded8b3537572fed1d8648a34415350ca3e5e97d577bff954b6d58e4d355e",
+		"target": "local",
+		"runtime": "bun 1.4.0"
+	},
+	{
 		"packet": "P15d",
 		"files": [
 			"tests/live/stacks/flutter.spec.ts"
@@ -19,9 +33,9 @@
 			"tests/live/release.spec.ts"
 		],
 		"passed": 5,
-		"at": "2026-10-19T21:19:47.408Z",
-		"id": "lr_1445a409fddf0a19",
-		"commit": "a58adabd406a0e3ab66da677db6ea2abbcd65569",
+		"at": "2026-10-20T10:33:23.379Z",
+		"id": "lr_f01e5b354852f7bc",
+		"commit": "702c97cab57b0893c262b646453d957dcf4ce504",
 		"dirty": false,
 		"specDigest": "bea6d75b94f713b8b55793bd874c04a5910d17a42a6124a7bd05b96d862497d9",
 		"target": "https://caddie.jamalibrahim.dev",

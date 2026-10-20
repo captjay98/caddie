@@ -364,13 +364,39 @@ behavior. No request was made to the embedded production API address.
 | Verified | `git ls-remote --heads origin` reports the same commit as local `main`; the GitHub API reported the same tip after each push |
 | Not pushed | the other local branches (`feat/publish-on-cloudflare`, `feat/chat-ui-polish`, `feat/track3-flutter`, `fix/live-test-findings`) and the pre-existing untracked review document |
 | Secrets | none tracked — `.dev.vars`/`.env` are gitignored, and a scan of tracked files for credential-shaped strings found only documentation text about PEM format |
-| Deploy | none; deployment authorization stays BLOCKED as an owner decision, and phase 9.3's after-deploy journey with it |
+| Deploy | authorized by the owner after this push and performed the same day — see "Production deploy" below |
+
+## Production deploy (2026-10-20)
+
+The owner authorized the deploy after the gate above and the push. It ran from
+`main` at `702c97c` in the documented order: production build → preflight →
+dry run → remote migrations → deploy → smoke.
+
+| Item | Value |
+|---|---|
+| Version id | `e6531a20-21ee-4138-a86e-5ca6ff14469a` |
+| Commit | `702c97c` |
+| Preflight | 18 PASS, 2 WARN (reused-local Nebius/Tavily/Contree keys, unchanged from 2026-10-19; untracked docs file), 0 FAIL |
+| Migrations | `0036`–`0039` applied remotely before the code; `0001`–`0035` were already applied |
+| Build identity | live `/sw.js` reports `BUILD = 'df640ece5c60'`, matching the local production build |
+| Smoke | P17 5/5 PASS, receipt `lr_f01e5b354852f7bc` at `702c97cab57b`; landing `/app` and JSON 404 all behave |
+| Judge access | unchanged and open (`{"open":true,"canStart":true}`) |
+
+Live gates re-run after the deploy:
+
+| Gate | Result |
+|---|---|
+| P04 | `bun run test:live -- P04` against real Contree — 2 tests passed, receipt `lr_31a967c50ad3de16`; now PASS in `release-check` |
+| P05 | hackathon follow-up routing on the real Nebius model — 3/3 trials called `hackathon_details`, none called `research`. Full coordinator round-trip not run (needs a signed-in session cookie); no receipt |
+| P01 | both OAuth handoffs from production return `200` with the production callback URIs and scopes; consent + callback still owner-performed |
+| P10 | `fetchWithPolicy` on `https://example.com/` → `200 text/html` under the Worker's policy; `tavilySearch` → 2 ranked results. Route-level capture needs a signed-in project; no receipt |
 
 ## Remaining proof boundaries
 
-- No deployment took place. Phase 9.3's **after-deploy** real chat → plan → build
-  walkthrough remains **BLOCKED** on deploying the integrated SHA and then
-  exercising that version. Historical live receipts do not establish this SHA.
+- The deploy happened, but phase 9.3's **after-deploy** real chat → plan → build
+  walkthrough is still **BLOCKED**: it needs the owner to sign in to the newly
+  deployed origin (OAuth consent is interactive), then drive one real journey.
+  The deploy itself is LIVE VERIFIED by the P17 receipt above.
 - Fixture browser workflows and local HTTP provider stubs prove UI/state/governance
   behavior, not real model planning quality, provider authorization or hosted
   publication. They are explicitly **SIMULATED** at those boundaries.
@@ -387,6 +413,8 @@ behavior. No request was made to the embedded production API address.
 - Flutter packages support arm64 Android and have a 64 MB storage bound. The
   default untagged Flutter sandbox image may expire around 2027-04-17; rebuild
   and override it before relying on it then.
-- No deployment, paid model call, purchase, provider publishing or new remote was
-  performed. Existing origin was changed only to the owner's configured SSH host
-  alias, `github.com-captjay98`, retaining `captjay98/caddie.git`.
+- No purchase, provider publishing or new remote was performed. The deploy and
+  the small paid live probes after it (one Contree sequence, three Nebius
+  routing trials, one Tavily search) were owner-authorized. Existing origin was
+  changed only to the owner's configured SSH host alias,
+  `github.com-captjay98`, retaining `captjay98/caddie.git`.
