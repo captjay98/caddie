@@ -47,7 +47,7 @@ Recorded 2026-10-06 on branch `p15-p17-completion`, with the owner's
 | P15b | Laravel + Inertia journey | BLOCKED | `tests/live/stacks/laravel-inertia.spec.ts` gates honestly: needs `CADDIE_LIVE_AUTHORIZED=1` (composer install is a network effect) + composer/php/npm present |
 | P15c | FastAPI + React journey | BLOCKED | `tests/live/stacks/fastapi-react.spec.ts`: needs `CADDIE_LIVE_AUTHORIZED=1` + uv/python/bun present |
 | P15d | Flutter journey (APK + emulator) | LIVE VERIFIED | `tests/live/stacks/flutter.spec.ts` — real `dart caddie/setup.dart` + locked `flutter pub get` + `flutter test test/examples` + `flutter build apk --debug`, then install, launch and capture on an arm64 emulator; receipt `lr_602f8532232b3019` at `9af594f396d3` (2026-10-20), 2 tests passed. Requires `CADDIE_LIVE_AUTHORIZED=1` + flutter + adb + a booted emulator, and clears a stale differently signed install of the same app id first |
-| P17 | Hosted acceptance smoke | LIVE VERIFIED | `tests/live/release.spec.ts` against `https://caddie.jamalibrahim.dev` — 5/5 PASS, receipt `lr_b843dd88b83598df` at `4fdaf26d270c`, 2026-10-20 (previous deploys: `lr_f01e5b354852f7bc` at `702c97cab57b`, `lr_1445a409fddf0a19` at `a58adabd406a`) |
+| P17 | Hosted acceptance smoke | LIVE VERIFIED | `tests/live/release.spec.ts` against `https://caddie.jamalibrahim.dev` — 5/5 PASS, receipt `lr_7242764b97c16f1e` at `ba35e4896bd2`, 2026-10-20 (previous deploys: `lr_b843dd88b83598df` at `4fdaf26d270c`, `lr_f01e5b354852f7bc` at `702c97cab57b`, `lr_1445a409fddf0a19` at `a58adabd406a`) |
 
 Intentionally-absent live specs stay honest holes, not fake passes:
 `tests/live/github.spec.ts` (P08) is authored only against a real registered
@@ -134,6 +134,32 @@ build` selects `env.production` correctly). Preflight refused it with
 "apps/app/dist is not the production build"; the deploy ran only after a
 rebuild that carried the production D1 id and route. No version was uploaded
 from the local-dev config.
+
+## Production deploy (2026-10-20, third): demo contract gate
+
+Owner-directed quality work: a PRD is now refused at save time unless it carries
+a judge-facing `## Demo contract` (one-line pitch, at least three numbered demo
+steps, the real integration and its call path, every mock, and why the entry
+wins). This is the deterministic answer to FarmLog AI: a comprehensive PRD that
+still planned a toy.
+
+| Item | Value |
+|---|---|
+| URL | https://caddie.jamalibrahim.dev |
+| Version id | `8d021f51-b6ef-4264-85e5-2ad403710911` |
+| Commit | `ba35e48` |
+| Release gate | typecheck clean; 1,707 unit/service tests, 0 fail (129 files); packet BUILD 11/11 and NET pass; `release-check` 0 FAIL |
+| Build | production `apps/app/dist` (D1 `f6315eae…`, production route); composed assets, 0 collisions |
+| Preflight | 18 PASS, 2 WARN (same reused keys; untracked docs file), 0 FAIL |
+| D1 | no new migrations (`0039` is current) |
+| Deploy | `wrangler deploy --secrets-file .prod.vars` (account id explicit) |
+| Smoke | P17 live 5/5 PASS, receipt `lr_7242764b97c16f1e` at `ba35e4896bd2` |
+| Behavior | `write_plan_note kind:'prd'` throws `DEMO_CONTRACT_INVALID` before a revision exists when the contract is missing, thin, or names a mock as the real integration; existing projects keep their approved PRDs and feature lists |
+
+The gate is prompt-plus-boundary, not prompt-only: the coordinator, the
+product/tech-lead specialists and the planning skill all carry the contract
+template, and `packages/contracts/src/demo-contract.ts` enforces it in the host
+with 7 tests. The next real build is the calibration run.
 
 ## Verification net (S01, 2026-10-18)
 
