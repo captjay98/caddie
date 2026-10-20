@@ -13,7 +13,7 @@ import {
 	isProtectedPath,
 	isShellTestCommand,
 } from '../apps/app/src/agents/permissions';
-import { BUILD_RECIPE_INSTRUCTION, SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
+import { BUILD_RECIPE_INSTRUCTION, PLATFORM_AI_RULE, SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
 import { CADDIE_SCRATCH_DIR } from '../apps/app/src/server/source-export.ts';
 import { findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
 import {
@@ -752,4 +752,26 @@ test('Flue cancellation reaches specialist execution and QA verification', async
   await (verify as unknown as RawTool).run({data:{},toolCallId:'qa-id',signal:controller.signal});
   expect(executionSignal).toBe(controller.signal);
   expect(verificationSignal).toBe(controller.signal);
+});
+
+describe("plans use the app's built-in AI (plan 4.1)", () => {
+	// Before plan 4.1 neither the coordinator nor the planners were told that a
+	// built app's AI is Caddie's own c.env.CADDIE.ai(...).
+	test('one rule names the platform AI and rules out Ollama, local models and AI keys', () => {
+		for (const fact of ['c.env.CADDIE.ai(', 'NVIDIA Nemotron', 'Nebius Token Factory', 'no AI key']) expect(PLATFORM_AI_RULE).toContain(fact);
+		for (const banned of ['Ollama', 'a local or self-hosted model', 'a third-party AI key']) expect(PLATFORM_AI_RULE).toContain(banned);
+	});
+
+	test('the planners and the coordinator (Home proposals and project PRDs alike) are given it', () => {
+		expect(SPECIALIST_INSTRUCTIONS.product).toContain(PLATFORM_AI_RULE);
+		expect(SPECIALIST_INSTRUCTIONS['tech-lead']).toContain(PLATFORM_AI_RULE);
+		const coordinator = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
+		const shared = coordinator.indexOf('useInstruction(HACKATHON_IDEATION_INSTRUCTION);');
+		const rule = coordinator.indexOf('useInstruction(PLATFORM_AI_RULE);');
+		const homeOnly = coordinator.indexOf('Your final role is Home intake');
+		expect(shared).toBeGreaterThan(0);
+		// In the instructions every conversation gets, after the shared ones and before the Home/project split.
+		expect(rule).toBeGreaterThan(shared);
+		expect(rule).toBeLessThan(homeOnly);
+	});
 });

@@ -38,6 +38,7 @@ import { coordinatorModelRole, findModelRouteForRole, IDEATION_TURN_WINDOW } fro
 import { COORDINATOR_DURABILITY } from "./permissions.ts";
 import { makeListStacks, makeVerifyBuild, makeUpdateProfile, makeRememberFact, makeInspectRepository, makeWritePlanNote, makeReadProjectContext } from "./tools.ts";
 import {
+  PLATFORM_AI_RULE,
   buildSpecialistDeclarations,
   type SpecialistBuildContext,
 } from "./specialists.ts";
@@ -537,6 +538,7 @@ export function Coordinator({ id }: AgentProps) {
   useInstruction(HACKATHON_HONESTY_INSTRUCTION);
   useInstruction(HACKATHON_FOLLOWUPS_INSTRUCTION);
   useInstruction(HACKATHON_IDEATION_INSTRUCTION);
+  useInstruction(PLATFORM_AI_RULE);
   if (context.homeOverview) {
     useInstruction("Your final role is Home intake and handoff. You MUST use continue_project for requested work on a named existing project, passing the full request to its actual id in Home context. That project's coordinator has frontend, QA and the sandbox. You do not execute specialist work here and MUST NOT report those tools as unavailable. If the user asks for technical repairs, forward those requirements intact to the project coordinator; do not evaluate local Home tools as project capabilities.");
   } else {

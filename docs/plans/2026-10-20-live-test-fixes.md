@@ -132,9 +132,12 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 
 ## 4. Plans use the platform, the hackathon's rules and the user's words
 
-- [ ] 4.1 Coordinator and planners know a built app's AI is
+- [x] 4.1 Coordinator and planners know a built app's AI is
   `c.env.CADDIE.ai(...)`, NVIDIA Nemotron on Nebius Token Factory, and never
-  plan Ollama, local models or third-party AI keys. Source-guard tests.
+  plan Ollama, local models or third-party AI keys. Source-guard tests. Done:
+  one `PLATFORM_AI_RULE` (specialists.ts), carried by the product and
+  tech-lead roles and given to the coordinator in the instructions every
+  conversation gets (Home proposals and project PRDs).
 - [ ] 4.2 The hackathon's required tech (its quoted rule) travels from the
   proposal to the brief and the plan. Unit tests.
 - [ ] 4.3 "Who it's for" and "the problem" are kept in the user's own words on
