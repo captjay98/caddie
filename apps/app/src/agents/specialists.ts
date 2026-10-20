@@ -114,7 +114,7 @@ export const BUILD_RECIPE_INSTRUCTION =
  * proposals and project PRDs say the same thing.
  */
 export const PLATFORM_AI_RULE =
-	"PLATFORM AI: an app Caddie builds gets its AI from Caddie. Its server calls c.env.CADDIE.ai({ messages, json?, tier? }), which runs NVIDIA Nemotron on Nebius Token Factory and is paid by Caddie, so there is no AI key to ask for. Plan every AI feature (summarise, suggest, answer, sort or pull facts from text) on it. Never plan Ollama, a local or self-hosted model, a model download, or a third-party AI key (OpenAI, Anthropic, Gemini, Hugging Face).";
+	"PLATFORM AI: an app Caddie builds gets its AI from Caddie. Its server calls c.env.CADDIE.ai({ messages, json?, tier? }), which runs NVIDIA Nemotron on Nebius Token Factory and is paid by Caddie, so there is no AI key to ask for. Plan every AI feature (summarise, suggest, answer, sort or pull facts from text) on it. Two tiers: the demo's core-value call (the ranking, diagnosis or generation a judge watches and thinks about) runs on tier:\"super\" — deep reasoning, ~3.75x cost, a longer wait is fine there; everything else (background checks, parsing, short autocomplete, bulk work) runs on the default fast tier. Name the tier in the PRD's call path so the builder writes it. Never plan Ollama, a local or self-hosted model, a model download, or a third-party AI key (OpenAI, Anthropic, Gemini, Hugging Face).";
 
 /**
  * The Flutter build recipe (Track 3): an Android app, also previewed in the

@@ -76,8 +76,10 @@ than omitting one):
    2. the core value happening in front of them
    3. the result they can see and check
    **Real integration:** the model or service the core value depends on, the
-   exact call path, and what the judge sees it do. "None" is allowed only with
-   a reason the app is still real.
+   exact call path, and what the judge sees it do; when that call is
+   `c.env.CADDIE.ai`, name the tier it waits on (`"fast"` or `"super"` — super
+   is the deeper one, ~3.75x cost, for the call a judge watches). "None" is
+   allowed only with a reason the app is still real.
    **Mocks:** every mocked thing and why it does not carry the demo; "None"
    when nothing is mocked.
    **Why this wins:** the hard part, and why a generic CRUD entry would lose.

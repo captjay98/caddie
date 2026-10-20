@@ -14,7 +14,7 @@ const CONTRACT = `## Demo contract
 1. Say "cow 14 is limping and off feed" on the record screen.
 2. The AI returns three ranked causes with the evidence it used.
 3. Reload the page; the case is still in the herd timeline.
-**Real integration:** Caddie's AI (\`c.env.CADDIE.ai\` in \`src/server.ts\`) receives the note plus the animal's recent logs and returns ranked causes.
+**Real integration:** Caddie's AI (\`c.env.CADDIE.ai\` in \`src/server.ts\`, tier "super") receives the note plus the animal's recent logs and returns ranked causes.
 **Mocks:** None.
 **Why this wins:** It turns a speech note into a triage decision a vet can check, instead of another CRUD log.`;
 
@@ -70,13 +70,35 @@ describe('demo contract', () => {
 	test('a mock cannot be the real integration', () => {
 		const result = parseDemoContract(
 			CONTRACT.replace(
-				'**Real integration:** Caddie\'s AI (`c.env.CADDIE.ai` in `src/server.ts`) receives the note plus the animal\'s recent logs and returns ranked causes.',
+				'**Real integration:** Caddie\'s AI (`c.env.CADDIE.ai` in `src/server.ts`, tier "super") receives the note plus the animal\'s recent logs and returns ranked causes.',
 				'**Real integration:** A mock AI JSON file with canned diagnoses.',
 			),
 		);
 		expect(result.ok).toBe(false);
 		if (result.ok) return;
 		expect(result.error).toContain('cannot be a mock');
+	});
+
+	test("Caddie's AI without a named tier is refused — the planner must pick fast or super", () => {
+		const result = parseDemoContract(
+			CONTRACT.replace('(`c.env.CADDIE.ai` in `src/server.ts`, tier "super")', '(`c.env.CADDIE.ai` in `src/server.ts`)'),
+		);
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.error).toContain('no tier');
+		expect(result.error).toContain('"fast"');
+		expect(result.error).toContain('"super"');
+	});
+
+	test('a "None" integration with a real reason passes without a tier', () => {
+		const localReal = CONTRACT.replace(
+			'**Real integration:** Caddie\'s AI (`c.env.CADDIE.ai` in `src/server.ts`, tier "super") receives the note plus the animal\'s recent logs and returns ranked causes.',
+			'**Real integration:** None — SQLite persistence and local math carry the demo; no outside service does.',
+		);
+		const result = parseDemoContract(localReal);
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		expect(result.contract.integration).toContain('No outside service');
 	});
 
 	test('placeholders are refused', () => {

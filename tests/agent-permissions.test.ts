@@ -762,6 +762,15 @@ describe("plans use the app's built-in AI (plan 4.1)", () => {
 		for (const banned of ['Ollama', 'a local or self-hosted model', 'a third-party AI key']) expect(PLATFORM_AI_RULE).toContain(banned);
 	});
 
+	test('the rule names both supported tiers and when each applies', () => {
+		// Both tiers, with the demo's core call on the deep one — never the
+		// Lightning default by omission (tier guidance added after HerdVoice's
+		// planner left every call on the default tier, 2026-10-20).
+		expect(PLATFORM_AI_RULE).toContain('tier:"super"');
+		expect(PLATFORM_AI_RULE).toContain('default fast tier');
+		expect(PLATFORM_AI_RULE).toContain('Name the tier in the PRD');
+	});
+
 	test('the planners and the coordinator (Home proposals and project PRDs alike) are given it', () => {
 		expect(SPECIALIST_INSTRUCTIONS.product).toContain(PLATFORM_AI_RULE);
 		expect(SPECIALIST_INSTRUCTIONS['tech-lead']).toContain(PLATFORM_AI_RULE);

@@ -25,7 +25,7 @@ export const DEMO_CONTRACT_GUIDE =
 	'1. the first thing the judge does, with real input\n' +
 	'2. the core value happening in front of them\n' +
 	'3. the result they can see and check (at least 3 numbered steps)\n' +
-	'**Real integration:** the model or service the core value depends on, the exact call path, and what the judge sees it do. "None" is allowed only with a reason the app is still real.\n' +
+	'**Real integration:** the model or service the core value depends on, the exact call path, and what the judge sees it do; when that call is c.env.CADDIE.ai, name the tier it waits on ("fast" or "super" — super is the deeper one, ~3.75x cost, for the call a judge watches). "None" is allowed only with a reason the app is still real.\n' +
 	'**Mocks:** every mocked thing and why it does not carry the demo; "None" when nothing is mocked.\n' +
 	'**Why this wins:** the hard part and why a generic CRUD entry would lose.';
 
@@ -171,6 +171,19 @@ export function parseDemoContract(body: string): DemoContractResult {
 		return {
 			ok: false,
 			error: `"Real integration:" cannot be a mock — name the service the core value depends on, or write "None" plus why the app is still real. ${DEMO_CONTRACT_GUIDE}`,
+		};
+	}
+
+	// The tier is a judge-facing decision, not an implementation detail: the core
+	// call a person watches must wait on the depth it needs. When the integration
+	// names Caddie's AI but no tier, the planner has left the default (fast)
+	// silently in force — refuse with the two-tier contract.
+	if (/c\.env\.CADDIE\.ai|caddie'?s?\s+ai|nebius/i.test(integration) && !/\b(?:fast|super)\b/i.test(integration)) {
+		return {
+			ok: false,
+			error:
+				'"Real integration:" names Caddie\'s AI but no tier — say which tier that call waits on: "fast" (cheap, quick, default) or "super" (deeper reasoning, ~3.75x cost, for the core call a judge watches). ' +
+				DEMO_CONTRACT_GUIDE,
 		};
 	}
 
