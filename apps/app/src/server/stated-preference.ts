@@ -100,3 +100,35 @@ export async function captureStatedPreferences(
 	}
 	return proposed;
 }
+
+/** One memory waiting for the person's OK, as the chat offers it. */
+export interface MemoryOffer {
+	readonly id: string;
+	readonly content: string;
+}
+
+/**
+ * What the chat offers to remember (plan 6.2): the person's own proposals
+ * that came from this project's chats (what they stated, `stated:<runId>`,
+ * and what Caddie proposed with remember, `<runId>`) while they still wait.
+ * Remembered or declined, an offer is gone. Only the person's own runs and
+ * facts are read, so nobody else's ever appear.
+ */
+export async function memoryOffers(db: D1Database, actorId: string, projectId: string): Promise<MemoryOffer[]> {
+	const rows = await db
+		.prepare(
+			`select f."id", f."content" from "memory_facts" f
+			  where f."userId" = ? and f."status" = 'proposed'
+			    and f."sourceRunId" in (
+			      select r."runId" from "run_bindings" r where r."projectId" = ? and r."createdBy" = ?
+			      union all
+			      select ? || r."runId" from "run_bindings" r where r."projectId" = ? and r."createdBy" = ?)
+			  order by f."createdAt" asc, f."id" asc`,
+		)
+		.bind(actorId, projectId, actorId, STATED_SOURCE_PREFIX, projectId, actorId)
+		.all();
+	return ((rows.results ?? []) as { id: string; content: string }[]).map((row) => ({
+		id: String(row.id),
+		content: String(row.content),
+	}));
+}

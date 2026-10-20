@@ -2,12 +2,16 @@ import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { describe, expect, test } from "bun:test";
 import type { D1Database } from "../apps/app/src/server/auth.ts";
-import { listMemoryFacts, memoryForInjection, retractMemoryFact } from "../apps/app/src/server/memory.ts";
+import { confirmMemoryFact, listMemoryFacts, memoryForInjection, proposeMemoryFact, retractMemoryFact } from "../apps/app/src/server/memory.ts";
 import {
   STATED_SOURCE_PREFIX,
   captureStatedPreferences,
+  memoryOffers,
   statedPreferences,
 } from "../apps/app/src/server/stated-preference.ts";
+import { ensureHomeProject } from "../apps/app/src/server/projects.ts";
+import { projectScopeForUser } from "../apps/app/src/server/scope.ts";
+import { createRun } from "../apps/app/src/server/runs.ts";
 import { allMigrationPaths } from "./fixtures/migrations.ts";
 import { splitSqlStatements } from "./fixtures/controls-harness.ts";
 
@@ -108,5 +112,50 @@ describe("a lasting preference the person states is offered to remember (plan 6.
     const branch = runs.slice(runs.indexOf("if (!fromServer) {"), runs.indexOf("await next();", runs.indexOf("if (!fromServer) {")));
     expect(branch).toContain("captureStatedPreferences(");
     expect(branch).toContain("catch");
+  });
+});
+
+describe("the chat offers what is waiting for the person's OK (plan 6.2)", () => {
+  test("a project's offers are the person's own proposals from that project's chats, while they wait", async () => {
+    const db = world();
+    const home = await ensureHomeProject(db, "alice");
+    const run = await createRun(db, await projectScopeForUser(db, "alice", home.id), {
+      modelRouteId: "nemotron-3-super",
+      payerId: "alice",
+      conversationId: "conv-offers",
+    });
+    // What the person stated, and what Caddie itself proposed with remember.
+    await captureStatedPreferences(db, { actorId: "alice", runId: run.runId }, { kind: "user", body: "Always use TypeScript." });
+    await proposeMemoryFact(db, "alice", { kind: "fact", content: "Builds apps for goat farmers", sourceRunId: run.runId });
+    // Proposals from outside this project's chats are not offered here.
+    await proposeMemoryFact(db, "alice", { kind: "fact", content: "From an import", sourceRunId: "import:abc" });
+    const offers = await memoryOffers(db, "alice", home.id);
+    expect(offers.map((o) => o.content)).toEqual(["Always use TypeScript.", "Builds apps for goat farmers"]);
+    expect(Object.keys(offers[0]!).sort()).toEqual(["content", "id"]);
+
+    // Remembered or declined, an offer stops waiting.
+    await confirmMemoryFact(db, "alice", offers[0]!.id);
+    await retractMemoryFact(db, "alice", offers[1]!.id);
+    expect(await memoryOffers(db, "alice", home.id)).toEqual([]);
+  });
+
+  test("another person never sees them", async () => {
+    const db = world();
+    const home = await ensureHomeProject(db, "alice");
+    const run = await createRun(db, await projectScopeForUser(db, "alice", home.id), {
+      modelRouteId: "nemotron-3-super",
+      payerId: "alice",
+      conversationId: "conv-private",
+    });
+    await captureStatedPreferences(db, { actorId: "alice", runId: run.runId }, { kind: "user", body: "Never use emojis." });
+    expect(await memoryOffers(db, "mallory", home.id)).toEqual([]);
+    expect((await memoryOffers(db, "alice", home.id)).map((o) => o.content)).toEqual(["Never use emojis."]);
+  });
+
+  test("the offers route answers only for the signed-in person", () => {
+    const profile = readFileSync(new URL("../apps/app/src/server/routes/profile.ts", import.meta.url), "utf8");
+    const route = profile.slice(profile.indexOf("router.get('/memory/offers'"));
+    expect(route.slice(0, 400)).toContain("requireSessionActorId(");
+    expect(route.slice(0, 400)).toContain("memoryOffers(c.env.DB, actorId,");
   });
 });
