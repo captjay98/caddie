@@ -116,3 +116,31 @@ describe('project proposals: Caddie proposes, the user creates', () => {
 		} finally { w.sqlite.close(); }
 	});
 });
+
+describe('only the Start button starts a new project (live finding, 2026-10-20)', () => {
+	// Live, a build began after the owner typed "start it" and could not see a
+	// card. Read every path that starts a project: none may skip the card.
+	const read = (path: string) => readFileSync(new URL(`../apps/app/src/${path}`, import.meta.url), 'utf8');
+
+	test('no chat tool can start a project: create_project is not mounted and startProject is never called', () => {
+		const coordinator = read('agents/coordinator.ts');
+		expect(coordinator).not.toContain('makeCreateProject');
+		expect(coordinator).not.toMatch(/authority\.startProject\(|\.startProject\(\{/);
+		expect(read('agents/host-context.ts')).not.toMatch(/startProject\(input\)[^\n]*\n[^\n]*useTool/);
+	});
+
+	test('acceptProposal runs only from its authenticated route, and the client calls that route only from the Start buttons', () => {
+		const callers = ['server/routes/build-workflow.ts', 'server/coordinator-host.ts', 'agents/coordinator.ts', 'agents/host-context.ts', 'agents/tools.ts']
+			.filter((path) => /acceptProposal\(/.test(read(path)));
+		expect(callers).toEqual(['server/routes/build-workflow.ts']);
+		const card = read('client/conversation/ProjectProposalCard.tsx');
+		expect(card.match(/act\('accept'\)/g)?.length).toBe(2); // "Start this project" and "Start it anyway"
+		expect(card).not.toContain('useEffect(() => { void act(');
+	});
+
+	test('a home chat message is only ever routed to an EXISTING project, by name, with an explicit continue verb', () => {
+		const host = read('server/coordinator-host.ts');
+		expect(host).toContain('(?:continue|resume|retry|finish|fix|repair)');
+		expect(/(?:continue\|resume\|retry\|finish\|fix\|repair)/.test('start it')).toBe(false);
+	});
+});

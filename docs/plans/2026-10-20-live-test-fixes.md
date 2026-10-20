@@ -67,8 +67,13 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   hygiene hides it, the turn says so with "Ask Caddie to try again", and the
   coordinator is told never to do it. Flue 2.2.2 has no hook that can read or
   rewrite a reply's text, so the server cannot run the tool from it.
-- [ ] 2.5 Find how "start it" started a build without the button; if it skips
-  the user's confirmation, close it. Test.
+- [x] 2.5 Find how "start it" started a build without the button; if it skips
+  the user's confirmation, close it. Test. Found: nothing skips it. A new
+  project starts only through `acceptProposal`, called only by its
+  authenticated route, which only the card's two Start buttons call; no chat
+  tool can start one, and Home routes only "continue/resume/… <name>" to an
+  existing project. So the build began from a click on a real card that
+  rendered (an accepted card shows as the build card). Guard tests pin this.
 
 ## 3. Build status from one record
 
