@@ -12,6 +12,7 @@ import { useProjectRepo, useSourceSave, type ProjectRepoView, type SourceSaveVie
 import { Icon } from "../icons.tsx";
 import { InteractivePreview } from "../artifacts/InteractivePreview.tsx";
 import { DesignMockPreview } from "../artifacts/DesignMockPreview.tsx";
+import { ReplyText } from "./ReplyText.tsx";
 import { BuildProgress } from "../project/BuildProgress.tsx";
 import { PlanFeatureList, SavedFeatures } from "../project/FeatureChecklist.tsx";
 import { AppKeys } from "../project/AppKeys.tsx";
@@ -487,7 +488,7 @@ export function ProjectWorkflow({
           {latestMessage.parts
             .filter((p) => p.type === "text")
             .map((p, i) =>
-              p.type === "text" ? <Markdown key={i} text={p.text} /> : null,
+              p.type === "text" ? <ReplyText key={i} text={p.text} streaming={p.state === "streaming"} /> : null,
             )}
         </details>
       ) : null}

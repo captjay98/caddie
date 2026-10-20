@@ -13,13 +13,13 @@ import { metaParts } from './hackathon-format.ts';
 import { ApprovalCardData, ApprovalCardView } from './ApprovalCard.tsx';
 import { ProjectProposalCard, ProjectProposalData } from './ProjectProposalCard.tsx';
 import { GuidedStepsCardData, GuidedStepsCardView } from './GuidedStepsCard.tsx';
-import { Markdown } from '@caddie/ui/Markdown';
 import { StatePanel } from '../states.tsx';
 import { Icon } from '../icons.tsx';
 import { DecisionCardView } from '../brief/DecisionCard.tsx';
 import { Composer } from './Composer.tsx';
 import type { ChannelDraft, ChannelSource } from './channel-store.ts';
 import { cleanAssistantText, sanitizeAssistantText } from './response-hygiene.ts';
+import { ReplyText } from './ReplyText.tsx';
 
 /** What a turn may do from inside the transcript. The rows are memoized, so
  *  the action travels by context instead of props. */
@@ -286,9 +286,9 @@ function TurnReasoning({ parts }: { parts: readonly ReasoningPart[] }): ReactEle
 function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement | null {
 	if (part.type === 'text') {
 		// R04 hygiene: strip reasoning tags / raw svg / serialization fragments /
-		// empty placeholder chains that leak INSIDE a text part before Markdown.
-		const clean = cleanAssistantText(part.text);
-		return clean ? <Markdown text={clean} /> : null;
+		// empty placeholder chains that leak INSIDE a text part before Markdown;
+		// a design mockup in it is drawn in the preview frame (plan 4.5).
+		return <ReplyText text={part.text} streaming={part.state === 'streaming'} />;
 	}
 		if (part.type === 'reasoning') {
 			// Reasoning is hoisted to the TURN level (TurnReasoning) so every pass

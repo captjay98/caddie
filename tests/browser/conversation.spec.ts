@@ -214,6 +214,57 @@ test.describe('U04 — unsent messages and restored drafts (v2 §3.6)', () => {
 		await expect(answer.locator('.md-body p')).toHaveText(['The Nebius x NVIDIA Global AI Hackathon is open to you.']);
 		await context.close();
 	});
+	test('mockups in a reply are drawn in the preview frame, a half-written one says so, and no raw HTML shows (plan 4.5)', async ({ browser }) => {
+		const OFFSET = '0000000000000000_0000000000000001';
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		await context.route('**/api/projects/proj_conversation/run-bindings', (route) =>
+			json(route, 200, {
+				runBindings: [{
+					runId: 'run-mock', projectId: 'proj_conversation', conversationId: 'conv-mock', submissionId: 's', planRevision: 'rev-0',
+					stackId: 'react-hono', payerId: 'actor-test', modelRouteId: 'route', pricingVersion: 'v1', createdBy: 'actor-test', createdAt: '2026-10-20T00:00:00.000Z',
+				}],
+			}),
+		);
+		const screen = '<main class="screen">\n  <h1>Herd today</h1>\n  <p>3 goats need a look</p>\n</main>';
+		const done = {
+			id: 'm-mock', role: 'assistant', purpose: 'assistant', display: 'visible', timestamp: '2026-10-20T00:00:00.000Z',
+			parts: [{
+				type: 'text', state: 'done',
+				text: `Here is the home screen.\n\n${screen}\n\nAnd when nothing is logged yet:\n\n\`\`\`html-mock Home · empty\n<main><p>No animals yet</p></main>\n\`\`\`\n\nTell me what to change.`,
+			}],
+		};
+		const writing = {
+			id: 'm-mock-2', role: 'assistant', purpose: 'assistant', display: 'visible', timestamp: '2026-10-20T00:00:01.000Z',
+			parts: [{ type: 'text', state: 'streaming', text: 'One more screen.\n\n```html-mock Add entry\n<main><h1>New ent' }],
+		};
+		await context.route('**/agents/coordinator/**', async (route) => {
+			const url = new URL(route.request().url());
+			if (url.searchParams.get('view') === 'updates') {
+				return route.fulfill({ contentType: 'text/event-stream', body: `event: control\ndata: {"streamNextOffset":"${OFFSET}","upToDate":true}\n\n` });
+			}
+			return route.fulfill({
+				contentType: 'application/json',
+				headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' },
+				body: JSON.stringify({ v: 1, conversationId: 'conv-mock', offset: OFFSET, messages: [done, writing], settlements: [] }),
+			});
+		});
+		const page = await context.newPage();
+		await openProjectPage(page);
+
+		const transcript = page.getByTestId('channel-transcript');
+		const preview = transcript.getByTestId('design-mock-preview');
+		await expect(preview).toHaveCount(1);
+		await expect(preview.getByTestId('design-mock-screens').getByRole('button')).toHaveText(['Screen 1', 'Home · empty']);
+		await expect(preview.getByTestId('design-mock-frame').locator('iframe')).toHaveAttribute('srcdoc', /script-src 'none'/);
+		await expect(preview.getByTestId('design-mock-frame').frameLocator('iframe').getByRole('heading', { name: 'Herd today' })).toBeVisible();
+		await expect(transcript).toContainText('Here is the home screen.');
+		await expect(transcript).toContainText('Tell me what to change.');
+		await expect(transcript.getByTestId('mock-drawing')).toHaveText('Drawing a mockup…');
+		for (const raw of ['<main', '</main>', 'html-mock', 'New ent', '```']) await expect(transcript).not.toContainText(raw);
+		await context.close();
+	});
 	test('a message on its way says "Sending…" with no buttons, and goes once Caddie has it (live finding, 2026-10-20)', async ({ browser }) => {
 		// Live, every message showed "Not sent · key … — resends reuse it" with
 		// Send again / Edit / Discard until the server admitted it.

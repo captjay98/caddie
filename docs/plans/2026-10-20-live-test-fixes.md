@@ -153,8 +153,15 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   framework, language, database, hosting or API with one plain line telling
   the model to put the stack in the brief (ordinary English such as "react
   fast" or "farm workers" passes).
-- [ ] 4.5 Design mocks render only in the styled preview frame; one that lands
-  in chat is shown there, never as raw HTML. Unit + browser.
+- [x] 4.5 Design mocks render only in the styled preview frame; one that lands
+  in chat is shown there, never as raw HTML. Unit + browser. Done:
+  `splitChatMocks` (contracts) takes ```html-mock and ```html blocks and
+  screens written straight into a reply (a page, `<body>` or `<main>`) out of
+  the prose, in order; chat replies and the build card's latest update render
+  through `ReplyText`, which draws them in the same locked-down preview frame
+  and says "Drawing a mockup…" while one is still being written. Code in other
+  languages stays code. The design step tells Caddie never to paste HTML into
+  a reply.
 
 ## 5. Polish
 
