@@ -126,6 +126,53 @@ test.describe('P05/P06 conversation surface', () => {
 });
 
 test.describe('U04 — unsent messages and restored drafts (v2 §3.6)', () => {
+	test('a proposal Caddie wrote out instead of making shows a plain notice, and its button asks again (live finding, 2026-10-20)', async ({ browser }) => {
+		const OFFSET = '0000000000000000_0000000000000001';
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		await context.route('**/api/projects/proj_conversation/run-bindings', (route) =>
+			json(route, 200, {
+				runBindings: [{
+					runId: 'run-written', projectId: 'proj_conversation', conversationId: 'conv-written', submissionId: 's', planRevision: 'rev-0',
+					stackId: 'react-hono', payerId: 'actor-test', modelRouteId: 'route', pricingVersion: 'v1', createdBy: 'actor-test', createdAt: '2026-10-20T00:00:00.000Z',
+				}],
+			}),
+		);
+		const written =
+			'{"name": "FarmLog AI", "idea": "A daily logging app for Nigerian broiler and catfish farmers.", "brief": "FarmLog AI helps farmers log daily activities.", "hackathon": "Nebius x NVIDIA Global AI Hackathon", "track": "Personal AI Track"}';
+		const reply = {
+			id: 'm-written', role: 'assistant', purpose: 'assistant', display: 'visible', timestamp: '2026-10-20T00:00:00.000Z',
+			parts: [{ type: 'text', text: `${written}\n\n${written}`, state: 'done' }],
+		};
+		const sent: string[] = [];
+		await context.route('**/agents/coordinator/**', async (route) => {
+			const request = route.request();
+			const url = new URL(request.url());
+			if (request.method() === 'POST') {
+				sent.push(request.postData() ?? '');
+				return json(route, 202, { streamUrl: url.href, offset: OFFSET, submissionId: 'sub-written', uid: 'uid-written' });
+			}
+			if (url.searchParams.get('view') === 'updates') {
+				return route.fulfill({ contentType: 'text/event-stream', body: `event: control\ndata: {"streamNextOffset":"${OFFSET}","upToDate":true}\n\n` });
+			}
+			return route.fulfill({
+				contentType: 'application/json',
+				headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' },
+				body: JSON.stringify({ v: 1, conversationId: 'conv-written', offset: OFFSET, messages: [reply], settlements: [] }),
+			});
+		});
+		const page = await context.newPage();
+		await openProjectPage(page);
+
+		const notice = page.getByTestId('msg-assistant').getByTestId('proposal-not-shown');
+		await expect(notice).toBeVisible();
+		await expect(notice).toContainText("Caddie tried to put this idea on a card, but it didn't come through.");
+		await expect(page.getByTestId('channel-transcript')).not.toContainText('"idea"');
+		await notice.getByRole('button', { name: 'Ask Caddie to try again' }).click();
+		await expect.poll(() => sent.some((body) => body.includes('Please show that idea as a project card.'))).toBe(true);
+		await context.close();
+	});
 	test('a reply streamed in pieces around its thinking reads as one paragraph, first word included (live finding, 2026-10-20)', async ({ browser }) => {
 		const OFFSET = '0000000000000000_0000000000000001';
 		const context = await browser.newContext();

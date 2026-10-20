@@ -60,10 +60,13 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 - [x] 2.2 No double copy of a message while it sends (Flue shows its own).
 - [x] 2.3 One paragraph per reply: join neighbouring text parts before
   rendering. Unit test with parts `"The"`, reasoning, `" Nebius…"`.
-- [ ] 2.4 Tool calls written as text: find the hook in `docs/flue-contracts.md`;
+- [x] 2.4 Tool calls written as text: find the hook in `docs/flue-contracts.md`;
   never show a JSON object matching a mounted tool's input; for
   `propose_project`, run it (the card still needs the button) or tell the model
-  it did not run. Unit tests, including the exact FarmLog JSON.
+  it did not run. Unit tests, including the exact FarmLog JSON. Done as:
+  hygiene hides it, the turn says so with "Ask Caddie to try again", and the
+  coordinator is told never to do it. Flue 2.2.2 has no hook that can read or
+  rewrite a reply's text, so the server cannot run the tool from it.
 - [ ] 2.5 Find how "start it" started a build without the button; if it skips
   the user's confirmation, close it. Test.
 

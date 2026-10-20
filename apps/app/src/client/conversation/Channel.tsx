@@ -1,5 +1,5 @@
 import { ProjectWorkflow } from './ProjectWorkflow.tsx';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { FlueConversationMessage, FlueConversationPart } from '@flue/react';
 import { answerParts } from './answer-parts.ts';
@@ -19,7 +19,11 @@ import { Icon } from '../icons.tsx';
 import { DecisionCardView } from '../brief/DecisionCard.tsx';
 import { Composer } from './Composer.tsx';
 import type { ChannelDraft, ChannelSource } from './channel-store.ts';
-import { cleanAssistantText } from './response-hygiene.ts';
+import { cleanAssistantText, sanitizeAssistantText } from './response-hygiene.ts';
+
+/** What a turn may do from inside the transcript. The rows are memoized, so
+ *  the action travels by context instead of props. */
+const TurnActions = createContext<{ ask: (text: string) => void } | null>(null);
 import { attachedFileNames, stripAttachedFileText } from './image-attachments.ts';
 import { settlementNotice } from './settlement-notice.ts';
 
@@ -473,6 +477,7 @@ function UserRow({ message, followsSameAuthor }: { message: FlueConversationMess
  * A specialist DIAGNOSTIC turn renders as its own foldable row instead.
  */
 function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversationMessage[]; followsSameAuthor?: boolean }): ReactElement | null {
+	const actions = useContext(TurnActions);
 	const first = messages[0];
 	if (!first) return null;
 	const clock = turnClock(first.timestamp);
@@ -485,6 +490,9 @@ function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversa
 	const answer = answerParts(messages);
 	const hasFolded = reasoning.length > 0 || tools.length > 0;
 	const hasAnswer = answer.some((part) => part.type !== 'text' || cleanAssistantText(part.text).trim().length > 0);
+	// A proposal the model wrote out instead of making is hidden by hygiene;
+	// say so plainly rather than leaving an empty or misleading reply.
+	const hiddenProposal = answer.some((part) => part.type === 'text' && sanitizeAssistantText(part.text).stripped.includes('tool-arguments'));
 
 	const body = (
 		<>
@@ -496,6 +504,16 @@ function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversa
 						<AssistantPart key={index} part={part} />
 					))}
 				</div>
+			) : null}
+			{hiddenProposal ? (
+				<p className="tool-banner" data-testid="proposal-not-shown">
+					Caddie tried to put this idea on a card, but it didn't come through.{' '}
+					{actions ? (
+						<button type="button" className="btn-ghost" onClick={() => actions.ask('Please show that idea as a project card.')}>
+							Ask Caddie to try again
+						</button>
+					) : null}
+				</p>
 			) : null}
 		</>
 	);
@@ -659,6 +677,9 @@ export function Channel(props: {
 	// this, every chrome re-render — i.e. every route change — re-parsed the
 	// whole conversation transcript in react-markdown (~8.5s blocking on long
 	// histories, measured).
+	const onSendRef = useRef(props.onSend);
+	onSendRef.current = props.onSend;
+	const turnActions = useMemo(() => ({ ask: (text: string) => onSendRef.current(text, []) }), []);
 	const transcriptRows = useMemo(
 		() => buildTranscriptRows(groupTurns(shownMessages)),
 		[shownMessages],
@@ -732,7 +753,7 @@ export function Channel(props: {
 						}
 					/>
 ) : (
-						transcriptRows
+						<TurnActions.Provider value={turnActions}>{transcriptRows}</TurnActions.Provider>
 					)}
 
 				{settledFailed.map((settlement) => {
