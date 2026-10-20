@@ -34,9 +34,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   `tar -xzf -`), at most 4 downloads at once, one retry on a failed extract, a
   plain error naming the package. `tests/verified-install.test.ts`: nothing left
   in tmpdir, a first failure is retried, existing cases green.
-- [ ] 1.2 A root `scratch/` folder is never saved (snapshots, "Files written",
-  checkpoints, versions): one rule in `source-export.ts`. Test.
-- [ ] 1.3 Builder instruction: probes go in `scratch/`; a failure inside
+- [x] 1.2 Caddie's `.caddie-scratch/` folder at the app root is never saved
+  (GitHub, versions, checkpoints) and never listed under "Files written". A
+  dot-name only Caddie uses, so a user's own `scratch/` folder is still saved
+  and imported.
+- [ ] 1.3 Builder instruction: probes go in `.caddie-scratch/`; a failure inside
   Caddie's own installer or checks is reported as Caddie's problem, not
   debugged. Source-guard test.
 

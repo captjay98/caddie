@@ -23,6 +23,8 @@
  * tests/build-timeline.test.ts.
  */
 
+import { CADDIE_SCRATCH_DIR } from './source-export.ts';
+
 export type ActivityKind = 'setup' | 'file' | 'command' | 'check';
 export type ActivityOutcome = 'ok' | 'failed' | 'cancelled';
 
@@ -286,6 +288,8 @@ export function buildTimeline(input: {
 	for (const row of rows) {
 		if (row.kind !== 'file' || row.outcome !== 'ok') continue;
 		const path = relativePath(row.subject);
+		// Caddie's throwaway probes are not part of the app.
+		if (path.startsWith(`${CADDIE_SCRATCH_DIR}/`)) continue;
 		const prev = fileMap.get(path);
 		fileMap.set(path, {
 			path,

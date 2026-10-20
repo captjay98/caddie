@@ -22,7 +22,14 @@ import { ScopeError } from './scope.ts';
  *   - binary files (not valid UTF-8, or containing a NUL byte) travel base64.
  */
 
-export type SourceSkipReason = 'dependencies' | 'build-output' | 'secret' | 'symlink' | 'noise';
+export type SourceSkipReason = 'dependencies' | 'build-output' | 'secret' | 'symlink' | 'noise' | 'scratch';
+
+/**
+ * Where Caddie's builder puts throwaway probes. Never saved (GitHub, versions,
+ * checkpoints) and never listed as a file written. A dot-name only Caddie
+ * uses, so a user's own `scratch/` folder is still saved and imported.
+ */
+export const CADDIE_SCRATCH_DIR = '.caddie-scratch';
 
 export interface SourceEntry {
 	name: string;
@@ -91,6 +98,7 @@ const ROOT_PATHS = new Map<string, SourceSkipReason>([
 	['storage/logs', 'noise'],
 	['storage/framework', 'noise'],
 	['bootstrap/cache', 'noise'],
+	[CADDIE_SCRATCH_DIR, 'scratch'],
 ]);
 
 const SECRET_FILE_NAMES = new Set([

@@ -166,6 +166,7 @@ const SKIP_LABEL: Record<SourceSkip['reason'], string> = {
 	secret: 'secret, never read',
 	symlink: 'link',
 	noise: 'generated',
+	scratch: "Caddie's scratch files",
 };
 
 function pullRequestBody(snapshot: SourceSnapshot, outputId: string): string {

@@ -158,6 +158,17 @@ describe("buildTimeline — stages, timing and honesty", () => {
     expect(t.quiet).toBe(false);
   });
 
+  test("Caddie's own scratch files are not listed or counted as files written", () => {
+    const rows = [
+      ...writing,
+      row({ kind: "file", subject: `${ROOT}/.caddie-scratch/probe.ts`, bytes: 300 }, 7),
+      row({ kind: "file", subject: `${ROOT}/scratch-check.ts`, bytes: 200 }, 7),
+    ];
+    const t = buildTimeline({ phase: "building", rows, nowMs: T0 + 9 * 60_000 });
+    expect(t.files.map((f) => f.path)).toEqual(["src/App.tsx", "scratch-check.ts", "src/App.test.tsx", "src/components/LogForm.tsx"]);
+    expect(t.stages.find((s) => s.key === "write")!.detail).toBe("4 files");
+  });
+
   test("a failing test run is reported with real counts and stays 'failed' after work loops back to writing", () => {
     const rows = [
       ...writing,
