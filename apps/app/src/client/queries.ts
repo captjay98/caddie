@@ -454,6 +454,42 @@ export function useMarkBriefRead(actor: ActorScope) {
 	});
 }
 
+/** One of the person's notifications (mirrors server NotificationRecord). */
+export interface AppNotification {
+	id: string;
+	projectId: string | null;
+	kind: string;
+	title: string;
+	body: string;
+	createdAt: string;
+}
+
+/**
+ * The person's unread notifications (plan 5.4) — what Caddie raised while they
+ * were away, such as a build it paused. Polled so a new one shows up without a
+ * reload; a failed read simply shows none.
+ */
+export function useUnreadNotifications(actor: ActorScope) {
+	return useQuery({
+		queryKey: ['notifications', 'unread', actor.actorId ?? 'pending'],
+		queryFn: () => fetchJson<{ notifications: AppNotification[] }>('/api/notifications?unread=1'),
+		enabled: actor.actorId !== null,
+		refetchInterval: 30_000,
+		select: (data) => data.notifications,
+	});
+}
+
+/** Mark one notification read; the unread list refreshes. */
+export function useMarkNotificationRead(actor: ActorScope) {
+	const queryClient = useQueryClient();
+	return useMutation({
+		mutationFn: (id: string) => postJson<unknown>(`/api/notifications/${encodeURIComponent(id)}/read`, {}),
+		onSuccess: () => {
+			void queryClient.invalidateQueries({ queryKey: ['notifications', 'unread', actor.actorId ?? 'pending'] });
+		},
+	});
+}
+
 /**
  * The actor's P14 profile — read from the real GET /api/profile. Home uses it
  * to state personalisation honestly (incomplete vs. complete), never to invent

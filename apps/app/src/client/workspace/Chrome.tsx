@@ -51,6 +51,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
 import { authClient } from '../auth.ts';
 import { SignInScreen } from '../sign-in.tsx';
+import { NotificationsBell } from './NotificationsBell.tsx';
 import { Icon } from '../icons.tsx';
 import { Composer } from '../conversation/Composer.tsx';
 import { Channel } from '../conversation/Channel.tsx';
@@ -989,6 +990,7 @@ function NavCapsule(props: {
 			>
 				<Icon name="search" title="Search" />
 			</button>
+			<NotificationsBell />
 			<button
 				type="button"
 				className="capsule-icon theme-toggle-btn"
@@ -1073,6 +1075,7 @@ function MobileHeader(props: {
 			)}
 			<span className="mobile-header-spacer" />
 			{action}
+			<NotificationsBell />
 			<AccountMenu accountOpen={props.accountOpen} setAccountOpen={props.setAccountOpen} displayName={props.displayName} />
 		</header>
 	);

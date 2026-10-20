@@ -4696,6 +4696,76 @@ a.btn-ghost.topbar-nav-link {
 	background: color-mix(in srgb, var(--color-bright) 6%, transparent);
 }
 
+/* The bell (plan 5.4): the unread count sits on the icon; the panel lists what
+   Caddie raised while the person was away, in its own words. */
+.notify-bell {
+	position: relative;
+}
+.notify-count {
+	position: absolute;
+	top: -2px;
+	right: -3px;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: 999px;
+	background: var(--color-action);
+	color: var(--color-ink);
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 16px;
+	text-align: center;
+}
+.notify-pop {
+	width: min(340px, calc(100vw - 2rem));
+	padding: 0.4rem;
+}
+.notify-empty {
+	margin: 0;
+	padding: 0.6rem;
+	color: var(--color-muted);
+	font-size: 13px;
+}
+.notify-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+}
+.notify-item {
+	display: grid;
+	gap: 0.25rem;
+	padding: 0.6rem;
+}
+.notify-item + .notify-item {
+	border-top: 1px solid var(--color-line-soft);
+}
+.notify-title {
+	font-size: 13px;
+	color: var(--color-bright);
+}
+.notify-body {
+	font-size: 12.5px;
+	line-height: 1.45;
+	color: var(--color-muted);
+}
+.notify-meta {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem;
+}
+.notify-time {
+	font-size: 11.5px;
+	color: var(--color-muted);
+}
+.account-menu-pop .notify-open {
+	padding: 0.25rem 0.5rem;
+	font-size: 12.5px;
+	color: var(--color-action);
+}
+
 /* --- mobile page-aware header (owner direction) ---------------------------
    Identity on the left ("Caddie" on Home, the page name elsewhere); Search
    and Account on the right. Navigation stays in the bottom bar — the header

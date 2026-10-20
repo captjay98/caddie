@@ -184,14 +184,15 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   bar says "Approving lets Caddie build exactly this plan in a private
   workspace; putting it online or changing real data always asks you first."
   in place of the two-box fold. Button-styled links lose their underline.
-- [ ] 5.4 A brief that needs the owner also arrives as a notification, once per
+- [x] 5.4 A brief that needs the owner also arrives as a notification, once per
   run, raised where the failure is recorded.
-  Part 1 done: every pause Caddie records (`setWorkflowBlocker`, the stall
+  Done: every pause Caddie records (`setWorkflowBlocker`, the stall
   watchdog) raises one `build_paused` notification per run for the build's
   owner (`brief:<runId>:blocked`); the person's own Stop never does; a
-  notification that cannot be saved never undoes the pause. Part 2: no screen
-  shows notifications yet (only `GET /api/notifications`), so a bell in the top
-  bar lists unread ones; opening one marks it read and opens its project.
+  notification that cannot be saved never undoes the pause. The app had no
+  screen for notifications, so a bell now sits in the top bar (and the phone
+  header): an unread count, the list in Caddie's words, and "Open the build"
+  marks it read and goes to that project's Build tab.
 - [ ] 5.5 Audit trail becomes "Details" in words; ids under "For developers".
 - [ ] 5.6 Page-shaped loading skeletons for Home, Projects, Plan and Build.
 - [ ] 5.7 Project card = variants B + C: the app's picture (its letter tile

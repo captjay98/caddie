@@ -505,3 +505,89 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		await context.close();
 	});
 });
+
+test.describe('notifications reach you (plan 5.4)', () => {
+	// Live finding (2026-10-20): Caddie paused a build and nothing told the
+	// owner; the app had no place that showed notifications at all.
+	const PAUSED = {
+		id: 'ntf-1',
+		userId: 'actor-test',
+		projectId: 'proj-a',
+		kind: 'build_paused',
+		title: 'Caddie paused the build of Pit wall',
+		body: 'Caddie could not get the app checks passing after three attempts. Your plan and files are saved.',
+		readAt: null,
+		dedupeKey: 'brief:run-1:blocked',
+		createdAt: NOW,
+	};
+
+	async function stubNotifications(context: BrowserContext, initial: Array<typeof PAUSED>) {
+		let unread = [...initial];
+		const reads: string[] = [];
+		await context.route('**/api/notifications**', (route) => {
+			const request = route.request();
+			const read = /\/api\/notifications\/([^/]+)\/read$/.exec(new URL(request.url()).pathname);
+			if (read && request.method() === 'POST') {
+				reads.push(read[1]!);
+				unread = unread.filter((note) => note.id !== read[1]);
+				return json(route, 200, { notification: { ...PAUSED, readAt: NOW } });
+			}
+			return json(route, 200, { notifications: unread });
+		});
+		return reads;
+	}
+
+	test('a paused build shows on the bell; opening it marks it read and goes to that build', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context);
+		const reads = await stubNotifications(context, [PAUSED]);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/`);
+
+		const bell = page.getByTestId('nav-capsule').getByTestId('notifications-bell');
+		await expect(bell.getByTestId('notifications-count')).toHaveText('1');
+		await expect(bell).toHaveAttribute('aria-label', 'Notifications, 1 new');
+		await bell.click();
+		const panel = page.getByTestId('notifications-panel');
+		await expect(panel.getByTestId('notification')).toHaveCount(1);
+		await expect(panel).toContainText('Caddie paused the build of Pit wall');
+		await expect(panel).toContainText('could not get the app checks passing');
+		await panel.getByTestId('notification-open').click();
+		await expect(page).toHaveURL(/\/app\/runs\?project=proj-a/);
+		expect(reads).toEqual(['ntf-1']);
+		await expect(bell.getByTestId('notifications-count')).toHaveCount(0);
+		await context.close();
+	});
+
+	test('with nothing new the bell shows no count and says so', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context);
+		await stubNotifications(context, []);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/`);
+
+		const bell = page.getByTestId('nav-capsule').getByTestId('notifications-bell');
+		await expect(bell).toBeVisible();
+		await expect(bell).toHaveAttribute('aria-label', 'Notifications');
+		await expect(bell.getByTestId('notifications-count')).toHaveCount(0);
+		await bell.click();
+		await expect(page.getByTestId('notifications-panel')).toContainText('Nothing new.');
+		await context.close();
+	});
+
+	test('on a phone the bell sits in the header too', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await stubAccount(context);
+		await stubNotifications(context, [PAUSED]);
+		const page = await context.newPage();
+		// A page tab: on the Caddie tab the chat fills the phone and its own
+		// header replaces the page header.
+		await page.goto(`${BASE}/app/projects`);
+
+		const bell = page.getByTestId('mobile-header').getByTestId('notifications-bell');
+		await expect(bell.getByTestId('notifications-count')).toHaveText('1');
+		await bell.click();
+		await expect(page.getByTestId('notifications-panel')).toContainText('Caddie paused the build of Pit wall');
+		await context.close();
+	});
+});
