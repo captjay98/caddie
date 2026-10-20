@@ -143,8 +143,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   proposal (migration 0036), asked for by propose_project; accepting adds
   "Required by the hackathon (<title>): “<rule>”" to the brief; the PRD
   instruction copies it word for word under "Hackathon requirements".
-- [ ] 4.3 "Who it's for" and "the problem" are kept in the user's own words on
-  the proposal and shown on its card. Unit + browser.
+- [x] 4.3 "Who it's for" and "the problem" are kept in the user's own words on
+  the proposal and shown on its card. Unit + browser. Done: `audience` and
+  `problem` (migration 0037), asked for "in the person's own words" by
+  propose_project; the card shows them quoted; accepting carries them into
+  the brief and the PRD opens its overview with them as written.
 - [ ] 4.4 The idea stays plain language; the stack lives only in the brief.
 - [ ] 4.5 Design mocks render only in the styled preview frame; one that lands
   in chat is shown there, never as raw HTML. Unit + browser.
@@ -190,8 +193,8 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   code (SVG, signed 30-minute link). Browser tests.
 - [ ] 8.4 Rebase on main, full gate with Flutter on PATH, docs (`sandbox.md`,
   `owner-inputs.md`, `.prod.vars.example`, ledger), merge locally as in 7.2.
-  Main now has 0036 (plan 4.2): renumber Track 3's 0036/0037 after main's
-  last migration before merging, and add the 1.3 sentences to
+  Main now has 0036 and 0037 (plans 4.2, 4.3): renumber Track 3's 0036/0037
+  after main's last migration before merging, and add the 1.3 sentences to
   `FLUTTER_RECIPE_INSTRUCTION`.
 
 ## 9. Live checks: paid, OK'd by the owner on 2026-10-20 (run each when ready)

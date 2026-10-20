@@ -180,3 +180,27 @@ describe("the hackathon's required tech travels from the proposal to the brief a
 		expect(coordinator).toContain('word for word');
 	});
 });
+
+describe("who it's for and the problem stay in the person's own words (plan 4.3)", () => {
+	const AUDIENCE = 'farmers like my uncle who keep goats and cannot read English well';
+	const PROBLEM = 'by the time the vet comes the animal is already dead';
+
+	test('they are kept on the proposal as said, and reach the started project\'s brief', async () => {
+		const w = await world();
+		try {
+			const proposal = await proposeProject(w.db, w.scope, { ...IDEA, audience: ` ${AUDIENCE} `, problem: PROBLEM, sourceConversationId: w.conversationId });
+			expect([proposal.audience, proposal.problem]).toEqual([AUDIENCE, PROBLEM]);
+			const started = await acceptProposal(w.db, w.scope, proposal.id);
+			const brief = (w.sqlite.prepare('select brief from build_workflows where projectId = ?').get(started.project.id) as { brief: string }).brief;
+			expect(brief).toContain(`Who it's for, in their words: “${AUDIENCE}”`);
+			expect(brief).toContain(`The problem, in their words: “${PROBLEM}”`);
+		} finally { w.sqlite.close(); }
+	});
+
+	test('the proposal tool asks for them in the person\'s own words', () => {
+		const coordinator = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
+		expect(coordinator).toMatch(/audience: v\.optional\(/);
+		expect(coordinator).toMatch(/problem: v\.optional\(/);
+		expect(coordinator).toContain("in the person's own words");
+	});
+});

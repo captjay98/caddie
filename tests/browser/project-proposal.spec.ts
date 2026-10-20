@@ -20,6 +20,8 @@ async function fixture(context: BrowserContext) {
 		id: 'prop-1', name: 'HerdWatch', idea: 'A voice-first early-warning helper for smallholder livestock farmers in Nigeria.',
 		hackathonTitle: 'Nebius x NVIDIA Global AI Hackathon', hackathonUrl: 'https://nebiusglobalaihackathon.devpost.com',
 		track: 'Personal AI', firstStep: 'A voice note in, a spoken next step out — for one common illness.',
+		audience: 'farmers like my uncle who keep goats and cannot read English well',
+		problem: 'by the time the vet comes the animal is already dead',
 		status: 'proposed' as 'proposed' | 'accepted' | 'dismissed', projectId: null as string | null,
 	};
 	const posts: string[] = [];
@@ -79,6 +81,9 @@ test('a proposal card shows the idea and creates nothing until "Start this proje
 	await expect(card).toContainText('HerdWatch');
 	await expect(card).toContainText('voice-first early-warning helper');
 	await expect(card).toContainText('Personal AI');
+	// Who it's for and the problem, in the person's own words (plan 4.3).
+	await expect(card.getByTestId('proposal-audience')).toHaveText("Who it's for“farmers like my uncle who keep goats and cannot read English well”");
+	await expect(card.getByTestId('proposal-problem')).toHaveText('The problem“by the time the vet comes the animal is already dead”');
 	await expect(card.getByRole('link', { name: 'Nebius x NVIDIA Global AI Hackathon' })).toHaveAttribute('href', 'https://nebiusglobalaihackathon.devpost.com');
 	await expect(card).toContainText('Nothing is created until you start it.');
 	// Showing the card created nothing.
