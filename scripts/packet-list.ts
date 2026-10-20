@@ -277,6 +277,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 	BUILD: {
 		tests: [
 			'tests/build-workflow.test.ts',
+			'tests/demo-contract.test.ts',
 			'tests/build-activity.test.ts',
 			'tests/build-timeline.test.ts',
 			'tests/sandbox-durability.test.ts',

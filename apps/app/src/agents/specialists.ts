@@ -16,7 +16,7 @@ import {
 import type { ToolDefinition } from '@flue/runtime';
 import { useInstruction, useSkill, useSubagent, useTool } from '@flue/runtime';
 import { findModelRouteForRole } from './providers.ts';
-import { FEATURE_BLOCK_GUIDE } from '@caddie/contracts';
+import { DEMO_CONTRACT_GUIDE, FEATURE_BLOCK_GUIDE } from '@caddie/contracts';
 import { CADDIE_SCRATCH_DIR } from '../server/source-export.ts';
 
 /**
@@ -145,12 +145,14 @@ export function recipeInstructionFor(stackId: string | undefined): string {
 export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> = {
 	product:
 		'You shape the product: scope, PRD and acceptance intent. Work only from the brief and pinned evidence; cite sources. You have no execution tools — write plan notes instead of running commands. ' +
+		'Aim at a demo that wins, not a complete CRUD app: one deep integration that works in the preview beats five shallow screens, and a mock may support the demo but never carry it. Write the demo contract before the feature list, then make every feature move that demo forward. ' +
 		PLATFORM_AI_RULE,
 	designer:
 		'You design the interface and interaction boundary. Read the current code from the sandbox for context, but express decisions as plan notes; implementation belongs to build roles. ' +
 		'After the PRD is approved the project enters the DESIGN step: author ONE design brief and save it with write_plan_note kind:\'design\' (same planRevision), then STOP for the design review — never build or scaffold. The brief covers: a SCREEN INVENTORY (every screen the app needs); for each key screen its LAYOUT (the regions and what sits where, described so a builder can lay it out) and the key COMPONENTS; the TOKEN/COMPONENT choices (which theme tokens, which shared components, the interaction pattern for each input — a form, a segmented picker, a list); and the EMPTY, LOADING and ERROR state for anything that loads or saves. Ground it in the design system the app uses; keep it concrete, not a restatement of the PRD. Where the PRD leaves a visual choice open, pick a sensible default and label it \'assumption:\'.',
 	'tech-lead':
 		'You own the plan of record. Delegate build and repair work with precise tasks, review results honestly, and keep the last good checkpoint visible. Never claim success without machine-checked evidence. ' +
+		'Before approving a plan, test it as a judge would: can the demo path happen with real input in three minutes, is the named integration core rather than decoration, and which mock would embarrass the demo? Push the product specialist to fix that before review. ' +
 		PLATFORM_AI_RULE,
 	frontend: 'You implement client-side behavior in the sandbox. Follow the plan of record; run the project checks; report exact commands and outcomes.',
 	backend: 'You implement server-side behavior in the sandbox. Follow the plan of record; run the project checks; report exact commands and outcomes.',
@@ -192,8 +194,12 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 		// The feature-list block belongs to the PRD, authored by product/tech-lead.
 		// The designer carries `planning` only to READ the PRD — its own output is a
 		// design brief with NO feature block, so it must not get this instruction.
-		if (descriptor.skills.includes('planning') && !descriptor.skills.includes('design'))
+		if (descriptor.skills.includes('planning') && !descriptor.skills.includes('design')) {
+			useInstruction(
+				`A PRD must carry a judge-facing demo contract before the feature list; write_plan_note refuses a PRD without one. ${DEMO_CONTRACT_GUIDE}`,
+			);
 			useInstruction(`A PRD must end with the feature list the user approves and the host builds one feature at a time. ${FEATURE_BLOCK_GUIDE}`);
+		}
 		if (descriptor.skills.includes('design'))
 			useInstruction(
 				'After the PRD is approved you author ONE design brief (write_plan_note kind:"design"), then STOP for review — never build. The brief carries NO caddie-features block, covers every section the design skill lists, and includes one titled `html-mock` fenced block per key screen and state (the key screen, its empty state, its error state), static and styled only with design-system tokens, so the review card can show each one.',

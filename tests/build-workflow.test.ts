@@ -1712,6 +1712,17 @@ const FEATURE_PRD = [
   "",
   "Log feed and see it on a dashboard.",
   "",
+  "## Demo contract",
+  "",
+  "**One-line pitch:** A farmer logs a feed and sees this week's total before leaving the barn.",
+  "**Demo path (3 minutes):**",
+  "1. Enter 12 kg of feed against cow 14 and save it.",
+  "2. The dashboard adds it to this week's total immediately.",
+  "3. Reload the page and the entry and total are still there.",
+  "**Real integration:** None — the app is a real local-first log with SQLite persistence; no outside service carries the demo.",
+  "**Mocks:** None.",
+  "**Why this wins:** The total is computed from real entries and survives a reload, not from a seeded chart a judge cannot change.",
+  "",
   "```caddie-features",
   JSON.stringify([
     { id: "log-feed", title: "Log daily feed", doneWhen: ["Saving 12 kg shows 12 kg in today's list"] },
@@ -2079,7 +2090,12 @@ describe("host-driven feature loop", () => {
     try {
       const item = await w.start();
       const host = await resolveCoordinatorContext({ DB: w.db }, item.workflow.conversationId);
-      await expect(host.writePlanNote({ kind: "prd", body: "# Farm log\n\nJust prose.", planRevision: "rev-0" })).rejects.toThrow("PLAN_FEATURES_INVALID");
+      const noContract = FEATURE_PRD.replace(/## Demo contract[\s\S]*?(?=```caddie-features)/, "");
+      await expect(host.writePlanNote({ kind: "prd", body: noContract, planRevision: "rev-0" })).rejects.toThrow("DEMO_CONTRACT_INVALID");
+      expect(w.count("plan_doc_revisions", "kind = 'prd'")).toBe(0);
+      await expect(host.writePlanNote({ kind: "prd", body: "# Farm log\n\nJust prose.", planRevision: "rev-0" })).rejects.toThrow("DEMO_CONTRACT_INVALID");
+      const noFeatures = FEATURE_PRD.replace(/```caddie-features[\s\S]*?```/, "");
+      await expect(host.writePlanNote({ kind: "prd", body: noFeatures, planRevision: "rev-0" })).rejects.toThrow("PLAN_FEATURES_INVALID");
       const duplicate = FEATURE_PRD.replace('"view-dashboard"', '"log-feed"');
       await expect(host.writePlanNote({ kind: "prd", body: duplicate, planRevision: "rev-0" })).rejects.toThrow("unique");
       expect(w.count("plan_doc_revisions", "kind = 'prd'")).toBe(0);

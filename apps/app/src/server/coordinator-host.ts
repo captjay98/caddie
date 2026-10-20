@@ -57,7 +57,7 @@ import { runVerifiedInstall } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { checkSentence, newTestsSentence } from "./round-detail.ts";
 import { projectStatusForActor } from "./project-experience.ts";
-import { FEATURE_BLOCK_GUIDE, parsePlanFeatures } from "@caddie/contracts";
+import { FEATURE_BLOCK_GUIDE, parseDemoContract, parsePlanFeatures } from "@caddie/contracts";
 import { collectSourceSnapshot } from "./source-export.ts";
 import { recordCodeVersion } from "./code-versions.ts";
 import { codeStoreFor } from "./code-store-env.ts";
@@ -916,6 +916,11 @@ export async function createCoordinatorContext(
         throw new SandboxError(409, "HOME_NO_PLAN", "Create a project first.");
       await ensureWorkflow(env.DB, scope);
       if (input.kind === "prd") {
+        // A complete PRD can still describe a toy. The demo contract makes the
+        // judge-facing path and the real integration explicit before approval.
+        const demo = parseDemoContract(input.body);
+        if (!demo.ok)
+          throw new Error(`DEMO_CONTRACT_INVALID: not saved — ${demo.error}`);
         // The approval binds to this revision's hash, so the feature list the
         // host will build must be inside it, valid, before it is saved.
         const features = parsePlanFeatures(input.body);

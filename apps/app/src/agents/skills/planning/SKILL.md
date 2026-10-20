@@ -11,8 +11,26 @@ Turn an accepted brief into versioned scope, PRD and spec documents.
 
 - Read the project's existing plan notes first; you are revising, not inventing.
 - Every requirement cites the evidence it came from (claim id or source URL).
-- Scope: what one builder can ship in the stated hours, with the cut list explicit.
+- Scope: what one builder can ship in the stated hours, with the cut list explicit —
+  but cut breadth, never the one thing that makes the demo worth watching.
 - PRD: user-visible behavior only. Spec: interfaces, data, and acceptance checks.
+
+## Quality bar: plan a demo, not a CRUD app
+
+A complete PRD can still describe a toy. The plan is judged by what a judge can
+see working in three minutes, not by how many tables it names.
+
+- Name ONE real integration the core value depends on (usually Caddie's AI via
+  `c.env.CADDIE.ai`, called from `src/server.ts`) and make it do real work on
+  real input. It is not decoration, and a mock may never carry it.
+- Mocks are allowed only where they do not carry the demo. A mock price feed,
+  seed dataset or rule table may support a screen; it cannot be the product.
+- Every feature must move the demo forward. If a feature would not appear in the
+  three-minute path, cut it or explain in one line why it still matters.
+- Prefer one deep, working flow over five shallow screens. A judge remembers
+  the moment the thing did something they did not expect, not the settings page.
+- The demo path must survive a skeptical judge: real input, a visible result,
+  and a reload that still shows the saved state.
 - Output goes through `write_plan_note` with `planRevision` set to the revision
   you were briefed on. Never edit history; append new revisions.
 - If a requirement conflicts with a pinned claim, surface the conflict instead
@@ -46,6 +64,27 @@ than omitting one):
    what it is given and returns, and the fail-soft behavior when it is
    unavailable. Never "an AI model" with no name or call path.
 8. **Success metrics** — how you know each goal is met, observably.
+9. **Demo contract** — required, and checked when the PRD is saved. Use this
+   exact shape (the labels are parsed, so do not rename them):
+
+   ```
+   ## Demo contract
+
+   **One-line pitch:** what a judge hears first (one sentence).
+   **Demo path (3 minutes):**
+   1. the first thing the judge does, with real input
+   2. the core value happening in front of them
+   3. the result they can see and check
+   **Real integration:** the model or service the core value depends on, the
+   exact call path, and what the judge sees it do. "None" is allowed only with
+   a reason the app is still real.
+   **Mocks:** every mocked thing and why it does not carry the demo; "None"
+   when nothing is mocked.
+   **Why this wins:** the hard part, and why a generic CRUD entry would lose.
+   ```
+
+   At least three numbered demo steps. The real integration cannot be a mock,
+   and the path must be something a person can actually do in the preview.
 
 Then end with the `caddie-features` block (the discipline below). The prose
 above it is the spec a builder implements against; the block is the ordered
