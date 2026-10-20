@@ -295,24 +295,32 @@ a.btn-ghost.topbar-nav-link {
 /* --- first-run voice (reference: today.ai brief cards, hacksteward wizard,
    the reference caddie's voice) ------------------------------------------- */
 
-/* Sign-in: a single focused column. One job — identify Caddie and get the
-   user in. The mascot and headline establish what Caddie is; the two provider
+/* Sign-in: one job — identify Caddie and get the user in. The two provider
    buttons sit frameless (no card around buttons that already have borders);
-   one reassurance line closes it. Shared by SignInWall and SignInGate. */
-.signin-view {
-	min-height: 100%;
-	display: grid;
-	place-items: center;
-	padding: 3rem 1.5rem;
-}
+   one reassurance line closes it.
 
-/* Split sign-in (SignInGate): brand/mascot hero on the left, the form column
-   on the right. The hero is static by necessity — a signed-out screen has no
-   live Caddie activity to show. Collapses to form-only on narrow screens. */
+   The ONE sign-in screen (SignInScreen, plan 5.2): brand/mascot hero on the
+   left, the form column on the right. The hero is static by necessity — a
+   signed-out screen has no live Caddie activity to show. Collapses to
+   form-only on narrow screens. It fills the workspace's main column (flex),
+   or the whole viewport as a chrome-free page (.signin-page). */
 .signin-split {
+	flex: 1;
 	min-height: 100%;
 	display: grid;
 	grid-template-columns: 1.05fr 1fr;
+}
+.signin-page {
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
+	min-height: 100dvh;
+}
+/* Signed out, the sign-in screen runs edge to edge under the header: the main
+   column's padding (and its phone clearance for the bottom bar, which only a
+   signed-in person has) is for pages. */
+.shell-main[data-signed-out='true'] {
+	padding: 0;
 }
 .signin-hero {
 	position: relative;

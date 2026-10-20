@@ -170,7 +170,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   chrome-free themed page (`.gate-view`, the route error page's canvas); the
   error offers Try again and no "Ask Caddie" (the chat is not open yet); a
   finished welcome shows the same panel while it opens the workspace.
-- [ ] 5.2 The split sign-in is the sign-in everywhere (one shared component).
+- [x] 5.2 The split sign-in is the sign-in everywhere (one shared component).
+  Done: `SignInScreen` (`client/sign-in.tsx`) is the only sign-in; the
+  workspace chrome, every page body and the onboarding page render it (the
+  plain column and the wall are gone). It runs edge to edge under the header,
+  fills a chrome-free page on onboarding, and is the form alone on a phone.
 - [ ] 5.3 Plan tab: same width as the other tabs; the plan folds once approved;
   badge and button follow the build ("See build progress" while building); one
   plain sentence on what approving means.

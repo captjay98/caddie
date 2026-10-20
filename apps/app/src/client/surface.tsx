@@ -4,8 +4,7 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import * as v from 'valibot';
 import { ProjectExperienceSchema } from '@caddie/contracts';
 import type { ApprovalRecord, DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
-import { SignInPanel } from './auth.ts';
-import { Mascot } from '@caddie/ui/Mascot';
+import { SignInScreen } from './sign-in.tsx';
 import { Markdown } from '@caddie/ui/Markdown';
 import { failureKind, StatePanel } from './states.tsx';
 import { formatMinorUnits, formatNextRun } from './settings/settings-model.ts';
@@ -75,52 +74,6 @@ const EXPLORE_QUICK_PROMPTS: ReadonlyArray<{ id: string; label: string; text: st
 	{ id: 'win', label: 'A standout project to win', text: 'Help me come up with an ambitious, standout project with a real shot at winning this hackathon — lean into what makes it impressive to judges.' },
 ];
 
-function SignInGate(): ReactElement {
-	return (
-		<div className="signin-split" data-testid="sign-in-gate">
-			{/* LEFT: brand / mascot hero — a signed-out screen has no live session,
-			    so this is an honest static hero (what Caddie does), never a faked
-			    live feed. Themed entirely via tokens so it tracks mode + palette. */}
-			<div className="signin-hero" aria-hidden="true">
-				<div className="signin-hero-grid" />
-				<p className="signin-hero-brand">CADDIE</p>
-				<div className="signin-hero-center">
-					<Mascot mood="ready" size={88} live />
-					<div className="signin-hero-copy">
-						<h2 className="signin-hero-title">Your caddie for the whole round.</h2>
-						<p className="signin-hero-lede">
-							Caddie finds the hackathons that fit you, plans the build, and ships it with you — step by
-							step, nothing without your say-so.
-						</p>
-					</div>
-					<ul className="signin-hero-chips">
-						<li>Finds contests</li>
-						<li>Plans the build</li>
-						<li>Ships with you</li>
-					</ul>
-				</div>
-				<p className="signin-hero-foot">Built for solo builders. Free to start.</p>
-			</div>
-
-			{/* RIGHT: the real sign-in form, vertically centered. */}
-			<div className="signin-form">
-				<div className="signin-col">
-					<div className="signin-brand">
-						<h1 className="signin-title">Sign in to Caddie</h1>
-						<p className="signin-lede">Use the account you already have — it&rsquo;s free to start.</p>
-					</div>
-					<div className="signin-card">
-						<SignInPanel callbackURL="/app/" />
-					</div>
-					<p className="signin-note">
-						Signing in doesn&rsquo;t give Caddie your code. It asks separately, only if you bring code in.
-					</p>
-				</div>
-			</div>
-		</div>
-	);
-}
-
 /**
  * Reads the resolved project scope from the chrome and renders the honest
  * states, then hands the concrete project id to the body. No fetch of project
@@ -136,7 +89,7 @@ function ProjectGateSoft(props: { children: (projectId: string) => ReactElement 
 
 function ProjectGate(props: { children: (projectId: string) => ReactElement }): ReactElement | null {
 	const chrome = useWorkspaceChrome();
-	if (!chrome.authenticated) return <SignInGate />;
+	if (!chrome.authenticated) return <SignInScreen />;
 	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
 	if (chrome.projectsError) {
 		return (
@@ -258,7 +211,7 @@ function DiscoverBody(): ReactElement {
 			);
 	}
 
-	if (!chrome.authenticated) return <SignInGate />;
+	if (!chrome.authenticated) return <SignInScreen />;
 	if (chrome.homeProject) {
 		return (
 			<>
@@ -603,7 +556,7 @@ function ProjectList(): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const brief = useAccountBrief(actor);
-	if (!chrome.authenticated) return <SignInGate />;
+	if (!chrome.authenticated) return <SignInScreen />;
 	if (chrome.projectsPending) return <StatePanel kind="loading" title="Loading your projects…" />;
 	if (chrome.projectsError) {
 		return (
@@ -1522,7 +1475,7 @@ export function RepositoriesPage(): ReactElement {
  */
 function RepositoriesGate(): ReactElement {
 	const chrome = useWorkspaceChrome();
-	if (!chrome.authenticated) return <SignInGate />;
+	if (!chrome.authenticated) return <SignInScreen />;
 	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
 	if (chrome.projectsError) {
 		return (
@@ -1638,7 +1591,7 @@ export function SearchPage(): ReactElement {
 // WorkspaceChrome").
 function SearchEnabled(): ReactElement {
 	const chrome = useWorkspaceChrome();
-	return chrome.authenticated ? <Search /> : <SignInGate />;
+	return chrome.authenticated ? <Search /> : <SignInScreen />;
 }
 
 export function AutomationsPage(): ReactElement {
@@ -1711,7 +1664,7 @@ export function AutomationsBody(): ReactElement {
 		};
 	}, [chrome.authenticated, chrome.buildProjects]);
 
-	if (!chrome.authenticated) return <SignInGate />;
+	if (!chrome.authenticated) return <SignInScreen />;
 	if (chrome.projectsPending) return <StatePanel kind="loading" title="Fetching your projects…" />;
 	if (chrome.buildProjects.length === 0) {
 		return <StatePanel kind="empty" title="No routines yet" detail="Routines are checks Caddie runs for a project on a schedule — like watching a hackathon deadline. Start a project first." />;
@@ -1808,7 +1761,7 @@ export function UsageBody(): ReactElement {
 		enabled: chrome.authenticated && chrome.actorId !== null,
 	});
 
-	if (!chrome.authenticated) return <SignInGate />;
+	if (!chrome.authenticated) return <SignInScreen />;
 	if (usage.isPending) {
 		return (
 			<section className="settings-section-body" data-testid="usage-panel">

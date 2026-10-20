@@ -211,3 +211,36 @@ test.describe('P01 sign-in panel (composed build)', () => {
 		await expect(page.getByTestId('sign-in-github')).toBeEnabled({ timeout: 10_000 });
 	});
 });
+
+test.describe('one sign-in everywhere (plan 5.2)', () => {
+	// Live finding (2026-10-20): signed out, Caddie first showed a plain sign-in
+	// column; only some pages had the split sign-in with Caddie beside the form.
+	for (const path of ['/app/', '/app/projects', '/app/onboarding']) {
+		test(`signed out, ${path} shows the split sign-in, filling the page`, async ({ page }) => {
+			await page.setViewportSize({ width: 1440, height: 900 });
+			await page.goto(`${BASE}${path}`);
+			const screen = page.getByTestId('sign-in-gate');
+			await expect(screen).toBeVisible();
+			await expect(screen).toHaveClass(/signin-split/);
+			await expect(screen.locator('.signin-hero')).toBeVisible();
+			await expect(screen.getByRole('heading', { name: 'Sign in to Caddie' })).toBeVisible();
+			await expect(screen.getByTestId('sign-in-panel')).toBeVisible();
+			// One sign-in on the page, and never the old plain column.
+			await expect(page.getByTestId('sign-in-panel')).toHaveCount(1);
+			await expect(page.locator('.signin-view')).toHaveCount(0);
+			const box = await screen.boundingBox();
+			expect((box?.y ?? 0) + (box?.height ?? 0)).toBeGreaterThanOrEqual(900 - 1);
+			if (process.env.SIGNIN_SHOTS) await page.screenshot({ path: `${process.env.SIGNIN_SHOTS}/sign-in${path.replace(/\//g, '-')}desktop.png` });
+		});
+	}
+
+	test('on a phone the same sign-in is the form alone', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto(`${BASE}/app/`);
+		const screen = page.getByTestId('sign-in-gate');
+		await expect(screen).toHaveClass(/signin-split/);
+		await expect(screen.getByTestId('sign-in-panel')).toBeVisible();
+		await expect(screen.locator('.signin-hero')).toBeHidden();
+		if (process.env.SIGNIN_SHOTS) await page.screenshot({ path: `${process.env.SIGNIN_SHOTS}/sign-in-app-phone.png` });
+	});
+});

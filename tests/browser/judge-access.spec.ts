@@ -257,7 +257,7 @@ for (const vp of VIEWPORTS) {
 			// The handoff reloads the app at the callback URL; with the session
 			// present the sign-in wall is gone.
 			await expect(page.getByTestId('sign-in-panel')).toHaveCount(0, { timeout: 15_000 });
-			await expect(page.getByTestId('sign-in-wall')).toHaveCount(0);
+			await expect(page.getByTestId('sign-in-gate')).toHaveCount(0);
 			// It sent the three real fields, never a synthetic email.
 			expect(posts).toHaveLength(1);
 			expect(posts[0]).toEqual({

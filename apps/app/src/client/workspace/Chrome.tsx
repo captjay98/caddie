@@ -49,7 +49,8 @@ import type { ReactElement, ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
-import { authClient, SignInPanel } from '../auth.ts';
+import { authClient } from '../auth.ts';
+import { SignInScreen } from '../sign-in.tsx';
 import { Icon } from '../icons.tsx';
 import { Composer } from '../conversation/Composer.tsx';
 import { Channel } from '../conversation/Channel.tsx';
@@ -675,7 +676,12 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								{props.crumbs}
 							</div>
 						) : null}
-						<main id="main" className="shell-main" data-hidden={conversationKind !== 'none' && mobileConversation && !isDesktop}>
+						<main
+							id="main"
+							className="shell-main"
+							data-hidden={conversationKind !== 'none' && mobileConversation && !isDesktop}
+							data-signed-out={authenticated || authOffline ? undefined : 'true'}
+						>
 							{authenticated ? (
 								props.children
 							) : authOffline ? (
@@ -690,26 +696,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 									/>
 								</div>
 							) : (
-								<div className="signin-view" data-testid="sign-in-gate">
-									<div className="signin-col">
-										<div className="signin-brand">
-											<Mascot mood="ready" size={56} live />
-											<h1 className="signin-title">Sign in to Caddie</h1>
-											<p className="signin-lede">
-												Use the account you already have
-												<br />
-												it&rsquo;s free to start.
-											</p>
-										</div>
-										<div className="signin-card">
-											<SignInPanel callbackURL="/app/" />
-										</div>
-										<p className="signin-note">
-											Signing in doesn&rsquo;t give Caddie your code. It asks separately, only if you
-											bring code in.
-										</p>
-									</div>
-								</div>
+								<SignInScreen />
 							)}
 						</main>
 					</section>
