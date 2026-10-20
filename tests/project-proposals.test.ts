@@ -144,3 +144,39 @@ describe('only the Start button starts a new project (live finding, 2026-10-20)'
 		expect(/(?:continue\|resume\|retry\|finish\|fix\|repair)/.test('start it')).toBe(false);
 	});
 });
+
+describe("the hackathon's required tech travels from the proposal to the brief and the plan (plan 4.2)", () => {
+	// Live, a hackathon's rules were used only to judge whether it fits; what
+	// it requires entries to use never reached the brief or the plan.
+	const RULE = 'Projects must use NVIDIA Nemotron models served through Nebius Token Factory.';
+
+	test('the quoted rule is kept on the proposal and lands in the started project\'s brief, word for word', async () => {
+		const w = await world();
+		try {
+			const proposal = await proposeProject(w.db, w.scope, { ...IDEA, requiredTech: `  ${RULE}\n`, sourceConversationId: w.conversationId });
+			expect(proposal.requiredTech).toBe(RULE);
+			const started = await acceptProposal(w.db, w.scope, proposal.id);
+			const brief = (w.sqlite.prepare('select brief from build_workflows where projectId = ?').get(started.project.id) as { brief: string }).brief;
+			expect(brief).toContain(IDEA.brief);
+			expect(brief).toContain(`Required by the hackathon (${IDEA.hackathonTitle}): “${RULE}”`);
+		} finally { w.sqlite.close(); }
+	});
+
+	test('without a rule the brief is exactly the proposal\'s', async () => {
+		const w = await world();
+		try {
+			const proposal = await proposeProject(w.db, w.scope, { ...IDEA, sourceConversationId: w.conversationId });
+			expect(proposal.requiredTech).toBeNull();
+			const started = await acceptProposal(w.db, w.scope, proposal.id);
+			const brief = (w.sqlite.prepare('select brief from build_workflows where projectId = ?').get(started.project.id) as { brief: string }).brief;
+			expect(brief).not.toContain('Required by the hackathon');
+		} finally { w.sqlite.close(); }
+	});
+
+	test('the proposal tool asks for the rule, and the plan instruction keeps it word for word', () => {
+		const coordinator = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
+		expect(coordinator).toMatch(/requiredTech: v\.optional\(/);
+		expect(coordinator).toContain('Required by the hackathon');
+		expect(coordinator).toContain('word for word');
+	});
+});

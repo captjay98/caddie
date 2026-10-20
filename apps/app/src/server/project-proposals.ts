@@ -25,6 +25,8 @@ export interface ProjectProposal {
 	readonly hackathonUrl: string | null;
 	readonly track: string | null;
 	readonly firstStep: string | null;
+	/** The hackathon's rule naming what entries must use, quoted (plan 4.2). */
+	readonly requiredTech: string | null;
 	readonly status: ProposalStatus;
 	readonly projectId: string | null;
 	readonly createdAt: string;
@@ -39,6 +41,7 @@ export interface ProposeProjectInput {
 	readonly hackathonUrl?: string | null;
 	readonly track?: string | null;
 	readonly firstStep?: string | null;
+	readonly requiredTech?: string | null;
 	readonly sourceConversationId: string;
 }
 
@@ -60,6 +63,7 @@ function fromRow(row: Record<string, unknown>): ProjectProposal {
 		hackathonUrl: (row['hackathonUrl'] as string | null) ?? null,
 		track: (row['track'] as string | null) ?? null,
 		firstStep: (row['firstStep'] as string | null) ?? null,
+		requiredTech: (row['requiredTech'] as string | null) ?? null,
 		status: row['status'] as ProposalStatus,
 		projectId: (row['projectId'] as string | null) ?? null,
 		createdAt: String(row['createdAt']),
@@ -82,7 +86,7 @@ export async function proposeProject(db: D1Database, scope: Scope, input: Propos
 	const stamp = now();
 	await db
 		.prepare(
-			'insert into "project_proposals" ("id","actorId","workspaceId","homeProjectId","sourceConversationId","name","idea","brief","hackathonTitle","hackathonUrl","track","firstStep","status","projectId","createdAt","updatedAt") values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+			'insert into "project_proposals" ("id","actorId","workspaceId","homeProjectId","sourceConversationId","name","idea","brief","hackathonTitle","hackathonUrl","track","firstStep","status","projectId","createdAt","updatedAt","requiredTech") values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
 		)
 		.bind(
 			id,
@@ -101,6 +105,7 @@ export async function proposeProject(db: D1Database, scope: Scope, input: Propos
 			null,
 			stamp,
 			stamp,
+			clean(input.requiredTech, 600),
 		)
 		.run();
 	return getProposal(db, verified, id);
@@ -144,10 +149,15 @@ export async function acceptProposal(
 		.bind(proposal.id)
 		.all<Record<string, unknown>>();
 	const sourceConversationId = String(row.results?.[0]?.['sourceConversationId'] ?? '');
+	// The hackathon's own rule travels with the brief, word for word, so the
+	// plan is written on it (plan 4.2). The brief keeps within the start limit.
+	const rule = proposal.requiredTech
+		? `\n\nRequired by the hackathon (${proposal.hackathonTitle ?? 'its rules'}): “${proposal.requiredTech}”`
+		: '';
 	const started = await startProjectFromChat(db, scope, {
 		name: proposal.name,
 		description: proposal.idea,
-		brief: proposal.brief,
+		brief: `${proposal.brief.slice(0, 16000 - rule.length)}${rule}`,
 		operationKey: `proposal:${proposal.id}`,
 		sourceConversationId,
 	}, limits);

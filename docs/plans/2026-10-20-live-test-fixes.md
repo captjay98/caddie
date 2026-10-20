@@ -138,8 +138,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   one `PLATFORM_AI_RULE` (specialists.ts), carried by the product and
   tech-lead roles and given to the coordinator in the instructions every
   conversation gets (Home proposals and project PRDs).
-- [ ] 4.2 The hackathon's required tech (its quoted rule) travels from the
-  proposal to the brief and the plan. Unit tests.
+- [x] 4.2 The hackathon's required tech (its quoted rule) travels from the
+  proposal to the brief and the plan. Unit tests. Done: `requiredTech` on the
+  proposal (migration 0036), asked for by propose_project; accepting adds
+  "Required by the hackathon (<title>): “<rule>”" to the brief; the PRD
+  instruction copies it word for word under "Hackathon requirements".
 - [ ] 4.3 "Who it's for" and "the problem" are kept in the user's own words on
   the proposal and shown on its card. Unit + browser.
 - [ ] 4.4 The idea stays plain language; the stack lives only in the brief.
@@ -187,6 +190,9 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   code (SVG, signed 30-minute link). Browser tests.
 - [ ] 8.4 Rebase on main, full gate with Flutter on PATH, docs (`sandbox.md`,
   `owner-inputs.md`, `.prod.vars.example`, ledger), merge locally as in 7.2.
+  Main now has 0036 (plan 4.2): renumber Track 3's 0036/0037 after main's
+  last migration before merging, and add the 1.3 sentences to
+  `FLUTTER_RECIPE_INSTRUCTION`.
 
 ## 9. Live checks: paid, OK'd by the owner on 2026-10-20 (run each when ready)
 

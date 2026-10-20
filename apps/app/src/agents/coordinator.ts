@@ -78,6 +78,7 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     hackathonUrl?: string;
     track?: string;
     firstStep?: string;
+    requiredTech?: string;
   }) => Promise<{ id: string; homeProjectId: string; status: string }>;
   listStacks: () => Promise<
     readonly { id: string; status: string; note?: string }[]
@@ -381,7 +382,7 @@ export function Coordinator({ id }: AgentProps) {
   useTool({
     name: "propose_project",
     description:
-      "Propose ONE new project as a card in this chat, once the user has agreed on a specific idea. This creates NOTHING: the card shows the name, the idea, the hackathon and track and what to build first, and the project is created only if the user presses its \"Start this project\" button (\"Keep refining\" creates nothing). Never call it while you are still brainstorming or narrowing down, never call it twice for the same idea, and never say a project was created or started.",
+      "Propose ONE new project as a card in this chat, once the user has agreed on a specific idea. This creates NOTHING: the card shows the name, the idea, the hackathon and track and what to build first, and the project is created only if the user presses its \"Start this project\" button (\"Keep refining\" creates nothing). Never call it while you are still brainstorming or narrowing down, never call it twice for the same idea, and never say a project was created or started. When the hackathon's rules name what entries must use, pass that rule word for word as requiredTech.",
     input: v.object({
       name: v.pipe(v.string(), v.minLength(1), v.maxLength(100)),
       idea: v.pipe(v.string(), v.minLength(1), v.maxLength(600)),
@@ -390,6 +391,9 @@ export function Coordinator({ id }: AgentProps) {
       hackathonUrl: v.optional(v.string()),
       track: v.optional(v.string()),
       firstStep: v.optional(v.string()),
+      // The hackathon's own rule naming what entries must use, quoted word for
+      // word from its rules (plan 4.2); left out when it has none.
+      requiredTech: v.optional(v.pipe(v.string(), v.maxLength(600))),
     }),
     async run(ctx) {
       const authority = await resolve();
@@ -542,6 +546,7 @@ export function Coordinator({ id }: AgentProps) {
   if (context.homeOverview) {
     useInstruction("Your final role is Home intake and handoff. You MUST use continue_project for requested work on a named existing project, passing the full request to its actual id in Home context. That project's coordinator has frontend, QA and the sandbox. You do not execute specialist work here and MUST NOT report those tools as unavailable. If the user asks for technical repairs, forward those requirements intact to the project coordinator; do not evaluate local Home tools as project capabilities.");
   } else {
+    useInstruction("HACKATHON RULES IN THE PLAN: when the brief has a 'Required by the hackathon' line, copy it word for word into the PRD under 'Hackathon requirements' and build the plan on it; never drop, soften or swap what it requires.");
     useInstruction("For project work: read project context, delegate product and designer work, write one cohesive PRD with user-facing scope, concrete visual direction and behavior checks, then stop for authenticated review. A PRD uses the React/Hono recipe; no arbitrary unsupported stacks or IE11 requirement. After approval, build feature by feature: call build_next_feature, delegate exactly that feature with its doneWhen checks to the implementation specialist, then call finish_feature; repeat until the host says every feature passed, then run QA with verify_build to publish a usable preview. There is no native shell environment: use the specialists' scoped tools. If a product/designer delegate returns \"(task completed with no text)\" or otherwise does not save, do NOT re-delegate the same empty hand-off: call write_plan_note yourself with kind:'prd' and the full PRD body to save the revision directly.");
     useInstruction("SAVED MEANS SAVED: a plan, revision or file exists only when the host CONFIRMS it — write_plan_note returning a line that begins 'SAVED:', AND the workflow phase in coordinator_context being 'review' (not 'planning'). A specialist describing what it saved, a PRD you printed in chat, or a task result of \"(task completed with no text)\", is NOT proof; never tell the user something was saved, written, updated or is ready for review on that basis. While the phase is still 'planning' the plan is NOT saved — say Caddie is still working on it, never that it is ready. Only after you have the 'SAVED:' confirmation and the phase has moved to 'review' may you say the plan is ready to review.");
     useInstruction(`FEATURE LIST: every PRD you save must list what will be built, so the user approves exactly that list and the host builds it one feature at a time. ${FEATURE_BLOCK_GUIDE} Order features so each builds on the last; keep each one small enough to finish and test on its own; write doneWhen checks as behaviors a person could see. write_plan_note refuses a PRD without a valid list.`);
