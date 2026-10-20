@@ -17,6 +17,7 @@ import type { ToolDefinition } from '@flue/runtime';
 import { useInstruction, useSkill, useSubagent, useTool } from '@flue/runtime';
 import { findModelRouteForRole } from './providers.ts';
 import { FEATURE_BLOCK_GUIDE } from '@caddie/contracts';
+import { CADDIE_SCRATCH_DIR } from '../server/source-export.ts';
 
 /**
  * P05 specialists — seven restricted roles. This module is deliberately NOT
@@ -89,6 +90,8 @@ export const BUILD_RECIPE_INSTRUCTION =
 	'Never create or edit bunfig.toml or anything under test/setup/ (writes there are refused), and never add jsdom, Vitest or Jest. ' +
 	'Write behavior tests as src/*.test.tsx using test/expect from bun:test and render/screen/fireEvent from @testing-library/react; test/examples/app.example.test.tsx shows the pattern but does not count. ' +
 	'Run tests ONLY with run_checks: it installs, runs `bun test src/` and builds exactly as the host verifies. Shell test commands are refused, and every failing run_checks counts toward the repair limit, so read the failure and fix its cause before running again. ' +
+	`Put throwaway probes only in ${CADDIE_SCRATCH_DIR}/ (it is never saved or shown as an app file), never in the app root or src/. ` +
+	"When run_checks fails inside Caddie's own steps rather than in your app — the output names /tmp/caddie-…, says a package could not be unpacked, says the registry could not be reached, or says a tarball does not match bun.lock — that is Caddie's problem, not your code: say so in one plain sentence and stop that repair. Never read, copy or debug Caddie's scripts or a package's node_modules internals. " +
 	'Never delete assertions or replace component tests with copied logic. Use React 19 createRoot. ' +
 	'Every app also has a server, ready from the start: src/server.ts is a Hono app whose routes all live under /api (it already answers GET /api/health); call it from React with fetch("/api/..."). ' +
 	'Data the app must keep or share goes through the server and env.DB (Cloudflare D1: c.env.DB.prepare(sql).bind(...).all() / first() / run(), env.DB.batch([...])); use localStorage only for per-device preferences. ' +

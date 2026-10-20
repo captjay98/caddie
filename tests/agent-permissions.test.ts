@@ -14,6 +14,7 @@ import {
 	isShellTestCommand,
 } from '../apps/app/src/agents/permissions';
 import { BUILD_RECIPE_INSTRUCTION, SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
+import { CADDIE_SCRATCH_DIR } from '../apps/app/src/server/source-export.ts';
 import { findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
 import {
 	makeRecordAcceptance,
@@ -146,6 +147,19 @@ describe('P05 permission matrix', () => {
 		expect(BUILD_RECIPE_INSTRUCTION).toContain('test/setup/');
 		expect(BUILD_RECIPE_INSTRUCTION).not.toContain('global-jsdom');
 		expect(BUILD_RECIPE_INSTRUCTION).not.toContain('initialize jsdom');
+	});
+
+	test("probes go in Caddie's scratch folder, and a failure inside Caddie's own steps is reported, not debugged (live finding, 2026-10-20)", () => {
+		// The FarmLog build left scratch-*.ts probes in the app and spent its
+		// repairs reading /tmp/caddie-verified-install.mjs after Caddie's own
+		// installer crashed.
+		expect(BUILD_RECIPE_INSTRUCTION).toContain(`only in ${CADDIE_SCRATCH_DIR}/`);
+		expect(BUILD_RECIPE_INSTRUCTION).toContain('never in the app root or src/');
+		for (const sign of ['/tmp/caddie-', 'could not be unpacked', 'the registry could not be reached']) {
+			expect(BUILD_RECIPE_INSTRUCTION).toContain(sign);
+		}
+		expect(BUILD_RECIPE_INSTRUCTION).toContain("that is Caddie's problem, not your code");
+		expect(BUILD_RECIPE_INSTRUCTION).toContain('stop that repair');
 	});
 
 	test('every tool name in every policy is a known tool', () => {

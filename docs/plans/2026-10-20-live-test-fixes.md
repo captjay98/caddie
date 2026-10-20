@@ -38,7 +38,7 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   (GitHub, versions, checkpoints) and never listed under "Files written". A
   dot-name only Caddie uses, so a user's own `scratch/` folder is still saved
   and imported.
-- [ ] 1.3 Builder instruction: probes go in `.caddie-scratch/`; a failure inside
+- [x] 1.3 Builder instruction: probes go in `.caddie-scratch/`; a failure inside
   Caddie's own installer or checks is reported as Caddie's problem, not
   debugged. Source-guard test.
 
