@@ -47,7 +47,7 @@ Recorded 2026-10-06 on branch `p15-p17-completion`, with the owner's
 | P15b | Laravel + Inertia journey | BLOCKED | `tests/live/stacks/laravel-inertia.spec.ts` gates honestly: needs `CADDIE_LIVE_AUTHORIZED=1` (composer install is a network effect) + composer/php/npm present |
 | P15c | FastAPI + React journey | BLOCKED | `tests/live/stacks/fastapi-react.spec.ts`: needs `CADDIE_LIVE_AUTHORIZED=1` + uv/python/bun present |
 | P15d | Flutter journey (APK + emulator) | LIVE VERIFIED | `tests/live/stacks/flutter.spec.ts` — real `dart caddie/setup.dart` + locked `flutter pub get` + `flutter test test/examples` + `flutter build apk --debug`, then install, launch and capture on an arm64 emulator; receipt `lr_602f8532232b3019` at `9af594f396d3` (2026-10-20), 2 tests passed. Requires `CADDIE_LIVE_AUTHORIZED=1` + flutter + adb + a booted emulator, and clears a stale differently signed install of the same app id first |
-| P17 | Hosted acceptance smoke | LIVE VERIFIED | `tests/live/release.spec.ts` against `https://caddie.jamalibrahim.dev` — 5/5 PASS, receipt `lr_f01e5b354852f7bc` at `702c97cab57b`, 2026-10-20 (previous deploy: `lr_1445a409fddf0a19` at `a58adabd406a`) |
+| P17 | Hosted acceptance smoke | LIVE VERIFIED | `tests/live/release.spec.ts` against `https://caddie.jamalibrahim.dev` — 5/5 PASS, receipt `lr_b843dd88b83598df` at `4fdaf26d270c`, 2026-10-20 (previous deploys: `lr_f01e5b354852f7bc` at `702c97cab57b`, `lr_1445a409fddf0a19` at `a58adabd406a`) |
 
 Intentionally-absent live specs stay honest holes, not fake passes:
 `tests/live/github.spec.ts` (P08) is authored only against a real registered
@@ -102,6 +102,38 @@ Owner-authorized deploy of `main` at `702c97c`, carrying Kiro's live fixes
 counts a recorded receipt for a packet with mapped live specs, and P01, P05
 (the full round-trip) and P10 need an interactive owner sign-in. P04 is now
 PASS from its receipt.
+
+## Production deploy (2026-10-20, second): build on Nemotron 3.5 Super VL
+
+Owner-directed follow-up deploy of `main` at `4fdaf26`, carrying the model
+re-route (`build` → Nemotron 3.5 Super VL), the deterministic local-model plan
+guard, and 4 new tests. Deployed the same day as the live-fixes deploy above.
+
+| Item | Value |
+|---|---|
+| URL | https://caddie.jamalibrahim.dev |
+| Version id | `ad8b8c12-ab83-4895-92d1-a5e02381a8fe` |
+| Commit | `4fdaf26` (untracked docs-only review file still present; no code outside a commit) |
+| Release gate | typecheck clean; 1,700 unit/service tests, 0 fail (128 files); packet P11 and NET re-run after mapping the new policy test; `release-check` 49 PASS, 0 FAIL, 1 BLOCKED (deploy authorization), 4 PROVISIONED |
+| Build | production app build (D1 `f6315eae…`, production route) + composed assets; `sw.js` BUILD `df640ece5c60`; 0 collisions |
+| Preflight | 18 PASS, 2 WARN (same reused keys; untracked docs file), 0 FAIL |
+| Dry run | DB, LOADER, PREVIEW_DB and both Flue agents listed; nothing uploaded |
+| D1 | no new migrations (`0039` is current) |
+| Deploy | `wrangler deploy --secrets-file .prod.vars` (account id explicit; wrangler cannot pick between three accounts non-interactively) |
+| Smoke | P17 live 5/5 PASS, receipt `lr_b843dd88b83598df` at `4fdaf26d270c` |
+| Judge access | unchanged (`open:true`, `canStart:true`); same secrets re-uploaded |
+
+Model routing now: `ideation` → Nemotron 3 Ultra, `chat`/`build`/`vision` →
+Nemotron 3.5 Super VL, `plan` → GLM-5.3-Flash, `helper` → Nemotron 3 Nano,
+`app` (inside generated apps only) → Nemotron 3.5 Lightning. Existing run
+bindings keep their frozen route; only new runs pick this up.
+
+One build attempt in this session left `local-dev-placeholder` in the composed
+config (the cause did not reproduce: a fresh `CLOUDFLARE_ENV=production bun run
+build` selects `env.production` correctly). Preflight refused it with
+"apps/app/dist is not the production build"; the deploy ran only after a
+rebuild that carried the production D1 id and route. No version was uploaded
+from the local-dev config.
 
 ## Verification net (S01, 2026-10-18)
 
