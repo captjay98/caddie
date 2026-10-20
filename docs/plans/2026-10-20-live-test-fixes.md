@@ -175,9 +175,15 @@ it, then finishes Track 3. It runs itself, one step per cycle.
   workspace chrome, every page body and the onboarding page render it (the
   plain column and the wall are gone). It runs edge to edge under the header,
   fills a chrome-free page on onboarding, and is the form alone on a phone.
-- [ ] 5.3 Plan tab: same width as the other tabs; the plan folds once approved;
+- [x] 5.3 Plan tab: same width as the other tabs; the plan folds once approved;
   badge and button follow the build ("See build progress" while building); one
-  plain sentence on what approving means.
+  plain sentence on what approving means. Done: the 820px cap is gone; the
+  plan is a fold, open until approved; once approved the badge and button
+  read the build's own phase (Building now / See build progress, Build paused
+  / See what's needed, App built / See your app, all to the Build tab); the
+  bar says "Approving lets Caddie build exactly this plan in a private
+  workspace; putting it online or changing real data always asks you first."
+  in place of the two-box fold. Button-styled links lose their underline.
 - [ ] 5.4 A brief that needs the owner also arrives as a notification, once per
   run, raised where the failure is recorded.
 - [ ] 5.5 Audit trail becomes "Details" in words; ids under "For developers".

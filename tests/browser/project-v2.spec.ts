@@ -413,7 +413,9 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
         await expect(page.getByRole('button', { name: 'Continue with Caddie' })).toBeVisible();
         // Markdown is a real list rather than literal source text.
         await expect(page.getByTestId('plan-body-content').locator('li')).toContainText('render a live chart');
-        await expect(page.getByTestId('design-review-scope')).not.toHaveAttribute('open');
+        // What approving means is one plain sentence; the approved plan folds.
+        await expect(page.getByTestId('approve-meaning')).toBeVisible();
+        await expect(page.getByTestId('design-review-plan-body')).not.toHaveAttribute('open');
         await page.screenshot({ path: '/tmp/caddie-plan-review.png' });
 
 		// No earlier versions → no "Earlier versions · 0" noise fold.
@@ -621,4 +623,59 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await expect(page.getByTestId('artifact-viewer')).toBeVisible();
 		await context.close();
 	});
+});
+
+test.describe('the Plan tab follows the build (plan 5.3)', () => {
+	// Live findings (2026-10-20): the Plan tab was narrower than the other tabs,
+	// the long plan stayed open after approval, the badge still said "Plan
+	// approved" with "Continue with Caddie" while the app was being built, and
+	// what approving means sat in a fold of boxes.
+	const PLAN = { id: 'pdr-follow', projectId: 'proj-a', kind: 'prd', revision: 1, body: '# FarmLog AI\n\n- Log daily feed', bodyHash: 'sha256-follow', createdAt: NOW };
+	const APPROVED = { resourceId: 'pdr-follow', revisionHash: 'sha256-follow', status: 'approved', expiresAt: '2027-01-01T00:00:00Z' };
+	const MEANING = 'Approving lets Caddie build exactly this plan in a private workspace; putting it online or changing real data always asks you first.';
+
+	test('before a decision: as wide as the other tabs, one plain sentence on approving, the plan open to read', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+		await stubAccount(context, { planDocs: [PLAN] });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/design-review?project=proj-a`);
+
+		const panel = page.getByTestId('design-review');
+		await expect(panel).toBeVisible();
+		const column = await page.locator('.page-col').first().boundingBox();
+		const box = await panel.boundingBox();
+		expect(Math.round(box!.width)).toBe(Math.round(column!.width));
+		await expect(page.getByTestId('approve-meaning')).toHaveText(MEANING);
+		await expect(page.getByTestId('approval-scope')).toHaveCount(0);
+		await expect(page.getByTestId('design-review-plan-body')).toHaveAttribute('open', '');
+		await expect(page.getByTestId('plan-body-content')).toBeVisible();
+		await context.close();
+	});
+
+	for (const [phase, badge, action] of [
+		['building', 'Building now · version 1', 'See build progress'],
+		['blocked', 'Build paused · version 1', 'See what’s needed'],
+		['ready', 'App built · version 1', 'See your app'],
+	] as const) {
+		test(`approved and ${phase}: the badge and the button follow the build, and the plan is folded`, async ({ browser }) => {
+			const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+			await stubAccount(context, { planDocs: [PLAN], approval: APPROVED, workflowPhase: phase });
+			const page = await context.newPage();
+			await page.goto(`${BASE}/app/design-review?project=proj-a`);
+
+			const outcome = page.getByTestId('design-review-outcome');
+			await expect(outcome).toHaveText(badge);
+			await expect(outcome).toHaveAttribute('data-decision', 'approved');
+			await expect(page.getByRole('button', { name: 'Continue with Caddie' })).toHaveCount(0);
+			await expect(page.getByTestId('design-review-plan-body')).not.toHaveAttribute('open');
+			const go = page.getByTestId('plan-see-build');
+			await expect(go).toHaveText(action);
+			// It is a link to the Build tab, drawn as a button: no underline.
+			await expect(go).toHaveCSS('text-decoration-line', 'none');
+			if (process.env.PLAN_SHOTS) await page.screenshot({ path: `${process.env.PLAN_SHOTS}/plan-tab-${phase}.png` });
+			await go.click();
+			await expect(page).toHaveURL(/\/app\/runs\?project=proj-a/);
+			await context.close();
+		});
+	}
 });

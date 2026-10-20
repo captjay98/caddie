@@ -30,6 +30,7 @@ import {
 	usePlanDocRevisions,
 	useProjectExperience,
 	useRunBindings,
+	useWorkflowPhase,
 } from './queries.ts';
 import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from './api.ts';
@@ -1051,6 +1052,8 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const planDocs = usePlanDocRevisions(actor, props.projectId);
+	// The build's own phase: once the plan is approved, the Plan tab follows it (plan 5.3).
+	const buildPhase = useWorkflowPhase(actor, props.projectId);
 	// PRD revisions share a counter; spec/note counters are incomparable.
     const revisions = [...(planDocs.data?.revisions ?? [])].filter((revision) => revision.kind === 'prd').sort((a, b) => b.revision - a.revision);
     const latest = revisions[0];
@@ -1069,6 +1072,7 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
             retryApproval={() => void approval.refetch()}
             onDecisionSaved={() => { void approval.refetch(); chrome.refreshAll(); }}
             onContinue={() => chrome.openProject(props.projectId, true)}
+            buildPhase={buildPhase.data ?? null}
 			projectId={props.projectId}
 			planRevisions={revisions}
 			isPending={planDocs.isPending}
