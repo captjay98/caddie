@@ -1140,12 +1140,14 @@ a.btn-ghost.topbar-nav-link {
    A danger halo behind the character, a FAULT kicker, a primary "Try again"
    + ghost "Ask Caddie" action row, and (DEV ONLY) a clearly-labelled raw
    detail panel. Token-only so it tracks light mode and every palette. */
-.route-error-view {
+.route-error-view,
+.gate-view {
 	display: grid;
 	place-items: center;
 	/* Chrome-free page: it owns the whole viewport and paints its own themed
 	   canvas (the shell is NOT mounted around it — that is what prevents a
-	   re-crash into a blank screen). */
+	   re-crash into a blank screen). The workspace gate (plan 5.1) is the same
+	   kind of page: it shows before the shell exists. */
 	min-height: 100vh;
 	min-height: 100dvh;
 	padding: clamp(24px, 6vh, 72px) 20px;
@@ -1153,6 +1155,10 @@ a.btn-ghost.topbar-nav-link {
 	background-image: var(--horizon);
 	background-repeat: no-repeat;
 	color: var(--color-bright);
+}
+
+.gate-view .state-panel {
+	width: min(100%, 420px);
 }
 
 .route-error-card {

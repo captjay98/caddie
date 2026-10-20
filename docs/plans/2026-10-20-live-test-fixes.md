@@ -165,7 +165,11 @@ it, then finishes Track 3. It runs itself, one step per cycle.
 
 ## 5. Polish
 
-- [ ] 5.1 A styled "Getting your workspace ready" screen (`Gate.tsx`, `routes.tsx`).
+- [x] 5.1 A styled "Getting your workspace ready" screen (`Gate.tsx`, `routes.tsx`).
+  Done: the gate's loading and error states are the shared state panel on a
+  chrome-free themed page (`.gate-view`, the route error page's canvas); the
+  error offers Try again and no "Ask Caddie" (the chat is not open yet); a
+  finished welcome shows the same panel while it opens the workspace.
 - [ ] 5.2 The split sign-in is the sign-in everywhere (one shared component).
 - [ ] 5.3 Plan tab: same width as the other tabs; the plan folds once approved;
   badge and button follow the build ("See build progress" while building); one

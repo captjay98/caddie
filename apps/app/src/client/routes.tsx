@@ -98,7 +98,7 @@ function OnboardingFlow(): ReactElement {
  return (
   <main id="main" data-testid="onboarding-page" style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 'clamp(16px, 4vw, 48px)' }}><div style={{ width: '100%', maxWidth: 720 }}>
    {!auth.data?.authenticated ? <SignInPanel callbackURL="/app/onboarding" /> : status.data?.completedAt ? (
-    <p role="status" aria-live="polite">Getting your workspace ready…</p>
+    <StatePanel kind="loading" title="Getting your workspace ready…" />
    ) : (
     <><fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0 }}>
      {atProfile && actor.data ? <OnboardingProfile actorId={actor.data} onDone={finish} /> : <WelcomeIntro onDone={() => setAtProfile(true)} />}
