@@ -296,6 +296,19 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await context.close();
 	});
 
+	test('Overview: a project without a workflow never claims Caddie is working', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubAccount(context, {
+			experience: { projectId: 'proj-a', version: 0, stage: 'planning', plan: null, preview: null, message: 'No workflow yet.', actions: [] },
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('overview-next-step')).toContainText('Let’s get started');
+		await expect(page.getByTestId('overview-brief-building')).toHaveCount(0);
+		await expect(page.getByTestId('overview-now')).toHaveCount(0);
+		await context.close();
+	});
+
 	test('Overview: while Caddie plans, the Now panel says so instead of "Let\'s get started"', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubAccount(context, {
@@ -309,6 +322,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await expect(page.getByTestId('overview-now-updated')).toHaveText('Updated 2 min ago');
 		await expect(page.getByTestId('overview-next-step')).toHaveCount(0);
 		await expect(page.locator('body')).not.toContainText('Let’s get started');
+		await expect(page.getByTestId('overview-brief-building')).toBeVisible();
 		await context.close();
 	});
 

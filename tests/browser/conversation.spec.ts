@@ -62,6 +62,37 @@ async function openProjectPage(page: Page) {
 }
 
 test.describe('P05/P06 conversation surface', () => {
+	test('a quota refusal explains the limit on the first send and retry, retaining the unsent message', async ({ browser }) => {
+		const context = await browser.newContext();
+		await stubSession(context);
+		await stubProjectList(context, { projects: [PROJECT] });
+		await context.route('**/api/projects/proj_conversation/runs', (route) => json(route, 201, { run: {
+			runId: 'run-quota', projectId: PROJECT.id, conversationId: 'conv-quota', submissionId: 'sub-quota',
+			planRevision: 'rev-0', stackId: 'react-hono', payerId: 'actor-test', modelRouteId: 'nemotron-3-super',
+			pricingVersion: 'v1', createdBy: 'actor-test', createdAt: PROJECT.createdAt,
+		} }));
+		const keys: string[] = [];
+		const message = 'Judges can send 0 Caddie messages in 24 hours. Everything else works the same.';
+		await context.route('**/agents/coordinator/conv-quota**', (route) => {
+			if (route.request().method() !== 'POST') return json(route, 404, { error: 'not_found' });
+			keys.push((route.request().postDataJSON() as { idempotencyKey: string }).idempotencyKey);
+			return json(route, 403, { error: 'JUDGE_LIMIT_MESSAGES', message });
+		});
+		const page = await context.newPage();
+		await openProjectPage(page);
+		await page.getByTestId('composer-input').fill('Build my daily task list');
+		await page.getByTestId('composer-input').press('Enter');
+		await expect(page.getByTestId('channel-offline')).toContainText(message);
+		await expect(page.getByTestId('channel-offline')).not.toContainText("can't be reached");
+		await expect(page.getByTestId('draft-row')).toContainText('Build my daily task list');
+		await page.getByTestId('draft-retry').click();
+		await expect.poll(() => keys.length).toBe(2);
+		await expect(page.getByTestId('channel-offline')).toContainText(message);
+		expect(keys[1]).toBe(keys[0]);
+		await page.getByTestId('draft-edit').click();
+		await expect(page.getByTestId('composer-input')).toHaveValue('Build my daily task list');
+		await context.close();
+	});
 	test('channel renders the honest standby state with no transport', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubSession(context);

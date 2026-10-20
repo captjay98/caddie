@@ -50,6 +50,7 @@ export function useCoordinatorTransport(
 	const bindings = useRunBindings(actor, projectId);
 	// A run created in this session wins until the list refetch includes it.
 	const [sessionRun, setSessionRun] = useState<RunBindingRecord | null>(null);
+	const [sendFailure, setSendFailure] = useState<{ actorId: string | null; projectId: string | null; error: Error } | null>(null);
 	// The transport can now outlive one workspace mount (it lives in the
 	// chrome so the mobile composer works on every route): a scope switch must
 	// never carry the previous actor's or project's run forward.
@@ -62,7 +63,7 @@ export function useCoordinatorTransport(
 		url: run ? `/agents/coordinator/${encodeURIComponent(run.conversationId)}` : undefined,
 	});
 
-	const send = useCallback(
+	const sendAttempt = useCallback(
 		async (
 			text: string,
 			idempotencyKey: string,
@@ -109,6 +110,21 @@ export function useCoordinatorTransport(
 		[run, projectId, actor.actorId, agent],
 	);
 
-	const source: ChannelSource = run ? agent : standbySource;
+	// The first send uses client.send before the hook adopts its conversation.
+	// Its admission error never enters the hook's failedSends; preserve it here
+	// for both paths, scoped so a late rejection cannot leak to another project.
+	const send = useCallback<CoordinatorTransport['send']>(async (...args) => {
+		setSendFailure(null);
+		try {
+			await sendAttempt(...args);
+		} catch (error) {
+			setSendFailure({ actorId: actor.actorId, projectId, error: error instanceof Error ? error : new Error(String(error)) });
+			throw error;
+		}
+	}, [sendAttempt, actor.actorId, projectId]);
+	const baseSource: ChannelSource = run ? agent : standbySource;
+	const source: ChannelSource = sendFailure && sendFailure.actorId === actor.actorId && sendFailure.projectId === projectId
+		? { ...baseSource, status: 'error', error: sendFailure.error }
+		: baseSource;
 	return { source, hasRun: run !== null, send };
 }

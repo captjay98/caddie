@@ -21,6 +21,7 @@ import type { ChannelDraft, ChannelSource } from './channel-store.ts';
 import { cleanAssistantText } from './response-hygiene.ts';
 import { attachedFileNames, stripAttachedFileText } from './image-attachments.ts';
 import { settlementNotice } from './settlement-notice.ts';
+import { quotaRefusalMessage } from './send-failure.ts';
 
 /**
  * The Channel — typed conversation rendering (feature-ledger row C7).
@@ -741,9 +742,9 @@ export function Channel(props: {
 				) : null}
 				{source.status === 'error' ? (
 					<div className="conv-offline" role="status" data-testid="channel-offline">
-						<Icon name="alert" title="Connection problem" />
+						<Icon name="alert" title="Message not sent" />
 						<span>
-							Caddie can't be reached right now. What you send waits here until you send it again.
+							{quotaRefusalMessage(source.error) ?? "Caddie can't be reached right now. What you send waits here until you send it again."}
 						</span>
 					</div>
 				) : null}

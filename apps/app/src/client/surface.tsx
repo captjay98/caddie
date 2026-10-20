@@ -777,7 +777,9 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 	const experienceParsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
 	const experienceStage = experienceParsed?.success ? experienceParsed.output.stage : null;
 	const workingStages: readonly string[] = ['planning', 'building', 'checking', 'repairing'];
-	const working = experienceStage !== null && workingStages.includes(experienceStage);
+	// version 0 is the projection's no-workflow fallback (stage 'planning'),
+	// not evidence that any work has started.
+	const working = experienceParsed?.success === true && experienceParsed.output.version > 0 && experienceStage !== null && workingStages.includes(experienceStage);
 	const navigate = useNavigate();
 	// The full brief opens in a modal, NOT an inline <details>, so revealing it
 	// never shifts the Overview layout (user steering, 2026-10-15).

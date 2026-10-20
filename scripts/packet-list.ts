@@ -59,7 +59,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 		live: ['tests/live/flue-lifecycle.spec.ts', 'tests/live/hackathon-followup-routing.spec.ts'],
 	},
 	P06: {
-		tests: [],
+		tests: ['tests/send-failure.test.ts'],
 		browser: ['tests/browser/workspace.spec.ts', 'tests/browser/conversation.spec.ts'],
 		live: [],
 	},
