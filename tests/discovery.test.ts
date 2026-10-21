@@ -778,3 +778,26 @@ describe('Stage polish — candidateDetail caches the AI digest (no re-read on r
 afterAll(() => {
 	// no external resources in this suite
 });
+
+test('cached digest prizes are corrected from stored binding rules without a paid recompute', async () => {
+ const world=makeDiscoveryWorld(); const adapter=createLocalSeedAdapter(world.db);
+ const url='https://source-prizes.devpost.com';
+ await seedCandidates(world.db,[{source:'local-seed',url,title:'Source prize event',summary:'Prize example'}]);
+ const feed=await runDiscoveryFeed(world.db,world.aliceScope,{adapters:[adapter]}); const id=feed.candidates[0]!.id;
+ const originalFetch=globalThis.fetch;
+ try {
+ let calls=0;
+ globalThis.fetch=(async()=>{calls++; return {ok:true,status:200,json:async()=>({choices:[{message:{content:JSON.stringify({headline:'An event.',bullets:['Online'],prizes:[{label:'Grand Prize',amount:''},{label:'2nd Place',amount:'1 GPU'}]})}}]})} as Response;}) as unknown as typeof fetch;
+ await candidateDetail(world.db,world.aliceScope,id,{country:'NG'},'fixture-key');
+ expect(calls).toBe(1);
+ const source=await registerSource(world.db,world.aliceScope,{url:`${url}/rules`,kind:'page',authority:'binding_rules',displayName:'Prize rules'});
+ await captureSnapshot(world.db,world.aliceScope,source.id,{content:'Intro\n'.repeat(3000)+'\n| Prize Name | Prize Items | Quantity | Eligibility |\n| --- | --- | --- | --- |\n| Grand Prize | * $20,000 USD | 1 | All eligible entries |\n| 2nd Place | * $10,000 USD | 1 | All eligible entries |\n| City Winner Awards | * $500 USD | 20 | City entrants |',mediaType:'text/plain'});
+ const corrected=await candidateDetail(world.db,world.aliceScope,id,{country:'NG'},'fixture-key',undefined,{deferDigest:true});
+ expect(calls).toBe(1); expect(corrected.digestPending).toBe(false);
+ expect(corrected.digest?.prizes.map(p=>p.amount)).toEqual(['$20,000 USD','$10,000 USD']);
+ expect(corrected.officialPrizes).toHaveLength(3); expect(corrected.officialPrizes[2]!.quantity).toBe('20');
+ expect(corrected.prizesSourceUrl).toBe(`${url}/rules`);
+ const other=await candidateDetail(world.db,world.bobScope,id,{country:'NG'},undefined,undefined,{deferDigest:true}).catch(()=>null);
+ expect(other).toBeNull();
+ } finally { globalThis.fetch=originalFetch; }
+});

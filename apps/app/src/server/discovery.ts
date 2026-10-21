@@ -12,8 +12,9 @@ import {
 	type EligibilityRuleClaim,
 } from './eligibility.ts';
 import { tavilySearch, TavilyNotConfiguredError, type TavilySearchResult } from './tavily.ts';
+import { parseOfficialPrizes, overlayOfficialPrizeAmounts, type OfficialPrize } from './discovery-prizes.ts';
 import { DIGEST_VERSION, digestCandidate, type CandidateDigest, type InspectionProfile } from './candidate-inspection.ts';
-import { readRulesForCandidates, overviewUrlFor } from './rules-reading.ts';
+import { readRulesForCandidates, overviewUrlFor, rulesUrlFor } from './rules-reading.ts';
 
 /**
  * P11 slice 1 — discovery: the candidate feed, candidate identity, and
@@ -1696,6 +1697,8 @@ export interface CandidateDetail {
 	 * model call). False whenever `digest`/`digestGap` are final.
 	 */
 	readonly digestPending: boolean;
+	readonly officialPrizes: readonly OfficialPrize[];
+	readonly prizesSourceUrl: string | null;
 	/** Tier 2: verbatim rules grouped by kind. */
 	readonly groups: readonly CandidateDetailGroup[];
 }
@@ -1837,7 +1840,12 @@ export async function candidateDetail(
 		}
 	}
 
-	return { candidate, fit, eligibility, digest, digestGap, digestPending, groups };
+	// The binding rules may carry a complete prize table absent from the overview.
+    // Read it locally, including on cache hits, without invalidating the digest
+    // or authorizing a new model call. Exact-labelled source rows win.
+    const { prizes: officialPrizes, sourceUrl: prizesSourceUrl } = await readOfficialPrizeTable(db, scope, candidate.url);
+    digest = overlayOfficialPrizeAmounts(digest, officialPrizes);
+    return { candidate, fit, eligibility, digest, digestGap, digestPending, groups, officialPrizes, prizesSourceUrl };
 }
 
 /**
@@ -1879,6 +1887,19 @@ async function readOverviewText(db: D1Database, scope: Scope, candidateUrl: stri
 	} catch {
 		return null; // a missing/removed snapshot reads as "no overview", never throws
 	}
+}
+
+async function readOfficialPrizeTable(db: D1Database, scope: Scope, candidateUrl: string): Promise<{prizes: readonly OfficialPrize[]; sourceUrl: string | null}> {
+    const url = rulesUrlFor(candidateUrl);
+    if (!url) return {prizes:[],sourceUrl:null};
+    const sources = await listSources(db, scope);
+    const source = sources.find(item => item.authority === 'binding_rules' && item.canonicalUrl === canonicalizeUrl(url));
+    if (!source?.latestSnapshotId) return {prizes:[],sourceUrl:null};
+    try {
+        const snapshot = await getSnapshot(db, scope, source.latestSnapshotId);
+        const prizes = parseOfficialPrizes(snapshot.content);
+        return {prizes,sourceUrl:prizes.length ? source.canonicalUrl : null};
+    } catch { return {prizes:[],sourceUrl:null}; }
 }
 
 /** Read a cached digest for (candidate, contentHash); null on miss or stale hash. */

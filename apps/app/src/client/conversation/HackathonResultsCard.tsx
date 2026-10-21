@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { createContext, useContext } from 'react';
 import type { HackathonResultsCard, HackathonCandidate } from '@caddie/contracts';
+import { CardHeader } from '../brief/CardFrame.tsx';
 import { Icon } from '../icons.tsx';
 import { countryName } from '../country.ts';
 import {
@@ -143,12 +144,14 @@ function FeaturedCard({ candidate }: { candidate: HackathonCandidate }): ReactEl
 	const site = platformName(candidate.platform);
 	return (
 		<article
-			className="hk-feature"
+			className="hk-feature caddie-card"
+            data-design="opportunity" data-tone="blue"
 			data-testid="hk-card"
 			data-eligibility={candidate.eligibility}
 			data-ai-fit={candidate.aiFit ?? 'unknown'}
 			data-top-pick={candidate.topPick ? 'true' : undefined}
 		>
+            <CardHeader design="opportunity" status={candidate.topPick ? 'Top pick' : 'Worth a look'} />
 			{candidate.topPick ? (
 				<div className="hk-toppick-ribbon" data-testid="hk-toppick-ribbon">
 					<Icon name="sparkCheck" title="" /> Top pick for you

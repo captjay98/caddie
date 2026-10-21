@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -88,6 +88,11 @@ test.afterAll(async () => {
 		await sleep(500);
 	}
 });
+
+async function exploreIdeas(page: Page, candidateId: string) {
+    await page.getByTestId(`disc-open-${candidateId}`).click();
+    await page.getByTestId('contest-detail-pane').getByRole('button',{name:'Find an idea',exact:true}).click();
+}
 
 // --- fixture data (mirrors the real P11 router payload shapes) ------------------
 
@@ -318,6 +323,11 @@ async function stubDiscovery(context: BrowserContext, state: StubState) {
 				},
 			});
 		}
+        if (path.endsWith('/detail')) return json(route,200,{
+            candidate:{id:'cand-1',url:CAND_1_URL,title:'Solar Hackweek',summary:'Build a climate dashboard in a weekend.'},
+            eligibility:{verdict:'eligible'},digest:null,digestGap:'No summary in this fixture.',
+            groups:[{kind:'entry',label:'Entry requirements',claims:[{claimId:'cl-team-1',claimType:'team',quote:'Teams of 1–4 may enter.',verdict:'eligible',reason:'Team size fits'}]}]
+        });
 		if (path.endsWith('/candidates')) {
 			if (state.candidatesStatus !== 200) {
 				return json(route, state.candidatesStatus, state.candidatesBody);
@@ -426,22 +436,28 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		await expect(page.getByText("Can't enter", { exact: true })).toHaveCount(0);
 		await page.getByTestId('discovery-reveal-ineligible').click();
 		await expect(page.getByText("Can't enter", { exact: true })).toBeVisible();
-		// One reason it fits: the first evidenced claim's statement, in the
+		await page.getByTestId('disc-open-cand-1').click();
+        await expect(page.getByTestId('contest-detail-pane')).toBeVisible();
+        // One reason it fits: the first evidenced claim's statement, in the
 		// row's "Why it fits" fold (collapsed by default since the 2026-10-15 card).
 		await page.getByTestId('disc-fit-cand-1').locator('summary').click();
 		await expect(page.getByTestId('disc-fit-cand-1').getByText('Teams of 1-4 may enter (on record: 1-4)')).toBeVisible();
+
+		await page.getByTestId('contest-detail-close').click();
 
 		// Partial feed failure is a VISIBLE, NAMED gap — never silently dropped.
 		const gaps = page.getByRole('status').filter({ hasText: 'Some sources failed' });
 		await expect(gaps).toBeVisible();
 		await expect(gaps).toContainText('devpost failed — upstream returned 503 (recorded receipt)');
 
-		await expect(page.getByTestId('discovery-country')).toContainText('Entry checked for United States');
+		await expect(page.getByTestId('discovery-country')).toContainText('United States');
 
 		// The fit reason cites its evidence claim id, and a claim Caddie could
 		// not confirm is shown under it with the assumption it recorded, so a
 		// fit is never presented as more certain than it is.
-		const fit = page.getByTestId('disc-fit-cand-1');
+		await page.getByTestId('disc-open-cand-1').click();
+        const fit = page.getByTestId('disc-fit-cand-1');
+        await fit.locator('summary').click();
 		await expect(fit).toContainText('evidence: cl-team-1');
 		const open = page.getByTestId('disc-open-claims-cand-1');
 		await expect(open).toBeVisible();
@@ -476,7 +492,9 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/discover`);
 
-		await expect(page.getByTestId('explore-ideas-cand-1')).toBeVisible();
+		await expect(page.getByTestId('disc-row-cand-1').getByRole('button',{name:'Find an idea',exact:true})).toHaveCount(0);
+        await page.getByTestId('disc-open-cand-1').click();
+        await expect(page.getByTestId('contest-detail-pane').getByRole('button',{name:'Find an idea',exact:true})).toBeVisible();
 		await expect(page.getByTestId('save-candidate-cand-1')).toBeVisible();
 		// The redesign replaces "Accept" with an explicit explore/save pair.
 		await expect(page.getByRole('button', { name: 'Accept', exact: true })).toHaveCount(0);
@@ -497,8 +515,9 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		// B01: saving hits the real save route — never the accept route, never
 		// a project creation.
 		await page.getByTestId('save-candidate-cand-1').click();
+        await expect(page.getByTestId('contest-detail-pane')).toHaveCount(0);
 		// The v2 row marks a saved event with its Saved (unsave) button.
-		await expect(page.getByTestId('unsave-candidate-cand-1')).toHaveText('Saved');
+		await expect(page.getByTestId('unsave-candidate-cand-1')).toHaveAttribute('aria-pressed','true');
 		expect(state.acceptedCalls).toHaveLength(0);
 		expect(state.savedCalls).toHaveLength(1);
 		expect(new URL(state.savedCalls[0]!.url).pathname).toBe(
@@ -509,7 +528,8 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		// Exploring the other candidate opens the two-step idea flow; cand-2 is
 		// hard-ineligible, so it must be revealed first (hidden by default).
 		await page.getByTestId('discovery-reveal-ineligible').click();
-		await page.getByTestId('explore-ideas-cand-2').click();
+		await exploreIdeas(page, 'cand-2');
+        await expect(page.getByTestId('contest-detail-pane')).toHaveCount(0);
 		// v2 explore-ideas: step 1 picks/types the idea, step 2 confirms.
 		await expect(page.getByTestId('explore-idea-text')).toBeVisible();
 		await page.getByTestId('explore-ideas-next').click();
@@ -532,7 +552,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/discover`);
 
-		await page.getByTestId('explore-ideas-cand-1').click();
+		await exploreIdeas(page, 'cand-1');
 		await expect(page.getByTestId('explore-idea-text')).toBeVisible();
 		await page.getByTestId('explore-ideas-next').click();
 		await expect(page.getByTestId('explore-commit')).toContainText('Start a project for this contest');
@@ -555,8 +575,9 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 
 		// Save cand-1 (B01: the real saved bookmark, never an accept).
 		await page.getByTestId('save-candidate-cand-1').click();
+        await expect(page.getByTestId('contest-detail-pane')).toHaveCount(0);
 		// The v2 row marks a saved event with its Saved (unsave) button.
-		await expect(page.getByTestId('unsave-candidate-cand-1')).toHaveText('Saved');
+		await expect(page.getByTestId('unsave-candidate-cand-1')).toHaveAttribute('aria-pressed','true');
 
 		// The Saved segment isolates the bookmark; unsave returns it to For you.
 		await page.getByTestId('discovery-view-saved').click();
@@ -575,6 +596,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		await expect(page.getByTestId('eligibility-cand-2')).toBeVisible();
 
 		// The can-enter filter narrows to eligible candidates only.
+		await page.getByTestId('discovery-filter-toggle').click();
 		await page.getByTestId('discovery-filter-canenter').click();
 		await expect(page.getByTestId('eligibility-cand-1')).toBeVisible();
 		await expect(page.getByTestId('eligibility-cand-2')).toHaveCount(0);
@@ -594,7 +616,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/discover`);
 
-		await page.getByTestId('explore-ideas-cand-1').click();
+		await exploreIdeas(page, 'cand-1');
 		await expect(page).toHaveURL(/\/app\/project\?project=proj-linked$/);
 		expect(created.calls).toHaveLength(0); // continued, not recreated
 		await context.close();
@@ -643,4 +665,129 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		await expect(page.getByTestId('discovery-results')).toBeVisible();
 		await context.close();
 	});
+});
+
+test('populated discovery cards, facts and toolbar stay inside narrow content bounds', async ({ browser },testInfo) => {
+ const context = await browser.newContext({ viewport: { width: 412, height: 915 } });
+ const state = initialState();
+ state.evaluated = structuredClone(WITH_CANDIDATES);
+ const evaluated = state.evaluated as {evaluations:{candidate:Record<string,unknown>}[]};
+ Object.assign(evaluated.evaluations[0]!.candidate,{title:'A developer hackathon with a long title that must remain readable on a phone',platform:'devpost.com',format:'online',themes:['Machine Learning/AI','A very long theme that should wrap instead of widening this card'],participants:59800,startsAt:'2026-08-31T00:00:00.000Z',endsAt:'2026-10-23T00:00:00.000Z'});
+ (state.evaluated as Record<string,unknown>).card = {candidates:[{
+  ...evaluated.evaluations[0]!.candidate, prize:'$138,000',deadline:null,organizer:null,topPick:false,eligibility:'eligible',eligibilityNote:'',eligibilityQuote:null,eligibilityNeedsConfirm:false,rulesUrl:null,openStatusUnverified:false,saved:false,aiFit:'unknown',aiFitReason:'',aiFitConfidence:null
+ }],gaps:[],profileCountry:'US'};
+ await stubAccount(context,[PROJECT_A]); await stubDiscovery(context,state);
+ const page = await context.newPage(); await page.goto(`${BASE}/app/discover`);
+ await expect(page.locator('.disc-row').first()).toBeVisible();
+ await expect(page.locator('.disc-fact')).toHaveCount(2);
+ await expect(page.getByTestId('discovery-filters')).toBeHidden();
+ await page.getByTestId('discovery-filter-toggle').click();
+ await expect(page.getByTestId('discovery-filters')).toBeVisible();
+ for (const width of [412,390,320,768,1440]) {
+  await page.setViewportSize({width,height:915});
+  const overflow = await page.locator('.discovery-panel').evaluate(panel => {
+   const bounds=panel.getBoundingClientRect();
+   return [...panel.querySelectorAll('.disc-toolbar,.disc-row,.disc-row-title,.disc-fact,.disc-row-actions,.disc-country-chip,.disc-filter')].filter(el=>{
+    const box=el.getBoundingClientRect();return box.width>0 && (box.right>bounds.right+1 || box.left<bounds.left-1 || el.scrollWidth>el.clientWidth+1);
+   }).map(el=>el.className);
+  });
+  expect(overflow,`overflow at ${width}px`).toEqual([]);
+  expect(await page.locator('.disc-row').first().evaluate(el=>el.getBoundingClientRect().height),`card height at ${width}px`).toBeLessThan(270);
+  await expect(page.getByRole('button',{name:'View opportunity',exact:true})).toHaveCount(0);
+  const card=page.locator('.disc-row').first();
+  const alignment=await card.evaluate(el=>{const h=el.querySelector('.disc-event-host')!.getBoundingClientRect(),v=el.querySelector('.disc-entry-status')!.getBoundingClientRect();return {difference:Math.abs(h.y+h.height/2-v.y-v.height/2),display:getComputedStyle(el.querySelector('.disc-card-top')!).display};});
+  expect(alignment.difference,JSON.stringify({width,...alignment})).toBeLessThan(2);
+  await expect(card.getByRole('button',{name:'Find an idea',exact:true})).toHaveCount(0);
+  expect((await card.locator('.disc-bookmark').boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  if(width===412) await page.screenshot({path:testInfo.outputPath('discovery-mobile-contained.png')});
+ }
+ await context.close();
+});
+
+
+test('Fit first detail retains supporting facts, prizes and exact rules behind readable sections', async ({ browser }) => {
+ const context = await browser.newContext({viewport:{width:390,height:844}});
+ const state = initialState(); state.evaluated = structuredClone(WITH_CANDIDATES);
+ const record=(state.evaluated as {evaluations:{candidate:Record<string,unknown>}[]}).evaluations[0]!.candidate;
+ (state.evaluated as Record<string,unknown>).card={candidates:[{...record,platform:'devpost.com',organizer:'Solar organisers',format:'online',startsAt:'2026-10-01',endsAt:'2026-10-23',deadline:'2026-10-23',prize:'$5,000',participants:100,themes:['Climate','Energy','Open-ended'],topPick:false,eligibility:'eligible',eligibilityNote:'',eligibilityQuote:'International entrants may participate.',eligibilityNeedsConfirm:false,rulesUrl:'https://contest.example/solar-hackweek/rules',openStatusUnverified:false,saved:false,aiFit:'unknown',aiFitReason:'',aiFitConfidence:null}],gaps:[],profileCountry:'US'};
+ await stubAccount(context,[PROJECT_A]); await stubDiscovery(context,state);
+ await context.route('**/candidates/cand-1/detail?digest=defer',route=>route.fulfill({json:{
+  candidate:{id:'cand-1',url:CAND_1_URL,title:'Solar Hackweek',summary:'Build a solar project'},eligibility:{verdict:'eligible'},
+  officialPrizes:[{label:'First place',amount:'$5,000',quantity:'2',eligibility:'Working solar prototypes'},{label:'Hardware and hosting award',amount:'$25,000 cash * $15,000 AWS Credits * Meeting with Amazon Developer team * Project featured on Amazon Developer channels',quantity:'1',eligibility:'All qualifying working applications'}],prizesSourceUrl:'https://contest.example/solar-hackweek/rules',
+  digest:{headline:'Build a solar project',bullets:['Deadline → Oct 23, 2026 @ 12:00pm PDT','Format → Online'],watchOut:'Submit before the deadline',tracks:[{name:'Clean energy',detail:'Reduce energy waste'}],prizes:[{label:'First place',amount:'$1'},{label:'Community award',amount:'$250'}],perks:['Cloud credits'],judging:['Working prototype'],fitTracks:[{name:'Clean energy',why:'Matches your interests'}]},
+  digestGap:null,groups:[{kind:'entry',label:'Entry requirements',claims:[{claimId:'cl-entry',claimType:'country',quote:'International entrants may participate.',verdict:'eligible',reason:'Country requirement met'}]}]
+ }}));
+ const page = await context.newPage(); await page.goto(`${BASE}/app/discover`);
+ await page.getByTestId('disc-open-cand-1').click();
+ const pane=page.getByTestId('contest-detail-pane');
+ await expect(pane).toBeVisible();
+ await expect(pane.getByTestId('contest-detail-fit')).toBeVisible();
+ await expect(pane.getByTestId('contest-detail-key-details')).toBeVisible();
+ await expect(pane.getByText('Oct 23, 2026 @ 12:00pm PDT',{exact:true})).toBeVisible();
+ await expect(pane.getByRole('heading',{name:'At a glance',exact:true})).toHaveCount(0);
+ await expect(pane.getByRole('heading',{name:'Event details',exact:true})).toHaveCount(0);
+ await expect(pane.getByTestId('contest-detail-key-details').getByText('Online',{exact:true})).toHaveCount(1);
+ await expect(pane.getByRole('button',{name:'More about the challenge'})).toHaveCount(0);
+ const back=await pane.getByTestId('contest-detail-close').boundingBox();
+ const title=await pane.locator('.cdp-title').boundingBox();
+ expect(back!.y+back!.height).toBeLessThanOrEqual(title!.y);
+ for(const button of await pane.locator('.cdp-foot > *').all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+ await pane.getByTestId('contest-detail-source-summary').locator('summary').click();
+ await expect(pane.getByTestId('contest-detail-source-summary')).toContainText('Build a solar project');
+ await expect(pane.getByRole('tab',{name:'Overview',exact:true})).toHaveAttribute('aria-selected','true');
+ await pane.getByRole('tab',{name:'Prizes',exact:true}).click();
+ await expect(pane.getByText('$5,000',{exact:true})).toBeVisible();
+ await expect(pane.getByText('$1',{exact:true})).toHaveCount(0);
+ await pane.locator('.cdp-unmatched-prizes').locator('summary').click();
+ await expect(pane.getByText('Community award',{exact:true})).toBeVisible();
+ await expect(pane.getByText('$250',{exact:true})).toBeVisible();
+ await expect(pane.getByText('Number of awards: 2')).toBeVisible();
+ await pane.getByRole('tab',{name:'Build',exact:true}).click();
+ await expect(pane.getByTestId('contest-detail-tracks')).toContainText('Reduce energy waste');
+ await expect(pane.getByTestId('contest-detail-tracks').locator('[data-fit="true"]')).toContainText('Clean energy');
+ await expect(pane.getByTestId('contest-detail-judging')).toContainText('Working prototype');
+ await pane.getByRole('tab',{name:'Entry rules',exact:true}).click();
+ await expect(pane.getByTestId('contest-detail-verdict')).toContainText('Your profile matches');
+ await expect(pane.getByTestId('contest-detail-group-entry')).toHaveAttribute('open','');
+ await expect(pane.getByText('“International entrants may participate.”')).toBeVisible();
+ await expect(pane.getByRole('tabpanel',{name:'Entry rules',exact:true}).locator('.hk-why')).toHaveCount(0);
+ await expect(pane.getByRole('link',{name:'Official entry rules',exact:true})).toHaveAttribute('href','https://contest.example/solar-hackweek/rules');
+ for(const width of [320,390,768,1440]) {
+  await page.setViewportSize({width,height:915});
+  expect(await pane.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+  await pane.getByRole('tab',{name:'Prizes',exact:true}).click();
+  expect(await pane.locator('.cdp-item-amount,.cdp-prize-benefits li').evaluateAll(elements=>elements.filter(el=>el.getBoundingClientRect().width>0).every(el=>el.scrollWidth<=el.clientWidth+1))).toBe(true);
+  await pane.getByRole('tab',{name:'Entry rules',exact:true}).click();
+ }
+ await pane.getByRole('tab',{name:'Entry rules',exact:true}).press('ArrowLeft');
+ await expect(pane.getByRole('tab',{name:'Build',exact:true})).toBeFocused();
+ await expect(pane.getByText('Submit before the deadline')).toBeVisible();
+ await page.getByTestId('contest-detail-close').click();
+ await expect(pane).toHaveCount(0); await expect(page.getByTestId('disc-row-cand-1')).toBeVisible();
+ await page.getByTestId('disc-row-cand-1').click({position:{x:5,y:5}});
+ await expect(pane).toBeVisible();
+ await expect(pane.getByRole('tab',{name:'Overview',exact:true})).toHaveAttribute('aria-selected','true');
+ await page.keyboard.press('Escape');
+ await expect(pane).toHaveCount(0);
+ await context.close();
+});
+
+
+test('stored fit evidence and source summary survive a failed detail request', async ({ browser }) => {
+ const context = await browser.newContext();
+ const state=initialState(); state.evaluated=structuredClone(WITH_CANDIDATES);
+ await stubAccount(context,[PROJECT_A]); await stubDiscovery(context,state);
+ await context.route('**/candidates/cand-1/detail?digest=defer',route=>route.fulfill({status:503,json:{error:'detail_temporarily_unavailable'}}));
+ const page=await context.newPage(); await page.goto(`${BASE}/app/discover`);
+ await page.getByTestId('disc-open-cand-1').click();
+ const pane=page.getByTestId('contest-detail-pane');
+ const fit=pane.getByTestId('disc-fit-cand-1');
+ await fit.locator('summary').click();
+ await expect(fit).toContainText('evidence: cl-team-1');
+ await pane.getByTestId('contest-detail-source-summary').locator('summary').click();
+ await expect(pane.getByTestId('contest-detail-source-summary')).toContainText('Build a climate dashboard');
+ await expect(pane.getByText('Could not load this hackathon')).toBeVisible({timeout:15000});
+ await expect(fit).toBeVisible();
+ await expect(pane.getByRole('tab',{name:'Entry rules',exact:true})).toHaveAttribute('aria-controls',/.+-entry$/);
+ await context.close();
 });

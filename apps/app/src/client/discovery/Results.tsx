@@ -6,7 +6,7 @@ import { countryName, countryFlag } from '../country.ts';
 import { Icon } from '../icons.tsx';
 import { EligibilityChip, RuleQuote } from '../conversation/HackathonResultsCard.tsx';
 import { ContestDetailPane } from './ContestDetailPane.tsx';
-import { eligibilityView, metaParts } from '../conversation/hackathon-format.ts';
+import { eligibilityView, metaParts, deadline } from '../conversation/hackathon-format.ts';
 
 /**
  * Discover — the account's hackathon list. It shows the SAME ranked, filtered,
@@ -142,6 +142,59 @@ function rowFromEvaluation(evaluation: DiscoveryEvaluation): HackathonCandidate 
 	};
 }
 
+function FitEvidence({ claims, candidateId }: { claims: readonly DiscoveryFitClaim[]; candidateId: string }): ReactElement | null {
+ const fitClaims = claims.filter(claim => claim.verdict === 'supported');
+ const openClaims = claims.filter((claim): claim is DiscoveryFitClaim & { verdict: keyof typeof OPEN_CLAIM_WORDS } => claim.verdict !== 'supported');
+ return <>{fitClaims.length > 0 || openClaims.length > 0 ? (
+												<details className="hk-why" data-testid={`disc-fit-${candidateId}`}>
+													<summary>{fitClaims.length > 0 ? 'Why it fits' : 'Not confirmed yet'}</summary>
+													{fitClaims.map((claim) => (
+														<div key={`${claim.claimType}:${claim.requirement}`} className="disc-claim">
+															<div className="disc-claim-line">{claim.statement}</div>
+															{claim.evidenceClaimIds.length > 0 ? (
+																<div className="disc-claim-evidence">
+																	evidence:{' '}
+																	{claim.evidenceClaimIds.map((id) => (
+																		<code key={id}>{id}</code>
+																	))}
+																</div>
+															) : null}
+															{claim.assumptions.map((assumption) => (
+																<div key={assumption} className="disc-assumption">
+																	Assumption: {assumption}
+																</div>
+															))}
+														</div>
+													))}
+													{openClaims.length > 0 ? (
+														<div className="disc-open-claims" data-testid={`disc-open-claims-${candidateId}`}>
+															{fitClaims.length > 0 ? <p className="disc-open-title">Not confirmed yet</p> : null}
+															{openClaims.map((claim) => (
+																<div key={`${claim.claimType}:${claim.requirement}`} className="disc-claim" data-verdict={claim.verdict}>
+																	<div className="disc-claim-line">
+																		{claim.requirement} <span className="disc-claim-status">· {OPEN_CLAIM_WORDS[claim.verdict]}</span>
+																	</div>
+																	{claim.evidenceClaimIds.length > 0 ? (
+																		<div className="disc-claim-evidence">
+																			evidence:{' '}
+																			{claim.evidenceClaimIds.map((id) => (
+																				<code key={id}>{id}</code>
+																			))}
+																		</div>
+																	) : null}
+																	{claim.assumptions.map((assumption) => (
+																		<div key={assumption} className="disc-assumption">
+																			Assumption: {assumption}
+																		</div>
+																	))}
+																</div>
+															))}
+														</div>
+													) : null}
+												</details>
+											) : null}</>;
+}
+
 export function DiscoveryResults(props: {
 	projectId: string;
 	apiBase?: string;
@@ -162,6 +215,7 @@ export function DiscoveryResults(props: {
 	const [view, setView] = useState<'forYou' | 'saved'>('forYou');
 	const [canEnterOnly, setCanEnterOnly] = useState(false);
 	const [onlineOnly, setOnlineOnly] = useState(false);
+	const [filtersOpen, setFiltersOpen] = useState(false);
 	const [showIneligible, setShowIneligible] = useState(false);
 	const [showAll, setShowAll] = useState(false);
 	const [detailId, setDetailId] = useState<string | null>(null);
@@ -282,48 +336,24 @@ export function DiscoveryResults(props: {
 							Saved <span className="seg-count">{savedCount}</span>
 						</button>
 					</span>
-					<span className="disc-filter-chips" data-testid="discovery-filters">
-						<button
-							type="button"
-							className="disc-filter"
-							data-testid="discovery-filter-canenter"
-							aria-pressed={canEnterOnly}
-							onClick={() => setCanEnterOnly((value) => !value)}
-						>
-							Can enter only
+					<div className="disc-filterline">
+						<span className="disc-country-chip" data-testid="discovery-country">
+							{profileCountry ? `${countryFlag(profileCountry)} ${countryName(profileCountry)}` : 'Set your country for entry checks'}
+							{onlineOnly ? ' · Online' : ''}{canEnterOnly ? ' · Can enter' : ''}
+						</span>
+						<button type="button" className="btn-ghost disc-filter-toggle" data-testid="discovery-filter-toggle" aria-expanded={filtersOpen} aria-controls="discover-filters" onClick={() => setFiltersOpen(value => !value)}>
+							<Icon name="settings" title="" /> Filters{canEnterOnly || onlineOnly ? ` · ${Number(canEnterOnly) + Number(onlineOnly)}` : ''}
 						</button>
-						<button
-							type="button"
-							className="disc-filter"
-							data-testid="discovery-filter-online"
-							aria-pressed={onlineOnly}
-							onClick={() => setOnlineOnly((value) => !value)}
-						>
-							Online
-						</button>
-					</span>
-					<span className="disc-actions">
-						{profileCountry ? (
-							<span
-								className="disc-country-chip"
-								data-testid="discovery-country"
-								title={`Entry rules are checked against your profile country: ${countryName(profileCountry)}`}
-							>
-								{countryFlag(profileCountry)} Entry checked for {countryName(profileCountry)}
-							</span>
-						) : (
-							<span
-								className="disc-country-chip disc-country-chip--none"
-								data-testid="discovery-country"
-								title="No profile country recorded — country-based eligibility stays unknown"
-							>
-								Set your country for entry checks
-							</span>
-						)}
-						<button type="button" className="btn-ghost" onClick={() => void runFeed()} disabled={busy} data-testid="discovery-sweep">
-							{busy ? 'Checking…' : 'Check again'}
-						</button>
-					</span>
+					</div>
+					<div id="discover-filters" className="disc-filter-chips" data-testid="discovery-filters" hidden={!filtersOpen}>
+						<label className="disc-filter-option"><input type="checkbox" className="disc-filter" data-testid="discovery-filter-canenter" checked={canEnterOnly} onChange={event => setCanEnterOnly(event.target.checked)} />Can enter only</label>
+						<label className="disc-filter-option"><input type="checkbox" className="disc-filter" data-testid="discovery-filter-online" checked={onlineOnly} onChange={event => setOnlineOnly(event.target.checked)} />Online only</label>
+						<p className="disc-filter-help">{profileCountry ? `Entry checks use your profile country: ${countryName(profileCountry)}. Each event shows its own verdict.` : 'Country-based eligibility stays unknown until you set your profile country.'}</p>
+						<button type="button" className="btn-key disc-filters-apply" onClick={() => setFiltersOpen(false)}>Show opportunities</button>
+					</div>
+					<button type="button" className="btn-ghost disc-refresh" onClick={() => void runFeed()} disabled={busy} data-testid="discovery-sweep" aria-label={busy ? 'Checking opportunities' : 'Check again'}>
+						<Icon name="refresh" title="" /><span>{busy ? 'Checking…' : 'Check again'}</span>
+					</button>
 				</div>
 			) : null}
 
@@ -395,94 +425,19 @@ export function DiscoveryResults(props: {
 						{shown.map((row) => {
 							const saved = isSaved(row);
 							const status = evaluations.get(row.id)?.candidate.status ?? 'new';
-							const claims = evaluations.get(row.id)?.fit.claims ?? [];
-							const fitClaims = claims.filter((claim) => claim.verdict === 'supported');
-							// Everything else is shown too, with the assumption Caddie
-							// recorded, so a fit is never presented as more certain than it is.
-							const openClaims = claims.filter(
-								(claim): claim is DiscoveryFitClaim & { verdict: keyof typeof OPEN_CLAIM_WORDS } => claim.verdict !== 'supported',
-							);
 							const facts = metaParts(row);
+							const end = deadline(row);
+							const primaryFacts = [...(end ? [{ key: 'deadline', label: 'Due', value: end }] : []), ...facts.filter(part => part.key === 'prize')];
+							const host = row.organizer ?? facts.find(part => part.key === 'host')?.value;
 							const eligibility = eligibilityView(row);
-							return (
-								<li key={row.id} className="disc-row" data-testid={`disc-row-${row.id}`}>
-									<div className="disc-row-head">
-										<div className="disc-row-main">
-											<button
-												type="button"
-												className="disc-row-title disc-row-title--btn"
-												onClick={() => setDetailId(row.id)}
-												title={`Open details for ${row.title}`}
-												data-testid={`disc-open-${row.id}`}
-											>
-												{row.title}
-											</button>
-											{facts.length > 0 ? (
-												<ul className="disc-facts" data-testid={`disc-facts-${row.id}`}>
-													{facts.map((part) => (
-														<li key={part.key} className="disc-fact" data-fact={part.key}>
-															<span className="disc-fact-label">{part.label}</span>
-															<span className="disc-fact-value">{part.value}</span>
-														</li>
-													))}
-												</ul>
-											) : null}
-											{fitClaims.length > 0 || openClaims.length > 0 ? (
-												<details className="hk-why" data-testid={`disc-fit-${row.id}`}>
-													<summary>{fitClaims.length > 0 ? 'Why it fits' : 'Not confirmed yet'}</summary>
-													{fitClaims.map((claim) => (
-														<div key={`${claim.claimType}:${claim.requirement}`} className="disc-claim">
-															<div className="disc-claim-line">{claim.statement}</div>
-															{claim.evidenceClaimIds.length > 0 ? (
-																<div className="disc-claim-evidence">
-																	evidence:{' '}
-																	{claim.evidenceClaimIds.map((id) => (
-																		<code key={id}>{id}</code>
-																	))}
-																</div>
-															) : null}
-															{claim.assumptions.map((assumption) => (
-																<div key={assumption} className="disc-assumption">
-																	Assumption: {assumption}
-																</div>
-															))}
-														</div>
-													))}
-													{openClaims.length > 0 ? (
-														<div className="disc-open-claims" data-testid={`disc-open-claims-${row.id}`}>
-															{fitClaims.length > 0 ? <p className="disc-open-title">Not confirmed yet</p> : null}
-															{openClaims.map((claim) => (
-																<div key={`${claim.claimType}:${claim.requirement}`} className="disc-claim" data-verdict={claim.verdict}>
-																	<div className="disc-claim-line">
-																		{claim.requirement} <span className="disc-claim-status">· {OPEN_CLAIM_WORDS[claim.verdict]}</span>
-																	</div>
-																	{claim.evidenceClaimIds.length > 0 ? (
-																		<div className="disc-claim-evidence">
-																			evidence:{' '}
-																			{claim.evidenceClaimIds.map((id) => (
-																				<code key={id}>{id}</code>
-																			))}
-																		</div>
-																	) : null}
-																	{claim.assumptions.map((assumption) => (
-																		<div key={assumption} className="disc-assumption">
-																			Assumption: {assumption}
-																		</div>
-																	))}
-																</div>
-															))}
-														</div>
-													) : null}
-												</details>
-											) : null}
-										</div>
-										<div className="disc-row-status">
-											{row.openStatusUnverified ? (
-												<span className="hk-chip hk-chip-unverified" title="Found by web search while Devpost's API was down">
-													Unverified
-												</span>
-											) : null}
-											{eligibility.state === 'unknown' ? (
+                            return (
+                                <li key={row.id} className="disc-row" data-testid={`disc-row-${row.id}`} onClick={event => {
+                                    if ((event.target as Element).closest('button, a, input, summary, details') || window.getSelection()?.toString()) return;
+                                    setDetailId(row.id);
+                                }}>
+                                    <div className="disc-card-top">
+                                        <p className="disc-event-host">{host ?? 'Hackathon'}</p>
+                                        <div className="disc-entry-status">{eligibility.state === 'unknown' ? (
 												<button
 													type="button"
 													className="hk-chip hk-chip-check"
@@ -495,58 +450,18 @@ export function DiscoveryResults(props: {
 												</button>
 											) : (
 												<EligibilityChip view={eligibility} compact testId={`eligibility-${row.id}`} />
-											)}
-										</div>
-									</div>
-									<div className="disc-row-tail">
-										<RuleQuote candidate={row} view={eligibility} />
-										{status === 'new' || status === 'accepted' ? (
-										<div className="disc-row-actions">
-											{onExplore ? (
-												<>
-													{saved ? (
-														<button
-															type="button"
-															className="btn-ghost"
-															data-testid={`unsave-candidate-${row.id}`}
-															onClick={() => void toggleSaved(row.id, false)}
-															disabled={busy}
-															aria-label={`Remove ${row.title} from saved`}
-														>
-															Saved
-														</button>
-													) : (
-														<button
-															type="button"
-															className="btn-ghost"
-															data-testid={`save-candidate-${row.id}`}
-															onClick={() => void toggleSaved(row.id, true)}
-															disabled={busy}
-															aria-label={`Save ${row.title}`}
-														>
-															Save
-														</button>
-													)}
-													<button
-														type="button"
-														className="btn-key"
-														data-testid={`explore-ideas-${row.id}`}
-														onClick={() => onExplore(exploreRecord(row))}
-														disabled={exploreBusy}
-													>
-														{exploreBusy ? 'Opening…' : 'Find an idea'}
-													</button>
-												</>
-											) : (
-												<button type="button" className="btn-key" onClick={() => void accept(row.id)} disabled={busy}>
-													Accept
-												</button>
-											)}
-										</div>
-									) : null}
-									</div>
-								</li>
-							);
+											)}</div>
+                                    </div>
+                                    <button type="button" className="disc-row-title disc-row-title--btn" onClick={() => setDetailId(row.id)} title={`Open details for ${row.title}`} data-testid={`disc-open-${row.id}`}>{row.title}</button>
+                                    <div className="disc-card-footer">
+                                        <div className="disc-card-meta">
+                                            {primaryFacts.length > 0 ? <ul className="disc-facts" data-testid={`disc-facts-${row.id}`}>{primaryFacts.map(part => <li key={part.key} className="disc-fact" data-fact={part.key}><span className="disc-fact-label">{part.label}</span><span className="disc-fact-value">{part.value}</span></li>)}</ul> : null}
+                                            <span className="disc-format">{facts.find(part => part.key === 'format')?.value}{row.openStatusUnverified ? ' · Open status unverified' : ''}</span>
+                                        </div>
+                                        {onExplore ? <button type="button" className="btn-ghost disc-bookmark" data-testid={`${saved ? 'unsave' : 'save'}-candidate-${row.id}`} onClick={() => void toggleSaved(row.id, !saved)} disabled={busy} aria-pressed={saved} aria-label={saved ? `Remove ${row.title} from saved` : `Save ${row.title}`}><Icon name="bookmark" title="" /></button> : status === 'new' ? <button type="button" className="btn-key" onClick={() => void accept(row.id)} disabled={busy}>Accept</button> : null}
+                                    </div>
+                                </li>
+                            );
 						})}
 					</ul>
 					<div className="disc-list-foot">
@@ -578,7 +493,13 @@ export function DiscoveryResults(props: {
 							candidateId={detailId}
 							apiBase={apiBase}
 							onClose={() => setDetailId(null)}
-							metaParts={detailRow ? metaParts(detailRow) : null}
+							metaParts={detailRow ? metaParts(detailRow).map(part => part.key === 'host' && detailRow.organizer ? {...part,value:detailRow.organizer} : part.key === 'themes' ? {...part,value:detailRow.themes.join(', ')} : part) : null}
+                            overviewEvidence={<FitEvidence candidateId={detailId} claims={evaluations.get(detailId)?.fit.claims ?? []} />}
+                            sourceSummary={detailRow?.summary}
+                            entryQuote={detailRow?.eligibilityQuote}
+                            rulesUrl={detailRow?.rulesUrl}
+                            entryEvidence={detailRow ? <RuleQuote candidate={detailRow} view={eligibilityView(detailRow)} /> : null}
+							deadline={detailRow ? deadline(detailRow) : null}
 							autoCheckOnOpen
 							saved={detailRow ? isSaved(detailRow) : false}
 							busy={busy}
