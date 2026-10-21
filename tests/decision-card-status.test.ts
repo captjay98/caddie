@@ -47,3 +47,5 @@ describe("DecisionCard statusLabel — plain language, never raw status", () => 
     }
   });
 });
+
+ test('armed future schedules read Watching rather than Done', () => { expect(statusLabel(card({ kind: 'deadline', status: 'handled' }))).toBe('Watching'); });

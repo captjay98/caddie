@@ -73,7 +73,7 @@ export function BuildFeatureList(props: { projectId: string; features: readonly 
 			setConfirming(null);
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ['build-activity'] }),
-				queryClient.invalidateQueries({ queryKey: ['workflow-phase'] }),
+				queryClient.invalidateQueries({ queryKey: ['build-workflow'] }),
 			]);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : 'The rollback did not go through.');

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useAuthStatus, useCreateProject, useSessionActor, useHomeProject } from '../queries.ts';
-import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
+import { Mascot } from '@caddie/ui/Mascot';
+import { Icon, type IconName } from '../icons.tsx';
 
 /** Storage key for the name the user gave Caddie in the welcome (v2 §4). */
 export const PROFILE_NAME_KEY = 'caddie:profile-name';
@@ -45,58 +46,19 @@ export function saveProfileName(name: string): void {
  * not the workspace chrome, so it works in both places.
  */
 
-/**
- * The welcome intro (v2, HANDOFF §4 Welcome): Caddie introduces itself one
- * line at a time with its face changing per line, asks what to call you
- * (prefilled from the account, never a username), then shows the three moods,
- * then hands off to the start paths. "Replay introduction" replays;
- * prefers-reduced-motion shows all lines at once. The saved name is the
- * profile name used by the account menu (chat greeting wires up as the
- * surfaces adopt it); React escapes it everywhere it renders.
- */
-export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
-	const sessionName = useSessionName();
-	const reduceMotion =
-		typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+export type StartingPoint = 'hackathon' | 'idea' | 'explore';
 
-	// The intro body (HANDOFF §4): plain-language lines that arrive one at a
-	// time, the mascot's face matching what each line is about. The "Hi" line
-	// is the headline above these; the spec counts these three <p> lines.
-	const LINES: { text: ReactElement; mood: MascotMood }[] = [
-		{
-			text: (
-				<>
-					I help you find <b>hackathons that fit you</b>, then <b>plan and build your app with you</b>.
-					You can bring your own project too.
-				</>
-			),
-			mood: 'building',
-		},
-		{
-			text: (
-				<>
-					Before you submit, we’ll check your app against the hackathon’s rules.
-				</>
-			),
-			mood: 'thinking',
-		},
-		{
-			text: (
-				<>
-					<b>You approve the plan first.</b> I ask before spending money.
-				</>
-			),
-			mood: 'done',
-		},
-	];
+const STARTING_POINTS: { id: StartingPoint; title: string; detail: string; action: string; icon: IconName }[] = [
+ { id: 'hackathon', title: 'Find a hackathon', detail: 'Discover something worth building for.', action: 'Find my fit', icon: 'trophy' },
+ { id: 'idea', title: 'I have an idea', detail: 'Turn it into a plan and a working app.', action: 'Start with my idea', icon: 'sparkle' },
+ { id: 'explore', title: 'I’m exploring', detail: 'Help me figure out where to begin.', action: 'Help me get started', icon: 'target' },
+];
 
-	const [line, setLine] = useState(reduceMotion ? LINES.length - 1 : 0);
-	useEffect(() => {
-		if (reduceMotion || line >= LINES.length - 1) return;
-		const timer = window.setTimeout(() => setLine((value) => value + 1), 1500);
-		return () => window.clearTimeout(timer);
-	}, [line, reduceMotion, LINES.length]);
-
+/** A purposeful welcome; the chosen path is handed to the completion flow. */
+export function WelcomeIntro(props: { onDone: (startingPoint: StartingPoint) => void }): ReactElement {
+ const sessionName = useSessionName();
+ const [startingPoint, setStartingPoint] = useState<StartingPoint>('hackathon');
+ const selected = STARTING_POINTS.find(item => item.id === startingPoint)!;
 	const [stage, setStage] = useState<'intro' | 'name'>('intro');
 	const suggested = suggestFirstName(sessionName);
 	const [name, setName] = useState('');
@@ -110,66 +72,70 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 	}, [stage, suggested, sessionName]);
 
 	if (stage === 'intro') {
-		return (
-			<section className="card-surface start-card welcome-intro" data-testid="welcome-intro">
-				<span className="welcome-intro-halo" aria-hidden="true">
-					<Mascot mood={LINES[line]!.mood} size={120} live />
-				</span>
-				<h1 className="welcome-intro-hello">Hi, I&rsquo;m Caddie.</h1>
-				<div className="welcome-intro-lines" aria-live="polite">
-					{LINES.slice(0, line + 1).map((entry, index) => (
-						<p key={index} className="welcome-intro-line">
-							{entry.text}
-						</p>
-					))}
-				</div>
-				<details className="welcome-definition">
-					<summary>What’s a hackathon?</summary>
-					<p>A hackathon is an event where you build a project, on your own or with a team, and present it within a set time. Many run online, and you don’t have to be an experienced developer to take part.</p>
-				</details>
-				<div className="row-actions">
-					<button
-						type="button"
-						className="btn-key"
-						data-testid="welcome-next"
-						onClick={() => setStage('name')}
-					>
-						Let&rsquo;s go
-					</button>
-					<button
-						type="button"
-						className="welcome-replay"
-						data-testid="welcome-replay"
-						onClick={() => setLine(reduceMotion ? LINES.length - 1 : 0)}
-					>
-						Replay introduction
-					</button>
-				</div>
-			</section>
-		);
-	}
+  return (
+   <section className="card-surface start-card welcome-intro welcome-starting-point" data-testid="welcome-intro">
+    <p className="welcome-start-label">LET’S GET STARTED</p>
+    <header className="welcome-start-head">
+     <span className="welcome-start-mascot" aria-hidden="true"><Mascot mood="ready" size={80} live /></span>
+     <h1 className="welcome-intro-hello">Hi, I’m Caddie.<br />What brings you here?</h1>
+    </header>
+    <p className="welcome-start-lede">Pick a starting point. You can change your mind anytime.</p>
+    <fieldset className="welcome-start-choices">
+     <legend className="sr-only">Your starting point</legend>
+     {STARTING_POINTS.map(item => (
+      <label className="welcome-start-choice" key={item.id} data-selected={startingPoint === item.id}>
+       <input type="radio" name="starting-point" value={item.id} checked={startingPoint === item.id} onChange={() => setStartingPoint(item.id)} />
+       <span className="welcome-start-icon" aria-hidden="true"><Icon name={item.icon} title="" /></span>
+       <span><strong>{item.title}</strong><small>{item.detail}</small></span>
+      </label>
+     ))}
+    </fieldset>
+    <details className="welcome-definition">
+     <summary>What’s a hackathon?</summary>
+     <p>An event where you build a project, on your own or with a team, and present it within a set time. Many run online.</p>
+    </details>
+    <div className="row-actions">
+     <button type="button" className="btn-key welcome-primary" data-testid="welcome-next" onClick={() => setStage('name')}>{selected.action}<span aria-hidden="true"> →</span></button>
+    </div>
+   </section>
+  );
+ }
 
 	if (stage === 'name') {
 		return (
-			<section className="card-surface start-card welcome-intro" data-testid="welcome-name">
-				<span className="welcome-intro-halo" aria-hidden="true">
-					<Mascot mood="listening" size={120} live />
-				</span>
-				<h1 className="welcome-intro-hello">What should I call you?</h1>
+			<section className="card-surface start-card welcome-intro welcome-starting-point welcome-name-step" data-testid="welcome-name">
+                <div className="welcome-name-top">
+                    <button type="button" className="btn-ghost" aria-label="Back" onClick={() => setStage('intro')}>← Back</button>
+                    <p className="welcome-start-label">A LITTLE ABOUT YOU</p>
+                </div>
+                <header className="welcome-start-head">
+                    <span className="welcome-start-mascot" aria-hidden="true"><Mascot mood="listening" size={80} live /></span>
+                    <h1 className="welcome-intro-hello">What should I call you?</h1>
+                </header>
+                <p className="welcome-start-lede">A first name or nickname is perfect. You can change it anytime.</p>
+                <form className="welcome-name-form" onSubmit={(event) => {
+                    event.preventDefault();
+                    saveProfileName(name);
+                    props.onDone(startingPoint);
+                }}>
 				<div className="welcome-name-ask">
+                    <label htmlFor="welcome-profile-name">Your name</label>
 					<input
+						id="welcome-profile-name"
 						className="input"
 						data-testid="welcome-name-input"
 						aria-label="What should I call you?"
 						placeholder="Your first name"
+                        autoComplete="given-name"
+                        aria-describedby="welcome-name-hint"
 						value={name}
 						maxLength={40}
 						onChange={(event) => setName(event.target.value)}
 					/>
 					{sessionName ? (
-						<p className="welcome-name-note">From your account. Change it if you like.</p>
+						<p className="welcome-name-note" id="welcome-name-hint">From your account. Change it if you like.</p>
 					) : (
-						<p className="welcome-name-note">Caddie greets you by this name.</p>
+						<p className="welcome-name-note" id="welcome-name-hint">Caddie greets you by this name.</p>
 					)}
 					{usernameHint ? (
 						<p className="welcome-name-note">
@@ -179,15 +145,11 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 				</div>
 				<div className="row-actions">
 					<button
-						type="button"
-						className="btn-key"
+						type="submit"
+						className="btn-key welcome-primary"
 						data-testid="welcome-name-save"
-						onClick={() => {
-							saveProfileName(name);
-							props.onDone();
-						}}
 					>
-						That&rsquo;s me
+						Continue <span aria-hidden="true">→</span>
 					</button>
 					<button
 						type="button"
@@ -195,12 +157,13 @@ export function WelcomeIntro(props: { onDone: () => void }): ReactElement {
 						data-testid="welcome-name-skip"
 						onClick={() => {
 							saveProfileName('');
-							props.onDone();
+							props.onDone(startingPoint);
 						}}
 					>
 						Skip — I&rsquo;ll add it later
 					</button>
 				</div>
+                </form>
 			</section>
 		);
 	}

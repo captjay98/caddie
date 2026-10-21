@@ -285,8 +285,19 @@ export function InteractivePreview(props: {
   onResetData?: () => Promise<void>;
   /** "flutter": an Android app's browser preview (Track 3), in a phone-sized frame. */
   kind?: "web" | "flutter";
+  standalone?: boolean;
 }): ReactElement {
   const frame = useRef<HTMLIFrameElement>(null);
+  const windowRef = useRef<HTMLDialogElement>(null);
+  const expandRef = useRef<HTMLButtonElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  function toggleExpanded() {
+    const dialog = windowRef.current;
+    if (!dialog) return;
+    dialog.close();
+    if (expanded) { dialog.show(); setExpanded(false); expandRef.current?.focus(); }
+    else { dialog.showModal(); setExpanded(true); }
+  }
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<{
     scope: string;
@@ -435,12 +446,18 @@ export function InteractivePreview(props: {
   }, [scope, props.actorId, props.projectId, props.artifactId, contentUrl, props.appRequestUrl, kind]);
 
   return (
+    <dialog open ref={windowRef} className={expanded ? "app-preview-window expanded" : "app-preview-window"} aria-label="App preview window" onCancel={event => { event.preventDefault(); toggleExpanded(); }}>
     <section
       className="artifact-panel"
       style={{ display: "grid", gap: 12 }}
       data-testid="interactive-preview"
       aria-label="App preview"
     >
+      <div className="preview-window-toolbar">
+        <span className="kicker">Try your app</span>
+        <div className="row-actions"><button ref={expandRef} type="button" className="btn-ghost" onClick={toggleExpanded} data-testid="preview-expand">{expanded ? 'Close full screen' : 'Full screen'}</button>
+        {!props.standalone ? <a className="btn-key" data-testid="preview-open-page" href={`${window.location.pathname.startsWith('/app') ? '/app' : ''}/preview?${new URLSearchParams({ project: props.projectId, preview: props.artifactId, source: props.contentUrl?.includes('/workflow/preview/') ? 'workflow' : 'artifact' })}`}>Open app preview</a> : null}</div>
+      </div>
       {error ? (
         <div role="alert" className="row-error">
           <p>{error}</p>
@@ -512,5 +529,6 @@ export function InteractivePreview(props: {
         ) : null}
       </div>
     </section>
+    </dialog>
   );
 }

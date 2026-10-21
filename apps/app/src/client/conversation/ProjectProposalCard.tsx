@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import * as v from 'valibot';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchJson, postJson } from '../api.ts';
-import { ProjectWorkflow } from './ProjectWorkflow.tsx';
+import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
 
 /**
  * The in-chat project PROPOSAL card. Caddie proposes; the user creates.
@@ -39,6 +39,7 @@ interface ProposalView {
 }
 
 export function ProjectProposalCard({ data }: { data: ProjectProposalPayload }): ReactElement {
+	const chrome = useWorkspaceChrome();
 	const queryClient = useQueryClient();
 	const base = `/api/projects/${encodeURIComponent(data.homeProjectId)}/proposals/${encodeURIComponent(data.proposalId)}`;
 	const key = ['project-proposal', data.proposalId];
@@ -69,10 +70,16 @@ export function ProjectProposalCard({ data }: { data: ProjectProposalPayload }):
 		);
 	}
 	const p = proposal.data.proposal;
-	if (p.status === 'accepted' && p.projectId) return <ProjectWorkflow projectId={p.projectId} name={p.name} />;
+	if (p.status === 'accepted' && p.projectId) return (
+        <section className="caddie-card proposal-card proposal-card-accepted" data-testid="accepted-project-proposal">
+            <p className="proposal-kicker">Project started</p><h3 className="proposal-title">{p.name}</h3>
+            <p className="proposal-idea">{p.idea}</p>
+            <button className="btn-ghost" type="button" onClick={() => chrome.openProject(p.projectId!, true)}>Open project</button>
+        </section>
+    );
 
 	return (
-		<section className="proposal-card" data-testid="project-proposal" data-status={p.status}>
+		<section className="caddie-card proposal-card" data-testid="project-proposal" data-status={p.status}>
 			<p className="proposal-kicker">Project idea</p>
 			<h3 className="proposal-title">{p.name}</h3>
 			<p className="proposal-idea">{p.idea}</p>

@@ -55,7 +55,8 @@ export type IconName =
 	| 'key'
 	| 'sparkle'
 	| 'mail'
-	| 'bell';
+	| 'bell'
+	| 'bookmark';
 
 interface IconProps {
 	name: IconName;
@@ -65,6 +66,7 @@ interface IconProps {
 }
 
 const PATHS: Record<IconName, ReactElement> = {
+	bookmark: <path d="M4 2.5h8v11l-4-2.6-4 2.6z" fill="none" stroke="currentColor" strokeLinejoin="round" />,
 	play: <path d="M6 4.5v7l5.5-3.5L6 4.5z" fill="currentColor" stroke="none" />,
 	check: <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" />,
 	alert: <path d="M8 2.5L14.5 13.5h-13L8 2.5z" fill="none" stroke="currentColor" strokeLinejoin="round" />,

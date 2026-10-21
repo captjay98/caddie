@@ -13,10 +13,10 @@ import { fileURLToPath } from 'node:url';
  *     account — "Ada Lovelace" suggests "Ada"; a GitHub-username-only name
  *     ("captjay98") leaves the box empty with an honest note.
  *   - The intro hands straight to the profile wizard (the 0016/0017 wave
- *     replaced the faces stage); finishing the wizard lands on the Brief.
+ *     replaced the faces stage); finishing the wizard follows the chosen starting point.
  *   - The name the user saves is the name the account menu shows.
  *   - A name containing markup renders as text everywhere (React escaping).
- *   - "Say that again" replays; reduced motion shows all lines at once.
+ *   - Starting choices update the action immediately, including with reduced motion.
  */
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -159,6 +159,7 @@ test.describe('Welcome intro (U09)', () => {
 		// Caddie introduces itself; Next advances to the name question.
 		await expect(page.getByTestId('welcome-intro')).toBeVisible();
 		await expect(page.getByTestId('welcome-intro').locator('.mascot')).toBeVisible();
+		await page.getByRole('radio', { name: 'I’m exploring' }).check();
 		await page.getByTestId('welcome-next').click();
 
 		const nameStep = page.getByTestId('welcome-name');
@@ -196,25 +197,36 @@ test.describe('Welcome intro (U09)', () => {
 		await context.close();
 	});
 
-	test('"Say that again" replays; reduced motion shows all lines at once', async ({ browser }) => {
-		const context = await browser.newContext();
-		await stubAccount(context, 'Ada Lovelace');
-		const page = await context.newPage();
-		await page.goto(`${BASE}/app/onboarding`);
-		// Wait for the intro to finish advancing, then replay from the start.
-		// Only the intro LINES count here — the definition details adds its own <p>.
-		const lines = page.getByTestId('welcome-intro').locator('.welcome-intro-line');
-		await expect(lines).toHaveCount(3);
-		await page.getByTestId('welcome-replay').click();
-		await expect(lines).toHaveCount(1);
-		await context.close();
+	test('starting choices are immediate, retained on Back, and available with reduced motion', async ({ browser }) => {
+  const context = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 320, height: 568 } });
+  await stubAccount(context, 'Ada Lovelace');
+  const page = await context.newPage();
+  await page.goto(`${BASE}/app/onboarding`);
+  await expect(page.getByRole('radio', { name: 'Find a hackathon' })).toBeChecked();
+  await page.getByRole('radio', { name: 'I have an idea' }).check();
+  await expect(page.getByTestId('welcome-next')).toHaveText('Start with my idea →');
+  await page.getByTestId('welcome-next').click();
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(page.getByRole('radio', { name: 'I have an idea' })).toBeChecked();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByTestId('welcome-next').click();
+  await page.getByTestId('welcome-name-skip').click();
+  await finishProfileWizard(page);
+  await expect(page.getByTestId('project-start-panel')).toBeVisible();
+  await expect(page).toHaveURL(/start=idea/);
+  await context.close();
+ });
 
-		const reduce = await browser.newContext({ reducedMotion: 'reduce' });
-		await stubAccount(reduce, 'Ada Lovelace');
-		const rPage = await reduce.newPage();
-		await rPage.goto(`${BASE}/app/onboarding`);
-		// All lines present immediately, no waiting.
-		await expect(rPage.getByTestId('welcome-intro').locator('.welcome-intro-line')).toHaveCount(3);
-		await reduce.close();
-	});
+ test('hackathon starting point opens Discover after profile setup', async ({ browser }) => {
+  const context = await browser.newContext();
+  await stubAccount(context, 'Ada Lovelace');
+  await context.route('**/api/discovery/**', route => json(route, 200, { candidates: [], opportunities: [] }));
+  const page = await context.newPage();
+  await page.goto(`${BASE}/app/onboarding`);
+  await page.getByTestId('welcome-next').click();
+  await page.getByTestId('welcome-name-skip').click();
+  await finishProfileWizard(page);
+  await expect(page).toHaveURL(/\/app\/discover/);
+  await context.close();
+ });
 });

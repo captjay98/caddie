@@ -344,11 +344,9 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 		// v2 layout: the open cards render big (server order), each card carries
 		// its project as context (no group headers), and finished items fold.
 		// Two big cards from proj-a; the handled deadline card folds under Done.
-		await expect(page.locator('[data-testid="decision-card"]')).toHaveCount(2);
+		await expect(page.locator('[data-testid="decision-card"]')).toHaveCount(3);
 		await expect(page.locator('.card-context').first()).toContainText('Pit wall');
-		const doneFold = page.getByTestId('brief-done');
-		await expect(doneFold).toContainText('Done · 1');
-		await expect(doneFold).toContainText('Weekly discovery sweep');
+		await expect(page.getByTestId('brief-deadline-row')).toContainText('Weekly discovery sweep');
 
 		// Opening the brief marks NOTHING read — no read POSTs, badges stay.
 		await expect(page.getByTestId('brief-count')).toContainText('3 unseen');
@@ -490,7 +488,7 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 	});
 });
 test.describe('U04 — the v2 brief layout', () => {
-	test('never more than three big cards, regardless of how many open updates exist', async ({ browser }) => {
+	test('retains every open card, including updates after the first three', async ({ browser }) => {
 		const context = await browser.newContext();
 		const extras = ['x1', 'x2', 'x3'].map((n, i) =>
 			card({
@@ -507,9 +505,8 @@ test.describe('U04 — the v2 brief layout', () => {
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/`);
 		await expect(page.getByTestId('account-brief-lane')).toBeVisible();
-		// Exactly the server's top three open cards are big; the rest are not
-		// rendered as cards at all (no infinite feed, no re-ranking).
-		await expect(page.locator('[data-testid="decision-card"]')).toHaveCount(3);
+		// Open work is never silently truncated at the third card.
+		await expect(page.locator('[data-testid="decision-card"]')).toHaveCount(5);
 		// Deadline rows: none of these cards are deadlines.
 		await expect(page.getByTestId('brief-deadlines')).toHaveCount(0);
 		await context.close();
@@ -533,7 +530,7 @@ test.describe('U04 — the v2 brief layout', () => {
 		await expect(page.getByTestId('brief-deadline-row')).toContainText('Submission window closes soon');
 		// The deadline row carries its own action (routes to Routines — the
 		// project settings section since U08).
-		await page.getByTestId('brief-deadline-action').click();
+		await page.getByTestId('brief-deadline-row').getByTestId('card-primary-action').click();
 		await expect(page).toHaveURL(/\/app\/project\/settings\?project=proj-b#routines$/);
 		await context.close();
 	});
@@ -577,4 +574,53 @@ test.describe('card details in words (plan 5.5)', () => {
 		]);
 		await context.close();
 	});
+});
+
+test('Earlier keeps a resolved decision and opens its original revision without substituting the latest plan', async ({ browser }) => {
+ const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+ await stubAccount(context, { cards: [{ ...APPROVAL_A, status: 'handled', headline: 'Design approved', summary: 'Decision approved.', primaryAction: { label: 'View decision', kind: 'review', targetId: 'ap-1' } }] });
+ const original = { id: 'plan-original', projectId: 'proj-a', kind: 'prd', revision: 1, bodyHash: 'original-hash', body: '# Original approved scope', createdBy: 'actor-test', createdAt: NOW };
+ const newer = { ...original, id: 'plan-newer', revision: 2, bodyHash: 'new-hash', body: '# Newer unapproved scope' };
+ await context.route('**/api/projects/proj-a/plan-docs', route => json(route, 200, { revisions: [newer, original] }));
+ await context.route('**/api/approvals/ap-1', route => json(route, 200, { approval: { id: 'ap-1', projectId: 'proj-a', action: 'design', resourceId: original.id, revisionHash: original.bodyHash, policyVersion: 'v1', intentHash: 'intent-original', status: 'approved', decidedBy: 'actor-test', expiresAt: '2999-01-01T00:00:00.000Z' } }));
+ const page = await context.newPage();
+ await page.goto(`${BASE}/app/?pane=brief`);
+ await page.getByTestId('brief-done').getByText('Earlier · 1').click();
+ await page.getByTestId('brief-done-item').getByRole('button', { name: 'View decision' }).click();
+ await expect(page).toHaveURL(/approval=ap-1/);
+ await expect(page.getByTestId('decision-original-content')).toContainText('Original approved scope');
+ await expect(page.getByTestId('decision-history')).not.toContainText('Newer unapproved scope');
+ await expect(page.getByTestId('decision-history').getByRole('button', { name: /Approve/ })).toHaveCount(0);
+ await context.close();
+});
+
+test('shared compact cards fit mobile and keep consistent primary actions', async ({ browser }, testInfo) => {
+ const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+ await stubAccount(context, { cards: [APPROVAL_A, BLOCKED_A, { ...APPROVAL_A, id: 'brf_approval_done', key: 'proj-a:approval:ap-done', headline: 'Design approved', summary: 'Decision approved. The original revision is kept.', status: 'handled', primaryAction: { label: 'View decision', kind: 'review', targetId: 'ap-done' } }] });
+ const page = await context.newPage();
+ await page.goto(`${BASE}/app/?pane=brief`);
+ await expect(page.getByTestId('decision-card').filter({ visible: true })).toHaveCount(2);
+ for (const action of await page.getByTestId('card-primary-action').filter({ visible: true }).all()) expect((await action.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+ await page.getByTestId('brief-done').getByText('Earlier · 1').click();
+ await page.screenshot({ path: testInfo.outputPath('shared-cards-mobile.png'), fullPage: true });
+ await page.setViewportSize({ width: 320, height: 568 });
+ expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+ await context.close();
+});
+
+test('Earlier loads archived decisions on demand and retains the exact decision target',async({browser})=>{
+ const context=await browser.newContext({viewport:{width:390,height:844}});
+ await stubAccount(context,{cards:[{...APPROVAL_A,status:'handled',headline:'Recent approval',primaryAction:{kind:'review',label:'View decision',targetId:'ap-1'}}]});
+ const requests:string[]=[];
+ await context.route('**/api/brief/history**',route=>{requests.push(route.request().url());return route.fulfill({contentType:'application/json',body:JSON.stringify({cards:[{...APPROVAL_A,id:'brf_approval_ancient',status:'handled',headline:'Original archived approval',primaryAction:{kind:'review',label:'View original decision',targetId:'ancient-approval'}}],next:null})});});
+ const page=await context.newPage();await page.goto(`${BASE}/app/?pane=brief`);
+ expect(requests).toHaveLength(0);
+ await page.getByTestId('brief-done').locator('summary').first().click();
+ await page.getByRole('button',{name:'Load older decisions'}).click();
+ await expect(page.getByText('Original archived approval')).toBeVisible();
+ await expect(page.getByText('All recorded decisions are shown.')).toBeVisible();
+ await page.getByRole('button',{name:'View original decision'}).click();
+ await expect(page).toHaveURL(/approval=ancient-approval/);
+ expect(requests).toHaveLength(1);
+ await context.close();
 });

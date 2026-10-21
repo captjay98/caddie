@@ -284,7 +284,7 @@ test.describe('Projects v2 (U05)', () => {
 		const win = page.getByTestId('import-repo-window');
 		await expect(win).toBeVisible();
 		// The window reads the REAL installations API for the project's workspace.
-		await expect(win).toContainText('at first only reads it');
+		await expect(win).toContainText('Your GitHub repository stays unchanged');
 		await expect(win.getByTestId('repository-picker')).toBeVisible();
 		expect(installCalls.some((url) => url.includes('workspaceId=ws-1'))).toBe(true);
 
@@ -420,4 +420,20 @@ test.describe('the project card shows the app, its steps and its hackathon (plan
 		if (process.env.CARD_SHOTS) await row.screenshot({ path: `${process.env.CARD_SHOTS}/project-card-phone.png` });
 		await context.close();
 	});
+});
+
+test('Bring your code works as the first project using the signed-in Home workspace',async({browser})=>{
+ const context=await browser.newContext(); await stubAccount(context);
+ await context.route('**/api/projects',route=>json(route,200,{projects:[HOME]}));
+ const reads:string[]=[];
+ await context.route('**/api/github/installations**',route=>{reads.push(route.request().url());return json(route,200,{installations:[]});});
+ await context.route('**/api/github/app**',route=>json(route,200,{app:null}));
+ const page=await context.newPage();await page.goto(`${BASE}/app/projects`);
+ await page.getByTestId('import-repo-project').click();
+ const win=page.getByTestId('import-repo-window');
+ await expect(win.getByTestId('repository-picker')).toBeVisible();
+ await expect(win).not.toContainText('Start a project first');
+ await expect.poll(()=>reads.length).toBeGreaterThan(0);
+ expect(reads.every(url=>new URL(url).searchParams.get('workspaceId')===HOME.workspaceId)).toBe(true);
+ await context.close();
 });

@@ -16,6 +16,7 @@ import { GuidedStepsCardData, GuidedStepsCardView } from './GuidedStepsCard.tsx'
 import { StatePanel } from '../states.tsx';
 import { Icon } from '../icons.tsx';
 import { DecisionCardView } from '../brief/DecisionCard.tsx';
+import { useCurrentDecisionCard, useDecisionCardAction } from '../brief/actions.ts';
 import { Composer } from './Composer.tsx';
 import type { ChannelDraft, ChannelSource } from './channel-store.ts';
 import { cleanAssistantText, sanitizeAssistantText } from './response-hygiene.ts';
@@ -24,7 +25,12 @@ import { MemoryOffers } from './MemoryOffers.tsx';
 
 /** What a turn may do from inside the transcript. The rows are memoized, so
  *  the action travels by context instead of props. */
-const TurnActions = createContext<{ ask: (text: string) => void } | null>(null);
+const TurnActions = createContext<{ ask: (text: string) => void; live: boolean } | null>(null);
+function ConversationDecisionCard({ card }: { card: DecisionCardType }): ReactElement {
+ const onAction = useDecisionCardAction();
+    const current = useCurrentDecisionCard(card);
+	return <DecisionCardView card={current} onAction={onAction} seen={current.seen} />;
+}
 import { attachedFileNames, stripAttachedFileText } from './image-attachments.ts';
 import { settlementNotice } from './settlement-notice.ts';
 import { quotaRefusalMessage } from './send-failure.ts';
@@ -181,8 +187,9 @@ function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
 		: actions.length <= 2
 			? actions.join(' · ')
 			: `${actions.slice(0, 2).join(' · ')} +${actions.length - 2} more`;
+	const runningTool = parts.find(part => part.state === 'input-available');
 	const summary = running
-		? `${actions.length ? actions[0]!.replace(/ed\b/, 'ing') : 'Working'}…`
+		? `${runningTool ? toolActionLabel(runningTool.toolName, false) : 'Working'}…`
 		: failed > 0
 			? `${actionPhrase} · ${failed} didn't complete${secs ? ` · ${secs}s` : ''}`
 			: `${actionPhrase}${secs ? ` · ${secs}s` : ''}`;
@@ -196,95 +203,6 @@ function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
 	);
 }
 
-/** The reasoning part as the Channel receives it — accumulated text + stream state. */
-type ReasoningPart = Extract<FlueConversationPart, { type: 'reasoning' }>;
-
-/**
- * Live reasoning view (Stage 4). While the model thinks, its reasoning streams
- * into a dimmed, scrollable, foldable panel that is OPEN by default so the user
- * sees progress in real time; when the turn completes it COLLAPSES to a quiet
- * one-line "Thought it through" summary (openable, never auto-expanded again).
- *
- * This threads the needle on the C7 hard constraint ("raw chain-of-thought
- * never renders as a permanent human-facing block"): raw CoT is shown ONLY
- * transiently while streaming and behind an explicit disclosure afterwards —
- * never as settled prose, and always run through the same hygiene cleaner that
- * strips serialization fragments / nested tags. A redacted reasoning block
- * shows the marker only, never fabricated text.
- */
-/**
- * Turn-level reasoning (one bubble, one disclosure). Every reasoning part the
- * turn produced — the model may emit several passes — folds into ONE "Thought
- * it through", instead of a stack of markers. OPEN while any pass is still
- * streaming so the user watches it think in real time; COLLAPSES to the quiet
- * one-liner when the turn settles (openable, never auto-expanded again).
- *
- * Threads the C7 hard constraint ("raw chain-of-thought never renders as a
- * permanent human-facing block"): raw CoT shows ONLY transiently while
- * streaming and behind an explicit disclosure afterwards — never settled
- * prose, always through the same hygiene cleaner. A fully-redacted turn shows
- * the marker only, never fabricated text.
- */
-function TurnReasoning({ parts }: { parts: readonly ReasoningPart[] }): ReactElement | null {
-	const streaming = parts.some((part) => part.state === 'streaming');
-	const redactedOnly =
-		parts.length > 0 &&
-		parts.every((part) => (part as { redacted?: unknown }).redacted === true);
-	// Merge every pass's accumulated text into one block (blank line between
-	// passes), cleaned the same way assistant text is so no tag/serialization
-	// noise leaks through.
-	const text = parts
-		.filter((part) => (part as { redacted?: unknown }).redacted !== true)
-		.map((part) => (typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : ''))
-		.map((raw) => cleanAssistantText(raw).trim())
-		.filter(Boolean)
-		.join('\n\n');
-
-	// Hooks run unconditionally, before any early return (a reasoning part can
-	// start empty and later gain text/stream; a conditional hook count crashes
-	// the tree with "Rendered more hooks than during the previous render").
-	const ref = useRef<HTMLDivElement>(null);
-	const reasoningPinned = useRef(true);
-	useEffect(() => {
-		if (streaming && ref.current && reasoningPinned.current) {
-			ref.current.scrollTop = ref.current.scrollHeight;
-		}
-	}, [streaming, text]);
-
-	// Nothing to show and not streaming: render nothing (quiet by default).
-	if (!streaming && !text && !redactedOnly) return null;
-
-	const summary = streaming
-		? 'Caddie is thinking…'
-		: redactedOnly && !text
-			? 'Reasoning (hidden by the model)'
-			: 'Thought it through';
-
-	return (
-		<details className="reasoning-view" data-testid="reasoning-view" data-state={streaming ? 'streaming' : 'done'} open={streaming}>
-			<summary className="reasoning-summary" role="status">
-				<Icon name={streaming ? 'play' : 'check'} title={streaming ? 'thinking' : 'done'} />{' '}
-				{summary}
-			</summary>
-			{text ? (
-				<div
-					className="reasoning-body"
-					ref={ref}
-					data-testid="reasoning-body"
-					onScroll={(event) => {
-						const el = event.currentTarget;
-						reasoningPinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
-					}}
-				>
-					{text}
-				</div>
-			) : redactedOnly ? (
-				<p className="reasoning-redacted">The model kept this reasoning private.</p>
-			) : null}
-		</details>
-	);
-}
-
 function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement | null {
 	if (part.type === 'text') {
 		// R04 hygiene: strip reasoning tags / raw svg / serialization fragments /
@@ -293,8 +211,7 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 		return <ReplyText text={part.text} streaming={part.state === 'streaming'} />;
 	}
 		if (part.type === 'reasoning') {
-			// Reasoning is hoisted to the TURN level (TurnReasoning) so every pass
-			// folds into one disclosure; never rendered per-part here.
+			// Internal reasoning stays out of the transcript; activity is shown separately.
 			return null;
 		}
 	if (part.type === 'dynamic-tool') {
@@ -324,12 +241,12 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 				</p>
 			);
 		}
-		return <DecisionCardView card={parsed.output} />;
+		return <ConversationDecisionCard card={parsed.output} />;
 	}
  if (part.type === 'data-projectWorkflow') {
   const data=part.data as {projectId?:unknown;name?:unknown};
   if(typeof data?.projectId !== 'string' || typeof data?.name !== 'string') return <p role="alert">The project card could not be loaded.</p>;
-  return <ProjectWorkflow projectId={data.projectId} name={data.name}/>;
+  return <ProjectWorkflow projectId={data.projectId} name={data.name} showTranscript={false}/>;
  }
 	if (part.type === 'data-hackathonResults') {
 		const parsed = safeParse(HackathonResultsCardSchema, part.data);
@@ -469,37 +386,35 @@ function UserRow({ message, followsSameAuthor }: { message: FlueConversationMess
 	);
 }
 
-/**
- * One assistant TURN as a single bubble (feature-ledger C7, redesigned): a
- * fixed order of at most three layers —
- *   1. ONE "Thought it through" disclosure merging every reasoning pass,
- *   2. ONE tool drawer holding every tool call in the turn,
- *   3. the answer (text + cards + files) across all the turn's messages, in
- *      order, with a hairline rule separating it from the folded layers.
- * A specialist DIAGNOSTIC turn renders as its own foldable row instead.
- */
+/** An assistant turn sits directly on the transcript. Cards own their single
+ * outer frame; completed tool activity is a quiet disclosure, and active work
+ * is represented by the channel's one status line. Internal reasoning is not
+ * a transcript section. Specialist diagnostics remain explicitly foldable. */
 function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversationMessage[]; followsSameAuthor?: boolean }): ReactElement | null {
 	const actions = useContext(TurnActions);
 	const first = messages[0];
 	if (!first) return null;
 	const clock = turnClock(first.timestamp);
 	const allParts = messages.flatMap((message) => message.parts);
-	const reasoning = allParts.filter((part): part is ReasoningPart => part.type === 'reasoning');
+	const thinking = allParts.some(part => part.type === 'reasoning' && part.state === 'streaming');
 	const tools = allParts.filter((part): part is ToolPart => part.type === 'dynamic-tool');
 	// The answer: everything that is neither reasoning nor a tool call, in order
 	// (text, cards, files, data disclosures), with the pieces of one streamed
 	// answer joined (answer-parts.ts).
 	const answer = answerParts(messages);
-	const hasFolded = reasoning.length > 0 || tools.length > 0;
+	const working = Boolean(actions?.live) && (thinking || tools.some(part => part.state === 'input-available'));
+    const hasFolded = !working && tools.length > 0;
 	const hasAnswer = answer.some((part) => part.type !== 'text' || cleanAssistantText(part.text).trim().length > 0);
 	// A proposal the model wrote out instead of making is hidden by hygiene;
 	// say so plainly rather than leaving an empty or misleading reply.
 	const hiddenProposal = answer.some((part) => part.type === 'text' && sanitizeAssistantText(part.text).stripped.includes('tool-arguments'));
 
+    // A tool-only active turn is represented by the one live activity line.
+    // A completed reasoning-only turn has no user-facing content.
+    if (!hasAnswer && !hiddenProposal && (working || tools.length === 0)) return null;
 	const body = (
 		<>
-			{reasoning.length > 0 ? <TurnReasoning parts={reasoning} /> : null}
-			{tools.length > 0 ? <ToolStrip parts={tools} /> : null}
+            {!working && tools.length > 0 ? <ToolStrip parts={tools} /> : null}
 			{hasAnswer ? (
 				<div className={hasFolded ? 'turn-answer has-folded' : 'turn-answer'}>
 					{answer.map((part, index) => (
@@ -617,6 +532,7 @@ export function Channel(props: {
 	const { source, projectId } = props;
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const pinnedToBottom = useRef(true);
+    const [showLatest, setShowLatest] = useState(false);
 	// §3.6: leftover typing restored from an earlier visit is labelled until it
 	// is sent or cleared. "From earlier" = text is present and the user has not
 	// typed in this visit — any edit (or clearing) retires the label, and a
@@ -681,7 +597,7 @@ export function Channel(props: {
 	// histories, measured).
 	const onSendRef = useRef(props.onSend);
 	onSendRef.current = props.onSend;
-	const turnActions = useMemo(() => ({ ask: (text: string) => onSendRef.current(text, []) }), []);
+	const turnActions = useMemo(() => ({ ask: (text: string) => onSendRef.current(text, []), live: ['connecting', 'submitted', 'streaming'].includes(source.status) }), [source.status]);
 	const transcriptRows = useMemo(
 		() => buildTranscriptRows(groupTurns(shownMessages)),
 		[shownMessages],
@@ -703,9 +619,9 @@ export function Channel(props: {
 		if (!live) return null;
 		const lastAssistant = [...source.messages].reverse().find((m) => m.role === 'assistant');
 		if (!lastAssistant) return null;
-		const toolParts = lastAssistant.parts.filter((p) => typeof p.type === 'string' && p.type.startsWith('tool-'));
+		const toolParts = lastAssistant.parts.filter((p): p is ToolPart => p.type === 'dynamic-tool');
 		const latestTool = toolParts.at(-1);
-		const toolName = latestTool ? String(latestTool.type).slice('tool-'.length) : null;
+		const toolName = latestTool?.toolName ?? null;
 		const reasoning = lastAssistant.parts.some((p) => p.type === 'reasoning' && (p as { state?: string }).state === 'streaming');
 		return { toolCount: toolParts.length, toolName, reasoning };
 	}, [live, source.messages]);
@@ -746,6 +662,7 @@ export function Channel(props: {
 				onScroll={(event) => {
 					const el = event.currentTarget;
 					pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+                    setShowLatest(!pinnedToBottom.current);
 				}}
 			>
 				{source.messages.length === 0 && !props.hideEmptyState ? (
@@ -824,6 +741,7 @@ export function Channel(props: {
 					/>
 				))}
 			</div>
+            {showLatest ? <button type="button" className="btn-ghost channel-jump-latest" onClick={() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; pinnedToBottom.current = true; setShowLatest(false); }}>Back to latest</button> : null}
 			{!props.composerHidden ? (
 				<Composer
 					onSend={props.onSend}

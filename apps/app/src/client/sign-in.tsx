@@ -4,7 +4,7 @@ import { SignInPanel } from './auth.ts';
 
 /**
  * The one sign-in screen (plan 5.2): Caddie and what it does on the left, the
- * real sign-in form on the right; on a phone, the form alone. Every signed-out
+ * real sign-in form on the right; on a phone, a compact hero above the form. Every signed-out
  * way in renders this one component (the workspace chrome, any page body and
  * the onboarding page), so a person never meets two different sign-ins.
  */
@@ -14,7 +14,7 @@ export function SignInScreen({ callbackURL = '/app/' }: { callbackURL?: string }
 			{/* LEFT: brand / mascot hero — a signed-out screen has no live session,
 			    so this is an honest static hero (what Caddie does), never a faked
 			    live feed. Themed entirely via tokens so it tracks mode + palette. */}
-			<div className="signin-hero" aria-hidden="true">
+			<div className="signin-hero">
 				<div className="signin-hero-grid" />
 				<p className="signin-hero-brand">CADDIE</p>
 				<div className="signin-hero-center">
@@ -29,6 +29,7 @@ export function SignInScreen({ callbackURL = '/app/' }: { callbackURL?: string }
 					<ul className="signin-hero-chips">
 						<li>Finds contests</li>
 						<li>Plans the build</li>
+						<li>Builds and repairs</li>
 						<li>Ships with you</li>
 					</ul>
 				</div>

@@ -127,12 +127,19 @@ export function ConvResizeHandle(props: { width: ConvWidth }): ReactElement {
 	const [dragging, setDragging] = useState(false);
 	const [focused, setFocused] = useState(false);
 	const draggingRef = useRef(false);
+	const pendingFrac = useRef<number | null>(null);
+	const frame = useRef<number | null>(null);
+	useEffect(() => () => {
+        if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+        document.body.classList.remove('conv-resizing');
+    }, []);
 
 	const onPointerDown = useCallback(
 		(event: ReactPointerEvent) => {
 			event.preventDefault();
 			event.currentTarget.setPointerCapture(event.pointerId);
 			draggingRef.current = true;
+			pendingFrac.current = null;
 			setDragging(true);
 			document.body.classList.add('conv-resizing');
 		},
@@ -144,7 +151,12 @@ export function ConvResizeHandle(props: { width: ConvWidth }): ReactElement {
 			if (!draggingRef.current) return;
 			// The panel's LEFT edge follows the pointer: distance from the right
 			// edge of the window is the panel width.
-			width.setFrac((windowWidth() - event.clientX) / windowWidth(), false);
+			pendingFrac.current = (windowWidth() - event.clientX) / windowWidth();
+            if (frame.current !== null) return;
+            frame.current = window.requestAnimationFrame(() => {
+                frame.current = null;
+                if (pendingFrac.current !== null) width.setFrac(pendingFrac.current, false);
+            });
 		},
 		[width],
 	);
@@ -155,13 +167,16 @@ export function ConvResizeHandle(props: { width: ConvWidth }): ReactElement {
 			draggingRef.current = false;
 			setDragging(false);
 			document.body.classList.remove('conv-resizing');
+            if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+            frame.current = null;
 			try {
 				event.currentTarget.releasePointerCapture(event.pointerId);
 			} catch {
 				// pointer already released (e.g. pointercancel) — nothing to do
 			}
 			// Persist the fraction the drag landed on.
-			width.setFrac(width.frac, true);
+			width.setFrac(pendingFrac.current ?? width.frac, true);
+            pendingFrac.current = null;
 		},
 		[width],
 	);

@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import type { ReactElement } from 'react';
 import * as v from 'valibot';
-import { postJson } from '../api.ts';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
+import { CardHeader, CardPanel } from '../brief/CardFrame.tsx';
+import { fetchJson, postJson } from '../api.ts';
 
 /**
  * The in-chat "OK to spend?" card (Caddie v2, HANDOFF §3.6, packet B06).
@@ -27,18 +30,26 @@ export const ApprovalCardData = v.pipe(
 );
 export type ApprovalCardPayload = v.InferOutput<typeof ApprovalCardData>;
 
-type ServerStatus = 'pending' | 'approved' | 'rejected' | 'expired';
+type ServerStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'revoked' | 'superseded';
 
 const STATUS_LABEL: Record<ServerStatus, string> = {
 	pending: 'Waiting for you',
 	approved: 'Approved',
 	rejected: 'Not now',
 	expired: 'Expired',
+    revoked: 'Revoked',
+    superseded: 'Superseded',
 };
 
 export function ApprovalCardView(props: { data: ApprovalCardPayload }): ReactElement {
 	const { data } = props;
-	const [status, setStatus] = useState<ServerStatus>(data.status);
+	const cache = useQueryClient();
+    const chrome = useWorkspaceChrome();
+    const record = useQuery({ queryKey: ['approval-card', chrome.actorId, data.projectId, data.approvalId], queryFn: () => fetchJson<{ approval: { projectId: string; status: ServerStatus } }>(`/api/approvals/${encodeURIComponent(data.approvalId)}`) });
+    const status = record.data?.approval?.projectId === data.projectId ? record.data.approval.status : data.status;
+    function setStatus(status: ServerStatus) {
+        cache.setQueryData(['approval-card', chrome.actorId, data.projectId, data.approvalId], { approval: { projectId: data.projectId, status } });
+    }
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -63,7 +74,9 @@ export function ApprovalCardView(props: { data: ApprovalCardPayload }): ReactEle
 					status: ServerStatus;
 				};
 			};
-			setStatus(approval.status === 'pending' ? approval.status : approval.status);
+			if (approval.projectId !== data.projectId) throw new Error('The approval does not belong to this project.');
+            setStatus(approval.status);
+            if (approval.status !== 'pending') { void cache.invalidateQueries({ queryKey: ['brief'] }); return; }
 			const result = await postJson<{ approval: { status: ServerStatus } }>('/api/approvals', {
 				intent: {
 					projectId: approval.projectId,
@@ -75,6 +88,9 @@ export function ApprovalCardView(props: { data: ApprovalCardPayload }): ReactEle
 				decision,
 			});
 			setStatus(result.approval.status);
+            void cache.invalidateQueries({ queryKey: ['brief'] });
+            void cache.invalidateQueries({ queryKey: ['build-workflow'] });
+            void cache.invalidateQueries({ queryKey: ['approval-card'] });
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
 		} finally {
@@ -92,12 +108,10 @@ export function ApprovalCardView(props: { data: ApprovalCardPayload }): ReactEle
 				})}.`;
 
 	return (
-		<div className="approval-card" data-testid="approval-card" data-status={status}>
-			<p className="kicker" data-tone="action">
-				OK TO SPEND?
-			</p>
-			<p className="approval-what">{data.what}</p>
-			<p className="state-detail">{cap}</p>
+		<div className="approval-card caddie-card" data-testid="approval-card" data-status={status} data-design={status === "pending" ? "plan" : "earlier"} data-tone={status === "pending" ? "blue" : "quiet"}>
+            <CardHeader design={status === 'pending' ? 'plan' : 'earlier'} status={STATUS_LABEL[status]} />
+            <h3 className="approval-what">{data.what}</h3>
+            <CardPanel title="Spending limit"><p className="state-detail">{cap}</p></CardPanel>
 			{status === 'pending' ? (
 				<div className="row-actions">
 					<button type="button" className="btn-key" data-testid="approval-allow" disabled={busy} onClick={() => void decide('approved')}>

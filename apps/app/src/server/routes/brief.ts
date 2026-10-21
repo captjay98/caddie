@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AuthEnv } from '../auth.ts';
 import { ScopeError, requireProjectScope, sessionUserId } from '../scope.ts';
-import { accountBrief, briefSummary, markBriefRead, projectBrief } from '../brief.ts';
+import { accountBrief, approvalHistory, briefSummary, markBriefRead, projectBrief } from '../brief.ts';
 
 /**
  * The brief feed routes.
@@ -49,6 +49,13 @@ export function createBriefRouter(): Hono<{ Bindings: Env }> {
 		const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
 		return c.json(await accountBrief(c.env.DB, actorId));
 	});
+
+ router.get('/brief/history', async c => {
+  const actorId = await requireSessionActorId(c.env, c.req.raw.headers);
+  const at = c.req.query('beforeTime'); const id = c.req.query('beforeId');
+  if ((at || id) && (!at || !id || !Number.isFinite(Date.parse(at)) || id.length > 256)) return c.json({ error: 'invalid_history_cursor' }, 400);
+  return c.json(await approvalHistory(c.env.DB, actorId, at && id ? { at, id } : undefined));
+ });
 
 	// R05: the brief-in-chat summary — counts derived from the SAME accountBrief
 	// so chat and the Brief destination never drift.

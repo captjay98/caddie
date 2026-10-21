@@ -8,7 +8,7 @@ import { splitFeatureBlock, splitDesignMocks } from "@caddie/contracts";
 import type { BuildWorkflow, WorkflowPhase } from "../../server/build-workflow.ts";
 import { fetchJson, postJson } from "../api.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
-import { useProjectRepo, useSourceSave, type ProjectRepoView, type SourceSaveView } from "../queries.ts";
+import { useProjectRepo, useSourceSave, useBuildActivity, type ProjectRepoView, type SourceSaveView } from "../queries.ts";
 import { Icon } from "../icons.tsx";
 import { InteractivePreview } from "../artifacts/InteractivePreview.tsx";
 import { DesignMockPreview } from "../artifacts/DesignMockPreview.tsx";
@@ -22,21 +22,10 @@ import { AppVersions } from "../project/AppVersions.tsx";
 import { AppAi } from "../project/AppAi.tsx";
 import { TestInbox } from "../project/TestInbox.tsx";
 import { ImportedApp, importedAppTitle } from "../project/ImportedApp.tsx";
-import type { ImportPreviewView } from "../../server/import-preview.ts";
+import { CardHeader } from "../brief/CardFrame.tsx";
+import type { CardDesign } from "../brief/card-design.ts";
+import { workflowQueryOptions } from "../workflow-query.ts";
 
-interface Snapshot {
-  workflow: BuildWorkflow | null;
-  plan: PlanDocRevision | null;
-  approval: ApprovalRecord | null;
-  design: PlanDocRevision | null;
-  designApproval: ApprovalRecord | null;
-  /** The checked build has a server (relay /api calls; offer Reset test data). */
-  previewHasServer?: boolean;
-  /** "flutter": an Android app's browser preview (Track 3). */
-  previewKind?: "web" | "flutter";
-  /** "Start from my GitHub repo": the copied app, until the first build has its own preview. */
-  importPreview?: ImportPreviewView | null;
-}
 /** Phases before any build started: the copied app is still the one to try. */
 const BEFORE_BUILD = new Set<WorkflowPhase>(["planning", "review", "design", "design-review"]);
 const LABEL: Record<WorkflowPhase, string> = {
@@ -56,7 +45,7 @@ const PLAN_EVER_APPROVED: ReadonlySet<string> = new Set(["approved", "revoked", 
 export function ProjectWorkflow({
   projectId,
   name,
-  showTranscript = true,
+  showTranscript = false,
 }: {
   projectId: string;
   name?: string;
@@ -64,15 +53,12 @@ export function ProjectWorkflow({
 }) {
   const chrome = useWorkspaceChrome();
   const state = useQuery({
-    queryKey: ["build-workflow", chrome.actorId, projectId],
+    ...workflowQueryOptions(chrome.actorId, projectId),
     enabled: Boolean(chrome.actorId && chrome.homeProject?.id !== projectId),
-    queryFn: () =>
-      fetchJson<Snapshot>(
-        `/api/projects/${encodeURIComponent(projectId)}/workflow`,
-      ),
-    refetchInterval: 2000,
   });
   const workflow = state.data?.workflow;
+  const activity = useBuildActivity({ actorId: chrome.actorId }, workflow?.phase === "building" ? projectId : null, false);
+  const repairing = workflow?.phase === "building" && Boolean(activity.data && (activity.data.openIssues > 0 || activity.data.timeline?.stages.some(stage => stage.state === "failed")));
   const repoQuery = useProjectRepo(
     { actorId: chrome.actorId },
     chrome.homeProject?.id === projectId ? null : projectId,
@@ -180,12 +166,13 @@ export function ProjectWorkflow({
     if (!importPreview || !chrome.actorId) return null;
     return (
       <section
-        className="project-workflow"
+        className="caddie-card project-workflow"
         data-testid="project-workflow"
         data-phase="imported"
         aria-label={name ? `${name} project` : "Your project"}
       >
-        <div className="workflow-heading">
+        <CardHeader design="preview" context={name} status={importPreview.status === "ready" ? "Ready to try" : "Checking"} />
+      <div className="workflow-heading">
           <div>
             <p className="kicker">{name ?? "YOUR PROJECT"}</p>
             <h3>{importedAppTitle(importPreview)}</h3>
@@ -222,13 +209,17 @@ export function ProjectWorkflow({
         .join(" ")
         .slice(0, 240) || null)
     : null;
+  const design: CardDesign = workflow.phase === 'ready' ? 'preview' : workflow.phase === 'building' ? repairing ? 'repair' : 'build' : workflow.phase === 'blocked' ? 'update' : 'plan';
   return (
     <section
-      className="project-workflow"
+      className="caddie-card project-workflow"
       data-testid="project-workflow"
       data-phase={workflow.phase}
+      data-design={design}
+      data-tone={design === "preview" ? "green" : design === "repair" ? "amber" : "blue"}
       aria-label={name ? `${name} project` : "Your project"}
     >
+      <CardHeader design={design} context={name} status={repairing ? 'I’m on it' : workflow.phase === 'ready' ? 'Ready to try' : workflow.phase === 'review' || workflow.phase === 'design-review' ? 'Needs you' : workflow.phase === 'blocked' ? 'Needs attention' : 'In progress'} />
       <div className="workflow-heading">
         <div>
           <p className="kicker">{name ?? "YOUR PROJECT"}</p>
@@ -262,10 +253,10 @@ export function ProjectWorkflow({
       ) : null}
       {workflow.phase === "review" && plan ? (
         <>
-          <div className="workflow-plan">
+          <div className="compact-card-panel"><p className="compact-card-panel-title">What you’re approving</p><div className="workflow-plan">
             <Markdown text={splitFeatureBlock(plan.body).display} />
             <PlanFeatureList body={plan.body} />
-          </div>
+          </div></div>
           {/* Reassurance STRIP: the safety facts the host actually enforces
               (sandbox build; deploy/spend gated behind a separate approval),
               as glanceable chips instead of a grey paragraph the user must
@@ -284,7 +275,7 @@ export function ProjectWorkflow({
               disabled={busy}
               onClick={() => void decide("approved")}
             >
-              {busy ? "Saving…" : "Looks good — build it"}
+              {busy ? "Saving…" : "Approve plan"}
             </button>
             <button
               className="btn-ghost"
@@ -516,6 +507,8 @@ export function ProjectWorkflow({
               : {})}
           />
           {state.data?.previewHasServer ? <TestInbox actorId={chrome.actorId} projectId={projectId} /> : null}
+          <SavedFeatures actorId={chrome.actorId} projectId={projectId} />
+          <details className="workflow-app-options"><summary>App settings, versions & delivery</summary>
           <AppKeys actorId={chrome.actorId} projectId={projectId} hasServer={Boolean(state.data?.previewHasServer)} />
           <PublishApp actorId={chrome.actorId} projectId={projectId} />
           {state.data?.previewKind === "flutter" ? <AndroidDownload actorId={chrome.actorId} projectId={projectId} /> : null}
@@ -528,7 +521,7 @@ export function ProjectWorkflow({
             repo={linkedRepo}
             onConnect={() => chrome.goProjectTab("/project/settings", { project: projectId })}
           />
-          <SavedFeatures actorId={chrome.actorId} projectId={projectId} />
+          </details>
         </>
       ) : null}
       {failed && workflow.phase !== "ready" && !active ? (

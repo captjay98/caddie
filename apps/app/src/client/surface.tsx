@@ -15,6 +15,7 @@ import { Schedules, type ScheduleRow } from './tasks/Schedules.tsx';
 import { Tasks } from './tasks/Tasks.tsx';
 import { EvidenceDrawer } from './evidence/Drawer.tsx';
 import { ArtifactViewer, type ViewerRevision } from './artifacts/Viewer.tsx';
+import { workflowQueryOptions } from './workflow-query.ts';
 import { DesignReview } from './planning/DesignReview.tsx';
 import { RepositoryPicker, type SelectedRepository } from './repositories/RepositoryPicker.tsx';
 import { RunInspector } from './runs/RunInspector.tsx';
@@ -439,7 +440,7 @@ function ImportRepoWindow(props: { onClose: () => void }): ReactElement {
 	/** After the copy: why Caddie won't build on it (or couldn't copy it), with the new project to open. */
 	const [notice, setNotice] = useState<{ projectId: string; title: string; message: string } | null>(null);
 
-	const workspaceId = chrome.buildProjects[0]?.workspaceId;
+	const workspaceId = chrome.buildProjects[0]?.workspaceId ?? chrome.homeProject?.workspaceId;
 
 	function openProject(projectId: string) {
 		props.onClose();
@@ -495,13 +496,12 @@ function ImportRepoWindow(props: { onClose: () => void }): ReactElement {
 					<>
 						<h3 className="state-title">Which repository?</h3>
 						<p className="state-detail">
-							Caddie reads the repo you pick — at first only reads it. Writing, merging and deploying
-							stay behind their own separate approvals.
+							Choose a repository to copy into Caddie. We’ll check whether it can run. Your GitHub repository stays unchanged; writing back, merging and publishing require separate approval.
 						</p>
 						{workspaceId ? (
 							<RepositoryPicker workspaceId={workspaceId} onSelected={setPicked} />
 						) : (
-							<StatePanel kind="empty" title="No workspace yet" detail="Start a project first — a repository connects to a project's workspace." />
+							<StatePanel kind="empty" title="Preparing your workspace" detail="Your account workspace is not available yet. Close this window and refresh to try again." />
 						)}
 						<div className="row-actions">
 							<button type="button" className="btn-ghost" onClick={props.onClose}>
@@ -671,9 +671,8 @@ function ProjectCard(props: {
 	// project page uses; only asked for once the projection says "no workflow".
 	const noWorkflow = parsed?.success === true && parsed.output.version === 0;
 	const copied = useQuery({
-		queryKey: ['build-workflow', chrome.actorId, props.project.id],
+		...workflowQueryOptions(chrome.actorId, props.project.id),
 		enabled: Boolean(chrome.actorId) && noWorkflow,
-		queryFn: () => fetchJson<{ importPreview?: CopiedAppSummary | null }>(`/api/projects/${encodeURIComponent(props.project.id)}/workflow`),
 	});
 	const copiedApp = noWorkflow ? (copied.data?.importPreview ?? null) : null;
 	const card = fromWorkflow ?? (copiedApp ? projectCardFromCopiedApp(copiedApp) : null);
@@ -805,10 +804,8 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 	// only) is a separate line, never the source of "is there an app".
 	const noWorkflow = experienceParsed?.success === true && experienceParsed.output.version === 0;
 	const copied = useQuery({
-		queryKey: ['build-workflow', chrome.actorId, props.projectId],
+		...workflowQueryOptions(chrome.actorId, props.projectId),
 		enabled: Boolean(chrome.actorId) && noWorkflow,
-		queryFn: () => fetchJson<{ importPreview?: CopiedAppSummary | null }>(`/api/projects/${encodeURIComponent(props.projectId)}/workflow`),
-		refetchInterval: (query) => (query.state.data?.importPreview?.status === 'checking' ? 3000 : false),
 	});
 	const [share, setShare] = useState<{ live: boolean; createdAt: string | null } | null>(null);
 	useEffect(() => {
@@ -833,18 +830,12 @@ function ProjectOverviewBody(props: { projectId: string }): ReactElement {
 		copiedApp: noWorkflow ? (copied.data?.importPreview ?? null) : null,
 		share,
 	});
-	// The app runs inside the project card in the chat pane: open it there and
-	// bring the preview into view (on a phone the pane switch renders first).
-	const tryApp = () => {
-		chrome.openProject(props.projectId, true);
-		let tries = 0;
-		const reveal = () => {
-			const target = document.querySelector('[data-app-preview]');
-			if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-			else if (++tries < 20) window.setTimeout(reveal, 100);
-		};
-		window.setTimeout(reveal, 0);
-	};
+    // A checked app has its own refreshable view; opening it never requires chat.
+    const tryApp = () => {
+        const previewId = experienceParsed?.success ? experienceParsed.output.preview?.id : null;
+        const outputId = previewId ?? copied.data?.importPreview?.outputId;
+        if (outputId) chrome.goProjectTab('/preview', { project: props.projectId, preview: outputId, source: 'workflow' });
+    };
 
 	const cards = brief.data?.cards ?? [];
 	const open = cards.filter((c) => c.status !== 'handled');
@@ -1110,6 +1101,12 @@ export function DesignReviewPage(): ReactElement {
 
 function DesignReviewBody(props: { projectId: string }): ReactElement {
 	const chrome = useWorkspaceChrome();
+	const search = useSearch({ strict: false }) as { approval?: string };
+	const historical = useQuery({
+        queryKey: ['approval-record', chrome.actorId, props.projectId, search.approval],
+        enabled: Boolean(chrome.actorId && search.approval),
+        queryFn: () => fetchJson<{ approval: ApprovalRecord }>(`/api/approvals/${encodeURIComponent(search.approval!)}`),
+    });
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const planDocs = usePlanDocRevisions(actor, props.projectId);
 	// The build's own phase: once the plan is approved, the Plan tab follows it (plan 5.3).
@@ -1119,9 +1116,23 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
     const latest = revisions[0];
     const approval = useQuery({
         queryKey: ['plan-approval', chrome.actorId, props.projectId, latest?.id, latest?.bodyHash],
-        enabled: Boolean(chrome.actorId && latest),
+        enabled: Boolean(chrome.actorId && latest && !search.approval),
         queryFn: () => fetchJson<{ approval: ApprovalRecord | null }>(`/api/approvals?${new URLSearchParams({ projectId: props.projectId, action: 'design', resourceId: latest!.id, revisionHash: latest!.bodyHash, policyVersion: 'v1' })}`),
     });
+    if (search.approval) {
+        if (historical.isPending || planDocs.isPending) return <StatePanel kind="loading" title="Reading the decision record…" />;
+        if (historical.error || planDocs.error) return <StatePanel kind="error" title="This decision could not be loaded" onRetry={() => { void historical.refetch(); void planDocs.refetch(); }} />;
+        const record = historical.data?.approval;
+        if (!record || record.projectId !== props.projectId) return <StatePanel kind="error" title="This decision does not belong to this project" />;
+        const original = planDocs.data?.revisions.find(revision => revision.id === record.resourceId && revision.bodyHash === record.revisionHash);
+        return <section className="card-surface caddie-card decision-history" data-testid="decision-history">
+            <p className="kicker">Decision record · {record.status}</p><h1>This decision is kept on record</h1>
+            <p>This is the exact decision you opened. Reading it does not approve, restart or change anything.</p>
+            {original ? <div data-testid="decision-original-content"><h2>Original content · revision {original.revision}</h2><Markdown text={original.body} /></div> : <p role="status">The original content is not available here. Its identity is retained below; the latest plan has not been substituted.</p>}
+            <details><summary>Record details</summary><dl><dt>Decision</dt><dd>{record.id}</dd><dt>Action</dt><dd>{record.action}</dd><dt>Resource</dt><dd>{record.resourceId}</dd><dt>Revision</dt><dd>{record.revisionHash}</dd></dl></details>
+            <button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/design-review', { project: props.projectId })}>View current plan</button>
+        </section>;
+    }
 	return (
 		<DesignReview
             autoBuild

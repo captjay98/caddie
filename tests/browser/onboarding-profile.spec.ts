@@ -147,8 +147,8 @@ async function stubAccount(context: BrowserContext, profileBody: { profile: unkn
 }
 
 test.describe('Profile wizard (minimal onboarding)', () => {
-	test('required country blocks Continue; Back preserves answers', async ({ browser }) => {
-		const context = await browser.newContext();
+	test('required country blocks Continue; Back preserves answers', async ({ browser }, testInfo) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
 		await stubAccount(context, { profile: null });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/onboarding`);
@@ -166,7 +166,13 @@ test.describe('Profile wizard (minimal onboarding)', () => {
 
 		// Step 2 (the last step) pairs experience + participation format as
 		// segmented pickers.
-		await expect(page.getByRole('heading', { name: 'A little about how you build' })).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'A few quick picks. Then we’re off.' })).toBeVisible();
+        const finish = page.getByTestId('onboarding-profile-save');
+        expect((await finish.boundingBox())?.height).toBe(48);
+        expect(await finish.evaluate(el => el.getBoundingClientRect().bottom <= window.innerHeight)).toBe(true);
+        await page.screenshot({ path: testInfo.outputPath('quick-picks-mobile.png'), fullPage: true });
+        await page.setViewportSize({ width: 320, height: 568 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 		await page.getByTestId('onboarding-experience').getByRole('radio', { name: 'A few apps' }).click();
 		await page.getByTestId('onboarding-format').getByRole('radio', { name: 'Either' }).click();
 
@@ -183,6 +189,7 @@ test.describe('Profile wizard (minimal onboarding)', () => {
 		const savedBodies = await stubAccount(context, { profile: null });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/onboarding`);
+		await page.getByRole('radio', { name: 'I’m exploring' }).check();
 		await page.getByTestId('welcome-next').click();
 		await page.getByTestId('welcome-name-skip').click();
 
@@ -195,10 +202,13 @@ test.describe('Profile wizard (minimal onboarding)', () => {
 		// The one remaining chip row is interests, and it is OPTIONAL.
 		const interests = page.getByTestId('onboarding-interests');
 		// "Open to anything" leads the row and is exclusive: a topic replaces it.
-		await interests.getByRole('button', { name: 'Open to anything', exact: true }).click();
+		await expect(interests.getByRole('button', { name: 'Open to anything', exact: true })).toHaveAttribute('aria-pressed', 'true');
+		await expect(interests.getByTestId('onboarding-interests-search')).toHaveCount(0);
 		await expect(interests.getByTestId('onboarding-interests-count')).toHaveText('Open to anything');
 		await interests.getByRole('button', { name: 'AI & agents', exact: true }).click();
-		// Search reaches the grouped catalog (not shown by default).
+		await expect(interests.getByRole('button', { name: 'Open to anything', exact: true })).toHaveAttribute('aria-pressed', 'false');
+		await interests.getByTestId('onboarding-interests-more').click();
+		// More topics preserves catalog search and custom interests.
 		await interests.getByTestId('onboarding-interests-search').fill('agri');
 		await interests.getByRole('button', { name: 'Agriculture', exact: true }).click();
 		// Anything not listed is one click away.
@@ -212,7 +222,7 @@ test.describe('Profile wizard (minimal onboarding)', () => {
 		await expect(page.getByTestId('onboarding-highlight')).toHaveCount(0);
 		await expect(page.getByText('Preferred tools')).toHaveCount(0);
 		// The defer note tells the user Caddie learns the rest in conversation.
-		await expect(page.getByTestId('onboarding-profile')).toContainText('pick up your skills, tools and the rest');
+		await expect(page.getByTestId('onboarding-profile')).toContainText('You can change all of this in Settings.');
 
 		await page.getByTestId('onboarding-profile-save').click();
 

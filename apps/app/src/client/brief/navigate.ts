@@ -16,8 +16,9 @@ export function briefActionRoute(
 	const search: Record<string, string | undefined> = { project: card.projectId };
 	switch (card.primaryAction.kind) {
 		case 'preview':
-			return { to: '/artifacts', search };
+			return { to: '/preview', search: { ...search, preview: card.primaryAction.targetId, source: card.id.startsWith('brf_workflow_preview_') ? 'workflow' : 'share' } };
 		case 'inspect':
+            if (card.id.startsWith('brf_workflow_')) return { to: '/runs', search };
 			// Opportunity review → the account feed the candidate came from.
 			if (homeProjectId !== null && card.projectId === homeProjectId) {
 				return { to: '/discover', search: {} };
@@ -32,7 +33,7 @@ export function briefActionRoute(
 	}
 	switch (card.kind) {
 		case 'approval':
-			return { to: '/design-review', search };
+			return { to: '/design-review', search: card.status === 'handled' ? { ...search, approval: card.primaryAction.targetId } : search };
 		case 'deadline':
 			return { to: '/schedules', search };
 		case 'result':

@@ -92,33 +92,61 @@ interface ApprovalRow {
 	revisionHash: string;
 	createdAt: string;
 	expiresAt: string;
+	status: string;
+	decidedAt: string | null;
 }
 
 async function pendingApprovalCards(db: D1Database, projectId: string, nowIso: string): Promise<DecisionCard[]> {
 	const rows = await queryAll(
 		db,
-		`select "id", "action", "resourceId", "revisionHash", "createdAt", "expiresAt"
+		`select "id", "action", "resourceId", "revisionHash", "createdAt", "expiresAt", "status", "decidedAt"
 		   from "approvals"
-		  where "projectId" = ? and "status" = 'pending' and "expiresAt" > ?
-		  order by "createdAt" desc`,
+		  where "projectId" = ? and (
+            ("status" = 'pending' and "expiresAt" > ?) or "id" in (
+                select "id" from "approvals" where "projectId" = ?
+                and ("status" != 'pending' or "expiresAt" <= ?)
+                order by coalesce("decidedAt", "createdAt") desc limit 24
+            ))
+          order by coalesce("decidedAt", "createdAt") desc`,
 		projectId,
 		nowIso,
+        projectId,
+        nowIso,
 	);
-	return rows.map((row) => {
+ return rows.map(row => approvalCard(row, projectId, nowIso));
+}
+function approvalCard(row: Record<string, unknown>, projectId: string, nowIso: string): DecisionCard {
 		const approval = row as unknown as ApprovalRow;
 		const copy = APPROVAL_COPY[approval.action];
+		const pending = approval.status === 'pending' && approval.expiresAt > nowIso;
+            const outcome = approval.status === 'pending' ? 'expired' : approval.status;
 		return {
 			id: newCardId('approval', approval.id),
-			projectId,
+			projectId: String(row.projectId ?? projectId),
 			kind: 'approval',
-			headline: `${copy.title} — ${approval.resourceId}`,
-			summary: `Approving this authorises ${copy.authorises}`,
+			headline: pending ? copy.title : `${copy.label.replace(/^Review /, '')} — ${outcome}`,
+			summary: pending ? `Approving this authorises ${copy.authorises}` : `Decision ${outcome}. Open the record to read the exact revision it concerned. This does not authorise a new action.`,
 			evidenceIds: [],
-			status: 'needs-you',
-			updatedAt: approval.createdAt,
-			primaryAction: { label: copy.label, kind: 'review', targetId: approval.id },
+			status: pending ? 'needs-you' : 'handled',
+			updatedAt: pending ? approval.createdAt : approval.decidedAt ?? (outcome === 'expired' ? approval.expiresAt : approval.createdAt),
+			primaryAction: { label: pending ? copy.label : 'View decision', kind: 'review', targetId: approval.id },
 		} satisfies DecisionCard;
-	});
+}
+
+export interface ApprovalHistoryPage { cards: DecisionCard[]; next: { at: string; id: string } | null }
+/** Keyset pagination of durable decisions, independently of the recent feed.
+ * Only membership-verified projects participate; all SQL values are bound. */
+export async function approvalHistory(db: D1Database, actorId: string, before?: { at: string; id: string }): Promise<ApprovalHistoryPage> {
+ const projects = await listProjectsForActor(db, actorId);
+ if (!projects.length) return { cards: [], next: null };
+ const nowIso = new Date().toISOString();
+ const at = `coalesce(decidedAt, case when status = 'pending' then expiresAt else createdAt end)`;
+ const args: unknown[] = [...projects.map(p => p.id), nowIso];
+ if (before) args.push(before.at, before.at, before.id);
+ const found = await queryAll(db, `select *, ${at} as historyAt from approvals where projectId in (${projects.map(() => '?').join(',')}) and (status != 'pending' or expiresAt <= ?) ${before ? `and (${at} < ? or (${at} = ? and id < ?))` : ''} order by historyAt desc, id desc limit 41`, ...args);
+ const page = found.slice(0, 40);
+ const last = page.at(-1);
+ return { cards: page.map(row => approvalCard(row, String(row.projectId), nowIso)), next: found.length > 40 && last ? { at: String(last.historyAt), id: String(last.id) } : null };
 }
 
 async function conflictCards(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
@@ -224,10 +252,32 @@ async function scheduleCards(db: D1Database, scope: Scope): Promise<DecisionCard
 }
 
 /** The project's brief: every live decision the project's own state demands. */
+/** Current build state is shared by chat and Brief; repair rounds alone never
+ * claim the build is stopped. The workflow is the authority for completion. */
+async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
+ const [workflow] = await queryAll(db, 'select * from build_workflows where projectId = ?', scope.projectId);
+ if (!workflow) return [];
+ const phase = String(workflow.phase);
+ if (!['building', 'blocked', 'ready'].includes(phase)) return [];
+ const runId = String(workflow.runId);
+ const [round] = phase === 'building' ? await queryAll(db, 'select outcome, issue from run_rounds where projectId = ? and runId = ? order by createdAt desc, id desc limit 1', scope.projectId, runId) : [];
+ const repairing = phase === 'building' && round?.outcome === 'failed';
+ const ready = phase === 'ready' && typeof workflow.previewId === 'string';
+ const targetId = ready ? String(workflow.previewId) : runId;
+ return [{
+  id: newCardId(`workflow_${ready ? 'preview' : repairing ? 'repair' : phase === 'blocked' ? 'blocked' : 'build'}`, targetId),
+  projectId: scope.projectId, runId, kind: 'result',
+  headline: ready ? 'Your app is ready to try' : repairing ? 'One check needs another pass' : phase === 'blocked' ? 'Your build needs attention' : 'Your app is taking shape',
+  summary: ready ? 'Open the checked app preview. Your plan and build remain available.' : repairing ? String(round?.issue ?? 'A check failed. Caddie is still working on this build.') : String(workflow.detail ?? (phase === 'blocked' ? 'The build stopped. Your plan and saved files are retained.' : 'Caddie is implementing your approved plan and running the checks.')),
+  evidenceIds: [], status: ready ? 'handled' : phase === 'blocked' ? 'blocked' : 'changed', updatedAt: String(workflow.updatedAt),
+  primaryAction: { label: ready ? 'Try the app' : 'View activity', kind: ready ? 'preview' : 'inspect', targetId },
+ }];
+}
+
 export async function projectBrief(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
 	const verified = await assertProjectScope(db, scope);
 	const nowIso = new Date().toISOString();
-	const [approvals, conflicts, staleArtifacts, failedRuns, schedules] = await Promise.all([
+	const [approvals, conflicts, staleArtifacts, failedRuns, schedules, workflow] = await Promise.all([
 		pendingApprovalCards(db, verified.projectId, nowIso),
 		conflictCards(db, verified).catch((error) => {
 			// The evidence layer is independent: its absence must not blank the
@@ -247,15 +297,17 @@ export async function projectBrief(db: D1Database, scope: Scope): Promise<Decisi
 			console.error('brief: schedule listing failed:', error);
 			return [] as DecisionCard[];
 		}),
+        workflowCards(db, verified),
 	]);
-	const all = [...approvals, ...conflicts, ...staleArtifacts, ...failedRuns, ...schedules];
-	return all
-		.sort((a, b) => {
+	const all = [...approvals, ...conflicts, ...staleArtifacts, ...failedRuns, ...schedules, ...workflow];
+	const sorted = all.sort((a, b) => {
 			const rank = STATUS_RANK[a.status] - STATUS_RANK[b.status];
 			if (rank !== 0) return rank;
 			return a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0;
-		})
-		.slice(0, MAX_CARDS);
+        });
+    // Outstanding work must never vanish behind a feed limit. Earlier is a
+    // recent-history window; original decisions remain durable in approvals.
+    return [...sorted.filter(card => card.status !== 'handled'), ...sorted.filter(card => card.status === 'handled').slice(0, MAX_CARDS)];
 }
 
 // --- ACCOUNT BRIEF (approved navigation 2026-10-09) ------------------------------
@@ -429,7 +481,8 @@ export async function accountBrief(db: D1Database, actorId: string): Promise<Acc
 		return a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0;
 	});
 	const seenKeys = await seenKeysForActor(db, actorId);
-	const cards = all.slice(0, ACCOUNT_MAX_CARDS).map((card) => ({
+	const visible = [...all.filter(card => card.status !== 'handled'), ...all.filter(card => card.status === 'handled').slice(0, ACCOUNT_MAX_CARDS)];
+	const cards = visible.map((card) => ({
 		...card,
 		key: cardKey(card),
 		seen: seenKeys.has(cardKey(card)),

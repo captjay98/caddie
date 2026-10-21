@@ -227,7 +227,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	const actor = useSessionActor(Boolean(auth.data?.authenticated));
 	const queryClient = useQueryClient();
 	const navigate = useNavigate();
-	const search = useSearch({ strict: false }) as { project?: string; pane?: string };
+	const search = useSearch({ strict: false }) as { project?: string; pane?: string; start?: 'idea' };
 	const actorId = actor.data ?? null;
 	const actorMemo = useMemo(() => ({ actorId }), [actorId]);
 
@@ -238,8 +238,8 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	const theme = themeChoice.mode;
 	const [accountOpen, setAccountOpen] = useState(false);
 	const [quickSearchOpen, setQuickSearchOpen] = useState(false);
-	const [startingProject, setStartingProject] = useState(false);
-	useEffect(() => setStartingProject(false), [actorId]);
+	const [startingProject, setStartingProject] = useState(search.start === 'idea');
+	useEffect(() => setStartingProject(search.start === 'idea'), [actorId, search.start]);
 	const openQuickSearch = () => setQuickSearchOpen(true);
 	useQuickSearchHotkey(openQuickSearch);
 	const { mode: viewportMode, isDesktop } = useViewportMode();
@@ -545,6 +545,11 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	}
 
 	function refreshAll() {
+		void queryClient.invalidateQueries({ queryKey: ['build-workflow', actorId] });
+		void queryClient.invalidateQueries({ queryKey: ['experience', actorId] });
+		void queryClient.invalidateQueries({ queryKey: ['build-activity', actorId] });
+        void queryClient.invalidateQueries({ queryKey: ['approval-card', actorId] });
+        void queryClient.invalidateQueries({ queryKey: ['brief-history', actorId] });
 		void queryClient.invalidateQueries({ queryKey: ['projects', actorId] });
 		void queryClient.invalidateQueries({ queryKey: ['run-bindings', actorId] });
 		void queryClient.invalidateQueries({ queryKey: ['artifacts', actorId] });

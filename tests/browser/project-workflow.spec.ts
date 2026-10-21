@@ -306,6 +306,7 @@ async function fixture(context: BrowserContext, options: { android?: boolean; ph
 			}
 			return json(route, 200, { importPreview: imported });
 		}
+		if (path.includes('/workflow/preview/') && path.endsWith('/metadata')) return json(route,200,{outputId:path.split('/').at(-2),kind:options.flutter ? 'flutter' : 'web',hasServer:Boolean(options.keys || options.inbox || options.flutter)});
 		if (path.includes('/workflow/preview/')) {
 			previewReads++;
 			if (failedPreviews-- > 0) return json(route, 403, { error: 'preview_denied' });
@@ -471,6 +472,10 @@ test('the plan review lists what will be built as a checklist, never as raw JSON
 	await expect(card.getByTestId('plan-feature-log-feed').locator('li')).toHaveText(['Saving 12 kg shows 12 kg in today’s list', 'The entry is still there after a reload']);
 	await expect(card).not.toContainText('caddie-features');
 	await expect(card).not.toContainText('"doneWhen"');
+    const parent = card.locator('xpath=ancestor::div[contains(@class,"bubble")]');
+    expect(await parent.evaluate(el=>getComputedStyle(el).borderTopWidth)).toBe('0px');
+    expect(await parent.evaluate(el=>getComputedStyle(el).paddingLeft)).toBe('0px');
+    expect(await card.evaluate(el=>getComputedStyle(el).borderRadius)).toBe('13px');
 });
 
 test('a finished build shows each feature and rolls back to a save point in two clicks', async ({ page, context }) => {
@@ -505,6 +510,10 @@ test('a finished build shows each feature and rolls back to a save point in two 
 });
 
 test('Home chat shows a readable project plan; approval admits the correct build and acknowledges its durable key', async ({ page, context }) => {
+	const openedProjectTransports: string[] = [];
+    page.on('request', request => {
+        if (new URL(request.url()).pathname === '/agents/coordinator/conv-project-workflow') openedProjectTransports.push(request.url());
+    });
 	const state = await fixture(context);
 	await page.goto(`${BASE}/app/`);
 	const card = page.getByTestId('channel').getByTestId('project-workflow');
@@ -513,7 +522,8 @@ test('Home chat shows a readable project plan; approval admits the correct build
 	await expect(card.getByRole('heading', { name: 'Minimal Todo app' })).toBeVisible();
 	await expect(card.locator('li')).toHaveText(['Add tasks', 'Complete and delete tasks', 'Save tasks in your browser']);
 	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
-	await card.getByRole('button', { name: 'Looks good — build it' }).click();
+    expect(openedProjectTransports).toHaveLength(0);
+	await card.getByRole('button', { name: 'Approve plan' }).click();
 	await expect(card).toHaveAttribute('data-phase', 'building');
 	expect(state.decisions).toEqual([{ planId: 'plan-1', decision: 'approved' }]);
 	// R02: dispatch is server-owned. The browser makes NO coordinator admission
@@ -544,7 +554,7 @@ test('feedback requires text, continues planning in the target conversation and 
 	await page.reload();
 	await expect(page.getByTestId('channel').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'review');
 	await expect(page.getByTestId('channel').getByTestId('project-workflow').locator('li')).toContainText(['Filter active and completed tasks']);
-	await page.getByTestId('channel').getByTestId('project-workflow').getByRole('button', { name: 'Looks good — build it' }).click();
+	await page.getByTestId('channel').getByTestId('project-workflow').getByRole('button', { name: 'Approve plan' }).click();
 	await expect(page.getByTestId('channel').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'building');
 	expect(state.decisions[1]).toEqual({ planId: 'plan-2', decision: 'approved' });
 	expect(state.admissions).toHaveLength(0);
@@ -590,6 +600,7 @@ test('a finished build saves its code as a pull request and merges it only after
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.getByText('App settings, versions & delivery', { exact: true }).click();
 	const card = page.getByTestId('channel').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const panel = card.getByTestId('save-github');
@@ -636,6 +647,7 @@ test('a finished build saves its code as a pull request and merges it only after
 // Track 3: a REAL Flutter web build (the scaffold plus a probe app), in the
 // real composed client's preview frame with its real policy and shim. Only
 // the API is stubbed. CanvasKit and Roboto load from Google's Flutter CDNs.
+
 test('an Android app runs its real Flutter web build in the preview frame and reaches its own server', async ({ page, context }) => {
 	test.setTimeout(360_000);
 	const probe = await flutterProbePage();
@@ -688,6 +700,7 @@ test('an app with a server lists the keys it needs; a key is pasted once and nev
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.getByText('App settings, versions & delivery', { exact: true }).click();
 	const card = page.getByTestId('channel').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const panel = card.getByTestId('app-keys');
@@ -744,6 +757,7 @@ test('Publish puts the checked app on the web in one click, then unpublishes it 
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.getByText('App settings, versions & delivery', { exact: true }).click();
 	const card = page.getByTestId('channel').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const panel = card.getByTestId('publish-app');
@@ -800,6 +814,7 @@ test('a new version waits for the safety check, then goes live on its own', asyn
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.getByText('App settings, versions & delivery', { exact: true }).click();
 	const panel = page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-app');
 	await panel.getByTestId('publish-go').click();
 	const checking = panel.getByTestId('publish-checking');
@@ -826,6 +841,7 @@ test('a taken-down app says why and offers no way to publish', async ({ page, co
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.getByText('App settings, versions & delivery', { exact: true }).click();
 	const panel = page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-app');
 	const blocked = panel.getByTestId('publish-blocked');
 	await expect(blocked).toContainText('This app was taken down for breaking Caddie’s rules');
@@ -843,12 +859,14 @@ test('Publish waits for the keys the app needs, and says plainly when publishing
 	const state = await fixture(context, { phase: 'ready', publish: true });
 	state.publish.status.missingKeys = ['WEATHER_API_KEY'];
 	await page.goto(`${BASE}/app/`);
+	await page.getByText('App settings, versions & delivery', { exact: true }).click();
 	const panel = page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-app');
 	await expect(panel.getByTestId('publish-needs-keys')).toHaveText('Add the keys this app needs first: WEATHER_API_KEY.');
 	await expect(panel.getByTestId('publish-go')).toBeDisabled();
 
 	state.publish.status = { ...state.publish.status, available: false, reason: "Publishing isn't set up on this Caddie server yet." };
 	await page.reload();
+	await page.getByText('App settings, versions & delivery', { exact: true }).click();
 	await expect(page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-unavailable')).toHaveText("Publishing isn't set up on this Caddie server yet.");
 	await expect(page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-go')).toHaveCount(0);
 });
@@ -858,6 +876,7 @@ test('Versions lists every checked build and goes back to an earlier one in two 
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.getByText('App settings, versions & delivery', { exact: true }).click();
 	const card = page.getByTestId('channel').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const panel = card.getByTestId('app-versions');
@@ -899,6 +918,7 @@ test("AI in your app shows this month's answers and allowance; when it runs out 
 	const ai = { calls: 12, usedPercent: 4, limitReached: false };
 	await fixture(context, { phase: 'ready', ai });
 	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.getByText('App settings, versions & delivery', { exact: true }).click();
 	const card = page.getByTestId('channel').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const panel = card.getByTestId('app-ai');
@@ -912,6 +932,7 @@ test("AI in your app shows this month's answers and allowance; when it runs out 
 	// Later the same month: the allowance ran out.
 	Object.assign(ai, { calls: 340, usedPercent: 100, limitReached: true });
 	await page.reload();
+	await page.getByText('App settings, versions & delivery', { exact: true }).click();
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	await expect(panel).toContainText('Paused');
 	await expect(panel.getByTestId('app-ai-summary')).toHaveText('340 answers · 100% used');
@@ -1056,7 +1077,9 @@ test('the build card is one card: nothing inside it is drawn as a card of its ow
 	await expect(card).toHaveAttribute('data-phase', 'building');
 	await expect(card.getByTestId('build-stages')).toBeVisible();
 	await expect(card.getByTestId('build-features')).toBeVisible();
-	await expect(card.getByTestId('build-files')).toBeVisible();
+	await expect(card.getByTestId('build-files')).toBeHidden();
+    await card.getByText('Technical activity · files & commands', { exact: true }).click();
+    await expect(card.getByTestId('build-files')).toBeVisible();
 	// Evidence only: CADDIE_SHOTS=<dir> saves the card, desktop and 390px wide.
 	const dir = process.env.CADDIE_SHOTS;
 	if (dir) {
@@ -1198,12 +1221,13 @@ for (const device of [
   { name: 'desktop', userAgent: 'Mozilla/5.0 Desktop', label: 'Download Android app (1.5 MB)', qr: true },
   { name: 'iOS', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)', label: 'Download Android app (1.5 MB)', qr: true },
   { name: 'Android', userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8)', label: 'Install on this phone (.apk)', qr: false },
-]) test(`Android download on ${device.name} uses a private version link and truthful backend status`, async ({ browser }) => {
+]) test(`Android download on ${device.name} uses a private version link and truthful backend status`, async ({ browser }, testInfo) => {
   const context = await browser.newContext({ userAgent: device.userAgent, acceptDownloads: true });
   try {
     await fixture(context, { phase: 'ready', android: true, flutter: { page: '<html><body>Browser preview</body></html>', relayed: [] } });
     await context.route('https://caddie.test/a/**', route => route.fulfill({ contentType: 'application/vnd.android.package-archive', headers: { 'content-disposition': 'attachment; filename="test.apk"' }, body: Buffer.from([0x50, 0x4b, 3, 4]) }));
     const page = await context.newPage(); await page.goto(`${BASE}/app/`);
+    await page.getByText('App settings, versions & delivery', { exact: true }).click();
     const panel = page.getByTestId('channel').getByTestId('android-download');
     await expect(panel).toContainText('Its server works after you publish');
     const download = page.waitForEvent('download');
@@ -1214,7 +1238,9 @@ for (const device of [
       await toggle.click();
       const image = panel.getByRole('img', { name: 'Scan to download this Android app' });
       await expect(image).toBeVisible();
-      const png = decodePng(await image.screenshot());
+      await image.evaluate(async element => { await (element as HTMLImageElement).decode(); element.scrollIntoView({block:'center'}); });
+      await expect(image).toBeInViewport({ratio:1});
+      const png = decodePng(await image.screenshot({path:testInfo.outputPath('android-qr.png')}));
       const rgba = new Uint8ClampedArray(png.width * png.height * 4);
       for (let y = 0; y < png.height; y++) for (let x = 0; x < png.width; x++) { const offset = (y * png.width + x) * 4; rgba.set([...png.pixel(x, y), 255], offset); }
       const decoded = jsQR(rgba, png.width, png.height);
@@ -1223,4 +1249,83 @@ for (const device of [
       await toggle.click(); await expect(image).toBeHidden();
     } else await expect(toggle).toHaveCount(0);
   } finally { await context.close(); }
+});
+
+test('app preview expands without resetting the frame, opens outside chat, and refreshes the exact build', async ({ page, context }) => {
+ await fixture(context,{phase:'ready'});
+ await page.goto(`${BASE}/app/`);
+ const preview = page.getByTestId('interactive-preview').first();
+ const app = preview.frameLocator('iframe');
+ await app.getByLabel('New task').fill('Keep my draft in full screen');
+ await preview.getByTestId('preview-expand').click();
+ await expect(page.locator('dialog:modal')).toBeVisible();
+ await expect(app.getByLabel('New task')).toHaveValue('Keep my draft in full screen');
+ await app.getByRole('button',{name:'Add task'}).click();
+ await preview.getByTestId('preview-expand').click();
+ await expect(page.locator('dialog:modal')).toHaveCount(0);
+ await expect(app.getByText('Keep my draft in full screen')).toBeVisible();
+ await preview.getByTestId('preview-open-page').click();
+ await expect(page).toHaveURL(/\/app\/preview\?project=proj-workflow&preview=output-workflow&source=workflow/);
+ await expect(page.getByTestId('preview-page')).toBeVisible();
+ await expect(page.getByTestId('preview-page').frameLocator('iframe').getByText('Keep my draft in full screen')).toBeVisible();
+ await page.reload();
+ await expect(page.getByTestId('preview-page').frameLocator('iframe').getByText('Keep my draft in full screen')).toBeVisible();
+ await page.setViewportSize({width:320,height:568});
+ await page.getByTestId('preview-page').getByTestId('preview-expand').click();
+ expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+ await page.keyboard.press('Escape');
+ await expect(page.locator('dialog:modal')).toHaveCount(0);
+});
+
+test('a share preview opens its own revision and an expired share never substitutes the latest app', async ({page,context}) => {
+ await fixture(context,{phase:'ready'});
+ let expired = false;
+ const requests: string[] = [];
+ await context.route('**/api/projects/proj-workflow/previews', route => json(route,200,{previews:[{id:'share-exact',revisionId:'original-revision',revoked:false,expiresAt:expired ? '2020-01-01T00:00:00.000Z' : '2999-01-01T00:00:00.000Z'}]}));
+ await context.route('**/api/projects/proj-workflow/artifact-revisions/*/content', route => {requests.push(new URL(route.request().url()).pathname);return route.fulfill({contentType:'text/html',body:'<h1>The original app</h1>'});});
+ await page.goto(`${BASE}/app/preview?project=proj-workflow&preview=share-exact&source=share`);
+ await expect(page.getByTestId('preview-page').frameLocator('iframe').getByText('The original app')).toBeVisible();
+ expect(requests).toEqual(['/api/projects/proj-workflow/artifact-revisions/original-revision/content']);
+ expired = true;
+ await page.reload();
+ await expect(page.getByText('This preview is no longer available')).toBeVisible();
+ await expect(page.getByTestId('preview-page')).toHaveCount(0);
+ expect(requests).toHaveLength(1);
+});
+
+test('a copied app opens outside chat with its own server bridge', async({page,context})=>{
+ await fixture(context,{imported:{status:'ready',noWorkflow:true}});
+ await context.route('**/api/projects/proj-workflow/workflow',route=>json(route,200,{workflow:null,plan:null,approval:null,importPreview:{status:'ready',origin:'github',repoFullName:'owner/app',versionSeq:1,outputId:'output-imported',hasServer:true,message:null}}));
+ const requests:string[]=[];
+ await context.route('**/api/projects/proj-workflow/workflow/preview/output-imported**',route=>{
+  if(new URL(route.request().url()).pathname.endsWith('/metadata')) return json(route,200,{outputId:'output-imported',kind:'web',hasServer:true});
+  if(route.request().method()==='POST'){requests.push(route.request().postDataJSON().path);return json(route,200,{status:200,headers:[['content-type','application/json']],body:Buffer.from('{"saved":true}').toString('base64')});}
+  return route.fulfill({contentType:'text/html',body:`<button onclick="fetch('/api/save',{method:'POST'}).then(r=>r.json()).then(r=>document.querySelector('p').textContent=r.saved?'Saved through the app server':'Failed')">Save entry</button><p></p>`});
+ });
+ await page.goto(`${BASE}/app/preview?project=proj-workflow&preview=output-imported&source=workflow`);
+ const preview=page.getByTestId('preview-page');
+ await expect(preview.getByTestId('preview-test-data-note')).toBeVisible();
+ await preview.frameLocator('iframe').getByRole('button',{name:'Save entry'}).click();
+ await expect(preview.frameLocator('iframe').getByText('Saved through the app server')).toBeVisible();
+ expect(requests).toEqual(['/api/save']);
+});
+
+test('an older preview keeps its own web/server metadata while the current build is changing', async({page,context})=>{
+ await fixture(context,{phase:'building'});
+ const requests:string[]=[];
+ await context.route('**/api/projects/proj-workflow/workflow/preview/old-server-output**',route=>{
+  const path=new URL(route.request().url()).pathname;
+  requests.push(`${route.request().method()} ${path}`);
+  if(path.endsWith('/metadata')) return json(route,200,{outputId:'old-server-output',kind:'web',hasServer:true});
+  if(route.request().method()==='POST') return json(route,200,{status:200,headers:[],body:Buffer.from('Still the original server').toString('base64')});
+  return route.fulfill({contentType:'text/html',body:`<button onclick="fetch('/api/original').then(r=>r.text()).then(t=>document.querySelector('p').textContent=t)">Check original</button><p></p>`});
+ });
+ await page.goto(`${BASE}/app/preview?project=proj-workflow&preview=old-server-output&source=workflow`);
+ const preview=page.getByTestId('preview-page');
+ await expect(preview.locator('iframe')).toHaveAttribute('data-kind','web');
+ await preview.frameLocator('iframe').getByRole('button',{name:'Check original'}).click();
+ await expect(preview.frameLocator('iframe').getByText('Still the original server')).toBeVisible();
+ await page.reload();
+ await expect(preview.locator('iframe')).toHaveAttribute('data-kind','web');
+ expect(requests.filter(r=>r.endsWith('/metadata'))).toHaveLength(2);
 });

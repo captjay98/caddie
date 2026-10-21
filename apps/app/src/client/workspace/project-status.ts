@@ -110,7 +110,7 @@ export function projectStatus(cards: readonly DecisionCard[]) {
 }
 
 /** The server workflow phase, as the pages read it from /workflow. */
-export type WorkflowPhase = 'planning' | 'review' | 'building' | 'blocked' | 'ready';
+export type WorkflowPhase = import('../../server/build-workflow.ts').WorkflowPhase;
 
 /**
  * Plain-language status for the four project steps, derived ONLY from real
@@ -133,10 +133,12 @@ export function workflowSteps(
 	// a genuinely post-approval phase (building/ready) earns the green check.
 	if (phase === 'planning') steps.plan = { text: 'Caddie is drafting it', tone: 'neutral' };
 	else if (phase === 'review') steps.plan = { text: 'Ready for you to review', tone: 'needs' };
+    else if (phase === 'design') steps.plan = { text: 'Caddie is designing the screens', tone: 'neutral' };
+    else if (phase === 'design-review') steps.plan = { text: 'Design ready for you to review', tone: 'needs' };
 	else if (phase === 'blocked') steps.plan = { text: 'Paused — check with Caddie', tone: 'needs' };
 	else if (phase) steps.plan = { text: 'Approved', tone: 'done' };
 	// Build
-	if (phase === 'planning' || phase === 'review') steps.build = { text: 'After you approve', tone: 'neutral' };
+	if (phase === 'planning' || phase === 'review' || phase === 'design' || phase === 'design-review') steps.build = { text: 'After you approve', tone: 'neutral' };
 	else if (phase === 'building') steps.build = { text: 'Caddie is building it', tone: 'neutral' };
 	else if (phase === 'blocked') steps.build = { text: 'Needs your help', tone: 'needs' };
 	else if (phase === 'ready') steps.build = { text: 'Ready to try', tone: 'done' };
@@ -165,7 +167,7 @@ export function workflowSteps(
  * once the app is ready. Unknown phase (no workflow yet) → none highlighted.
  */
 export function activeStep(phase: WorkflowPhase | null): ProjectStepId | null {
-	if (phase === 'planning' || phase === 'review') return 'plan';
+	if (phase === 'planning' || phase === 'review' || phase === 'design' || phase === 'design-review') return 'plan';
 	if (phase === 'building' || phase === 'blocked') return 'build';
 	if (phase === 'ready') return 'check';
 	return null;

@@ -30,6 +30,7 @@ export function InterestPicker({
 	optional = false,
 	testId = 'interest-picker',
 	disabled = false,
+	compact = false,
 }: {
 	selected: readonly string[];
 	onChange: (next: string[]) => void;
@@ -38,11 +39,13 @@ export function InterestPicker({
 	optional?: boolean;
 	testId?: string;
 	disabled?: boolean;
+	/** Onboarding: a short first row, with search/catalog behind More topics. */
+	compact?: boolean;
 }): ReactElement {
 	const [query, setQuery] = useState('');
 	const [expanded, setExpanded] = useState(false);
 	const searchId = useId();
-	const openToAnything = selected.includes(OPEN_TO_ANYTHING_INTEREST);
+	const openToAnything = selected.includes(OPEN_TO_ANYTHING_INTEREST) || (compact && selected.length === 0);
 	const picked = selected.filter((s) => s !== OPEN_TO_ANYTHING_INTEREST).length;
 	const full = picked >= MAX_INTERESTS;
 	const searching = query.trim().length > 0;
@@ -53,7 +56,7 @@ export function InterestPicker({
 
 	const isOn = (topic: string) => selected.some((s) => s.toLowerCase() === topic.toLowerCase());
 	const chip = (topic: string) => {
-		const on = isOn(topic);
+		const on = isOn(topic) || (compact && topic === OPEN_TO_ANYTHING_INTEREST && selected.length === 0);
 		return (
 			<button
 				key={topic}
@@ -65,7 +68,7 @@ export function InterestPicker({
 				onClick={() => onChange(toggleInterest(selected, topic))}
 			>
 				<span>{topic}</span>
-				{on ? (
+				{on && !(compact && topic === OPEN_TO_ANYTHING_INTEREST) ? (
 					<span className="chip-x" aria-hidden="true">
 						<Icon name="x" title="" />
 					</span>
@@ -80,18 +83,18 @@ export function InterestPicker({
 	};
 
 	return (
-		<fieldset className="onboarding-chips interest-picker" data-testid={testId} disabled={disabled}>
+		<fieldset className={`onboarding-chips interest-picker${compact ? ' interest-picker-compact' : ''}`} data-testid={testId} disabled={disabled}>
 			<div className="chips-legend">
 				<legend>
 					{legend}
 					{optional ? <span className="onboarding-optional-tag"> · optional</span> : null}
 				</legend>
-				<span className="chips-count" data-testid={`${testId}-count`}>
+			<span className={compact && picked === 0 ? 'sr-only' : 'chips-count'} data-testid={`${testId}-count`}>
 					{openToAnything ? 'Open to anything' : `${picked}/${MAX_INTERESTS}`}
 				</span>
 			</div>
-			<p className="chips-hint">{hint}</p>
-			<label className="sr-only" htmlFor={searchId}>
+			{!compact ? <p className="chips-hint">{hint}</p> : null}
+			{!compact || expanded ? <><label className="sr-only" htmlFor={searchId}>
 				Search topics or add your own
 			</label>
 			<input
@@ -109,8 +112,12 @@ export function InterestPicker({
 						add();
 					}
 				}}
-			/>
-			{visible.map((group) => (
+			/></> : null}
+			{compact && !expanded ? <div className="chip-flow">
+                {chip(OPEN_TO_ANYTHING_INTEREST)}
+                {[...new Set(['AI & agents', 'Games', 'Social impact', ...selected.filter(s => s !== OPEN_TO_ANYTHING_INTEREST)])].map(chip)}
+                <button type="button" className="chip chip-add-pick" aria-expanded={false} onClick={() => setExpanded(true)} data-testid={`${testId}-more`}>+ More topics</button>
+            </div> : visible.map((group) => (
 				<div key={group.label ?? 'popular'} className="interest-group" data-group={group.label ?? 'popular'}>
 					{group.label && (searching || expanded) ? <p className="interest-group-label">{group.label}</p> : null}
 					{!group.label && (searching || expanded) ? <p className="interest-group-label">Popular</p> : null}
@@ -121,6 +128,7 @@ export function InterestPicker({
 					</div>
 				</div>
 			))}
+			{compact ? <p className="chips-hint">{hint}</p> : null}
 			{offerAdd ? (
 				<div className="chip-flow">
 					<button type="button" className="chip chip-add-pick" disabled={disabled || full} onClick={add} data-testid={`${testId}-add`}>
@@ -128,8 +136,8 @@ export function InterestPicker({
 					</button>
 				</div>
 			) : null}
-			{searching ? null : (
-				<button type="button" className="interest-more" aria-expanded={expanded} onClick={() => setExpanded(!expanded)} data-testid={`${testId}-more`}>
+			{searching || (compact && !expanded) ? null : (
+				<button type="button" className="interest-more" aria-expanded={expanded} onClick={() => { setExpanded(!expanded); setQuery(''); }} data-testid={`${testId}-more`}>
 					{expanded ? 'Show fewer' : 'Show all topics'}
 				</button>
 			)}

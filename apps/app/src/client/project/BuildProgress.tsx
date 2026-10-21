@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { CardHeader } from '../brief/CardFrame.tsx';
 import { Icon } from '../icons.tsx';
 import { BuildFeatureList, hasFeatureList } from './FeatureChecklist.tsx';
 import {
@@ -34,15 +35,17 @@ export function BuildProgress(props: {
 	// Nothing to show until a build is under way (or just finished/stuck mid-build).
 	// A response without a timeline (an older server mid-deploy) shows nothing
 	// rather than taking the whole page down with it.
-	if (!data || !data.timeline || data.phase === 'planning' || data.phase === 'review') return null;
+	if (!data || !data.timeline || data.phase === 'planning' || data.phase === 'review' || data.phase === 'design' || data.phase === 'design-review') return null;
 
+    const repairing = data.phase === 'building' && (data.openIssues > 0 || data.timeline.stages.some(stage => stage.state === 'failed'));
 	const t = data.timeline;
 	const files = t.files.slice(0, 4);
 	const moreFiles = t.files.length - files.length;
 	const commands = t.commands.slice(0, 3);
 
 	return (
-		<section className="build-progress" data-testid="build-progress" data-phase={data.phase}>
+		<section className="build-progress caddie-card" data-testid="build-progress" data-phase={data.phase} data-design={repairing ? "repair" : data.phase === "ready" ? "preview" : "build"} data-tone={repairing ? "amber" : "blue"}>
+            <CardHeader design={repairing ? 'repair' : data.phase === 'ready' ? 'preview' : 'build'} status={repairing ? 'I’m on it' : data.phase === 'ready' ? 'Ready to try' : data.phase === 'blocked' ? 'Needs attention' : 'In progress'} />
 			<header className="build-head">
 				<span className="build-head-row">
 					<span className="build-head-dot" data-phase={data.phase} aria-hidden="true" />
@@ -105,6 +108,7 @@ export function BuildProgress(props: {
 			) : null}
 
 			{t.files.length > 0 || t.commands.length > 0 ? (
+                <details className="build-technical"><summary>Technical activity · files & commands</summary>
 				<div className="build-detail" data-testid="build-detail">
 					{t.files.length > 0 ? (
 						<div className="build-detail-card" data-testid="build-files">
@@ -155,8 +159,8 @@ export function BuildProgress(props: {
 							</ul>
 						</div>
 					) : null}
-				</div>
-			) : null}
+                </div></details>
+            ) : null}
 
 			{props.latest ? (
 				<div className="build-latest" data-testid="build-latest">

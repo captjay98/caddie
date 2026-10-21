@@ -225,13 +225,13 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await context.close();
 	});
 
-	test('Overview: Try your app opens the chat pane, where the app runs (phone width, review F04)', async ({ browser }) => {
+	test('Overview: Try your app opens the exact app outside chat on mobile', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
 		await stubAccount(context, { experience: READY_EXPERIENCE });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/project?project=proj-a`);
 		await page.getByTestId('overview-try-app').click();
-		await expect(page).toHaveURL(/pane=channel/);
+		await expect(page).toHaveURL(/\/preview\?project=proj-a&preview=out-1&source=workflow/);
 		await context.close();
 	});
 

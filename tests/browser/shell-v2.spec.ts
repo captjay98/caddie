@@ -340,6 +340,9 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		// transform, and mid-slide the rect's width can read 420.00001, which
 		// Math.ceil turned into a 421 failure about one run in eight.
 		expect(Math.round(box?.width ?? 0)).toBeLessThanOrEqual(420);
+        // CSS and JS must agree at the first tablet pixel, not only at 768px.
+        await page.setViewportSize({ width: 761, height: 1024 });
+        await expect(page.getByTestId('conversation-panel')).toBeVisible();
 
 		// Scrim click closes.
 		await page.getByTestId('conv-scrim').click({ position: { x: 40, y: 300 } });

@@ -6,6 +6,9 @@ import { formatTimeAgo } from '@caddie/ui/time';
 import { Mascot } from '@caddie/ui/Mascot';
 import { PageSkeleton, StatePanel, StaleChip, failureKind, type StateKind } from '../states.tsx';
 import { Icon } from '../icons.tsx';
+import { DecisionHistory } from './DecisionHistory.tsx';
+import { CardHeader, CardPanel } from './CardFrame.tsx';
+import { cardDesign, CARD_DESIGNS } from './card-design.ts';
 
 /**
  * The typed brief card — feature-ledger row C6 (ADAPT/IMPROVE).
@@ -21,13 +24,6 @@ import { Icon } from '../icons.tsx';
  * project and action ids fold under "For developers". The summary carries the
  * "Approving this authorises …" scope inline on approval cards.
  */
-
-const KIND_LABEL: Record<DecisionCardType['kind'], string> = {
-	approval: 'Approval · Needs a decision',
-	change: 'Change · What moved',
-	deadline: 'Clock · Deadline',
-	result: 'Result · Verified output',
-};
 
 /** What a card's button does, in words (plan 5.5). */
 const ACTION_WORDS: Record<DecisionCardType['primaryAction']['kind'], string> = {
@@ -49,7 +45,12 @@ function evidenceWords(count: number): string {
  * not "needs-you". Falls back to a readable generic per status.
  */
 export function statusLabel(card: DecisionCardType): string {
+	if (cardDesign(card) === 'build') return 'In progress';
+	if (cardDesign(card) === 'repair') return 'I’m on it';
 	if (card.status === 'blocked') return 'Needs attention';
+	if (cardDesign(card) === 'preview') return 'Ready to try';
+	if (cardDesign(card) === 'opportunity') return 'Saved';
+	if (card.kind === 'deadline' && card.status === 'handled') return 'Watching';
 	if (card.status === 'handled') return 'Done';
 	if (card.status === 'changed') return 'Changes to review';
 	// needs-you — word it for what the card is about.
@@ -77,31 +78,24 @@ export function DecisionCardView(props: {
 	contextLabel?: string;
 }): ReactElement {
 	const { card } = props;
+	const design = cardDesign(card);
 	const [detailOpen, setDetailOpen] = useState(false);
 	return (
 		<article
-			className="decision-card card-surface"
+			className="decision-card card-surface caddie-card"
 			data-testid="decision-card"
 			data-kind={card.kind}
+            data-design={design}
+            data-tone={CARD_DESIGNS[design].tone}
 			data-status={card.status}
 			data-seen={props.seen === true ? 'true' : 'false'}
 		>
-			<div className="card-head">
-				<p className="kind-kicker">
-					{props.contextLabel ? <span className="card-context">{props.contextLabel} · </span> : null}
-					{KIND_LABEL[card.kind]}
-				</p>
-				<span className="pill status-pill" data-status={card.status}>
-					{statusLabel(card)}
-				</span>
-				{props.seen === false ? (
-					<span className="pill status-pill" data-status="unseen" data-testid="card-unseen">
-						new
-					</span>
-				) : null}
-			</div>
+            <CardHeader design={design} context={props.contextLabel} status={statusLabel(card)} fresh={props.seen === false} />
+            {props.seen === false ? <span className="sr-only" data-testid="card-unseen">New</span> : null}
 			<h3>{card.headline}</h3>
-			<p className="summary">{card.summary}</p>
+			{design === 'plan' ? <CardPanel title="What you’re reviewing"><p className="summary">{card.summary}</p></CardPanel> : <p className="summary">{card.summary}</p>}
+            {design === 'build' || design === 'repair' ? <p className="compact-card-note">{design === 'repair' ? 'The preview stays held while checks and repairs continue.' : 'Preview appears after the checks pass.'}</p> : null}
+            {design === 'plan' ? <p className="compact-card-note">Opening this card does not approve anything. Review the original before deciding.</p> : null}
 			<div className="card-meta" data-testid="card-meta">
 				<span className="mono-id">updated {formatTimeAgo(card.updatedAt, props.now)}</span>
 			</div>
@@ -460,8 +454,9 @@ export function AccountBriefV2(props: {
 								with one clear action.
 							</p>
 						</section>
-					</div>
-				) : (
+                        <details className="brief-done"><summary>Earlier decisions</summary><DecisionHistory existingIds={[]} names={projectName} onAction={props.onAction} /></details>
+                    </div>
+                ) : (
 					<div className="card-stack" data-testid="brief-new-user">
 						<section className="decision-card card-surface brief-teach brief-teach-quiet">
 							<span className="brief-teach-mascot" aria-hidden="true">
@@ -473,9 +468,9 @@ export function AccountBriefV2(props: {
 							<h3>Nothing needs you yet</h3>
 							<p className="summary">
 								Once you start a project with Caddie, the decisions it needs from you — plans to
-								approve, previews to check, blockers to clear — land here, one at a time. Start in
-								the chat.
+								approve, previews to check, blockers to clear — land here, one at a time.
 							</p>
+                            <div className="actions"><button type="button" className="btn-key" onClick={props.onAskCaddie}>Start with Caddie</button><button type="button" className="btn-ghost" onClick={props.onBrowse}>Find a hackathon</button></div>
 						</section>
 					</div>
 				)}
@@ -483,10 +478,10 @@ export function AccountBriefV2(props: {
 		);
 	}
 
-	const open = cards.filter((card) => card.status !== 'handled');
-	const done = cards.filter((card) => card.status === 'handled');
-	const deadlineCards = open.filter((card) => card.kind === 'deadline');
-	const bigCards = open.filter((card) => card.kind !== 'deadline').slice(0, 3);
+	const open = cards.filter((card) => card.status !== 'handled' || ['preview', 'opportunity'].includes(cardDesign(card)));
+	const done = cards.filter((card) => card.status === 'handled' && !['deadline', 'preview', 'opportunity'].includes(cardDesign(card)));
+	const deadlineCards = cards.filter((card) => card.kind === 'deadline');
+	const bigCards = open.filter((card) => card.kind !== 'deadline');
 	const unseenCount = cards.filter((card) => !card.seen).length;
 	const waitingCount = cards.filter((card) => card.status === 'needs-you').length;
 
@@ -521,44 +516,18 @@ export function AccountBriefV2(props: {
 					/>
 				))}
 
-				{deadlineCards.length > 0 ? (
-					<div className="brief-deadlines" data-testid="brief-deadlines">
-						{deadlineCards.map((card) => (
-							<div className="brief-deadline" key={card.id} data-testid="brief-deadline-row">
-								<Icon name="calendar" title="Deadline" />
-								<span className="brief-deadline-text">
-									<b>{card.headline}</b>
-									<span>
-										{projectName.get(card.projectId) ?? card.projectId} · {card.summary}
-									</span>
-								</span>
-								<button
-									type="button"
-									className="btn-ghost"
-									data-testid="brief-deadline-action"
-									onClick={() => props.onAction?.(card)}
-								>
-									{card.primaryAction.label}
-								</button>
-							</div>
-						))}
-					</div>
-				) : null}
+                {deadlineCards.length > 0 ? <div className="brief-deadlines" data-testid="brief-deadlines">{deadlineCards.map(card => <div key={card.id} data-testid="brief-deadline-row"><DecisionCardView card={card} seen={card.seen} contextLabel={projectName.get(card.projectId)} onAction={props.onAction} /></div>)}</div> : null}
 
-				{done.length > 0 ? (
+				{done.length > 0 || props.hasBuildProjects ? (
 					<details className="brief-done" data-testid="brief-done">
 						<summary>
-							Done · {done.length}
+							Earlier · {done.length}
 						</summary>
 						<ul>
-							{done.map((card) => (
-								<li key={card.id} data-testid="brief-done-item">
-									<b>{card.headline}</b> — {projectName.get(card.projectId) ?? card.projectId}
-									{card.key ? null : null}
-								</li>
-							))}
-						</ul>
-					</details>
+                            {done.map(card => <li key={card.id} data-testid="brief-done-item"><DecisionCardView card={card} seen={card.seen} contextLabel={projectName.get(card.projectId)} onAction={props.onAction} /></li>)}
+                        </ul>
+                        <DecisionHistory existingIds={done.map(card => card.id)} names={projectName} onAction={props.onAction} />
+                    </details>
 				) : null}
 
 				{open.length === 0 ? (

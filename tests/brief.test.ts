@@ -138,6 +138,34 @@ function seedConflictEvidence(sqlite: Database): void {
 }
 
 describe('brief feed (projectBrief)', () => {
+    test('feed limits never hide outstanding decisions at project or account scope', async () => {
+        const world = makeWorld();
+        try {
+            seedAliceState(world.sqlite);
+            const insert = world.sqlite.prepare(`insert into approvals (id,projectId,action,resourceId,revisionHash,policyVersion,intentHash,decidedBy,status,expiresAt,createdAt,decidedAt)
+              select ?,projectId,action,?,revisionHash,policyVersion,?,decidedBy,status,expiresAt,createdAt,decidedAt from approvals where id='unit-ap-live'`);
+            for (let i = 0; i < 60; i++) insert.run(`many-${i}`, `resource-${i}`, `intent-${i}`);
+            expect((await projectBrief(world.db, world.aliceScope)).filter(c => c.status === 'needs-you')).toHaveLength(61);
+            expect((await accountBrief(world.db, world.aliceScope.actorId)).cards.filter(c => c.status === 'needs-you')).toHaveLength(61);
+        } finally { world.sqlite.close(); }
+    });
+    test('a decided approval retains its identity, outcome and exact target in history', async () => {
+        const world = makeWorld();
+        try {
+            seedAliceState(world.sqlite);
+            const before = (await projectBrief(world.db, world.aliceScope)).find(c => c.primaryAction.targetId === 'unit-ap-live')!;
+            for (const status of ['approved', 'rejected', 'revoked', 'expired', 'superseded']) {
+                world.sqlite.prepare('update approvals set status = ?, decidedAt = ? where id = ?').run(status, ISO, 'unit-ap-live');
+                const after = (await projectBrief(world.db, world.aliceScope)).find(c => c.id === before.id);
+                expect(after).toBeDefined();
+                expect(after!.status).toBe('handled');
+                expect(after!.summary).toContain(status);
+                expect(after!.primaryAction.targetId).toBe('unit-ap-live');
+                expect(after!.updatedAt).toBe(ISO);
+            }
+            expect((await projectBrief(world.db, world.bobScope)).some(c => c.id === before.id)).toBe(false);
+        } finally { world.sqlite.close(); }
+    });
 	test('a live project produces ranked, contract-valid decision cards', async () => {
 		const world = makeWorld();
 		seedAliceState(world.sqlite);
@@ -197,8 +225,8 @@ describe('brief feed (projectBrief)', () => {
 		expect(run1!.headline).not.toContain('Run stopped');
 		expect(blocked.every((card) => card.kind === 'result')).toBe(true);
 
-		// Handled: armed schedules only.
-		const handled = cards.filter((card) => card.status === 'handled');
+		// Handled schedules coexist with retained approval outcomes.
+		const handled = cards.filter((card) => card.status === 'handled' && card.kind === 'deadline');
 		expect(handled.length).toBe(1);
 		expect(handled[0]!.kind).toBe('deadline');
 		expect(handled[0]!.headline).toContain('Weekly discovery sweep');
@@ -431,4 +459,39 @@ describe('the "paused this build" card follows the build itself (live finding, 2
 			world.sqlite.close();
 		}
 	});
+});
+
+test('Brief follows the actual workflow through build, repair and a retained ready preview', async () => {
+ const { sqlite, db, aliceScope, bobScope } = makeWorld();
+ try {
+  sqlite.prepare(`insert into build_workflows (projectId,runId,conversationId,intakeKey,brief,phase,updatedAt) values (?,?,?,?,?,'building',?)`).run(aliceScope.projectId,'run-card','conv-card','intake-card','Farm log',ISO);
+  let cards = await projectBrief(db, aliceScope);
+  expect(cards.find(c => c.id.startsWith('brf_workflow_build_'))?.status).toBe('changed');
+  expect((await projectBrief(db,bobScope)).some(c => c.id.includes('workflow'))).toBe(false);
+  sqlite.prepare(`insert into run_rounds (id,runId,projectId,issue,round,outcome,createdAt) values ('repair-card','run-card',?,'Save check failed','repair_attempt','failed',?)`).run(aliceScope.projectId,ISO);
+  cards = await projectBrief(db,aliceScope);
+  expect(cards.find(c => c.id.startsWith('brf_workflow_repair_'))?.headline).toContain('another pass');
+  sqlite.prepare(`update build_workflows set phase='ready',previewId='exact-output' where projectId=?`).run(aliceScope.projectId);
+  cards = await projectBrief(db,aliceScope);
+  expect(cards.find(c => c.id.startsWith('brf_workflow_preview_'))?.primaryAction.targetId).toBe('exact-output');
+  expect(cards.some(c => c.id.startsWith('brf_workflow_repair_'))).toBe(false);
+ } finally { sqlite.close(); }
+});
+
+test('Older decisions paginate with no gaps or duplicates and exclude other actors', async () => {
+ const { approvalHistory } = await import('../apps/app/src/server/brief.ts');
+ const { sqlite,db,aliceScope,bobScope } = makeWorld();
+ try {
+  const insert = sqlite.prepare(`insert into approvals (id,projectId,action,resourceId,revisionHash,policyVersion,intentHash,status,expiresAt,createdAt,decidedAt) values (?,?,'design',?,'hash','policy',?,'approved','2999-01-01T00:00:00.000Z',?,?)`);
+  for(let i=0;i<85;i++) insert.run(`history-${String(i).padStart(3,'0')}`,aliceScope.projectId,`revision-${i}`,`intent-${i}`,ISO,ISO);
+  insert.run('foreign-history',bobScope.projectId,'foreign-revision','foreign-intent',ISO,ISO);
+  const first = await approvalHistory(db,aliceScope.actorId);
+  const second = await approvalHistory(db,aliceScope.actorId,first.next!);
+  const third = await approvalHistory(db,aliceScope.actorId,second.next!);
+  const cards = [...first.cards,...second.cards,...third.cards];
+  expect(first.cards).toHaveLength(40);expect(second.cards).toHaveLength(40);expect(third.cards).toHaveLength(5);
+  expect(third.next).toBeNull();expect(new Set(cards.map(c=>c.id)).size).toBe(85);
+  expect(cards.every(c=>c.projectId===aliceScope.projectId && c.status==='handled')).toBe(true);
+  expect((await approvalHistory(db,'unknown-actor')).cards).toEqual([]);
+ } finally { sqlite.close(); }
 });

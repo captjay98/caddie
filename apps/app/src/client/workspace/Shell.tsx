@@ -5,7 +5,7 @@ import { SignInScreen } from '../sign-in.tsx';
 import { Mascot } from '@caddie/ui/Mascot';
 import { Icon } from '../icons.tsx';
 import { AccountBriefV2 } from '../brief/DecisionCard.tsx';
-import { briefActionRoute } from '../brief/navigate.ts';
+import { useDecisionCardAction } from '../brief/actions.ts';
 import { useAccountBrief, useMarkBriefRead } from '../queries.ts';
 import { useWorkspaceChrome } from './Chrome.tsx';
 
@@ -36,8 +36,9 @@ export function Shell(): ReactElement {
 function BriefBody(): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
-	const brief = useAccountBrief(actor);
+	const brief = useAccountBrief(actor, false);
 	const markRead = useMarkBriefRead(actor);
+	const onCardAction = useDecisionCardAction();
 
 	if (!chrome.authenticated) return <SignInScreen />;
 
@@ -45,11 +46,6 @@ function BriefBody(): ReactElement {
 	// surface, projectId scopes it, targetId is the exact revision/claim/
 	// schedule/preview/package/candidate. Acting on a card marks it read —
 	// reading never resolves the underlying work.
-	function onCardAction(card: DecisionCardType) {
-		if (card.key) void markRead.mutate([card.key]);
-		const route = briefActionRoute(card, chrome.homeProject?.id ?? null);
-		chrome.goProjectTab(route.to, route.search);
-	}
 
 	function markAllRead() {
 		const keys = (brief.data?.cards ?? [])
@@ -60,7 +56,7 @@ function BriefBody(): ReactElement {
 	}
 
 	const isNewUser = chrome.buildProjects.length === 0;
-	const openCards = (brief.data?.cards ?? []).filter((card) => card.status !== 'handled');
+	const openCards = (brief.data?.cards ?? []).filter((card) => card.status === 'needs-you' || card.status === 'blocked' || card.kind === 'change');
 	const needsYou = openCards.length;
 	const today = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date());
 	// Honest background line: counts drawn only from real brief data — the

@@ -243,6 +243,8 @@ test.describe('U04 — unsent messages and restored drafts (v2 §3.6)', () => {
 		await expect(answer).toBeVisible();
 		await expect(answer.locator('.md-body')).toHaveCount(1);
 		await expect(answer.locator('.md-body p')).toHaveText(['The Nebius x NVIDIA Global AI Hackathon is open to you.']);
+        await expect(page.getByTestId('reasoning-view')).toHaveCount(0);
+        expect(await page.getByTestId('msg-assistant').locator('.bubble').evaluate(el=>({border:getComputedStyle(el).borderTopWidth,padding:getComputedStyle(el).paddingLeft,shadow:getComputedStyle(el).boxShadow}))).toEqual({border:'0px',padding:'0px',shadow:'none'});
 		await context.close();
 	});
 	test('mockups in a reply are drawn in the preview frame, a half-written one says so, and no raw HTML shows (plan 4.5)', async ({ browser }) => {
@@ -769,4 +771,35 @@ test.describe('memory learns: the chat offers what Caddie can remember (plan 6.2
 		expect(actions).toEqual(['retract mem_a']);
 		await context.close();
 	});
+});
+
+test('a long conversation keeps reading position, draft and mobile input through collapse, resizing and reload', async ({ browser }) => {
+ const context = await browser.newContext({viewport:{width:1440,height:900}});
+ await stubSession(context); await stubProjectList(context,{projects:[PROJECT]});
+ const offset='0000000000000000_0000000000000001';
+ const messages=Array.from({length:160},(_,i)=>({id:`history-${i}`,role:i%2===0?'user':'assistant',purpose:'assistant',display:'visible',timestamp:'2026-10-21T00:00:00.000Z',parts:[{type:'text',state:'done',text:`History entry ${i}. ${'A useful project note that stays readable after returning. '.repeat(8)}`}]}));
+ await context.route('**/api/projects/proj_conversation/run-bindings',route=>json(route,200,{runBindings:[{runId:'history-run',projectId:PROJECT.id,conversationId:'history-conversation',submissionId:'s',planRevision:'rev-0',stackId:'react-hono',payerId:'actor-test',modelRouteId:'route',pricingVersion:'v1',createdBy:'actor-test',createdAt:PROJECT.createdAt}]}));
+ await context.route('**/agents/coordinator/**', route=> { const url=new URL(route.request().url());return route.fulfill(url.searchParams.get('view')==='updates'?{contentType:'text/event-stream',body:`event: control\ndata: {"streamNextOffset":"${offset}","upToDate":true}\n\n`}:{contentType:'application/json',headers:{'stream-next-offset':offset,'stream-up-to-date':'true'},body:JSON.stringify({v:1,conversationId:'history-conversation',offset,messages,settlements:[]})}); });
+ const page=await context.newPage(); await openProjectPage(page);
+ const transcript=page.getByTestId('channel-transcript');
+ await expect(page.getByTestId('msg-user')).toHaveCount(80);
+ await transcript.evaluate(el=>{el.scrollTop=0;});
+ await expect(page.getByRole('button',{name:'Back to latest'})).toBeVisible();
+ await page.getByTestId('composer-input').fill('Unsent scope change');
+ expect(await transcript.evaluate(el=>el.scrollTop)).toBeLessThan(10);
+ await page.getByRole('button',{name:'Back to latest'}).click();
+ expect(await transcript.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeLessThan(45);
+ await page.getByTestId('conv-collapse').click();
+ await page.getByTestId('conv-rail').click();
+ await expect(page.getByTestId('composer-input')).toHaveValue('Unsent scope change');
+ await page.setViewportSize({width:390,height:844});
+ await page.goto('/app/project?project=proj_conversation&pane=channel');
+ await expect(page.getByTestId('composer-input').filter({visible:true})).toHaveValue('Unsent scope change');
+ await transcript.evaluate(el=>{el.scrollTop=0;});
+ await page.getByRole('button',{name:'Back to latest'}).click();
+ expect(await transcript.evaluate(el=>el.scrollHeight-el.scrollTop-el.clientHeight)).toBeLessThan(45);
+ await page.reload();
+ await expect(page.getByTestId('composer-input').filter({visible:true})).toHaveValue('Unsent scope change');
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await context.close();
 });

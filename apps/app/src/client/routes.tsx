@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { OnboardingGate, useOnboarding, onboardingKey, returnKey, type OnboardingStatus } from './onboarding/Gate.tsx';
 import { postJson } from './api.ts';
+import { PreviewPage } from './artifacts/PreviewPage.tsx';
 import { SignInScreen } from './sign-in.tsx';
 import { Link, Outlet, createBrowserHistory, createRootRoute, createRoute, createRouter, redirect, useMatches } from '@tanstack/react-router';
 import type { ReactElement } from 'react';
 import { WorkspaceChrome, type WorkspaceNavId } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
-import { WelcomeIntro } from './onboarding/Start.tsx';
+import { WelcomeIntro, type StartingPoint } from './onboarding/Start.tsx';
 import { OnboardingProfile } from './onboarding/Profile.tsx';
 import { ProjectSettingsPage } from './settings/ProjectSettings.tsx';
 import { Mascot } from '@caddie/ui/Mascot';
@@ -44,6 +45,7 @@ function OnboardingFlow(): ReactElement {
  const cache = useQueryClient();
  const [busy, setBusy] = useState(false);
  const [atProfile, setAtProfile] = useState(false);
+ const [startingPoint, setStartingPoint] = useState<StartingPoint>('hackathon');
  const [error, setError] = useState<string | null>(null);
  // A user who already finished onboarding and navigates BACK to /onboarding
  // must not get stuck on the "Getting your workspace ready…" message — it has
@@ -80,8 +82,8 @@ function OnboardingFlow(): ReactElement {
    } catch { /* Fall through to the app root without browser storage. */ }
    // Onboarding hands straight off to the app — there is no interstitial start
    // screen. Restore a saved same-origin destination if the gate captured one;
-   // otherwise land on the app root (the Brief).
-   let target = '/app/';
+   // otherwise follow the chosen starting point.
+   let target = startingPoint === 'hackathon' ? '/app/discover' : startingPoint === 'idea' ? '/app/?start=idea&pane=channel' : '/app/';
    if (destination) {
     const url = new URL(destination, window.location.origin);
     if (url.origin === window.location.origin && url.pathname.startsWith('/app/') &&
@@ -92,8 +94,11 @@ function OnboardingFlow(): ReactElement {
    window.location.replace(target);
   } catch {
    setError('We couldn’t save your progress. Please try again.');
+   setBusy(false);
    throw new Error('We couldn’t finish setup. Please try again.');
-  } finally { setBusy(false); }
+  }
+  // Keep busy through navigation: clearing it here lets the completed-account
+  // effect race this redirect and replace the chosen destination with Home.
  }
  // Signed out here too: the one sign-in screen, filling the page (plan 5.2).
  if (!auth.data?.authenticated) {
@@ -109,7 +114,7 @@ function OnboardingFlow(): ReactElement {
     <StatePanel kind="loading" title="Getting your workspace ready…" />
    ) : (
     <><fieldset disabled={busy} style={{ border: 0, padding: 0, margin: 0 }}>
-     {atProfile && actor.data ? <OnboardingProfile actorId={actor.data} onDone={finish} /> : <WelcomeIntro onDone={() => setAtProfile(true)} />}
+     {atProfile && actor.data ? <OnboardingProfile actorId={actor.data} onDone={finish} /> : <WelcomeIntro onDone={(choice) => { setStartingPoint(choice); setAtProfile(true); }} />}
     </fieldset>{busy ? <p role="status">Saving your progress…</p> : null}
     {error ? <p role="alert">{error}</p> : null}</>
    )}
@@ -267,13 +272,17 @@ function validateSearch(search: Record<string, unknown>): {
 	project?: string;
 	pane?: 'channel' | 'brief' | 'runs';
 	section?: string;
+	start?: 'idea';
+	approval?: string;
 } {
 	const project = search.project;
 	const pane = search.pane;
 	const section = search.section;
 	return {
+		...(typeof search.approval === 'string' && search.approval.trim() ? { approval: search.approval } : {}),
 		...(typeof project === 'string' && project.trim() !== '' ? { project } : {}),
 		...(pane === 'channel' || pane === 'brief' || pane === 'runs' ? { pane } : {}),
+		...(search.start === 'idea' ? { start: 'idea' as const } : {}),
 		...(typeof section === 'string' && section.trim() !== '' ? { section } : {}),
 	};
 }
@@ -385,6 +394,14 @@ const projectRoute = createRoute({
 	validateSearch: validateProjectView,
 	staticData: { nav: 'project' },
 	component: ProjectOverviewPage,
+});
+
+const previewRoute = createRoute({
+ getParentRoute: () => shellLayoutRoute,
+ path: '/preview',
+ validateSearch: (search: Record<string, unknown>) => ({ ...validateSearch(search), ...(typeof search.preview === 'string' ? { preview: search.preview } : {}), source: search.source === 'workflow' || search.source === 'share' ? search.source : 'artifact' }),
+ staticData: { nav: 'project' },
+ component: PreviewPage,
 });
 
 // --- account surfaces ----------------------------------------------------------
@@ -618,6 +635,7 @@ export const routeTree = rootRoute.addChildren([
 	discoverRoute,
 	projectsRoute,
 	projectRoute,
+    previewRoute,
 	searchRoute,
 	automationsRoute,
 	usageRoute,
