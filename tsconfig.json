@@ -19,6 +19,9 @@
 		"paths": {
 			"@caddie/contracts": [
 				"./packages/contracts/src/index.ts"
+			],
+			"@tanstack/react-query": [
+				"./apps/app/node_modules/@tanstack/react-query"
 			]
 		},
 		"jsx": "react-jsx"

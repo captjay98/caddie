@@ -1,11 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import type { DecisionCard, ExperienceStage, ProjectExperience } from '@caddie/contracts';
-import { projectCardFromCopiedApp, projectCardFromExperience, projectStatus } from '../apps/app/src/client/workspace/project-status.ts';
+import { activeStep, workflowSteps, projectCardFromCopiedApp, projectCardFromExperience, projectStatus } from '../apps/app/src/client/workspace/project-status.ts';
 
 function card(id: string, kind: DecisionCard['kind'], status: DecisionCard['status'], updatedAt = '2026-10-11T12:00:00Z'): DecisionCard {
  return { id, projectId: 'project-a', kind, status, headline: id, summary: id + ' details', evidenceIds: [], updatedAt, primaryAction: { label: 'Review', kind: 'review', targetId: id } };
 }
 describe('Project summaries from real brief events', () => {
+ test('design work remains in Plan and does not mark the build started or finished', () => {
+  for (const phase of ['design', 'design-review'] as const) {
+   expect(activeStep(phase)).toBe('plan');
+   expect(workflowSteps(phase).build?.tone).toBe('neutral');
+   expect(workflowSteps(phase).plan?.tone).not.toBe('done');
+  }
+ });
  test('a failed result cannot imply that a build or checks finished', () => {
   const failure = card('brf_failed-run_1', 'result', 'blocked');
   expect(projectStatus([failure])).toEqual({ label: 'Needs attention', detail: failure.summary, next: failure });

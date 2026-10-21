@@ -18,6 +18,7 @@ import type {
 import type { DiscoveryEvaluatedList } from './discovery/Results.tsx';
 import type { WorkflowPhase } from './workspace/project-status.ts';
 import { fetchJson, postJson } from './api.ts';
+import { workflowQueryOptions } from './workflow-query.ts';
 
 /**
  * TanStack Query hooks over the REAL P02 REST surface (projects, plan-docs,
@@ -159,13 +160,7 @@ export function useRunBindings(actor: ActorScope, projectId: string | null) {
  */
 export function useWorkflowPhase(actor: ActorScope, projectId: string | null) {
 	return useQuery({
-		queryKey: ['workflow-phase', actor.actorId ?? 'pending', projectId ?? 'none'],
-		queryFn: () =>
-			fetchJson<{ workflow: { phase: WorkflowPhase } | null }>(
-				`/api/projects/${encodeURIComponent(projectId ?? '')}/workflow`,
-			),
-		enabled: actor.actorId !== null && projectId !== null,
-		refetchInterval: 4000,
+		...workflowQueryOptions(actor.actorId, projectId),
 		select: (data) => data.workflow?.phase ?? null,
 	});
 }
@@ -185,7 +180,7 @@ export interface BuildRoundView {
 	at: string;
 }
 /** The derived timeline (mirrors server BuildTimeline in build-timeline.ts). */
-export type TimelinePhaseView = 'planning' | 'review' | 'building' | 'blocked' | 'ready';
+export type TimelinePhaseView = WorkflowPhase;
 export type TimelineStageKey = 'setup' | 'write' | 'test' | 'check' | 'preview';
 export type TimelineStageState = 'done' | 'active' | 'pending' | 'failed';
 export type TimelineFileArea = 'app' | 'test' | 'style' | 'config' | 'server';
@@ -251,12 +246,13 @@ export interface BuildActivityView {
  * the workspace can show WHAT is being built instead of one frozen sentence.
  * Polls while mounted so the steps follow a live build.
  */
-export function useBuildActivity(actor: ActorScope, projectId: string | null) {
+export function useBuildActivity(actor: ActorScope, projectId: string | null, poll = true) {
 	return useQuery({
 		queryKey: ['build-activity', actor.actorId ?? 'pending', projectId ?? 'none'],
 		queryFn: () => fetchJson<BuildActivityView>(`/api/projects/${encodeURIComponent(projectId ?? '')}/activity`),
 		enabled: actor.actorId !== null && projectId !== null,
-		refetchInterval: 3000,
+		staleTime: 1000,
+        refetchInterval: poll ? query => query.state.data?.phase === 'building' ? 3000 : 30_000 : false,
 	});
 }
 
@@ -268,13 +264,7 @@ export function useBuildActivity(actor: ActorScope, projectId: string | null) {
  */
 export function useWorkflowBrief(actor: ActorScope, projectId: string | null) {
 	return useQuery({
-		queryKey: ['workflow-phase', actor.actorId ?? 'pending', projectId ?? 'none'],
-		queryFn: () =>
-			fetchJson<{ workflow: { phase: WorkflowPhase; brief?: string } | null }>(
-				`/api/projects/${encodeURIComponent(projectId ?? '')}/workflow`,
-			),
-		enabled: actor.actorId !== null && projectId !== null,
-		refetchInterval: 4000,
+		...workflowQueryOptions(actor.actorId, projectId),
 		select: (data) => briefText(data.workflow?.brief ?? null),
 	});
 }
@@ -433,10 +423,12 @@ export function useProjectHackathon(actor: ActorScope, projectId: string | null)
  * keyed by actor, `placeholderData` keeps the last known cards during a
  * refetch so a stale/offline refresh never blanks the surface.
  */
-export function useAccountBrief(actor: ActorScope) {
+export function useAccountBrief(actor: ActorScope, poll = true) {
 	return useQuery({
 		queryKey: ['brief', 'account', actor.actorId ?? 'pending'],
 		queryFn: () => fetchJson<AccountBriefPayload>('/api/brief'),
+        staleTime: 2000,
+        refetchInterval: poll ? query => query.state.data?.cards.some(card => card.id.startsWith('brf_workflow_build_') || card.id.startsWith('brf_workflow_repair_')) ? 3000 : 30_000 : false,
 		enabled: actor.actorId !== null,
 		placeholderData: (previous) => previous,
 	});

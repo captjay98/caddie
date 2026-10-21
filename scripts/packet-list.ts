@@ -90,6 +90,8 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 	P11: {
 		tests: [
 			'tests/discovery.test.ts',
+			'tests/discovery-prizes.test.ts',
+			'tests/detail-facts.test.ts',
 			'tests/generated-app-policy.test.ts',
 			'tests/planning.integration.test.ts',
 			'tests/candidate-digest.test.ts',
@@ -181,7 +183,10 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 		live: [],
 	},
 	U04: {
-		tests: ['tests/attachments.test.ts', 'tests/brief-lifecycle.test.ts', 'tests/brief.test.ts', 'tests/decision-card-status.test.ts'],
+		tests: ['tests/attachments.test.ts', 'tests/brief-lifecycle.test.ts', 'tests/brief.test.ts', 'tests/decision-card-status.test.ts',
+			// Packet of the 2026-10-20 UI foundation: the shared workflow query
+			// every workflow card/phase/brief view now reads through.
+			'tests/workflow-query.test.ts', 'tests/card-design.test.ts'],
 		browser: ['tests/browser/brief.spec.ts', 'tests/browser/conversation.spec.ts'],
 		live: [],
 	},
