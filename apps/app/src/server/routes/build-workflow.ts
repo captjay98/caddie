@@ -337,6 +337,16 @@ export function createBuildWorkflowRouter(
     await acknowledgeDispatch(c.env.DB, scope, input.key);
     return c.json({ acknowledged: true });
   });
+  // Preview capabilities belong to the requested output, never whichever
+  // version happens to be the current workflow preview today.
+  router.get("/projects/:projectId/workflow/preview/:outputId/metadata", async c => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const outputId = c.req.param("outputId");
+    const manifest = await readOutputManifest(c.env.DB, scope, outputId);
+    if (!manifest) throw new ScopeError(404, "preview_not_found", "No such preview in this project.");
+    return c.json({ outputId, kind: manifest.kind, hasServer: manifest.hasServer });
+  });
+
   router.get("/projects/:projectId/workflow/preview/:outputId", async (c) => {
     const scope = await requireProjectScope(
       c.env.DB,
