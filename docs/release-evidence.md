@@ -198,6 +198,45 @@ Two honesty notes carried by this release:
   filter. The feed's real invariant is the ranking (ineligible last, labelled
   honestly), and the test now pins that.
 
+## Production deploy (2026-10-22): feature code to the implementation specialists, and the sandbox wedge fix
+
+Two fixes that make the NEXT build better, plus the corrected preview finding
+from the previous release.
+
+| Item | Value |
+|---|---|
+| URL | https://caddie.jamalibrahim.dev |
+| Version id | `000c87e4-147b-4187-9e1b-8f3178a36f67` |
+| Commit | `c921bc2` (and `36666e0` in the same deploy) |
+| Release gate | typecheck clean; 1,746 unit/service tests, 0 fail (133 files); packets BUILD, P05, P12, U04, NET re-run green; `release-check` 49 PASS, 0 FAIL, 1 BLOCKED (deploy authorization), 4 PROVISIONED |
+| Build | production `apps/app/dist` (D1 `f6315eae…`, production route) + composed assets, 0 collisions |
+| Preflight | 18 PASS, 2 WARN (same reused provider keys), 0 FAIL |
+| D1 | no new migrations (`0039` is current) |
+| Deploy | `wrangler deploy --config dist/caddie_app/wrangler.json --secrets-file .prod.vars` (account id explicit) |
+| Smoke | P17 live 5/5 PASS, receipt `lr_391bbf37d5bec14c` at `c921bc212960` |
+
+**What changed**
+
+- A feature's CODE now goes to the specialist whose surface it touches —
+  client side to `frontend`, server side to `backend`, the Android target to
+  `mobile` — and never to `tech-lead`, which keeps the plan of record, review
+  and repair decisions. Before this, the loop's "the implementation
+  specialist" named nobody, the coordinator chose `tech-lead`, and because
+  `tech-lead` carries the `planning` skill it ran on the PLAN model
+  (GLM-5.3-Flash): every feature's code was written by the weaker model while
+  the Super VL implementation specialists sat unused.
+- The sandbox no longer bricks on an unknown dispatch: an operation left
+  ambiguous with no remote id is closed deterministically as failed after the
+  staleness window (default 5 minutes), with a receipt that says the outcome
+  was never known. The session unlocks, the next attempt runs under a fresh
+  key, and nothing that may have run remotely is dispatched again. A fresh
+  ambiguous attempt is still refused; an attempt with a remote id is still
+  reconciled by polling it.
+- The shared rule lives in its own leaf module (`apps/app/src/agents/delegation.ts`):
+  importing it from `agents/specialists` would drag the `.md` skill imports
+  into every worker that loads the server modules, and the schedules fixture
+  worker (no `.md` loader) failed to boot until the rule moved.
+
 ## Verification net (S01, 2026-10-18)
 
 The 2026-10-06 gate above is kept as a dated receipt; this is the net that
