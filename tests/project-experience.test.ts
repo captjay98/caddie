@@ -15,6 +15,8 @@ import {
   workflowSnapshot,
   stopWorkflow,
   setWorkflowBlocker,
+  reconcileStalledBuild,
+  BUILD_STALL_MS,
 } from "../apps/app/src/server/build-workflow.ts";
 import {
   projectExperience,
@@ -180,16 +182,18 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     ]);
   });
 
-  test("building: approved plan and design -> stage building, stop is the primary", async () => {
+  test("building: approved plan and design -> stage building, Stop offered but nothing is the main action", async () => {
     const w = await world();
     const item = await planned(w);
     await building(w, item);
     const exp = await projectExperience(w.db, item.scope);
     expect(exp.stage).toBe("building");
     expect(exp.plan!.approved).toBe(true);
-    expect(exp.actions.find((a) => a.primary)!.kind).toBe("stop");
+    // Caddie is working and nothing needs the person, so no button is the
+    // main one: Stop is offered, never as the filled button.
+    expect(exp.actions.filter((a) => a.primary)).toHaveLength(0);
     // One label for every Stop button (plan 3.2): the chat card says "Stop build" too.
-    expect(exp.actions.find((a) => a.kind === "stop")!.label).toBe("Stop build");
+    expect(exp.actions.find((a) => a.kind === "stop")).toMatchObject({ label: "Stop build", primary: false, enabled: true });
   });
 
   test("stopped: user stop -> stage stopped (distinct from blocked), resume primary", async () => {
@@ -210,6 +214,22 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     const exp = await projectExperience(w.db, item.scope);
     expect(exp.stage).toBe("blocked");
     expect(exp.message).toContain("sandbox");
+    // The button retries the build (POST workflow/retry), so it says so.
+    expect(exp.actions.find((a) => a.primary)).toMatchObject({ kind: "retry", label: "Retry build" });
+  });
+
+  test("a build that stopped making progress says Press Retry, and its button is Retry build", async () => {
+    const w = await world();
+    const item = await planned(w);
+    await building(w, item);
+    expect(await reconcileStalledBuild(w.db, item.scope.projectId, Date.now() + 2 * BUILD_STALL_MS)).toBe(true);
+    const exp = await projectExperience(w.db, item.scope);
+    expect(exp.stage).toBe("blocked");
+    expect(exp.message).toContain("Press Retry to continue from here.");
+    const primary = exp.actions.find((a) => a.primary)!;
+    expect(primary.kind).toBe("retry");
+    // The words the message tells you to press are on the button.
+    expect(primary.label.startsWith("Retry")).toBe(true);
   });
 
   test("planning_blocked: a block BEFORE approval is a stuck plan, not a stuck build", async () => {
@@ -241,7 +261,7 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     expect(exp.stage).toBe("stopped");
   });
 
-  test("every stage offers exactly one primary action", async () => {
+  test("every stage that waits for the person offers exactly one main action; a running build offers none", async () => {
     const w = await world();
     const item = await planned(w);
     // review
@@ -254,8 +274,8 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     // design_review
     expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(1);
     await decideDesign(w.db, item.scope, { designId: design.id, decision: "approved" });
-    // building
-    expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(1);
+    // building: Caddie is working; nothing is the main action
+    expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(0);
   });
 });
 

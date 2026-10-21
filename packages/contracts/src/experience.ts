@@ -69,7 +69,8 @@ export const ExperienceActionSchema = v.pipe(
 		enabled: v.boolean(),
 		/** Why it is disabled (user-facing), when enabled is false. */
 		reason: v.optional(v.string()),
-		/** True for exactly one action per state — the filled primary button. */
+		/** The filled main button: true for at most one action, and for none
+		 *  while Caddie builds (nothing needs the person then). */
 		primary: v.boolean(),
 	}),
 	v.readonly(),

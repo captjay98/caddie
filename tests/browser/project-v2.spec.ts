@@ -489,7 +489,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 			experience: {
 				projectId: 'proj-a', version: Date.parse('2026-10-19T12:00:00.000Z'), stage: 'building',
 				plan: { id: 'plan-r2', revision: '2', approved: true }, preview: null, message: 'Caddie is building your app.',
-				actions: [{ kind: 'stop', label: 'Stop build', enabled: true, primary: true }],
+				actions: [{ kind: 'stop', label: 'Stop build', enabled: true, primary: false }],
 			},
 		});
 		const feature = (id: string, title: string, position: number, status: string) =>

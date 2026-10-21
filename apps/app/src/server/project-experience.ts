@@ -103,9 +103,11 @@ function messageOf(
 }
 
 /**
- * The single-main-action set per stage. Exactly one action carries
- * primary=true. Every action is re-authorized server-side when invoked; these
- * flags only drive what the UI OFFERS.
+ * The actions per stage. At most one carries primary=true: the stage's main
+ * button when it waits for the person. While Caddie builds nothing needs the
+ * person, so there is none, and Stop is never drawn as the filled button.
+ * Every action is re-authorized server-side when invoked; these flags only
+ * drive what the UI OFFERS.
  */
 function actionsOf(
 	stage: ProjectExperience['stage'],
@@ -132,7 +134,7 @@ function actionsOf(
 		case 'checking':
 		case 'repairing':
 			return [
-				{ kind: 'stop', label: 'Stop build', enabled: true, primary: true },
+				{ kind: 'stop', label: 'Stop build', enabled: true, primary: false },
 				...(hasPreview
 					? [{ kind: 'open_preview' as const, label: 'View last preview', enabled: true, primary: false }]
 					: []),
@@ -144,7 +146,9 @@ function actionsOf(
 				{ kind: 'suggest_change', label: 'Request a change', enabled: true, primary: false },
 			];
 		case 'blocked':
-			return [{ kind: 'retry', label: 'Review next step', enabled: true, primary: true }];
+			// The button resumes the build (retryWorkflow); a stalled build's
+			// message says "Press Retry to continue from here".
+			return [{ kind: 'retry', label: 'Retry build', enabled: true, primary: true }];
 		case 'planning_blocked':
 			// Nothing is built — the one action resumes PLANNING (retryWorkflow
 			// routes a pre-approval block back to planning), worded honestly.
