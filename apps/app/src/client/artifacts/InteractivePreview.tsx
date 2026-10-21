@@ -196,6 +196,10 @@ export function previewDocument(
 		Object.defineProperty(window, 'localStorage', { value: storage, configurable: false, writable: false });
 	})();`;
   const fetchShim = kind === "flutter" ? flutterFetchShim(nonce, bridgeFetch) : bridgeFetch ? fetchBridgeShim(nonce) : null;
+  // The shims stay CLASSIC scripts: they must be installed BEFORE the app's own
+  // scripts run, because a generated app may read localStorage or call fetch
+  // at parse time. Making them modules defers them past the app's first
+  // statements and breaks exactly that ordering (browser spec, 2026-10-21).
   return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${kind === "flutter" ? FLUTTER_CSP : CSP}"><meta name="referrer" content="no-referrer"><script>${shim}</script>${fetchShim ? `<script>${fetchShim}</script>` : ""}</head><body>${html}</body></html>`;
 }
 
