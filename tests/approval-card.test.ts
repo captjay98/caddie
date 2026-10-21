@@ -63,7 +63,12 @@ describe('B06: in-chat approval card', () => {
 	});
 
 	test('the card renders the spend cap and the plain-words actions', () => {
-		expect(cardSrc).toContain('OK TO SPEND?');
+		// The shared card family replaced the old "OK TO SPEND?" heading with a
+		// "Spending limit" panel (UI foundation, 2026-10-21). The invariant is
+		// unchanged: the cap is shown, the actions are plain words, and a card
+		// with no budget says so instead of inventing a number.
+		expect(cardSrc).toContain('Spending limit');
+		expect(cardSrc).toContain('Uses up to');
 		expect(cardSrc).toContain('Allow');
 		expect(cardSrc).toContain('Not now');
 		// No budget → the honest line, never a fake number.
