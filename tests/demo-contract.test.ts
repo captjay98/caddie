@@ -98,7 +98,7 @@ describe('demo contract', () => {
 		const result = parseDemoContract(localReal);
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
-		expect(result.contract.integration).toContain('No outside service');
+		expect(result.contract.integration).toContain('no outside service');
 	});
 
 	test('placeholders are refused', () => {
