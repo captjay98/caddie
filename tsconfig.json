@@ -22,6 +22,9 @@
 			],
 			"@tanstack/react-query": [
 				"./apps/app/node_modules/@tanstack/react-query"
+			],
+			"@durable-streams/client": [
+				"./node_modules/.bun/@durable-streams+client@0.2.7/node_modules/@durable-streams/client"
 			]
 		},
 		"jsx": "react-jsx"
