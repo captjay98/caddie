@@ -16,6 +16,7 @@ import {
 import type { ToolDefinition } from '@flue/runtime';
 import { useInstruction, useSkill, useSubagent, useTool } from '@flue/runtime';
 import { findModelRouteForRole } from './providers.ts';
+import { FEATURE_DELEGATION_RULE } from './delegation.ts';
 import { DEMO_CONTRACT_GUIDE, FEATURE_BLOCK_GUIDE } from '@caddie/contracts';
 import { CADDIE_SCRATCH_DIR } from '../server/source-export.ts';
 
@@ -232,4 +233,5 @@ export function buildSpecialistDeclarations(context: SpecialistBuildContext) {
 	}));
 }
 
+export { FEATURE_DELEGATION_RULE };
 export { useSubagent };

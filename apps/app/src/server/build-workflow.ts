@@ -24,6 +24,7 @@ import { recordPlanDecision } from "./planning.ts";
 import { createD1ContentStore, D1_MAX_VALUE_BYTES } from "./artifacts.ts";
 import { getLarge, putLarge } from "./large-content.ts";
 import { findModelRouteForRole } from "../agents/providers.ts";
+import { FEATURE_DELEGATION_RULE } from "../agents/delegation.ts";
 
 export type WorkflowPhase =
   "planning" | "review" | "design" | "design-review" | "building" | "blocked" | "ready";
@@ -468,7 +469,7 @@ export async function decideDesign(
     const phase = input.decision === "approved" ? "building" : "design";
     const message =
       input.decision === "approved"
-        ? `The authenticated design review approved the design brief ${design.id}. Build the approved plan feature by feature, implementing it to match the design brief: call build_next_feature, delegate exactly that feature with its doneWhen checks, then finish_feature; when every feature has passed, run QA with verify_build. Stop honestly on blockers.`
+        ? `The authenticated design review approved the design brief ${design.id}. Build the approved plan feature by feature, implementing it to match the design brief: call build_next_feature, delegate exactly that feature with its doneWhen checks, then finish_feature; when every feature has passed, run QA with verify_build. ${FEATURE_DELEGATION_RULE} Stop honestly on blockers.`
         : `Revise the design brief ${design.id} using the user's feedback below. Write a NEW design revision (write_plan_note kind:'design'), then wait for the design review; no building.\n\n${note}`;
     await db
       .prepare(

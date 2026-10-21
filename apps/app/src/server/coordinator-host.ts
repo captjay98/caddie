@@ -43,6 +43,7 @@ import { hostCheckCommands, testsPassed } from "./host-checks.ts";
 import { projectScopeForUser, ScopeError } from "./scope.ts";
 import { requestAppSecret } from "./app-secrets.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
+import { FEATURE_DELEGATION_RULE } from "../agents/delegation.ts";
 import {
   currentFeature,
   ensureBuildFeatures,
@@ -503,7 +504,7 @@ export async function createCoordinatorContext(
       position: current.position,
       total: rows.length,
       alreadyBuilt: rows.filter((row) => row.status === "passed").map((row) => row.title),
-      next: `Delegate ONLY this feature to the implementation specialist, with its doneWhen checks: build it, add at least one test in src/*.test.tsx for each check, and get run_checks green. Then call finish_feature with featureId "${current.featureId}". Do not start another feature.`,
+      next: `Delegate ONLY this feature to the implementation specialist, with its doneWhen checks: build it, add at least one test in src/*.test.tsx for each check, and get run_checks green. ${FEATURE_DELEGATION_RULE} Then call finish_feature with featureId "${current.featureId}". Do not start another feature.`,
     };
   };
   /**
@@ -533,7 +534,7 @@ export async function createCoordinatorContext(
         receipts: outcome.receipts,
         next: outcome.paused
           ? `“${current.title}” failed its checks three times, so the build is paused. Report what is failing.`
-          : "Delegate a focused repair for the failing check, then call finish_feature again.",
+          : `Delegate a focused repair for the failing check, then call finish_feature again. ${FEATURE_DELEGATION_RULE}`,
       };
     }
     const tests = outcome.receipts.find((receipt) => receipt.check === "behavior-tests");
@@ -605,7 +606,7 @@ export async function createCoordinatorContext(
         passed: false,
         paused: outcome.paused,
         receipts: outcome.receipts,
-        next: "Delegate a focused repair for the failing check, then run verify_build again.",
+        next: `Delegate a focused repair for the failing check, then run verify_build again. ${FEATURE_DELEGATION_RULE}`,
       };
     const { workflow, plan, driver, id, receipts } = outcome;
     signal?.throwIfAborted();

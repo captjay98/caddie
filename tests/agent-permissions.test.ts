@@ -13,7 +13,7 @@ import {
 	isProtectedPath,
 	isShellTestCommand,
 } from '../apps/app/src/agents/permissions';
-import { BUILD_RECIPE_INSTRUCTION, PLATFORM_AI_RULE, SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
+import { BUILD_RECIPE_INSTRUCTION, FEATURE_DELEGATION_RULE, PLATFORM_AI_RULE, SPECIALIST_CATALOG, SPECIALIST_INSTRUCTIONS, buildSpecialistDeclarations } from '../apps/app/src/agents/specialists.ts';
 import { CADDIE_SCRATCH_DIR } from '../apps/app/src/server/source-export.ts';
 import { findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
 import {
@@ -782,5 +782,29 @@ describe("plans use the app's built-in AI (plan 4.1)", () => {
 		// In the instructions every conversation gets, after the shared ones and before the Home/project split.
 		expect(rule).toBeGreaterThan(shared);
 		expect(rule).toBeLessThan(homeOnly);
+	});
+});
+
+describe("a feature's code goes to the implementation specialist, not to tech-lead", () => {
+	// The build loop said "the implementation specialist" and named nobody, so
+	// the coordinator chose tech-lead — the role that owns the plan of record.
+	// tech-lead carries the planning skill, so it runs on the PLAN model and
+	// every feature's code was written by the weaker model while the Super VL
+	// implementation specialists sat unused (HerdVoice, 2026-10-20).
+	test('the rule names the surface owner for each kind of work and forbids tech-lead', () => {
+		expect(FEATURE_DELEGATION_RULE).toContain('frontend');
+		expect(FEATURE_DELEGATION_RULE).toContain('backend');
+		expect(FEATURE_DELEGATION_RULE).toContain('mobile');
+		expect(FEATURE_DELEGATION_RULE).toContain('never to tech-lead');
+		expect(FEATURE_DELEGATION_RULE).toContain('doneWhen');
+	});
+
+	test('every prompt that drives the feature loop carries the rule', () => {
+		const coordinator = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
+		expect(coordinator).toContain('FEATURE_DELEGATION_RULE');
+		const host = readFileSync(new URL('../apps/app/src/server/coordinator-host.ts', import.meta.url), 'utf8');
+		expect(host).toContain('FEATURE_DELEGATION_RULE');
+		const workflow = readFileSync(new URL('../apps/app/src/server/build-workflow.ts', import.meta.url), 'utf8');
+		expect(workflow).toContain('FEATURE_DELEGATION_RULE');
 	});
 });
