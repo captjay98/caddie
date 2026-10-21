@@ -341,10 +341,27 @@ describe('discoverForActor — quoted rules decide eligibility', () => {
 			expect(amazon.eligibilityQuote).toContain('Brazil');
 			expect(amazon.rulesUrl).toBe('https://amazonappdev2026.devpost.com/rules');
 			expect(result.gaps.join(' ')).toContain('official rules pages (via Tavily)');
-			// US-only rules: NG is outside the quoted allowlist → ineligible, so the
-			// event sinks below ~30 eligible/unknown events and out of the top 20.
-			expect(result.candidates.find((x) => x.url === PAYPAL_URL)).toBeUndefined();
-			expect(result.candidates.every((x) => x.eligibility.verdict !== 'ineligible')).toBe(true);
+			// US-only rules: NG is outside the quoted allowlist → ineligible. The
+			// feed's ladder is eligibility verdict FIRST (eligible → unknown →
+			// ineligible), so an ineligible event never outranks an eligible or
+			// unjudged one; when it is in the list at all it is labelled
+			// honestly, so a person can see WHY it does not apply to them.
+			// (This test used to assert the event was absent from the top 20 —
+			// true only while more than twenty events cleared the format filter.
+			// The catalog's size is not the invariant; the ranking is.)
+			const paypal = result.candidates.find((x) => x.url === PAYPAL_URL);
+			if (paypal) {
+				expect(paypal.eligibility.verdict).toBe('ineligible');
+				expect(paypal.eligibilityNote).toBe('Only open to US');
+				const firstIneligible = result.candidates.findIndex((x) => x.eligibility.verdict === 'ineligible');
+				const lastJudged = result.candidates.map((x) => x.eligibility.verdict).lastIndexOf('unknown');
+				expect(firstIneligible).toBeGreaterThan(lastJudged);
+			}
+			expect(result.candidates.every((x, index) => {
+				if (x.eligibility.verdict !== 'ineligible') return true;
+				// Nothing judged better may come after an ineligible event.
+				return result.candidates.slice(index).every((later) => later.eligibility.verdict === 'ineligible');
+			})).toBe(true);
 			const usAllowlist = (await listClaims(db, scope)).find((cl) => cl.claimType === 'eligibility.open_countries');
 			expect(usAllowlist?.value).toBe('US');
 			expect(evaluateEligibility([{ claimId: usAllowlist!.id, claimType: usAllowlist!.claimType, value: usAllowlist!.value, quote: usAllowlist!.quote }], { country: 'NG' }).verdict).toBe('ineligible');
