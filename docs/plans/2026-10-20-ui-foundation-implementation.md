@@ -25,3 +25,7 @@
 - Preview/repair/delivery and notifications: full-window preview access, exact destinations, durable outcomes and clear read-versus-resolved semantics.
 
 Earlier approval covers seven card designs; these later surface designs still require collaborative review. Packet completion does not claim the whole-app redesign or active-build performance audit is complete.
+
+## Owner scope clarification and acceptance checkpoint — 2026-10-21
+
+The owner keeps the four mobile bottom tabs and persistent input; mobile navigation mockup alternatives are set aside. Finish chat/Caddie and Brief before the Projects/subpage and Discover redesigns. The completion packet is implemented locally and verified by the receipts in `docs/evidence/2026-10-21-chat-brief-completion.md` (125 focused unit/service checks and 112 fixture-backed browser checks, typecheck and build). Exact-output preview metadata, paginated older decisions, current outcomes and mobile reading controls are included. Next: owner tests locally at localhost:5176; do not start the remaining redesigns before that feedback.
