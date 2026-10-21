@@ -161,6 +161,43 @@ product/tech-lead specialists and the planning skill all carry the contract
 template, and `packages/contracts/src/demo-contract.ts` enforces it in the host
 with 7 tests. The next real build is the calibration run.
 
+## Production deploy (2026-10-21): UI foundation + chat/Brief completion + discovery
+
+Owner-directed deploy of the other agent's UI packet plus the two host-side
+fixes that were waiting: the design-save recovery (a design delegate that
+returns prose instead of a saved brief now recovers), the app-AI two-tier gate
+(a demo contract that names Caddie's AI must name the tier: `fast` or `super`),
+and the shared card family with real decision history, build/repair/preview
+cards in Brief, official prize tables and fit-first discovery facts.
+
+| Item | Value |
+|---|---|
+| URL | https://caddie.jamalibrahim.dev |
+| Version id | `5fd61664-1188-4e7c-afdd-505c22be4349` |
+| Commit | `be29872` (deployed tree; `72689ae` and later are test-harness only) |
+| Release gate | typecheck clean; 1,743 unit/service tests, 0 fail (133 files); packets U04 and BUILD re-run after the tree changed; `release-check` 49 PASS, 0 FAIL, 1 BLOCKED (deploy authorization), 4 PROVISIONED |
+| Build | production `apps/app/dist` (D1 `f6315eae…`, production route) + composed assets, 0 collisions; `sw.js` build `e5f4582c5c25` |
+| Preflight | 19 PASS, 1 WARN (same reused provider keys), 0 FAIL |
+| Dry run | DB, LOADER, PREVIEW_DB, both Flue agents and assets listed; nothing uploaded |
+| D1 | no new migrations (`0039` is current) |
+| Deploy | `wrangler deploy --config dist/caddie_app/wrangler.json --secrets-file .prod.vars` (account id explicit) |
+| Smoke | P17 live 5/5 PASS, receipt `lr_4b7ae14e690f4ffe` at `be29872169a5` |
+| P05 live | **PROVISIONED, not PASS** — `tests/live/flue-lifecycle.spec.ts` now loads (the root tsconfig maps `@durable-streams/client`), but it needs `CADDIE_LIVE_CONVERSATION_URL` and a session cookie only the owner's signed-in browser can produce. The browser agent declined to extract a credential, so the gate was not run. |
+| Judge access | unchanged (`open:true`); the same secrets were re-uploaded |
+
+Two honesty notes carried by this release:
+
+- The HerdVoice build reached `ready` with all six features passing, but the
+  judge demo FAILED: the preview document is the generated app and its script
+  runs without a single console error, yet it mounts nothing (`#root` has 0
+  children). The build checks prove the bundle builds; they do not prove the
+  app renders. Evidence: `docs/evidence/2026-10-20-herdvoice-demo/README.md`.
+- `tests/rules-reading.test.ts` was already red in `origin/main` since
+  `eca3f5e`; it asserted an ineligible discovery event is absent from the top
+  20, which only held while more than twenty events cleared the format
+  filter. The feed's real invariant is the ranking (ineligible last, labelled
+  honestly), and the test now pins that.
+
 ## Verification net (S01, 2026-10-18)
 
 The 2026-10-06 gate above is kept as a dated receipt; this is the net that
