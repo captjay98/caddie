@@ -37,8 +37,8 @@ function storage() {
 	const db = sqliteD1(sqlite);
 	return { sqlite, db, port: new D1SandboxPersistence(db) };
 }
-function driver(port: D1SandboxPersistence) {
-	return new SandboxDriver({ contree: { baseUrl: stub.url, apiToken: TOKEN, platformProjectId: 'local-test' }, workspaceRoot: '/workspace', quotas: { maxUploadBytes: 65536, maxOutputBytes: 65536, maxCommandTimeoutMs: 30000 }, pollIntervalMs: 5, reconcileTimeoutMs: 500, dispatchTimeoutMs: 1000 }, port);
+function driver(port: D1SandboxPersistence, overrides: { staleAmbiguousMs?: number } = {}) {
+	return new SandboxDriver({ contree: { baseUrl: stub.url, apiToken: TOKEN, platformProjectId: 'local-test' }, workspaceRoot: '/workspace', quotas: { maxUploadBytes: 65536, maxOutputBytes: 65536, maxCommandTimeoutMs: 30000 }, pollIntervalMs: 5, reconcileTimeoutMs: 500, dispatchTimeoutMs: 1000, ...overrides }, port);
 }
 async function create(subject: SandboxDriver, suffix: string) {
 	return (await subject.ensureSession({ sessionKey: `durable:${suffix}`, projectId: `project-${suffix}`, runId: `run-${suffix}`, image: IMAGE })).sessionId;
@@ -88,6 +88,34 @@ describe('durable sandbox image chain and machine receipts', () => {
 		expect((await restarted.reconcileOperation('uncertain-attempt')).state).toBe('unknown');
 		expect(await restarted.getOperationReceipt('uncertain-attempt')).toBeNull();
 		expect(stub.spawnRequestCount() - before).toBe(1);
+	});
+
+	test('a dispatch that stayed unknown is closed as failed, so the session continues instead of bricking', async () => {
+		// HerdVoice, 2026-10-20: the sandbox isolate died mid-dispatch twice and
+		// the unknown outcome locked the workspace for good. The host repaired
+		// production D1 by hand both times. An ambiguous operation has no remote
+		// id, so nothing can be polled for it: after the staleness window the
+		// host closes it as failed and lets the next attempt run.
+		const { db, port } = storage();
+		const first = driver(port);
+		const sessionId = await create(first, 'stale');
+		stub.chaos.resetNextDispatch = true;
+		await expect(first.execute({ sessionId, command: 'uncertain-command', operationKey: 'stale-attempt', timeoutMs: 1000 })).rejects.toMatchObject({ code: 'AMBIGUOUS_DISPATCH' });
+		stub.chaos.resetNextDispatch = false;
+		const spawnsAfterTheLostDispatch = stub.spawnRequestCount();
+
+		// A driver whose staleness window has passed closes the unknown attempt.
+		const patient = driver(new D1SandboxPersistence(db), { staleAmbiguousMs: 0 });
+		const result = await patient.execute({ sessionId, command: 'next-command', operationKey: 'after-stale', timeoutMs: 1000 });
+		expect(result.exitCode).toBe(0);
+
+		// The closed attempt is on the record as failed, with the honest note.
+		const receipt = await patient.getOperationReceipt('stale-attempt');
+		expect(receipt?.state).toBe('failed');
+		expect(receipt?.stderr).toContain('outcome was never known');
+		// The uncertain command was never dispatched a second time: only the new
+		// command reached the sandbox.
+		expect(stub.spawnRequestCount() - spawnsAfterTheLostDispatch).toBe(1);
 	});
 
 	test('bootstrap also persists its identity before exposure and cannot be blindly repeated after a lost response', async () => {

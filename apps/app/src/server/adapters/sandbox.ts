@@ -79,6 +79,13 @@ export interface SandboxDriverConfig {
 	dispatchTimeoutMs?: number;
 	/** Bound on one reconciliation poll cycle (default 5s). */
 	reconcileTimeoutMs?: number;
+	/**
+	 * How long an operation whose outcome is unknown (dispatch lost, no remote
+	 * id) may block the session before the host closes it as failed
+	 * (default 5 minutes). Nothing can be polled for such an operation, so
+	 * waiting only prolongs the block.
+	 */
+	staleAmbiguousMs?: number;
 }
 
 export type SandboxState = 'running' | 'succeeded' | 'failed' | 'cancelled' | 'unknown';
@@ -390,6 +397,7 @@ export class SandboxDriver {
 	private readonly pollIntervalMs: number;
 	private readonly dispatchTimeoutMs: number;
 	private readonly reconcileTimeoutMs: number;
+	private readonly staleAmbiguousMs: number;
 	/** Single-flight creation promises, per session key, per driver instance. */
 	private readonly ensureInflight = new Map<string, Promise<{ sessionId: string }>>();
 
@@ -401,6 +409,7 @@ export class SandboxDriver {
 		this.pollIntervalMs = config.pollIntervalMs ?? 50;
 		this.dispatchTimeoutMs = config.dispatchTimeoutMs ?? 10_000;
 		this.reconcileTimeoutMs = config.reconcileTimeoutMs ?? 5_000;
+		this.staleAmbiguousMs = config.staleAmbiguousMs ?? 5 * 60_000;
 	}
 
 	// --- session lifecycle ---------------------------------------------------------
@@ -1038,6 +1047,50 @@ export class SandboxDriver {
 		return `${this.config.workspaceRoot.replace(/\/+$/, '')}/${projectId}`;
 	}
 
+	/**
+	 * True when an operation's outcome is unknown (dispatch never got a remote
+	 * id, so nothing can be polled) and it has been sitting unresolved long
+	 * enough that no live attempt can still be finishing it.
+	 */
+	private isStaleAmbiguous(record: SandboxRecord): boolean {
+		if (record.state !== 'ambiguous' || record.remoteId !== null) return false;
+		const updatedAt = Date.parse(record.updatedAt);
+		// An unreadable timestamp is broken data, not a live attempt: it must
+		// not block the session forever.
+		if (Number.isNaN(updatedAt)) return true;
+		return Date.now() - updatedAt >= this.staleAmbiguousMs;
+	}
+
+	/**
+	 * Close a stale ambiguous operation as failed, with a receipt that says
+	 * exactly what happened, and release the session lock through the normal
+	 * reconcile path (the receipt is what adoptOperationImage consumes).
+	 */
+	private async closeStaleAmbiguous(record: SandboxRecord, session: SandboxRecord): Promise<void> {
+		const receipt: SandboxOperationReceipt = {
+			operationKey: record.operationKey ?? record.key.replace(/^op:/, ''),
+			sessionId: record.sessionId,
+			projectId: record.projectId,
+			runId: record.runId,
+			command: record.command ?? '',
+			cwd: record.cwd ?? '',
+			inputImage: session.image ?? record.inputImage ?? '',
+			resultImage: null,
+			// No remote operation ever existed for this attempt, so there is no
+			// remote id to point at.
+			remoteId: '',
+			exitCode: null,
+			stdout: '',
+			stderr:
+				'The sandbox lost this dispatch and its outcome was never known (no remote id), so the host closed it as failed instead of blocking the session forever. The work may not have landed: re-run it under a new operation key.',
+			state: 'failed',
+			outputTruncated: false,
+			timedOut: false,
+			outputBytes: 0,
+		};
+		await this.persistence.save({ ...record, state: 'failed', receipt, updatedAt: nowIso() });
+	}
+
 	private async requireActiveSession(sessionId: string, resumeOperationKey?: string): Promise<SandboxRecord> {
 		let record = await this.persistence.load(`session:${sessionId}`);
 		if (!record || record.kind !== 'session') throw new SandboxError(404, 'SESSION_LOST', `no persisted binding for session ${sessionId} — create it first`);
@@ -1049,6 +1102,15 @@ export class SandboxDriver {
 			// can have occurred before that claim exists. Other work stays blocked.
 			if (!pending && record.operationKey === resumeOperationKey && record.state === 'active') return record;
 			if (!pending) throw new SandboxError(409, 'OPERATION_UNRESOLVED', 'Sandbox work was interrupted before dispatch; retry the same operation key.', { operationKey: record.operationKey });
+			// A dispatch whose outcome is unknown and that nobody has resolved for
+			// minutes is closed DETERMINISTICALLY as failed, so the session
+			// unlocks instead of bricking every later command. With no remote id
+			// there is nothing to poll and no way to recover the outcome, so
+			// waiting only prolongs the block: the next attempt runs under a
+			// fresh key, and nothing that may have run remotely is dispatched
+			// again. (HerdVoice, 2026-10-20: two builds lost ~35 minutes each
+			// to this wedge, repaired by hand in production D1.)
+			if (this.isStaleAmbiguous(pending)) await this.closeStaleAmbiguous(pending, record);
 			const result = await this.reconcileOperation(record.operationKey);
 			if (result.state === 'unknown' || result.state === 'running') {
 				throw new SandboxError(409, 'OPERATION_UNRESOLVED', 'Previous sandbox work has an unknown outcome; reconcile it before continuing.', { operationKey: record.operationKey });
