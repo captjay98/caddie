@@ -33,9 +33,9 @@
 			"tests/live/release.spec.ts"
 		],
 		"passed": 5,
-		"at": "2026-10-20T17:14:29.493Z",
-		"id": "lr_7242764b97c16f1e",
-		"commit": "ba35e4896bd2c88648951ce55471f1c80a302170",
+		"at": "2026-10-21T21:17:31.773Z",
+		"id": "lr_4b7ae14e690f4ffe",
+		"commit": "be29872169a5cc4e7fcf6ed63b8028394ce940e6",
 		"dirty": false,
 		"specDigest": "bea6d75b94f713b8b55793bd874c04a5910d17a42a6124a7bd05b96d862497d9",
 		"target": "https://caddie.jamalibrahim.dev",
