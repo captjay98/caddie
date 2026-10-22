@@ -7,9 +7,7 @@ export function CardHeader({ design, context, status, fresh, freshLabel }: {
 }) {
  const view = CARD_DESIGNS[design];
  const pulsing = design === 'build' || design === 'repair';
- // The opportunity kicker reads "Found for you" (mockup), overriding the
- // design's generic label without touching the shared card-design map.
- const label = design === 'opportunity' ? 'Found for you' : view.label;
+ const label = view.label;
  return (
   <div className="compact-card-head">
    <span className="compact-card-kicker">

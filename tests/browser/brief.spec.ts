@@ -1208,6 +1208,9 @@ test.describe('redo — each card matches its mockup', () => {
 		await expect(opp.getByTestId('card-secondary-action')).toHaveText('Save for later');
 		// The kicker reads "Found for you" (mockup), not the generic design label.
 		await expect(opp.locator('.compact-card-kicker')).toContainText('Found for you');
+		// Green, as in the mockup: the hue drives the kicker, the pill, the panel
+		// tint and the filled CTA.
+		await expect(opp).toHaveAttribute('data-tone', 'green');
 		await context.close();
 	});
 
