@@ -241,6 +241,14 @@ export const DecisionCardSchema = v.pipe(
 				version: v.optional(v.string()),
 			}),
 		),
+		/** Repair card "What needs fixing" panel (team-mode redo): a FIXED,
+		 *  true expectation for the failed check, keyed from run_rounds.issue
+		 *  ("<featureId>:<check>"). Absent for an unknown check, so the card
+		 *  then keeps its plain summary and shows no panel. The card's summary
+		 *  carries the failed round's own plain sentence (run_rounds.detail)
+		 *  plus the fixed "I found it before handing the preview to you." line —
+		 *  never the same sentence twice. */
+		repair: v.optional(v.strictObject({ expectation: v.string() })),
 		/**
 		 * DRAFT FIELDS (team-mode Brief card redo, 2026-10-22 lane rules). Each
 		 * is filled by the server from a REAL record or left absent; the card

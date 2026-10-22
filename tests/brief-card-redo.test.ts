@@ -287,3 +287,64 @@ describe('pending plan card: next step + footer (steps 1-2)', () => {
 		}
 	});
 });
+
+describe('repair card: body from detail + fixed expectation panel (step 2)', () => {
+	// A repairing card: the build is live (phase 'building') and the latest
+	// round for the run FAILED. The failed round carries its own `detail`
+	// sentence AND an `issue` of the form "<featureId>:<check>" — the two must
+	// both reach the card as DISTINCT texts: the body from `detail`, the panel
+	// from the check's fixed expectation. Never the same sentence twice.
+	function seedRepair(sqlite: Database, issue: string, detail: string): void {
+		sqlite.exec(`
+			insert into "build_workflows" (projectId, runId, conversationId, intakeKey, brief, phase, detail, updatedAt)
+			 values ('unit-proj-a','unit-run-r','unit-conv-r','unit-intake-r','Farm log.','building','Caddie is implementing your approved plan.','${ISO}');
+			insert into "build_features" ("projectId","runId","planId","featureId","position","title","doneWhen","status","attempts","testsPassed","updatedAt") values
+				('unit-proj-a','unit-run-r','plan-r','log',1,'Daily activity log','[]','passed',0,4,'${ISO}'),
+				('unit-proj-a','unit-run-r','plan-r','offline',2,'Save and sync entries','[]','building',0,null,'${ISO}');
+			insert into "run_rounds" ("id","runId","projectId","issue","round","outcome","detail","createdAt") values
+				('round-r','unit-run-r','unit-proj-a','${issue}','repair_attempt','failed','${detail}','2026-10-05T03:00:00.000Z');
+		`);
+	}
+
+	test('a round whose detail and issue differ shows BOTH texts, and no line appears twice', async () => {
+		const world = makeWorld();
+		try {
+			const detail = 'An offline entry did not survive reopening the app.';
+			// issue check "contract-read" → the fixed "Save something, restart…" expectation.
+			seedRepair(world.sqlite, 'offline:contract-read', detail);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const repair = cards.find((card) => card.id.startsWith('brf_workflow_repair_'));
+			expect(repair).toBeDefined();
+			// The body carries the round's own `detail` plus the fixed line.
+			// Mutation proof: drop the `summary = <detail> + …` branch and the
+			// summary falls back to plainCheck, so this toContain fails.
+			expect(repair!.summary).toBe(`${detail} I found it before handing the preview to you.`);
+			// The panel is the FIXED expectation for the check, NOT the detail.
+			// Mutation proof: drop the `repair` field assignment and this is undefined.
+			expect(repair!.repair).toEqual({ expectation: 'Save something, restart the app, and it must still be there.' });
+			// No line appears twice: the panel expectation is not the body, and
+			// the body does not contain the expectation.
+			expect(repair!.repair!.expectation).not.toBe(repair!.summary);
+			expect(repair!.summary).not.toContain(repair!.repair!.expectation);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('an unknown check keeps the plain summary and shows no panel', async () => {
+		const world = makeWorld();
+		try {
+			seedRepair(world.sqlite, 'offline:mystery-check', 'A detail that should be ignored for an unknown check.');
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const repair = cards.find((card) => card.id.startsWith('brf_workflow_repair_'));
+			expect(repair).toBeDefined();
+			// Mutation proof: make the check map return a default for unknown
+			// checks and `repair` becomes defined, failing this.
+			expect(repair!.repair).toBeUndefined();
+			// The summary keeps the plain fallback (plainCheck), not the detail body.
+			expect(repair!.summary).not.toContain('I found it before handing the preview to you.');
+		} finally {
+			world.sqlite.close();
+		}
+	});
+});

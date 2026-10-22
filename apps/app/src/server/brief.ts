@@ -45,6 +45,32 @@ function plainCheck(issue: string): string {
 }
 
 /**
+ * The repair card's "What needs fixing" panel (team-mode redo, step 2): a
+ * FIXED, true expectation per check, keyed from run_rounds.issue of the form
+ * "<featureId>:<check>". The sentence is the plain-English promise the check
+ * makes — never the failed round's own detail (that is the card body). An
+ * unknown check returns null, so the card shows no panel and keeps its plain
+ * summary.
+ */
+const REPAIR_EXPECTATIONS: Record<string, string> = {
+	'behavior-tests': "The app's own tests must all pass.",
+	'browser-bundle': 'The app must build for the browser.',
+	dependencies: "The app's parts must install cleanly.",
+	'part-boundary': 'Each builder changes only its own part of the app.',
+	'contract-create': 'Something you add must be saved.',
+	'contract-read': 'Save something, restart the app, and it must still be there.',
+	'contract-privacy-screen':
+		"No one sees another person's records, and every screen shows what was saved.",
+	'contract-test-mode': 'Test payments, emails, jobs and files must behave as the plan says.',
+};
+
+function repairExpectation(issue: string): string | null {
+	// issue is "<featureId>:<check>"; the check is the part after the last ":".
+	const check = issue.includes(':') ? issue.slice(issue.lastIndexOf(':') + 1).trim() : '';
+	return REPAIR_EXPECTATIONS[check] ?? null;
+}
+
+/**
  * The deadline countdown parts for a card (lane 14 step 2), computed from a
  * real timestamp in its own timezone: whole days left (floored, never
  * negative), the date a person reads ("Friday, 23 October"), and the time of
@@ -465,7 +491,7 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
  const phase = String(workflow.phase);
  if (!['building', 'blocked', 'ready'].includes(phase)) return [];
  const runId = String(workflow.runId);
- const [round] = phase === 'building' ? await queryAll(db, 'select outcome, issue from run_rounds where projectId = ? and runId = ? order by createdAt desc, id desc limit 1', scope.projectId, runId) : [];
+ const [round] = phase === 'building' ? await queryAll(db, 'select outcome, issue, detail from run_rounds where projectId = ? and runId = ? order by createdAt desc, id desc limit 1', scope.projectId, runId) : [];
  const repairing = phase === 'building' && round?.outcome === 'failed';
  const ready = phase === 'ready' && typeof workflow.previewId === 'string';
  const building = phase === 'building' && !repairing;
@@ -494,15 +520,29 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
  const footer = appName
 	? { appName, ...(ready && readyChecks?.version ? { version: `Version ${readyChecks.version}` } : repairing ? { version: `Check attempt ${checkAttempt}` } : {}) }
 	: null;
+ // Step 2: the repair "What needs fixing" panel is a FIXED expectation keyed
+ // from the failed check (run_rounds.issue). When the check is known, the card
+ // body is the round's own plain sentence (run_rounds.detail) plus a fixed
+ // true line, and the panel carries the expectation — two DISTINCT texts. An
+ // unknown check keeps the plain summary and shows no panel.
+ const repairIssue = repairing ? String(round?.issue ?? '') : '';
+ const repairExp = repairing ? repairExpectation(repairIssue) : null;
+ const repairDetail = repairing ? String(round?.detail ?? '').trim() : '';
+ const repairBody = repairExp && repairDetail !== ''
+	? `${repairDetail} I found it before handing the preview to you.`
+	: repairExp
+		? 'I found it before handing the preview to you.'
+		: null;
  return [{
   id: newCardId(`workflow_${ready ? 'preview' : repairing ? 'repair' : phase === 'blocked' ? 'blocked' : 'build'}`, targetId),
   projectId: scope.projectId, runId, kind: 'result',
   headline: ready ? 'Your app is ready to try' : repairing ? 'One check needs another pass' : phase === 'blocked' ? 'Your build needs attention' : 'Your app is taking shape',
-  summary: ready ? 'Open the checked app preview. Your plan and build remain available.' : repairing ? plainCheck(String(round?.issue ?? '')) : String(workflow.detail ?? (phase === 'blocked' ? 'The build stopped. Your plan and saved files are retained.' : 'Caddie is implementing your approved plan and running the checks.')),
+  summary: ready ? 'Open the checked app preview. Your plan and build remain available.' : repairing ? (repairBody ?? plainCheck(repairIssue)) : String(workflow.detail ?? (phase === 'blocked' ? 'The build stopped. Your plan and saved files are retained.' : 'Caddie is implementing your approved plan and running the checks.')),
   evidenceIds: [], status: ready ? 'handled' : phase === 'blocked' ? 'blocked' : 'changed', updatedAt: String(workflow.updatedAt),
   primaryAction: { label: ready ? 'Try the app' : 'View activity', kind: ready ? 'preview' : 'inspect', targetId },
   ...(checks ? { checks } : {}),
   ...(build ? { build } : {}),
+  ...(repairExp ? { repair: { expectation: repairExp } } : {}),
   ...(footer ? { footer } : {}),
  }];
 }
