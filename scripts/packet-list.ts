@@ -361,6 +361,15 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// plan approval list, the opportunity fit split and the ready card's
 			// preview checks, each field filled from a real record or absent.
 			'tests/brief.test.ts',
+			// Lane 12 (part P): the ModuleBuilder agent + parallel-module
+			// orchestration — the D12 slot caps, dependency order, at-least-once
+			// harmlessness, module feature scope, a stopped module not stopping
+			// the rest, and the build's shared spend limit (resolveTurnPayer).
+			'tests/module-builder.test.ts',
+			// S3 spike: two ModuleBuilders build one feature each on their own
+			// copies at the same time (overlap proven), each with its own save
+			// point and one onModuleFinished hook call. Local, scripted, no cost.
+			'tests/module-builder-s3.test.ts',
 		],
 		browser: ['tests/browser/brief.spec.ts'],
 		live: [],

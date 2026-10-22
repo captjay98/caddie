@@ -74,16 +74,87 @@ export function _resetPayerRegistry(): void {
 }
 
 /**
+ * Thrown by {@link resolveTurnPayer} when a ModuleBuilder turn (part P) has no
+ * payer. A module builder runs in its own Durable Object whose isolate registry
+ * starts empty, and every model call it (or its delegates) makes MUST be charged
+ * to the build's shared payer (plan §A step 4). If the module's `build_modules`
+ * row carries no payer, the turn is REFUSED rather than passing through
+ * unmetered: the throw propagates out of the interceptor and fails the model
+ * call before it reaches Token Factory. (Ordinary chat, which has no module row,
+ * still passes through — only a real module-builder turn with a missing payer
+ * refuses.)
+ */
+export class ModulePayerMissingError extends Error {
+	readonly code = 'module_payer_missing';
+	readonly instanceId: string;
+	constructor(instanceId: string) {
+		super(`This module build has no spending payer, so its model call was refused. (instance ${instanceId})`);
+		this.name = 'ModulePayerMissingError';
+		this.instanceId = instanceId;
+	}
+}
+
+/**
+ * A ModuleBuilder instance id is `<projectId>:<buildSeq>:<moduleId>` (plan part
+ * P). This is a cheap structural test — three colon-separated parts whose middle
+ * is a non-negative integer — used only to decide WHETHER to consult
+ * build_modules; the row lookup is the authority.
+ */
+function looksLikeModuleInstance(instanceId: string): boolean {
+	const parts = instanceId.split(':');
+	return parts.length === 3 && parts[0].length > 0 && parts[2].length > 0 && /^\d+$/.test(parts[1]);
+}
+
+/**
  * Resolve the payer for a turn, by lineage. Tries the registry first (instance,
- * then conversation), then falls back to D1: a coordinator's conversationId is
- * stored on its `build_workflows` row as `spendPayerId`. Returns null when no
- * build owns the turn (ordinary chat), which means "pass through".
+ * then conversation); then, for a ModuleBuilder turn (part P), the build's
+ * shared payer from its `build_modules` row; then falls back to D1: a
+ * coordinator's conversationId is stored on its `build_workflows` row as
+ * `spendPayerId`. Returns null when no build owns the turn (ordinary chat),
+ * which means "pass through".
+ *
+ * REFUSAL (part P / plan §A step 4): when the turn's instance id is a module
+ * builder's AND its `build_modules` row carries no payer, this THROWS
+ * {@link ModulePayerMissingError} rather than returning null — a module builder's
+ * model call must never pass through unmetered. Ordinary chat (no module row)
+ * still passes through.
  */
 export async function resolveTurnPayer(db: D1Database, ctx: FlueExecutionContext): Promise<string | null> {
 	const instanceId = ctx.instanceId ?? '';
 	const conversationId = ctx.conversationId ?? '';
 	if (instanceId && payerByKey.has(instanceId)) return payerByKey.get(instanceId)!;
 	if (conversationId && payerByKey.has(conversationId)) return payerByKey.get(conversationId)!;
+
+	// Part P: a ModuleBuilder (and its delegates, which share its instance id)
+	// is charged to its build's shared payer, read from the module's
+	// build_modules row by its derived instance id. A module row with no payer is
+	// a REFUSAL, not a pass-through — the module build must never run unmetered.
+	// The registry (populated by modules.ts via registerBuildPayerForInstance
+	// when a module starts) is the fast path above; this is the durable fallback,
+	// and it is the live path in a fresh module-builder DO whose registry is empty.
+	if (looksLikeModuleInstance(instanceId)) {
+		const moduleRow = (
+			await db
+				.prepare(
+					'select "payerId" from "build_modules" where ? = ("projectId" || \':\' || "buildSeq" || \':\' || "moduleId") limit 1',
+				)
+				.bind(instanceId)
+				.all<{ payerId: string | null }>()
+		).results?.[0];
+		// A real module row exists for this instance: its payer is authoritative.
+		if (moduleRow) {
+			if (moduleRow.payerId) return moduleRow.payerId;
+			throw new ModulePayerMissingError(instanceId);
+		}
+		// No module row: only Caddie dispatches ids of this shape (ModuleBuilder
+		// is dispatch-only; chat and coordinator ids are conv_<hex>), so this is a
+		// lost or broken module build. Refuse: it must never run unmetered.
+		throw new ModulePayerMissingError(instanceId);
+	}
+	// A ModuleBuilder's own turn under any other id (a malformed dispatch) has no
+	// build to charge either: refuse rather than fall through to chat.
+	if (ctx.agentName === 'ModuleBuilder') throw new ModulePayerMissingError(instanceId);
+
 	// D1, read fresh on every call: Caddie addresses a build's coordinator as
 	// /agents/coordinator/<build_workflows.conversationId>, and Flue makes that
 	// URL id the agent's instanceId (a delegate shares it). Flue's own
