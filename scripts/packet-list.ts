@@ -381,6 +381,10 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// hook. Local, scripted, no cost.
 			'tests/module-copy-isolation.test.ts',
 			'tests/module-builder-agents.test.ts',
+			// Lane 11 (part M + the K starter types): the app AI accepts photos
+			// (host side, app-ai.ts) and the react-hono starter's generated types
+			// and test stand-in carry the photo and email shapes.
+			'tests/app-ai-starter.test.ts',
 		],
 		browser: ['tests/browser/brief.spec.ts'],
 		live: [],

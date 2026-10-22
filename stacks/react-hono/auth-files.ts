@@ -44,9 +44,33 @@ export type CaddieSignInCodeReply =
   | { ok: true }
   | { ok: false; reason: "invalid_request" | "busy" | "unavailable" | "failed"; message: string };
 
+// Email (part K). This week every email goes to the project's test inbox inside
+// Caddie, marked "Not sent — test mode": nothing is sent. The same call keeps
+// working when real sending turns on later, so the app's code never changes.
+export interface CaddieEmailRequest {
+  /** One recipient. */
+  to: string;
+  /** At most 150 characters. */
+  subject: string;
+  /** At most 5,000 characters. */
+  text: string;
+  /** A short name for this kind of email, e.g. "invite" (shown in the inbox). */
+  template: string;
+}
+
+export type CaddieEmailReply =
+  | { ok: true; delivered: "test-inbox" }
+  | { ok: false; reason: "invalid_request" | "too_long" | "limit_reached" | "unavailable" | "failed"; message: string };
+
 export interface CaddiePlatform {
   ai(request: CaddieAiRequest): Promise<CaddieAiReply>;
   signInCode(request: CaddieSignInCodeRequest): Promise<CaddieSignInCodeReply>;
+  /**
+   * Send an email. This week it lands in the project's test inbox (marked
+   * "Not sent — test mode"); the reply tells the app it was saved there, so
+   * the app can say "Saved to the test inbox". Nothing is sent.
+   */
+  email(request: CaddieEmailRequest): Promise<CaddieEmailReply>;
 }
 `),
 
@@ -456,7 +480,7 @@ create index "auth_verification_identifier_idx" on "auth_verification" ("identif
 // and keeps every sign-in code it was asked to send (codeFor(email)).
 // createTestEnv() already includes one; pass your own to change the AI reply.
 import type { CaddieAiReply, CaddieAiRequest } from "../../caddie/ai";
-import type { CaddiePlatform, CaddieSignInCodeReply } from "../../caddie/platform";
+import type { CaddieEmailReply, CaddieEmailRequest, CaddiePlatform, CaddieSignInCodeReply } from "../../caddie/platform";
 
 export interface TestCaddie extends CaddiePlatform {
   /** Every AI request, in order. */
@@ -464,6 +488,8 @@ export interface TestCaddie extends CaddiePlatform {
   /** The last sign-in code sent to each email address. */
   codes: Map<string, string>;
   codeFor(email: string): string | undefined;
+  /** Every email the app asked to send, in order (test inbox). */
+  emails: CaddieEmailRequest[];
 }
 
 export function createTestCaddie(
@@ -475,10 +501,12 @@ export function createTestCaddie(
 ): TestCaddie {
   const requests: CaddieAiRequest[] = [];
   const codes = new Map<string, string>();
+  const emails: CaddieEmailRequest[] = [];
   const reply = options.ai ?? "test reply";
   return {
     requests,
     codes,
+    emails,
     codeFor: (email) => codes.get(email.trim().toLowerCase()),
     async ai(request) {
       requests.push(request);
@@ -498,21 +526,57 @@ export function createTestCaddie(
       codes.set(request.email, request.code);
       return { ok: true };
     },
+    async email(request) {
+      // The same refusals the real platform makes before it stores anything.
+      const to = typeof request.to === "string" ? request.to.trim() : "";
+      if (!to || to.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
+        return { ok: false, reason: "invalid_request", message: "Enter one valid email address." };
+      }
+      if (typeof request.subject !== "string" || typeof request.text !== "string" || typeof request.template !== "string" || !request.subject.trim() || !request.text.trim()) {
+        return { ok: false, reason: "invalid_request", message: "An email needs a subject and some text." };
+      }
+      if (request.subject.length > 150) return { ok: false, reason: "too_long", message: "Keep the subject under 150 characters." };
+      if (request.text.length > 5000) return { ok: false, reason: "too_long", message: "Keep the email under 5,000 characters." };
+      emails.push({ to, subject: request.subject, text: request.text, template: request.template });
+      return { ok: true, delivered: "test-inbox" };
+    },
   };
 }
 
 /** The refusals Caddie's platform makes before it ever calls a model. */
 function refusalFor(request: CaddieAiRequest): CaddieAiReply | null {
+  const no = (message: string): CaddieAiReply => ({ ok: false, reason: "invalid_request", message });
+  const tooLong = (message: string): CaddieAiReply => ({ ok: false, reason: "too_long", message });
   const tier = (request as { tier?: unknown }).tier;
   if (tier !== undefined && tier !== "fast" && tier !== "super") {
-    return { ok: false, reason: "invalid_request", message: 'Choose tier "fast" or "super".' };
+    return no('Choose tier "fast" or "super".');
   }
   if (!Array.isArray(request.messages) || request.messages.length === 0) {
-    return { ok: false, reason: "invalid_request", message: "Send at least one message." };
+    return no("Send at least one message.");
   }
+  let images = 0;
   for (const message of request.messages) {
-    if (!message || typeof message.content !== "string" || !message.content.trim()) {
-      return { ok: false, reason: "invalid_request", message: "Every message needs some content." };
+    if (!message) return no("Every message needs some content.");
+    if (typeof message.content === "string") {
+      if (!message.content.trim()) return no("Every message needs some content.");
+      continue;
+    }
+    if (!Array.isArray(message.content) || message.content.length === 0) {
+      return no("Every message needs some content.");
+    }
+    for (const part of message.content) {
+      if (!part || typeof part !== "object") return no("Each content part must be text or an image.");
+      if (part.type === "text") continue;
+      if (part.type === "image") {
+        if (typeof part.mime !== "string" || !["image/jpeg", "image/png", "image/webp"].includes(part.mime)) {
+          return no("Photos must be JPEG, PNG or WebP.");
+        }
+        if (tier !== "super") return no('Looking at a photo needs tier "super".');
+        images += 1;
+        if (images > 4) return tooLong("Send at most 4 photos in one call.");
+        continue;
+      }
+      return no("Each content part must be text or an image.");
     }
   }
   return null;
