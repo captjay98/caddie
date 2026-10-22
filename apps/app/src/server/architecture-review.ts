@@ -75,8 +75,11 @@ const RecordReviewInput = v.pipe(
 	v.strictObject({
 		/** The sha256 of the exact block reviewed (the design revision's own block hash). */
 		blockHash: v.pipe(v.string(), v.minLength(8)),
-		/** Which review round this is (1-based); the host rejects a reused round. */
-		round: v.pipe(v.number(), v.integer(), v.minValue(1)),
+		/**
+		 * Ignored: Caddie numbers the rounds itself (recordArchitectureReview).
+		 * Still accepted so a model that sends one isn't refused.
+		 */
+		round: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
 		/** Every finding, or an empty list when the block is clean. */
 		issues: v.pipe(v.array(ReviewIssueSchema), v.maxLength(200)),
 	}),
@@ -114,36 +117,39 @@ export interface ReviewVerdict {
 }
 
 /**
- * Decide, from the review rounds recorded for the block whose hash is
- * `blockHash`, whether the design may be approved.
+ * Decide, from the rounds of the project's CURRENT design cycle (see
+ * {@link listArchitectureReviews}), whether the design whose block hash is
+ * `blockHash` may be approved.
  *
- * The LATEST round for the block decides: its open security issues block, with
- * no round limit and no waiver. `mustChangePlan` turns true once at least
- * SECURITY_ROUND_LIMIT rounds for this block each carried a security issue —
- * re-reviewing the same block a third time is not the way out; a plan change
- * is. A block with no review yet blocks too (the architect must run first),
- * via `blocks: true` and `round: 0`, so the gate never approves an unreviewed
- * block in team mode.
+ * The LATEST round for this exact block decides whether it blocks: its open
+ * security issues block, with no round limit and no waiver, and a block with no
+ * review yet blocks too (the architect must run first), via `round: 0`.
+ *
+ * `mustChangePlan` counts consecutive rounds with a security issue across the
+ * whole cycle, newest first, whichever block each round reviewed. A normal loop
+ * revises the block between reviews, so a per-block count would never reach the
+ * limit; two rounds in a row that still find safety problems mean the plan, not
+ * the block, has to change. A clean round resets the count.
  */
 export function reviewVerdict(rounds: ArchitectureReviewRound[], blockHash: string): ReviewVerdict {
-	const forBlock = rounds.filter((r) => r.blockHash === blockHash).sort((a, b) => a.round - b.round);
+	const ordered = [...rounds].sort((a, b) => a.round - b.round || a.createdAt.localeCompare(b.createdAt));
+	let consecutiveSecurity = 0;
+	for (let i = ordered.length - 1; i >= 0; i--) {
+		if (securityIssues(ordered[i]!.issues).length > 0) consecutiveSecurity += 1;
+		else break;
+	}
+	const mustChangePlan = consecutiveSecurity >= SECURITY_ROUND_LIMIT;
+	const forBlock = ordered.filter((r) => r.blockHash === blockHash);
 	if (forBlock.length === 0) {
-		return { blocks: true, securityMessages: [], advisoryMessages: [], mustChangePlan: false, round: 0 };
+		return { blocks: true, securityMessages: [], advisoryMessages: [], mustChangePlan, round: 0 };
 	}
 	const latest = forBlock[forBlock.length - 1]!;
 	const security = securityIssues(latest.issues);
-	// How many rounds in a row (up to and including the latest) carried a
-	// security issue — the two-round limit counts consecutive failing rounds.
-	let consecutiveSecurity = 0;
-	for (let i = forBlock.length - 1; i >= 0; i--) {
-		if (securityIssues(forBlock[i]!.issues).length > 0) consecutiveSecurity += 1;
-		else break;
-	}
 	return {
 		blocks: security.length > 0,
 		securityMessages: security.map((i) => i.message),
 		advisoryMessages: advisoryIssues(latest.issues).map((i) => i.message),
-		mustChangePlan: consecutiveSecurity >= SECURITY_ROUND_LIMIT,
+		mustChangePlan,
 		round: latest.round,
 	};
 }
@@ -168,11 +174,27 @@ function roundFromRow(row: Record<string, unknown>): ArchitectureReviewRound {
 	};
 }
 
-/** Every review round recorded for a project, oldest first. */
-export async function listArchitectureReviews(db: D1Database, projectId: string): Promise<ArchitectureReviewRound[]> {
+/**
+ * When the project's current design cycle started: the newest plan (PRD)
+ * revision. Writing a new plan sends the build back to plan review
+ * (workflowSnapshot), so reviews of earlier designs no longer count. After a
+ * design is approved no review happens until a new plan, which starts the next
+ * cycle. '' when there is no plan yet (every round counts).
+ */
+async function designCycleStart(db: D1Database, projectId: string): Promise<string> {
 	const result = await db
-		.prepare('select * from "architecture_reviews" where "projectId" = ? order by "round" asc')
+		.prepare(`select max("createdAt") as "startedAt" from "plan_doc_revisions" where "projectId" = ? and "kind" = 'prd'`)
 		.bind(projectId)
+		.all<{ startedAt: string | null }>();
+	return result.results?.[0]?.startedAt ?? '';
+}
+
+/** Every review round of the project's CURRENT design cycle, oldest first. */
+export async function listArchitectureReviews(db: D1Database, projectId: string): Promise<ArchitectureReviewRound[]> {
+	const since = await designCycleStart(db, projectId);
+	const result = await db
+		.prepare('select * from "architecture_reviews" where "projectId" = ? and "createdAt" >= ? order by "round" asc, "createdAt" asc')
+		.bind(projectId, since)
 		.all<Record<string, unknown>>();
 	return (result.results ?? []).map(roundFromRow);
 }
@@ -188,11 +210,12 @@ export async function latestArchitectureReview(
 }
 
 /**
- * Append one review round. Idempotent on (projectId, blockHash, round) through
- * the migration's unique index: a replayed tool delivery writes the same row
- * once. The round number is the architect's own 1-based counter; a reused
- * (block, round) with different issues is a bug and surfaces as the insert
- * conflict rather than silently overwriting a recorded finding.
+ * Append one review round. Caddie numbers it (the next number for the
+ * project; any round the model sent is ignored), so rounds keep their order
+ * across block revisions. A replay of the same review (the cycle's latest round
+ * already has this block and exactly these findings) returns that round instead
+ * of adding one, so a retried tool delivery can't push a design to "change the
+ * plan".
  */
 export async function recordArchitectureReview(
 	db: D1Database,
@@ -201,19 +224,46 @@ export async function recordArchitectureReview(
 	now: string = new Date().toISOString(),
 ): Promise<ArchitectureReviewRound> {
 	const parsed = v.parse(RecordReviewInput, input);
+	const issuesJson = JSON.stringify(parsed.issues);
+	const latest = (await listArchitectureReviews(db, projectId)).at(-1);
+	if (latest && latest.blockHash === parsed.blockHash && JSON.stringify(latest.issues) === issuesJson) return latest;
+	const top = await db
+		.prepare('select max("round") as "top" from "architecture_reviews" where "projectId" = ?')
+		.bind(projectId)
+		.all<{ top: number | null }>();
+	const round = Number(top.results?.[0]?.top ?? 0) + 1;
 	const id = `arev_${crypto.randomUUID()}`;
 	await db
 		.prepare(
 			'insert into "architecture_reviews" ("id","projectId","blockHash","round","issues","createdAt") values (?,?,?,?,?,?) ' +
 				'on conflict ("projectId","blockHash","round") do nothing',
 		)
-		.bind(id, projectId, parsed.blockHash, parsed.round, JSON.stringify(parsed.issues), now)
+		.bind(id, projectId, parsed.blockHash, round, issuesJson, now)
 		.run();
 	const stored = await db
 		.prepare('select * from "architecture_reviews" where "projectId" = ? and "blockHash" = ? and "round" = ?')
-		.bind(projectId, parsed.blockHash, parsed.round)
+		.bind(projectId, parsed.blockHash, round)
 		.all<Record<string, unknown>>();
 	return roundFromRow(stored.results![0]!);
+}
+
+/**
+ * What the architect hears back after recording a round: its number, the
+ * counts, and whether the plan must change (two rounds in a row in this cycle
+ * still found safety problems). The host closure returns this to the tool.
+ */
+export async function reviewOutcome(
+	db: D1Database,
+	projectId: string,
+	stored: ArchitectureReviewRound,
+): Promise<{ round: number; security: number; advisory: number; mustChangePlan: boolean }> {
+	const verdict = reviewVerdict(await listArchitectureReviews(db, projectId), stored.blockHash);
+	return {
+		round: stored.round,
+		security: securityIssues(stored.issues).length,
+		advisory: advisoryIssues(stored.issues).length,
+		mustChangePlan: verdict.mustChangePlan,
+	};
 }
 
 // --- the tool the architect delegate mounts ----------------------------------
@@ -225,19 +275,22 @@ export async function recordArchitectureReview(
  * findings with severities, and {@link reviewVerdict} decides what blocks.
  */
 export function makeRecordArchitectureReview(deps: {
-	record: (input: RecordReviewInput) => Promise<{ round: number; security: number; advisory: number }>;
+	record: (input: RecordReviewInput) => Promise<{ round: number; security: number; advisory: number; mustChangePlan?: boolean }>;
 }) {
 	return defineTool({
 		name: 'record_architecture_review',
 		description:
-			"Record this round's architecture-review findings on the design's caddie-architecture block. Give blockHash (the exact block you reviewed), the 1-based round, and every issue with its severity: 'security' for sign-in, ownership/privacy, key exposure or data loss (these BLOCK the design until fixed, with no waiver), 'advisory' for everything else (shown to the user, never blocks). Record an empty issue list when the block is clean. You review only; you never approve or change the design.",
+			"Record this review's findings on the design's caddie-architecture block. Give blockHash (the exact block you reviewed) and every issue with its severity: 'security' for sign-in, ownership/privacy, key exposure or data loss (these BLOCK the design until fixed, with no waiver), 'advisory' for everything else (shown to the user, never blocks). Record an empty issue list when the block is clean. Caddie numbers the rounds. You review only; you never approve or change the design.",
 		input: RecordReviewInput,
 		run: async (ctx) => {
 			const result = await deps.record(ctx.data);
-			const line =
+			const base =
 				result.security > 0
 					? `Recorded review round ${result.round}: ${result.security} security issue(s) that block the design until fixed, and ${result.advisory} advisory. The design cannot be approved while a security issue is open.`
 					: `Recorded review round ${result.round}: no security issues; ${result.advisory} advisory note(s) shown to the user.`;
+			const line = result.mustChangePlan
+				? `${base} Two reviews in a row have found safety problems, so the plan must change: say so in your answer. The coordinator should not revise this design again; it should write a new plan revision that removes the cause, which sends the build back to plan review.`
+				: base;
 			return { output: line };
 		},
 	});

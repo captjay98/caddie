@@ -120,6 +120,24 @@ describe('decideDesign team-mode architecture gate', () => {
 		}
 	});
 
+	test('team mode: a design whose exact block was never reviewed is refused', async () => {
+		const body = designBody(validBlock());
+		const { designId } = await toDesignReview(body, { TEAM_MODE: 'on' });
+		// A clean review of a DIFFERENT block (an earlier revision) does not count for this one.
+		await recordArchitectureReview(db, projectId, { blockHash: architectureBlockHash('{"version":2,"other":true}'), issues: [] });
+		let code = '';
+		let message = '';
+		try {
+			await decideDesign(db, scope, { designId, decision: 'approved' });
+		} catch (error) {
+			code = (error as ScopeError).code;
+			message = (error as ScopeError).message;
+		}
+		expect(code).toBe('ARCHITECTURE_UNSAFE');
+		expect(message).toContain('has not run on this design');
+		expect((await workflowSnapshot(db, scope)).workflow?.phase).toBe('design-review');
+	});
+
 	test('team mode: after two security rounds the reason is change-plan', async () => {
 		const body = designBody(validBlock());
 		const { designId } = await toDesignReview(body, { TEAM_MODE: 'on' });
