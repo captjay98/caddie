@@ -11,6 +11,36 @@ import { listPreviews } from './previews.ts';
 import { listPackages, getReadiness } from './submission.ts';
 import { STOP_SENTINEL } from './project-experience.ts';
 
+/** Format an ISO timestamp as a date a person reads, in the schedule's own
+ *  timezone, e.g. "Monday, 6 October 2026 at 08:00". Returns the raw string
+ *  unchanged when it is not a parseable timestamp, so a card never shows the
+ *  word "Invalid Date". */
+function readableDate(iso: string, timezone: string): string {
+	const when = new Date(iso);
+	if (Number.isNaN(when.getTime())) return iso;
+	try {
+		return new Intl.DateTimeFormat('en-GB', {
+			weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+			hour: '2-digit', minute: '2-digit', timeZone: timezone,
+		}).format(when);
+	} catch {
+		// An unknown timezone falls back to UTC rather than throwing.
+		return new Intl.DateTimeFormat('en-GB', {
+			weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+			hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
+		}).format(when);
+	}
+}
+
+/** Turn an internal check name ("feature-2:behavior-tests") into a plain-words
+ *  sentence a non-technical owner understands. A string that already reads as
+ *  prose (has a space, no "word:word" id) is returned as-is. */
+function plainCheck(issue: string): string {
+	const raw = issue.trim();
+	if (raw.length > 0 && raw.includes(' ') && !/\b[a-z0-9-]+:[a-z0-9-]+\b/i.test(raw)) return raw;
+	return 'A check did not pass yet. Caddie is adjusting the build and will run the checks again.';
+}
+
 /**
  * UI review board screen 05/06 — the brief feed. `GET /api/projects/:id/brief`
  * reads the project's REAL state and projects it onto the frozen DecisionCard
@@ -243,7 +273,7 @@ async function scheduleCards(db: D1Database, scope: Scope): Promise<DecisionCard
 			projectId: scope.projectId,
 			kind: 'deadline',
 			headline: `${schedule.name} is scheduled`,
-			summary: `Next run ${schedule.nextRunAt} (${schedule.timezone}). A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
+			summary: `Next run ${readableDate(schedule.nextRunAt, schedule.timezone)} (${schedule.timezone}). A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
 			evidenceIds: [],
 			status: 'handled',
 			updatedAt: schedule.updatedAt,
@@ -268,7 +298,7 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
   id: newCardId(`workflow_${ready ? 'preview' : repairing ? 'repair' : phase === 'blocked' ? 'blocked' : 'build'}`, targetId),
   projectId: scope.projectId, runId, kind: 'result',
   headline: ready ? 'Your app is ready to try' : repairing ? 'One check needs another pass' : phase === 'blocked' ? 'Your build needs attention' : 'Your app is taking shape',
-  summary: ready ? 'Open the checked app preview. Your plan and build remain available.' : repairing ? String(round?.issue ?? 'A check failed. Caddie is still working on this build.') : String(workflow.detail ?? (phase === 'blocked' ? 'The build stopped. Your plan and saved files are retained.' : 'Caddie is implementing your approved plan and running the checks.')),
+  summary: ready ? 'Open the checked app preview. Your plan and build remain available.' : repairing ? plainCheck(String(round?.issue ?? '')) : String(workflow.detail ?? (phase === 'blocked' ? 'The build stopped. Your plan and saved files are retained.' : 'Caddie is implementing your approved plan and running the checks.')),
   evidenceIds: [], status: ready ? 'handled' : phase === 'blocked' ? 'blocked' : 'changed', updatedAt: String(workflow.updatedAt),
   primaryAction: { label: ready ? 'Try the app' : 'View activity', kind: ready ? 'preview' : 'inspect', targetId },
  }];
@@ -428,18 +458,26 @@ async function opportunityCards(db: D1Database, scope: Scope): Promise<DecisionC
 	const candidates = await listCandidates(db, scope);
 	return candidates
 		.filter((candidate) => candidate.status === 'accepted')
-		.map((candidate) => ({
-			id: newCardId('opportunity', candidate.id),
-			projectId: scope.projectId,
-			kind: 'result',
-			headline: `A suitable opportunity is saved: ${candidate.title}`,
-			summary:
-				'This was saved from the local seed feed — live contest sources are not connected yet, so this is Caddie\'s built-in sample, not a live match. Explore ideas for it when you are ready.',
-			evidenceIds: [],
-			status: 'handled',
-			updatedAt: candidate.updatedAt,
-			primaryAction: { label: 'Review opportunity', kind: 'inspect', targetId: candidate.id },
-		}) satisfies DecisionCard);
+		.map((candidate) => {
+			// A sample from the built-in seed feed vs a real listing read from a
+			// live source (Devpost). Worded from the candidate's own source so the
+			// card never over- or under-claims where it came from.
+			const live = candidate.source !== 'local-seed' && candidate.source !== 'catalog';
+			const summary = live
+				? 'Read from a live contest listing. Explore ideas for it when you are ready.'
+				: "A sample from Caddie's built-in feed, not a real contest yet. Explore ideas for it when you are ready.";
+			return {
+				id: newCardId('opportunity', candidate.id),
+				projectId: scope.projectId,
+				kind: 'result',
+				headline: `A suitable opportunity is saved: ${candidate.title}`,
+				summary,
+				evidenceIds: [],
+				status: 'handled',
+				updatedAt: candidate.updatedAt,
+				primaryAction: { label: 'Review opportunity', kind: 'inspect', targetId: candidate.id },
+			} satisfies DecisionCard;
+		});
 }
 
 /** The account-wide brief: every authorised project's cards, grouped, ranked

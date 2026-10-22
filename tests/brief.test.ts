@@ -336,8 +336,8 @@ describe('account brief (accountBrief)', () => {
 		const opportunities = brief.cards.filter((card) => card.primaryAction.kind === 'inspect' && card.projectId === 'unit-home-a');
 		expect(opportunities.length).toBe(1);
 		expect(opportunities[0]!.headline).toContain('Solar Hackweek');
-		expect(opportunities[0]!.summary).toContain('local seed');
-		expect(opportunities[0]!.summary).toContain('not connected yet');
+		expect(opportunities[0]!.summary).toMatch(/sample/i);
+		expect(opportunities[0]!.summary).not.toContain('not connected yet');
 
 		// The LIVE preview is a card; the revoked one is not.
 		const previews = brief.cards.filter((card) => card.primaryAction.kind === 'preview');
@@ -494,4 +494,76 @@ test('Older decisions paginate with no gaps or duplicates and exclude other acto
   expect(cards.every(c=>c.projectId===aliceScope.projectId && c.status==='handled')).toBe(true);
   expect((await approvalHistory(db,'unknown-actor')).cards).toEqual([]);
  } finally { sqlite.close(); }
+});
+
+// --- PLAIN WORDING ON THE CARD FACE (2026-10-22) --------------------------------
+// Non-technical owners must never see a raw check name, a machine timestamp, or a
+// stale "not connected" claim. These pin the three leaks found in the Brief review.
+describe('brief cards never show raw machine strings', () => {
+	test('a repairing build names the check in plain words, not "feature-2:behavior-tests"', async () => {
+		const world = makeWorld();
+		try {
+			world.sqlite.exec(`
+				insert into "build_workflows" (projectId, runId, conversationId, intakeKey, brief, phase, detail, updatedAt)
+				 values ('unit-proj-a','unit-run-rep','unit-conv-rep','unit-intake-rep','Build a farm log.','building',null,'${ISO}');
+				insert into "run_rounds" ("id","runId","projectId","issue","round","outcome","detail","createdAt") values
+					('unit-rep-1','unit-run-rep','unit-proj-a','feature-2:behavior-tests','repair_attempt','failed',null,'2026-10-04T09:00:00.000Z');
+			`);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const repair = cards.find((card) => card.headline === 'One check needs another pass');
+			expect(repair).toBeDefined();
+			// Not the bare token, and no "word:word" machine id on the face.
+			expect(repair!.summary).not.toBe('feature-2:behavior-tests');
+			expect(repair!.summary).not.toMatch(/\b[a-z0-9-]+:[a-z0-9-]+\b/);
+			expect(repair!.summary).toContain(' ');
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a schedule card shows a readable date, not a raw ISO timestamp', async () => {
+		const world = makeWorld();
+		try {
+			seedAliceState(world.sqlite);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const schedule = cards.find((card) => card.kind === 'deadline' && card.primaryAction.targetId === 'unit-sch-armed');
+			expect(schedule).toBeDefined();
+			expect(schedule!.summary).not.toContain('2026-10-06T07:00:00.000Z');
+			expect(schedule!.summary).not.toContain('T07:00');
+			// A month name proves the timestamp was formatted for a person.
+			expect(schedule!.summary).toMatch(/January|February|March|April|May|June|July|August|September|October|November|December/);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a saved opportunity words its source truthfully: a sample says sample, a live listing says live', async () => {
+		const world = makeWorld();
+		try {
+			world.sqlite.exec(`
+				insert into "projects" ("id","workspaceId","name","kind","status","createdAt","updatedAt") values
+					('unit-home-w','unit-ws-a','Home','home','active','${ISO}','${ISO}');
+				insert into "discovery_feed_runs" ("id","projectId","requestedBy","requestedAt","candidateCount") values
+					('unit-feed-w','unit-home-w','unit-alice','${ISO}',2);
+				insert into "discovery_candidates" ("id","projectId","source","url","title","summary","requirementsJson","status","feedRunId","firstSeenAt","updatedAt") values
+					('cand_seed_w','unit-home-w','local-seed','https://contest.example/seed','Seed Sample','x','[]','accepted','unit-feed-w','${ISO}','${ISO}'),
+					('cand_live_w','unit-home-w','devpost','https://nebius.devpost.com','Nebius Live','x','[]','accepted','unit-feed-w','${ISO}','${ISO}');
+			`);
+			const brief = await accountBrief(world.db, 'unit-alice');
+			const seed = brief.cards.find((card) => card.headline.includes('Seed Sample'));
+			const live = brief.cards.find((card) => card.headline.includes('Nebius Live'));
+			expect(seed).toBeDefined();
+			expect(live).toBeDefined();
+			// The seed card is honest about being a sample; the live card says it
+			// came from a live listing. Neither claims sources are "not connected".
+			expect(seed!.summary).toMatch(/sample/i);
+			expect(seed!.summary).not.toMatch(/live/i);
+			expect(live!.summary).toMatch(/live/i);
+			expect(live!.summary).not.toMatch(/sample/i);
+			expect(live!.summary).not.toContain('not connected yet');
+			expect(live!.summary).not.toContain('local seed');
+		} finally {
+			world.sqlite.close();
+		}
+	});
 });
