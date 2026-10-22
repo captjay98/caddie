@@ -18,10 +18,11 @@ import { SCAFFOLD_BASE_FILES } from '../../stacks/react-hono/scaffold.ts';
 import { SCAFFOLD_LOCKFILE } from '../../stacks/react-hono/scaffold-lock.ts';
 import { generateContractFiles } from '../../apps/app/src/server/contract-files.ts';
 import { NOTES_BLOCK, type ContractFixture } from '../fixtures/contract/notes-apps.ts';
+import type { ArchitectureBlock } from '@caddie/contracts';
 
 const bun = process.execPath;
 
-/** The generated contract files for the notes block — written for every fixture. */
+/** The generated contract files for the notes block — written at materialise. */
 const GENERATED = generateContractFiles(NOTES_BLOCK, { kind: 'small' }).files;
 
 export interface FixtureApp {
@@ -58,13 +59,31 @@ export function materializeFixtureApp(): FixtureApp {
 	};
 }
 
-/** Put a fixture's builder files into the app, replacing any previous fixture's. */
-export function applyFixture(app: FixtureApp, fixture: ContractFixture): void {
-	// Remove a previous fixture's extra migration / screen so they don't linger.
-	for (const stale of ['migrations/0001_notes.sql', 'src/NotesScreen.tsx', 'src/server.ts']) {
+/**
+ * Put a fixture's builder files into the app, replacing any previous fixture's,
+ * and (re)write the GENERATED caddie/ files for this fixture's block — exactly
+ * what the host writes before a check run. The block defaults to NOTES_BLOCK.
+ */
+export function applyFixture(app: FixtureApp, fixture: ContractFixture, block: ArchitectureBlock = NOTES_BLOCK): void {
+	// Remove a previous fixture's extra migration / screen / app / server so they
+	// don't linger across fixtures (notes and team apps use different file names).
+	for (const stale of [
+		'migrations/0001_notes.sql',
+		'migrations/0001_schema.sql',
+		'src/NotesScreen.tsx',
+		'src/LogsScreen.tsx',
+		'src/App.tsx',
+		'src/server.ts',
+	]) {
 		const full = join(app.dir, stale);
 		if (existsSync(full)) rmSync(full, { force: true });
 	}
+	// The generated contract files for THIS fixture's block (contract.ts and
+	// contract.test.ts differ per block), overwriting the materialise-time set.
+	// A fixture that names its built features gets the feature-scoped test, as
+	// the host writes it during a build.
+	const generated = generateContractFiles(block, { kind: 'small', ...(fixture.features ? { features: fixture.features } : {}) });
+	for (const [path, text] of Object.entries(generated.files)) write(app.dir, path, text);
 	for (const [path, text] of Object.entries(fixture.files)) write(app.dir, path, text);
 	// Fresh database file for each fixture run.
 	for (const suffix of ['', '-wal', '-shm', '.handoff.json']) {

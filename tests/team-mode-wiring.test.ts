@@ -24,6 +24,7 @@ import {
 	readOutputContractReceipts,
 } from '../apps/app/src/server/output-contract-receipts.ts';
 import { checkPublishSafety } from '../apps/app/src/server/publish-safety.ts';
+import { featuresInContractScope, type BuildFeatureRow } from '../apps/app/src/server/build-features.ts';
 import type { ArchitectureBlock, Scope } from '@caddie/contracts';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 
@@ -282,5 +283,35 @@ describe('team-mode wiring — publish receipts (part G, item 4)', () => {
 		expect(result.refused).toBe(true);
 		expect(result.findings.some((f) => f.kind === 'red-receipt')).toBe(true);
 		sqlite.close();
+	});
+});
+
+describe('team-mode wiring — the contract check covers the features built so far (part E)', () => {
+	const row = (featureId: string, position: number, status: BuildFeatureRow['status']): BuildFeatureRow => ({
+		projectId: 'p',
+		runId: 'r',
+		planId: 'plan',
+		featureId,
+		position,
+		title: featureId,
+		doneWhen: [],
+		status,
+		attempts: 0,
+		testsPassed: null,
+		checkpointRef: null,
+		passedAt: null,
+	});
+
+	test('passed features plus the one being built; later features are left out', () => {
+		expect(featuresInContractScope([row('crews', 0, 'passed'), row('logs', 1, 'building'), row('admin', 2, 'pending')])).toEqual(['crews', 'logs']);
+	});
+
+	test('a feature that failed a try is still the current one', () => {
+		expect(featuresInContractScope([row('crews', 0, 'passed'), row('logs', 1, 'failed'), row('admin', 2, 'pending')])).toEqual(['crews', 'logs']);
+	});
+
+	test('before any feature passes, only the first; when all have passed, all of them', () => {
+		expect(featuresInContractScope([row('crews', 0, 'pending'), row('logs', 1, 'pending')])).toEqual(['crews']);
+		expect(featuresInContractScope([row('crews', 0, 'passed'), row('logs', 1, 'passed')])).toEqual(['crews', 'logs']);
 	});
 });

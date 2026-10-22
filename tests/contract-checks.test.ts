@@ -9,10 +9,21 @@
 // Classification: LOCAL VERIFIED.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { materializeFixtureApp, applyFixture, runPhase, type FixtureApp } from './support/contract-fixtures-app.ts';
-import { CONTRACT_FIXTURES, LOCALSTORAGE_SCREEN, CORRECT_SCREEN } from './fixtures/contract/notes-apps.ts';
+import {
+	CONTRACT_FIXTURES,
+	TEAM_FIXTURES,
+	TEAM_SCOPED_FIXTURES,
+	TEAM_BLOCK,
+	NOTES_BLOCK,
+	LOCALSTORAGE_SCREEN,
+	CORRECT_SCREEN,
+	type ContractFixture,
+} from './fixtures/contract/notes-apps.ts';
 import { checkScreensUseApi } from '../apps/app/src/server/contract-files.ts';
+import type { ArchitectureBlock } from '@caddie/contracts';
 
 const SLOW = 240_000;
+const PHASES = ['create', 'read', 'privacy-screen', 'test-mode'] as const;
 
 describe('part E: the static check — screens reach the server only through caddie/api.ts', () => {
 	test('a screen using caddie/api.ts passes; one reading localStorage or calling fetch fails', () => {
@@ -29,56 +40,91 @@ describe('part E: the static check — screens reach the server only through cad
 	});
 });
 
-describe('part E: the contract check runs the real test apps', () => {
-	let app: FixtureApp;
+/**
+ * Why each bad app must fail: the first failing phase's output must carry this
+ * sentence, so a check that breaks for an unrelated reason can't stand in for
+ * the check the defect targets.
+ */
+const WHY: Readonly<Record<string, string>> = {
+	'kept-in-memory': "reading A's record after restart failed",
+	'dummy-row-serves-memory': "reading A's record after restart failed",
+	'no-owner-filter': "B can read A's record",
+	'update-not-saved': 'the change was not saved',
+	'screen-reads-localstorage': 'does not show a record the server saved',
+	'team-route-without-team-filter': 'the route does not filter by team',
+	'team-update-not-saved': 'the change was not saved',
+	'team-screen-reads-localstorage': "does not show the team's saved record",
+	'team-delete-without-team-filter': "B deleted A's record through B's own team",
+	'team-crews-built-whole-design': 'This route is not built yet',
+};
 
+/** Assert a fixture passes the phases it should and fails exactly the ones it must. */
+function assertFixture(app: FixtureApp, fixture: ContractFixture, block: ArchitectureBlock): void {
+	applyFixture(app, fixture, block);
+	const g: Record<string, { ok: boolean; out: string }> = {};
+	for (const phase of PHASES) {
+		const r = runPhase(app, phase);
+		g[phase] = { ok: r.ok && r.failed === 0 && r.passed > 0, out: r.out };
+	}
+	const must = new Set<string>(fixture.mustFail);
+	if (must.size === 0) {
+		for (const phase of PHASES) {
+			expect(g[phase]!.ok, `${fixture.id}: ${phase} should PASS but failed:\n${g[phase]!.out}`).toBe(true);
+		}
+	} else {
+		const why = WHY[fixture.id];
+		expect(why, `${fixture.id}: a bad app needs its expected failure sentence in WHY`).toBeDefined();
+		const firstRed = PHASES.find((phase) => must.has(phase))!;
+		expect(g[firstRed]!.out, `${fixture.id}: ${firstRed} failed, but not for the reason its defect should give`).toContain(why!);
+		// Each named phase must be RED; every earlier phase must be GREEN so the
+		// failure is a real bite, not a phase that never ran.
+		for (let i = 0; i < PHASES.length; i++) {
+			const phase = PHASES[i]!;
+			if (must.has(phase)) {
+				expect(g[phase]!.ok, `${fixture.id}: should FAIL ${phase} but it passed:\n${g[phase]!.out}`).toBe(false);
+				for (let k = 0; k < i; k++) {
+					const earlier = PHASES[k]!;
+					if (!must.has(earlier)) {
+						expect(g[earlier]!.ok, `${fixture.id}: ${earlier} should PASS so the ${phase} failure is real:\n${g[earlier]!.out}`).toBe(true);
+					}
+				}
+			}
+		}
+	}
+}
+
+describe('part E: the contract check runs the real test apps (person-owned)', () => {
+	let app: FixtureApp;
 	beforeAll(() => {
 		app = materializeFixtureApp();
 	}, SLOW);
-
-	afterAll(() => {
-		app?.cleanup();
-	});
+	afterAll(() => app?.cleanup());
 
 	for (const fixture of CONTRACT_FIXTURES) {
-		test(
-			`${fixture.id}: ${fixture.plain}`,
-			() => {
-				applyFixture(app, fixture);
+		test(`${fixture.id}: ${fixture.plain}`, () => assertFixture(app, fixture, NOTES_BLOCK), SLOW);
+	}
+});
 
-				// Phase order is the real order; the restart lives between create and read.
-				const create = runPhase(app, 'create');
-				const read = runPhase(app, 'read');
-				const privacy = runPhase(app, 'privacy-screen');
+describe('part E: the contract check runs the real team apps', () => {
+	let app: FixtureApp;
+	beforeAll(() => {
+		app = materializeFixtureApp();
+	}, SLOW);
+	afterAll(() => app?.cleanup());
 
-				const phaseGreen: Record<string, boolean> = {
-					create: create.ok && create.passed > 0 && create.failed === 0,
-					read: read.ok && read.passed > 0 && read.failed === 0,
-					'privacy-screen': privacy.ok && privacy.passed > 0 && privacy.failed === 0,
-				};
+	for (const fixture of TEAM_FIXTURES) {
+		test(`${fixture.id}: ${fixture.plain}`, () => assertFixture(app, fixture, TEAM_BLOCK), SLOW);
+	}
+});
 
-				if (fixture.mustFail.length === 0) {
-					// The correct app passes every phase.
-					expect(phaseGreen.create, `create failed:\n${create.out}`).toBe(true);
-					expect(phaseGreen.read, `read failed:\n${read.out}`).toBe(true);
-					expect(phaseGreen['privacy-screen'], `privacy-screen failed:\n${privacy.out}`).toBe(true);
-				} else {
-					// Each named phase must be RED, and it must be the phase part E says.
-					for (const phase of fixture.mustFail) {
-						expect(phaseGreen[phase], `${fixture.id} should FAIL the ${phase} phase but it passed:\ncreate=${create.out}\nread=${read.out}\nprivacy=${privacy.out}`).toBe(false);
-					}
-					// A failure must be an earlier phase passing then the named one biting —
-					// never a phase that simply never ran (which would be a false pass).
-					if (fixture.mustFail.includes('read')) {
-						expect(phaseGreen.create, `${fixture.id}: create should PASS so the read failure is real:\n${create.out}`).toBe(true);
-					}
-					if (fixture.mustFail.includes('privacy-screen')) {
-						expect(phaseGreen.create, `${fixture.id}: create should pass:\n${create.out}`).toBe(true);
-						expect(phaseGreen.read, `${fixture.id}: read should pass:\n${read.out}`).toBe(true);
-					}
-				}
-			},
-			SLOW,
-		);
+describe('part E: the check covers only the features built so far (passed plus the current one)', () => {
+	let app: FixtureApp;
+	beforeAll(() => {
+		app = materializeFixtureApp();
+	}, SLOW);
+	afterAll(() => app?.cleanup());
+
+	for (const fixture of TEAM_SCOPED_FIXTURES) {
+		test(`${fixture.id}: ${fixture.plain}`, () => assertFixture(app, fixture, TEAM_BLOCK), SLOW);
 	}
 });

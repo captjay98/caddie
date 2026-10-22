@@ -4,8 +4,21 @@
 // in docs/plans/2026-10-22-software-team-mode.md part G.
 //
 // Classification: LOCAL VERIFIED.
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { Database } from 'bun:sqlite';
+import type { Scope } from '@caddie/contracts';
 import { checkPublishSafety, isAppKeyName, type OutputVerifyReceipts } from '../apps/app/src/server/publish-safety.ts';
+import type { D1Database } from '../apps/app/src/server/auth.ts';
+import type { AppHost } from '../apps/app/src/server/app-host.ts';
+import { publishApp, type PublishDeps } from '../apps/app/src/server/publish.ts';
+import { requestAppSecret, setAppSecret } from '../apps/app/src/server/app-secrets.ts';
+import { recordDecision } from '../apps/app/src/server/approvals.ts';
+import { decideDesign, decideWorkflow, startProjectFromChat, storeBuildOutput, workflowSnapshot } from '../apps/app/src/server/build-workflow.ts';
+import { createPlanDocRevision, ensureHomeProject } from '../apps/app/src/server/projects.ts';
+import { createRun } from '../apps/app/src/server/runs.ts';
+import { ScopeError, projectScopeForUser } from '../apps/app/src/server/scope.ts';
+import { parseKeyring, type Keyring } from '../apps/app/src/server/secret-box.ts';
+import { addUser, migratedDatabase } from './fixtures/sqlite-d1.ts';
 
 const greenReceipts = (outputId: string): OutputVerifyReceipts => ({
 	outputId,
@@ -181,5 +194,126 @@ describe('part G: app key name shape', () => {
 	test('WEATHER_API_KEY is a valid app-key name; a lowercase one is not', () => {
 		expect(isAppKeyName('WEATHER_API_KEY')).toBe(true);
 		expect(isAppKeyName('weatherApiKey')).toBe(false);
+	});
+});
+
+
+// --- integration: the call site passes the saved VALUES (plan part G) --------
+// Part G's saved-value scan is only live if the publish call site reads the
+// keys' values and passes them to checkPublishSafety. This exercises the REAL
+// deployOutput path (through publishApp): an app whose bundle ships the value of
+// a saved key is refused with PUBLISH_UNSAFE, before any Cloudflare call. The
+// AppHost is a stub that throws if touched, so reaching it would fail loudly —
+// proving the refusal happens at the safety gate, not downstream.
+//
+// Classification: LOCAL VERIFIED.
+
+/** An AppHost that throws on every call — the safety refusal must fire first. */
+const throwingHost: AppHost = new Proxy({} as AppHost, {
+	get(_t, prop) {
+		return () => {
+			throw new Error(`AppHost.${String(prop)} was called — publish safety did not refuse first`);
+		};
+	},
+});
+
+/** True when the thrown message is the publish-safety unsafe refusal. */
+function isUnsafeMessage(message: string): boolean {
+	return /can't be published yet|cannot be published yet|saved key/i.test(message);
+}
+
+describe('part G: the publish call site scans the saved key VALUES (deployOutput path)', () => {
+	let sqlite: Database;
+	let db: D1Database;
+	let scope: Scope;
+	let keyring: Keyring;
+	let deps: PublishDeps;
+	let planId: string;
+	let runId: string;
+
+	const SECRET_VALUE = 'ow-live-SECRET-value-abc123';
+	const CLEAN_JS = 'console.log("farm log")';
+	const CSS = 'body{color:green}';
+	const INIT = { name: '0001_init.sql', sql: 'create table notes (id integer primary key, body text not null);' };
+
+	async function readyProject(name = 'Farm Log') {
+		const home = await ensureHomeProject(db, 'alice');
+		const homeScope = await projectScopeForUser(db, 'alice', home.id);
+		const homeRun = await createRun(db, homeScope, { modelRouteId: 'nemotron-3-super', payerId: 'alice', conversationId: `conv-${crypto.randomUUID()}` });
+		const started = await startProjectFromChat(db, homeScope, {
+			name,
+			description: 'Log feed',
+			brief: 'Build a farm log with a database. Show me the plan first.',
+			operationKey: `create-${crypto.randomUUID()}`,
+			sourceConversationId: homeRun.conversationId,
+		});
+		const projectScope = await projectScopeForUser(db, 'alice', started.project.id);
+		const plan = await createPlanDocRevision(db, projectScope, { kind: 'prd', body: '# Farm log\n\nLog feed.' });
+		await workflowSnapshot(db, projectScope);
+		await decideWorkflow(db, projectScope, { planId: plan.id, decision: 'approved' });
+		const design = await createPlanDocRevision(db, projectScope, { kind: 'design', body: '# Design\n\nOne screen.' });
+		await workflowSnapshot(db, projectScope);
+		await decideDesign(db, projectScope, { designId: design.id, decision: 'approved' });
+		return { scope: projectScope, planId: plan.id, runId: started.workflow.runId as string };
+	}
+
+	async function storeOutput(js: string, server: string | null): Promise<string> {
+		sqlite.prepare('update build_workflows set phase = ? where projectId = ?').run('building', scope.projectId);
+		const output = await storeBuildOutput(db, scope, {
+			html: '<!doctype html><html><body>preview</body></html>',
+			image: `sha256:img-${crypto.randomUUID()}`,
+			planId,
+			runId,
+			bundle: { server, migrations: [INIT], client: { js, css: CSS } },
+		});
+		return output.outputId;
+	}
+
+	beforeEach(async () => {
+		({ sqlite, db } = migratedDatabase());
+		addUser(sqlite, 'alice', 'alice@example.com');
+		keyring = await parseKeyring(`k1:${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64')}`);
+		deps = {
+			host: throwingHost,
+			appsDomain: 'caddieapps.test',
+			keyring,
+			probe: async () => 200,
+			authSecret: 'caddie-master-secret-for-tests-0123',
+			sleep: async () => undefined,
+		};
+		const ready = await readyProject();
+		scope = ready.scope;
+		planId = ready.planId;
+		runId = ready.runId;
+		// A saved key whose value must never ship to the browser.
+		await requestAppSecret(db, scope, { name: 'WEATHER_API_KEY', description: 'Forecast.' });
+		await setAppSecret(db, keyring, scope, { name: 'WEATHER_API_KEY', value: SECRET_VALUE });
+	});
+
+	afterEach(() => sqlite.close());
+
+	test('a bundle that ships the saved key VALUE is refused through publishApp', async () => {
+		const outputId = await storeOutput(`const K = ${JSON.stringify(SECRET_VALUE)}; fetch("/x?k=" + K)`, null);
+		let code: string | null = null;
+		try {
+			await publishApp(db, deps, scope, { outputId });
+		} catch (error) {
+			expect(error).toBeInstanceOf(ScopeError);
+			code = (error as ScopeError).code;
+		}
+		expect(code, 'a bundle carrying a saved key value should be refused as unsafe').toBe('PUBLISH_UNSAFE');
+	});
+
+	test('MUTATION: the SAME setup with a clean bundle is NOT refused for the value reason', async () => {
+		// Proves the refusal above is the value scan, not an unrelated gate: a clean
+		// bundle gets PAST publish safety (then fails loudly at the throwing host).
+		const outputId = await storeOutput(CLEAN_JS, null);
+		let message = '';
+		try {
+			await publishApp(db, deps, scope, { outputId });
+		} catch (error) {
+			message = error instanceof Error ? error.message : String(error);
+		}
+		expect(isUnsafeMessage(message), `a clean bundle must not be refused as unsafe (got: ${message})`).toBe(false);
 	});
 });

@@ -353,6 +353,19 @@ function apiTs(): string {
 		'  delete: <T>(path: string) => request<T>("DELETE", path),',
 		'};',
 		'',
+		'// Team apps: the team the person is looking at. A screen that shows team',
+		'// records reads it with currentTeamId() and, when none is set, uses the',
+		'// person\'s first team (from the team list route) and saves it with',
+		'// setCurrentTeamId(). A team picker calls setCurrentTeamId() too. Caddie\'s',
+		'// check sets it before it opens a team screen.',
+		'const TEAM_KEY = "caddie.teamId";',
+		'export function currentTeamId(): string | null {',
+		'  try { return globalThis.localStorage?.getItem(TEAM_KEY) ?? null; } catch { return null; }',
+		'}',
+		'export function setCurrentTeamId(teamId: string): void {',
+		'  try { globalThis.localStorage?.setItem(TEAM_KEY, teamId); } catch { /* storage unavailable */ }',
+		'}',
+		'',
 	].join('\n');
 }
 
@@ -435,49 +448,171 @@ function exampleBody(route: ArchitectureRoute): Record<string, string> {
 	return body;
 }
 
+/** A second example body, so an update is a visibly different value from create. */
+function updatedBody(route: ArchitectureRoute): Record<string, string> {
+	const body: Record<string, string> = {};
+	for (const f of route.request) body[f.name] = f.example + ' (changed)';
+	return body;
+}
+
+/** The CRUD routes for one table, by op. */
+interface TableRoutes {
+	readonly table: string;
+	readonly create: ArchitectureRoute | null;
+	readonly read: ArchitectureRoute | null;
+	readonly list: ArchitectureRoute | null;
+	readonly update: ArchitectureRoute | null;
+	readonly delete: ArchitectureRoute | null;
+}
+
+function routesForTable(block: ArchitectureBlock, table: string): TableRoutes {
+	const of = (op: ArchitectureRoute['op']) => block.routes.find((r) => r.table === table && r.op === op) ?? null;
+	return { table, create: of('create'), read: of('read'), list: of('list'), update: of('update'), delete: of('delete') };
+}
+
+/** A route's path with every :param replaced by a literal value (first match wins per name). */
+const substPath = (path: string, params: Record<string, string>): string =>
+	path.replace(/:([a-zA-Z]+)/g, (_m, name: string) => (name in params ? params[name]! : 'x'));
+
+/** The subject the generated test drives: a table and its CRUD, with example bodies. */
+interface SubjectMeta {
+	readonly table: string;
+	readonly idField: string;
+	readonly createId: string | null;
+	readonly createPath: string | null;
+	readonly createMethod: string | null;
+	readonly createBody: Record<string, string>;
+	readonly readPath: string | null;
+	readonly readMethod: string | null;
+	readonly listPath: string | null;
+	readonly listMethod: string | null;
+	readonly updatePath: string | null;
+	readonly updateMethod: string | null;
+	readonly updateBody: Record<string, string>;
+	readonly updateField: string | null;
+	readonly deletePath: string | null;
+	readonly deleteMethod: string | null;
+	readonly response: string[];
+}
+
+function subjectFor(routes: TableRoutes): SubjectMeta {
+	const idField = routes.create?.response.find((f) => f === 'id') ?? 'id';
+	const updateField = routes.update?.request[0]?.name ?? null;
+	return {
+		table: routes.table,
+		idField,
+		createId: routes.create?.id ?? null,
+		createPath: routes.create?.path ?? null,
+		createMethod: routes.create?.method ?? null,
+		createBody: routes.create ? exampleBody(routes.create) : {},
+		readPath: routes.read?.path ?? null,
+		readMethod: routes.read?.method ?? 'GET',
+		listPath: routes.list?.path ?? null,
+		listMethod: routes.list?.method ?? 'GET',
+		updatePath: routes.update?.path ?? null,
+		updateMethod: routes.update?.method ?? null,
+		updateBody: routes.update ? updatedBody(routes.update) : {},
+		updateField,
+		deletePath: routes.delete?.path ?? null,
+		deleteMethod: routes.delete?.method ?? null,
+		response: routes.create?.response ?? routes.read?.response ?? [],
+	};
+}
+
 /**
  * The generated contract test. It is ONE file, run four times with different
- * CADDIE_CONTRACT_PHASE values so the host can drive the restart across two
- * processes (host-checks.ts). The phases:
- *   create          A signs in and creates each person/team record (step 3).
- *   read            reopen the file; read by id and in the list (steps 3-4).
- *   privacy-screen  B can't see A's record; screens show A's and not B's; and
- *                   a team member can / an outsider can't (steps 5-8).
- *   test-mode       locked/email/job/file behaviour, when declared (step 9).
- * It writes its own data through the app's REAL routes via caddie/api-style
- * fetch at app.request, over the FILE database (createFileEnv), so "saved" is
- * proven across processes.
+ * CADDIE_CONTRACT_PHASE values so the host can drive restarts across SEPARATE
+ * processes (host-checks.ts). Each phase process opens the file database fresh,
+ * so moving from one phase to the next is a real restart. The phases:
+ *   create          A signs in; seeds teams (team mode); creates each record.
+ *   read            restart; read by id and in the list; then update (step 3-4).
+ *   privacy-screen  restart; the update survived; second-person and team/role
+ *                   checks; the screen shows A's record and not B's; then delete.
+ *   test-mode       restart; the delete survived (404 + gone); test-mode checks.
+ * Data crosses phases through a handoff JSON file next to the database, so a
+ * later process knows the ids and cookies the earlier one made.
+ *
+ * NO test is vacuous: a declared subject the test cannot exercise FAILS with a
+ * plain sentence (never a skip or an early return), so a weak app cannot pass
+ * by having nothing checked.
  */
-function contractTestTs(block: ArchitectureBlock): string {
-	// Pick the simplest person-owned create/read/list to drive the core round trip.
-	const personTables = new Set(block.tables.filter((t) => t.owner === 'person').map((t) => t.name));
-	const createRoute = block.routes.find((r) => r.op === 'create' && r.table !== null && personTables.has(r.table)) ?? null;
-	const readRoute =
-		createRoute && createRoute.table
-			? block.routes.find((r) => r.op === 'read' && r.table === createRoute.table) ?? null
-			: null;
-	const listRoute =
-		createRoute && createRoute.table
-			? block.routes.find((r) => r.op === 'list' && r.table === createRoute.table) ?? null
-			: null;
+function contractTestTs(block: ArchitectureBlock, features?: readonly string[]): string {
+	// Plan part E checks "the routes of passed features plus the current one".
+	// During a build the host passes those feature ids; the final check passes
+	// none, so the whole design is driven. Only this TEST is scoped: the route
+	// table in caddie/contract.ts stays whole, so every route is registered from
+	// the first feature (an unbuilt one answers 501). In a scoped test a check
+	// whose route is a later feature waits for it; a route that IS in scope but
+	// cannot be exercised still fails with a plain sentence.
+	const scoped = features !== undefined;
+	const inScope = new Set(features ?? []);
+	const view: ArchitectureBlock = scoped ? { ...block, routes: block.routes.filter((r) => inScope.has(r.feature)) } : block;
 
-	const hasTeam = block.team !== null;
+	// The person subject: the first person-owned table with a create route.
+	const personTable = block.tables.find((t) => t.owner === 'person' && view.routes.some((r) => r.table === t.name && r.op === 'create'));
+	const person = personTable ? subjectFor(routesForTable(view, personTable.name)) : null;
+
+	// Team mode: the team registry table, a team-owned child table (its records
+	// live under /api/teams/:teamId/…), the team create/list routes, and the
+	// role and admin routes step 6 exercises.
+	const teamTable = block.team?.table ?? null;
+	const teamChildTable = block.tables.find(
+		(t) => t.owner === 'team' && t.name !== teamTable && view.routes.some((r) => r.table === t.name && r.op === 'create'),
+	);
+	const team = teamChildTable ? subjectFor(routesForTable(view, teamChildTable.name)) : null;
+	const teamCreate = teamTable ? view.routes.find((r) => r.table === teamTable && r.op === 'create') ?? null : null;
+	const teamList = teamTable ? view.routes.find((r) => r.table === teamTable && r.op === 'list') ?? null : null;
+	// The team checks start once a team can be started (its create route built).
+	const hasTeam = block.team !== null && (!scoped || teamCreate !== null);
+	// A team-role:<role> route (step 6: refuses C, allows A who holds creatorRole).
+	const roleRoute = view.routes.find((r) => teamRoleOf(r.access as Access) !== null) ?? null;
+	// An admin route (step 6: refuses B, allows the first account).
+	const adminRoute = view.routes.find((r) => r.access === 'admin') ?? null;
+
+	// Step 8: each screen that shows a table is checked against the record the
+	// test saved for that table: the team subject's (opened as the current team)
+	// or the person subject's. A screen of another table has no record to look
+	// for, so it is not checked here — checking it against this record would
+	// fail a correct app.
+	const screenOnly = new Set(block.screenOnly);
+	const tableScreens = block.screens
+		.filter((s) => !screenOnly.has(s.id) && s.shows.length > 0)
+		.flatMap((s) => {
+			const kind =
+				hasTeam && team && s.shows.includes(team.table) ? 'team' : person && s.shows.includes(person.table) ? 'person' : null;
+			return kind ? [{ id: s.id, path: s.path, kind }] : [];
+		});
+
+	// Step 9: declared test-mode features. A declared feature with no generated
+	// check makes the test-mode phase FAIL (see the phase below).
+	const declaredFeatures = {
+		payments: block.payments !== null,
+		emails: block.emails.length > 0,
+		jobs: block.jobs.length > 0,
+		files: block.tables.some((t) => t.fields.some((f) => f.type === 'file')),
+	};
 
 	const meta = {
-		createRouteId: createRoute?.id ?? null,
-		createPath: createRoute?.path ?? null,
-		createMethod: createRoute?.method ?? null,
-		createBody: createRoute ? exampleBody(createRoute) : {},
-		readPath: readRoute?.path ?? null,
-		listPath: listRoute?.path ?? null,
-		idField: createRoute?.response.find((f) => f === 'id') ?? 'id',
+		scoped,
 		hasTeam,
+		creatorRole: block.team?.creatorRole ?? null,
+		otherRole: block.team ? block.team.roles.find((r) => r !== block.team!.creatorRole) ?? block.team.roles[0]! : null,
+		teamTable,
+		person,
+		team,
+		teamCreate: teamCreate ? { path: teamCreate.path, method: teamCreate.method, body: exampleBody(teamCreate) } : null,
+		teamList: teamList ? { path: teamList.path, method: teamList.method } : null,
+		role: roleRoute ? { path: roleRoute.path, method: roleRoute.method, role: teamRoleOf(roleRoute.access as Access), body: exampleBody(roleRoute) } : null,
+		admin: adminRoute ? { path: adminRoute.path, method: adminRoute.method, body: exampleBody(adminRoute) } : null,
+		screens: tableScreens,
+		features: declaredFeatures,
 	};
 
 	return [
-		'// Caddie runtime file — do not edit. The generated contract test (plan part E).',
-		'// Run in phases by CADDIE_CONTRACT_PHASE so the host can restart between create',
-		'// and read in SEPARATE processes, on one file at CADDIE_TEST_DB_FILE.',
+		'// Caddie runtime file — do not edit. The generated contract test (plan part E,',
+		'// steps 1-9). Run in phases by CADDIE_CONTRACT_PHASE; each phase is a SEPARATE',
+		'// process on one file at CADDIE_TEST_DB_FILE, so moving between phases is a real',
+		'// restart. Data crosses phases through HANDOFF (a JSON file beside the database).',
 		'import { expect, test } from "bun:test";',
 		'import { app } from "../src/server";',
 		'import { signInForTest } from "../test/setup/auth";',
@@ -488,22 +623,43 @@ function contractTestTs(block: ArchitectureBlock): string {
 		'const FILE = process.env.CADDIE_TEST_DB_FILE!;',
 		'const META = ' + j(meta) + ' as const;',
 		'const HANDOFF = FILE + ".handoff.json";',
+		'/** The current-team key caddie/api.ts keeps (currentTeamId); step 8 sets it. */',
+		'const TEAM_KEY = "caddie.teamId";',
 		'',
 		'function req(path: string, init: RequestInit, env: unknown) { return app.request(path, init, env as any); }',
 		'const jsonHeaders = (extra: Record<string, string> = {}) => ({ "content-type": "application/json", ...extra });',
+		'type Row = Record<string, unknown>;',
+		'async function readHandoff(): Promise<Row> { return (await Bun.file(HANDOFF).json()) as Row; }',
+		'async function writeHandoff(next: Row) { await Bun.write(HANDOFF, JSON.stringify(next)); }',
+		'/** Substitute :teamId then :id, then any other :param with a dummy. */',
+		'function path(p: string, teamId?: unknown, id?: unknown): string {',
+		'  let out = p;',
+		'  if (teamId !== undefined) out = out.replace(/:teamId\\b/g, String(teamId));',
+		'  if (id !== undefined) out = out.replace(/:id\\b/g, String(id));',
+		'  return out.replace(/:[a-zA-Z]+/g, "x");',
+		'}',
+		'/** Insert a team_members row directly (step 6 seeds membership). */',
+		'async function seedMember(env: any, teamId: unknown, personId: string, role: string) {',
+		'  const now = new Date().toISOString();',
+		'  await env.DB.prepare("insert or replace into team_members (teamId, personId, role, createdAt) values (?, ?, ?, ?)").bind(String(teamId), personId, role, now).run();',
+		'}',
+		'/** Make the first signed-in account an admin (step 6 admin route). */',
+		'async function seedAdmin(env: any, personId: string) {',
+		'  const now = new Date().toISOString();',
+		'  await env.DB.prepare("insert or replace into caddie_admins (personId, createdAt) values (?, ?)").bind(personId, now).run();',
+		'}',
 		'',
-		'// ---- phase: create (step 1-3) -------------------------------------------',
+		'// ==== phase: create (steps 1-3, 7) =======================================',
 		'if (PHASE === "create") {',
 		'  test("every route is registered through implement() (step 1)", async () => {',
 		'    const env = createFileEnv(FILE);',
-		'    // A route that exists answers something other than 404 "no such route".',
 		'    for (const route of ROUTES) {',
 		'      const res = await req(route.path.replace(/:[a-zA-Z]+/g, "x"), { method: route.method }, env);',
 		'      expect(res.status, `route ${route.id} (${route.method} ${route.path}) is not registered`).not.toBe(404);',
 		'    }',
 		'  });',
 		'',
-		'  test("sign-in routes answer 401 without a session (step 2)", async () => {',
+		'  test("guarded routes answer 401/403 without a session (step 2)", async () => {',
 		'    const env = createFileEnv(FILE);',
 		'    const guarded = ROUTES.filter((r) => r.access !== "public" && r.access !== "job");',
 		'    for (const route of guarded) {',
@@ -512,81 +668,393 @@ function contractTestTs(block: ArchitectureBlock): string {
 		'    }',
 		'  });',
 		'',
-		(meta.createRouteId
-			? [
-				'  test("A creates a record (step 3, process 1)", async () => {',
-				'    const env = createFileEnv(FILE);',
-				'    const { headers, user } = await signInForTest(app, env, "ada@example.com");',
-				'    const res = await req(META.createPath!, { method: META.createMethod!, headers: jsonHeaders(headers), body: JSON.stringify(META.createBody) }, env);',
-				'    expect([200, 201], `create failed: ${res.status} ${await res.clone().text()}`).toContain(res.status);',
-				'    const row = (await res.json()) as Record<string, unknown>;',
-				'    await Bun.write(HANDOFF, JSON.stringify({ id: row[META.idField], cookie: headers.cookie, ownerId: user.id }));',
-				'  });',
-			].join('\n')
-			: '  test.skip("no person-owned create route to exercise (step 3)", () => {});'),
-		'}',
-		'',
-		'// ---- phase: read (step 3-4) ---------------------------------------------',
-		'if (PHASE === "read") {',
-		(meta.createRouteId && meta.readPath
-			? [
-				'  test("after restart, A reads the record by id (step 3, process 2)", async () => {',
-				'    const env = createFileEnv(FILE);',
-				'    const handoff = (await Bun.file(HANDOFF).json()) as { id: unknown; cookie: string };',
-				'    const headers = { cookie: handoff.cookie };',
-				'    const path = META.readPath!.replace(/:id\\b/, String(handoff.id)).replace(/:[a-zA-Z]+/g, "x");',
-				'    const res = await req(path, { headers }, env);',
-				'    expect(res.status, `read after restart failed: ${res.status}`).toBe(200);',
-				'  });',
-			].join('\n')
-			: '  test.skip("no person-owned read route to exercise (step 3-4)", () => {});'),
-		(meta.createRouteId && meta.listPath
-			? [
-				'  test("after restart, the record is in A\'s list (step 3)", async () => {',
-				'    const env = createFileEnv(FILE);',
-				'    const handoff = (await Bun.file(HANDOFF).json()) as { id: unknown; cookie: string };',
-				'    const headers = { cookie: handoff.cookie };',
-				'    const res = await req(META.listPath!.replace(/:[a-zA-Z]+/g, "x"), { headers }, env);',
-				'    expect(res.status).toBe(200);',
-				'    const rows = (await res.json()) as Array<Record<string, unknown>>;',
-				'    expect(rows.some((r) => String(r[META.idField]) === String(handoff.id)), "the saved record is not in the list after restart").toBe(true);',
-				'  });',
-			].join('\n')
-			: '  test.skip("no person-owned list route to exercise (step 3)", () => {});'),
-		'}',
-		'',
-		'// ---- phase: privacy-screen (step 5-8) -----------------------------------',
-		'if (PHASE === "privacy-screen") {',
-		(meta.createRouteId && meta.listPath
-			? [
-				'  test("a second person B cannot see A\'s record (step 5)", async () => {',
-				'    const env = createFileEnv(FILE);',
-				'    const { headers } = await signInForTest(app, env, "bo@example.com");',
-				'    const res = await req(META.listPath!.replace(/:[a-zA-Z]+/g, "x"), { headers }, env);',
-				'    expect(res.status).toBe(200);',
-				'    const rows = (await res.json()) as Array<Record<string, unknown>>;',
-				'    const handoff = (await Bun.file(HANDOFF).json()) as { id: unknown };',
-				'    expect(rows.some((r) => String(r[META.idField]) === String(handoff.id)), "B can see A\'s record — the list is not owner-scoped").toBe(false);',
-				'  });',
-			].join('\n')
-			: '  test.skip("no list route to check privacy on (step 5)", () => {});'),
-		'  test("the team table\'s list is open to any signed-in person, but shows only your teams (step 6)", async () => {',
-		'    if (!META.hasTeam || TEAM_TABLE === null) return;',
+		'  test("A creates a record and the reply carries the declared fields (steps 3, 7)", async () => {',
 		'    const env = createFileEnv(FILE);',
-		'    const list = ROUTES.find((r) => r.table === TEAM_TABLE && r.op === "list");',
-		'    if (!list) return;',
-		'    const anon = await req(list.path.replace(/:[a-zA-Z]+/g, "x"), { method: list.method }, env);',
-		'    // signed-in people may list; anonymous may not.',
-		'    expect([401, 403]).toContain(anon.status);',
-		'    const { headers } = await signInForTest(app, env, "cas@example.com");',
-		'    const mine = await req(list.path.replace(/:[a-zA-Z]+/g, "x"), { method: list.method, headers }, env);',
-		'    expect(mine.status).toBe(200);',
+		'    const { headers, user } = await signInForTest(app, env, "ada@example.com");',
+		'    const handoff: Row = { aCookie: headers.cookie, aId: user.id };',
+		'',
+		'    if (META.hasTeam) {',
+		'      // Seed the first account as admin (step 6 admin route).',
+		'      await seedAdmin(env, user.id);',
+		'      // A owns team T1 with the creator role; T1 is the team registry row.',
+		'      if (!META.teamCreate) throw new Error("A team app must let a signed-in person start a team, but no team-create route is declared.");',
+		'      const created = await req(META.teamCreate.path.replace(/:[a-zA-Z]+/g, "x"), { method: META.teamCreate.method, headers: jsonHeaders(headers), body: JSON.stringify(META.teamCreate.body) }, env);',
+		'      expect([200, 201], `starting team T1 failed: ${created.status} ${await created.clone().text()}`).toContain(created.status);',
+		'      const t1 = (await created.json()) as Row;',
+		'      const t1Id = t1["id"];',
+		'      expect(t1Id, "the team-create reply has no id").toBeDefined();',
+		'      await seedMember(env, t1Id, user.id, META.creatorRole!);',
+		'      handoff.t1Id = t1Id;',
+		'',
+		'      if (!META.team || !META.team.createId) {',
+		'        // Scoped: the team records are a later feature; the team itself is checked now.',
+		'        if (!META.scoped) throw new Error("A team app must let a member add a record under its team, but no team-owned record route is declared.");',
+		'      } else {',
+		'        const res = await req(path(META.team.createPath!, t1Id), { method: META.team.createMethod!, headers: jsonHeaders(headers), body: JSON.stringify(META.team.createBody) }, env);',
+		'        expect([200, 201], `A creating a team record failed: ${res.status} ${await res.clone().text()}`).toContain(res.status);',
+		'        const row = (await res.json()) as Row;',
+		'        for (const field of META.team.response) expect(field in row, `the reply is missing the declared field "${field}" (step 7)`).toBe(true);',
+		'        handoff.teamRecordId = row[META.team.idField];',
+		'      }',
+		'    }',
+		'',
+		'    if (META.person && META.person.createId) {',
+		'      const res = await req(META.person.createPath!, { method: META.person.createMethod!, headers: jsonHeaders(headers), body: JSON.stringify(META.person.createBody) }, env);',
+		'      expect([200, 201], `A creating a record failed: ${res.status} ${await res.clone().text()}`).toContain(res.status);',
+		'      const row = (await res.json()) as Row;',
+		'      for (const field of META.person.response) expect(field in row, `the reply is missing the declared field "${field}" (step 7)`).toBe(true);',
+		'      handoff.personRecordId = row[META.person.idField];',
+		'    }',
+		'',
+		'    if (!META.scoped && !META.person?.createId && !META.hasTeam) throw new Error("No create route could be exercised, so nothing proves the app saves anything.");',
+		'    await writeHandoff(handoff);',
 		'  });',
 		'}',
 		'',
-		'// ---- phase: test-mode (step 9) ------------------------------------------',
+		'// ==== phase: read (steps 3-4: read after restart, then update) ===========',
+		'if (PHASE === "read") {',
+		'  test("after a restart, A reads the saved record by id and in the list (step 3)", async () => {',
+		'    const env = createFileEnv(FILE);',
+		'    const h = await readHandoff();',
+		'    const headers = { cookie: String(h.aCookie) };',
+		'',
+		'    if (META.hasTeam && META.team && (META.team.readPath || !META.scoped)) {',
+		'      if (!META.team.readPath) throw new Error("A team app must let a member read a saved record, but no team read route is declared.");',
+		'      const byId = await req(path(META.team.readPath, h.t1Id, h.teamRecordId), { method: META.team.readMethod, headers }, env);',
+		'      expect(byId.status, `reading A\'s team record after restart failed: ${byId.status}`).toBe(200);',
+		'      if (META.team.listPath) {',
+		'        const list = await req(path(META.team.listPath, h.t1Id), { method: META.team.listMethod, headers }, env);',
+		'        expect(list.status).toBe(200);',
+		'        const rows = (await list.json()) as Row[];',
+		'        expect(rows.some((r) => String(r[META.team.idField]) === String(h.teamRecordId)), "A\'s team record is gone from the list after restart").toBe(true);',
+		'      }',
+		'    }',
+		'',
+		'    if (META.person && META.person.readPath) {',
+		'      const byId = await req(path(META.person.readPath, undefined, h.personRecordId), { method: META.person.readMethod, headers }, env);',
+		'      expect(byId.status, `reading A\'s record after restart failed: ${byId.status}`).toBe(200);',
+		'      if (META.person.listPath) {',
+		'        const list = await req(path(META.person.listPath), { method: META.person.listMethod, headers }, env);',
+		'        expect(list.status).toBe(200);',
+		'        const rows = (await list.json()) as Row[];',
+		'        expect(rows.some((r) => String(r[META.person.idField]) === String(h.personRecordId)), "the saved record is gone from the list after restart").toBe(true);',
+		'      }',
+		'    }',
+		'  });',
+		'',
+		'  test("A updates the record; the change is saved (step 4, update half)", async () => {',
+		'    const env = createFileEnv(FILE);',
+		'    const h = await readHandoff();',
+		'    const headers = jsonHeaders({ cookie: String(h.aCookie) });',
+		'    const subj = META.hasTeam && META.team ? META.team : META.person;',
+		'    if (!subj) return; // nothing saved to change: no record route is built yet (scoped), or create already failed',
+		'    if (!subj.updatePath && META.scoped) return; // the change route is a later feature',
+		'    if (!subj.updatePath || !subj.updateField) throw new Error("The app declares no way to change a saved record, so a change cannot be proven to stick.");',
+		'    const teamId = META.hasTeam && META.team ? h.t1Id : undefined;',
+		'    const recId = META.hasTeam && META.team ? h.teamRecordId : h.personRecordId;',
+		'    const res = await req(path(subj.updatePath, teamId, recId), { method: subj.updateMethod!, headers, body: JSON.stringify(subj.updateBody) }, env);',
+		'    expect([200, 201, 204], `update failed: ${res.status} ${await res.clone().text()}`).toContain(res.status);',
+		'    h.updatedField = subj.updateField;',
+		'    h.updatedValue = subj.updateBody[subj.updateField];',
+		'    await writeHandoff(h);',
+		'  });',
+		'}',
+		'',
+		'// ==== phase: privacy-screen (steps 4 read, 5-8) ==========================',
+		'if (PHASE === "privacy-screen") {',
+		'  test("after a restart, the update is still there (step 4, read half)", async () => {',
+		'    const env = createFileEnv(FILE);',
+		'    const h = await readHandoff();',
+		'    if (!h.updatedField) return;',
+		'    const headers = { cookie: String(h.aCookie) };',
+		'    const subj = META.hasTeam && META.team ? META.team : META.person;',
+		'    if (!subj || !subj.readPath) {',
+		'      if (META.scoped) return; // the read route is a later feature',
+		'      throw new Error("The app cannot read a record back, so a saved change cannot be checked.");',
+		'    }',
+		'    const teamId = META.hasTeam && META.team ? h.t1Id : undefined;',
+		'    const recId = META.hasTeam && META.team ? h.teamRecordId : h.personRecordId;',
+		'    const res = await req(path(subj.readPath, teamId, recId), { method: subj.readMethod, headers }, env);',
+		'    expect(res.status, "the record is gone after the update and a restart").toBe(200);',
+		'    const row = (await res.json()) as Row;',
+		'    expect(String(row[String(h.updatedField)]), "the change was not saved: the record still shows the old value after a restart").toBe(String(h.updatedValue));',
+		'  });',
+		'',
+		'  test("a second person B cannot read, change or delete A\'s record (step 5)", async () => {',
+		'    const env = createFileEnv(FILE);',
+		'    const h = await readHandoff();',
+		'    const { headers: bHeaders } = await signInForTest(app, env, "bo@example.com");',
+		'    const subj = META.hasTeam && META.team ? META.team : META.person;',
+		'    if (!subj) return;',
+		'    const teamId = META.hasTeam && META.team ? h.t1Id : undefined;',
+		'    const recId = META.hasTeam && META.team ? h.teamRecordId : h.personRecordId;',
+		'',
+		'    if (subj.readPath) {',
+		'      const read = await req(path(subj.readPath, teamId, recId), { method: subj.readMethod, headers: bHeaders }, env);',
+		'      expect([403, 404], "B can read A\'s record — it is not owner/team-scoped").toContain(read.status);',
+		'    }',
+		'    if (subj.listPath) {',
+		'      const list = await req(path(subj.listPath, teamId), { method: subj.listMethod, headers: bHeaders }, env);',
+		'      // B listing under A\'s team is itself refused (outsider) or returns rows that exclude A\'s record.',
+		'      if (list.status === 200) {',
+		'        const rows = (await list.json()) as Row[];',
+		'        expect(rows.some((r) => String(r[subj.idField]) === String(recId)), "A\'s record shows up in B\'s list — not scoped").toBe(false);',
+		'      } else {',
+		'        expect([403, 404]).toContain(list.status);',
+		'      }',
+		'    }',
+		'    if (subj.updatePath && subj.updateField) {',
+		'      const before = subj.readPath ? await (await req(path(subj.readPath, teamId, recId), { method: subj.readMethod, headers: { cookie: String(h.aCookie) } }, env)).json() as Row : null;',
+		'      const upd = await req(path(subj.updatePath, teamId, recId), { method: subj.updateMethod!, headers: jsonHeaders(bHeaders), body: JSON.stringify(subj.updateBody) }, env);',
+		'      // Refused outright (403/404), or a no-op — but A\'s record must be UNCHANGED.',
+		'      if (subj.readPath && before) {',
+		'        const after = await (await req(path(subj.readPath, teamId, recId), { method: subj.readMethod, headers: { cookie: String(h.aCookie) } }, env)).json() as Row;',
+		'        expect(String(after[subj.updateField]), "B changed A\'s record — the write is not owner/team-scoped").toBe(String(before[subj.updateField]));',
+		'      } else {',
+		'        expect([403, 404], "B could change A\'s record").toContain(upd.status);',
+		'      }',
+		'    }',
+		'    if (subj.deletePath) {',
+		'      const del = await req(path(subj.deletePath, teamId, recId), { method: subj.deleteMethod!, headers: bHeaders }, env);',
+		'      void del.status;',
+		'      // Refused or a no-op — but A\'s record must still be there.',
+		'      if (subj.readPath) {',
+		'        const read = await req(path(subj.readPath, teamId, recId), { method: subj.readMethod, headers: { cookie: String(h.aCookie) } }, env);',
+		'        expect(read.status, "B deleted A\'s record — the delete is not owner/team-scoped").toBe(200);',
+		'      }',
+		'    }',
+		'  });',
+		'',
+		(meta.hasTeam
+			? [
+				'  test("teams and roles: member C reads, outsider B cannot; role and admin routes (step 6)", async () => {',
+				'    const env = createFileEnv(FILE);',
+				'    const h = await readHandoff();',
+				'    // The record checks need a saved team record and its read route. In a scoped',
+				'    // test they wait for that feature; the team list, role and admin checks run now.',
+				'    const records = Boolean(META.team && META.team.readPath && h.teamRecordId !== undefined);',
+				'    if (!records && !META.scoped) throw new Error("A team app must let a teammate read the team\'s records, but no team read route is declared.");',
+				'    // C joins T1 with a non-creator role; B owns a separate team T2.',
+				'    const { user: c, headers: cHeaders } = await signInForTest(app, env, "cas@example.com");',
+				'    await seedMember(env, h.t1Id, c.id, META.otherRole!);',
+				'    const { user: b, headers: bHeaders } = await signInForTest(app, env, "bo@example.com");',
+				'    let t2Id: unknown = null;',
+				'    if (META.teamCreate) {',
+				'      const t2 = await req(META.teamCreate.path.replace(/:[a-zA-Z]+/g, "x"), { method: META.teamCreate.method, headers: jsonHeaders(bHeaders), body: JSON.stringify(META.teamCreate.body) }, env);',
+				'      expect([200, 201]).toContain(t2.status);',
+				'      t2Id = ((await t2.json()) as Row)["id"];',
+				'      await seedMember(env, t2Id, b.id, META.creatorRole!);',
+				'      // Step 8 opens B\'s screens with B\'s own team T2 as the current team.',
+				'      await writeHandoff({ ...h, t2Id });',
+				'    }',
+				'',
+				'    if (records) {',
+				'    // C can read and list T1\'s records.',
+				'    const cRead = await req(path(META.team.readPath, h.t1Id, h.teamRecordId), { method: META.team.readMethod, headers: cHeaders }, env);',
+				'    expect(cRead.status, "a teammate C cannot read the team\'s record").toBe(200);',
+				'    if (META.team.listPath) {',
+				'      const cList = await req(path(META.team.listPath, h.t1Id), { method: META.team.listMethod, headers: cHeaders }, env);',
+				'      expect(cList.status).toBe(200);',
+				'      const rows = (await cList.json()) as Row[];',
+				'      expect(rows.some((r) => String(r[META.team.idField]) === String(h.teamRecordId)), "the team\'s record is not in teammate C\'s list").toBe(true);',
+				'    }',
+				'',
+				'    // B (outsider to T1) can read, change or delete nothing of T1\'s, and T1 is not in B\'s lists.',
+				'    const bRead = await req(path(META.team.readPath, h.t1Id, h.teamRecordId), { method: META.team.readMethod, headers: bHeaders }, env);',
+				'    expect([403, 404], "outsider B can read T1\'s record").toContain(bRead.status);',
+				'    if (META.team.updatePath && META.team.updateField) {',
+				'      const bUpd = await req(path(META.team.updatePath, h.t1Id, h.teamRecordId), { method: META.team.updateMethod!, headers: jsonHeaders(bHeaders), body: JSON.stringify(META.team.updateBody) }, env);',
+				'      expect([403, 404], "outsider B can change T1\'s record").toContain(bUpd.status);',
+				'    }',
+				'    if (META.team.deletePath) {',
+				'      const bDel = await req(path(META.team.deletePath, h.t1Id, h.teamRecordId), { method: META.team.deleteMethod!, headers: bHeaders }, env);',
+				'      expect([403, 404], "outsider B can delete T1\'s record").toContain(bDel.status);',
+				'    }',
+				'    // The real team-filter check: B is a MEMBER of T2, so the guard lets B call',
+				'    // T2\'s routes. A handler that does not filter by teamId would leak A\'s T1',
+				'    // record here. B must never see or change A\'s record through B\'s own team.',
+				'    if (t2Id !== null) {',
+				'      if (META.team.listPath) {',
+				'        const bOwnList = await req(path(META.team.listPath, t2Id), { method: META.team.listMethod, headers: bHeaders }, env);',
+				'        expect(bOwnList.status).toBe(200);',
+				'        const rows = (await bOwnList.json()) as Row[];',
+				'        expect(rows.some((r) => String(r[META.team.idField]) === String(h.teamRecordId)), "A\'s record leaks into B\'s own-team list — the route does not filter by team").toBe(false);',
+				'      }',
+				'      const bReadOwn = await req(path(META.team.readPath, t2Id, h.teamRecordId), { method: META.team.readMethod, headers: bHeaders }, env);',
+				'      expect([403, 404], "B reads A\'s record through B\'s own team — the route does not filter by team").toContain(bReadOwn.status);',
+				'      if (META.team.updatePath && META.team.updateField) {',
+				'        const before = await (await req(path(META.team.readPath, h.t1Id, h.teamRecordId), { method: META.team.readMethod, headers: { cookie: String(h.aCookie) } }, env)).json() as Row;',
+				'        await req(path(META.team.updatePath, t2Id, h.teamRecordId), { method: META.team.updateMethod!, headers: jsonHeaders(bHeaders), body: JSON.stringify(META.team.updateBody) }, env);',
+				'        const after = await (await req(path(META.team.readPath, h.t1Id, h.teamRecordId), { method: META.team.readMethod, headers: { cookie: String(h.aCookie) } }, env)).json() as Row;',
+				'        expect(String(after[META.team.updateField]), "B changed A\'s record through B\'s own team — the route does not filter by team").toBe(String(before[META.team.updateField]));',
+				'      }',
+				'      if (META.team.deletePath) {',
+				'        await req(path(META.team.deletePath, t2Id, h.teamRecordId), { method: META.team.deleteMethod!, headers: bHeaders }, env);',
+				'        const still = await req(path(META.team.readPath, h.t1Id, h.teamRecordId), { method: META.team.readMethod, headers: { cookie: String(h.aCookie) } }, env);',
+				'        expect(still.status, "B deleted A\'s record through B\'s own team — the route does not filter by team").toBe(200);',
+				'      }',
+				'    }',
+				'    }',
+				'    if (META.teamList && t2Id !== null) {',
+				'      const bList = await req(META.teamList.path.replace(/:[a-zA-Z]+/g, "x"), { method: META.teamList.method, headers: bHeaders }, env);',
+				'      expect(bList.status).toBe(200);',
+				'      const rows = (await bList.json()) as Row[];',
+				'      const ids = rows.map((r) => String(r["id"]));',
+				'      expect(ids.includes(String(t2Id)), "B\'s own team T2 is missing from B\'s team list").toBe(true);',
+				'      expect(ids.includes(String(h.t1Id)), "A\'s team T1 shows up in B\'s team list").toBe(false);',
+				'    }',
+				'',
+				'    // The team-role route refuses C (lacks the role) and allows A (holds it).',
+				'    if (META.role) {',
+				'      const { headers: aHeaders } = await signInForTest(app, env, "ada@example.com");',
+				'      const cTry = await req(path(META.role.path, h.t1Id, h.teamRecordId), { method: META.role.method, headers: jsonHeaders(cHeaders), body: JSON.stringify(META.role.body) }, env);',
+				'      expect([403], `the ${META.role.role} route let a member without that role through`).toContain(cTry.status);',
+				'      const aTry = await req(path(META.role.path, h.t1Id, h.teamRecordId), { method: META.role.method, headers: jsonHeaders(aHeaders), body: JSON.stringify(META.role.body) }, env);',
+				'      expect(aTry.status, `the ${META.role.role} route refused A who holds that role`).not.toBe(403);',
+				'    }',
+				'',
+				'    // The admin route refuses B and allows the first account (A, seeded admin in create).',
+				'    if (META.admin) {',
+				'      const { headers: aHeaders } = await signInForTest(app, env, "ada@example.com");',
+				'      const bAdmin = await req(path(META.admin.path, h.t1Id), { method: META.admin.method, headers: jsonHeaders(bHeaders), body: JSON.stringify(META.admin.body) }, env);',
+				'      expect([403], "the admin route let a non-admin through").toContain(bAdmin.status);',
+				'      const aAdmin = await req(path(META.admin.path, h.t1Id), { method: META.admin.method, headers: jsonHeaders(aHeaders), body: JSON.stringify(META.admin.body) }, env);',
+				'      expect(aAdmin.status, "the admin route refused the app\'s first account").not.toBe(403);',
+				'    }',
+				'  });',
+			].join('\n')
+			: '  // (no team declared: step 6 does not apply)'),
+		'',
+		(meta.screens.length > 0
+			? [
+				'  test("each table screen shows A\'s saved record and not B\'s (step 8)", async () => {',
+				'    if (typeof document === "undefined") throw new Error("This app\'s screens could not be opened for the check: the starter\'s browser-page test setup (happy-dom, in bunfig.toml and test/setup/) is missing. Put it back as the starter had it.");',
+				'    const env = createFileEnv(FILE);',
+				'    const h = await readHandoff();',
+				'    // Route the screen\'s fetch at the real server, as the chosen person.',
+				'    let activeCookie = String(h.aCookie);',
+				'    const realFetch = globalThis.fetch;',
+				'    (globalThis as any).fetch = async (input: any, init: any = {}) => {',
+				'      const url = typeof input === "string" ? input : input.url;',
+				'      const p = url.replace(/^https?:\\/\\/[^/]+/, "");',
+				'      const headers = { ...(init.headers || {}), cookie: activeCookie };',
+				'      return req(p, { ...init, headers }, env);',
+				'    };',
+				'    try {',
+				'      const React = await import("react");',
+				'      const { render, cleanup, waitFor } = await import("@testing-library/react");',
+				'      let entry: any;',
+				'      try { entry = await import("../src/App"); } catch { entry = null; }',
+				'      const App = entry && (entry.App || entry.default);',
+				'      if (!App) throw new Error("This app\'s screen could not be rendered to check it shows saved data (no src/App export).");',
+				'      /** A\'s saved value to look for: the longest text A typed into the record, read live (it may have changed). */',
+				'      const needleFor = async (kind: "team" | "person"): Promise<string> => {',
+				'        const subj = kind === "team" ? META.team : META.person;',
+				'        if (!subj) return "";',
+				'        const recId = kind === "team" ? h.teamRecordId : h.personRecordId;',
+				'        const teamId = kind === "team" ? h.t1Id : undefined;',
+				'        const aHeaders = { cookie: String(h.aCookie) };',
+				'        let row: Row | null = null;',
+				'        if (subj.readPath) {',
+				'          const r = await req(path(subj.readPath, teamId, recId), { method: subj.readMethod, headers: aHeaders }, env);',
+				'          if (r.status === 200) row = (await r.json()) as Row;',
+				'        }',
+				'        if (!row && subj.listPath) {',
+				'          const r = await req(path(subj.listPath, teamId), { method: subj.listMethod, headers: aHeaders }, env);',
+				'          if (r.status === 200) row = ((await r.json()) as Row[]).find((x) => String(x[subj.idField]) === String(recId)) ?? null;',
+				'        }',
+				'        if (!row) return "";',
+				'        const found = row;',
+				'        const typed = Object.keys(subj.createBody).map((k) => found[k]).filter((v): v is string => typeof v === "string" && v.length > 0);',
+				'        const pool = typed.length > 0 ? typed : Object.entries(found).filter(([k, v]) => k !== subj.idField && !/(Id|At)$/.test(k) && typeof v === "string" && v.length > 0).map(([, v]) => String(v));',
+				'        return [...pool].sort((x, y) => y.length - x.length)[0] ?? "";',
+				'      };',
+				'      for (const sc of META.screens) {',
+				'        const needle = await needleFor(sc.kind);',
+				'        if (!needle) throw new Error(`The ${sc.id} screen cannot be checked: no saved value was found to look for.`);',
+				'        // Render for A, with A\'s team T1 as the current team: the record must appear.',
+				'        activeCookie = String(h.aCookie);',
+				'        if (sc.kind === "team") localStorage.setItem(TEAM_KEY, String(h.t1Id));',
+				'        else localStorage.removeItem(TEAM_KEY);',
+				'        location.hash = sc.kind === "team" ? sc.path.replace(/:teamId\\b/g, String(h.t1Id)) : sc.path;',
+				'        render(React.createElement(App));',
+				'        await waitFor(() => expect(document.body.textContent || "").toContain(needle), { timeout: 4000 }).catch(() => {',
+				'          throw new Error(',
+				'            sc.kind === "team"',
+				'              ? `The ${sc.id} screen does not show the team\'s saved record. A team screen shows the records of the team in currentTeamId() from caddie/api.ts (the person\'s first team when none is set), read from the server.`',
+				'              : `The ${sc.id} screen does not show a record the server saved (it may read the browser instead of the server).`,',
+				'          );',
+				'        });',
+				'        cleanup();',
+				'        // Render for B, with B\'s own team current: the record must NOT appear.',
+				'        activeCookie = String((await signInForTest(app, createFileEnv(FILE), "bo@example.com")).cookie);',
+				'        const bTeam = h.t2Id !== undefined && h.t2Id !== null ? String(h.t2Id) : null;',
+				'        if (sc.kind === "team" && bTeam) localStorage.setItem(TEAM_KEY, bTeam);',
+				'        else localStorage.removeItem(TEAM_KEY);',
+				'        location.hash = sc.kind === "team" && bTeam ? sc.path.replace(/:teamId\\b/g, bTeam) : sc.path;',
+				'        render(React.createElement(App));',
+				'        await new Promise((r) => setTimeout(r, 500));',
+				'        expect(document.body.textContent || "", `the ${sc.id} screen shows another person\'s record to B`).not.toContain(needle);',
+				'        cleanup();',
+				'      }',
+				'    } finally {',
+				'      (globalThis as any).fetch = realFetch;',
+				'      localStorage.removeItem(TEAM_KEY);',
+				'    }',
+				'  });',
+			].join('\n')
+			: '  // (no table-backed screen declared: step 8 does not apply)'),
+		'',
+		'  test("A deletes the record (step 4, delete half — the read is checked in test-mode)", async () => {',
+		'    const env = createFileEnv(FILE);',
+		'    const h = await readHandoff();',
+		'    const headers = { cookie: String(h.aCookie) };',
+		'    const subj = META.hasTeam && META.team ? META.team : META.person;',
+		'    if (!subj || !subj.deletePath) { h.skipDelete = true; await writeHandoff(h); return; }',
+		'    const teamId = META.hasTeam && META.team ? h.t1Id : undefined;',
+		'    const recId = META.hasTeam && META.team ? h.teamRecordId : h.personRecordId;',
+		'    const res = await req(path(subj.deletePath, teamId, recId), { method: subj.deleteMethod!, headers }, env);',
+		'    expect([200, 204], `delete failed: ${res.status}`).toContain(res.status);',
+		'    h.deletedId = recId;',
+		'    await writeHandoff(h);',
+		'  });',
+		'}',
+		'',
+		'// ==== phase: test-mode (step 4 delete-read, step 9) ======================',
 		'if (PHASE === "test-mode") {',
-		'  test.skip("test-mode features (payments/emails/jobs/files) are checked when declared (step 9)", () => {});',
+		'  test("after a restart, the deleted record is gone (404 and not in the list) (step 4, delete read)", async () => {',
+		'    const env = createFileEnv(FILE);',
+		'    const h = await readHandoff().catch(() => null);',
+		'    if (!h || h.skipDelete) return; // no delete route — already reported in privacy-screen',
+		'    const headers = { cookie: String(h.aCookie) };',
+		'    const subj = META.hasTeam && META.team ? META.team : META.person;',
+		'    if (!subj || !subj.readPath) {',
+		'      if (META.scoped) return; // the read route is a later feature',
+		'      throw new Error("The app cannot read a record back, so a delete cannot be checked.");',
+		'    }',
+		'    const teamId = META.hasTeam && META.team ? h.t1Id : undefined;',
+		'    const read = await req(path(subj.readPath, teamId, h.deletedId), { method: subj.readMethod, headers }, env);',
+		'    expect(read.status, "a deleted record is still readable after a restart").toBe(404);',
+		'    if (subj.listPath) {',
+		'      const list = await req(path(subj.listPath, teamId), { method: subj.listMethod, headers }, env);',
+		'      if (list.status === 200) {',
+		'        const rows = (await list.json()) as Row[];',
+		'        expect(rows.some((r) => String(r[subj.idField]) === String(h.deletedId)), "a deleted record is still in the list after a restart").toBe(false);',
+		'      }',
+		'    }',
+		'  });',
+		'',
+		'  test("declared test-mode features (payments/emails/jobs/files) have a check (step 9)", () => {',
+		'    // Lanes 9/10 extend this phase with the real payment/email/job/file checks.',
+		'    // Until then, a block that DECLARES such a feature must not pass silently:',
+		'    // a declared feature with no generated check fails here, in plain words.',
+		'    const missing: string[] = [];',
+		'    if (META.features.payments) missing.push("payments (a locked route should answer 402 before checkout)");',
+		'    if (META.features.emails) missing.push("emails (a message should land in the test inbox and nothing real is sent)");',
+		'    if (META.features.jobs) missing.push("scheduled jobs (a job route should need Caddie\'s signature)");',
+		'    if (META.features.files) missing.push("file uploads (a file should come back byte-identical after a restart)");',
+		'    expect(missing.length === 0, missing.length === 0 ? "" : `This app declares ${missing.join(", ")}, but those are not checked yet. They must be checked before the app can pass.`).toBe(true);',
+		'  });',
 		'}',
 		'',
 	].join('\n');
@@ -601,12 +1069,15 @@ function contractTestTs(block: ArchitectureBlock): string {
  * architecture block. Deterministic (declaration order throughout), so part E's
  * generation is snapshot-testable. `kind === 'big'` adds caddie/modules.ts.
  */
-export function generateContractFiles(block: ArchitectureBlock, options: { kind: ContractKind }): GeneratedContractFiles {
+export function generateContractFiles(
+	block: ArchitectureBlock,
+	options: { kind: ContractKind; features?: readonly string[] },
+): GeneratedContractFiles {
 	const files: Record<string, string> = {
 		'caddie/contract.ts': contractTs(block),
 		'caddie/api.ts': apiTs(),
 		'caddie/router.tsx': routerTsx(block),
-		'caddie/contract.test.ts': contractTestTs(block),
+		'caddie/contract.test.ts': contractTestTs(block, options.features),
 		'test/setup/d1-file.ts': D1_FILE,
 	};
 	if (options.kind === 'big') files['caddie/modules.ts'] = modulesTs(block);
