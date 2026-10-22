@@ -16,6 +16,7 @@ import {
 	type FlueEvent,
 	type FlueExecutionContext,
 	type FlueExecutionOperation,
+	type FlueInstrumentation,
 	AgentRunError,
 	dispatch,
 	init,
@@ -28,14 +29,17 @@ import {
 } from '@flue/runtime';
 import { start, type Flue } from '@flue/runtime/node';
 import * as v from 'valibot';
-import { scriptedProvider, type ScriptedReply } from './scripted-provider.ts';
+import { scriptedProvider, type ScriptedProviderOptions, type ScriptedReply } from './scripted-provider.ts';
 
 // Re-export the symbols the spike test asserts against, so tests/ imports only
 // this one relative module and never a bare @flue specifier.
 export { AgentRunError, dispatch, init, instrument };
-export type { FlueEvent, FlueExecutionContext, FlueExecutionOperation, Flue };
+export type { FlueEvent, FlueExecutionContext, FlueExecutionOperation, FlueInstrumentation, Flue };
 export { scriptedProvider };
 export type { ScriptedReply };
+
+/** The routes array shape the scripted provider serves (see scripted-provider.ts). */
+export type ScriptedProviderRoutes = ScriptedProviderOptions['routes'];
 
 // Mirror the real MODEL_ROUTES rates (src/agents/providers.ts) so the cost math
 // is the same as production. $/Mtok. Only the fields the scripted provider uses.
@@ -213,6 +217,38 @@ export async function boot(opts: {
 	const flue = await start({ agents: [Coordinator, Worker], providers: [sp.provider] });
 	return {
 		...inst,
+		flue,
+		sp,
+		async stop() {
+			await disposeInstrumentation();
+			await flue.stop();
+		},
+	};
+}
+
+/** A booted runtime with a CALLER-PROVIDED instrumentation (e.g. part A's own). */
+export interface BootedRaw {
+	flue: Flue;
+	sp: ReturnType<typeof scriptedProvider>;
+	stop: () => Promise<void>;
+}
+
+/**
+ * Install a caller-provided instrumentation object (part A's
+ * `makeSpendInstrumentation`) and start the Node runtime with the scripted
+ * provider. Used by the part A integration test to exercise the REAL instrument
+ * wiring against real Flue agents. `routes` defaults to {@link ROUTES}, whose
+ * model ids match the real MODEL_ROUTES so part A's route lookup resolves.
+ */
+export async function bootRaw(opts: {
+	instrumentation: FlueInstrumentation;
+	script: ScriptedReply[];
+	routes?: ScriptedProviderRoutes;
+}): Promise<BootedRaw> {
+	const disposeInstrumentation = instrument(opts.instrumentation);
+	const sp = scriptedProvider({ providerId: 'scripted', routes: opts.routes ?? ROUTES, script: opts.script });
+	const flue = await start({ agents: [Coordinator, Worker], providers: [sp.provider] });
+	return {
 		flue,
 		sp,
 		async stop() {
