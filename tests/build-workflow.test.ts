@@ -51,7 +51,8 @@ import { androidDownloadView, createAndroidAppRouter } from "../apps/app/src/ser
 import { buildActivity } from "../apps/app/src/server/build-activity.ts";
 import { rollbackToFeature } from "../apps/app/src/server/build-features.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, ROLE_TOOL_POLICY } from "../apps/app/src/agents/permissions.ts";
-import { resolveCoordinatorContext } from "../apps/app/src/server/coordinator-host.ts";
+import { resolveCoordinatorContext, resolveModuleBuilderContext } from "../apps/app/src/server/coordinator-host.ts";
+import { getModule, seedModules, takeSlot } from "../apps/app/src/server/module-slots.ts";
 import { listAppSecrets, setAppSecret } from "../apps/app/src/server/app-secrets.ts";
 import { parseKeyring } from "../apps/app/src/server/secret-box.ts";
 import { makeRequestAppKey } from "../apps/app/src/agents/tools.ts";
@@ -136,6 +137,8 @@ async function world() {
     // spending-limit tables and the workflow mode columns).
     "0033_judge_accounts.sql",
     "0040_team_mode.sql",
+    // Part P: the module rows and slots the module-builder tests seed.
+    "0042_module_builders.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -2283,6 +2286,109 @@ describe("part A: a build never starts without its spending limit", () => {
       expect(row.spendPayerId).toMatch(/^build:/);
     } finally {
       w.sqlite.close();
+    }
+  });
+});
+
+describe("part P: a module builder's repair limit and working copy are its own", () => {
+  // Two modules build in parallel on the REAL module host
+  // (resolveModuleBuilderContext) against the sandbox stub, each owning one
+  // feature of the approved plan. The app's own tests fail, so every check
+  // round fails. Team mode itself is off here: these paths are keyed on the
+  // module scope, not on the switch.
+  async function modulesWorld() {
+    const w = await world();
+    const stub = new SandboxStub({ expectedToken: "local-module-token" });
+    stub.seedImage("tag:module-base:1");
+    stub.setBehavior("bun run test", { exitCode: 1, stderr: "1 fail" });
+    await stub.start();
+    const item = await approved(w);
+    const root = `/workspace/${item.scope.projectId}`;
+    // Each module's start save point holds a marker only that module's copy
+    // can see; the main build's session starts from the base image instead.
+    const startImages = {
+      feed: stub.seedImageWithFiles({ [`${root}/MODULE_START`]: "feed" }),
+      tasks: stub.seedImageWithFiles({ [`${root}/MODULE_START`]: "tasks" }),
+    };
+    const env = {
+      DB: w.db, CONTREE_BASE_URL: stub.url, CONTREE_API_TOKEN: "local-module-token",
+      CONTREE_PROJECT_ID: "local-project", CONTREE_IMAGE: "tag:module-base:1",
+    };
+    const { plan } = await requireBuildApproval(w.db, item.scope);
+    const insertFeature = w.sqlite.prepare(
+      "insert into build_features (projectId,runId,planId,featureId,position,title,doneWhen,status,attempts,updatedAt) values (?,?,?,?,?,?,?,?,?,?)",
+    );
+    ["feed-feature", "tasks-feature"].forEach((featureId, position) =>
+      insertFeature.run(item.scope.projectId, item.workflow.runId, plan.id, featureId, position, featureId, "[]", "building", 0, "2026-10-23T00:00:00.000Z"),
+    );
+    await seedModules(w.db, item.scope, {
+      buildSeq: 0,
+      payerId: "build:modules-test:1",
+      modules: [{ moduleId: "feed", dependsOn: [] }, { moduleId: "tasks", dependsOn: [] }],
+    });
+    for (const moduleId of ["feed", "tasks"] as const) {
+      await takeSlot(w.db, item.scope.projectId, 0, moduleId);
+      w.sqlite
+        .prepare('update build_modules set "status" = ?, "checkpointRef" = ? where "projectId" = ? and "buildSeq" = ? and "moduleId" = ?')
+        .run("building", startImages[moduleId], item.scope.projectId, 0, moduleId);
+    }
+    const host = (moduleId: "feed" | "tasks") =>
+      resolveModuleBuilderContext(env, {
+        conversationId: item.workflow.conversationId,
+        moduleId,
+        buildSeq: 0,
+        features: [`${moduleId}-feature`],
+      });
+    const moduleStatus = async (moduleId: string) => (await getModule(w.db, item.scope.projectId, 0, moduleId))?.status;
+    const slots = () => w.count("build_module_slots", `projectId='${item.scope.projectId}'`);
+    return { w, stub, item, root, host, moduleStatus, slots };
+  }
+
+  test("a module that spends its three tries stops only itself; the other module keeps building", async () => {
+    const m = await modulesWorld();
+    try {
+      const feed = await m.host("feed");
+      for (const attempt of ["feed-1", "feed-2", "feed-3"]) {
+        const outcome = (await feed.runChecks!(attempt)) as { passed: boolean };
+        expect(outcome.passed).toBe(false);
+      }
+      // MUTATION: send the module's repair pause to the build-wide blocker,
+      // and the phase flips to blocked while feed stays building. (failModule
+      // stores 'stopped', the same status as a manual stop, by design.)
+      expect(await m.moduleStatus("feed")).toBe("stopped");
+      expect(m.slots()).toBe(1); // feed's slot is free; tasks still holds its own
+      expect((await readWorkflow(m.w.db, m.item.scope))?.phase).toBe("building");
+
+      // The other module is not refused: its first failure is its own first
+      // try. MUTATION: count every issue in the run (the old rule), and this
+      // call is refused with RUN_PAUSED because of feed's spent tries.
+      const tasks = await m.host("tasks");
+      const first = (await tasks.runChecks!("tasks-1")) as { passed: boolean; paused: boolean };
+      expect(first.passed).toBe(false);
+      expect(first.paused).toBe(false);
+      expect(await m.moduleStatus("tasks")).toBe("building");
+      expect((await readWorkflow(m.w.db, m.item.scope))?.phase).toBe("building");
+      // feed's own spent tries still count for feed.
+      await rejectsCode(feed.runChecks!("feed-4"), "RUN_PAUSED");
+    } finally {
+      m.w.sqlite.close();
+      await m.stub.stop();
+    }
+  });
+
+  test("a module host works on its own copy from its start save point, never the project's session pointer", async () => {
+    const m = await modulesWorld();
+    try {
+      const feed = await m.host("feed");
+      const tasks = await m.host("tasks");
+      // MUTATION: open the module through openWorkingCopy (the main build's
+      // session) and both reads see the base image, which has no marker.
+      expect(await feed.driver.readFile({ sessionId: feed.sessionId, path: `${m.root}/MODULE_START` })).toBe("feed");
+      expect(await tasks.driver.readFile({ sessionId: tasks.sessionId, path: `${m.root}/MODULE_START` })).toBe("tasks");
+      expect(m.w.count("build_sandbox_sessions", `projectId='${m.item.scope.projectId}'`)).toBe(0);
+    } finally {
+      m.w.sqlite.close();
+      await m.stub.stop();
     }
   });
 });

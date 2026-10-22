@@ -51,7 +51,8 @@ import { registerBuildPayerForInstance } from "../server/spend-instrument.ts";
 import { payerForInstance } from "../server/module-slots.ts";
 import { findModelRouteForRole } from "./providers.ts";
 import { FEATURE_DELEGATION_RULE } from "./delegation.ts";
-import { buildSpecialistDeclarations } from "./specialists.ts";
+import { buildSpecialistDeclarations, type SpecialistBuildContext } from "./specialists.ts";
+import type { SandboxToolDeps } from "./tools.ts";
 
 /**
  * The instance-creation data a dispatch carries (plan part P): which module
@@ -91,6 +92,7 @@ export function ModuleBuilder({ id }: AgentProps) {
     return resolveModuleBuilderContext(env, {
       conversationId: seed.conversationId,
       moduleId: seed.moduleId,
+      buildSeq: seed.buildSeq,
       features: seed.features,
     });
   };
@@ -163,42 +165,52 @@ export function ModuleBuilder({ id }: AgentProps) {
   // host call to `resolve()`, so no network work happens at render time. Only
   // the two build roles (backend, frontend) and QA matter for a module; the
   // planning roles never run here (the plan and design are already approved).
-  const moduleContext = {
+  //
+  // Gap 3: this is a TYPED SpecialistBuildContext with NO `as unknown as` cast,
+  // so a field the delegates need that we forgot would be a type error. Its
+  // `runId` is this instance's id and its `sessionId` is the module's own
+  // session `module:<runId>:<moduleId>` derived from that runId — NEVER built
+  // from the conversationId. (The host's own driver resolves the real session
+  // server-side and ignores this label, but the label must still be the
+  // module's own session, not the project's.)
+  const moduleRunId = id ?? "module";
+  const driver: SandboxToolDeps = {
+    execute: async (input) => (await resolve()).driver.execute(input),
+    readFile: async (input) => (await resolve()).driver.readFile(input),
+    writeFile: async (input) => (await resolve()).driver.writeFile(input),
+  };
+  const moduleContext: SpecialistBuildContext = {
     teamMode: true,
     bigApps: true,
     stackId: "react-hono",
-    driver: {
-      execute: async (input: Parameters<CoordinatorHostContext["driver"]["execute"]>[0]) => (await resolve()).driver.execute(input),
-      readFile: async (input: Parameters<CoordinatorHostContext["driver"]["readFile"]>[0]) => (await resolve()).driver.readFile(input),
-      writeFile: async (input: Parameters<CoordinatorHostContext["driver"]["writeFile"]>[0]) => (await resolve()).driver.writeFile(input),
-    },
-    sessionId: `module:${seed?.conversationId ?? "pending"}:${seed?.moduleId ?? "pending"}`,
-    runId: id ?? "module",
-    readPlanNote: async (kind: string) => (await resolve()).readPlanNote(kind),
-    writePlanNote: async (input: { kind: string; body: string; planRevision: string }) => (await resolve()).writePlanNote(input),
-    delegateRepair: async (input: { issue: string; round: string; toRole: string; task: string }) => (await resolve()).delegateRepair(input),
-    recordVerification: async (input: { check: string; passed: boolean; evidence: string; planRevision: string }) => (await resolve()).recordVerification(input),
-    runChecks: async (key: string, signal?: AbortSignal) => {
+    driver,
+    sessionId: `module:${moduleRunId}:${seed?.moduleId ?? "pending"}`,
+    runId: moduleRunId,
+    readPlanNote: async (kind) => (await resolve()).readPlanNote(kind),
+    writePlanNote: async (input) => (await resolve()).writePlanNote(input),
+    delegateRepair: async (input) => (await resolve()).delegateRepair(input),
+    recordVerification: async (input) => (await resolve()).recordVerification(input),
+    runChecks: async (key, signal) => {
       const host = await resolve();
       if (!host.runChecks) throw new Error("Host checks are not configured.");
       return host.runChecks(key, signal);
     },
-    requestAppKey: async (input: { name: string; description: string; helpUrl?: string }) => {
+    requestAppKey: async (input) => {
       const host = await resolve();
       if (!host.requestAppKey) throw new Error("App keys are not available here.");
       return host.requestAppKey(input);
     },
-    activePartForRole: async (role: Parameters<NonNullable<CoordinatorHostContext["activePartForRole"]>>[0], moduleId?: string) => {
+    activePartForRole: async (role, mod) => {
       const host = await resolve();
-      return host.activePartForRole ? host.activePartForRole(role, moduleId) : null;
+      return host.activePartForRole ? host.activePartForRole(role, mod) : null;
     },
-    restorePartFiles: async (paths: string[], moduleId?: string) => {
+    restorePartFiles: async (paths, mod) => {
       const host = await resolve();
       if (!host.restorePartFiles) throw new Error("There is no part in progress, so there is nothing to restore.");
-      return host.restorePartFiles(paths, moduleId);
+      return host.restorePartFiles(paths, mod);
     },
-    currentRequest: seed ? `Build the "${seed.moduleId}" module's features only.` : undefined,
-  } as unknown as Parameters<typeof buildSpecialistDeclarations>[0];
+    ...(seed ? { currentRequest: `Build the "${seed.moduleId}" module's features only.` } : {}),
+  };
 
   for (const declaration of buildSpecialistDeclarations(moduleContext)) useSubagent(declaration);
 
