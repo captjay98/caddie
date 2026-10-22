@@ -47,8 +47,14 @@ import { getModule, listModules, setModuleStatus } from './module-slots.ts';
 /** How many repair rounds a module gets before it is marked "not merged" (part Q). */
 export const MAX_MERGE_REPAIR_ROUNDS = 2;
 
-/** How long an acquired merge lock is held before a crashed holder's lock may be taken. */
-export const MERGE_LOCK_TTL_MS = 10 * 60_000;
+/**
+ * How long an acquired merge lock is held before a crashed holder's lock may be
+ * taken (plan review item 4). A single merge can run several repair ROUNDS, and
+ * one round can outlast the old 10-minute window, so the TTL is 30 minutes and
+ * the holder REFRESHES it before each step (see `refreshIntegrationLock`); the
+ * TTL is the crash fallback, not the normal merge budget.
+ */
+export const MERGE_LOCK_TTL_MS = 30 * 60_000;
 
 // --- the integration lock (migration 0043) -----------------------------------
 
@@ -85,9 +91,47 @@ export async function acquireIntegrationLock(
 	return (res.meta?.changes ?? 0) === 1;
 }
 
-/** Release the per-build integration lock (best-effort; an absent row is a no-op). */
-export async function releaseIntegrationLock(db: D1Database, projectId: string, buildSeq: number): Promise<void> {
-	await db.prepare('delete from "integration_merge_locks" where "projectId" = ? and "buildSeq" = ?').bind(projectId, buildSeq).run();
+/**
+ * Extend THIS holder's lock by a fresh TTL (plan review item 4). A merge round
+ * can take longer than the TTL; without a refresh the lock would lapse
+ * mid-merge, let a second merge in, and have the first merge's `release` delete
+ * the second's lock. `refreshIntegrationLock` pushes `expiresAt` out only while
+ * the given `holder` still owns the row — a stale holder whose lock was already
+ * taken over refreshes nothing. Returns true when the holder's lock was extended.
+ */
+export async function refreshIntegrationLock(
+	db: D1Database,
+	projectId: string,
+	buildSeq: number,
+	holder: string,
+	nowMs: number = Date.now(),
+): Promise<boolean> {
+	const expiresAt = new Date(nowMs + MERGE_LOCK_TTL_MS).toISOString();
+	const res = (await db
+		.prepare('update "integration_merge_locks" set "expiresAt" = ? where "projectId" = ? and "buildSeq" = ? and "holder" = ?')
+		.bind(expiresAt, projectId, buildSeq, holder)
+		.run()) as { meta?: { changes?: number } };
+	return (res.meta?.changes ?? 0) === 1;
+}
+
+/**
+ * Release the per-build integration lock, but ONLY when `holder` still owns it
+ * (plan review item 4). If this holder's lock already lapsed and another merge
+ * took it over, the row now names the new holder, so an unconditional delete
+ * would wrongly free the new holder's lock. Scoping the delete to `holder`
+ * means a stale releaser is a no-op and the live holder keeps the lock.
+ * Best-effort; an absent row is a no-op.
+ */
+export async function releaseIntegrationLock(
+	db: D1Database,
+	projectId: string,
+	buildSeq: number,
+	holder: string,
+): Promise<void> {
+	await db
+		.prepare('delete from "integration_merge_locks" where "projectId" = ? and "buildSeq" = ? and "holder" = ?')
+		.bind(projectId, buildSeq, holder)
+		.run();
 }
 
 // --- the module's folders -----------------------------------------------------
@@ -180,12 +224,30 @@ export interface MergeDeps {
 	readonly readModuleFile: (checkpointRef: string, path: string) => Promise<string>;
 	/** Write a batch of files into the integration copy in ONE commit (no command). */
 	readonly writeIntegration: (files: ReadonlyArray<{ path: string; contentBase64: string }>) => Promise<void>;
+	/**
+	 * Snapshot the integration copy as it stands, returning a ref the merge can
+	 * restore to (plan review item 2). The merge takes this BEFORE its first
+	 * write so a module that ends "not merged" can be rolled back out of the
+	 * integration copy — otherwise its half-merged files stay and poison every
+	 * later merge. Optional: when absent, no rollback is taken (the restore is a
+	 * no-op), which is only safe when the caller guarantees an isolated copy.
+	 */
+	readonly snapshotIntegration?: () => Promise<string>;
+	/** Restore the integration copy to a ref taken by `snapshotIntegration` (item 2). */
+	readonly restoreIntegration?: (ref: string) => Promise<void>;
 	/** Run the full checks on the integration copy (install, tests, build, contracts, server start). */
 	readonly runChecks: () => Promise<IntegrationCheckResult>;
 	/** Make a save point on the integration copy with the given name; returns its ref. */
 	readonly savePoint: (name: string) => Promise<string>;
-	/** Dispatch a repair to a module's own copy (plan part Q); at-least-once. */
-	readonly dispatchRepair: (input: { moduleId: string; failures: readonly CheckFailure[] }) => Promise<void>;
+	/**
+	 * Dispatch a repair to a module's own copy (plan part Q); at-least-once.
+	 * Returns the repaired module's NEW committed checkpoint ref, so the next
+	 * merge round reads the FIXED snapshot instead of the stale one (plan review
+	 * item 1). `null` means the repair produced no new snapshot — the module's
+	 * current ref is kept and re-read, which can never land a fix, so the real
+	 * wiring always returns the new ref on a repair that committed.
+	 */
+	readonly dispatchRepair: (input: { moduleId: string; failures: readonly CheckFailure[] }) => Promise<string | null>;
 	/** How many repair rounds before "not merged" (default MAX_MERGE_REPAIR_ROUNDS). */
 	readonly maxRepairRounds?: number;
 	/** The lock holder label; defaults to the merging module's instance. */
@@ -211,6 +273,13 @@ export interface MergeResult {
 	readonly reason: string;
 	/** False only when the lock could not be taken (another merge holds it). */
 	readonly acquiredLock: boolean;
+	/**
+	 * True when this module did not merge itself but another holder's drain will
+	 * (plan review item 3): the module was recorded "passed" and left for the
+	 * holder, which merges every waiting module before it releases. A queued
+	 * result is NOT a failure — the module merges, just on the holder's turn.
+	 */
+	readonly queued?: boolean;
 }
 
 // --- the stray report ---------------------------------------------------------
@@ -269,11 +338,140 @@ export async function mergedSavePointName(
 // --- the merge ----------------------------------------------------------------
 
 /**
+ * Merge ONE module into the integration copy, under a lock the caller already
+ * holds (plan review items 1, 2, 4, 5). This is the per-module body the drain
+ * runs for each waiting module; it never touches the lock's lifecycle (acquire
+ * or release) — the drain owns that — but it REFRESHES the lock before each
+ * step so a long repair round cannot let the TTL lapse (item 4).
+ *
+ * The round loop reads every module in `refs` from its CURRENT ref and writes
+ * their folders, so a repaired module's new snapshot is what round N+1 copies
+ * (item 1). It snapshots the integration copy before the first write and, on a
+ * module that ends "not merged", restores that snapshot so the failed module's
+ * files never linger (item 2). On green it makes the save point FIRST and only
+ * then marks the module "merged" — if the save point throws, the module stays
+ * "passed" and is retried, never marked merged without its save point (item 5).
+ */
+async function mergeOneModule(
+	db: D1Database,
+	scope: Scope,
+	deps: MergeDeps,
+	holder: string,
+	moduleId: string,
+	startRef: string,
+): Promise<MergeResult> {
+	const { block, buildSeq } = deps;
+	const maxRounds = deps.maxRepairRounds ?? MAX_MERGE_REPAIR_ROUNDS;
+	const areas = moduleAreas(block, moduleId);
+	const now = () => (deps.now ? deps.now() : Date.now());
+
+	// item 1: a ref per module, so a repaired module is re-read from its FIXED
+	// snapshot each round. It starts with the merging module at its passed ref.
+	const refs = new Map<string, string>([[moduleId, startRef]]);
+
+	// item 2: the integration copy as it stands, to roll back a "not merged".
+	const rollback = deps.snapshotIntegration ? await deps.snapshotIntegration() : null;
+
+	let strayFiles: string[] = [];
+	let rounds = 0;
+
+	for (;;) {
+		// item 4: extend the lock before each round; a repair round can outlast
+		// the TTL, and a lapsed lock would let a second merge corrupt this one.
+		await refreshIntegrationLock(db, scope.projectId, buildSeq, holder, now());
+
+		// 1. Read every tracked module's folders from its CURRENT ref and write
+		//    them in one batch. The merging module's own files decide strays.
+		const batch: { path: string; contentBase64: string }[] = [];
+		for (const [id, ref] of refs) {
+			const modulePort = deps.readModuleSnapshot(ref);
+			const moduleManifest = await buildManifest(modulePort);
+			if (id === moduleId) {
+				const integrationManifest = deps.readIntegrationSnapshot ? await buildManifest(deps.readIntegrationSnapshot()) : null;
+				strayFiles = await strayChanges(block, moduleId, moduleManifest, integrationManifest);
+			}
+			const modAreas = id === moduleId ? areas : moduleAreas(block, id);
+			for (const file of moduleManifest.files.filter((f) => inModule(modAreas, f.path))) {
+				batch.push({ path: file.path, contentBase64: await deps.readModuleFile(ref, file.path) });
+			}
+		}
+		await deps.writeIntegration(batch);
+
+		// 2. Run the full checks on the integration copy.
+		await refreshIntegrationLock(db, scope.projectId, buildSeq, holder, now());
+		const checks = await deps.runChecks();
+		if (checks.passed) {
+			// item 5: the save point FIRST, then "merged". A throw here leaves the
+			// module "passed" (retried), never merged without its save point.
+			const name = await mergedSavePointName(db, scope.projectId, buildSeq, moduleId, block.modules.map((m) => m.id));
+			await deps.savePoint(name);
+			// item 1: persist each repaired module's new ref on its row, so a later
+			// read of the board sees the fixed snapshot, not the stale one.
+			for (const [id, ref] of refs) {
+				await setModuleStatus(db, scope.projectId, buildSeq, id, id === moduleId ? 'merged' : 'passed', { checkpointRef: ref });
+			}
+			return {
+				moduleId,
+				merged: true,
+				savePoint: name,
+				strayFiles,
+				rounds,
+				reason:
+					strayFiles.length === 0
+						? `Merged into the app.`
+						: `Merged into the app; ${strayFiles.length} file(s) the builder changed outside its folders were left out.`,
+				acquiredLock: true,
+			};
+		}
+
+		// 3. Red: out of repair rounds → "not merged", rolled back out of the copy.
+		if (rounds >= maxRounds) {
+			if (rollback !== null && deps.restoreIntegration) await deps.restoreIntegration(rollback);
+			await setModuleStatus(db, scope.projectId, buildSeq, moduleId, 'not-merged', { checkpointRef: refs.get(moduleId)! });
+			const owners = [...new Set(checks.failures.map((f) => ownerModuleOfFailure(block, f)))];
+			return {
+				moduleId,
+				merged: false,
+				savePoint: null,
+				strayFiles,
+				rounds,
+				reason: `Couldn't make "${moduleId}" work with the rest after ${maxRounds} tries (checks failed in: ${owners.join(', ')}). The rest of your app still works.`,
+				acquiredLock: true,
+			};
+		}
+
+		// Match each failure to its owning module, dispatch a repair to its own
+		// copy, and record the NEW ref so the next round reads the fix (item 1).
+		await refreshIntegrationLock(db, scope.projectId, buildSeq, holder, now());
+		const byOwner = new Map<string, CheckFailure[]>();
+		for (const failure of checks.failures) {
+			const owner = ownerModuleOfFailure(block, failure);
+			(byOwner.get(owner) ?? byOwner.set(owner, []).get(owner)!).push(failure);
+		}
+		for (const [owner, failures] of byOwner) {
+			const newRef = await deps.dispatchRepair({ moduleId: owner, failures });
+			if (newRef) refs.set(owner, newRef);
+			else if (!refs.has(owner)) refs.set(owner, refs.get(moduleId)!);
+		}
+		rounds += 1;
+	}
+}
+
+/**
  * Merge one finished module into the app, the hook the lead wires into
  * `onModuleFinished` (plan part Q). One merge at a time per build, under the
  * integration lock; copy only the module's folders; run the full checks; a
  * green save point, or up to 2 repair rounds then "not merged" with the rest of
  * the app left working.
+ *
+ * Lock contention never loses a module (plan review item 3): the finished
+ * module is recorded "passed" (finished, awaiting merge) with its checkpoint
+ * ref BEFORE the lock is tried. The caller that holds the lock DRAINS every
+ * "passed" module — in the block's declared order — before it releases, and
+ * re-checks after release in case another module finished during the drain. So
+ * a module that could not take the lock is merged by whoever holds it, not
+ * dropped: this call returns that module's own merge result, or `{ queued:
+ * true }` when another holder will merge it.
  *
  * The signature the hook needs is `(db, scope, { runId, moduleId, checkpointRef })`
  * plus the injected `deps` (supplied in the lead's wiring closure). It never
@@ -288,10 +486,15 @@ export async function mergeFinishedModule(
 ): Promise<MergeResult> {
 	const { block, buildSeq } = deps;
 	const holder = deps.lockHolder ?? `${scope.projectId}:${buildSeq}:${input.moduleId}`;
-	const nowMs = deps.now ? deps.now() : Date.now();
+	const now = () => (deps.now ? deps.now() : Date.now());
 
-	const got = await acquireIntegrationLock(db, scope.projectId, buildSeq, holder, nowMs);
+	// item 3: record the module "passed" with its ref FIRST, so whoever holds the
+	// lock will drain it even if this call cannot take the lock itself.
+	await setModuleStatus(db, scope.projectId, buildSeq, input.moduleId, 'passed', { checkpointRef: input.checkpointRef });
+
+	const got = await acquireIntegrationLock(db, scope.projectId, buildSeq, holder, now());
 	if (!got) {
+		// Another merge holds the lock; its drain will merge this module.
 		return {
 			moduleId: input.moduleId,
 			merged: false,
@@ -300,78 +503,43 @@ export async function mergeFinishedModule(
 			rounds: 0,
 			reason: 'Another part is merging right now; this one will merge when the lock is free.',
 			acquiredLock: false,
+			queued: true,
 		};
 	}
 
+	const results = new Map<string, MergeResult>();
 	try {
-		const maxRounds = deps.maxRepairRounds ?? MAX_MERGE_REPAIR_ROUNDS;
-		const areas = moduleAreas(block, input.moduleId);
-		let strayFiles: string[] = [];
-		let rounds = 0;
-
-		// Round 0 is the initial merge + checks; each red round dispatches one
-		// repair and tries again, up to maxRounds repairs.
+		// Drain every "passed" module in block order, re-checking after each sweep
+		// for a module that finished mid-drain, so none is left behind (item 3).
 		for (;;) {
-			// 1. Read the module's folders from its snapshot and write them in one batch.
-			const modulePort = deps.readModuleSnapshot(input.checkpointRef);
-			const moduleManifest = await buildManifest(modulePort);
-			const integrationManifest = deps.readIntegrationSnapshot ? await buildManifest(deps.readIntegrationSnapshot()) : null;
-			strayFiles = await strayChanges(block, input.moduleId, moduleManifest, integrationManifest);
-
-			const inFolder = moduleManifest.files.filter((f) => inModule(areas, f.path));
-			const batch: { path: string; contentBase64: string }[] = [];
-			for (const file of inFolder) {
-				batch.push({ path: file.path, contentBase64: await deps.readModuleFile(input.checkpointRef, file.path) });
+			const modules = await listModules(db, scope.projectId, buildSeq);
+			const order = block.modules.map((m) => m.id);
+			const waiting = modules
+				.filter((m) => m.status === 'passed' && m.checkpointRef !== null && !results.has(m.moduleId))
+				.sort((a, b) => order.indexOf(a.moduleId) - order.indexOf(b.moduleId));
+			if (waiting.length === 0) break;
+			for (const m of waiting) {
+				results.set(m.moduleId, await mergeOneModule(db, scope, deps, holder, m.moduleId, m.checkpointRef!));
 			}
-			await deps.writeIntegration(batch);
-
-			// 2. Run the full checks on the integration copy.
-			const checks = await deps.runChecks();
-			if (checks.passed) {
-				await setModuleStatus(db, scope.projectId, buildSeq, input.moduleId, 'merged', { checkpointRef: input.checkpointRef });
-				const name = await mergedSavePointName(db, scope.projectId, buildSeq, input.moduleId, block.modules.map((m) => m.id));
-				await deps.savePoint(name);
-				return {
-					moduleId: input.moduleId,
-					merged: true,
-					savePoint: name,
-					strayFiles,
-					rounds,
-					reason: strayFiles.length === 0 ? `Merged into the app.` : `Merged into the app; ${strayFiles.length} file(s) the builder changed outside its folders were left out.`,
-					acquiredLock: true,
-				};
-			}
-
-			// 3. Red: out of repair rounds → "not merged", the rest keeps working.
-			if (rounds >= maxRounds) {
-				await setModuleStatus(db, scope.projectId, buildSeq, input.moduleId, 'not-merged', { checkpointRef: input.checkpointRef });
-				const owners = [...new Set(checks.failures.map((f) => ownerModuleOfFailure(block, f)))];
-				return {
-					moduleId: input.moduleId,
-					merged: false,
-					savePoint: null,
-					strayFiles,
-					rounds,
-					reason: `Couldn't make "${input.moduleId}" work with the rest after ${maxRounds} tries (checks failed in: ${owners.join(', ')}). The rest of your app still works.`,
-					acquiredLock: true,
-				};
-			}
-
-			// Match each failure to its owning module and dispatch a repair to its
-			// own copy, then try the merge again.
-			const byOwner = new Map<string, CheckFailure[]>();
-			for (const failure of checks.failures) {
-				const owner = ownerModuleOfFailure(block, failure);
-				(byOwner.get(owner) ?? byOwner.set(owner, []).get(owner)!).push(failure);
-			}
-			for (const [owner, failures] of byOwner) {
-				await deps.dispatchRepair({ moduleId: owner, failures });
-			}
-			rounds += 1;
 		}
 	} finally {
-		await releaseIntegrationLock(db, scope.projectId, buildSeq);
+		await releaseIntegrationLock(db, scope.projectId, buildSeq, holder);
 	}
+
+	// This call's own module: either the drain merged it here, or (a race where
+	// another holder took it first) it is already resolved — report queued.
+	return (
+		results.get(input.moduleId) ?? {
+			moduleId: input.moduleId,
+			merged: false,
+			savePoint: null,
+			strayFiles: [],
+			rounds: 0,
+			reason: 'Another part merged this one as part of its batch.',
+			acquiredLock: true,
+			queued: true,
+		}
+	);
 }
 
 /**

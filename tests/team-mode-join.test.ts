@@ -15,6 +15,7 @@ import {
 	mergedSavePointName,
 	moduleAreas,
 	ownerModuleOfFailure,
+	refreshIntegrationLock,
 	releaseIntegrationLock,
 } from '../apps/app/src/server/integration.ts';
 import type { SnapshotReadPort } from '../apps/app/src/server/part-manifests.ts';
@@ -122,7 +123,7 @@ function makeDeps(
 		writeIntegration: async (files) => { for (const f of files) written.push(f); },
 		runChecks: async () => checks.shift() ?? { passed: true, failures: [] },
 		savePoint: async (name) => { saves.push(name); return `img:${saves.length}`; },
-		dispatchRepair: async ({ moduleId }) => { repairs.push({ moduleId }); },
+		dispatchRepair: async ({ moduleId }) => { repairs.push({ moduleId }); return null; },
 		...overrides,
 	};
 	return { deps, written, saves, repairs };
@@ -138,7 +139,7 @@ describe('the integration lock serialises merges per build (part Q)', () => {
 		// acquire throws instead of returning false (the lock stops serialising).
 		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'core')).toBe(true);
 		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'feed')).toBe(false);
-		await releaseIntegrationLock(db, projectId, BUILD_SEQ);
+		await releaseIntegrationLock(db, projectId, BUILD_SEQ, 'core');
 		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'feed')).toBe(true);
 	});
 
@@ -146,10 +147,10 @@ describe('the integration lock serialises merges per build (part Q)', () => {
 		const { db, projectId } = await seedProject();
 		const t0 = Date.parse('2026-10-22T00:00:00.000Z');
 		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'core', t0)).toBe(true);
-		// Still held a minute later.
-		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'feed', t0 + 60_000)).toBe(false);
+		// Still held ten minutes later (the TTL is 30 minutes — item 4).
+		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'feed', t0 + 10 * 60_000)).toBe(false);
 		// Past the TTL the lapsed lock is cleared and the next caller takes it.
-		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'feed', t0 + 11 * 60_000)).toBe(true);
+		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'feed', t0 + 31 * 60_000)).toBe(true);
 	});
 
 	test('mergeFinishedModule reports when another merge holds the lock', async () => {
@@ -290,6 +291,213 @@ describe('a red merge routes the repair and keeps a partial result (part Q step 
 		expect(inModule(core, 'src/App.tsx')).toBe(true);
 	});
 });
+
+// --- plan-review fixes (items 1–5) -------------------------------------------
+
+/**
+ * A stateful fake integration copy. `writeIntegration` applies a batch,
+ * `snapshotIntegration` returns a ref over a deep copy of the current files,
+ * and `restoreIntegration` rolls back to a snapshot. It models the real copy
+ * closely enough to prove a not-merged module leaves no files behind (item 2).
+ */
+class FakeIntegration {
+	files = new Map<string, string>();
+	private snaps = new Map<string, Map<string, string>>();
+	private seq = 0;
+	write(batch: ReadonlyArray<{ path: string; contentBase64: string }>): void {
+		for (const f of batch) this.files.set(f.path, Buffer.from(f.contentBase64, 'base64').toString('utf8'));
+	}
+	snapshot(): string {
+		const ref = `int:${++this.seq}`;
+		this.snaps.set(ref, new Map(this.files));
+		return ref;
+	}
+	restore(ref: string): void {
+		const snap = this.snaps.get(ref);
+		if (snap) this.files = new Map(snap);
+	}
+}
+
+describe('item 1 — a retry reads the REPAIRED snapshot, not the stale one', () => {
+	test('round 2 writes the repaired bytes and the row records the new ref', async () => {
+		const { db, scope, projectId } = await seedProject();
+		// Two snapshots for feed: the broken one at 'img', the fixed one at 'img2'.
+		const broken = new FakeSnapshot(new Map([['src/server/feed/feed.ts', 'export const feed = BROKEN;']]));
+		const fixed = new FakeSnapshot(new Map([['src/server/feed/feed.ts', 'export const feed = 1;']]));
+		const byRef: Record<string, FakeSnapshot> = { img: broken, img2: fixed };
+		const written: Array<{ path: string; contentBase64: string }> = [];
+		const deps: MergeDeps = {
+			block: BLOCK,
+			buildSeq: BUILD_SEQ,
+			readModuleSnapshot: (ref) => byRef[ref]!.port(),
+			readModuleFile: async (ref, path) => Buffer.from(byRef[ref]!.files.get(path) ?? '', 'utf8').toString('base64'),
+			writeIntegration: async (files) => { for (const f of files) written.push(f); },
+			runChecks: (() => {
+				const seq = [
+					{ passed: false, failures: [{ check: 'behavior-tests', file: 'src/server/feed/feed.ts' }] as CheckFailure[] },
+					{ passed: true, failures: [] as CheckFailure[] },
+				];
+				return async () => seq.shift() ?? { passed: true, failures: [] };
+			})(),
+			savePoint: async () => 'sp',
+			// The repair commits a new snapshot and returns its ref (item 1 contract).
+			dispatchRepair: async () => 'img2',
+		};
+		const result = await mergeFinishedModule(db, scope, { runId: 'r', moduleId: 'feed', checkpointRef: 'img' }, deps);
+		expect(result.merged).toBe(true);
+		expect(result.rounds).toBe(1);
+		// Round 2's write must carry the FIXED bytes read from img2.
+		const round2 = written.filter((f) => f.path === 'src/server/feed/feed.ts').pop()!;
+		// MUTATION PROOF: mergeOneModule records the repair's NEW ref with
+		// `if (newRef) refs.set(owner, newRef)`. Drop that set and round 2 re-reads
+		// the stale 'img' snapshot, writing the BROKEN bytes — this assertion fails.
+		expect(Buffer.from(round2.contentBase64, 'base64').toString('utf8')).toBe('export const feed = 1;');
+		// The merged row records feed's NEW ref, not the stale 'img'.
+		expect((await getModule(db, projectId, BUILD_SEQ, 'feed'))?.checkpointRef).toBe('img2');
+	});
+});
+
+describe('item 2 — a not-merged module leaves no files in the integration copy', () => {
+	test('after feed ends not-merged the copy holds none of feed, then tasks merges green', async () => {
+		const { db, scope, projectId } = await seedProject();
+		const integration = new FakeIntegration();
+		// feed always fails; tasks (reuse core's slot as a second mergeable module) is clean.
+		const feedSnap = new FakeSnapshot(new Map([['src/server/feed/feed.ts', 'export const feed = BAD;']]));
+		const coreSnap = new FakeSnapshot(new Map([['src/server/core/core.ts', 'export const core = 1;']]));
+		const feedChecks = [
+			{ passed: false, failures: [{ check: 'behavior-tests', file: 'src/server/feed/feed.ts' }] as CheckFailure[] },
+			{ passed: false, failures: [{ check: 'behavior-tests', file: 'src/server/feed/feed.ts' }] as CheckFailure[] },
+			{ passed: false, failures: [{ check: 'behavior-tests', file: 'src/server/feed/feed.ts' }] as CheckFailure[] },
+		];
+		const depsFor = (snap: FakeSnapshot, checks: Array<{ passed: boolean; failures: CheckFailure[] }>): MergeDeps => ({
+			block: BLOCK,
+			buildSeq: BUILD_SEQ,
+			readModuleSnapshot: () => snap.port(),
+			readModuleFile: async (_ref, path) => Buffer.from(snap.files.get(path) ?? '', 'utf8').toString('base64'),
+			writeIntegration: async (files) => integration.write(files),
+			snapshotIntegration: async () => integration.snapshot(),
+			restoreIntegration: async (ref) => integration.restore(ref),
+			runChecks: (() => { const s = [...checks]; return async () => s.shift() ?? { passed: true, failures: [] }; })(),
+			savePoint: async () => 'sp',
+			dispatchRepair: async () => null,
+		});
+
+		const feedResult = await mergeFinishedModule(db, scope, { runId: 'r', moduleId: 'feed', checkpointRef: 'f' }, depsFor(feedSnap, feedChecks));
+		expect(feedResult.merged).toBe(false);
+		// MUTATION PROOF: mergeOneModule restores the pre-write snapshot on
+		// not-merged. Drop the `restoreIntegration(rollback)` call and feed's file
+		// stays in the copy and this assertion fails.
+		expect(integration.files.has('src/server/feed/feed.ts')).toBe(false);
+
+		// A later merge (core) then succeeds against a clean copy.
+		const coreResult = await mergeFinishedModule(db, scope, { runId: 'r', moduleId: 'core', checkpointRef: 'c' }, depsFor(coreSnap, [{ passed: true, failures: [] }]));
+		expect(coreResult.merged).toBe(true);
+		expect(integration.files.get('src/server/core/core.ts')).toBe('export const core = 1;');
+		expect((await getModule(db, projectId, BUILD_SEQ, 'core'))?.status).toBe('merged');
+	});
+});
+
+describe('item 3 — the holder drains every waiting module exactly once', () => {
+	test('two modules finish while the lock is held; both end merged, each once', async () => {
+		const { db, scope, projectId } = await seedProject();
+		const saves: string[] = [];
+		const snap = new FakeSnapshot(new Map([
+			['src/server/core/core.ts', 'ok'],
+			['src/server/feed/feed.ts', 'ok'],
+		]));
+		const makeGreenDeps = (): MergeDeps => ({
+			block: BLOCK,
+			buildSeq: BUILD_SEQ,
+			readModuleSnapshot: () => snap.port(),
+			readModuleFile: async (_ref, path) => Buffer.from(snap.files.get(path) ?? '', 'utf8').toString('base64'),
+			writeIntegration: async () => {},
+			runChecks: async () => ({ passed: true, failures: [] }),
+			savePoint: async (name) => { saves.push(name); return `img:${saves.length}`; },
+			dispatchRepair: async () => null,
+			// A fixed holder label, so both calls contend for the SAME lock row.
+			lockHolder: 'drain-holder',
+		});
+		// core finishes first and takes the lock; before it drains, feed finishes
+		// too (recorded "passed"). Model that by recording feed passed up front,
+		// then calling core's merge — its drain must pick up BOTH.
+		const { setModuleStatus } = await import('../apps/app/src/server/module-slots.ts');
+		await setModuleStatus(db, projectId, BUILD_SEQ, 'feed', 'passed', { checkpointRef: 'f' });
+		const result = await mergeFinishedModule(db, scope, { runId: 'r', moduleId: 'core', checkpointRef: 'c' }, makeGreenDeps());
+		expect(result.merged).toBe(true);
+		// MUTATION PROOF: mergeFinishedModule drains ALL "passed" modules in block
+		// order before releasing. Replace the drain loop with merging only
+		// input.moduleId and feed stays "passed" — the next assertion fails.
+		expect((await getModule(db, projectId, BUILD_SEQ, 'core'))?.status).toBe('merged');
+		expect((await getModule(db, projectId, BUILD_SEQ, 'feed'))?.status).toBe('merged');
+		// Each module merged exactly once: two save points, no duplicates.
+		expect(saves.length).toBe(2);
+		expect(new Set(saves).size).toBe(2);
+	});
+
+	test('a module that cannot take the lock is queued, not dropped', async () => {
+		const { db, scope, projectId } = await seedProject();
+		await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'another-holder');
+		const snap = new FakeSnapshot(new Map([['src/server/feed/feed.ts', 'ok']]));
+		const { deps } = makeDeps(snap);
+		const result = await mergeFinishedModule(db, scope, { runId: 'r', moduleId: 'feed', checkpointRef: 'img' }, deps);
+		// MUTATION PROOF: mergeFinishedModule records "passed" BEFORE trying the
+		// lock. Move the setModuleStatus('passed') to after the acquire and a
+		// contended module is never recorded for the holder to drain.
+		expect(result.queued).toBe(true);
+		expect((await getModule(db, projectId, BUILD_SEQ, 'feed'))?.status).toBe('passed');
+		expect((await getModule(db, projectId, BUILD_SEQ, 'feed'))?.checkpointRef).toBe('img');
+	});
+});
+
+describe('item 4 — the lock is refreshed mid-merge and released only by its holder', () => {
+	test('a refresh extends expiresAt for the holder', async () => {
+		const { db, projectId } = await seedProject();
+		const t0 = Date.parse('2026-10-22T00:00:00.000Z');
+		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'core', t0)).toBe(true);
+		const before = await lockExpiry(db, projectId, BUILD_SEQ);
+		// MUTATION PROOF: refreshIntegrationLock updates expiresAt to now+TTL.
+		// Make it a no-op (return true without the UPDATE) and expiresAt does not move.
+		expect(await refreshIntegrationLock(db, projectId, BUILD_SEQ, 'core', t0 + 5 * 60_000)).toBe(true);
+		const after = await lockExpiry(db, projectId, BUILD_SEQ);
+		expect(Date.parse(after!)).toBeGreaterThan(Date.parse(before!));
+	});
+
+	test("a stale holder's release leaves the new holder's lock in place", async () => {
+		const { db, projectId } = await seedProject();
+		const t0 = Date.parse('2026-10-22T00:00:00.000Z');
+		// 'core' takes the lock, then lapses; 'feed' takes it over after the TTL.
+		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'core', t0)).toBe(true);
+		expect(await acquireIntegrationLock(db, projectId, BUILD_SEQ, 'feed', t0 + 31 * 60_000)).toBe(true);
+		// The stale holder 'core' releases — it must NOT free feed's lock.
+		await releaseIntegrationLock(db, projectId, BUILD_SEQ, 'core');
+		// MUTATION PROOF: releaseIntegrationLock scopes the delete to `holder`.
+		// Remove the `and "holder" = ?` clause and core's release deletes feed's
+		// row, so feed's refresh below fails and this assertion flips.
+		expect(await refreshIntegrationLock(db, projectId, BUILD_SEQ, 'feed', t0 + 32 * 60_000)).toBe(true);
+	});
+});
+
+describe('item 5 — a module is marked merged only after its save point exists', () => {
+	test('a save-point failure leaves the module "passed", never "merged"', async () => {
+		const { db, scope, projectId } = await seedProject();
+		const snap = new FakeSnapshot(new Map([['src/server/feed/feed.ts', 'ok']]));
+		const { deps } = makeDeps(snap, { savePoint: async () => { throw new Error('save point failed'); } });
+		// MUTATION PROOF: mergeOneModule awaits deps.savePoint(name) BEFORE
+		// setModuleStatus('merged'). Swap the two lines so the status is set first
+		// and the module is left "merged" with no save point — this expectation flips.
+		await expect(mergeFinishedModule(db, scope, { runId: 'r', moduleId: 'feed', checkpointRef: 'img' }, deps)).rejects.toThrow('save point failed');
+		expect((await getModule(db, projectId, BUILD_SEQ, 'feed'))?.status).toBe('passed');
+	});
+});
+
+/** Read the live lock row's expiresAt (item 4 helper). */
+async function lockExpiry(db: D1Database, projectId: string, buildSeq: number): Promise<string | null> {
+	const res = await db
+		.prepare('select "expiresAt" from "integration_merge_locks" where "projectId" = ? and "buildSeq" = ?')
+		.bind(projectId, buildSeq)
+		.all<{ expiresAt: string }>();
+	return res.results?.[0]?.expiresAt ?? null;
+}
 
 // --- R: code store / code versions up to 2,000 files -------------------------
 
