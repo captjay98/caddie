@@ -7494,6 +7494,12 @@ mark {
 .decision-card.caddie-card .summary { margin: 0; font-size: 13px; line-height: 1.65; color: var(--color-muted); }
 .decision-card.caddie-card .card-meta { margin: 0; font-size: 11px; }
 .caddie-card .btn-key, .brief-teach .btn-key { min-height: 38px; border-radius: 9px; padding: 9px 14px; font-size: 13px; font-weight: 600; }
+/* The ONE filled CTA takes the card's channel hue (blue decision, green
+   ready/opportunity, amber deadline), per TheCard grammar. Text is white on
+   the darker light-mode accents and near-black on the brighter dark-mode
+   accents, mirroring the mockup's light-dark() CTA label. */
+.caddie-card .actions > .btn-key { background: var(--card-accent, var(--color-action)); color: #fff; }
+:root[data-theme="dark"] .caddie-card .actions > .btn-key { color: #09121c; }
 .caddie-card .btn-ghost, .caddie-card .detail-toggle { min-height: 38px; border-radius: 9px; }
 .caddie-card .actions, .caddie-card .row-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 20px; }
 .decision-card.caddie-card .card-details { padding: 12px 14px; border-radius: 8px; background: var(--color-raised); margin-top: 13px; font-size: 12px; color: var(--color-muted); }
@@ -9075,9 +9081,9 @@ mark {
  * genuinely wide pane (≥ ~900px). A card is capped at 584px so it never
  * stretches wider than the mockup. Deadlines, the Earlier fold and the
  * caught-up line stay full width. */
-.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap:16px; justify-items:start; }
+.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap:16px; justify-items:start; }
 .brief-v2 > .brief-deadlines, .brief-v2 > .brief-done, .brief-v2 > .state-detail { grid-column: 1 / -1; }
-.brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap:12px; }
+.brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap:12px; }
 .brief-done li { padding:0; border:0; }
 .brief-done .caddie-card { box-shadow:none; }
 .channel-pane .msg { min-width:0; overflow-wrap:anywhere; }
