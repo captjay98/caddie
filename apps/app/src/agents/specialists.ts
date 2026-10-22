@@ -19,6 +19,7 @@ import { findModelRouteForRole } from './providers.ts';
 import { FEATURE_DELEGATION_RULE } from './delegation.ts';
 import { DEMO_CONTRACT_GUIDE, FEATURE_BLOCK_GUIDE } from '@caddie/contracts';
 import { CADDIE_SCRATCH_DIR } from '../server/source-export.ts';
+import { makeRecordArchitectureReview, type RecordReviewInput } from '../server/architecture-review.ts';
 
 /**
  * P05 specialists — seven restricted roles. This module is deliberately NOT
@@ -42,6 +43,12 @@ export interface SpecialistBuildContext {
   currentRequest?: string;
   /** The run's kind of app: 'flutter' for an Android app (Track 3), else a web app. */
   stackId?: string;
+  /** Software-team mode (part B/C): the design carries a caddie-architecture block
+   *  v2 and the planner/build prompts change. Stamped on the workflow; with it
+   *  off (the default) every prompt is exactly as it was before team mode. */
+  teamMode?: boolean;
+  /** A big app (part C): modules are planned and built independently, core first. */
+  bigApps?: boolean;
  verifyBuild?: (operationKey:string, signal?:AbortSignal)=>Promise<unknown>;
 	/** Host-run project checks for build roles (run_checks); never publishes a preview. */
 	runChecks?: (operationKey: string, signal?: AbortSignal) => Promise<unknown>;
@@ -164,6 +171,62 @@ export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> =
 		'You verify using verify_build: the host executes fixed tests and build commands and records their actual receipts. Read code to find missing behaviors and ask implementation specialists to repair them. You cannot execute arbitrary shell, write product code, or invent verification evidence.',
 };
 
+/**
+ * Part C — the team-mode PRODUCT instruction, which REPLACES the "demo that
+ * wins" wording when team mode is on. It aims at a complete app (every table
+ * has screens that create/show/change/delete through the server, the main path
+ * works with real saved data), and keeps the demo contract as the three-minute
+ * tour of that complete app — a mock may stand in only for what the plan marks
+ * test mode. With team mode OFF this is never used and the product prompt is
+ * exactly as before.
+ */
+export const TEAM_MODE_PRODUCT_INSTRUCTION =
+	'You shape the product: scope, PRD and acceptance intent. Work only from the brief and pinned evidence; cite sources. You have no execution tools — write plan notes instead of running commands. ' +
+	'Plan a complete app. Every table you declare has screens that create, show, change and delete its records through the server, and the main path works end to end with real saved data. The demo contract is the three-minute tour of that complete app, not a substitute for it. A mock may stand in only for what the plan marks as test mode: payments, emails and jobs. ' +
+	'Decide where the data lives, in the PRD, and be concrete: anything a screen reads or writes (a herd, a case, a report) must be stored by the app\'s SERVER in its own database with a table, so it survives a restart and is the same for every device; the device\'s own storage is a cache for speed and offline use, never the only copy. ' +
+	PLATFORM_AI_RULE;
+
+/**
+ * Part C — the team-mode TECH-LEAD instruction, which REPLACES the three-minute
+ * judge test. It checks completeness as well as the demo: every declared table
+ * is used by a screen, every person/team-owned record is private as declared,
+ * the main path still works after a restart, and the demo path is the main path
+ * of the complete app.
+ */
+export const TEAM_MODE_TECH_LEAD_INSTRUCTION =
+	'You own the plan of record. Delegate build and repair work with precise tasks, review results honestly, and keep the last good checkpoint visible. Never claim success without machine-checked evidence. ' +
+	'Before approving a plan, check that every declared table is used by a screen, that every person- or team-owned record is private as declared, that the main path still works after a restart, and that the demo path is the main path of the complete app. Push the product specialist to fix any gap before review. ' +
+	PLATFORM_AI_RULE;
+
+/**
+ * Part B/C — the DESIGN instruction that applies in team mode. The designer
+ * (and the tech-lead where it authors the design) emit the caddie-architecture
+ * block v2 INSIDE the design document, so there is ONE approval and ONE
+ * revision hash for both the brief and the architecture. For a big app the
+ * block plans independent modules with core first; every screen declares what
+ * it shows.
+ */
+export const TEAM_MODE_DESIGN_INSTRUCTION =
+	'TEAM MODE: the design document carries ONE fenced ```caddie-architecture JSON block (version 2) describing how the whole app works before it is built — its sign-in, team shape, modules, tables (and who owns each record), routes (and who may call each), screens, outside services, AI uses, and any payments, emails and jobs. The block lives inside the SAME design the user approves, so there is one approval and one revision hash for the brief and the architecture together; never split them into two documents. Every table is owned person, team, shared or public; every route declares its access; every screen declares what it shows (its `shows` list of tables), and a screen that shows no saved data goes in `screenOnly`. Caddie checks the block with deterministic rules and an architecture review before the design can be approved, so make it correct and safe: private records need full create/read/list/update/delete and are never open to everyone, team records carry :teamId and team access, admin and job routes need sign-in, and services name an UPPER_SNAKE key with an https page.';
+
+/** Part C — for a BIG app the modules are planned independently, core first. */
+export const TEAM_MODE_BIG_APPS_DESIGN_INSTRUCTION =
+	'BIG APP: plan the app as independent modules (parts) that can be built at the same time, with the core module first — core holds the app shell, sign-in, roles and the shared records every other module depends on. Each other module depends on core (and only on modules already planned), writes only its own tables, and reads core\'s tables without changing them. Draft and review the modules in parallel, as delegates dispatched in one batch; each screen still declares what it shows.';
+
+/**
+ * The role instruction to use for a given team-mode flag. With `teamMode`
+ * false (the default) every role returns exactly its SPECIALIST_INSTRUCTIONS
+ * text; with it true, product and tech-lead get their part-C replacements and
+ * every other role is unchanged. The designer's team-mode additions are mounted
+ * separately (they are extra instructions, not a replacement).
+ */
+export function specialistInstruction(role: SpecialistRole, teamMode: boolean): string {
+	if (!teamMode) return SPECIALIST_INSTRUCTIONS[role];
+	if (role === 'product') return TEAM_MODE_PRODUCT_INSTRUCTION;
+	if (role === 'tech-lead') return TEAM_MODE_TECH_LEAD_INSTRUCTION;
+	return SPECIALIST_INSTRUCTIONS[role];
+}
+
 /** Build one specialist's agent function with its policy's tools mounted. */
 export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildContext) {
 	const allowed = ROLE_TOOL_POLICY[role];
@@ -192,7 +255,7 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 			
 			useSkill(PACKAGED_SKILLS[skillName as keyof typeof PACKAGED_SKILLS]);
 		}
-		useInstruction(SPECIALIST_INSTRUCTIONS[role]);
+		useInstruction(specialistInstruction(role, context.teamMode === true));
 		// The feature-list block belongs to the PRD, authored by product/tech-lead.
 		// The designer carries `planning` only to READ the PRD — its own output is a
 		// design brief with NO feature block, so it must not get this instruction.
@@ -202,13 +265,21 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 			);
 			useInstruction(`A PRD must end with the feature list the user approves and the host builds one feature at a time. ${FEATURE_BLOCK_GUIDE}`);
 		}
-		if (descriptor.skills.includes('design'))
+		if (descriptor.skills.includes('design')) {
 			useInstruction(
 				'After the PRD is approved you author ONE design brief (write_plan_note kind:"design"), then STOP for review — never build. The brief carries NO caddie-features block, covers every section the design skill lists, and includes one titled `html-mock` fenced block per key screen and state (the key screen, its empty state, its error state), static and styled only with design-system tokens, so the review card can show each one.',
 			);
+			// Team mode: the design document also carries the caddie-architecture
+			// block v2 (one approval, one revision hash); a big app plans its
+			// modules independently, core first.
+			if (context.teamMode === true) {
+				useInstruction(TEAM_MODE_DESIGN_INSTRUCTION);
+				if (context.bigApps === true) useInstruction(TEAM_MODE_BIG_APPS_DESIGN_INSTRUCTION);
+			}
+		}
     if (context.currentRequest?.trim()) useInstruction(`Current user request, carried forward by the host: ${context.currentRequest}\nRespect the approved plan and your role permissions; this request does not bypass review or spending gates.`);
  useInstruction(recipeInstructionFor(context.stackId));
-		return SPECIALIST_INSTRUCTIONS[role];
+		return specialistInstruction(role, context.teamMode === true);
 	};
 }
 
@@ -232,6 +303,43 @@ export function buildSpecialistDeclarations(context: SpecialistBuildContext) {
 		agent: buildSpecialist(descriptor.role, context),
 		model: findModelRouteForRole(specialistModelRole(descriptor)).specifier,
 	}));
+}
+
+// --- the architecture-review delegate (plan part B — team mode only) ---------
+
+/** The read-only architect's instruction: review the block, record findings. */
+export const ARCHITECT_INSTRUCTION =
+	'You review how an app is planned to work, for SAFETY, before it is built. Read the design\'s caddie-architecture block (through read_project_context, kind "design") and judge it as an architect: is sign-in required where private data is touched; does every private record stay owned by its person or team; can one person reach another\'s or another team\'s records; is any key or secret exposed to the browser; can data be lost. Record EVERY finding with record_architecture_review, each with a severity — "security" for sign-in, ownership/privacy, key exposure or data loss (these BLOCK the design until fixed), "advisory" for anything that would merely be better. Give the round (1 for the first review of a block, higher when you re-review after a change) and the exact blockHash you reviewed. Record an empty issue list when the block is clean. You are READ-ONLY: you never write the design, scaffold, run commands or approve anything — your one action is record_architecture_review.';
+
+export interface ArchitectDelegateContext {
+	/** Reads the latest plan note body of a kind (durable, from D1). */
+	readPlanNote: (kind: string) => Promise<string | null>;
+	/** Records one review round (host-scoped insert into architecture_reviews). */
+	recordArchitectureReview: (input: RecordReviewInput) => Promise<{ round: number; security: number; advisory: number }>;
+}
+
+/**
+ * The `architect` delegate (team mode only): a read-only reviewer on the
+ * `architect` model role (Ultra, providers.ts). It can read the project's plan
+ * notes and record a review round; it has no sandbox, write or build tools.
+ */
+export function buildArchitectDelegate(context: ArchitectDelegateContext) {
+	return function architectAgent() {
+		useTool(makeReadProjectContext({ readPlanNote: context.readPlanNote }));
+		useTool(makeRecordArchitectureReview({ record: context.recordArchitectureReview }));
+		useInstruction(ARCHITECT_INSTRUCTION);
+		return ARCHITECT_INSTRUCTION;
+	};
+}
+
+/** The architect delegate declaration, for the coordinator's useSubagent (team mode). */
+export function architectDeclaration(context: ArchitectDelegateContext) {
+	return {
+		name: 'architect',
+		description: 'Reviews the design\'s architecture block for safety (sign-in, ownership/privacy, key exposure, data loss) and records security/advisory findings. Read-only.',
+		agent: buildArchitectDelegate(context),
+		model: findModelRouteForRole('architect').specifier,
+	};
 }
 
 export { FEATURE_DELEGATION_RULE };
