@@ -4,6 +4,8 @@ import { listAbuseReports, resolveAbuseReport, type AbuseReportView } from '../a
 import { hostnameFor, restoreTakenDownApp, takeDownApp, type PublishDeps } from '../publish.ts';
 import { appsDomainOf, publishDepsFromEnv, type PublishEnv } from '../publish-env.ts';
 import { ScopeError, sessionUserId } from '../scope.ts';
+import { readSwitches, setSwitch, SwitchError } from '../platform-switches.ts';
+import { SWITCH_KEYS, type SwitchKey, type SwitchValue } from '@caddie/contracts';
 
 /**
  * The operator's review page for abuse reports (Publish programme stage 5).
@@ -203,6 +205,44 @@ ${recent.length ? `<ul>${recent.map((r) => reportItem(r, appsDomain)).join('\n')
 		if (!deps) return back("Publishing isn't set up on this server.");
 		const done = await restoreTakenDownApp(c.env.DB, deps, c.req.param('projectId'), { by: actor.id });
 		return back(done ? 'The takedown is lifted. The owner can publish again.' : 'That app was not taken down.');
+	});
+
+	/**
+	 * Platform switches (plan section 4). JSON, operator-only, so lane 1 and the
+	 * owner can read and flip team mode, big apps, app features and the two
+	 * kill switches without a redeploy. The `operator` gate above answers 401
+	 * (not signed in) and 403 (not an operator, judges included) exactly as the
+	 * reports page does — no new refusal.
+	 */
+	router.get('/operator/switches', async (c) => {
+		const actor = await operator(c.env, c.req.raw);
+		if (actor instanceof Response) return actor;
+		const switches = await readSwitches(c.env.DB, c.env);
+		return c.json({ switches }, 200, { 'cache-control': 'no-store' });
+	});
+
+	router.post('/operator/switches', async (c) => {
+		const actor = await operator(c.env, c.req.raw);
+		if (actor instanceof Response) return actor;
+		if (!sameOrigin(c.req.raw)) return c.json({ error: 'cross_origin', message: 'Send this from the operator surface.' }, 403);
+		let body: unknown;
+		try {
+			body = await c.req.raw.json();
+		} catch {
+			body = null;
+		}
+		const key = (body as { key?: unknown } | null)?.key;
+		const value = (body as { value?: unknown } | null)?.value;
+		if (!(SWITCH_KEYS as readonly string[]).includes(key as string)) {
+			return c.json({ error: 'unknown_switch', message: `No such switch: ${String(key)}.` }, 400);
+		}
+		try {
+			const reading = await setSwitch(c.env.DB, c.env, actor.id, key as SwitchKey, value as SwitchValue);
+			return c.json({ switch: reading }, 200, { 'cache-control': 'no-store' });
+		} catch (error) {
+			if (error instanceof SwitchError) return c.json({ error: error.code, message: error.message }, error.status as 400);
+			throw error;
+		}
 	});
 
 	return router;
