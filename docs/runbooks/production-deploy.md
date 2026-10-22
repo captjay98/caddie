@@ -61,14 +61,43 @@ and start one judge account yourself before sharing the code.
 
 ## Every deploy
 
-On `main` with a clean tree:
+One command, from the repo root on `main` with a clean tree:
+
+```sh
+bun run deploy          # REHEARSAL: every gate below + two remote READS,
+                        # then prints exactly what --yes would write, and stops.
+bun run deploy --yes    # the owner's authorization: also runs the remote writes
+                        # (migrations BEFORE the code), the smoke and the report.
+```
+
+`bun run deploy` runs the eight steps in the one correct order, stops at the
+first failure, parses the Version ID (the rollback handle), prints the evidence
+row for you to commit, and on a failed smoke prints the exact rollback command.
+It never issues `wrangler secret put`, `deploy --env` or `migrations … --local`,
+and it never writes `docs/live-receipts.json`.
+
+Two flags beyond `--yes`:
+
+- `--with-secrets` — deploy with `--secrets-file .prod.vars`. Leave it off on a
+  normal deploy: a re-upload undoes any value you set later with `secret put`.
+- `--accept-do-migration` — required (with `--yes`) when `wrangler.jsonc` adds a
+  new Durable Object `migrations` tag since the last deploy. Rollback past that
+  boundary is refused by Cloudflare, so the flag is a deliberate acknowledgement.
+
+While judge access is off (no `JUDGE_ACCESS_CODE` in `.prod.vars`), the script
+passes `--owner-only` to the preflight for you.
+
+### Manual steps (fallback)
+
+The eight steps `bun run deploy` automates, if you need to run them by hand. On
+`main` with a clean tree:
 
 1. `bun scripts/release-check.ts`: 0 FAIL.
 2. `CLOUDFLARE_ENV=production bun run build`.
 3. `bun scripts/deploy-preflight.ts`, with `--owner-only` while judge access
    is off: 0 FAIL. Read every WARN.
 4. `cd apps/app && bunx wrangler deploy --dry-run`. It lists DB, LOADER,
-   PREVIEW_DB and the two Flue agents, and uploads nothing.
+   PREVIEW_DB and the Flue agents, and uploads nothing.
 5. **[remote] Migrations, before the code** (in `apps/app`):
    `bunx wrangler d1 migrations apply caddie --remote --config wrangler.jsonc --env production`.
    The first run applies 0001-0035; later runs apply only new ones. Never edit
