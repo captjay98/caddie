@@ -7471,15 +7471,32 @@ mark {
 }
 /* Shared compact card family: the same control geometry in Brief and chat. */
 .caddie-card { min-width: 0; padding: 18px; border: 1px solid var(--color-line); border-radius: 13px; background: var(--card-gradient, var(--color-raised)); overflow-wrap: anywhere; }
-.decision-card.caddie-card { display: grid; gap: 10px; }
-.decision-card.caddie-card .card-head { align-items: center; flex-wrap: wrap; gap: 8px; }
-.decision-card.caddie-card h3 { margin: 0; font-size: 20px; line-height: 1.25; letter-spacing: -.025em; }
+/* --- Brief card redo (team-mode, 2026-10-22): TheCard grammar at Halo
+   geometry. The SHELL is neutral (status never touches it); the channel hue
+   lives only in the kicker, the soft pill, the tinted panels and ONE filled
+   CTA. Type scale, 13px corners, 24px padding and ~580px width match the
+   accepted mockups (caddie-card-review.html), light and dark. */
+.decision-card.caddie-card {
+ display: grid;
+ gap: 0;
+ width: 100%;
+ max-width: 584px;
+ padding: 24px;
+ border-radius: 14px;
+ border: 1px solid var(--color-line);
+ background: linear-gradient(155deg, var(--color-panel), color-mix(in srgb, var(--color-raised) 65%, var(--color-panel)));
+ box-shadow: 0 3px 14px color-mix(in srgb, var(--color-bright) 4%, transparent);
+ overflow-wrap: anywhere;
+ font-size: 14px;
+}
+.decision-card.caddie-card .card-head { align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+.decision-card.caddie-card h3 { margin: 14px 0 6px; font-size: 22px; line-height: 1.25; letter-spacing: -.035em; font-weight: 650; color: var(--color-bright); }
 .decision-card.caddie-card .summary { margin: 0; font-size: 13px; line-height: 1.65; color: var(--color-muted); }
 .decision-card.caddie-card .card-meta { margin: 0; font-size: 11px; }
-.caddie-card .btn-key, .brief-teach .btn-key { min-height: 48px; border-radius: 13px; padding: 12px 16px; font-size: 14px; }
-.caddie-card .btn-ghost, .caddie-card .detail-toggle { min-height: 44px; border-radius: 13px; }
-.caddie-card .actions, .caddie-card .row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.decision-card.caddie-card .card-details { padding: 12px; border-radius: 10px; background: color-mix(in srgb, var(--color-action) 6%, var(--color-raised)); }
+.caddie-card .btn-key, .brief-teach .btn-key { min-height: 38px; border-radius: 9px; padding: 9px 14px; font-size: 13px; font-weight: 600; }
+.caddie-card .btn-ghost, .caddie-card .detail-toggle { min-height: 38px; border-radius: 9px; }
+.caddie-card .actions, .caddie-card .row-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 20px; }
+.decision-card.caddie-card .card-details { padding: 12px 14px; border-radius: 8px; background: var(--color-raised); margin-top: 13px; font-size: 12px; color: var(--color-muted); }
 .brief-done li { padding: 14px 0; border-bottom: 1px solid var(--color-line); }
 .brief-done li:last-child { border-bottom: 0; }
 .brief-earlier-outcome { margin: 6px 0; color: var(--color-muted); font-size: 12px; line-height: 1.6; }
@@ -7489,9 +7506,8 @@ mark {
 .decision-history dl { display: grid; gap: 8px; font-size: 12px; }
 .decision-history dd { margin: 0; overflow-wrap: anywhere; }
 @media(max-width: 600px) {
- .caddie-card { padding: 14px; }
- .decision-card.caddie-card h3 { font-size: 18px; }
- .caddie-card .actions > .btn-key { flex: 1 1 100%; }
+ .caddie-card { padding: 18px; }
+ .decision-card.caddie-card h3 { font-size: 21px; }
 }
 .welcome-replay {
  min-height: 44px;
@@ -8922,62 +8938,127 @@ mark {
 .caddie-card[data-tone="green"] { --card-accent: var(--color-ok, #279f76); }
 .caddie-card[data-tone="amber"] { --card-accent: var(--color-warn, #c28b34); }
 .caddie-card[data-tone="quiet"] { --card-accent: var(--color-muted); }
-.caddie-card[data-tone] { background: linear-gradient(145deg, color-mix(in srgb, var(--card-accent) 5%, var(--color-raised)), var(--color-raised)); border-color: color-mix(in srgb, var(--card-accent) 22%, var(--color-line)); }
-.compact-card-head { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
-.compact-card-kicker { display:flex; align-items:center; flex:1 1 120px; gap:7px; min-width:0; font-size:11px; font-weight:650; color:var(--color-muted); }
-.compact-card-icon { color:var(--card-accent, var(--color-action)); display:flex; }
-.compact-card-icon svg { width:16px; height:16px; }
-.compact-card-badge { border:1px solid color-mix(in srgb, var(--card-accent, var(--color-line)) 30%, var(--color-line)); border-radius:999px; padding:4px 9px; color:var(--card-accent, var(--color-muted)); background:color-mix(in srgb, var(--card-accent, var(--color-muted)) 7%, transparent); font-size:11px; font-weight:650; }
+/* Shell stays neutral (TheCard grammar): the hue lives only in the kicker,
+   the soft pill, the tinted panels and the one filled CTA — not the card
+   background. */
+.compact-card-head { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+.compact-card-kicker { display:flex; align-items:center; gap:7px; min-width:0; font-size:12px; font-weight:600; color:var(--card-accent, var(--color-action)); flex-wrap:wrap; }
+.compact-card-icon { color:var(--card-accent, var(--color-action)); display:inline-flex; flex:none; width:15px; height:15px; align-items:center; justify-content:center; }
+.compact-card-icon svg { width:15px; height:15px; }
+/* "· time" freshness in the kicker, muted (mockup `cc-fresh`). */
+.compact-card-fresh { font-weight:400; color:var(--color-muted); white-space:nowrap; }
+/* Soft pill: hue at 12% fill, no border (mockup `cc-pill`). A low-stakes
+ * (quiet) card mutes it to the muted hue. */
+.compact-card-badge { border:0; border-radius:20px; padding:3px 9px; color:var(--card-accent, var(--color-muted)); background:color-mix(in srgb, var(--card-accent, var(--color-muted)) 12%, transparent); font-size:11px; font-weight:600; white-space:nowrap; }
 .compact-card-new { font-size:10px; color:var(--color-action); }
-.compact-card-panel { padding:12px; border-radius:10px; background:color-mix(in srgb, var(--color-muted) 6%, transparent); margin-block:10px; }
-.compact-card-panel-title { margin:0 0 8px; font-size:11px; color:var(--color-muted); font-weight:650; }
-.compact-card-note { margin:6px 0; font-size:12px; line-height:1.6; color:var(--color-muted); }
-.compact-card-pulse { width:6px; height:6px; flex:none; border-radius:50%; background:var(--card-accent, var(--color-action)); animation:card-pulse 1.8s ease-in-out infinite; }
-@keyframes card-pulse { 50% { opacity:.35; box-shadow:0 0 0 4px color-mix(in srgb,var(--card-accent, var(--color-action)) 12%,transparent); } }
+/* Tinted nested panel: the card's hue at 7% over the panel (mockup `cc-panel`). */
+.compact-card-panel { padding:16px; border-radius:10px; background:color-mix(in srgb, var(--card-accent, var(--color-action)) 7%, var(--color-panel)); margin-top:18px; }
+.compact-card-panel-title { margin:0; font-size:13px; color:var(--color-bright); font-weight:600; }
+.compact-card-panel-title + * { margin-top:10px; }
+.compact-card-note { display:flex; gap:8px; margin-top:16px; font-size:13px; line-height:1.6; color:var(--color-bright); }
+.compact-card-note .compact-card-icon { color:var(--card-accent, var(--color-action)); margin-top:3px; }
+.compact-card-pulse { width:7px; height:7px; flex:none; border-radius:50%; background:var(--card-accent, var(--color-action)); box-shadow:0 0 0 4px color-mix(in srgb,var(--card-accent, var(--color-action)) 12%,transparent); animation:card-pulse 1.8s ease-in-out infinite; }
+@keyframes card-pulse { 50% { opacity:.55; box-shadow:0 0 0 7px color-mix(in srgb,var(--card-accent, var(--color-action)) 3%,transparent); } }
 /* Build rail (mockup "Live build"): four flat stage columns, a 3px top bar per
- * stage — grey pending, accent active, green done. No new data: derived from
- * the card's design (build → Building, repair → Checking). */
-.compact-card-rail { list-style:none; margin:14px 0 4px; padding:0; display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+ * stage — grey pending, accent active, green done. */
+.compact-card-rail { list-style:none; margin:19px 0 0; padding:0; display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
 .compact-card-step { display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--color-muted); }
 .compact-card-step::before { content:""; height:3px; border-radius:3px; background:var(--color-line); }
 .compact-card-step[data-state="done"]::before { background:var(--color-ok, #279f76); }
 .compact-card-step[data-state="active"]::before { background:var(--card-accent, var(--color-action)); }
-.compact-card-step[data-state="active"] { color:var(--card-accent, var(--color-action)); font-weight:650; }
+.compact-card-step[data-state="active"] { color:var(--card-accent, var(--color-action)); font-weight:600; }
 /* Card footer (mockup `cc-bottom`): a quiet divider, subject left, reassurance
  * right; wraps on a narrow card. Omitted entirely when it would be empty. */
-.compact-card-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px solid var(--color-line); font-size:11px; color:var(--color-muted); }
+.compact-card-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:20px; padding-top:13px; border-top:1px solid var(--color-line); font-size:11px; color:var(--color-muted); }
 .compact-card-foot-note { text-align:right; }
-.compact-card-panel[data-panel-tone="caution"] { background:color-mix(in srgb, var(--color-warn, #c28b34) 7%, transparent); }
+.compact-card-panel[data-panel-tone="caution"] { background:color-mix(in srgb, var(--color-warn, #c28b34) 7%, var(--color-panel)); }
 /* Deadline countdown (mockup `cc-countdown`): a big days-left number beside the
  * readable date, on an accent-tinted panel. Amber via the card's deadline tone. */
-.compact-card-countdown { display:flex; align-items:center; gap:20px; margin:14px 0 4px; padding:16px; border-radius:10px; background:color-mix(in srgb, var(--card-accent, var(--color-action)) 8%, transparent); }
-.compact-card-days { display:flex; flex-direction:column; align-items:center; min-width:52px; font-size:12px; color:var(--card-accent, var(--color-action)); }
-.compact-card-days b { font-size:40px; font-weight:650; line-height:1.05; letter-spacing:-.05em; }
-.compact-card-when { min-width:0; border-left:1px solid color-mix(in srgb, var(--card-accent, var(--color-action)) 25%, transparent); padding-left:16px; }
-.compact-card-when strong { font-size:13px; font-weight:600; }
-.compact-card-when p { margin:3px 0 0; font-size:12px; color:var(--color-muted); }
-@media(max-width:600px){ .compact-card-countdown { gap:14px; padding:14px; } .compact-card-when { padding-left:12px; } }
+.compact-card-countdown { display:flex; align-items:center; gap:22px; margin-top:18px; padding:18px; border-radius:10px; background:color-mix(in srgb, var(--card-accent, var(--color-action)) 8%, var(--color-panel)); }
+.compact-card-days { display:flex; flex-direction:column; align-items:center; min-width:58px; font-size:12px; color:var(--card-accent, var(--color-action)); }
+.compact-card-days b { font-size:42px; font-weight:600; line-height:1.1; letter-spacing:-.06em; }
+.compact-card-when { min-width:0; border-left:1px solid color-mix(in srgb, var(--card-accent, var(--color-action)) 25%, transparent); padding-left:19px; }
+.compact-card-when strong { font-size:13px; font-weight:550; }
+.compact-card-when p { margin:4px 0 0; font-size:12px; color:var(--color-muted); }
+@media(max-width:480px){ .compact-card-countdown { gap:14px; padding:14px; } .compact-card-when { padding-left:13px; } }
 /* Plan "What you're approving" / fit rows (mockup `cc-rows`/`cc-row`): an
  * accent-tinted mark, a title and a muted one-line detail. */
 .compact-card-list { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
 .compact-card-list-row { display:flex; align-items:flex-start; gap:10px; min-width:0; }
-.compact-card-list-mark { flex:none; margin-top:2px; color:var(--card-accent, var(--color-action)); display:flex; }
+.compact-card-list-mark { flex:none; margin-top:3px; color:var(--card-accent, var(--color-action)); display:flex; }
 .compact-card-list-mark svg { width:15px; height:15px; }
 .compact-card-list-text { min-width:0; }
 .compact-card-list-text strong { display:block; font-size:13px; font-weight:550; }
 .compact-card-list-text small { display:block; font-size:12px; color:var(--color-muted); line-height:1.5; }
 /* Fit split (mockup `cc-split`): two tinted panels side by side on a wide card,
  * stacked when narrow. Each side renders only when it has content. */
-.compact-card-split { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0 4px; }
+.compact-card-split { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:18px; }
 .compact-card-split .compact-card-panel { margin:0; }
-.compact-card-notes { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
-.compact-card-notes li { font-size:12px; line-height:1.55; color:var(--color-muted); }
-@media(max-width:600px){ .compact-card-split { grid-template-columns:1fr; } }
+.compact-card-notes { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
+.compact-card-notes li { font-size:13px; line-height:1.65; color:var(--color-muted); }
+@media(max-width:480px){ .compact-card-split { grid-template-columns:1fr; } }
 /* Preview checks chips (mockup `cc-docs`/`cc-doc`): the passed-checks count, the
  * named features behind them, and the version — quiet bordered chips. */
-.compact-card-chips { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0 4px; }
-.compact-card-chip { font-size:11px; border:1px solid var(--color-line); border-radius:6px; padding:4px 8px; color:var(--color-muted); background:var(--color-raised); }
-.compact-card-chip-ok b { color:var(--color-ok, #279f76); margin-right:4px; font-weight:500; }
+.compact-card-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
+.compact-card-chip { font-size:11px; border:1px solid var(--color-line); border-radius:6px; padding:4px 8px; color:var(--color-muted); background:var(--color-panel); }
+.compact-card-chip-ok b { color:var(--card-accent, var(--color-ok, #279f76)); margin-right:4px; font-weight:500; }
+/* Active-line (mockup `cc-active-line`): the "Now: <feature>" / repair heading
+ * row with its hue icon or pulse. */
+.compact-card-active { display:flex; gap:9px; align-items:center; }
+.compact-card-active h4 { margin:0; font-size:13px; font-weight:600; color:var(--color-bright); }
+.compact-card-active .compact-card-icon { color:var(--card-accent, var(--color-action)); }
+/* Live-build feed (mockup `cc-feed`): one row per feature with its state at the
+ * right; the building row carries the hue, built rows a green check. */
+.compact-card-feed { display:grid; gap:0; margin-top:10px; }
+.compact-card-feed-row { display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--color-line); font-size:13px; color:var(--color-bright); }
+.compact-card-feed-row:last-child { border:0; padding-bottom:0; }
+.compact-card-feed-row .compact-card-icon { color:var(--color-ok, #279f76); }
+.compact-card-feed-row[data-state="building"] { font-weight:500; }
+.compact-card-feed-row[data-state="building"] .compact-card-icon { color:var(--card-accent, var(--color-action)); }
+.compact-card-feed-row[data-state="waiting"] { color:var(--color-muted); }
+.compact-card-feed-row[data-state="waiting"] .compact-card-icon { color:var(--color-muted); }
+.compact-card-feed-state { margin-left:auto; color:var(--color-muted); font-size:11px; }
+/* Live-build "last update" line (mockup `cc-live-text`). */
+.compact-card-live { margin-top:14px; font-size:12px; color:var(--color-muted); display:flex; gap:7px; align-items:center; }
+/* Repair "what needs fixing" panel (mockup `cc-repair`): amber-tinted, the
+ * failed check's plain sentence. */
+.compact-card-repair { padding:14px 16px; margin-top:18px; border-radius:9px; background:color-mix(in srgb, var(--color-warn, #c28b34) 8%, var(--color-panel)); }
+.compact-card-repair h4 { margin:0 0 6px; font-size:13px; font-weight:600; color:var(--color-warn, #c28b34); }
+.compact-card-repair p { margin:0; font-size:13px; line-height:1.65; color:var(--color-muted); }
+.compact-card-fix { display:flex; gap:8px; align-items:center; font-size:12px; margin-top:10px; color:var(--color-muted); }
+/* Ready app-peek (mockup `cc-miniapp`): shown only when a real screenshot/
+ * artifact exists. A framed mini header + body, or the stored image. */
+.compact-card-peek { margin-top:18px; border:1px solid var(--color-line); border-radius:10px; overflow:hidden; background:var(--color-ink); }
+.compact-card-peek-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 15px; border-bottom:1px solid var(--color-line); background:var(--color-panel); font-size:11px; }
+.compact-card-peek-head b { font-weight:650; letter-spacing:-.02em; }
+.compact-card-peek-body { padding:17px; }
+.compact-card-peek-body p { margin:0; font-size:12px; color:var(--color-muted); line-height:1.6; }
+.compact-card-peek img { display:block; width:100%; height:auto; }
+/* Deadline submission steps (mockup deadline `cc-rows`): each a checklist row,
+ * done = green check, pending = hollow ring (muted). */
+.compact-card-steps { list-style:none; margin:16px 0 0; padding:0; display:grid; gap:10px; }
+.compact-card-steps li { display:flex; align-items:flex-start; gap:10px; min-width:0; }
+.compact-card-steps .compact-card-icon { margin-top:3px; }
+.compact-card-steps li[data-done="true"] .compact-card-icon { color:var(--color-ok, #279f76); }
+.compact-card-steps li[data-done="false"] .compact-card-icon { color:var(--color-muted); }
+.compact-card-steps strong { display:block; font-size:13px; font-weight:550; color:var(--color-bright); }
+.compact-card-steps small { display:block; font-size:12px; color:var(--color-muted); line-height:1.5; }
+/* Footer app · version (mockup `cc-bottom` left): the app name and its
+ * version/revision, replacing the developer-looking subject span. */
+.compact-card-foot-subject { color:var(--color-muted); }
+/* Earlier / history card (mockup 7): a header row, then compact record rows. */
+.compact-card-history-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px; }
+.decision-card.caddie-card .compact-card-history-head h3 { margin:0; font-size:13px; font-weight:600; letter-spacing:0; }
+.compact-card-history-label { font-size:12px; color:var(--color-muted); }
+.compact-card-record { padding:14px 0; border-bottom:1px solid var(--color-line); display:flex; align-items:flex-start; gap:12px; }
+.compact-card-record:last-of-type { border:0; }
+.compact-card-record-mark { border-radius:50%; background:color-mix(in srgb, var(--color-ok, #279f76) 10%, var(--color-panel)); color:var(--color-ok, #279f76); padding:7px; display:flex; flex:none; }
+.compact-card-record-mark svg { width:15px; height:15px; }
+.compact-card-record-body { flex:1; min-width:0; }
+.compact-card-record-body h4 { margin:0 0 3px; font-size:14px; font-weight:600; color:var(--color-bright); }
+.compact-card-record-body p { margin:0; font-size:12px; color:var(--color-muted); line-height:1.5; }
+.compact-card-record-body .detail-toggle { margin-top:5px; padding:4px 0; min-height:auto; border:0; background:transparent; color:var(--color-action); font:inherit; font-size:12px; font-weight:500; }
+.compact-card-record time { font-size:11px; color:var(--color-muted); white-space:nowrap; }
 .caddie-card .workflow-heading { margin-block:8px 14px; gap:10px; }
 .caddie-card .workflow-heading h3 { font-size:20px; letter-spacing:-.025em; }
 .project-workflow > .build-progress { border:0; background:transparent; padding:0; box-shadow:none; }
@@ -8986,18 +9067,17 @@ mark {
 .build-technical > summary, .workflow-app-options > summary, .workflow-updates > summary { padding-block:12px; min-height:44px; font-size:12px; cursor:pointer; color:var(--color-muted); }
 .workflow-app-options[open] { display:grid; gap:14px; }
 .brief-deadlines { display:grid; gap:12px; }
-/* The live Brief (v2): open decision cards flow two-up on a wide pane and drop
- * to one column when narrow (auto-fit, 340px min → two at ~720px+). The
- * deadlines block, the Earlier fold and the caught-up line stay full width. */
-/* The live Brief (v2): open decision cards flow two-up on a wide pane and drop
- * to one column when narrow. Lane 14 measured the Brief pane at 1440px with the
- * chat at half the window — the pane is ~651px, so the min card width is 300px:
- * two 300px cards + the 12px gap (612px) fit two-up there and stay readable for
- * the plan and fit lists, while a phone width drops cleanly to one column. The
- * deadlines block, the Earlier fold and the caught-up line stay full width. */
-.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:12px; }
+
+/* The live Brief (v2): open decision cards flow two-up ONLY when each column is
+ * at least 440px wide, and otherwise stay one-up. Lane 14 measured the Brief
+ * pane at ~651px with the chat at half a 1440px window: at that width a single
+ * ~580px card reads at the mockups' type scale, and two-up kicks in only on a
+ * genuinely wide pane (≥ ~900px). A card is capped at 584px so it never
+ * stretches wider than the mockup. Deadlines, the Earlier fold and the
+ * caught-up line stay full width. */
+.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap:16px; justify-items:start; }
 .brief-v2 > .brief-deadlines, .brief-v2 > .brief-done, .brief-v2 > .state-detail { grid-column: 1 / -1; }
-.brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:10px; }
+.brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(440px, 1fr)); gap:12px; }
 .brief-done li { padding:0; border:0; }
 .brief-done .caddie-card { box-shadow:none; }
 .channel-pane .msg { min-width:0; overflow-wrap:anywhere; }

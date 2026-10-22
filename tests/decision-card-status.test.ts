@@ -23,8 +23,8 @@ function card(partial: Partial<DecisionCard>): DecisionCard {
 }
 
 describe("DecisionCard statusLabel — plain language, never raw status", () => {
-  test("an approval that needs you reads 'Plan ready', not 'needs-you'", () => {
-    expect(statusLabel(card({ kind: "approval", status: "needs-you" }))).toBe("Plan ready");
+  test("an approval that needs you reads 'Needs you' (mockup 1 pill)", () => {
+    expect(statusLabel(card({ kind: "approval", status: "needs-you" }))).toBe("Needs you");
   });
   test("a verified result that needs you reads 'Ready to try'", () => {
     expect(statusLabel(card({ kind: "result", status: "needs-you" }))).toBe("Ready to try");
@@ -48,4 +48,5 @@ describe("DecisionCard statusLabel — plain language, never raw status", () => 
   });
 });
 
- test('armed future schedules read Watching rather than Done', () => { expect(statusLabel(card({ kind: 'deadline', status: 'handled' }))).toBe('Watching'); });
+ test('a handled hackathon deadline still reads its Deadline badge (mockup 5)', () => { expect(statusLabel(card({ kind: 'deadline', status: 'handled' }))).toBe('Deadline'); });
+ test("a schedule-backed deadline card reads 'Scheduled', never a Deadline badge", () => { expect(statusLabel(card({ kind: 'deadline', status: 'handled', schedule: { name: 'Weekly check', nextRunLabel: 'Monday 08:00' } }))).toBe('Scheduled'); });
