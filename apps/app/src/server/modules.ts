@@ -22,6 +22,7 @@
 
 import type { D1Database } from './auth.ts';
 import type { Scope } from '@caddie/contracts';
+import { SandboxError, type SandboxDriver } from './adapters/sandbox.ts';
 import {
 	type ModuleRow,
 	type ModuleStatus,
@@ -255,4 +256,63 @@ export function buildOutcome(modules: readonly ModuleRow[]): { done: boolean; al
 	const unfinished = modules.filter((m) => m.status === 'pending' || m.status === 'building').map((m) => m.moduleId);
 	const allMerged = modules.length > 0 && modules.every((m) => m.status === 'merged');
 	return { done: unfinished.length === 0, allMerged, unfinished };
+}
+
+// --- opening a module's own working copy (part P, gap 1) ---------------------
+
+/** What {@link openModuleWorkingCopy} needs: a driver + the module's identity. */
+export interface ModuleWorkingCopyInput {
+	db: D1Database;
+	driver: Pick<SandboxDriver, 'ensureSession'>;
+	scope: Scope;
+	/** The run binding's runId (the module session key is `module:<runId>:<moduleId>`). */
+	runId: string;
+	/** The build sequence this module belongs to (to read its build_modules row). */
+	buildSeq: number;
+	/** The module this builder owns. */
+	moduleId: string;
+	/** The module's own session key, `module:<runId>:<moduleId>`. */
+	sessionKey: string;
+	/** The sandbox base image, used ONLY as a defensive fallback if the row has no save point. */
+	baseImage: string;
+}
+
+/**
+ * Team mode (plan part P, gap 1) — open a MODULE's own working copy.
+ *
+ * A module builder's copy must be ITS OWN, never the main build's. The main
+ * build's `openWorkingCopy` (server/working-copy.ts) reads and rewrites the
+ * PROJECT-level `build_sandbox_sessions` pointer (buildSessionOverride, and its
+ * startAgain path deletes + replaces that pointer for the whole project), so a
+ * module routed through it could be handed the main build's session and could
+ * corrupt the project's pointer. This path NEVER reads or writes
+ * `build_sandbox_sessions`.
+ *
+ * Instead it opens the module's own session key `module:<runId>:<moduleId>`
+ * directly from the module's START SAVE POINT — its `build_modules` row's
+ * `checkpointRef`, which `startReadyModules` stored as the latest merged save
+ * point the module's copy is restored from. The image already carries the
+ * installed dependencies (it is a checkpoint of an installed tree), so no
+ * re-install is done here; this is a pure session open.
+ */
+export async function openModuleWorkingCopy(input: ModuleWorkingCopyInput): Promise<string> {
+	const row = await getModule(input.db, input.scope.projectId, input.buildSeq, input.moduleId);
+	if (!row) {
+		throw new SandboxError(
+			404,
+			'MODULE_NOT_FOUND',
+			`No build module "${input.moduleId}" in build ${input.buildSeq}, so its working copy cannot be opened.`,
+		);
+	}
+	// The module's own copy is restored from its start save point. A row with no
+	// save point yet (defensive only — startReadyModules always sets one) falls
+	// back to the base image rather than throwing.
+	const image = row.checkpointRef ?? input.baseImage;
+	const { sessionId } = await input.driver.ensureSession({
+		sessionKey: input.sessionKey,
+		image,
+		projectId: input.scope.projectId,
+		runId: input.runId,
+	});
+	return sessionId;
 }
