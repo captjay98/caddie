@@ -26,6 +26,11 @@ import { getLarge, putLarge } from "./large-content.ts";
 import { findModelRouteForRole } from "../agents/providers.ts";
 import { FEATURE_DELEGATION_RULE } from "../agents/delegation.ts";
 import { stampProjectModes, type SwitchEnv } from "./platform-switches.ts";
+import {
+  architectureKindForBuild,
+  evaluateDesignGate,
+} from "./architecture-gate.ts";
+import { listArchitectureReviews } from "./architecture-review.ts";
 
 export type WorkflowPhase =
   "planning" | "review" | "design" | "design-review" | "building" | "blocked" | "ready";
@@ -442,8 +447,27 @@ export async function decideDesign(
       "feedback_required",
       "Describe the change in 2000 characters or fewer.",
     );
-  // S07 judge limits: approving the design brief starts the actual build, and
-  // is refused before any write. Only the transition from design-review counts.
+  // Team-mode architecture gate (part B): an approval is refused while the
+  // design's caddie-architecture block is missing, fails the deterministic
+  // rules, or has open security issues from the Ultra review — the plain
+  // sentences come back in the error so the review screen can list them. With
+  // teamMode=0 this is skipped entirely and the design gate behaves as today.
+  // Checked before any judge-limit admission or decision write, so a refused
+  // approval costs nothing. On approval the reviewed revision is stored below.
+  const teamMode = await isTeamModeWorkflow(db, scope.projectId);
+  if (input.decision === "approved" && teamMode && workflow!.phase === "design-review") {
+    const gate = evaluateDesignGate(design.body, {
+      kind: architectureKindForBuild(await isBigAppsWorkflow(db, scope.projectId)),
+      reviews: await listArchitectureReviews(db, scope.projectId),
+    });
+    if (!gate.ok) {
+      throw new ScopeError(
+        409,
+        gate.reason === "change-plan" ? "ARCHITECTURE_CHANGE_PLAN" : "ARCHITECTURE_UNSAFE",
+        gate.messages.join(" "),
+      );
+    }
+  }
   // A change request makes Caddie rewrite the brief: one Caddie message.
   if (input.decision === "approved" && workflow!.phase === "design-review")
     await admitJudgeBuildStart(db, scope.actorId, limits);
@@ -480,14 +504,53 @@ export async function decideDesign(
       input.decision === "approved"
         ? `The authenticated design review approved the design brief ${design.id}. Build the approved plan feature by feature, implementing it to match the design brief: call build_next_feature, delegate exactly that feature with its doneWhen checks, then finish_feature; when every feature has passed, run QA with verify_build. ${FEATURE_DELEGATION_RULE} Stop honestly on blockers.`
         : `Revise the design brief ${design.id} using the user's feedback below. Write a NEW design revision (write_plan_note kind:'design'), then wait for the design review; no building.\n\n${note}`;
+    // On approval, bind the build to exactly this design revision (part B): its
+    // block is what lanes E and P read back through getApprovedBlock. A change
+    // request clears any prior binding so a stale revision can't be served.
+    const approvedRevisionId = input.decision === "approved" ? design.id : null;
     await db
       .prepare(
         "update build_workflows set phase = ?, pendingKey = ?, pendingBody = ?, detail = null, updatedAt = ? where projectId = ?",
       )
       .bind(phase, `design-decision:${approval.id}`, message, now(), scope.projectId)
       .run();
+    // The binding column is from migration 0040; write it separately and
+    // tolerate its absence so an older workflow table still advances.
+    try {
+      await db
+        .prepare("update build_workflows set approvedDesignRevisionId = ? where projectId = ?")
+        .bind(approvedRevisionId, scope.projectId)
+        .run();
+    } catch (error) {
+      if (!String(error).includes("no such column")) throw error;
+    }
   }
   return workflowSnapshot(db, scope);
+}
+
+/** True when this project's workflow was stamped team-mode (part B gate). */
+async function isTeamModeWorkflow(db: D1Database, projectId: string): Promise<boolean> {
+  return (await workflowModeFlag(db, projectId, "teamMode")) === 1;
+}
+
+/** True when this project's workflow was stamped a big app (gate kind). */
+async function isBigAppsWorkflow(db: D1Database, projectId: string): Promise<boolean> {
+  return (await workflowModeFlag(db, projectId, "bigApps")) === 1;
+}
+
+/**
+ * Read one team-mode flag off the workflow row. A workflow table without the
+ * migration-0040 columns (an older database) has no team mode, so a missing
+ * column reads as 0 — team mode fails safe to OFF, never a crash.
+ */
+async function workflowModeFlag(db: D1Database, projectId: string, column: "teamMode" | "bigApps"): Promise<number> {
+  try {
+    const found = await rows(db, `select ${column} from build_workflows where projectId = ?`, projectId);
+    return Number(found[0]?.[column] ?? 0);
+  } catch (error) {
+    if (String(error).includes("no such column")) return 0;
+    throw error;
+  }
 }
 export async function acknowledgeDispatch(
   db: D1Database,

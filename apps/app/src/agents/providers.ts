@@ -294,6 +294,14 @@ export const MODEL_ROLES = {
 	 *  colours named, `remember` call returned), which is what moved vision off
 	 *  GLM. Keep {@link VISION_ROUTE_IDS} in step with this value. */
 	vision: 'nemotron-3.5-super-vl',
+	/** Software-team mode's architecture review (plan part B): a read-only
+	 *  `architect` delegate reads the design's caddie-architecture block and
+	 *  records security/advisory findings. This is where judgment on safety
+	 *  pays — sign-in, ownership and privacy, key exposure, data loss — so it
+	 *  runs on Ultra, the frontier model, like ideation. It has one write tool
+	 *  (record_architecture_review) and no sandbox or build tools. Team mode
+	 *  only; nothing routes here with teamMode=0. */
+	architect: 'nemotron-3-ultra',
 } as const satisfies Record<string, string>;
 
 export type ModelRole = keyof typeof MODEL_ROLES;
