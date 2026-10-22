@@ -3,6 +3,8 @@ import { AppHostError } from './app-host.ts';
 import type { OperatorNotifier } from './abuse-reports.ts';
 import { mailerFromEnv } from './notifications.ts';
 import type { PublishDeps } from './publish.ts';
+import type { D1Database } from './auth.ts';
+import { readOutputContractReceipts } from './output-contract-receipts.ts';
 import { SecretBoxError, keyringFromEnv, type Keyring } from './secret-box.ts';
 
 /**
@@ -64,7 +66,7 @@ export function operatorNotifierFromEnv(env: PublishEnv): OperatorNotifier {
 	};
 }
 
-export async function publishDepsFromEnv(env: PublishEnv): Promise<PublishDeps | null> {
+export async function publishDepsFromEnv(env: PublishEnv, db?: D1Database): Promise<PublishDeps | null> {
 	const appsDomain = appsDomainOf(env);
 	if (!appsDomain) return null;
 	let host: CloudflareAppHost;
@@ -74,5 +76,17 @@ export async function publishDepsFromEnv(env: PublishEnv): Promise<PublishDeps |
 		if (error instanceof AppHostError && error.code === 'NOT_CONFIGURED') return null;
 		throw error;
 	}
-	return { host, appsDomain, keyring: await keyringOrNull(env), probe, notifyOperator: operatorNotifierFromEnv(env), authSecret: env.BETTER_AUTH_SECRET ?? null };
+	return {
+		host,
+		appsDomain,
+		keyring: await keyringOrNull(env),
+		probe,
+		notifyOperator: operatorNotifierFromEnv(env),
+		authSecret: env.BETTER_AUTH_SECRET ?? null,
+		// Team mode (part G): bind a publish to the output's own contract-check
+		// receipts. Supplied only when a db is passed (the user publish route);
+		// the abuse-sweep/recheck callers never publish a new output, so they
+		// pass none and the receipt gate is simply not consulted there.
+		...(db ? { readOutputContractReceipts: (projectId: string, outputId: string) => readOutputContractReceipts(db, projectId, outputId) } : {}),
+	};
 }

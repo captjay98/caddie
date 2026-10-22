@@ -26,8 +26,9 @@
 
 import type { D1Database } from './auth.ts';
 import type { Scope } from '@caddie/contracts';
-import { parseArchitectureBlock, type ArchitectureBlock } from '@caddie/contracts';
+import type { ArchitectureBlock } from '@caddie/contracts';
 import { ScopeError } from './scope.ts';
+import { getApprovedBlock } from './architecture-gate.ts';
 import { REPAIR_PAUSE_THRESHOLD } from '../agents/permissions.ts';
 import {
 	type BuildFeatureRow,
@@ -106,31 +107,22 @@ function isAreaRole(value: string): value is AreaRole {
 }
 
 async function readApprovedBlock(db: D1Database, scope: Scope): Promise<ArchitectureBlock> {
-	// The design revision bound to the build (parts B/E/G). Fall back to the
-	// latest design revision when a build has not stamped one yet (tests, and
-	// the first design-review pass).
-	const bound = (
-		await db
-			.prepare(
-				'select r.body as body from build_workflows w join plan_doc_revisions r on r.id = w.approvedDesignRevisionId where w.projectId = ?',
-			)
-			.bind(scope.projectId)
-			.all<{ body: string }>()
-	).results?.[0];
-	const body =
-		bound?.body ??
-		(
-			await db
-				.prepare(
-					"select body from plan_doc_revisions where projectId = ? and kind = 'design' order by revision desc limit 1",
-				)
-				.bind(scope.projectId)
-				.all<{ body: string }>()
-		).results?.[0]?.body;
-	if (!body) throw new ScopeError(409, 'NO_DESIGN', 'There is no approved design to read the app areas from.');
-	const parsed = parseArchitectureBlock(body);
-	if (!parsed.ok) throw new ScopeError(409, 'NO_ARCHITECTURE', `The design has no usable architecture block: ${parsed.error}`);
-	return parsed.block;
+	// The areas a part may touch are read ONLY from the design revision the
+	// build approved (lane 2's getApprovedBlock, which reads
+	// build_workflows.approvedDesignRevisionId). No approved revision means
+	// refuse: a part must never be checked against a design the user did not
+	// approve — the earlier "fall back to the latest design" let an
+	// unapproved, in-flight revision define the areas. The gate
+	// (architecture-gate.ts) stamps approvedDesignRevisionId on approval, so in
+	// a real team-mode build this is always set before a part starts.
+	const block = await getApprovedBlock(db, scope.projectId);
+	if (!block)
+		throw new ScopeError(
+			409,
+			'NO_APPROVED_DESIGN',
+			'There is no approved design to read the app areas from. The design must be approved before a part can start.',
+		);
+	return block;
 }
 
 async function loadStoredPart(db: D1Database, projectId: string, partKey: string): Promise<StoredPart | null> {
@@ -333,6 +325,50 @@ export async function clearActivePart(db: D1Database, scope: Scope, moduleId?: s
 		.prepare('delete from "part_manifests" where "projectId" = ? and "partKey" = ?')
 		.bind(scope.projectId, activeKey(moduleId ?? SMALL_APP_MODULE))
 		.run();
+}
+
+/**
+ * Make sure `role` holds the active part for its module before it changes
+ * files (team mode). The write and shell tools call this through their guard.
+ *
+ *   - No part yet: start one for this role from the current committed image
+ *     (the feature's save point, since nothing has been saved since).
+ *   - This role's part: keep it.
+ *   - Another role's part (backend done, frontend starting): check that part
+ *     first. If it stayed in its area, close it and start this role's part
+ *     from the files as they are now. If not, refuse with the files to put
+ *     back; restore_files acts on the still-active part, so the next builder
+ *     can fix them and try again.
+ */
+export async function ensurePartForRole(
+	db: D1Database,
+	scope: Scope,
+	currentPort: () => Promise<SnapshotReadPort & { image: string }>,
+	input: { role: AreaRole; featureId: string; moduleId?: string },
+): Promise<ActivePart> {
+	const existing = await activePart(db, scope, input.moduleId);
+	if (existing && existing.role === input.role) return existing;
+	const port = await currentPort();
+	if (existing) {
+		const check = await finishPart(db, scope, port, input.moduleId);
+		if (!check.ok) {
+			const files = check.outOfArea.map((change) => `${change.path} (${change.kind})`).join(', ');
+			throw new ScopeError(
+				409,
+				'OUT_OF_AREA_PENDING',
+				`The ${existing.role} part changed files outside its area: ${files}. Put them back with restore_files before the ${input.role} builder starts.`,
+			);
+		}
+		await clearActivePart(db, scope, input.moduleId);
+	}
+	await startPart(db, scope, port, {
+		featureId: input.featureId,
+		role: input.role,
+		...(input.moduleId ? { moduleId: input.moduleId } : {}),
+	});
+	const started = await activePart(db, scope, input.moduleId);
+	if (!started) throw new ScopeError(500, 'PART_NOT_STARTED', 'The part could not be started.');
+	return started;
 }
 
 // --- Part F: "Try this feature again from the last save point" ---------------

@@ -168,6 +168,13 @@ export function makeSandboxExec(deps: {
 	driver: SandboxToolDeps;
 	sessionId: string;
 	runId: string;
+	/**
+	 * Team mode (part D): a command's paths aren't known in advance, so the
+	 * guard only makes sure this role holds the active part before the command
+	 * runs (starting it from the save point if needed). The finish check on the
+	 * saved files catches anything the command changed outside the area.
+	 */
+	partGuard?: PartGuard;
 }) {
 	return defineTool({
 		name: 'sandbox_exec',
@@ -183,6 +190,14 @@ export function makeSandboxExec(deps: {
 				throw new Error(
 					`PROTECTED_PATH: command references an acceptance-harness path and was not dispatched`,
 				);
+			}
+			if (deps.partGuard) {
+				const active = await deps.partGuard.active();
+				if (active && active.role !== deps.partGuard.role) {
+					throw new Error(
+						`OUT_OF_PART: the "${active.role}" part is active, so the ${deps.partGuard.role} role may not run commands now. Only the active role changes files while its part runs.`,
+					);
+				}
 			}
 			const result = await deps.driver.execute({
 				sessionId: deps.sessionId,
