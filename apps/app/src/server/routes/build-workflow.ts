@@ -26,6 +26,7 @@ import {
   type WorkerLoaderLike,
 } from "../preview-runtime.ts";
 import { rollbackToFeature } from "../build-features.ts";
+import { tryAgainFromSavePoint } from "../build-steps.ts";
 import {
   dispatchPendingWorkflow,
   recoverStalledDispatch,
@@ -325,6 +326,26 @@ export function createBuildWorkflowRouter(
     if (typeof input.featureId !== "string" || typeof input.key !== "string")
       throw new ScopeError(400, "invalid_input", "A featureId and an idempotency key are required.");
     return c.json(await rollbackToFeature(c.env.DB, scope, { featureId: input.featureId, key: input.key }));
+  });
+  // Part F: "Try this feature again from the last save point" — offered only
+  // when the build stopped after 3 failed tries (the host re-checks). It rolls
+  // back to the previous feature's save point and retries carrying the failure
+  // summary, then delivers the pending coordinator message server-side (as
+  // retry does). The first feature starts again from the plan.
+  router.post("/projects/:projectId/workflow/try-again", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    let input: { key?: unknown };
+    try {
+      input = await c.req.json();
+    } catch {
+      throw new ScopeError(400, "invalid_input", "Expected JSON.");
+    }
+    if (typeof input.key !== "string")
+      throw new ScopeError(400, "invalid_input", "An idempotency key is required.");
+    const result = await tryAgainFromSavePoint(c.env.DB, scope, { key: input.key }, c.env);
+    const deliver = deliverFor(c);
+    if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
+    return c.json({ ...result, ...(await workflowSnapshot(c.env.DB, scope)) });
   });
   router.post("/projects/:projectId/workflow/ack", async (c) => {
     const scope = await requireProjectScope(
