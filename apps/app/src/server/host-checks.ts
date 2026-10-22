@@ -110,7 +110,7 @@ function phaseFailureSentence(phase: ContractPhase, reason: "exit" | "counts" | 
 				? "The app's save-and-check didn't run, so we can't tell if your data is really saved."
 				: "Something you add to the app can't be saved.";
 		case "read":
-			return "An animal you add is gone after the app restarts.";
+			return "Something you saved is gone after the app restarts.";
 		case "privacy-screen":
 			return "One person can see another person's private data, or a screen doesn't show what was saved.";
 		case "test-mode":
@@ -173,6 +173,37 @@ export async function runTeamModeContractChecks(run: PhaseRunner): Promise<Contr
 
 	const passed = phases.length === CONTRACT_PHASES.length && phases.every((p) => p.passed);
 	return { passed, phases, failureSentence, checks };
+}
+
+/** The most output a contract receipt hands the builder (the failure lines first). */
+const CONTRACT_RECEIPT_CHARS = 6000;
+
+/**
+ * The failed contract phase as a check receipt, shaped like the base checks'
+ * receipts, so the builder's repair sees WHY it failed: the generated test's
+ * own error and (fail) lines first, then the end of the output. The plain
+ * failureSentence is for the person; this is for the builder. Null when every
+ * phase passed.
+ */
+export function contractFailureReceipt(
+	outcome: ContractCheckOutcome,
+	operationKey: string,
+): { check: string; passed: false; exitCode: number; stdout: string; stderr: string; operationKey: string } | null {
+	const failed = outcome.phases.find((phase) => !phase.passed);
+	if (!failed) return null;
+	const lines = failed.output.split("\n");
+	const marked = lines.filter((line) => /^(error: |\(fail\) |Expected|Received)/.test(line.trim()));
+	const head = [...new Set(marked)].join("\n");
+	const rest = CONTRACT_RECEIPT_CHARS - head.length - 40;
+	const tailText = rest > 0 ? failed.output.slice(-rest) : "";
+	return {
+		check: `contract-${failed.phase}`,
+		passed: false,
+		exitCode: failed.exitCode,
+		stdout: (head ? `${head}\n--- end of the contract test output ---\n${tailText}` : tailText).slice(0, CONTRACT_RECEIPT_CHARS),
+		stderr: "",
+		operationKey: `${operationKey}:${failed.phase}`,
+	};
 }
 
 /**

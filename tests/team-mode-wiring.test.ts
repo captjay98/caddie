@@ -213,7 +213,7 @@ describe('team-mode wiring — contract check gating (part E, item 3)', () => {
 			return { exitCode: 0, output: '1 pass\n0 fail' };
 		});
 		expect(outcome.passed).toBe(false);
-		expect(outcome.failureSentence).toBe('An animal you add is gone after the app restarts.');
+		expect(outcome.failureSentence).toBe('Something you saved is gone after the app restarts.');
 		// restart (from `read`) is red; sign-in (from `create`) is green.
 		expect(outcome.checks['sign-in']).toBe(true);
 		expect(outcome.checks.restart).toBe(false);
@@ -235,7 +235,7 @@ describe('team-mode wiring — contract check gating (part E, item 3)', () => {
 		).results ?? [];
 		expect(rows).toHaveLength(1);
 		expect(rows[0]!.issue).toBe('f1:contract');
-		expect(rows[0]!.detail).toBe('An animal you add is gone after the app restarts.');
+		expect(rows[0]!.detail).toBe('Something you saved is gone after the app restarts.');
 		sqlite.close();
 	});
 });

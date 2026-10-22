@@ -9,6 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import {
 	runTeamModeContractChecks,
 	writeContractFiles,
+	contractFailureReceipt,
 	CONTRACT_PHASES,
 	type ContractPhase,
 } from '../apps/app/src/server/host-checks.ts';
@@ -41,7 +42,7 @@ describe('part E: runTeamModeContractChecks — gating', () => {
 		const outcome = await runTeamModeContractChecks(run);
 		expect(outcome.passed).toBe(false);
 		expect(outcome.checks.restart).toBe(false);
-		expect(outcome.failureSentence).toBe('An animal you add is gone after the app restarts.');
+		expect(outcome.failureSentence).toBe('Something you saved is gone after the app restarts.');
 		// It stopped at read — the later phases never ran.
 		expect(seen).toEqual(['create', 'read']);
 	});
@@ -209,5 +210,37 @@ describe('part E: team screens show the current team', () => {
 		expect(files['caddie/api.ts']).toContain('export function currentTeamId()');
 		expect(files['caddie/api.ts']).toContain('export function setCurrentTeamId(');
 		expect(files['caddie/contract.test.ts']).toContain('localStorage.setItem(TEAM_KEY');
+	});
+});
+
+// --- lead fix: the builder sees WHY a contract phase failed -------------------
+describe('part E: a failed contract phase reaches the builder as a receipt with its error lines', () => {
+	test('the first failing phase becomes a contract-<phase> receipt carrying the test\'s error lines', async () => {
+		const failingRead = [
+			'caddie/contract.test.ts:',
+			'error: reading A\'s record after restart failed: 404',
+			'',
+			'Expected: 200',
+			'Received: 404',
+			'(fail) after a restart, A reads the saved record by id and in the list (step 3) [11.94ms]',
+			'',
+			' 0 pass',
+			' 1 fail',
+		].join('\n');
+		const { run } = runnerFrom({ read: { exitCode: 1, output: failingRead } });
+		const outcome = await runTeamModeContractChecks(run);
+		const receipt = contractFailureReceipt(outcome, 'contract:run1:a1');
+		expect(receipt).not.toBeNull();
+		expect(receipt!.check).toBe('contract-read');
+		expect(receipt!.passed).toBe(false);
+		expect(receipt!.exitCode).toBe(1);
+		expect(receipt!.operationKey).toBe('contract:run1:a1:read');
+		expect(receipt!.stdout).toContain("error: reading A's record after restart failed: 404");
+		expect(receipt!.stdout).toContain('(fail) after a restart, A reads the saved record');
+	});
+
+	test('all phases green: no receipt', async () => {
+		const { run } = runnerFrom({});
+		expect(contractFailureReceipt(await runTeamModeContractChecks(run), 'k')).toBeNull();
 	});
 });

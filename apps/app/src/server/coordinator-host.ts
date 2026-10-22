@@ -39,7 +39,7 @@ import { recordBuildActivity } from "./build-activity.ts";
 import { checkServerStarts, type WorkerLoaderLike } from "./preview-runtime.ts";
 import { SCAFFOLD_FILES } from "../../../../stacks/react-hono/scaffold.ts";
 import { FLUTTER_SCAFFOLD_FILES } from "../../../../stacks/flutter/scaffold.ts";
-import { hostCheckCommands, testsPassed, writeContractFiles, runTeamModeContractChecks, type ContractPhase } from "./host-checks.ts";
+import { hostCheckCommands, testsPassed, writeContractFiles, runTeamModeContractChecks, contractFailureReceipt, type ContractPhase } from "./host-checks.ts";
 import { ContreeClient } from "./adapters/contree.ts";
 import { snapshotReadPort, snapshotWritePort, type ImageInspect } from "./part-snapshot.ts";
 import {
@@ -732,8 +732,14 @@ export async function createCoordinatorContext(
       contractChecks = contract.checks;
       if (!contract.passed) {
         const sentence = contract.failureSentence ?? "A team-mode contract check did not pass.";
+        // The builder's repair needs the generated test's own error lines (the
+        // plain sentence is for the person): hand them over as a receipt, like
+        // a failing base check's output.
+        const failedReceipt = contractFailureReceipt(contract, `contract:${runId}:${attempt}`);
+        if (failedReceipt) receipts.push(failedReceipt);
+        const check = failedReceipt?.check ?? "contract";
         await recordRepairRound(env.DB, scope, workflow.runId, {
-          issue: issuePrefix ? `${issuePrefix}:contract` : "contract",
+          issue: issuePrefix ? `${issuePrefix}:${check}` : check,
           round: "repair_attempt",
           outcome: "failed",
           detail: sentence,
