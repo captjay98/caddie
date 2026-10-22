@@ -417,6 +417,20 @@ async function assertPublishSafe(
 	const workflow = await readWorkflow(db, scope).catch(() => null);
 	const teamMode = (workflow as { teamMode?: number } | null)?.teamMode === 1;
 	const savedKeyNames = (await listAppSecrets(db, scope).catch(() => [])).map((s) => s.name);
+	// Read the saved keys' VALUES so the bundle scan catches an exact value shipped
+	// to the browser (part G). In memory only: the values are handed to the pure
+	// checker and never logged, returned, or passed to a model. A read failure (no
+	// keyring on this server, an unreadable envelope) leaves the value scan off and
+	// the name/shape scan still runs.
+	let savedKeyValues: string[] = [];
+	if (deps.keyring && savedKeyNames.length > 0) {
+		try {
+			const resolved = await resolveAppSecrets(db, deps.keyring, scope.projectId);
+			savedKeyValues = Object.values(resolved.values);
+		} catch {
+			savedKeyValues = [];
+		}
+	}
 	const receipts =
 		teamMode && deps.readOutputContractReceipts ? await deps.readOutputContractReceipts(scope.projectId, outputId) : null;
 
@@ -426,6 +440,7 @@ async function assertPublishSafe(
 		css: bundle.css,
 		server: bundle.server,
 		savedKeyNames,
+		savedKeyValues,
 		teamMode,
 		publishSafety: publishSafety === 'off' ? 'off' : 'on',
 		receipts,
