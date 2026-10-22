@@ -11,6 +11,11 @@
  * design against real Flue agents without a paid Token Factory call; the real
  * provider stays `src/agents/providers.ts`.
  *
+ * It lives in apps/app/test-support/ (not tests/) on purpose: its bare
+ * specifiers (`@earendil-works/pi-ai`) resolve from apps/app/node_modules, so
+ * the spike runs in a fresh checkout with no root-level symlinks. The test in
+ * tests/ imports it relatively.
+ *
  * Why a custom `api` (not a stubbed `fetch`): pi's openai-completions api
  * drives the OpenAI SDK client over a streaming SSE body, so a stubbed fetch
  * would have to fake an SSE transport. A custom `api.stream` emits the exact

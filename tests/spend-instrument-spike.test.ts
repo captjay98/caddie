@@ -1,21 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
+	type Booted,
 	type FlueEvent,
-	type FlueExecutionContext,
-	type FlueExecutionOperation,
 	AgentRunError,
-	dispatch,
+	boot,
 	init,
-	instrument,
-	useAgentFinish,
-	useInstruction,
-	useModel,
-	useSubagent,
-	useTool,
-} from '@flue/runtime';
-import { start, type Flue } from '@flue/runtime/node';
-import * as v from 'valibot';
-import { scriptedProvider, type ScriptedReply } from './support/scripted-provider.ts';
+	perCallCosts,
+	makeFakeD1,
+	Coordinator,
+	Worker,
+} from '../apps/app/test-support/spend-harness.ts';
 
 /**
  * S1 (part A's spike) — the spending limit checked before every model call.
@@ -23,6 +17,12 @@ import { scriptedProvider, type ScriptedReply } from './support/scripted-provide
  * Proves or disproves the design in docs/plans/2026-10-22-software-team-mode.md
  * part A step 2 against REAL Flue 2.2.2 agents, with a scripted provider (no
  * Token Factory, no key, no cost). Part A itself is NOT built here.
+ *
+ * The runtime-dependent harness (scripted provider, agents, instrument/start
+ * wiring) lives in apps/app/test-support/ so its `@flue/runtime` and
+ * `@earendil-works/pi-ai` bare specifiers resolve from apps/app/node_modules.
+ * This test imports it RELATIVELY, so the spike runs in a fresh checkout with
+ * no root-level symlinks.
  *
  * Six questions (§A "S1 must prove"), each with evidence from a committed test:
  *   1. instrument({observe,interceptor}) install point; the interceptor sees
@@ -40,180 +40,18 @@ import { scriptedProvider, type ScriptedReply } from './support/scripted-provide
  * Harness: `start()` (@flue/runtime/node) is the documented in-process
  * bootstrap "mirroring what a generated Flue server entry does at boot" — the
  * same runtime behind `init()`/`dispatch()` that a Cloudflare isolate runs,
- * minus the HTTP/DO surface. `instrument()` is installed here exactly as part A
- * installs it in app.ts (module scope, once per isolate).
+ * minus the HTTP/DO surface. `instrument()` is installed by boot() exactly as
+ * part A installs it in app.ts (module scope, ONE object, once per isolate).
  */
 
-// Mirror the real MODEL_ROUTES rates (src/agents/providers.ts) so the cost math
-// is the same as production. $/Mtok. Only the fields the scripted provider uses.
-const ROUTES = [
-	{ modelId: 'nvidia/Nemotron-3.5-Super-VL', inputPerMtokUsd: 0.3, outputPerMtokUsd: 0.9, contextWindow: 1048576, maxTokens: 8192 },
-	{ modelId: 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B', inputPerMtokUsd: 0.06, outputPerMtokUsd: 0.24, contextWindow: 262144, maxTokens: 8192 },
-] as const;
-const CHAT = 'scripted/nvidia/Nemotron-3.5-Super-VL';
-const HELPER = 'scripted/nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B';
-
-/** A captured interception: operation + the ctx fields part A relies on. */
-interface Seen {
-	type: FlueExecutionOperation['type'];
-	turnId?: string;
-	conversationId?: string;
-	instanceId?: string;
-	agentName?: string;
-}
-
-/** The observe()/interceptor pair, matching part A's `instrument({observe,interceptor})`. */
-function makeInstrumentation(opts: {
-	/** Called inside the interceptor for each `model` op, BEFORE next(). Throw to fail the call. */
-	beforeModel?: (ctx: FlueExecutionContext) => void;
-	/** Optional per-model-call cost recorder (reads the paired `turn` event). */
-}) {
-	const events: FlueEvent[] = [];
-	const seen: Seen[] = [];
-	// turnId -> the order in which turn_request (observe) vs model interceptor fired.
-	const order: Array<{ turnId: string; what: 'turn_request' | 'interceptor' }> = [];
-
-	const instrumentation = {
-		observe(event: FlueEvent) {
-			events.push(event);
-			if (event.type === 'turn_request') order.push({ turnId: event.turnId, what: 'turn_request' });
-		},
-		interceptor: async <T>(
-			operation: FlueExecutionOperation,
-			ctx: FlueExecutionContext,
-			next: () => Promise<T>,
-		): Promise<T> => {
-			seen.push({
-				type: operation.type,
-				turnId: ctx.turnId,
-				conversationId: ctx.conversationId,
-				instanceId: ctx.instanceId,
-				agentName: ctx.agentName,
-			});
-			if (operation.type === 'model') {
-				if (ctx.turnId) order.push({ turnId: ctx.turnId, what: 'interceptor' });
-				opts.beforeModel?.(ctx);
-			}
-			return next();
-		},
-		dispose() {},
-	};
-	return { instrumentation, events, seen, order };
-}
-
-/** Per-call cost from the `turn` observation events (the leaf usage part A settles from). */
-function perCallCosts(events: FlueEvent[]): number[] {
-	return events
-		.filter((e): e is Extract<FlueEvent, { type: 'turn' }> => e.type === 'turn')
-		.map((e) => e.response.usage?.cost.total ?? 0);
-}
-
-// ----- agents -------------------------------------------------------------
-
-/**
- * A delegate the coordinator hands work to via the framework `task` tool —
- * the SAME delegation path the real coordinator uses (useSubagent, see
- * src/agents/specialists.ts). Its own render declares its model, so its model
- * call is a distinct turn the interceptor must see.
- */
-function Delegate() {
-	// FINDING: useModel() THROWS inside a subagent render ("not available in a
-	// subagent render — a delegate declares its model on its useSubagent()
-	// definition"). The delegate's model is set on the useSubagent() mount below,
-	// matching src/agents/specialists.ts (buildSpecialistDeclarations sets
-	// `model:` per delegate). Part A's spend attribution therefore sees a
-	// delegate's model call as its OWN model turn under an enclosing `task` op.
-	return 'You are a delegate. Reply briefly.';
-}
-
-/** A top-level agent reachable by dispatch() — its own Durable Object / instance. */
-export function Worker() {
-	useModel(HELPER);
-	return 'You are a dispatched worker. Reply briefly.';
-}
-
-/**
- * The coordinator under test: one own turn, then (scripted) a `task` tool-call
- * to the delegate. Shaped like src/agents/coordinator.ts (useModel + useSubagent
- * + tools), trimmed to the delegation seam S1 needs.
- */
-export function Coordinator() {
-	useModel(CHAT);
-	useSubagent({ name: 'delegate', description: 'Hands focused work to a delegate.', agent: Delegate, model: HELPER });
-	// A no-op tool so a scripted non-delegating turn has something to end on.
-	useTool({ name: 'noop', description: 'does nothing', input: v.object({}), async run() { return { output: 'ok' }; } });
-	useInstruction('You are the coordinator.');
-	useAgentFinish(() => {});
-	return 'Coordinator under test.';
-}
-
-// ----- D1 reachability (Q2) ----------------------------------------------
-
-/**
- * A minimal fake D1 that records the payer lookup part A's interceptor does:
- * conversationId -> payer. Proves the interceptor can both REACH a DB handle
- * and USE ctx.conversationId to query it. On Cloudflare the same handle is
- * `getCloudflareContext().env.DB` (reachable because the interceptor runs
- * inside the DO request handler's async context); here it is captured in the
- * install closure, which is exactly how app.ts hands the isolate's binding to
- * the interceptor.
- */
-function makeFakeD1(payers: Record<string, string>) {
-	const table = { ...payers };
-	const queries: Array<{ sql: string; binds: unknown[] }> = [];
-	return {
-		queries,
-		setPayer(conversationId: string, payerId: string) {
-			table[conversationId] = payerId;
-		},
-		prepare(sql: string) {
-			const binds: unknown[] = [];
-			const stmt = {
-				bind(...args: unknown[]) {
-					binds.push(...args);
-					return stmt;
-				},
-				async first<T = unknown>(): Promise<T | null> {
-					queries.push({ sql, binds });
-					const conversationId = String(binds[0]);
-					const payerId = table[conversationId] ?? null;
-					return (payerId ? ({ payerId } as unknown as T) : null);
-				},
-			};
-			return stmt;
-		},
-	};
-}
-
-// ----- lifecycle ----------------------------------------------------------
-
-let flue: Flue | null = null;
-let disposeInstrumentation: (() => Promise<void>) | null = null;
+let booted: Booted | null = null;
 
 afterEach(async () => {
-	if (disposeInstrumentation) {
-		await disposeInstrumentation();
-		disposeInstrumentation = null;
-	}
-	if (flue) {
-		await flue.stop();
-		flue = null;
+	if (booted) {
+		await booted.stop();
+		booted = null;
 	}
 });
-
-async function boot(opts: {
-	script: ScriptedReply[];
-	beforeModel?: (ctx: FlueExecutionContext) => void;
-}) {
-	const inst = makeInstrumentation({ beforeModel: opts.beforeModel });
-	// Installed BEFORE start(), at module/isolate scope — part A's app.ts order.
-	disposeInstrumentation = instrument(inst.instrumentation);
-	const sp = scriptedProvider({ providerId: 'scripted', routes: ROUTES, script: opts.script });
-	flue = await start({ agents: [Coordinator, Worker], providers: [sp.provider] });
-	return inst;
-}
-
-// --------------------------------------------------------------------------
 
 describe('S1 — instrument() spending-limit design against real Flue agents', () => {
 	test('Q1+Q4+Q6: the interceptor sees the coordinator, a delegate (via task) and a dispatch()ed instance; turn_request precedes the interceptor; conversationId is present', async () => {
@@ -222,9 +60,10 @@ describe('S1 — instrument() spending-limit design against real Flue agents', (
 		//  1: delegate turn (runs inside the task) -> plain reply
 		//  2: coordinator continues after the task result -> plain reply (ends)
 		//  3: dispatched Worker turn -> plain reply
-		const sp = scriptedProvider({
-			providerId: 'scripted',
-			routes: ROUTES,
+		//
+		// boot() installs exactly ONE instrument() object (part A's app.ts order),
+		// which is the correct way to count the interceptor's firing behaviour.
+		booted = await boot({
 			script: [
 				{ toolCall: { id: 'c1', name: 'task', arguments: { agent: 'delegate', prompt: 'do the sub-bit' } }, input: 100, output: 20 },
 				{ text: 'delegate done', input: 40, output: 10 },
@@ -232,33 +71,57 @@ describe('S1 — instrument() spending-limit design against real Flue agents', (
 				{ text: 'worker done', input: 30, output: 8 },
 			],
 		});
-		const inst = makeInstrumentation({});
-		disposeInstrumentation = instrument(inst.instrumentation);
-		flue = await start({ agents: [Coordinator, Worker], providers: [sp.provider] });
+		const inst = booted;
 
 		const coordinator = init(Coordinator, { id: 'conv-coord' });
 		await coordinator.read(await coordinator.dispatch('Build it.'));
 		const worker = init(Worker, { id: 'conv-worker' });
 		await worker.read(await worker.dispatch('You were dispatched.'));
 
-		// FINDING: the scripted provider's stream() was invoked exactly ONCE per
-		// model call (4), but the `model` INTERCEPTOR fires several times per
-		// turnId (Flue wraps the attempt chain, not one-to-one with provider
-		// calls). So part A must reserve ONCE PER turnId (idempotent on turnId —
-		// the migration-0040 unique index on turnId is exactly this), never once
-		// per interceptor invocation.
-		expect(sp.callCount()).toBe(4);
+		// FINDING (re-checked with exactly ONE instrument() registration): the
+		// scripted provider's stream() is invoked exactly ONCE per model call (4),
+		// and the `model` INTERCEPTOR fires MORE THAN ONCE per turnId (see the
+		// per-turn assertion below).
+		//
+		// RE-CHECK OUTCOME (the S1 report left this open): the "~8 interceptor
+		// calls per turnId" reading is REAL, not a double-registration artifact.
+		// Re-verified in a fresh process with exactly ONE instrument() object (one
+		// plain turn → STREAM_CALLS 1, MODEL_INTERCEPTIONS 8). The interceptor
+		// registry (errors-*.mjs: `interceptors` array) holds exactly one entry per
+		// install and dispatchExecution walks it once per ENTRY, so the 8 are 8
+		// genuine entries into the SINGLE model-op interception site
+		// (emitTurnRequestAndStream, conversation-stream-store line 1214) for one
+		// turn — the runtime's own per-turn execution machinery re-enters the model
+		// wrapper around the single provider stream. It is NOT retries-on-error
+		// (the turn settles clean, stopReason stop/toolUse) and NOT compaction
+		// (the other model-op site, line 4239, never fires here).
+		//
+		// DESIGN IMPLICATION (strengthened): part A MUST reserve idempotently
+		// per turnId — insert the reservation keyed on turnId, and on a turnId that
+		// already has a row, do NOT insert again and do NOT read the duplicate as
+		// "limit reached" (migration-0040's UNIQUE index on turnId is exactly this
+		// dedupe key). Reserving once per interceptor invocation would reserve 8×
+		// for one model call.
+		expect(inst.sp.callCount()).toBe(4);
 
 		// Q1: every one of the 4 model calls was covered — the distinct model
 		// turnIds the interceptor saw match the distinct `turn` observations.
-		const interceptedTurnIds = new Set(
-			inst.seen.filter((s) => s.type === 'model' && s.turnId).map((s) => s.turnId as string),
-		);
+		const modelSeen = inst.seen.filter((s) => s.type === 'model' && s.turnId);
+		const interceptedTurnIds = new Set(modelSeen.map((s) => s.turnId as string));
 		const observedTurnIds = new Set(
 			inst.events.filter((e): e is Extract<FlueEvent, { type: 'turn' }> => e.type === 'turn').map((e) => e.turnId),
 		);
 		expect(interceptedTurnIds.size).toBe(4);
 		expect(observedTurnIds).toEqual(interceptedTurnIds);
+
+		// RE-CHECK assertion: the interceptor fires multiple times per turnId
+		// (observed 8), while the provider stream is called once per turn (4). A
+		// per-invocation reserve would overcount; a per-turnId reserve is correct.
+		const perTurn = new Map<string, number>();
+		for (const s of modelSeen) perTurn.set(s.turnId as string, (perTurn.get(s.turnId as string) ?? 0) + 1);
+		expect([...perTurn.values()].every((n) => n > 1)).toBe(true); // >1: NOT 1:1 with provider calls
+		expect([...perTurn.values()].every((n) => n === 8)).toBe(true); // observed: exactly 8 per turn
+		expect(modelSeen.length).toBe(32); // 4 turns × 8 interceptor entries each
 
 		// The delegate ran inside a `task` operation (the delegation path), and a
 		// separate `agent` op wrapped the dispatched Worker submission.
@@ -312,7 +175,7 @@ describe('S1 — instrument() spending-limit design against real Flue agents', (
 	});
 
 	test('Q5: sum of per-call usage.cost.total equals the per-call Flue totals (no double counting)', async () => {
-		const inst = await boot({
+		booted = await boot({
 			script: [
 				// Turn 0: coordinator calls the `noop` tool (forces a second turn).
 				{ toolCall: { id: 't0', name: 'noop', arguments: {} }, input: 1_000_000, output: 1_000_000 },
@@ -320,6 +183,7 @@ describe('S1 — instrument() spending-limit design against real Flue agents', (
 				{ text: 'two', input: 500_000, output: 200_000 },
 			],
 		});
+		const inst = booted;
 		const coordinator = init(Coordinator, { id: 'conv-cost' });
 		const r = await coordinator.dispatch('go');
 		await coordinator.read(r);
@@ -353,7 +217,7 @@ describe('S1 — instrument() spending-limit design against real Flue agents', (
 		const resolvedPayers: Array<string | null> = [];
 		let interceptorConversationId: string | undefined;
 
-		const inst = await boot({
+		booted = await boot({
 			script: [{ text: 'done', input: 10, output: 5 }],
 			beforeModel: (ctx) => {
 				// The interceptor reaches a DB handle (closure-captured here; on
@@ -372,6 +236,7 @@ describe('S1 — instrument() spending-limit design against real Flue agents', (
 					.then((row) => resolvedPayers.push(row?.payerId ?? null));
 			},
 		});
+		const inst = booted;
 
 		const coordinator = init(Coordinator, { id: 'conv-withpayer' });
 		const r = await coordinator.dispatch('go');
@@ -390,7 +255,7 @@ describe('S1 — instrument() spending-limit design against real Flue agents', (
 	});
 
 	test('Q3: a throw from the interceptor fails the call cleanly; the turn settles failed (AgentRunError), the host can read it as a blocked build', async () => {
-		const inst = await boot({
+		booted = await boot({
 			script: [{ text: 'never reached', input: 10, output: 5 }],
 			beforeModel: () => {
 				// Part A: reservation refused at the limit -> set blocker and throw,
@@ -398,6 +263,7 @@ describe('S1 — instrument() spending-limit design against real Flue agents', (
 				throw new Error('spend_limit_reached');
 			},
 		});
+		const inst = booted;
 
 		const coordinator = init(Coordinator, { id: 'conv-blocked' });
 		const receipt = await coordinator.dispatch('go');
@@ -432,5 +298,7 @@ describe('S1 — instrument() spending-limit design against real Flue agents', (
 		// The errored turn carries no usage from the (never-made) provider call.
 		expect(turnEvents[0].response.usage?.cost.total ?? 0).toBe(0);
 		expect(inst.seen.some((s) => s.type === 'model')).toBe(true);
+		// The provider was never called (next() pre-empted).
+		expect(inst.sp.callCount()).toBe(0);
 	});
 });
