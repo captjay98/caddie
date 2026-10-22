@@ -50,17 +50,21 @@ model by role:
 | :--- | :--- | :--- | :--- |
 | `chat` / coordinator | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts` |
 | `ideation` (brainstorm) | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/coordinator.ts` (Home) |
-| `plan` / `build` | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts`, `apps/app/src/server/build-workflow.ts` |
+| `plan` (PRD, design) | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts` (planning specialists) |
+| `build` (coding + QA) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/specialists.ts`, `apps/app/src/server/build-workflow.ts` |
 | `helper` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/rules-reading.ts`, `candidate-inspection.ts` |
 | `app` (in-app AI, fast) | `nemotron-3.5-lightning` | `nvidia/Nemotron-3_5-Lightning` | `apps/app/src/server/app-ai.ts` |
 | `appSuper` (in-app AI, super) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/server/app-ai.ts` |
 | `vision` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts`, `attachments.ts` |
 
-So Caddie uses three NVIDIA Nemotron tiers — **Nemotron 3 Ultra** for
-brainstorming, **Nemotron 3.5 Super VL** for the coordinator conversation and
-vision, and **Nemotron 3.5 Lightning** for in-app AI — plus GLM-5.3-Flash for
-planning and code emission, all through Token Factory. The model ids are the
-exact case-sensitive listing spellings (`Nemotron-3.5-…` with a dot,
+So Caddie uses four NVIDIA Nemotron tiers — **Nemotron 3 Ultra** for
+brainstorming, **Nemotron 3.5 Super VL** for the coordinator conversation, the
+coding-and-QA build loop and vision, **Nemotron 3.5 Lightning** for in-app AI,
+and **Nemotron 3 Nano** for the fast rules-reading helper — plus GLM-5.3-Flash
+for the PRD and design planning step, all through Token Factory. Building and QA
+moved to Super VL on 2026-10-20 (the cheap Flash route produced small,
+fixture-shaped apps); planning keeps GLM. The model ids are the exact
+case-sensitive listing spellings (`Nemotron-3.5-…` with a dot,
 `Nemotron-3_5-Lightning` with an underscore).
 
 **The sandbox.** Generated code runs in an isolated sandbox reached over an HTTP
@@ -86,6 +90,80 @@ Token Factory and runs the pipeline locally and in recorded live runs. The
 **hosted demo is not deployed yet**, and Publish (Workers for Platforms) is not
 live-verified. The README's status table records both as not built/not deployed
 rather than implying otherwise. Full labels are in §7.
+
+<!--
+  SOFTWARE-TEAM MODE: not shipped. The team-mode build programme
+  (docs/plans/2026-10-22-software-team-mode.md) is decided on Tuesday
+  2026-10-27 against section 10's go/no-go marks. Its description goes here
+  ONLY after that decision, and only for what actually passed. Describe
+  nothing that isn't built. Leave this comment until then.
+-->
+
+---
+
+## 1a. Feedback on Nebius Token Factory and NVIDIA models
+
+The hackathon asks entrants for feedback on Token Factory and the NVIDIA
+models. Every point below is drawn from this repo's own recorded runs, with
+the date it was observed; nothing here is a general impression.
+
+**What worked**
+
+- **Super VL's tool calls in the build loop (2026-10-18, 2026-10-20).** The
+  2026-10-18 listing probe (`GET /v1/models?verbose=true` plus a chat probe)
+  had `nvidia/Nemotron-3.5-Super-VL` return a clean tool call, and on
+  2026-10-20 the coding and QA roles were moved onto it for exactly that
+  reason — it drives the host's `build_next_feature → run_checks →
+  finish_feature → verify_build` loop reliably where the cheaper route did
+  not.
+- **Super VL reads images (2026-10-18).** The same probe sent a split
+  red/blue PNG with a `remember` tool: HTTP 200, both colours named, and the
+  tool call returned (711 in / 260 out, 1267 ms). That is what moved the
+  `vision` role onto it (`providers.ts` Super-VL entry).
+- **GLM-5.3-Flash as a vision model for planning (2026-10-15).** GLM-5.3-Flash
+  read both halves of the split PNG and emitted a tool call (~7 s), which is
+  why it stayed the planning route and is listed in `VISION_ROUTE_IDS`.
+- **Token Factory's OpenAI-compatible endpoint (recorded 2026-10-06).** One
+  base URL (`https://api.tokenfactory.nebius.com/v1`) serves every role through
+  the standard OpenAI completions shape, so routing eight roles across five
+  models is a one-line change in `MODEL_ROLES` with no per-model client code
+  (live model round-trip recorded, ledger `P05-live`).
+- **One account for models and sandboxes (recorded 2026-10-06, 2026-10-19).**
+  The sandbox API (`https://api.tokenfactory.nebius.com/sandboxes`) is on the
+  same Token Factory account as the models; a real session + remote exec was
+  recorded 2026-10-06 (release-evidence P04), and the app template installed,
+  built and tested there on 2026-10-19.
+
+**What didn't, and what we worked around**
+
+- **Token Factory rejects the OpenAI `developer` role (observed 2026-10-06).**
+  It 422s without a compatibility block, so the `nebius` provider is
+  registered with `supportsDeveloperRole: false` /`supportsStore: false` /
+  `maxTokensField: 'max_tokens'` (`providers.ts`).
+- **Reasoning models need a generous output cap (2026-10-19).** Nemotron 3
+  Nano spends tokens thinking before any output; at a 2,048-token cap the
+  rules-reading probe hit the cap mid-reasoning and returned empty content
+  (9,270 chars of `reasoning_content`, no answer). Raising the cap to 8,192
+  fixed it. The same failure mode showed on Nemotron 3.5 Lightning at 512
+  (2026-10-18).
+- **Nemotron 3.5 Lightning couldn't do the structured rules-reading job
+  (2026-10-20).** Tried as the `helper` model, on the real rules prompt at
+  temperature 0 it returned 17,867 chars of narrated reasoning and no JSON
+  even at the 4,096 cap (`finish_reason: length`), so `helper` was reverted to
+  Nemotron 3 Nano the same day. Both cost the same ($0.06/$0.24 per Mtok), so
+  nothing was lost.
+- **The 3.x Nemotron ids don't accept image input (2026-10-15).** Every 3.x
+  Nemotron route 400s an image ("This model does not support image input");
+  only the 3.5 Super VL id does. The id spellings are also inconsistent and
+  case-sensitive (`Nemotron-3.5-…` with a dot, `Nemotron-3_5-Lightning` with
+  an underscore), which had to be read from the live listing rather than
+  guessed.
+- **The sandbox base image's Bun can't unpack some tarballs (2026-10-19).**
+  On `tag:tt-base:1` (Bun 1.4.2), `bun install` failed to extract react-dom.
+  The fix downloads each `bun.lock`-pinned tarball, checks its sha512, and
+  unpacks it with GNU `tar` before the unchanged `bun install
+  --frozen-lockfile` runs (`verified-install.ts`, LIVE VERIFIED for the
+  template, 2026-10-19).
 
 ---
 

@@ -152,7 +152,7 @@ and `Nemotron-3_5-Lightning` with an underscore).
 | `chat` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts` (`useModel`, resolved by `coordinatorModelRole`) |
 | `ideation` | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/coordinator.ts` (Home conversation) |
 | `plan` | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts` (`specialistModelRole` → planning specialists) |
-| `build` | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts`, `apps/app/src/server/build-workflow.ts` |
+| `build` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/specialists.ts` (`specialistModelRole` → coding + QA), `apps/app/src/server/build-workflow.ts` |
 | `helper` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/rules-reading.ts`, `apps/app/src/server/candidate-inspection.ts` |
 | `app` | `nemotron-3.5-lightning` | `nvidia/Nemotron-3_5-Lightning` | `apps/app/src/server/app-ai.ts` (`env.CADDIE.ai`, the fast tier) |
 | `appSuper` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/server/app-ai.ts` (`tier: "super"`) |

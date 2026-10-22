@@ -151,10 +151,12 @@ the design. Approval is the gate that starts the build.
 > — Caddie uses the right model for the job. I review the design and approve
 > it, and *that* starts the build."
 
-**Notes.** Planning and build share `glm-5.3-flash` today (`MODEL_ROLES.plan`,
-`MODEL_ROLES.build`). Planning is `apps/app/src/server/planning.ts` +
-`build-workflow.ts`; the design review is `DesignReview.tsx`. Do not show or
-claim a mock as the finished app.
+**Notes.** This beat covers planning only, which runs on `glm-5.3-flash`
+(`MODEL_ROLES.plan`). Building and QA do **not** share that route — they moved
+to `nemotron-3.5-super-vl` on 2026-10-20 (`MODEL_ROLES.build`), so do not say
+"planning and building run on the same model". Planning is
+`apps/app/src/server/planning.ts` + `build-workflow.ts`; the design review is
+`DesignReview.tsx`. Do not show or claim a mock as the finished app.
 
 ---
 
