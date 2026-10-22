@@ -334,6 +334,8 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// steps and the S2 spike; the Try-again-from-save-point handler.
 			'tests/part-boundaries.test.ts',
 			'tests/try-again.test.ts',
+			// Lane 7 (part H): the submission texts match the code and records.
+			'tests/submission-texts.test.ts',
 		],
 		browser: [],
 		live: [],

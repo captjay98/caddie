@@ -10,7 +10,7 @@ replace a placeholder with an invented value.
 | Placeholder | What the owner must supply |
 | :--- | :--- |
 | `<REPO-URL>` | The public GitHub repository URL. **The repo does not exist yet** (D5/G3; no remote is configured). |
-| `<DEMO-URL>` | The hosted demo URL. **Does not exist yet** — production is owner-gated (S10/G4) and `README.md` records the hosted demo as *NOT BUILT / not deployed*. |
+| `<DEMO-URL>` | The hosted demo URL. **Deployed and live-verified:** production runs at `https://caddie.jamalibrahim.dev` (owner-gated deploy, S10/G4), and the P17 hosted acceptance smoke is **LIVE VERIFIED** there — `tests/live/release.spec.ts` 5/5 PASS, `docs/live-receipts.json` receipt `lr_5bf0b08f5db1bbcb` (deploy 2026-10-22, commit `5f3574a`). The owner still confirms the exact URL to paste into the Devpost form. |
 | `<VIDEO-URL>` | The YouTube URL of the uploaded demo video (public or unlisted). **Not recorded yet** — see `docs/submission/video-script.md`. |
 | the judge access code | Filled in **only** in the Devpost form's testing-instructions field, never in this repo. The placeholder for it lives solely in the testing-instructions template in §6. |
 
@@ -50,17 +50,21 @@ model by role:
 | :--- | :--- | :--- | :--- |
 | `chat` / coordinator | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts` |
 | `ideation` (brainstorm) | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/coordinator.ts` (Home) |
-| `plan` / `build` | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts`, `apps/app/src/server/build-workflow.ts` |
+| `plan` (PRD, design) | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts` (planning specialists) |
+| `build` (coding + QA) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/specialists.ts`, `apps/app/src/server/build-workflow.ts` |
 | `helper` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/rules-reading.ts`, `candidate-inspection.ts` |
 | `app` (in-app AI, fast) | `nemotron-3.5-lightning` | `nvidia/Nemotron-3_5-Lightning` | `apps/app/src/server/app-ai.ts` |
 | `appSuper` (in-app AI, super) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/server/app-ai.ts` |
 | `vision` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts`, `attachments.ts` |
 
-So Caddie uses three NVIDIA Nemotron tiers — **Nemotron 3 Ultra** for
-brainstorming, **Nemotron 3.5 Super VL** for the coordinator conversation and
-vision, and **Nemotron 3.5 Lightning** for in-app AI — plus GLM-5.3-Flash for
-planning and code emission, all through Token Factory. The model ids are the
-exact case-sensitive listing spellings (`Nemotron-3.5-…` with a dot,
+So Caddie uses four NVIDIA Nemotron tiers — **Nemotron 3 Ultra** for
+brainstorming, **Nemotron 3.5 Super VL** for the coordinator conversation, the
+coding-and-QA build loop and vision, **Nemotron 3.5 Lightning** for in-app AI,
+and **Nemotron 3 Nano** for the fast rules-reading helper — plus GLM-5.3-Flash
+for the PRD and design planning step, all through Token Factory. Building and QA
+moved to Super VL on 2026-10-20 (the cheap Flash route produced small,
+fixture-shaped apps); planning keeps GLM. The model ids are the exact
+case-sensitive listing spellings (`Nemotron-3.5-…` with a dot,
 `Nemotron-3_5-Lightning` with an underscore).
 
 **The sandbox.** Generated code runs in an isolated sandbox reached over an HTTP
@@ -83,9 +87,87 @@ build driven by Caddie's agents has not been run live yet.
 
 **Honest status.** The app is a working build that makes real runtime calls to
 Token Factory and runs the pipeline locally and in recorded live runs. The
-**hosted demo is not deployed yet**, and Publish (Workers for Platforms) is not
-live-verified. The README's status table records both as not built/not deployed
-rather than implying otherwise. Full labels are in §7.
+**hosted demo is deployed at `https://caddie.jamalibrahim.dev`** and its P17
+hosted acceptance smoke is **LIVE VERIFIED** (5/5 PASS, receipt
+`lr_5bf0b08f5db1bbcb`, deploy 2026-10-22). Publish (Workers for Platforms) is
+still **not** live-verified. The README's status table records each surface at
+its real status rather than implying otherwise. Full labels are in §7.
+
+<!--
+  SOFTWARE-TEAM MODE: not shipped. The team-mode build programme
+  (docs/plans/2026-10-22-software-team-mode.md) is decided on Tuesday
+  2026-10-27 against section 10's go/no-go marks. Its description goes here
+  ONLY after that decision, and only for what actually passed. Describe
+  nothing that isn't built. Leave this comment until then.
+-->
+
+---
+
+## 1a. Feedback on Nebius Token Factory and NVIDIA models
+
+The hackathon asks entrants for feedback on Token Factory and the NVIDIA
+models. Every point below is drawn from this repo's own recorded runs, with
+the date it was observed; nothing here is a general impression.
+
+**What worked**
+
+- **Super VL's tool calls in the build loop (2026-10-18, 2026-10-20).** The
+  2026-10-18 listing probe (`GET /v1/models?verbose=true` plus a chat probe)
+  had `nvidia/Nemotron-3.5-Super-VL` return a clean tool call, and on
+  2026-10-20 the coding and QA roles were moved onto it for exactly that
+  reason — it drives the host's `build_next_feature → run_checks →
+  finish_feature → verify_build` loop reliably where the cheaper route did
+  not.
+- **Super VL reads images (2026-10-18).** The same probe sent a split
+  red/blue PNG with a `remember` tool: HTTP 200, both colours named, and the
+  tool call returned (711 in / 260 out, 1267 ms). That is what moved the
+  `vision` role onto it (`providers.ts` Super-VL entry).
+- **GLM-5.3-Flash as a vision model for planning (2026-10-15).** GLM-5.3-Flash
+  read both halves of the split PNG and emitted a tool call (~7 s), which is
+  why it stayed the planning route and is listed in `VISION_ROUTE_IDS`.
+- **Token Factory's OpenAI-compatible endpoint (recorded 2026-10-06).** One
+  base URL (`https://api.tokenfactory.nebius.com/v1`) serves every role through
+  the standard OpenAI completions shape, so routing eight roles across five
+  models is a one-line change in `MODEL_ROLES` with no per-model client code
+  (live model round-trip recorded, ledger `P05-live`).
+- **One account for models and sandboxes (recorded 2026-10-06, 2026-10-19).**
+  The sandbox API (`https://api.tokenfactory.nebius.com/sandboxes`) is on the
+  same Token Factory account as the models; a real session + remote exec was
+  recorded 2026-10-06 (release-evidence P04), and the app template installed,
+  built and tested there on 2026-10-19.
+
+**What didn't, and what we worked around**
+
+- **Token Factory rejects the OpenAI `developer` role (observed 2026-10-06).**
+  It 422s without a compatibility block, so the `nebius` provider is
+  registered with `supportsDeveloperRole: false` /`supportsStore: false` /
+  `maxTokensField: 'max_tokens'` (`providers.ts`).
+- **Reasoning models need a generous output cap (2026-10-19).** Nemotron 3
+  Nano spends tokens thinking before any output; at a 2,048-token cap the
+  rules-reading probe hit the cap mid-reasoning and returned empty content
+  (9,270 chars of `reasoning_content`, no answer). Raising the cap to 8,192
+  fixed it. The same failure mode showed on Nemotron 3.5 Lightning at 512
+  (2026-10-18).
+- **Nemotron 3.5 Lightning couldn't do the structured rules-reading job
+  (2026-10-20).** Tried as the `helper` model, on the real rules prompt it
+  returned `finish_reason: length` with no parseable JSON even at the route's
+  4,096-token output cap, and its narration came back inside `content` rather
+  than `reasoning_content` (so the claim parser read null) — recorded in the
+  execution ledger's 2026-10-20 `probe-lightning` run (1,482 in / 4,096 out).
+  `helper` was reverted to Nemotron 3 Nano the same day. Both cost the same
+  ($0.06/$0.24 per Mtok), so nothing was lost.
+- **The 3.x Nemotron ids don't accept image input (2026-10-15).** Every 3.x
+  Nemotron route 400s an image ("This model does not support image input");
+  only the 3.5 Super VL id does. The id spellings are also inconsistent and
+  case-sensitive (`Nemotron-3.5-…` with a dot, `Nemotron-3_5-Lightning` with
+  an underscore), which had to be read from the live listing rather than
+  guessed.
+- **The sandbox base image's Bun can't unpack some tarballs (2026-10-19).**
+  On `tag:tt-base:1` (Bun 1.4.2), `bun install` failed to extract react-dom.
+  The fix downloads each `bun.lock`-pinned tarball, checks its sha512, and
+  unpacks it with GNU `tar` before the unchanged `bun install
+  --frozen-lockfile` runs (`verified-install.ts`, LIVE VERIFIED for the
+  template, 2026-10-19).
 
 ---
 
@@ -158,10 +240,13 @@ same table.)
 ## 5. Repo, demo and video URLs
 
 - **Repository:** `<REPO-URL>` — **does not exist yet.**
-- **Live demo:** `<DEMO-URL>` — **does not exist yet.** Production is
-  owner-gated (S10/G4); `README.md` records the hosted demo as *NOT BUILT / not
-  deployed*, and `docs/release-evidence.md` records the hosted smoke (P17) as
-  BLOCKED without `CADDIE_RELEASE_URL`.
+- **Live demo:** `<DEMO-URL>` — **deployed and live-verified.** Production runs
+  at `https://caddie.jamalibrahim.dev` (owner-gated deploy, S10/G4);
+  `docs/release-evidence.md` records the hosted acceptance smoke (P17) as
+  **LIVE VERIFIED** (`tests/live/release.spec.ts` 5/5 PASS against that origin),
+  and `docs/live-receipts.json` holds the latest receipt `lr_5bf0b08f5db1bbcb`
+  (deploy 2026-10-22, commit `5f3574a`). The owner confirms the exact URL for
+  the Devpost form.
 - **Video:** `<VIDEO-URL>` — **not recorded yet.** Upload to YouTube as public
   or unlisted. See `docs/submission/video-script.md`. If production is not
   ready, the video is recorded on a local build with live models and the live
@@ -243,9 +328,11 @@ status.
   `P05-live`"; and the P09 React+Hono journey. Re-probed live on 2026-10-18
   (G1 listing probe) and 2026-10-19 (`scripts/probe-lightning.ts`, ledger
   "Owner review follow-ups").
-- **Caveat:** these live calls were made from a local/dev origin under owner
-  authorization. The **hosted** deployment is not live-verified
-  (`README.md` status table).
+- **Caveat:** these live *model* calls were made from a local/dev origin under
+  owner authorization. The hosted deployment itself is live and smoke-verified
+  (P17, `https://caddie.jamalibrahim.dev`, receipt `lr_5bf0b08f5db1bbcb`), but a
+  model round-trip through the hosted origin needs an interactive owner sign-in,
+  so the P05 model-route receipt stays local/dev (`README.md` status table).
 
 ### (b) At least one NVIDIA open-source model — **LIVE VERIFIED** (recorded 2026-10-18)
 
@@ -266,7 +353,9 @@ status.
 
 ### Honest gaps (state these rather than overclaim)
 
-- **Hosted demo URL:** NOT BUILT / not deployed (`README.md`).
+- **Hosted demo URL:** LIVE VERIFIED — deployed at
+  `https://caddie.jamalibrahim.dev`; the P17 hosted acceptance smoke is 5/5 PASS
+  (receipt `lr_5bf0b08f5db1bbcb`, `docs/release-evidence.md`).
 - **Publish / Worker Loader / Cloudflare Artifacts / Web Risk on a deployed
   Worker:** implemented and locally tested, **not** live-verified on a deployed
   Worker (`README.md`; `docs/release-evidence.md`).
