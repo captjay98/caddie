@@ -787,6 +787,11 @@ describe('the ready card\u2019s preview checks (lane 14 step 5)', () => {
 			expect(ready!.checks!.items).toEqual(['Daily activity log', 'Search and filters', 'Save and sync entries']);
 			// Plain feature names, never an internal check id.
 			for (const item of ready!.checks!.items) expect(item).not.toMatch(/\b[a-z0-9-]+:[a-z0-9-]+\b/);
+			// The live mini view (owner, 2026-10-22): the peek names THIS card's
+			// checked preview, so the card can show the real app, scaled down.
+			expect(ready!.peek?.previewId).toBe('prev-exact');
+			expect(ready!.peek?.previewKind).toBe('web');
+			expect(ready!.peek?.previewHasServer).toBe(false);
 		} finally {
 			world.sqlite.close();
 		}

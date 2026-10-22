@@ -294,6 +294,11 @@ export const DecisionCardSchema = v.pipe(
 				appName: v.string(),
 				caption: v.optional(v.string()),
 				imageUrl: v.optional(v.string()),
+				/** The checked preview this card is about: the card shows a live,
+				 *  scaled-down, non-interactive view of it (owner, 2026-10-22). */
+				previewId: v.optional(v.string()),
+				previewKind: v.optional(v.picklist(['web', 'flutter'])),
+				previewHasServer: v.optional(v.boolean()),
 			}),
 		),
 		/** A schedule (not a hackathon) behind a deadline-kind card: it says

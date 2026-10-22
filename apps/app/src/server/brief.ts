@@ -13,6 +13,7 @@ import { listPreviews } from './previews.ts';
 import { listPackages, getReadiness, getPackage } from './submission.ts';
 import { projectHackathon } from './project-hackathon.ts';
 import { STOP_SENTINEL } from './project-experience.ts';
+import { readBuildBundle, readOutputManifest } from './build-workflow.ts';
 
 /** Format an ISO timestamp as a date a person reads, in the schedule's own
  *  timezone, e.g. "Monday, 6 October 2026 at 08:00". Returns the raw string
@@ -554,6 +555,18 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
 	: repairExp
 		? 'I found it before handing the preview to you.'
 		: null;
+ // The ready card's live mini view (owner, 2026-10-22): THIS card's checked
+ // preview, described exactly as the workflow route describes it to the
+ // project view (a server bundle → its requests are relayed; the output kind).
+ const previewId = ready ? String(workflow.previewId) : null;
+ const peek = previewId
+	? {
+			appName: appName ?? 'Your app',
+			previewId,
+			previewKind: ((await readOutputManifest(db, scope, previewId).catch(() => null))?.kind ?? 'web') as 'web' | 'flutter',
+			previewHasServer: (await readBuildBundle(db, scope, previewId).catch(() => null)) !== null,
+		}
+	: null;
  return [{
   id: newCardId(`workflow_${ready ? 'preview' : repairing ? 'repair' : phase === 'blocked' ? 'blocked' : 'build'}`, targetId),
   projectId: scope.projectId, runId, kind: 'result',
@@ -562,6 +575,7 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
   evidenceIds: [], status: ready ? 'handled' : phase === 'blocked' ? 'blocked' : 'changed', updatedAt: String(workflow.updatedAt),
   primaryAction: { label: ready ? 'Try the app' : 'View activity', kind: ready ? 'preview' : 'inspect', targetId },
   ...(checks ? { checks } : {}),
+  ...(peek ? { peek } : {}),
   ...(build ? { build } : {}),
   ...(repairExp ? { repair: { expectation: repairExp, ...(repairFixing ? { fixing: repairFixing } : {}) } } : {}),
   ...(footer ? { footer } : {}),
