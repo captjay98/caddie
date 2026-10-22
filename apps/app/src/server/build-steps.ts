@@ -327,6 +327,50 @@ export async function clearActivePart(db: D1Database, scope: Scope, moduleId?: s
 		.run();
 }
 
+/**
+ * Make sure `role` holds the active part for its module before it changes
+ * files (team mode). The write and shell tools call this through their guard.
+ *
+ *   - No part yet: start one for this role from the current committed image
+ *     (the feature's save point, since nothing has been saved since).
+ *   - This role's part: keep it.
+ *   - Another role's part (backend done, frontend starting): check that part
+ *     first. If it stayed in its area, close it and start this role's part
+ *     from the files as they are now. If not, refuse with the files to put
+ *     back; restore_files acts on the still-active part, so the next builder
+ *     can fix them and try again.
+ */
+export async function ensurePartForRole(
+	db: D1Database,
+	scope: Scope,
+	currentPort: () => Promise<SnapshotReadPort & { image: string }>,
+	input: { role: AreaRole; featureId: string; moduleId?: string },
+): Promise<ActivePart> {
+	const existing = await activePart(db, scope, input.moduleId);
+	if (existing && existing.role === input.role) return existing;
+	const port = await currentPort();
+	if (existing) {
+		const check = await finishPart(db, scope, port, input.moduleId);
+		if (!check.ok) {
+			const files = check.outOfArea.map((change) => `${change.path} (${change.kind})`).join(', ');
+			throw new ScopeError(
+				409,
+				'OUT_OF_AREA_PENDING',
+				`The ${existing.role} part changed files outside its area: ${files}. Put them back with restore_files before the ${input.role} builder starts.`,
+			);
+		}
+		await clearActivePart(db, scope, input.moduleId);
+	}
+	await startPart(db, scope, port, {
+		featureId: input.featureId,
+		role: input.role,
+		...(input.moduleId ? { moduleId: input.moduleId } : {}),
+	});
+	const started = await activePart(db, scope, input.moduleId);
+	if (!started) throw new ScopeError(500, 'PART_NOT_STARTED', 'The part could not be started.');
+	return started;
+}
+
 // --- Part F: "Try this feature again from the last save point" ---------------
 //
 // The stopped-build card offers ONE extra button, and only when the build

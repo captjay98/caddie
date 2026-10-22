@@ -21,9 +21,10 @@ import {
 	finishPart,
 	restoreFiles,
 	clearActivePart,
+	ensurePartForRole,
 	type SnapshotWritePort,
 } from '../apps/app/src/server/build-steps.ts';
-import { assertInArea } from '../apps/app/src/agents/tools.ts';
+import { assertInArea, makeSandboxExec } from '../apps/app/src/agents/tools.ts';
 
 /**
  * Lane 5, part D (plan docs/plans/2026-10-22-software-team-mode.md): a builder
@@ -506,5 +507,100 @@ describe('S2 — manifest time on a 300-file app; build loop unchanged with team
 		} finally {
 			world.sqlite.close();
 		}
+	});
+});
+
+// --- one builder after another, and shell commands (lead fix) ---------------
+// A feature is often built by backend and then frontend. Before this fix the
+// first builder's part stayed active until finish_feature, so the second
+// builder was refused every write; and sandbox_exec never started or checked a
+// part, so a builder working only through the shell bypassed the boundary.
+
+describe('part D — builders take turns within a feature; shell commands respect the part', () => {
+	let world: Awaited<ReturnType<typeof seed>>;
+	afterEach(() => world?.sqlite.close());
+
+	test('the first builder starts the part, and the same builder keeps it', async () => {
+		world = await seed(SMALL_BLOCK);
+		const { db, scope } = world;
+		const port = memoryPort({ 'src/server.ts': 'export const api = 1;', 'src/App.tsx': 'export const App = () => null;' });
+		const first = await ensurePartForRole(db, scope, async () => port.startPort, { role: 'backend', featureId: 'f1' });
+		expect(first.role).toBe('backend');
+		port.write_('src/server.ts', 'export const api = 2;'); // in the backend area
+		const again = await ensurePartForRole(db, scope, async () => port.startPort, { role: 'backend', featureId: 'f1' });
+		expect(again.role).toBe('backend');
+		expect(again.manifest).toEqual(first.manifest); // not restarted
+	});
+
+	test('a second builder takes over once the first stayed in its area', async () => {
+		world = await seed(SMALL_BLOCK);
+		const { db, scope } = world;
+		const port = memoryPort({ 'src/server.ts': 'export const api = 1;', 'src/App.tsx': 'export const App = () => null;' });
+		await ensurePartForRole(db, scope, async () => port.startPort, { role: 'backend', featureId: 'f1' });
+		port.write_('src/server.ts', 'export const api = 2;');
+		const next = await ensurePartForRole(db, scope, async () => port.startPort, { role: 'frontend', featureId: 'f1' });
+		expect(next.role).toBe('frontend');
+		expect((await activePart(db, scope))?.role).toBe('frontend');
+		// The frontend part starts from the files as the backend left them.
+		const server = next.manifest.files.find((f) => f.path === 'src/server.ts');
+		expect(server?.sha256).toBe(sha256('export const api = 2;'));
+	});
+
+	test('a second builder is refused while the first left files outside its area, until they are put back', async () => {
+		world = await seed(SMALL_BLOCK);
+		const { db, scope } = world;
+		const port = memoryPort({ 'src/server.ts': 'export const api = 1;', 'src/App.tsx': 'export const App = () => null;' });
+		await ensurePartForRole(db, scope, async () => port.startPort, { role: 'backend', featureId: 'f1' });
+		port.write_('src/App.tsx', 'export const App = () => "changed by the backend";'); // outside the backend area
+		let code = '';
+		let message = '';
+		try {
+			await ensurePartForRole(db, scope, async () => port.startPort, { role: 'frontend', featureId: 'f1' });
+		} catch (error) {
+			code = (error as { code?: string }).code ?? '';
+			message = (error as Error).message;
+		}
+		expect(code).toBe('OUT_OF_AREA_PENDING');
+		expect(message).toContain('src/App.tsx');
+		expect(message).toContain('restore_files');
+		const fixed = await restoreFiles(db, scope, port.ports, ['src/App.tsx']);
+		expect(fixed.restored).toContain('src/App.tsx');
+		const next = await ensurePartForRole(db, scope, async () => port.startPort, { role: 'frontend', featureId: 'f1' });
+		expect(next.role).toBe('frontend');
+	});
+
+	test('a shell command starts or checks the part before it runs', async () => {
+		const calls: string[] = [];
+		const driver = {
+			execute: async () => {
+				calls.push('execute');
+				return { exitCode: 0, stdout: '', stderr: '' };
+			},
+		} as never;
+		const exec = makeSandboxExec({
+			driver,
+			sessionId: 's1',
+			runId: 'r1',
+			partGuard: {
+				role: 'frontend',
+				active: async () => {
+					calls.push('active');
+					return { role: 'frontend', area: areaFor(SMALL_BLOCK, 'frontend') };
+				},
+			},
+		});
+		await exec.run({ data: { sessionId: 's1', command: 'echo hi', timeoutMs: 1000 }, toolCallId: 't1' } as never);
+		expect(calls).toEqual(['active', 'execute']);
+
+		const refused = makeSandboxExec({
+			driver,
+			sessionId: 's1',
+			runId: 'r1',
+			partGuard: { role: 'frontend', active: async () => ({ role: 'backend', area: areaFor(SMALL_BLOCK, 'backend') }) },
+		});
+		await expect(
+			refused.run({ data: { sessionId: 's1', command: 'echo hi', timeoutMs: 1000 }, toolCallId: 't2' } as never),
+		).rejects.toThrow('OUT_OF_PART');
+		expect(calls.filter((c) => c === 'execute')).toHaveLength(1);
 	});
 });

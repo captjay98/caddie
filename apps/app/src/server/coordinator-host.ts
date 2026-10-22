@@ -48,13 +48,13 @@ import {
   clearActivePart,
   activePart,
   restoreFiles,
+  ensurePartForRole,
 } from "./build-steps.ts";
 import { areaFor, SMALL_APP_MODULE, type AreaRole } from "./part-manifests.ts";
 import { getApprovedBlock } from "./architecture-gate.ts";
 import {
   recordArchitectureReview,
-  securityIssues,
-  advisoryIssues,
+  reviewOutcome,
 } from "./architecture-review.ts";
 import {
   recordOutputContractReceipts,
@@ -262,17 +262,14 @@ export async function createCoordinatorContext(
     moduleId?: string,
   ): Promise<{ role: string; area: ReturnType<typeof areaFor> } | null> => {
     if (!teamMode || !inspect) return null;
-    const existing = await activePart(env.DB, scope, moduleId);
-    if (existing) return { role: existing.role, area: existing.area };
-    // Start the part from the current committed image for this role.
-    const image = await currentImage();
-    const started = await startPart(env.DB, scope, readPortFor(image), {
-      featureId: (await currentFeatureId()) ?? "feature",
+    // One builder after another within a feature: the previous role's part is
+    // checked before this role's starts (build-steps.ensurePartForRole).
+    const part = await ensurePartForRole(env.DB, scope, async () => readPortFor(await currentImage()), {
       role,
+      featureId: (await currentFeatureId()) ?? "feature",
       ...(moduleId ? { moduleId } : {}),
     });
-    const fresh = await activePart(env.DB, scope, started.moduleId);
-    return fresh ? { role: fresh.role, area: fresh.area } : null;
+    return { role: part.role, area: part.area };
   };
 
   /** The id of the feature being built (for the part's featureId), or null. */
@@ -1046,15 +1043,13 @@ export async function createCoordinatorContext(
     recordArchitectureReview: teamMode
       ? async (input: {
           blockHash: string;
-          round: number;
+          round?: number;
           issues: { severity: "security" | "advisory"; path: string; message: string }[];
         }) => {
+          // Caddie numbers the round; the outcome also says whether two reviews
+          // in a row found safety problems, so the plan must change.
           const stored = await recordArchitectureReview(env.DB, scope.projectId, input);
-          return {
-            round: stored.round,
-            security: securityIssues(stored.issues).length,
-            advisory: advisoryIssues(stored.issues).length,
-          };
+          return reviewOutcome(env.DB, scope.projectId, stored);
         }
       : undefined,
     // Team mode (part D): the active part for a build role (the write-tool

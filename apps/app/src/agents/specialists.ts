@@ -272,7 +272,7 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 	const toolFor: Record<string, ToolDefinition> = {
 		read_project_context: makeReadProjectContext({ readPlanNote: context.readPlanNote }),
 		write_plan_note: makeWritePlanNote({ writePlanNote: context.writePlanNote }),
-		sandbox_exec: makeSandboxExec({ driver: context.driver, sessionId: context.sessionId, runId: context.runId }),
+		sandbox_exec: makeSandboxExec({ driver: context.driver, sessionId: context.sessionId, runId: context.runId, ...(partGuard ? { partGuard } : {}) }),
 		read_sandbox_file: makeReadSandboxFile({ driver: context.driver, sessionId: context.sessionId }),
 		write_sandbox_file: makeWriteSandboxFile({ driver: context.driver, sessionId: context.sessionId, ...(partGuard ? { partGuard } : {}) }),
 		restore_files: makeRestoreFiles({
