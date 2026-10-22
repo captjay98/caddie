@@ -692,3 +692,54 @@ describe('"What you\u2019re approving" plan list (lane 14 step 3)', () => {
 		}
 	});
 });
+
+describe('the fit split (lane 14 step 4)', () => {
+	function seedHomeWithCandidate(sqlite: Database, requirementsJson: string): void {
+		sqlite.exec(`
+			insert into "projects" ("id","workspaceId","name","kind","status","createdAt","updatedAt") values
+				('unit-home-f','unit-ws-a','Home','home','active','${ISO}','${ISO}');
+			insert into "discovery_feed_runs" ("id","projectId","requestedBy","requestedAt","candidateCount") values
+				('unit-feed-f','unit-home-f','unit-alice','${ISO}',1);
+			insert into "discovery_candidates" ("id","projectId","source","url","title","summary","requirementsJson","status","feedRunId","firstSeenAt","updatedAt") values
+				('cand_fit','unit-home-f','local-seed','https://contest.example/fit','Farm Innovation Challenge','x',?,'accepted','unit-feed-f','${ISO}','${ISO}');
+		`.replace('?', `'${requirementsJson.replace(/'/g, "''")}'`));
+	}
+
+	test('"Before you commit" is filled from the candidate\u2019s real requirements; "Why it fits" stays empty (no source)', async () => {
+		const world = makeWorld();
+		try {
+			seedHomeWithCandidate(world.sqlite, JSON.stringify([
+				{ text: 'Regional eligibility still needs confirming.', claimType: 'eligibility' },
+				{ text: 'A short demo video is required.', claimType: 'submission' },
+			]));
+			const brief = await accountBrief(world.db, 'unit-alice');
+			const opp = brief.cards.find((card) => card.headline.includes('Farm Innovation Challenge'));
+			expect(opp).toBeDefined();
+			// Mutation proof: remove the `...(cautions.length ? {fit} : {})` spread
+			// in opportunityCards and this field is undefined.
+			expect(opp!.fit).toBeDefined();
+			expect(opp!.fit!.cautions).toEqual([
+				'Regional eligibility still needs confirming.',
+				'A short demo video is required.',
+			]);
+			// No fabricated positive reasons — the source does not carry them.
+			expect(opp!.fit!.reasons).toEqual([]);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a candidate with no requirements carries no fit field, so the card keeps its summary', async () => {
+		const world = makeWorld();
+		try {
+			seedHomeWithCandidate(world.sqlite, '[]');
+			const brief = await accountBrief(world.db, 'unit-alice');
+			const opp = brief.cards.find((card) => card.headline.includes('Farm Innovation Challenge'));
+			expect(opp).toBeDefined();
+			expect(opp!.fit).toBeUndefined();
+			expect(opp!.summary).toMatch(/sample/i);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+});

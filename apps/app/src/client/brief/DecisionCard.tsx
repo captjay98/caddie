@@ -151,6 +151,24 @@ export function DecisionCardView(props: {
                     </div>
                 </div>
             ) : null}
+            {card.fit && (card.fit.reasons.length > 0 || card.fit.cautions.length > 0) ? (
+                <div className="compact-card-split" data-testid="card-fit">
+                    {card.fit.reasons.length > 0 ? (
+                        <CardPanel title="Why it fits">
+                            <ul className="compact-card-notes" data-testid="card-fit-reasons">
+                                {card.fit.reasons.map((reason, index) => <li key={index}>{reason}</li>)}
+                            </ul>
+                        </CardPanel>
+                    ) : null}
+                    {card.fit.cautions.length > 0 ? (
+                        <CardPanel title="Before you commit" tone="caution">
+                            <ul className="compact-card-notes" data-testid="card-fit-cautions">
+                                {card.fit.cautions.map((caution, index) => <li key={index}>{caution}</li>)}
+                            </ul>
+                        </CardPanel>
+                    ) : null}
+                </div>
+            ) : null}
             {design === 'build' || design === 'repair' ? <BuildRail design={design} /> : null}
             {design === 'build' || design === 'repair' ? <p className="compact-card-note">{design === 'repair' ? 'The preview stays held while checks and repairs continue.' : 'Preview appears after the checks pass.'}</p> : null}
             {design === 'plan' ? <p className="compact-card-note">Opening this card does not approve anything. Review the original before deciding.</p> : null}

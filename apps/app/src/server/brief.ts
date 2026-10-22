@@ -554,6 +554,12 @@ async function opportunityCards(db: D1Database, scope: Scope): Promise<DecisionC
 			const summary = live
 				? 'Read from a live contest listing. Explore ideas for it when you are ready.'
 				: "A sample from Caddie's built-in feed, not a real contest yet. Explore ideas for it when you are ready.";
+			// Step 4: the fit split. "Before you commit" is filled from the
+			// candidate's OWN stated requirements (eligibility / tech rules it
+			// lists) — a real record. "Why it fits" has no stored source on a
+			// saved candidate, so reasons stays empty and the card renders only
+			// the cautions side. Nothing positive is invented from the summary.
+			const cautions = candidate.requirements.map((req) => req.text).filter((text) => text.trim() !== '');
 			return {
 				id: newCardId('opportunity', candidate.id),
 				projectId: scope.projectId,
@@ -564,6 +570,7 @@ async function opportunityCards(db: D1Database, scope: Scope): Promise<DecisionC
 				status: 'handled',
 				updatedAt: candidate.updatedAt,
 				primaryAction: { label: 'Review opportunity', kind: 'inspect', targetId: candidate.id },
+				...(cautions.length > 0 ? { fit: { reasons: [], cautions } } : {}),
 			} satisfies DecisionCard;
 		});
 }

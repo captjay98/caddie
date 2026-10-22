@@ -803,6 +803,88 @@ test.describe('U step 3 — plan approval list', () => {
 	});
 });
 
+// --- U (lane 14) step 4: the fit split --------------------------------------
+function opportunity(overrides: Partial<BriefCard>): BriefCard {
+	return card({
+		id: 'brf_opportunity_cand-1',
+		projectId: 'home-1',
+		kind: 'result',
+		headline: 'A suitable opportunity is saved: Farm Innovation Challenge',
+		summary: "A sample from Caddie's built-in feed, not a real contest yet.",
+		status: 'handled',
+		primaryAction: { label: 'Review opportunity', kind: 'inspect', targetId: 'cand-1' },
+		key: 'home-1:result:cand-1',
+		...overrides,
+	});
+}
+
+test.describe('U step 4 — opportunity fit split', () => {
+	test('both sides render as a two-up split when each has content; desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, {
+			cards: [opportunity({ fit: {
+				reasons: ['A real problem you know first-hand.', 'Offline tools are relevant to the brief.'],
+				cautions: ['Regional eligibility still needs confirming.', 'A short demo video is required.'],
+			} })],
+			unseenCount: 0,
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const opp = page.getByTestId('decision-card').filter({ hasText: 'Farm Innovation Challenge' });
+		const split = opp.getByTestId('card-fit');
+		await expect(split).toBeVisible();
+		await expect(opp).toContainText('Why it fits');
+		await expect(opp).toContainText('Before you commit');
+		await expect(opp.getByTestId('card-fit-reasons').locator('li')).toHaveCount(2);
+		await expect(opp.getByTestId('card-fit-cautions').locator('li')).toHaveCount(2);
+		await expect(split).toContainText('A real problem you know first-hand.');
+		await expect(split).toContainText('Regional eligibility still needs confirming.');
+		// Two columns on a wide card: the two panels share a top edge.
+		const panels = await split.locator('.compact-card-panel').all();
+		const boxes = await Promise.all(panels.map((p) => p.boundingBox()));
+		expect(Math.abs(boxes[0]!.y - boxes[1]!.y)).toBeLessThanOrEqual(2);
+		expect(boxes[1]!.x).toBeGreaterThan(boxes[0]!.x + boxes[0]!.width / 2);
+		await opp.screenshot({ path: join(SHOTS, 'u4-fit-split-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		// Stacked on a phone: the second panel drops below the first.
+		const narrow = await Promise.all((await split.locator('.compact-card-panel').all()).map((p) => p.boundingBox()));
+		expect(narrow[1]!.y).toBeGreaterThan(narrow[0]!.y + narrow[0]!.height / 2);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await opp.screenshot({ path: join(SHOTS, 'u4-fit-split-390.png') });
+		await context.close();
+	});
+
+	test('only "Before you commit" renders when there are no reasons (the real saved-candidate shape)', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, {
+			cards: [opportunity({ fit: { reasons: [], cautions: ['Regional eligibility still needs confirming.'] } })],
+			unseenCount: 0,
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const opp = page.getByTestId('decision-card').filter({ hasText: 'Farm Innovation Challenge' });
+		await expect(opp.getByTestId('card-fit-cautions')).toBeVisible();
+		// No empty "Why it fits" heading is rendered.
+		await expect(opp.getByTestId('card-fit-reasons')).toHaveCount(0);
+		await expect(opp).not.toContainText('Why it fits');
+		await expect(opp).toContainText('Before you commit');
+		await context.close();
+	});
+
+	test('an opportunity with no fit field shows only its summary', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [opportunity({})], unseenCount: 0 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const opp = page.getByTestId('decision-card').filter({ hasText: 'Farm Innovation Challenge' });
+		await expect(opp.getByTestId('card-fit')).toHaveCount(0);
+		await expect(opp).toContainText("built-in feed");
+		await context.close();
+	});
+});
+
 test('Earlier loads archived decisions on demand and retains the exact decision target',async({browser})=>{
  const context=await browser.newContext({viewport:{width:390,height:844}});
  await stubAccount(context,{cards:[{...APPROVAL_A,status:'handled',headline:'Recent approval',primaryAction:{kind:'review',label:'View decision',targetId:'ap-1'}}]});
