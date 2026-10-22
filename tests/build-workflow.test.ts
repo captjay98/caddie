@@ -1226,6 +1226,41 @@ describe("explicit build recovery and existing project handoff", () => {
       w.sqlite.close();
     }
   });
+
+  test("a build retry carries a message parked while blocked, instead of dropping it", async () => {
+    // A user asks to continue a blocked build WITHOUT resumeBlocked: the request
+    // is parked under a `continue:` pendingKey (continueProjectFromChat). When the
+    // build is later retried (e.g. POST /workflow/retry, which passes no request),
+    // that parked message must reach the builder, not be overwritten — the same
+    // carry resumePlanning already does for a blocked plan.
+    const w = await world();
+    try {
+      const item = await approved(w);
+      await acknowledgeDispatch(w.db, item.scope, item.snapshot.workflow!.pendingKey!);
+      for (let i = 0; i < 3; i++)
+        await recordRepairRound(w.db, item.scope, item.workflow.runId, {
+          issue: "behavior-tests",
+          round: "repair_attempt",
+          outcome: "failed",
+        });
+      await setWorkflowBlocker(w.db, item.scope, "Checks failed");
+      // Park a message (no resumeBlocked) → pendingKey "continue:…", pendingBody = request.
+      const parkedMessage = "Fix the AI tier and store data in the database, please.";
+      await continueProjectFromChat(w.db, w.homeScope, {
+        projectId: item.project.id,
+        request: parkedMessage,
+        operationKey: "parked-while-blocked",
+      });
+      const parked = await readWorkflow(w.db, item.scope);
+      expect(parked?.pendingKey?.startsWith("continue:")).toBe(true);
+      // Retry with NO request, as the route does.
+      const retry = await retryWorkflow(w.db, item.scope, "retry-after-park");
+      expect(retry.workflow?.phase).toBe("building");
+      expect(retry.workflow?.pendingBody).toContain(parkedMessage);
+    } finally {
+      w.sqlite.close();
+    }
+  });
   test("retry cannot bypass revoked approval or a revised plan", async () => {
     const w = await world();
     try {

@@ -1132,6 +1132,11 @@ export async function retryWorkflow(db: D1Database, scope: Scope, key: string, r
   // resume row and the phase change. Replays (the `previous` check above) and a
   // blocked plan that resumes planning never reach here.
   await admitJudgeBuildStart(db, scope.actorId, limits);
+  // A message parked while blocked (continueProjectFromChat without resumeBlocked)
+  // is carried into the retry prompt, not dropped — the same carry resumePlanning
+  // does. Both the parked body and any explicit request are appended.
+  const parked = workflow.pendingKey?.startsWith("continue:") && workflow.pendingBody ? workflow.pendingBody : null;
+  const extras = [parked, request].filter((text): text is string => Boolean(text && text.trim()));
   await db.batch([
     db
       .prepare(
@@ -1151,7 +1156,7 @@ export async function retryWorkflow(db: D1Database, scope: Scope, key: string, r
       )
       .bind(
         `retry:${key}`,
-        `The authenticated user asked to retry approved plan ${plan.id}. Features that already passed are saved; call build_next_feature to continue from the first unfinished one, repair its blocker, then finish_feature. Do not discard prior work.${request ? "\n\nUser request: " + request : ""}`,
+        `The authenticated user asked to retry approved plan ${plan.id}. Features that already passed are saved; call build_next_feature to continue from the first unfinished one, repair its blocker, then finish_feature. Do not discard prior work.${extras.length ? "\n\nThe user also said:\n" + extras.join("\n") : ""}`,
         now(),
         scope.projectId,
         plan.id,
