@@ -2,6 +2,8 @@ import { FLUTTER_SCAFFOLD_COMMANDS } from "../../../../stacks/flutter/scaffold.t
 import { SCAFFOLD_COMMANDS } from "../../../../stacks/react-hono/scaffold.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { VERIFIED_INSTALL_COMMAND } from "./verified-install.ts";
+import { generateContractFiles, type ContractKind } from "./contract-files.ts";
+import type { ArchitectureBlock } from "@caddie/contracts";
 
 /**
  * The host-owned checks for each kind of app, in order. Fixed recipe commands
@@ -43,4 +45,143 @@ export function hostCheckCommands(stack: "react-hono" | "flutter"): HostCheck[] 
 export function testsPassed(output: string): boolean {
 	const counts = parseTestCounts(output);
 	return counts !== null && counts.passed > 0 && counts.failed === 0;
+}
+
+// ---------------------------------------------------------------------------
+// Team mode: the contract checks (plan part E, steps 1-9).
+//
+// When a workflow has teamMode = 1, the host also runs the generated contract
+// test (caddie/contract.test.ts) in phases, in order, against ONE file database
+// at CADDIE_TEST_DB_FILE — so create (process 1) and read (process 2) really do
+// cross a restart. Each phase gates on BOTH the exit code AND the parsed test
+// counts (a thrown hook can still exit 0, and a file that ran zero tests proves
+// nothing), and a failed phase is reported as a plain sentence a non-technical
+// person can act on.
+//
+// The generated files (contract.ts, api.ts, router.tsx, contract.test.ts and
+// test/setup/d1-file.ts) must be WRITTEN into the app before each run — when a
+// feature is handed out and before every check run — so the test always matches
+// the approved design. `writeContractFiles` is the hook the coordinator-host
+// calls to do that; it is kept here so the generation and the checks live
+// together.
+// ---------------------------------------------------------------------------
+
+/** The phases part E runs, in order. The restart lives between `create` and `read`. */
+export const CONTRACT_PHASES = ["create", "read", "privacy-screen", "test-mode"] as const;
+export type ContractPhase = (typeof CONTRACT_PHASES)[number];
+
+/** The required checks that gate a team-mode publish (part G); mapped from phases here. */
+export const CONTRACT_CHECK_NAMES = ["sign-in", "second-person", "restart"] as const;
+export type ContractCheckName = (typeof CONTRACT_CHECK_NAMES)[number];
+
+export interface ContractPhaseResult {
+	readonly phase: ContractPhase;
+	/** The child process exit code. */
+	readonly exitCode: number;
+	/** The parsed pass/fail counts, or null when the runner printed none. */
+	readonly counts: { passed: number; failed: number } | null;
+	readonly passed: boolean;
+	/** A plain sentence when the phase failed, else null. */
+	readonly failureSentence: string | null;
+	/** The raw output, kept for the receipt. */
+	readonly output: string;
+}
+
+export interface ContractCheckOutcome {
+	readonly passed: boolean;
+	readonly phases: readonly ContractPhaseResult[];
+	/** The first plain failure sentence, for the build card; null when all green. */
+	readonly failureSentence: string | null;
+	/**
+	 * Per required check, green/red — written to the output's verify receipts so
+	 * part G (publish-safety) can bind a team-mode publish to this exact output.
+	 */
+	readonly checks: Readonly<Record<ContractCheckName, boolean>>;
+}
+
+/** How one phase is run. Injected, so the host wires `bun test` and tests stub it. */
+export type PhaseRunner = (phase: ContractPhase) => Promise<{ exitCode: number; output: string }> | { exitCode: number; output: string };
+
+/** A plain sentence for a phase that failed. Part E: "name the record and the step". */
+function phaseFailureSentence(phase: ContractPhase, reason: "exit" | "counts" | "zero"): string {
+	switch (phase) {
+		case "create":
+			return reason === "zero"
+				? "The app's save-and-check didn't run, so we can't tell if your data is really saved."
+				: "Something you add to the app can't be saved.";
+		case "read":
+			return "An animal you add is gone after the app restarts.";
+		case "privacy-screen":
+			return "One person can see another person's private data, or a screen doesn't show what was saved.";
+		case "test-mode":
+			return "A test-mode feature (payments, emails, a job or a file) doesn't behave as the plan says.";
+	}
+}
+
+/** A phase passed only when the process exited 0 AND at least one test passed and none failed. */
+function evaluatePhase(phase: ContractPhase, exitCode: number, output: string): ContractPhaseResult {
+	const counts = parseTestCounts(output);
+	if (exitCode !== 0) {
+		return { phase, exitCode, counts, passed: false, failureSentence: phaseFailureSentence(phase, "exit"), output };
+	}
+	if (counts === null || (counts.passed === 0 && counts.failed === 0)) {
+		// A phase with no tests to run (e.g. test-mode when nothing is declared) is
+		// allowed to pass vacuously ONLY for the optional trailing phase; the core
+		// phases must run at least one test.
+		if (phase === "test-mode") {
+			return { phase, exitCode, counts, passed: true, failureSentence: null, output };
+		}
+		return { phase, exitCode, counts, passed: false, failureSentence: phaseFailureSentence(phase, "zero"), output };
+	}
+	if (counts.failed > 0) {
+		return { phase, exitCode, counts, passed: false, failureSentence: phaseFailureSentence(phase, "counts"), output };
+	}
+	return { phase, exitCode, counts, passed: true, failureSentence: null, output };
+}
+
+/** Which required check a passed phase proves. */
+const PHASE_TO_CHECK: Record<ContractPhase, ContractCheckName | null> = {
+	create: "sign-in",
+	read: "restart",
+	"privacy-screen": "second-person",
+	"test-mode": null,
+};
+
+/**
+ * Run the team-mode contract phases in order against one file database. Stops
+ * at the first failed phase (a failed create makes read meaningless). Returns
+ * the per-phase results, the first plain failure sentence, and the per-check
+ * green/red map the output's receipts carry for part G.
+ */
+export async function runTeamModeContractChecks(run: PhaseRunner): Promise<ContractCheckOutcome> {
+	const phases: ContractPhaseResult[] = [];
+	const checks: Record<ContractCheckName, boolean> = { "sign-in": false, "second-person": false, restart: false };
+	let failureSentence: string | null = null;
+
+	for (const phase of CONTRACT_PHASES) {
+		const { exitCode, output } = await run(phase);
+		const result = evaluatePhase(phase, exitCode, output);
+		phases.push(result);
+		if (result.passed) {
+			const check = PHASE_TO_CHECK[phase];
+			if (check) checks[check] = true;
+		} else {
+			failureSentence = result.failureSentence;
+			break; // a later phase can't be trusted once an earlier one failed
+		}
+	}
+
+	const passed = phases.length === CONTRACT_PHASES.length && phases.every((p) => p.passed);
+	return { passed, phases, failureSentence, checks };
+}
+
+/**
+ * The generated contract files for an app, from its approved architecture
+ * block. The coordinator-host writes these into the working copy before every
+ * check run (and when a feature is handed out), so the contract test always
+ * matches the approved design. Thin wrapper over the generator so generation
+ * and the checks stay in one module.
+ */
+export function writeContractFiles(block: ArchitectureBlock, kind: ContractKind): Readonly<Record<string, string>> {
+	return generateContractFiles(block, { kind }).files;
 }

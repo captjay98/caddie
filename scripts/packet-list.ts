@@ -336,6 +336,10 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/try-again.test.ts',
 			// Lane 7 (part H): the submission texts match the code and records.
 			'tests/submission-texts.test.ts',
+			// Part E (contract checks) + part G (publish safety), lane 4.
+			'tests/publish-safety.test.ts',
+			'tests/host-checks-contract.test.ts',
+			'tests/contract-checks.test.ts',
 		],
 		browser: [],
 		live: [],
