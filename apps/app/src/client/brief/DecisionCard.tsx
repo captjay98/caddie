@@ -6,6 +6,7 @@ import { formatTimeAgo } from '@caddie/ui/time';
 import { Mascot } from '@caddie/ui/Mascot';
 import { PageSkeleton, StatePanel, StaleChip, failureKind, type StateKind } from '../states.tsx';
 import { Icon } from '../icons.tsx';
+import { ReadyPeek } from './ReadyPeek.tsx';
 import { DecisionHistory } from './DecisionHistory.tsx';
 import { CardHeader, CardPanel, BuildRail, CardFooter } from './CardFrame.tsx';
 import { cardDesign, CARD_DESIGNS } from './card-design.ts';
@@ -31,6 +32,26 @@ const ACTION_WORDS: Record<DecisionCardType['primaryAction']['kind'], string> = 
 	inspect: 'opens what happened so you can look before deciding.',
 	preview: 'opens the app so you can try it.',
 };
+
+/**
+ * The secondary (ghost) button's label per design (mockup `cc-secondary`). It
+ * opens the same Details disclosure the card already carries — the mockup's
+ * second button reveals a detail panel, it does not start a new action — so
+ * behaviour is unchanged and only the affordance now reads like the mockup.
+ * A design with no standing secondary (earlier/update) returns null and the
+ * card shows the quiet Details toggle instead.
+ */
+function secondaryLabel(design: ReturnType<typeof cardDesign>): string | null {
+	switch (design) {
+		case 'plan': return 'Read the plan';
+		case 'build': return 'Stop build';
+		case 'repair': return 'See what happened';
+		case 'preview': return 'Ask for changes';
+		case 'deadline': return 'View deadline source';
+		case 'opportunity': return 'Save for later';
+		default: return null;
+	}
+}
 
 /** What a card rests on, in words (plan 5.5); the ids stay for developers. */
 function evidenceWords(count: number): string {
@@ -71,26 +92,29 @@ function footerNote(design: ReturnType<typeof cardDesign>): string | null {
  * not "needs-you". Falls back to a readable generic per status.
  */
 export function statusLabel(card: DecisionCardType): string {
+	// A schedule card (not a hackathon) never wears a Deadline badge.
+	if (card.kind === 'deadline' && card.schedule) return 'Scheduled';
 	if (cardDesign(card) === 'build') return 'In progress';
 	if (cardDesign(card) === 'repair') return 'I’m on it';
 	if (card.status === 'blocked') return 'Needs attention';
 	if (cardDesign(card) === 'preview') return 'Ready to try';
-	if (cardDesign(card) === 'opportunity') return 'Saved';
-	if (card.kind === 'deadline' && card.status === 'handled') return 'Watching';
+	if (cardDesign(card) === 'opportunity') return 'Worth a look';
+	if (card.kind === 'deadline') return 'Deadline';
 	if (card.status === 'handled') return 'Done';
 	if (card.status === 'changed') return 'Changes to review';
 	// needs-you — word it for what the card is about.
 	switch (card.kind) {
 		case 'approval':
-			return 'Plan ready';
-		case 'deadline':
-			return 'Deadline';
+			return 'Needs you';
 		case 'result':
 			return 'Ready to try';
 		default:
 			return 'Needs you';
 	}
 }
+
+/** Build-feed state label (mockup "Built"/"Building"/"Waiting"). */
+const BUILD_STATE_LABEL = { built: 'Built', building: 'Building', waiting: 'Waiting' } as const;
 
 export function DecisionCardView(props: {
 	card: DecisionCardType;
@@ -106,6 +130,39 @@ export function DecisionCardView(props: {
 	const { card } = props;
 	const design = cardDesign(card);
 	const [detailOpen, setDetailOpen] = useState(false);
+	const secondary = secondaryLabel(design);
+	// Earlier/history gets its own compact layout (mockup 7), not the big card.
+	if (design === 'earlier') {
+		return (
+			<article
+				className="decision-card card-surface caddie-card"
+				data-testid="decision-card"
+				data-kind={card.kind}
+				data-design={design}
+				data-tone={CARD_DESIGNS[design].tone}
+				data-status={card.status}
+				data-seen={props.seen === true ? 'true' : 'false'}
+			>
+				<div className="compact-card-history-head">
+					<h3>Earlier</h3>
+					{props.contextLabel ? <span className="compact-card-history-label" data-testid="card-foot-subject">{props.contextLabel} · {formatTimeAgo(card.updatedAt, props.now)}</span> : <span className="compact-card-history-label">{formatTimeAgo(card.updatedAt, props.now)}</span>}
+				</div>
+				<div className="compact-card-record">
+					<span className="compact-card-record-mark" aria-hidden="true"><Icon name="check" title="" /></span>
+					<div className="compact-card-record-body">
+						<h4>{card.headline}</h4>
+						<p>{card.summary}</p>
+						<button type="button" className="detail-toggle" data-testid="card-primary-action" onClick={() => props.onAction?.(card)}>{card.primaryAction.label}</button>
+					</div>
+					<time>{formatTimeAgo(card.updatedAt, props.now)}</time>
+				</div>
+				<div className="compact-card-foot" data-testid="card-foot">
+					<span className="compact-card-foot-subject">1 completed update</span>
+					<span className="compact-card-foot-note">Read-only history</span>
+				</div>
+			</article>
+		);
+	}
 	return (
 		<article
 			className="decision-card card-surface caddie-card"
@@ -116,29 +173,93 @@ export function DecisionCardView(props: {
 			data-status={card.status}
 			data-seen={props.seen === true ? 'true' : 'false'}
 		>
-            <CardHeader design={design} context={props.contextLabel} status={statusLabel(card)} fresh={props.seen === false} />
+            <CardHeader design={design} context={props.contextLabel} status={statusLabel(card)} fresh={props.seen === false} freshLabel={formatTimeAgo(card.updatedAt, props.now)} />
             {props.seen === false ? <span className="sr-only" data-testid="card-unseen">New</span> : null}
 			<h3>{card.headline}</h3>
-			{design === 'plan' ? (
-				card.planItems && card.planItems.length > 0 ? (
-					<CardPanel title="What you’re approving">
-						<ul className="compact-card-list" data-testid="card-plan-items">
-							{card.planItems.map((item, index) => (
-								<li key={index} className="compact-card-list-row">
-									<span className="compact-card-list-mark" aria-hidden="true"><Icon name="sparkCheck" title="" /></span>
-									<span className="compact-card-list-text">
-										<strong>{item.title}</strong>
-										{item.detail ? <small>{item.detail}</small> : null}
-									</span>
-								</li>
+			{/* The lede (mockup `cc-copy`) sits under the title on every big card;
+			    the plan's feature list follows in its own panel. */}
+			<p className="summary">{card.summary}</p>
+			{design === 'plan' && card.planItems && card.planItems.length > 0 ? (
+				<CardPanel title="What you’re approving">
+					<ul className="compact-card-list" data-testid="card-plan-items">
+						{card.planItems.map((item, index) => (
+							<li key={index} className="compact-card-list-row">
+								<span className="compact-card-list-mark" aria-hidden="true"><Icon name="check" title="" /></span>
+								<span className="compact-card-list-text">
+									<strong>{item.title}</strong>
+									{item.detail ? <small>{item.detail}</small> : null}
+								</span>
+							</li>
+						))}
+					</ul>
+				</CardPanel>
+			) : null}
+			{design === 'build' ? (
+				<>
+					<BuildRail design={design} />
+					{card.build ? (
+					<>
+					<div className="compact-card-panel">
+						{card.build.current ? (
+							<div className="compact-card-active">
+								<span className="compact-card-icon" aria-hidden="true"><Icon name="play" title="" /></span>
+								<h4 data-testid="card-build-current">Now: {card.build.current}</h4>
+							</div>
+						) : null}
+						<div className="compact-card-feed" data-testid="card-build-feed">
+							{card.build.features.map((feature, index) => (
+								<div key={index} className="compact-card-feed-row" data-state={feature.state} data-testid="card-build-feed-row">
+									<span className="compact-card-icon" aria-hidden="true"><Icon name={feature.state === 'built' ? 'check' : feature.state === 'building' ? 'play' : 'clock'} title="" /></span>
+									<span>{feature.title}</span>
+									<span className="compact-card-feed-state">{BUILD_STATE_LABEL[feature.state]}</span>
+								</div>
 							))}
-						</ul>
-					</CardPanel>
-				) : (
-					<CardPanel title="What you’re reviewing"><p className="summary">{card.summary}</p></CardPanel>
-				)
-			) : <p className="summary">{card.summary}</p>}
+						</div>
+					</div>
+					<p className="compact-card-live" data-testid="card-build-update">
+						<span className="compact-card-icon" aria-hidden="true"><Icon name="refresh" title="" /></span>
+						<span>Last update {card.build.lastUpdatedAt ? formatTimeAgo(card.build.lastUpdatedAt, props.now) : 'just now'} · {card.build.builtCount} {card.build.builtCount === 1 ? 'feature' : 'features'} built</span>
+					</p>
+					</>
+					) : (
+						<p className="compact-card-note"><span className="compact-card-icon" aria-hidden="true"><Icon name="info" title="" /></span><span>Preview appears after the checks pass.</span></p>
+					)}
+				</>
+			) : null}
+			{design === 'repair' ? (
+				<>
+					{card.repair ? (
+						<div className="compact-card-repair" data-testid="card-repair">
+							<h4>What needs fixing</h4>
+							<p>{card.repair.expectation}</p>
+						</div>
+					) : null}
+					{card.checks || card.repair?.fixing ? (
+						<div className="compact-card-panel">
+							<div className="compact-card-active">
+								<span className="compact-card-pulse" aria-hidden="true" />
+								{/* The feature from the build record, never mockup text. */}
+								<h4 data-testid="card-repair-now">{card.repair?.fixing ? `Now fixing: ${card.repair.fixing}` : 'Fixing it now'}</h4>
+							</div>
+							{card.checks ? (
+								<p className="compact-card-fix" data-testid="card-repair-fix">
+									<span className="compact-card-icon" aria-hidden="true"><Icon name="check" title="" /></span>
+									{/* It counts passed features, so it says features. */}
+									<span>{card.checks.passed} {card.checks.passed === 1 ? 'feature passed' : 'features passed'}</span>
+									<span>·</span>
+									<span>1 being repaired</span>
+								</p>
+							) : null}
+						</div>
+					) : null}
+					<p className="compact-card-note" data-testid="card-repair-reassure">
+						<span className="compact-card-icon" aria-hidden="true"><Icon name="send" title="" /></span>
+						<span>You don’t need to do anything. I’ll run the checks again after the fix.</span>
+					</p>
+				</>
+			) : null}
             {card.deadline ? (
+                <>
                 <div className="compact-card-countdown" data-testid="card-countdown">
                     <div className="compact-card-days">
                         <b data-testid="card-days-left">{card.deadline.daysLeft}</b>
@@ -146,10 +267,24 @@ export function DecisionCardView(props: {
                     </div>
                     <div className="compact-card-when">
                         <strong>{card.deadline.dateLabel}</strong>
-                        <p>{card.deadline.timeLabel}</p>
+                        {card.deadline.localTimeLabel ? <p data-testid="card-local-time">{card.deadline.localTimeLabel} · Your local time</p> : null}
                         {card.deadline.source ? <p className="compact-card-when-source">{card.deadline.source}</p> : null}
                     </div>
                 </div>
+                {card.deadline.steps && card.deadline.steps.length > 0 ? (
+                    <ul className="compact-card-steps" data-testid="card-deadline-steps">
+                        {card.deadline.steps.map((step, index) => (
+                            <li key={index} data-done={step.done ? 'true' : 'false'}>
+                                <span className="compact-card-icon" aria-hidden="true"><Icon name={step.done ? 'check' : 'clock'} title="" /></span>
+                                <span><strong>{step.title}</strong>{step.detail ? <small>{step.detail}</small> : null}</span>
+                            </li>
+                        ))}
+                    </ul>
+                ) : null}
+                </>
+            ) : null}
+            {card.schedule ? (
+                <p className="compact-card-note" data-testid="card-schedule"><span className="compact-card-icon" aria-hidden="true"><Icon name="calendar" title="" /></span><span>{card.schedule.name} runs next {card.schedule.nextRunLabel}.</span></p>
             ) : null}
             {card.fit && (card.fit.reasons.length > 0 || card.fit.cautions.length > 0) ? (
                 <div className="compact-card-split" data-testid="card-fit">
@@ -169,24 +304,43 @@ export function DecisionCardView(props: {
                     ) : null}
                 </div>
             ) : null}
-            {card.checks ? (
+            {design === 'preview' ? <ReadyPeek card={card} /> : null}
+            {design === 'preview' && card.checks ? (
                 <div className="compact-card-chips" data-testid="card-checks">
                     <span className="compact-card-chip compact-card-chip-ok">
-                        <b aria-hidden="true">✓</b> {card.checks.passed} {card.checks.passed === 1 ? 'check passed' : 'checks passed'}
+                        <b aria-hidden="true">✓</b> All {card.checks.passed} {card.checks.passed === 1 ? 'feature passed its check' : 'features passed their checks'}
                     </span>
-                    {card.checks.items.slice(0, 3).map((item, index) => (
-                        <span key={index} className="compact-card-chip" data-testid="card-check-item">{item}</span>
-                    ))}
-                    {card.checks.items.length > 3 ? <span className="compact-card-chip">+{card.checks.items.length - 3} more</span> : null}
-                    {card.checks.version ? <span className="compact-card-chip">{card.checks.version}</span> : null}
+                    {card.checks.version ? <span className="compact-card-chip" data-testid="card-check-version">Version {card.checks.version}</span> : null}
                 </div>
             ) : null}
-            {design === 'build' || design === 'repair' ? <BuildRail design={design} /> : null}
-            {design === 'build' || design === 'repair' ? <p className="compact-card-note">{design === 'repair' ? 'The preview stays held while checks and repairs continue.' : 'Preview appears after the checks pass.'}</p> : null}
-            {design === 'plan' ? <p className="compact-card-note">Opening this card does not approve anything. Review the original before deciding.</p> : null}
-			<div className="card-meta" data-testid="card-meta">
-				<span className="mono-id">updated {formatTimeAgo(card.updatedAt, props.now)}</span>
-			</div>
+            {card.nextStep ? (
+                <p className="compact-card-note" data-testid="card-next-step"><span className="compact-card-icon" aria-hidden="true"><Icon name="send" title="" /></span><span>{card.nextStep}</span></p>
+            ) : null}
+			{design === 'build' || design === 'repair' ? (
+				// A card where Caddie is working gets NO filled CTA (mockup): the
+				// navigate action is a light bordered button, and "Stop build" is
+				// text-only and quiet. Neither takes the card hue fill.
+				<div className="actions">
+					<button
+						type="button"
+						className="btn-ghost"
+						data-testid="card-primary-action"
+						data-action-kind={card.primaryAction.kind}
+						onClick={() => props.onAction?.(card)}
+					>
+						{design === 'repair' ? 'See what happened' : card.primaryAction.label}
+					</button>
+					<button
+						type="button"
+						className="detail-toggle compact-card-quiet"
+						aria-expanded={detailOpen}
+						data-testid="card-secondary-action"
+						onClick={() => setDetailOpen((open) => !open)}
+					>
+						Stop build
+					</button>
+				</div>
+			) : (
 			<div className="actions">
 				<button
 					type="button"
@@ -197,16 +351,29 @@ export function DecisionCardView(props: {
 				>
 					{card.primaryAction.label}
 				</button>
-				<button
-					type="button"
-					className="detail-toggle"
-					aria-expanded={detailOpen}
-					data-testid="card-detail-toggle"
-					onClick={() => setDetailOpen((open) => !open)}
-				>
-					{detailOpen ? 'Hide details' : 'Details'}
-				</button>
+				{secondary ? (
+					<button
+						type="button"
+						className="btn-ghost"
+						aria-expanded={detailOpen}
+						data-testid="card-secondary-action"
+						onClick={() => setDetailOpen((open) => !open)}
+					>
+						{secondary}
+					</button>
+				) : (
+					<button
+						type="button"
+						className="detail-toggle"
+						aria-expanded={detailOpen}
+						data-testid="card-detail-toggle"
+						onClick={() => setDetailOpen((open) => !open)}
+					>
+						{detailOpen ? 'Hide details' : 'Details'}
+					</button>
+				)}
 			</div>
+			)}
 			{detailOpen ? (
 				<div className="card-details" data-testid="card-details">
 					<ul className="card-details-words" data-testid="card-details-words">
@@ -232,7 +399,7 @@ export function DecisionCardView(props: {
 					</details>
 				</div>
 			) : null}
-			<CardFooter subject={props.contextLabel} note={footerNote(design) ?? undefined} />
+			<CardFooter subject={props.contextLabel} note={footerNote(design) ?? undefined} app={card.footer?.appName} version={card.footer?.version} />
 		</article>
 	);
 }

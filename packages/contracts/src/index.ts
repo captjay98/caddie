@@ -200,6 +200,21 @@ export const DecisionCardSchema = v.pipe(
 				dateLabel: v.string(),
 				timeLabel: v.string(),
 				source: v.optional(v.string()),
+				/** The TheCard "Your time →" line: the deadline rendered in the
+				 *  reader's own locale/timezone, when known. */
+				localTimeLabel: v.optional(v.string()),
+				/** The submission checklist from real submission records: each
+				 *  step and whether it is done. Empty when the project has no
+				 *  submission package (the checklist is then absent). */
+				steps: v.optional(
+					v.array(
+						v.strictObject({
+							title: v.string(),
+							detail: v.optional(v.string()),
+							done: v.boolean(),
+						}),
+					),
+				),
 			}),
 		),
 		/** "What you're approving" (plan cards): the plan's own feature list,
@@ -225,6 +240,71 @@ export const DecisionCardSchema = v.pipe(
 				items: v.array(v.string()),
 				version: v.optional(v.string()),
 			}),
+		),
+		/** Repair card "What needs fixing" panel (team-mode redo): a FIXED,
+		 *  true expectation for the failed check, keyed from run_rounds.issue
+		 *  ("<featureId>:<check>"). Absent for an unknown check, so the card
+		 *  then keeps its plain summary and shows no panel. The card's summary
+		 *  carries the failed round's own plain sentence (run_rounds.detail)
+		 *  plus the fixed "I found it before handing the preview to you." line —
+		 *  never the same sentence twice. */
+		repair: v.optional(v.strictObject({ expectation: v.string(), fixing: v.optional(v.string()) })),
+		/**
+		 * DRAFT FIELDS (team-mode Brief card redo, 2026-10-22 lane rules). Each
+		 * is filled by the server from a REAL record or left absent; the card
+		 * falls back to its summary when a field has no source. Nothing is
+		 * guessed. Draft = not yet promoted into contracts.md; may change shape
+		 * until the owner accepts the cards.
+		 */
+		/** The card footer's left side (every mockup): the app it is about and
+		 *  an optional version/revision label, e.g. "FarmLog AI" + "Plan v2". */
+		footer: v.optional(
+			v.strictObject({ appName: v.string(), version: v.optional(v.string()) }),
+		),
+		/** Plan card: the one next-step line beneath the plan list ("Approve
+		 *  this scope and I'll prepare the design for your review."). A fixed
+		 *  true sentence for the approval action, never invented advice. */
+		nextStep: v.optional(v.string()),
+		/** Live-build card: the feature now being worked and the feature list
+		 *  with each feature's real state, from build_features. `current` is the
+		 *  name of the building feature; `lastUpdatedAt` + `builtCount` drive the
+		 *  "Last update <time> · N features built" line. */
+		build: v.optional(
+			v.strictObject({
+				current: v.optional(v.string()),
+				features: v.array(
+					v.strictObject({
+						title: v.string(),
+						state: v.union([
+							v.literal('built'),
+							v.literal('building'),
+							v.literal('waiting'),
+						]),
+					}),
+				),
+				builtCount: v.pipe(v.number(), v.integer(), v.minValue(0)),
+				lastUpdatedAt: v.optional(v.string()),
+			}),
+		),
+		/** Ready card: an app peek shown ONLY when a real preview screenshot or
+		 *  stored artifact exists. `appName` labels the peek frame; `imageUrl`
+		 *  is the stored screenshot when one exists (absent → text peek). */
+		peek: v.optional(
+			v.strictObject({
+				appName: v.string(),
+				caption: v.optional(v.string()),
+				imageUrl: v.optional(v.string()),
+				/** The checked preview this card is about: the card shows a live,
+				 *  scaled-down, non-interactive view of it (owner, 2026-10-22). */
+				previewId: v.optional(v.string()),
+				previewKind: v.optional(v.picklist(['web', 'flutter'])),
+				previewHasServer: v.optional(v.boolean()),
+			}),
+		),
+		/** A schedule (not a hackathon) behind a deadline-kind card: it says
+		 *  plainly when it next runs, with no days-left and no Deadline badge. */
+		schedule: v.optional(
+			v.strictObject({ name: v.string(), nextRunLabel: v.string() }),
 		),
 	}),
 	v.readonly(),

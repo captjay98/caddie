@@ -17,7 +17,7 @@ export const CARD_DESIGNS = {
  repair: { label: 'Checking & repairing', icon: 'sparkCheck', tone: 'amber' },
  preview: { label: 'Your app is ready', icon: 'play', tone: 'green' },
  deadline: { label: 'Coming up', icon: 'calendar', tone: 'amber' },
- opportunity: { label: 'An opportunity for you', icon: 'target', tone: 'blue' },
+ opportunity: { label: 'Found for you', icon: 'target', tone: 'green' },
  earlier: { label: 'Earlier', icon: 'check', tone: 'quiet' },
  update: { label: 'Project update', icon: 'info', tone: 'quiet' },
 } as const;

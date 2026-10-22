@@ -32,6 +32,7 @@ import {
   setWorkflowBlocker,
   storeBuildOutput,
   workflowRepairPause,
+  type RepairPauseScope,
   continueProjectFromChat,
 } from "./build-workflow.ts";
 import { stackCatalog } from "./stacks.ts";
@@ -77,6 +78,7 @@ import {
   testsBaseline,
 } from "./build-features.ts";
 import { openWorkingCopy } from "./working-copy.ts";
+import { stopModule, failModule, openModuleWorkingCopy } from "./modules.ts";
 import { runVerifiedInstall } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { checkSentence, newTestsSentence } from "./round-detail.ts";
@@ -182,7 +184,7 @@ export async function resolveCoordinatorContext(
  */
 export async function resolveModuleBuilderContext(
   env: CoordinatorEnvironment,
-  input: { conversationId: string; moduleId: string; features: readonly string[] },
+  input: { conversationId: string; moduleId: string; buildSeq: number; features: readonly string[] },
 ): Promise<CoordinatorHostContext> {
   if (!env?.DB) throw new Error("Coordinator D1 binding is unavailable.");
   const run = await lookupRunByConversation(env.DB, input.conversationId);
@@ -191,6 +193,7 @@ export async function resolveModuleBuilderContext(
   const scope = await projectScopeForUser(env.DB, run.createdBy, run.projectId);
   return createCoordinatorContext(env, scope, run.runId, run, {
     moduleId: input.moduleId,
+    buildSeq: input.buildSeq,
     features: input.features,
   });
 }
@@ -211,7 +214,7 @@ export async function createCoordinatorContext(
    *   - the part boundary uses this moduleId (so parallel module builders never
    *     collide on one project-wide active-part pointer).
    */
-  moduleScope?: { moduleId: string; features: readonly string[] },
+  moduleScope?: { moduleId: string; buildSeq: number; features: readonly string[] },
 ): Promise<CoordinatorHostContext> {
   const projectRows = await env.DB.prepare(
     "select kind from projects where id = ?",
@@ -237,6 +240,7 @@ export async function createCoordinatorContext(
   // `module:<runId>:<moduleId>`, restored from the latest merged save point by
   // the caller; the coordinator's own build keeps `session:<runId>`.
   const moduleId = moduleScope?.moduleId;
+  const moduleBuildSeq = moduleScope?.buildSeq;
   const sessionId = moduleId ? `module:${runId}:${moduleId}` : `session:${runId}`;
   const root = `/workspace/${scope.projectId}`;
   // Team mode (part P): the feature ids this module owns. Used to narrow the
@@ -248,6 +252,38 @@ export async function createCoordinatorContext(
   /** Narrow a feature row list to the module's own features (identity otherwise). */
   const scopeToModule = (rows: BuildFeatureRow[]): BuildFeatureRow[] =>
     moduleFeatureIds ? rows.filter((row) => moduleFeatureIds.has(row.featureId)) : rows;
+  // Part P: whose spent tries pause this host. A module builder counts only its
+  // own features' issues, so one module that spent its three tries never
+  // refuses or stops another module working in parallel. The coordinator's own
+  // build keeps today's rule: every issue in the run.
+  const pauseScope: RepairPauseScope = moduleFeatureIds ? { featureIds: [...moduleFeatureIds] } : {};
+
+  // Team mode (part P, gap 2): in MODULE scope a pause or an honest block stops
+  // ONLY this module and frees its slot — the build phase stays `building` and
+  // the other modules keep going. In the coordinator's own build (no module
+  // scope) these fall back to today's build-wide `setWorkflowBlocker`.
+  //
+  // A SPENT SPENDING LIMIT is deliberately NOT routed here: it is set by the
+  // spend interceptor (server/spend-instrument.ts), stays build-wide, and this
+  // file never touches it.
+
+  /** A repair pause (the 3-try limit was spent): fail this module, else block the build. */
+  const pauseOrStop = async (message: string): Promise<void> => {
+    if (moduleId !== undefined && moduleBuildSeq !== undefined) {
+      await failModule(env.DB, scope, { buildSeq: moduleBuildSeq, moduleId });
+      return;
+    }
+    await setWorkflowBlocker(env.DB, scope, message);
+  };
+
+  /** report_blocker: stop this module honestly, else block the build. */
+  const blockOrStop = async (reason: string): Promise<void> => {
+    if (moduleId !== undefined && moduleBuildSeq !== undefined) {
+      await stopModule(env.DB, scope, { buildSeq: moduleBuildSeq, moduleId });
+      return;
+    }
+    await setWorkflowBlocker(env.DB, scope, reason);
+  };
 
   // --- Software-team mode (parts B/C/D/E/G) --------------------------------
   // The workflow row carries the stamped teamMode/bigApps flags. Everything
@@ -433,7 +469,7 @@ export async function createCoordinatorContext(
   const ensureSession = async () => {
     if (isHome)
       throw new SandboxError(409, "HOME_NO_SANDBOX", "Create a project first.");
-    await requireBuildApproval(env.DB, scope);
+    await requireBuildApproval(env.DB, scope, pauseScope);
     if (
       !env.CONTREE_BASE_URL ||
       !env.CONTREE_API_TOKEN ||
@@ -451,6 +487,29 @@ export async function createCoordinatorContext(
       );
     }
     driver ??= buildSandboxFromEnv(env)!;
+    // Team mode (part P, gap 1): a MODULE builder's copy is its OWN. It opens
+    // its own session key `module:<runId>:<moduleId>` directly from the module
+    // row's start save point, and NEVER reads or writes the project-level
+    // `build_sandbox_sessions` pointer openWorkingCopy uses — so a module can
+    // never be handed the main build's session, and its open can never corrupt
+    // the project's pointer. The coordinator's own build keeps openWorkingCopy.
+    if (moduleId !== undefined && moduleBuildSeq !== undefined) {
+      sessionReady ??= openModuleWorkingCopy({
+        db: env.DB,
+        driver,
+        scope,
+        runId,
+        buildSeq: moduleBuildSeq,
+        moduleId,
+        sessionKey: sessionId,
+        baseImage: runtime.image,
+      }).catch((error: unknown) => {
+        sessionReady = null;
+        throw error;
+      });
+      const id = await sessionReady;
+      return { driver, id };
+    }
     // A rollback or Restore points the build at another session; a working
     // copy the sandbox no longer keeps is started again from the saved code.
     // A failed open is not cached, so the next call in this context retries.
@@ -627,7 +686,7 @@ export async function createCoordinatorContext(
     issuePrefix?: string,
   ) => {
     signal?.throwIfAborted();
-    const { workflow, plan } = await requireBuildApproval(env.DB, scope);
+    const { workflow, plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     await scaffold();
     // Team mode (part E): write the generated contract files from the approved
     // design BEFORE every check run, so the contract test matches the design.
@@ -640,7 +699,7 @@ export async function createCoordinatorContext(
     const receipts: { check: string; passed: boolean; exitCode: number | null; stdout: string; stderr: string; operationKey: string }[] = [];
     for (const check of commands) {
       const operationKey = `${mode}:${runId}:${plan.id}:${attempt}:${check.check}`;
-      await requireBuildApproval(env.DB, scope);
+      await requireBuildApproval(env.DB, scope, pauseScope);
       const checkStarted = new Date().toISOString();
       // The dependencies check is the ONE verified install step: fetch every
       // pinned tarball, verify its sha512 against bun.lock, extract it, then
@@ -708,12 +767,10 @@ export async function createCoordinatorContext(
           outcome: "failed",
           detail: checkSentence(receipts.at(-1) ?? {}),
         });
-        const paused = (await workflowRepairPause(env.DB, workflow.runId))
+        const paused = (await workflowRepairPause(env.DB, workflow.runId, pauseScope))
           .paused;
         if (paused)
-          await setWorkflowBlocker(
-            env.DB,
-            scope,
+          await pauseOrStop(
             "Caddie could not get the app checks passing after three attempts. Your plan and files are saved. The app is not ready to try yet.",
           );
         return { passed: false as const, paused, receipts, workflow, plan, driver, id };
@@ -744,11 +801,9 @@ export async function createCoordinatorContext(
           outcome: "failed",
           detail: sentence,
         });
-        const paused = (await workflowRepairPause(env.DB, workflow.runId)).paused;
+        const paused = (await workflowRepairPause(env.DB, workflow.runId, pauseScope)).paused;
         if (paused)
-          await setWorkflowBlocker(
-            env.DB,
-            scope,
+          await pauseOrStop(
             "Caddie could not get the app's contract checks (sign-in, privacy, restart) passing after three attempts. Your plan and files are saved. The app is not ready to try yet.",
           );
         return { passed: false as const, paused, receipts, workflow, plan, driver, id, contractChecks };
@@ -758,7 +813,7 @@ export async function createCoordinatorContext(
   };
   const runChecks = async (attempt: string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
-    const { plan } = await requireBuildApproval(env.DB, scope);
+    const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     // Failures count toward the feature being built, not one build-wide bucket.
     const current = currentFeature(scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan)));
     const outcome = await runHostChecks("checks", attempt, signal, current?.featureId);
@@ -779,7 +834,7 @@ export async function createCoordinatorContext(
   };
   /** The host decides what is built next: the first feature that has not passed. */
   const buildNextFeature = async () => {
-    const { plan } = await requireBuildApproval(env.DB, scope);
+    const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     const rows = scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan));
     const current = currentFeature(rows);
     if (!current)
@@ -812,7 +867,7 @@ export async function createCoordinatorContext(
    */
   const finishFeature = async (featureId: string, attempt: string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
-    const { plan } = await requireBuildApproval(env.DB, scope);
+    const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     const rows = scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan));
     const current = currentFeature(rows);
     if (!current)
@@ -850,9 +905,7 @@ export async function createCoordinatorContext(
       });
       await recordFeatureAttempt(env.DB, current, round.paused);
       if (round.paused)
-        await setWorkflowBlocker(
-          env.DB,
-          scope,
+        await pauseOrStop(
           `Caddie could not add working tests for “${current.title}” after three attempts. The features before it are saved. The app is not ready to try yet.`,
         );
       return {
@@ -877,12 +930,10 @@ export async function createCoordinatorContext(
           outcome: "failed",
           detail: boundary.message,
         });
-        const paused = (await workflowRepairPause(env.DB, runId)).paused;
+        const paused = (await workflowRepairPause(env.DB, runId, pauseScope)).paused;
         await recordFeatureAttempt(env.DB, current, paused);
         if (paused)
-          await setWorkflowBlocker(
-            env.DB,
-            scope,
+          await pauseOrStop(
             `“${current.title}” kept changing files outside its area after three tries. The features before it are saved. The app is not ready to try yet.`,
           );
         return {
@@ -922,7 +973,7 @@ export async function createCoordinatorContext(
     signal?.throwIfAborted();
     {
       // The preview is published only after every planned feature has passed.
-      const { plan } = await requireBuildApproval(env.DB, scope);
+      const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
       const rows = await ensureBuildFeatures(env.DB, scope, runId, plan);
       const pending = currentFeature(rows);
       if (pending)
@@ -1014,7 +1065,7 @@ export async function createCoordinatorContext(
           outcome: "failed",
           detail: checkSentence(receipt),
         });
-        const paused = (await workflowRepairPause(env.DB, workflow.runId)).paused;
+        const paused = (await workflowRepairPause(env.DB, workflow.runId, pauseScope)).paused;
         if (paused)
           await setWorkflowBlocker(
             env.DB,
@@ -1247,7 +1298,7 @@ export async function createCoordinatorContext(
         detail: state.workflow!.detail,
       };
     },
-    blockBuild: (reason) => setWorkflowBlocker(env.DB, scope, reason),
+    blockBuild: (reason) => blockOrStop(reason),
     requestApproval: async (input) => {
       // Agent-facing REQUEST bridge: create a PENDING server approval only.
       // There is no decision parameter here — the user decides through the
@@ -1268,7 +1319,7 @@ export async function createCoordinatorContext(
     verifyBuild,
     runChecks,
     requestAppKey: async (input) => {
-      await requireBuildApproval(env.DB, scope);
+      await requireBuildApproval(env.DB, scope, pauseScope);
       const key = await requestAppSecret(env.DB, scope, input);
       return { name: key.name, status: key.status };
     },
@@ -1322,7 +1373,7 @@ export async function createCoordinatorContext(
       }
     },
     delegateRepair: async (input) => {
-      await requireBuildApproval(env.DB, scope);
+      await requireBuildApproval(env.DB, scope, pauseScope);
       await recordRepairRound(env.DB, scope, runId, {
         issue: input.issue,
         round: input.round as "diagnosis",

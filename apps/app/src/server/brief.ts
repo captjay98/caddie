@@ -8,10 +8,12 @@ import { listSchedules } from './schedules.ts';
 import type { AccountBriefPayload, BriefSummary } from '@caddie/contracts';
 import { listProjectsForActor } from './projects.ts';
 import { listPlanDocRevisions } from './projects.ts';
-import { listCandidates } from './discovery.ts';
+import { listCandidates, computeFit } from './discovery.ts';
 import { listPreviews } from './previews.ts';
-import { listPackages, getReadiness } from './submission.ts';
+import { listPackages, getReadiness, getPackage } from './submission.ts';
+import { projectHackathon } from './project-hackathon.ts';
 import { STOP_SENTINEL } from './project-experience.ts';
+import { readBuildBundle, readOutputManifest } from './build-workflow.ts';
 
 /** Format an ISO timestamp as a date a person reads, in the schedule's own
  *  timezone, e.g. "Monday, 6 October 2026 at 08:00". Returns the raw string
@@ -41,6 +43,32 @@ function plainCheck(issue: string): string {
 	const raw = issue.trim();
 	if (raw.length > 0 && raw.includes(' ') && !/\b[a-z0-9-]+:[a-z0-9-]+\b/i.test(raw)) return raw;
 	return 'A check did not pass yet. Caddie is adjusting the build and will run the checks again.';
+}
+
+/**
+ * The repair card's "What needs fixing" panel (team-mode redo, step 2): a
+ * FIXED, true expectation per check, keyed from run_rounds.issue of the form
+ * "<featureId>:<check>". The sentence is the plain-English promise the check
+ * makes — never the failed round's own detail (that is the card body). An
+ * unknown check returns null, so the card shows no panel and keeps its plain
+ * summary.
+ */
+const REPAIR_EXPECTATIONS: Record<string, string> = {
+	'behavior-tests': "The app's own tests must all pass.",
+	'browser-bundle': 'The app must build for the browser.',
+	dependencies: "The app's parts must install cleanly.",
+	'part-boundary': 'Each builder changes only its own part of the app.',
+	'contract-create': 'Something you add must be saved.',
+	'contract-read': 'Save something, restart the app, and it must still be there.',
+	'contract-privacy-screen':
+		"No one sees another person's records, and every screen shows what was saved.",
+	'contract-test-mode': 'Test payments, emails, jobs and files must behave as the plan says.',
+};
+
+function repairExpectation(issue: string): string | null {
+	// issue is "<featureId>:<check>"; the check is the part after the last ":".
+	const check = issue.includes(':') ? issue.slice(issue.lastIndexOf(':') + 1).trim() : '';
+	return REPAIR_EXPECTATIONS[check] ?? null;
 }
 
 /**
@@ -178,25 +206,46 @@ async function pendingApprovalCards(db: D1Database, scope: Scope, nowIso: string
         nowIso,
 	);
  const cards = rows.map(row => approvalCard(row, projectId, nowIso));
- // Step 3: "What you're approving" — fill the plan's own feature list onto a
- // PENDING card whose plan body really carries a caddie-features block. The
+ // Step 2/3: "What you're approving" — fill the plan's own feature list onto a
+ // PENDING card whose plan body really carries a caddie-features block, plus a
+ // fixed next-step line and a footer naming the app and plan revision. The
  // revisions are fetched once; a decided card and a plan with no list stay as
  // they were (the card then shows its summary).
  if (cards.some(card => card.status === 'needs-you')) {
-  const items = await planItemsFor(db, scope).catch(error => {
-   console.error('brief: plan-items read failed:', error);
-   return new Map<string, { title: string; detail?: string }[]>();
-  });
+  const [items, appName, revisionNumber] = await Promise.all([
+   planItemsFor(db, scope).catch(error => {
+    console.error('brief: plan-items read failed:', error);
+    return new Map<string, { title: string; detail?: string }[]>();
+   }),
+   projectAppName(db, projectId),
+   planRevisionNumbers(db, scope).catch(() => new Map<string, number>()),
+  ]);
   for (const card of cards) {
    const resourceId = String((card as { _resourceId?: string })._resourceId ?? '');
    const list = items.get(resourceId);
-   if (card.status === 'needs-you' && list && list.length > 0) {
-    (card as { planItems?: unknown }).planItems = list;
+   if (card.status === 'needs-you' && card.kind === 'approval') {
+    if (list && list.length > 0) (card as { planItems?: unknown }).planItems = list;
+    // A fixed, true next-step sentence for a design approval — never invented
+    // advice, the same promise the approval makes.
+    (card as { nextStep?: string }).nextStep = 'Approve this scope and I’ll prepare the design for your review.';
+    if (appName) {
+     const n = revisionNumber.get(resourceId);
+     (card as { footer?: unknown }).footer = { appName, ...(n ? { version: `Plan v${n}` } : {}) };
+    }
    }
    delete (card as { _resourceId?: string })._resourceId;
   }
  }
  return cards;
+}
+
+/** Map each plan-doc revision id to its real revision number, so an approval
+ * card can show "Plan v<n>" from the record, never a guess. */
+async function planRevisionNumbers(db: D1Database, scope: Scope): Promise<Map<string, number>> {
+	const revisions = await listPlanDocRevisions(db, scope);
+	const byId = new Map<string, number>();
+	for (const revision of revisions) byId.set(revision.id, revision.revision);
+	return byId;
 }
 
 /**
@@ -227,12 +276,30 @@ function approvalCard(row: Record<string, unknown>, projectId: string, nowIso: s
 		const copy = APPROVAL_COPY[approval.action];
 		const pending = approval.status === 'pending' && approval.expiresAt > nowIso;
             const outcome = approval.status === 'pending' ? 'expired' : approval.status;
+		// The plan approval is the one a non-technical person meets: say what
+		// approving does and what they decided, in plain words (the outcome word
+		// stays in the summary, so history always shows it).
+		const plan = approval.action === 'design';
+		const PLAN_OUTCOME: Record<string, { headline: string; summary: string }> = {
+			approved: { headline: 'You approved the plan', summary: 'This plan was approved.' },
+			rejected: { headline: 'You turned the plan down', summary: 'This plan was rejected.' },
+			revoked: { headline: 'The plan approval was withdrawn', summary: 'This plan approval was revoked.' },
+			expired: { headline: 'The plan approval expired', summary: 'This plan expired before a decision.' },
+			superseded: { headline: 'A newer plan replaced this one', summary: 'This plan was superseded by a newer one.' },
+		};
+		const planDecided = PLAN_OUTCOME[outcome] ?? { headline: 'Plan decided', summary: `This plan was ${outcome}.` };
 		return {
 			id: newCardId('approval', approval.id),
 			projectId: String(row.projectId ?? projectId),
 			kind: 'approval',
-			headline: pending ? copy.title : `${copy.label.replace(/^Review /, '')} — ${outcome}`,
-			summary: pending ? `Approving this authorises ${copy.authorises}` : `Decision ${outcome}. Open the record to read the exact revision it concerned. This does not authorise a new action.`,
+			headline: pending ? (plan ? 'Your plan is ready to build' : copy.title) : plan ? planDecided.headline : `${copy.label.replace(/^Review /, '')} — ${outcome}`,
+			summary: pending
+				? plan
+					? 'Approve it and Caddie starts building. Nothing is published until you decide.'
+					: `Approving this authorises ${copy.authorises}`
+				: plan
+					? `${planDecided.summary} Open it to read the plan.`
+					: `Decision ${outcome}. Open the record to read the exact revision it concerned. This does not authorise a new action.`,
 			evidenceIds: [],
 			status: pending ? 'needs-you' : 'handled',
 			updatedAt: pending ? approval.createdAt : approval.decidedAt ?? (outcome === 'expired' ? approval.expiresAt : approval.createdAt),
@@ -349,24 +416,89 @@ async function scheduleCards(db: D1Database, scope: Scope, nowIso: string): Prom
 	return schedules
 		.filter((schedule) => !schedule.paused)
 		.map((schedule) => {
-			const parts = deadlineParts(schedule.nextRunAt, schedule.timezone, nowIso);
+			// A SCHEDULE is not a hackathon deadline: it says plainly when it
+			// next runs, with NO days-left countdown and NO Deadline badge (lane
+			// 14 step 6). The `schedule` field drives that wording; the card
+			// carries no `deadline` block, so statusLabel reads "Scheduled".
+			const nextRunLabel = `${readableDate(schedule.nextRunAt, schedule.timezone)} (${schedule.timezone})`;
 			return {
 				id: newCardId('schedule', schedule.id),
 				projectId: scope.projectId,
 				kind: 'deadline',
 				headline: `${schedule.name} is scheduled`,
-				summary: `Next run ${readableDate(schedule.nextRunAt, schedule.timezone)} (${schedule.timezone}). A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
+				summary: `A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
 				evidenceIds: [],
 				status: 'handled',
 				updatedAt: schedule.updatedAt,
 				primaryAction: { label: 'Open the schedule', kind: 'review', targetId: schedule.id },
-				// A parseable next-run instant gives the countdown parts; an
-				// unparseable one leaves the field absent and the summary stands.
-				...(parts
-					? { deadline: { ...parts, source: `${schedule.name} (${schedule.timezone})` } }
-					: {}),
+				schedule: { name: schedule.name, nextRunLabel },
 			} satisfies DecisionCard;
 		});
+}
+
+/**
+ * The hackathon deadline card (lane 14 step 6): the REAL hackathon deadline
+ * the project card already shows (projectHackathon — the accepted proposal's
+ * event, or the project's contestUrl, with the deadline parsed from the stored
+ * listing), never a schedule's nextRunAt. It carries the days-left countdown,
+ * the deadline in the reader's own locale ("Your time → …"), and the
+ * submission steps from the project's real submission package checklist. No
+ * hackathon, or no parseable deadline → no card (the project simply has none).
+ */
+async function hackathonDeadlineCard(db: D1Database, scope: Scope, nowIso: string): Promise<DecisionCard[]> {
+	const hackathon = await projectHackathon(db, scope, Date.parse(nowIso) || Date.now());
+	if (!hackathon || !hackathon.deadline) return [];
+	// The deadline instant is the END of the deadline day (projectHackathon
+	// stores a YYYY-MM-DD). Render the countdown + date/time in UTC (the stored
+	// deadline has no timezone) and a reader-locale "Your time →" line.
+	const deadlineIso = `${hackathon.deadline}T23:59:59Z`;
+	const parts = deadlineParts(deadlineIso, 'UTC', nowIso);
+	if (!parts) return [];
+	const when = new Date(deadlineIso);
+	// The reader's own local time (TheCard "Your time →" line), from the host
+	// locale/timezone — deterministic enough for display, never a claim.
+	let localTimeLabel: string | undefined;
+	try {
+		localTimeLabel = new Intl.DateTimeFormat('en-US', {
+			weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+		}).format(when);
+	} catch {
+		localTimeLabel = undefined;
+	}
+	// The submission steps from the real checklist of the project's submission
+	// package, when one exists. A 'verified' item is done; everything else is
+	// still to do. No package → no steps (the countdown stands alone).
+	let steps: { title: string; detail?: string; done: boolean }[] | undefined;
+	try {
+		const packages = await listPackages(db, scope);
+		if (packages[0]) {
+			const pkg = await getPackage(db, scope, packages[0].id);
+			const items = pkg.checklist
+				.filter((item) => item.requirementText.trim() !== '')
+				.map((item) => ({ title: item.requirementText, done: item.status === 'verified' }));
+			if (items.length > 0) steps = items;
+		}
+	} catch (error) {
+		console.error('brief: deadline submission steps failed:', error);
+	}
+	return [{
+		id: newCardId('hackathon-deadline', scope.projectId),
+		projectId: scope.projectId,
+		kind: 'deadline',
+		headline: 'Leave time to tell the story',
+		summary: 'The app is one part of the submission. Your demo and project write-up still need a final pass.',
+		evidenceIds: [],
+		status: hackathon.ended ? 'handled' : 'needs-you',
+		updatedAt: nowIso,
+		primaryAction: { label: 'Review submission', kind: 'review', targetId: scope.projectId },
+		deadline: {
+			...parts,
+			source: hackathon.title,
+			...(localTimeLabel ? { localTimeLabel } : {}),
+			...(steps ? { steps } : {}),
+		},
+		...(hackathon.title ? { footer: { appName: hackathon.title, version: 'Submission' } } : {}),
+	} satisfies DecisionCard];
 }
 
 /** The project's brief: every live decision the project's own state demands. */
@@ -378,23 +510,141 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
  const phase = String(workflow.phase);
  if (!['building', 'blocked', 'ready'].includes(phase)) return [];
  const runId = String(workflow.runId);
- const [round] = phase === 'building' ? await queryAll(db, 'select outcome, issue from run_rounds where projectId = ? and runId = ? order by createdAt desc, id desc limit 1', scope.projectId, runId) : [];
+ const [round] = phase === 'building' ? await queryAll(db, 'select outcome, issue, detail from run_rounds where projectId = ? and runId = ? order by createdAt desc, id desc limit 1', scope.projectId, runId) : [];
  const repairing = phase === 'building' && round?.outcome === 'failed';
  const ready = phase === 'ready' && typeof workflow.previewId === 'string';
+ const building = phase === 'building' && !repairing;
  const targetId = ready ? String(workflow.previewId) : runId;
  // Step 5: on a READY card, the preview checks — how many features passed and
  // their names, read from the real build_features rows for this run. Absent
  // (so the card keeps its summary) when no rows have passed yet.
- const checks = ready ? await checksForRun(db, scope.projectId, runId) : null;
+ const readyChecks = ready ? await checksForRun(db, scope.projectId, runId) : null;
+ // Step 4: on a REPAIR card, how many of this run's checks have passed so far,
+ // so the panel can say "N checks passed · 1 being repaired".
+ const repairChecks = repairing ? await repairChecksForRun(db, scope.projectId, runId) : null;
+ const checks = readyChecks ?? repairChecks;
+ // Step 3: on a live BUILD card, the feature feed — each feature's real state
+ // (Built / Building / Waiting) from build_features, the feature now building,
+ // and how many are built. Absent when the run has no feature rows.
+ const build = building ? await buildFeedForRun(db, scope.projectId, runId) : null;
+ // The repair "Check attempt N" footer: N is one past the real failed-repair
+ // round count for this run (attempt 1 is the first pass). Queried only for a
+ // repairing card.
+ let checkAttempt = 2;
+ if (repairing) {
+	const [c] = await queryAll(db, `select count(*) as n from run_rounds where projectId = ? and runId = ? and outcome = 'failed'`, scope.projectId, runId);
+	checkAttempt = Number(c?.n ?? 1) + 1;
+ }
+ const appName = await projectAppName(db, scope.projectId);
+ const footer = appName
+	? { appName, ...(ready && readyChecks?.version ? { version: `Version ${readyChecks.version}` } : repairing ? { version: `Check attempt ${checkAttempt}` } : {}) }
+	: null;
+ // Step 2: the repair "What needs fixing" panel is a FIXED expectation keyed
+ // from the failed check (run_rounds.issue). When the check is known, the card
+ // body is the round's own plain sentence (run_rounds.detail) plus a fixed
+ // true line, and the panel carries the expectation — two DISTINCT texts. An
+ // unknown check keeps the plain summary and shows no panel.
+ const repairIssue = repairing ? String(round?.issue ?? '') : '';
+ const repairExp = repairing ? repairExpectation(repairIssue) : null;
+ const repairDetail = repairing ? String(round?.detail ?? '').trim() : '';
+ // The repair card's work line names the feature being fixed: the run's own
+ // building feature row. Absent when no feature is building.
+ const repairFixing = repairing ? (await buildFeedForRun(db, scope.projectId, runId))?.current : undefined;
+ const repairBody = repairExp && repairDetail !== ''
+	? `${repairDetail} I found it before handing the preview to you.`
+	: repairExp
+		? 'I found it before handing the preview to you.'
+		: null;
+ // The ready card's live mini view (owner, 2026-10-22): THIS card's checked
+ // preview, described exactly as the workflow route describes it to the
+ // project view (a server bundle → its requests are relayed; the output kind).
+ const previewId = ready ? String(workflow.previewId) : null;
+ const peek = previewId
+	? {
+			appName: appName ?? 'Your app',
+			previewId,
+			previewKind: ((await readOutputManifest(db, scope, previewId).catch(() => null))?.kind ?? 'web') as 'web' | 'flutter',
+			previewHasServer: (await readBuildBundle(db, scope, previewId).catch(() => null)) !== null,
+		}
+	: null;
  return [{
   id: newCardId(`workflow_${ready ? 'preview' : repairing ? 'repair' : phase === 'blocked' ? 'blocked' : 'build'}`, targetId),
   projectId: scope.projectId, runId, kind: 'result',
   headline: ready ? 'Your app is ready to try' : repairing ? 'One check needs another pass' : phase === 'blocked' ? 'Your build needs attention' : 'Your app is taking shape',
-  summary: ready ? 'Open the checked app preview. Your plan and build remain available.' : repairing ? plainCheck(String(round?.issue ?? '')) : String(workflow.detail ?? (phase === 'blocked' ? 'The build stopped. Your plan and saved files are retained.' : 'Caddie is implementing your approved plan and running the checks.')),
+  summary: ready ? 'Open the checked app preview. Your plan and build remain available.' : repairing ? (repairBody ?? plainCheck(repairIssue)) : String(workflow.detail ?? (phase === 'blocked' ? 'The build stopped. Your plan and saved files are retained.' : 'Caddie is implementing your approved plan and running the checks.')),
   evidenceIds: [], status: ready ? 'handled' : phase === 'blocked' ? 'blocked' : 'changed', updatedAt: String(workflow.updatedAt),
   primaryAction: { label: ready ? 'Try the app' : 'View activity', kind: ready ? 'preview' : 'inspect', targetId },
   ...(checks ? { checks } : {}),
+  ...(peek ? { peek } : {}),
+  ...(build ? { build } : {}),
+  ...(repairExp ? { repair: { expectation: repairExp, ...(repairFixing ? { fixing: repairFixing } : {}) } } : {}),
+  ...(footer ? { footer } : {}),
  }];
+}
+
+/** The project's app name for a card footer (mockup `cc-bottom` left). The
+ * project's own name is the app's name here; absent when the project row is
+ * gone, so the footer falls back to the subject label. */
+async function projectAppName(db: D1Database, projectId: string): Promise<string | null> {
+	try {
+		const [row] = await queryAll(db, 'select "name" from "projects" where "id" = ?', projectId);
+		const name = row?.name;
+		return typeof name === 'string' && name.trim() !== '' ? name : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The live-build feature feed (lane 14 step 3), from the real build_features
+ * rows for this run: each feature mapped to Built (passed) / Building (building)
+ * / Waiting (pending or failed-awaiting-retry), the feature currently building,
+ * and the built count. Returns null when the run has no feature rows, so the
+ * build card keeps its plain summary — nothing is invented.
+ */
+async function buildFeedForRun(
+	db: D1Database,
+	projectId: string,
+	runId: string,
+): Promise<{ current?: string; features: { title: string; state: 'built' | 'building' | 'waiting' }[]; builtCount: number; lastUpdatedAt?: string } | null> {
+	let rows: Record<string, unknown>[];
+	try {
+		rows = await queryAll(
+			db,
+			`select "title", "status", "updatedAt" from "build_features" where "projectId" = ? and "runId" = ? order by "position" asc`,
+			projectId,
+			runId,
+		);
+	} catch (error) {
+		if (String(error).includes('no such table')) return null;
+		throw error;
+	}
+	const features = rows
+		.map((row) => ({ title: String(row.title), raw: String(row.status) }))
+		.filter((row) => row.title.trim() !== '')
+		.map((row) => ({
+			title: row.title,
+			state: (row.raw === 'passed' ? 'built' : row.raw === 'building' ? 'building' : 'waiting') as 'built' | 'building' | 'waiting',
+		}));
+	if (features.length === 0) return null;
+	const current = features.find((feature) => feature.state === 'building')?.title;
+	const builtCount = features.filter((feature) => feature.state === 'built').length;
+	// The newest feature-row update stands in for "last update".
+	const lastUpdatedAt = rows
+		.map((row) => (row.updatedAt == null ? '' : String(row.updatedAt)))
+		.reduce((latest, at) => (at > latest ? at : latest), '');
+	return { ...(current ? { current } : {}), features, builtCount, ...(lastUpdatedAt ? { lastUpdatedAt } : {}) };
+}
+
+/** The repair card's "N checks passed" count (lane 14 step 4): how many of this
+ * run's features have passed, so the repair panel can say "N checks passed · 1
+ * being repaired". Null when the run has no passed features. */
+async function repairChecksForRun(db: D1Database, projectId: string, runId: string): Promise<{ passed: number; items: string[] } | null> {
+	const feed = await buildFeedForRun(db, projectId, runId);
+	if (!feed) return null;
+	const items = feed.features.filter((feature) => feature.state === 'built').map((feature) => feature.title);
+	if (items.length === 0) return null;
+	return { passed: items.length, items };
 }
 
 /**
@@ -430,7 +680,7 @@ async function checksForRun(
 export async function projectBrief(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
 	const verified = await assertProjectScope(db, scope);
 	const nowIso = new Date().toISOString();
-	const [approvals, conflicts, staleArtifacts, failedRuns, schedules, workflow] = await Promise.all([
+	const [approvals, conflicts, staleArtifacts, failedRuns, schedules, workflow, hackathonDeadline] = await Promise.all([
 		pendingApprovalCards(db, verified, nowIso),
 		conflictCards(db, verified).catch((error) => {
 			// The evidence layer is independent: its absence must not blank the
@@ -451,8 +701,12 @@ export async function projectBrief(db: D1Database, scope: Scope): Promise<Decisi
 			return [] as DecisionCard[];
 		}),
         workflowCards(db, verified),
+		hackathonDeadlineCard(db, verified, nowIso).catch((error) => {
+			console.error('brief: hackathon deadline read failed:', error);
+			return [] as DecisionCard[];
+		}),
 	]);
-	const all = [...approvals, ...conflicts, ...staleArtifacts, ...failedRuns, ...schedules, ...workflow];
+	const all = [...approvals, ...conflicts, ...staleArtifacts, ...failedRuns, ...schedules, ...workflow, ...hackathonDeadline];
 	const sorted = all.sort((a, b) => {
 			const rank = STATUS_RANK[a.status] - STATUS_RANK[b.status];
 			if (rank !== 0) return rank;
@@ -579,9 +833,8 @@ async function submissionCards(db: D1Database, scope: Scope): Promise<DecisionCa
  *  prerequisite, never implied. */
 async function opportunityCards(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
 	const candidates = await listCandidates(db, scope);
-	return candidates
-		.filter((candidate) => candidate.status === 'accepted')
-		.map((candidate) => {
+	const accepted = candidates.filter((candidate) => candidate.status === 'accepted');
+	return Promise.all(accepted.map(async (candidate) => {
 			// A sample from the built-in seed feed vs a real listing read from a
 			// live source (Devpost). Worded from the candidate's own source so the
 			// card never over- or under-claims where it came from.
@@ -589,12 +842,23 @@ async function opportunityCards(db: D1Database, scope: Scope): Promise<DecisionC
 			const summary = live
 				? 'Read from a live contest listing. Explore ideas for it when you are ready.'
 				: "A sample from Caddie's built-in feed, not a real contest yet. Explore ideas for it when you are ready.";
-			// Step 4: the fit split. "Before you commit" is filled from the
-			// candidate's OWN stated requirements (eligibility / tech rules it
-			// lists) — a real record. "Why it fits" has no stored source on a
-			// saved candidate, so reasons stays empty and the card renders only
-			// the cautions side. Nothing positive is invented from the summary.
-			const cautions = candidate.requirements.map((req) => req.text).filter((text) => text.trim() !== '');
+			// Step 7: the fit split, from the SAME fit evaluator the discovery
+			// route uses (computeFit). "Why it fits" = the requirements the
+			// evidence actually SUPPORTS (plain words from the record); "Before
+			// you commit" = the requirements in conflict or unknown (what still
+			// needs confirming). A candidate with no requirements, or a fit read
+			// that fails, falls back to the requirement texts as cautions —
+			// nothing positive is ever invented.
+			let reasons: string[] = [];
+			let cautions: string[] = candidate.requirements.map((req) => req.text).filter((text) => text.trim() !== '');
+			try {
+				const fit = await computeFit(db, scope, candidate);
+				reasons = fit.claims.filter((claim) => claim.verdict === 'supported').map((claim) => claim.statement);
+				cautions = fit.claims.filter((claim) => claim.verdict !== 'supported').map((claim) => claim.requirement);
+			} catch (error) {
+				console.error('brief: opportunity fit read failed:', error);
+			}
+			const footer = { appName: candidate.title };
 			return {
 				id: newCardId('opportunity', candidate.id),
 				projectId: scope.projectId,
@@ -605,9 +869,10 @@ async function opportunityCards(db: D1Database, scope: Scope): Promise<DecisionC
 				status: 'handled',
 				updatedAt: candidate.updatedAt,
 				primaryAction: { label: 'Review opportunity', kind: 'inspect', targetId: candidate.id },
-				...(cautions.length > 0 ? { fit: { reasons: [], cautions } } : {}),
+				...(reasons.length > 0 || cautions.length > 0 ? { fit: { reasons, cautions } } : {}),
+				footer,
 			} satisfies DecisionCard;
-		});
+		}));
 }
 
 /** The account-wide brief: every authorised project's cards, grouped, ranked
