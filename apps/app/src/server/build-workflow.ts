@@ -561,22 +561,14 @@ export async function decideDesign(
     // block is what lanes E and P read back through getApprovedBlock. A change
     // request clears any prior binding so a stale revision can't be served.
     const approvedRevisionId = input.decision === "approved" ? design.id : null;
+    // One statement: the phase change and the approved-revision binding land
+    // together or not at all (migration 0040 runs before this code ships).
     await db
       .prepare(
-        "update build_workflows set phase = ?, pendingKey = ?, pendingBody = ?, detail = null, updatedAt = ? where projectId = ?",
+        "update build_workflows set phase = ?, pendingKey = ?, pendingBody = ?, detail = null, approvedDesignRevisionId = ?, updatedAt = ? where projectId = ?",
       )
-      .bind(phase, `design-decision:${approval.id}`, message, now(), scope.projectId)
+      .bind(phase, `design-decision:${approval.id}`, message, approvedRevisionId, now(), scope.projectId)
       .run();
-    // The binding column is from migration 0040; write it separately and
-    // tolerate its absence so an older workflow table still advances.
-    try {
-      await db
-        .prepare("update build_workflows set approvedDesignRevisionId = ? where projectId = ?")
-        .bind(approvedRevisionId, scope.projectId)
-        .run();
-    } catch (error) {
-      if (!String(error).includes("no such column")) throw error;
-    }
   }
   return workflowSnapshot(db, scope);
 }
@@ -591,19 +583,10 @@ async function isBigAppsWorkflow(db: D1Database, projectId: string): Promise<boo
   return (await workflowModeFlag(db, projectId, "bigApps")) === 1;
 }
 
-/**
- * Read one team-mode flag off the workflow row. A workflow table without the
- * migration-0040 columns (an older database) has no team mode, so a missing
- * column reads as 0 — team mode fails safe to OFF, never a crash.
- */
+/** Read one team-mode flag off the workflow row (migration 0040 columns). */
 async function workflowModeFlag(db: D1Database, projectId: string, column: "teamMode" | "bigApps"): Promise<number> {
-  try {
-    const found = await rows(db, `select ${column} from build_workflows where projectId = ?`, projectId);
-    return Number(found[0]?.[column] ?? 0);
-  } catch (error) {
-    if (String(error).includes("no such column")) return 0;
-    throw error;
-  }
+  const found = await rows(db, `select ${column} from build_workflows where projectId = ?`, projectId);
+  return Number(found[0]?.[column] ?? 0);
 }
 export async function acknowledgeDispatch(
   db: D1Database,
