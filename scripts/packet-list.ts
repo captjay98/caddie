@@ -370,6 +370,14 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// copies at the same time (overlap proven), each with its own save
 			// point and one onModuleFinished hook call. Local, scripted, no cost.
 			'tests/module-builder-s3.test.ts',
+			// Lane 12 follow-up (gaps 1, 2, 4): a module opens its OWN copy from
+			// its start save point and never the project pointer; a module-scope
+			// stop stops only that module while the build stays building; and two
+			// REAL ModuleBuilder agents build in parallel through the Flue node
+			// runtime on scripted providers, each with its own save point and one
+			// hook. Local, scripted, no cost.
+			'tests/module-copy-isolation.test.ts',
+			'tests/module-builder-agents.test.ts',
 		],
 		browser: ['tests/browser/brief.spec.ts'],
 		live: [],
