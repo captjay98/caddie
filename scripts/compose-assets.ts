@@ -133,6 +133,30 @@ if (existsSync(WORKER_CONFIG)) {
 	}
 }
 
+// The environment must be the one that was asked for. The Cloudflare Vite
+// plugin resolves `env.<name>` from CLOUDFLARE_ENV, and it has been observed
+// to resolve the TOP-LEVEL config instead (2026-10-22): the build then
+// produced a config with the local D1 placeholder and no production route,
+// which the deploy refused ("binding DB of type d1 must have a valid
+// database_id"). A build that does not carry the requested environment is a
+// failed build, so it fails here — loudly, before anything is uploaded.
+const requestedEnvironment = process.env.CLOUDFLARE_ENV;
+if (requestedEnvironment && existsSync(WORKER_CONFIG)) {
+	const authored = readFileSync(join(REPO_ROOT, 'apps/app/wrangler.jsonc'), 'utf8');
+	const composed = JSON.parse(readFileSync(WORKER_CONFIG, 'utf8')) as {
+		d1_databases?: { binding: string; database_id: string }[];
+		routes?: unknown[];
+	};
+	const expected = authored.match(new RegExp(`"${requestedEnvironment}"\\s*:\\s*\\{[\\s\\S]*?database_id"\\s*:\\s*"([^"]+)"`));
+	const wanted = expected?.[1];
+	const got = composed.d1_databases?.find((entry) => entry.binding === 'DB')?.database_id;
+	if (wanted && got !== wanted) {
+		fail(
+			`the build did not select the "${requestedEnvironment}" environment (D1 id ${got ?? 'missing'}, expected ${wanted}) — rebuild with CLOUDFLARE_ENV=${requestedEnvironment}`,
+		);
+	}
+}
+
 console.log(
 	`compose-assets: composed ${relocated.length} relocated SPA + ${unchanged.length} SPA asset + ${landingEntries.length} landing files; collisions: 0; sw.js build ${swStamp}; manifest: ${relative(REPO_ROOT, MANIFEST_PATH)}${legacyEnvRemoved ? '; legacy_env removed from the Worker config' : ''}`,
 );
