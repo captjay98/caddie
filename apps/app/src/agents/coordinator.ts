@@ -41,6 +41,9 @@ import {
   PLATFORM_AI_RULE,
   FEATURE_DELEGATION_RULE,
   buildSpecialistDeclarations,
+  architectDeclaration,
+  TEAM_MODE_DESIGN_INSTRUCTION,
+  TEAM_MODE_BIG_APPS_DESIGN_INSTRUCTION,
   type SpecialistBuildContext,
 } from "./specialists.ts";
 
@@ -128,6 +131,16 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     current: { id: string; title: string; position: number } | null;
   } | null>;
   blockBuild: (reason: string) => Promise<void>;
+  /**
+   * Team mode (part B): record one architecture-review round. The host closure
+   * performs the project-scoped insert into architecture_reviews. Absent when
+   * the run is not team-mode, so the architect delegate is not mounted.
+   */
+  recordArchitectureReview?: (input: {
+    blockHash: string;
+    round: number;
+    issues: { severity: "security" | "advisory"; path: string; message: string }[];
+  }) => Promise<{ round: number; security: number; advisory: number }>;
   /**
    * B06: create a PENDING approval on the server (the agent-facing request
    * bridge). Returns the server approval id; the user's Allow / Not now
@@ -226,6 +239,11 @@ export function Coordinator({ id }: AgentProps) {
   if (!snapshot || context.homeOverview === null) {
     for (const declaration of buildSpecialistDeclarations({ ...context, currentRequest: delivery.kind === "user" ? delivery.body : lastUserRequest }))
       useSubagent(declaration);
+    // Team mode (part B): the read-only architecture reviewer, on the Ultra
+    // `architect` model role. Mounted only when the workflow is team-mode and
+    // the host provides the record hook; with team mode off it is absent.
+    if (context.teamMode === true && context.recordArchitectureReview)
+      useSubagent(architectDeclaration({ readPlanNote: context.readPlanNote, recordArchitectureReview: context.recordArchitectureReview }));
     // The coordinator can read the current plan and SAVE a PRD revision
     // itself. The product/designer delegates remain the normal authoring path,
     // but a delegate that returns "(task completed with no text)" leaves
@@ -606,6 +624,15 @@ export function Coordinator({ id }: AgentProps) {
     useInstruction(`FEATURE LIST: every PRD you save must list what will be built, so the user approves exactly that list and the host builds it one feature at a time. ${FEATURE_BLOCK_GUIDE} Order features so each builds on the last; keep each one small enough to finish and test on its own; write doneWhen checks as behaviors a person could see. write_plan_note refuses a PRD without a valid list.`);
     useInstruction("COMPREHENSIVE PRD, FIRST PASS: write the whole thing before saving — the user must never have to ask for the schema, then say 'not comprehensive', then 'still ambiguous'. Every PRD covers, as explicit sections: overview + goals/non-goals; user stories/flows; a DATA MODEL with every entity's fields, types, keys and relations (money as integer minor units, never a float); the API surface (Hono routes in/out) or an explicit 'local-only, no server API'; the frontend screens + key components with each loading/empty/error state; offline/sync (what's stored locally, what syncs, the conflict rule) when it is a PWA/offline app; the SPECIFIC AI model/service with its call path and fail-soft behavior, never 'an AI model'; and observable success metrics. Where the brief lacks a detail, choose a sensible default and label it 'assumption:' so the user corrects one line — do NOT leave a section blank, do NOT drip-feed depth across turns, and do NOT stop to ask one question at a time.");
     useInstruction("DESIGN STEP: after the PRD is approved the project enters the 'design' phase — the user has NOT approved a build yet. Do NOT scaffold or build. Delegate the designer (or author it yourself with write_plan_note kind:'design', same planRevision) to produce ONE design brief: the screen inventory; each key screen's layout and components; the token/component choices and the interaction pattern for each input; and the empty, loading and error state for anything that loads or saves; plus one titled ```html-mock block per key screen and state (static markup styled only with design-system tokens) so the user can see it. If the designer returns text without a SAVED: confirmation, do NOT stop and do NOT re-delegate the same hand-off: call write_plan_note yourself with kind:'design', the same planRevision, and the full brief. Save it and STOP for the authenticated design review. Only after the design review approves does the phase become 'building' and the feature loop begins. The design brief is NOT the PRD and carries no caddie-features block. Never paste a mockup or any HTML into a reply: the card draws the brief's mockups; to show one screen in chat, put its static HTML in one ```html-mock <screen name> block.");
+    // Team mode (part B/C): the design document also carries the
+    // caddie-architecture block v2, so there is one approval and one revision
+    // hash for the brief and the architecture. Caddie's deterministic rules and
+    // the architecture review gate the design, so the block must be correct and
+    // safe before it can be approved. With team mode off this is never added.
+    if (context.teamMode === true) {
+      useInstruction(TEAM_MODE_DESIGN_INSTRUCTION);
+      if (context.bigApps === true) useInstruction(TEAM_MODE_BIG_APPS_DESIGN_INSTRUCTION);
+    }
   }
   return "Caddie helps solo builders discover, plan, build, verify and share software through one continuous conversation.";
 }

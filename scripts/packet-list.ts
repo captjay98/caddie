@@ -328,6 +328,10 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/team-mode-migration.test.ts',
 			'tests/team-mode-foundations.test.ts',
 			'tests/architecture-block.test.ts',
+			'tests/architecture-review.test.ts',
+			'tests/architecture-summary.test.ts',
+			'tests/architecture-gate-binding.test.ts',
+			'tests/team-mode-prompts.test.ts',
 			'tests/contract-restart-spike.test.ts',
 			'tests/brief-run.test.ts',
 			// Lane 5 (parts D + F): part boundaries, the start/finish/restore

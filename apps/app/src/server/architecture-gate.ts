@@ -19,6 +19,8 @@ import {
 	CORE_MODULE,
 	RESERVED_API_PREFIX,
 	SMALL_APP_MODULE,
+	parseArchitectureBlock,
+	splitArchitectureBlock,
 	teamRoleOf,
 	type Access,
 	type ArchitectureBlock,
@@ -27,6 +29,11 @@ import {
 } from '@caddie/contracts';
 import { MAX_PLAN_FEATURES } from '@caddie/contracts';
 import { APP_SECRET_NAME } from './app-secrets.ts';
+import {
+	architectureBlockHash,
+	reviewVerdict,
+	type ArchitectureReviewRound,
+} from './architecture-review.ts';
 
 export type ArchitectureKind = 'small' | 'big';
 
@@ -349,4 +356,101 @@ export function checkArchitecture(block: ArchitectureBlock, options: { kind: Arc
 	});
 
 	return issues;
+}
+
+// --- the design gate (plan part B — "The gate") ------------------------------
+//
+// decideDesign (build-workflow.ts) calls evaluateDesignGate before it approves
+// a design IN TEAM MODE ONLY. It refuses approval while the design's
+// caddie-architecture block is missing, fails the deterministic rules, or has
+// open security issues from the Ultra review — listing the plain sentences.
+// On approval the host stores the design revision id (approvedDesignRevisionId,
+// migration 0040), and getApprovedBlock(db, projectId) returns that revision's
+// block for lanes E and P. teamMode=0 never reaches any of this.
+
+/** Which app kind to check a block as, from a workflow's big-apps flag. */
+export function architectureKindForBuild(bigApps: boolean): ArchitectureKind {
+	return bigApps ? 'big' : 'small';
+}
+
+export type DesignGateResult =
+	| { ok: true; block: ArchitectureBlock; blockHash: string }
+	| { ok: false; reason: 'missing' | 'rules' | 'security' | 'change-plan'; messages: string[] };
+
+/**
+ * Decide whether a design brief may be approved in team mode. In order:
+ *   1. the brief must carry a valid caddie-architecture block (parse);
+ *   2. the block must pass every deterministic rule (checkArchitecture);
+ *   3. the Ultra review's latest round for this exact block must carry no open
+ *      security issue — and if security issues have persisted for the round
+ *      limit, the reason is 'change-plan' (the coordinator must change the plan
+ *      and go back to plan review), not another review of the same block.
+ * `ok: true` carries the block and its hash so the caller binds the approval
+ * to exactly the reviewed block. Every `messages` entry is a plain sentence.
+ */
+export function evaluateDesignGate(
+	designBody: string,
+	options: { kind: ArchitectureKind; reviews: ArchitectureReviewRound[] },
+): DesignGateResult {
+	const parsed = parseArchitectureBlock(designBody);
+	if (!parsed.ok) {
+		return {
+			ok: false,
+			reason: 'missing',
+			messages: ['The design does not yet describe how the app works. Caddie must add the "How your app works" block before this can be approved.'],
+		};
+	}
+	const issues = checkArchitecture(parsed.block, { kind: options.kind });
+	if (issues.length > 0) {
+		return { ok: false, reason: 'rules', messages: issues.map((i) => i.message) };
+	}
+	const { raw } = splitArchitectureBlock(designBody);
+	const blockHash = architectureBlockHash(raw ?? '');
+	const verdict = reviewVerdict(options.reviews, blockHash);
+	if (verdict.blocks) {
+		const security = verdict.securityMessages.length
+			? verdict.securityMessages
+			: ['The architecture review has not run on this design yet, so Caddie cannot confirm it is safe.'];
+		if (verdict.mustChangePlan) {
+			return {
+				ok: false,
+				reason: 'change-plan',
+				messages: [
+					'The review found the same safety problems twice. Caddie should change the plan and send it back to plan review instead of trying the same design again.',
+					...security,
+				],
+			};
+		}
+		return { ok: false, reason: 'security', messages: security };
+	}
+	return { ok: true, block: parsed.block, blockHash };
+}
+
+/**
+ * The architecture block of the APPROVED design revision of a project, for
+ * lanes E and P. Reads approvedDesignRevisionId off the workflow, loads that
+ * revision's body, and returns its parsed block — null when no design is
+ * approved yet or the stored revision somehow carries no valid block.
+ */
+export async function getApprovedBlock(
+	db: {
+		prepare: (sql: string) => {
+			bind: (...args: unknown[]) => { all: <T = Record<string, unknown>>() => Promise<{ results?: T[] }> };
+		};
+	},
+	projectId: string,
+): Promise<ArchitectureBlock | null> {
+	const workflow = (
+		await db.prepare('select "approvedDesignRevisionId" from "build_workflows" where "projectId" = ?').bind(projectId).all<{
+			approvedDesignRevisionId: string | null;
+		}>()
+	).results?.[0];
+	const revisionId = workflow?.approvedDesignRevisionId;
+	if (!revisionId) return null;
+	const revision = (
+		await db.prepare('select "body" from "plan_doc_revisions" where "id" = ?').bind(revisionId).all<{ body: string }>()
+	).results?.[0];
+	if (!revision) return null;
+	const parsed = parseArchitectureBlock(revision.body);
+	return parsed.ok ? parsed.block : null;
 }
