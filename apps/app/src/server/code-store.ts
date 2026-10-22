@@ -97,14 +97,24 @@ export interface CodeStore {
 }
 
 /**
- * Size caps shared by every implementation. maxFileBytes stays under D1's
- * 2,000,000-byte value limit so the local store can hold any file the
- * Artifacts store accepts.
+ * Size caps shared by every implementation.
+ *
+ * Room for big apps (plan part R): a big-app snapshot goes up to 2,000 files
+ * and 48 MB total — a v0-farmops-sized app with many modules. The LOCAL store
+ * holds each file's bytes in the chunked `large_content` table (64 MB per
+ * value), so a snapshot of that size is storable without Cloudflare Artifacts.
+ *
+ * `maxFileBytes` stays under D1's 2,000,000-byte single-value limit on PURPOSE:
+ * a project's source file is small, the 48 MB is the count × size of many such
+ * files, and the shared code-store contract (both backends) requires a 3 MB
+ * single file to be refused TOO_LARGE. The big SINGLE artifacts — a preview
+ * bundle or a server bundle over 2 MB — are NOT code-store files; they go
+ * through the chunked-bundle path in `preview-runtime.ts` (part R, same table).
  */
 export const CODE_STORE_CAPS = {
-	maxFiles: 400,
+	maxFiles: 2000,
 	maxFileBytes: 1024 * 1024,
-	maxSnapshotBytes: 16 * 1024 * 1024,
+	maxSnapshotBytes: 48 * 1024 * 1024,
 } as const;
 
 const SAFE_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))[^\0\\]+$/;

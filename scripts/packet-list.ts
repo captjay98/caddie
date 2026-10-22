@@ -373,6 +373,12 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// copies at the same time (overlap proven), each with its own save
 			// point and one onModuleFinished hook call. Local, scripted, no cost.
 			'tests/module-builder-s3.test.ts',
+			// Lane 13 (parts Q + R): joining the parts — the per-build integration
+			// lock (migration 0043), copying only a module's folders with a stray
+			// report, failure→module routing, the repair round and partial result;
+			// and room for big apps — a 1,500-file version round trip and the
+			// chunked preview/server bundle over 2 MB.
+			'tests/team-mode-join.test.ts',
 			// Lane 12 follow-up (gaps 1, 2, 4): a module opens its OWN copy from
 			// its start save point and never the project pointer; a module-scope
 			// stop stops only that module while the build stays building; and two
