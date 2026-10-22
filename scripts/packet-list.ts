@@ -319,6 +319,21 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 	// `bun scripts/refresh-flutter-scaffold-lock.ts --check` (local) and the
 	// sandbox runs; these unit tests pin what can be checked without one.
 	FLUTTER: { tests: ['tests/flutter-scaffold.test.ts', 'tests/flutter-apps-switch.test.ts', 'tests/flutter-build-loop.test.ts', 'tests/flutter-preview.test.ts', 'tests/large-content.test.ts', 'tests/android-app.test.ts'], browser: [], live: [] },
+	// --- Software-team mode (docs/plans/2026-10-22-software-team-mode.md) ----
+	// Foundations (switches, migration 0040), part B's block, rules and
+	// generated schema, the S4 restart spike and the campaign runner (offline).
+	// Each lane adds its tests here when the lead merges it.
+	TEAM_MODE: {
+		tests: [
+			'tests/team-mode-migration.test.ts',
+			'tests/team-mode-foundations.test.ts',
+			'tests/architecture-block.test.ts',
+			'tests/contract-restart-spike.test.ts',
+			'tests/brief-run.test.ts',
+		],
+		browser: [],
+		live: [],
+	},
 	// --- Verification net (S01) ----------------------------------------------
 	NET: { tests: ['tests/packet-completeness.test.ts'], browser: [], live: [] },
 };

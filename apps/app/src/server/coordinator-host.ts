@@ -864,7 +864,7 @@ export async function createCoordinatorContext(
       return { id: proposal.id, homeProjectId: proposal.homeProjectId, status: proposal.status };
     },
     workflowState: async () => {
-      await ensureWorkflow(env.DB, scope);
+      await ensureWorkflow(env.DB, scope, env);
       const state = await workflowSnapshot(env.DB, scope);
       return {
         phase: state.workflow!.phase,
@@ -904,7 +904,7 @@ export async function createCoordinatorContext(
     readPlanNote: async (kind) => {
       if (kind === "feedback" || kind === "profile")
         return (await actorContext(env.DB, scope)).text;
-      if (kind === "brief") return (await ensureWorkflow(env.DB, scope)).brief;
+      if (kind === "brief") return (await ensureWorkflow(env.DB, scope, env)).brief;
       const res = await env.DB.prepare(
         "select body from plan_doc_revisions where projectId = ? and kind = ? order by revision desc limit 1",
       )
@@ -915,7 +915,7 @@ export async function createCoordinatorContext(
     writePlanNote: async (input) => {
       if (isHome)
         throw new SandboxError(409, "HOME_NO_PLAN", "Create a project first.");
-      await ensureWorkflow(env.DB, scope);
+      await ensureWorkflow(env.DB, scope, env);
       if (input.kind === "prd") {
         // A complete PRD can still describe a toy. The demo contract makes the
         // judge-facing path and the real integration explicit before approval.
