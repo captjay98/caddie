@@ -84,24 +84,24 @@ export async function resolveTurnPayer(db: D1Database, ctx: FlueExecutionContext
 	const conversationId = ctx.conversationId ?? '';
 	if (instanceId && payerByKey.has(instanceId)) return payerByKey.get(instanceId)!;
 	if (conversationId && payerByKey.has(conversationId)) return payerByKey.get(conversationId)!;
-	// D1 fallback: the coordinator's build row carries its payer. A delegate's
-	// conversationId won't match a workflow row, so lineage via the registry is
-	// the primary path; this backs up a cold isolate that lost its map.
-	if (conversationId) {
-		const row = (
-			await db
-				.prepare('select "spendPayerId" from build_workflows where conversationId = ? and "spendPayerId" is not null limit 1')
-				.bind(conversationId)
-				.all<{ spendPayerId: string }>()
-		).results?.[0];
-		if (row?.spendPayerId) {
-			// Cache both keys so the delegate's own turns resolve on the instance.
-			registerBuildPayer(conversationId, row.spendPayerId);
-			if (instanceId) registerBuildPayer(instanceId, row.spendPayerId);
-			return row.spendPayerId;
-		}
-	}
-	return null;
+	// D1, read fresh on every call: Caddie addresses a build's coordinator as
+	// /agents/coordinator/<build_workflows.conversationId>, and Flue makes that
+	// URL id the agent's instanceId (a delegate shares it). Flue's own
+	// ctx.conversationId is a different, internal id, so the row is matched on
+	// the instanceId first. The coordinator runs in its own Durable Object, whose
+	// registry starts empty, so this is the live path. Nothing is cached: a retry
+	// stores a fresh payer on the same row, and the next call must see it.
+	const keys = [instanceId, conversationId].filter((key) => key.length > 0);
+	if (keys.length === 0) return null;
+	const row = (
+		await db
+			.prepare(
+				`select "spendPayerId" from build_workflows where "conversationId" in (${keys.map(() => '?').join(',')}) and "spendPayerId" is not null limit 1`,
+			)
+			.bind(...keys)
+			.all<{ spendPayerId: string }>()
+	).results?.[0];
+	return row?.spendPayerId ?? null;
 }
 
 // --- request-size tracking for the estimate ---------------------------------

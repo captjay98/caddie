@@ -71,6 +71,9 @@ async function world() {
     "0018_build_workflow.sql",
     "0022_build_activity.sql",
     "0024_design_phase.sql",
+    // A build start opens its spending limit (judge status, team-mode tables).
+    "0033_judge_accounts.sql",
+    "0040_team_mode.sql",
   ]) {
     const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), "utf8");
     for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);

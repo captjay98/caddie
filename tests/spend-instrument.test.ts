@@ -228,6 +228,66 @@ describe('Part A — spend instrument wiring (real agents, real D1)', () => {
 		await seedWorkflowPayer(db, 'conv-db', 'build:from-db:1');
 		expect(await resolveTurnPayer(db, { conversationId: 'conv-db' } as FlueExecutionContext)).toBe('build:from-db:1');
 	});
+
+	// --- the live id layout (lead review) --------------------------------------
+	// Caddie addresses a build's coordinator as /agents/coordinator/<build_workflows.conversationId>,
+	// and Flue makes that URL id the agent's instanceId (agent-api.md: "`id` — the `:id` segment of
+	// the agent's conversation URL"). Flue's own ctx.conversationId is a different, internal id. The
+	// coordinator runs in its own Durable Object, whose payer cache starts empty, so the payer must
+	// come from the build row by instanceId, every time.
+
+	test('live ids, empty cache: a coordinator addressed by its build conversationId is refused at its limit', async () => {
+		await createBuildPayer(db, PAYER, 1_000); // $0.001 — far below any call estimate
+		await seedWorkflowPayer(db, 'conv_build_cold', PAYER);
+		const blockers: string[] = [];
+		const inst = makeSpendInstrumentation({ db, setBlocker: (_payerId, message) => void blockers.push(message) });
+		booted = await bootRaw({ instrumentation: inst, script: [{ text: 'never', input: 10, output: 5 }] });
+
+		const c = init(Coordinator, { id: 'conv_build_cold' });
+		let failed = false;
+		try {
+			await c.read(await c.dispatch('go'));
+		} catch (error) {
+			failed = true;
+			expect(error).toBeInstanceOf(AgentRunError);
+		}
+		expect(failed).toBe(true);
+		expect(booted.sp.callCount()).toBe(0);
+		expect(blockers.length).toBeGreaterThanOrEqual(1);
+	});
+
+	test('live ids, empty cache: a delegate charges its coordinator build', async () => {
+		await createBuildPayer(db, PAYER, 5 * MICROS_PER_UNIT);
+		await seedWorkflowPayer(db, 'conv_build_delegate', PAYER);
+		const inst = makeSpendInstrumentation({ db });
+		booted = await bootRaw({
+			instrumentation: inst,
+			script: [
+				{ toolCall: { id: 'c1', name: 'task', arguments: { agent: 'delegate', prompt: 'sub' } }, input: 100, output: 20 },
+				{ text: 'delegate done', input: 50_000, output: 20_000 },
+				{ text: 'all done', input: 120, output: 15 },
+			],
+		});
+
+		const c = init(Coordinator, { id: 'conv_build_delegate' });
+		await c.read(await c.dispatch('go'));
+
+		const all = (await db.prepare('select "payerId","status" from "build_spend_reservations"').all<{ payerId: string; status: string }>()).results;
+		expect(all.length).toBe(3);
+		expect(all.every((r) => r.payerId === PAYER && r.status === 'settled')).toBe(true);
+	});
+
+	test("resolveTurnPayer reads the build row fresh: the instance id finds it, and a retry's new payer applies at once", async () => {
+		await seedWorkflowPayer(db, 'conv_build_fresh', 'build:fresh:old');
+		const ctx = { instanceId: 'conv_build_fresh', conversationId: 'conv_flue_internal' } as FlueExecutionContext;
+		expect(await resolveTurnPayer(db, ctx)).toBe('build:fresh:old');
+		// retryWorkflow stores a fresh payer on the same build row.
+		await db
+			.prepare('update build_workflows set "spendPayerId" = ? where "conversationId" = ?')
+			.bind('build:fresh:new', 'conv_build_fresh')
+			.run();
+		expect(await resolveTurnPayer(db, ctx)).toBe('build:fresh:new');
+	});
 });
 
 /** Seed a build_workflows row carrying a conversationId -> spendPayerId mapping. */
