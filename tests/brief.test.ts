@@ -189,7 +189,14 @@ describe('brief feed (projectBrief)', () => {
 		const needsYou = cards.filter((card) => card.status === 'needs-you');
 		expect(needsYou.length).toBe(1);
 		expect(needsYou[0]!.kind).toBe('approval');
-		expect(needsYou[0]!.summary).toContain('Approving this authorises');
+		// A plain promise for a non-technical person, never "authorises specialists
+		// building against this plan revision".
+		expect(needsYou[0]!.headline).toBe('Your plan is ready to build');
+		expect(needsYou[0]!.summary).toBe('Approve it and Caddie starts building. Nothing is published until you decide.');
+		// The decided plan reads as what the person did.
+		const decided = cards.find((card) => card.kind === 'approval' && card.status === 'handled' && card.id.includes('unit-ap-done'));
+		expect(decided?.headline).toBe('You approved the plan');
+		for (const card of cards.filter((c) => c.kind === 'approval')) expect(card.summary).not.toMatch(/authoris|revision|specialists/);
 		expect(needsYou[0]!.primaryAction).toEqual({
 			label: 'Review the design',
 			kind: 'review',
@@ -528,10 +535,13 @@ describe('brief cards never show raw machine strings', () => {
 			const cards = await projectBrief(world.db, world.aliceScope);
 			const schedule = cards.find((card) => card.kind === 'deadline' && card.primaryAction.targetId === 'unit-sch-armed');
 			expect(schedule).toBeDefined();
-			expect(schedule!.summary).not.toContain('2026-10-06T07:00:00.000Z');
-			expect(schedule!.summary).not.toContain('T07:00');
+			// A schedule card now says when it next runs via its schedule field
+			// (item 6), with a readable date — never a raw ISO timestamp.
+			expect(schedule!.schedule).toBeDefined();
+			expect(schedule!.schedule!.nextRunLabel).not.toContain('2026-10-06T07:00:00.000Z');
+			expect(schedule!.schedule!.nextRunLabel).not.toContain('T07:00');
 			// A month name proves the timestamp was formatted for a person.
-			expect(schedule!.summary).toMatch(/January|February|March|April|May|June|July|August|September|October|November|December/);
+			expect(schedule!.schedule!.nextRunLabel).toMatch(/January|February|March|April|May|June|July|August|September|October|November|December/);
 		} finally {
 			world.sqlite.close();
 		}
@@ -595,21 +605,22 @@ describe('deadline countdown (lane 14 step 2)', () => {
 		expect(deadlineParts('not a date', 'UTC', '2026-10-20T08:00:00.000Z')).toBeNull();
 	});
 
-	test('an armed schedule card carries a deadline field; a card with no schedule has none', async () => {
+	test('an armed schedule card carries a schedule field (next-run label) and NO deadline countdown', async () => {
 		const world = makeWorld();
 		try {
 			seedAliceState(world.sqlite);
 			const cards = await projectBrief(world.db, world.aliceScope);
 			const schedule = cards.find((card) => card.kind === 'deadline' && card.primaryAction.targetId === 'unit-sch-armed');
 			expect(schedule).toBeDefined();
-			// The field is present, with a readable date and a non-negative count —
-			// mutation proof: drop the `...(parts ? {deadline} : {})` spread in
-			// scheduleCards and this field is undefined.
-			expect(schedule!.deadline).toBeDefined();
-			expect(typeof schedule!.deadline!.daysLeft).toBe('number');
-			expect(schedule!.deadline!.daysLeft).toBeGreaterThanOrEqual(0);
-			expect(schedule!.deadline!.dateLabel).toMatch(/October/);
-			expect(schedule!.deadline!.source).toContain('Africa/Lagos');
+			// A schedule is not a hackathon deadline (item 6): it says when it next
+			// runs, with no days-left and no Deadline badge. Mutation proof: drop
+			// the `schedule: {...}` field in scheduleCards and this is undefined.
+			expect(schedule!.schedule).toBeDefined();
+			expect(schedule!.schedule!.name).toBe('Weekly discovery sweep');
+			expect(schedule!.schedule!.nextRunLabel).toMatch(/October/);
+			// Mutation proof: re-add a `deadline` block to a schedule card and this
+			// fails — a schedule must NOT carry a days-left countdown.
+			expect(schedule!.deadline).toBeUndefined();
 			// A non-deadline card (the pending approval) never carries it.
 			const approval = cards.find((card) => card.kind === 'approval');
 			expect(approval!.deadline).toBeUndefined();
@@ -671,7 +682,7 @@ describe('"What you\u2019re approving" plan list (lane 14 step 3)', () => {
 			const cards = await projectBrief(world.db, world.aliceScope);
 			const approval = cards.find((card) => card.kind === 'approval' && card.status === 'needs-you');
 			expect(approval!.planItems).toBeUndefined();
-			expect(approval!.summary).toContain('Approving this authorises');
+			expect(approval!.summary).toBe('Approve it and Caddie starts building. Nothing is published until you decide.');
 		} finally {
 			world.sqlite.close();
 		}

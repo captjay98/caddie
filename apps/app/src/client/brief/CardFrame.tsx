@@ -2,18 +2,21 @@ import type { ReactNode } from 'react';
 import { Icon } from '../icons.tsx';
 import { CARD_DESIGNS, type CardDesign } from './card-design.ts';
 
-export function CardHeader({ design, context, status, fresh }: {
- design: CardDesign; context?: string; status: string; fresh?: boolean;
+export function CardHeader({ design, context, status, fresh, freshLabel }: {
+ design: CardDesign; context?: string; status: string; fresh?: boolean; freshLabel?: string;
 }) {
  const view = CARD_DESIGNS[design];
+ const pulsing = design === 'build' || design === 'repair';
+ const label = view.label;
  return (
   <div className="compact-card-head">
    <span className="compact-card-kicker">
-    <span className="compact-card-icon" aria-hidden="true"><Icon name={view.icon} title="" /></span>
-    <span>{context ? <span className="card-context">{context} · </span> : null}{view.label}</span>
-    {design === 'build' || design === 'repair' ? <span className="compact-card-pulse" aria-hidden="true" /> : null}
+    {pulsing ? <span className="compact-card-pulse" aria-hidden="true" /> : <span className="compact-card-icon" aria-hidden="true"><Icon name={view.icon} title="" /></span>}
+    <span>{context ? <span className="card-context">{context} · </span> : null}{label}</span>
+    {/* "· time" freshness, when the caller supplied an updated-at label. */}
+    {freshLabel ? <span className="compact-card-fresh" data-testid="card-fresh">· {freshLabel}</span> : null}
    </span>
-   <span className="compact-card-badge">{status}</span>
+   {status ? <span className="compact-card-badge">{status}</span> : null}
    {fresh ? <span className="compact-card-new">New</span> : null}
   </div>
  );
@@ -48,16 +51,17 @@ export function BuildRail({ design }: { design: CardDesign }) {
 }
 
 /**
- * The card footer (mockup `cc-bottom`): a quiet two-line rule under the
- * actions. `subject` names what the card is about (e.g. the app or source),
- * `note` is the reassurance the mockup keeps bottom-right. Either may be
- * omitted; an empty footer renders nothing rather than an empty rule.
+ * The card footer (mockup `cc-bottom`): a quiet two-part rule under the
+ * actions. The left side names the app (and an optional version) when the card
+ * carries a footer record; otherwise it falls back to the subject label. The
+ * right side is the standing reassurance. An empty footer renders nothing.
  */
-export function CardFooter({ subject, note }: { subject?: string; note?: string }) {
- if (!subject && !note) return null;
+export function CardFooter({ subject, note, app, version }: { subject?: string; note?: string; app?: string; version?: string }) {
+ const left = app ? (version ? `${app} · ${version}` : app) : subject;
+ if (!left && !note) return null;
  return (
   <div className="compact-card-foot" data-testid="card-foot">
-   {subject ? <span className="compact-card-foot-subject">{subject}</span> : <span />}
+   {left ? <span className="compact-card-foot-subject" data-testid="card-foot-subject">{left}</span> : <span />}
    {note ? <span className="compact-card-foot-note">{note}</span> : null}
   </div>
  );
