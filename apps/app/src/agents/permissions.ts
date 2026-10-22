@@ -37,14 +37,18 @@ export const ROLE_TOOL_POLICY: Readonly<Record<SpecialistRole, readonly string[]
 		'run_checks',
 		'delegate_repair',
 		'request_app_key',
+		// Team mode (part D): put out-of-area files back from the start-of-part
+		// snapshot in one call. A no-op outside team mode (no active part).
+		'restore_files',
 	],
 	// Build roles run the project's tests ONLY through run_checks (host-run,
 	// fixed commands, every failure counted toward the repair pause); shell
 	// test commands are refused at the host (isShellTestCommand). They can ask
 	// the owner for an app key (request_app_key) but never receive its value.
-	frontend: ['read_project_context', 'sandbox_exec', 'read_sandbox_file', 'write_sandbox_file', 'run_checks', 'request_app_key'],
-	backend: ['read_project_context', 'sandbox_exec', 'read_sandbox_file', 'write_sandbox_file', 'run_checks', 'request_app_key'],
-	mobile: ['read_project_context', 'sandbox_exec', 'read_sandbox_file', 'write_sandbox_file', 'run_checks', 'request_app_key'],
+	// restore_files (team mode, part D) puts out-of-area files back.
+	frontend: ['read_project_context', 'sandbox_exec', 'read_sandbox_file', 'write_sandbox_file', 'run_checks', 'request_app_key', 'restore_files'],
+	backend: ['read_project_context', 'sandbox_exec', 'read_sandbox_file', 'write_sandbox_file', 'run_checks', 'request_app_key', 'restore_files'],
+	mobile: ['read_project_context', 'sandbox_exec', 'read_sandbox_file', 'write_sandbox_file', 'run_checks', 'request_app_key', 'restore_files'],
 	// QA verifies only: read + execute the project's own checks. No write tool
 	// at all, so protected checks cannot be overwritten by QA even in error.
 	qa: ['read_project_context', 'read_sandbox_file', 'verify_build'],

@@ -2,6 +2,39 @@ import { createHash } from 'node:crypto';
 import * as v from 'valibot';
 import { defineTool } from '@flue/runtime';
 import { isProtectedPath, mentionsProtectedPath } from './permissions.ts';
+import { type Area, inArea } from '../server/part-manifests.ts';
+
+/**
+ * Team-mode part guard (plan part D). When a part is active, a build role may
+ * write only inside its own area, and only the active role may write at all.
+ * The guard is the EARLY-FEEDBACK form of the check — the authoritative one is
+ * the snapshot diff in finish_part. It is optional: outside team mode no guard
+ * is mounted, so `assertInArea` is never called and behaviour is unchanged.
+ *
+ * `active()` returns null when no part is in progress (then every write is
+ * allowed, as today). `role` is the role this tool instance was mounted for.
+ */
+export interface PartGuard {
+	role: string;
+	active: () => Promise<{ role: string; area: Area } | null>;
+}
+
+/** Refuse a write when a part is active and the path/role is out of bounds. */
+export async function assertInArea(guard: PartGuard | undefined, path: string): Promise<void> {
+	if (!guard) return;
+	const active = await guard.active();
+	if (!active) return;
+	if (active.role !== guard.role) {
+		throw new Error(
+			`OUT_OF_PART: the "${active.role}" part is active, so the ${guard.role} role may not write now. Only the active role changes files while its part runs.`,
+		);
+	}
+	if (!inArea(active.area, path)) {
+		throw new Error(
+			`OUT_OF_AREA: ${path} is outside the ${active.role} area for this part. A part changes only its own folders; finish_part refuses anything else.`,
+		);
+	}
+}
 
 /**
  * P05 agent tools — Valibot schemas (flue contract lesson), one definition
@@ -184,6 +217,8 @@ export function makeReadSandboxFile(deps: {
 export function makeWriteSandboxFile(deps: {
 	driver: SandboxToolDeps;
 	sessionId: string;
+	/** Team mode (part D): refuse another role or an out-of-area path early. */
+	partGuard?: PartGuard;
 }) {
 	return defineTool({
 		name: 'write_sandbox_file',
@@ -192,6 +227,7 @@ export function makeWriteSandboxFile(deps: {
 		input: WriteSandboxFileInput,
 		run: async (ctx) => {
 			assertNotProtectedPath(ctx.data.path);
+			await assertInArea(deps.partGuard, ctx.data.path);
 			await deps.driver.writeFile({
 				sessionId: deps.sessionId,
 				path: ctx.data.path,
@@ -414,6 +450,38 @@ export function makeRequestAppKey(deps: {
 					? `${key.name} is already saved. The server reads it as c.env.${key.name}.`
 					: `Asked the owner for ${key.name}. Until they save it, routes that need it must answer 503 with a plain message (never crash). Read it as c.env.${key.name}; tests pass a fake one with createTestEnv({ ${key.name}: "test-value" }).`;
 			return { output: status };
+		},
+	});
+}
+
+const RestoreFilesInput = v.strictObject({
+	/** Workspace-relative paths to put back from the start-of-part snapshot. */
+	paths: v.pipe(v.array(v.pipe(v.string(), v.trim(), v.minLength(1))), v.minLength(1, 'name at least one file to restore')),
+});
+
+/**
+ * Build roles (team mode, part D): put out-of-area files back to exactly what
+ * they were when the part started, in ONE call. The host reads each path from
+ * the start-of-part snapshot and writes them all in one commit. A path that
+ * did not exist at the start of the part is reported as such (the builder
+ * removes it instead). Outside team mode there is no active part and this is
+ * refused with a plain message.
+ */
+export function makeRestoreFiles(deps: {
+	restore: (paths: string[]) => Promise<{ restored: string[]; absentAtStart: string[] }>;
+}) {
+	return defineTool({
+		name: 'restore_files',
+		description:
+			'Put files back to exactly what they were when this part started, in one call. Use it when finish_part lists an out-of-area change you did not mean to make. Names workspace-relative paths; a path that did not exist at the start of the part is not restorable (remove it instead).',
+		input: RestoreFilesInput,
+		run: async (ctx) => {
+			const result = await deps.restore([...ctx.data.paths]);
+			const parts: string[] = [];
+			if (result.restored.length > 0) parts.push(`restored ${result.restored.length}: ${result.restored.join(', ')}`);
+			if (result.absentAtStart.length > 0)
+				parts.push(`not restorable (absent at start — remove instead): ${result.absentAtStart.join(', ')}`);
+			return { output: parts.join('; ') || 'nothing to restore' };
 		},
 	});
 }
