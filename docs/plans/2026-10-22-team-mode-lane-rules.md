@@ -21,6 +21,9 @@ The plan is `docs/plans/2026-10-22-software-team-mode.md` (rev 5, commit
   symlink `node_modules/@flue/sdk -> ../../apps/app/node_modules/@flue/sdk`
   (check the target exists first).
 - Flue 2.2.2 docs: `apps/app/node_modules/@flue/sdk/docs/reference/`.
+- Typecheck only with `bun run typecheck`, which uses the repo's TypeScript
+  7.0.2. A bare `tsc` runs a global TypeScript 5.8.3 that reports a false
+  error in `secret-box.ts`.
 
 ## Testing
 
@@ -33,6 +36,9 @@ The plan is `docs/plans/2026-10-22-software-team-mode.md` (rev 5, commit
 - Never use `git stash`; stashes are shared by every worktree.
 - Make edits in one tool call and run the tests in a later one. Check that the
   run's count includes your new tests.
+- A check that tests nothing must fail, never pass. No early `return` inside
+  a test, no `test.skip` standing in for a required check, and every test
+  asserts what its name says.
 - Browser tests use the repo's own `@playwright/test` Chromium, never
   `playwright-cli`, and every launch is time-bounded.
 
@@ -46,8 +52,9 @@ The plan is `docs/plans/2026-10-22-software-team-mode.md` (rev 5, commit
 - No deploys, no paid model or sandbox calls, and no new remotes. Never set
   `CADDIE_LIVE_AUTHORIZED`.
 - Never read or print `.dev.vars` or `.env` values.
-- Edit only the files your task lists. For any other file, put the exact
-  patch in your report; the lead applies it.
+- Edit only the files your task lists. A file your task marks as cleared is
+  yours to edit for exactly that purpose: make the change, don't hand it back.
+  For any other file, put the exact patch in your report; the lead applies it.
 - Scratch files go in `$KIROCREW_SCRATCH`. Don't create subdirectories there;
   use `mktemp -d` instead. Delete with `rm -f`, then `rmdir`, never `rm -rf`.
 
