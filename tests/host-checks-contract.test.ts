@@ -12,7 +12,8 @@ import {
 	CONTRACT_PHASES,
 	type ContractPhase,
 } from '../apps/app/src/server/host-checks.ts';
-import { NOTES_BLOCK } from './fixtures/contract/notes-apps.ts';
+import { NOTES_BLOCK, TEAM_BLOCK } from './fixtures/contract/notes-apps.ts';
+import type { ArchitectureBlock } from '@caddie/contracts';
 
 /** A stub phase runner from a per-phase {exitCode, output} map. */
 function runnerFrom(map: Partial<Record<ContractPhase, { exitCode: number; output: string }>>) {
@@ -95,5 +96,46 @@ describe('part E: writeContractFiles generates the protected files', () => {
 	test('a big app also gets caddie/modules.ts', () => {
 		const files = writeContractFiles(NOTES_BLOCK, 'big');
 		expect(files['caddie/modules.ts']).toBeDefined();
+	});
+});
+
+describe('part E: the generated test is never vacuous and bites on declared features (steps 7-9)', () => {
+	const gen = (block: ArchitectureBlock) => writeContractFiles(block, 'small')['caddie/contract.test.ts']!;
+
+	test('no generated test is a test.skip or an early return standing in for a check (step 7 rule)', () => {
+		for (const block of [NOTES_BLOCK, TEAM_BLOCK]) {
+			const src = gen(block);
+			expect(src.includes('test.skip'), 'a generated test must not be a test.skip').toBe(false);
+		}
+	});
+
+	test('a block that declares payments makes the test-mode phase FAIL with a plain sentence (step 9)', () => {
+		const withPayments: ArchitectureBlock = {
+			...NOTES_BLOCK,
+			payments: { plan: 'pro', plain: 'Pro plan', interval: 'month', amount: 500, currency: 'usd' } as unknown as ArchitectureBlock['payments'],
+		};
+		const src = gen(withPayments);
+		// The test-mode phase names payments and the must-be-checked sentence.
+		expect(src).toContain('META.features.payments');
+		expect(src).toContain('those are not checked yet');
+		// And the feature flag is actually set in the embedded META for this block.
+		expect(src).toContain('"payments":true');
+	});
+
+	test('a block that declares no test-mode feature does not force a test-mode failure', () => {
+		const src = gen(NOTES_BLOCK);
+		expect(src).toContain('"payments":false');
+		expect(src).toContain('"emails":false');
+		expect(src).toContain('"jobs":false');
+		expect(src).toContain('"files":false');
+	});
+
+	test('a team block embeds the full team subject so step 6 is exercised, not skipped', () => {
+		const src = gen(TEAM_BLOCK);
+		expect(src).toContain('teams and roles');
+		expect(src).toContain('"hasTeam":true');
+		// a team-role route and an admin route are both carried for step 6.
+		expect(src).toContain('META.role');
+		expect(src).toContain('META.admin');
 	});
 });
