@@ -25,6 +25,10 @@ import {
 	SMALL_APP_MODULE,
 } from '@caddie/contracts';
 
+// Re-export the module constants so the DB-backed orchestration (build-steps.ts)
+// and the tests import them from one place alongside the area logic.
+export { CORE_MODULE, SMALL_APP_MODULE };
+
 /** A build role that owns an area. The three write roles plus 'other'. */
 export const AREA_ROLES = ['backend', 'frontend', 'mobile', 'other'] as const;
 export type AreaRole = (typeof AREA_ROLES)[number];

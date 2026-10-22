@@ -335,7 +335,8 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/contract-restart-spike.test.ts',
 			'tests/brief-run.test.ts',
 			// Lane 5 (parts D + F): part boundaries, the start/finish/restore
-			// steps and the S2 spike; the Try-again-from-save-point handler.
+			// steps and the S2 spike; the Try-again-from-save-point handler; the
+			// real snapshot ports over the driver; the Try-again card button.
 			'tests/part-boundaries.test.ts',
 			'tests/try-again.test.ts',
 			// Lane 7 (part H): the submission texts match the code and records.
@@ -349,6 +350,9 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/spend-instrument-spike.test.ts',
 			'tests/build-spend.test.ts',
 			'tests/spend-instrument.test.ts',
+			// Lane 5 follow-up: the real snapshot reads and the Try-again card.
+			'tests/part-snapshot.test.ts',
+			'tests/try-again-card.test.ts',
 		],
 		browser: [],
 		live: [],
