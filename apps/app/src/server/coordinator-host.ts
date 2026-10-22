@@ -66,6 +66,7 @@ import { requestAppSecret } from "./app-secrets.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
 import { FEATURE_DELEGATION_RULE } from "../agents/delegation.ts";
 import {
+  type BuildFeatureRow,
   currentFeature,
   ensureBuildFeatures,
   featuresInContractScope,
@@ -170,11 +171,47 @@ export async function resolveCoordinatorContext(
   const scope = await projectScopeForUser(env.DB, run.createdBy, run.projectId);
   return createCoordinatorContext(env, scope, run.runId, run);
 }
+/**
+ * Team mode (part P): resolve a MODULE-SCOPED host context for a ModuleBuilder.
+ * The builder is addressed by the build's conversationId (so the run and scope
+ * resolve exactly as the coordinator's), plus the module it owns and that
+ * module's feature ids. The returned context's session is `module:<runId>:
+ * <moduleId>`, and its feature loop, contract scope and part boundary are all
+ * scoped to the module (see createCoordinatorContext's `moduleScope`). Called
+ * inside the ModuleBuilder's own Durable Object.
+ */
+export async function resolveModuleBuilderContext(
+  env: CoordinatorEnvironment,
+  input: { conversationId: string; moduleId: string; features: readonly string[] },
+): Promise<CoordinatorHostContext> {
+  if (!env?.DB) throw new Error("Coordinator D1 binding is unavailable.");
+  const run = await lookupRunByConversation(env.DB, input.conversationId);
+  if (!run?.createdBy)
+    throw new ScopeError(404, "conversation_not_found", "No actor-bound conversation exists for this module build.");
+  const scope = await projectScopeForUser(env.DB, run.createdBy, run.projectId);
+  return createCoordinatorContext(env, scope, run.runId, run, {
+    moduleId: input.moduleId,
+    features: input.features,
+  });
+}
 export async function createCoordinatorContext(
   env: CoordinatorEnvironment,
   scope: { actorId: string; workspaceId: string; projectId: string },
   runId: string,
   run: RunBindingRecord,
+  /**
+   * Team mode (plan part P): when a ModuleBuilder builds one module of a big
+   * app, the host is scoped to that module. ADDITIVE and OPTIONAL — with no
+   * module scope (every path today, and the coordinator's own build) behaviour
+   * is exactly as before. When present:
+   *   - the sandbox session is `module:<runId>:<moduleId>` (the module's own
+   *     copy, restored from the latest merged save point by the caller);
+   *   - the feature loop (build_next_feature / finish_feature) and the contract
+   *     scope see ONLY this module's features;
+   *   - the part boundary uses this moduleId (so parallel module builders never
+   *     collide on one project-wide active-part pointer).
+   */
+  moduleScope?: { moduleId: string; features: readonly string[] },
 ): Promise<CoordinatorHostContext> {
   const projectRows = await env.DB.prepare(
     "select kind from projects where id = ?",
@@ -196,8 +233,21 @@ export async function createCoordinatorContext(
       )
     : null;
   let planRevision = run.planRevision;
-  const sessionId = `session:${runId}`;
+  // Team mode (part P): a ModuleBuilder's session is its module's own copy,
+  // `module:<runId>:<moduleId>`, restored from the latest merged save point by
+  // the caller; the coordinator's own build keeps `session:<runId>`.
+  const moduleId = moduleScope?.moduleId;
+  const sessionId = moduleId ? `module:${runId}:${moduleId}` : `session:${runId}`;
   const root = `/workspace/${scope.projectId}`;
+  // Team mode (part P): the feature ids this module owns. Used to narrow the
+  // feature loop and the contract scope to the module's own features; empty
+  // (no module scope) means "every feature", i.e. today's behaviour.
+  const moduleFeatureIds: ReadonlySet<string> | null = moduleScope
+    ? new Set(moduleScope.features)
+    : null;
+  /** Narrow a feature row list to the module's own features (identity otherwise). */
+  const scopeToModule = (rows: BuildFeatureRow[]): BuildFeatureRow[] =>
+    moduleFeatureIds ? rows.filter((row) => moduleFeatureIds.has(row.featureId)) : rows;
 
   // --- Software-team mode (parts B/C/D/E/G) --------------------------------
   // The workflow row carries the stamped teamMode/bigApps flags. Everything
@@ -277,7 +327,7 @@ export async function createCoordinatorContext(
   const currentFeatureId = async (): Promise<string | null> => {
     const snap = await workflowSnapshot(env.DB, scope).catch(() => null);
     if (!snap?.plan) return null;
-    const current = currentFeature(await listBuildFeatures(env.DB, scope.projectId, snap.plan.id));
+    const current = currentFeature(scopeToModule(await listBuildFeatures(env.DB, scope.projectId, snap.plan.id)));
     return current?.featureId ?? null;
   };
   /**
@@ -288,7 +338,7 @@ export async function createCoordinatorContext(
   const contractScope = async (): Promise<string[]> => {
     const snap = await workflowSnapshot(env.DB, scope).catch(() => null);
     if (!snap?.plan) return [];
-    return featuresInContractScope(await listBuildFeatures(env.DB, scope.projectId, snap.plan.id));
+    return featuresInContractScope(scopeToModule(await listBuildFeatures(env.DB, scope.projectId, snap.plan.id)));
   };
 
   /** restore_files for a build role: put out-of-area files back from the part's
@@ -309,11 +359,11 @@ export async function createCoordinatorContext(
 
   /** finish_part on the CURRENT image: refuse out-of-area changes, else clear
    *  the module's active pointer. A no-op (ok) when no part is active. */
-  const finishActivePart = async (moduleId?: string) => {
+  const finishActivePart = async (mod: string | undefined = moduleId) => {
     if (!teamMode || !inspect) return { ok: true as const };
     const read = readPortFor(await currentImage());
-    const result = await finishPart(env.DB, scope, read, moduleId);
-    if (result.ok) await clearActivePart(env.DB, scope, moduleId);
+    const result = await finishPart(env.DB, scope, read, mod);
+    if (result.ok) await clearActivePart(env.DB, scope, mod);
     return result;
   };
 
@@ -704,7 +754,7 @@ export async function createCoordinatorContext(
     signal?.throwIfAborted();
     const { plan } = await requireBuildApproval(env.DB, scope);
     // Failures count toward the feature being built, not one build-wide bucket.
-    const current = currentFeature(await ensureBuildFeatures(env.DB, scope, runId, plan));
+    const current = currentFeature(scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan)));
     const outcome = await runHostChecks("checks", attempt, signal, current?.featureId);
     if (!outcome.passed)
       return {
@@ -724,17 +774,20 @@ export async function createCoordinatorContext(
   /** The host decides what is built next: the first feature that has not passed. */
   const buildNextFeature = async () => {
     const { plan } = await requireBuildApproval(env.DB, scope);
-    const rows = await ensureBuildFeatures(env.DB, scope, runId, plan);
+    const rows = scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan));
     const current = currentFeature(rows);
     if (!current)
-      return { done: true, next: "Every feature passed. Ask QA to run verify_build to publish the preview." };
+      return { done: true, next: moduleId
+        ? `Every feature of the "${moduleId}" module passed. The module is done.`
+        : "Every feature passed. Ask QA to run verify_build to publish the preview." };
     await markFeatureBuilding(env.DB, current);
     // Team mode (parts D/E): a new feature starts a FRESH part — clear any
     // stale pointer so the builder's first write starts its part from the
     // current save point — and write the generated contract files so the
-    // builder sees the approved contract. No-ops with team mode off.
+    // builder sees the approved contract. No-ops with team mode off. In a
+    // module build the pointer and part are keyed by THIS module.
     if (teamMode) {
-      await clearActivePart(env.DB, scope).catch(() => {});
+      await clearActivePart(env.DB, scope, moduleId).catch(() => {});
       await writeGeneratedContractFiles(await contractScope()).catch(() => false);
     }
     return {
@@ -754,10 +807,12 @@ export async function createCoordinatorContext(
   const finishFeature = async (featureId: string, attempt: string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
     const { plan } = await requireBuildApproval(env.DB, scope);
-    const rows = await ensureBuildFeatures(env.DB, scope, runId, plan);
+    const rows = scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan));
     const current = currentFeature(rows);
     if (!current)
-      return { passed: true, done: true, next: "Every feature passed. Ask QA to run verify_build to publish the preview." };
+      return { passed: true, done: true, next: moduleId
+        ? `Every feature of the "${moduleId}" module passed. The module is done.`
+        : "Every feature passed. Ask QA to run verify_build to publish the preview." };
     if (current.featureId !== featureId)
       throw new ScopeError(
         409,
@@ -832,21 +887,23 @@ export async function createCoordinatorContext(
       }
     }
     await recordFeaturePassed(env.DB, current, { checkpointRef, testsPassed: passing });
-    const after = currentFeature(await listBuildFeatures(env.DB, scope.projectId, plan.id));
+    const after = currentFeature(scopeToModule(await listBuildFeatures(env.DB, scope.projectId, plan.id)));
     return {
       passed: true,
       feature: current.title,
       testsPassed: passing,
       next: after
         ? `Saved. Feature ${after.position} of ${rows.length}, “${after.title}”, is next: call build_next_feature.`
-        : "Every feature passed. Ask QA to run verify_build to publish the preview.",
+        : moduleId
+          ? `Saved. Every feature of the "${moduleId}" module passed. The module is done.`
+          : "Every feature passed. Ask QA to run verify_build to publish the preview.",
     };
   };
   /** Where the feature loop stands, for the coordinator's finish hook. */
   const featureProgress = async () => {
     const { workflow, plan } = await workflowSnapshot(env.DB, scope);
     if (!workflow || !plan) return null;
-    const rows = await listBuildFeatures(env.DB, scope.projectId, plan.id);
+    const rows = scopeToModule(await listBuildFeatures(env.DB, scope.projectId, plan.id));
     if (rows.length === 0) return null;
     const current = currentFeature(rows);
     return {
@@ -1069,12 +1126,14 @@ export async function createCoordinatorContext(
       : undefined,
     // Team mode (part D): the active part for a build role (the write-tool
     // guard resolves this), and restore_files. Both are absent with team mode
-    // off, so the specialists mount neither the guard nor restore_files.
+    // off, so the specialists mount neither the guard nor restore_files. In a
+    // module build (part P) the role's part is keyed by THIS module by default,
+    // so parallel module builders never share one project-wide active part.
     activePartForRole: teamMode
-      ? (role: AreaRole, moduleId?: string) => ensureActivePart(role, moduleId)
+      ? (role: AreaRole, mod: string | undefined = moduleId) => ensureActivePart(role, mod)
       : undefined,
     restorePartFiles: teamMode
-      ? (paths: string[], moduleId?: string) => restorePartFiles(paths, moduleId)
+      ? (paths: string[], mod: string | undefined = moduleId) => restorePartFiles(paths, mod)
       : undefined,
     projectId: scope.projectId,
     homeOverview,
