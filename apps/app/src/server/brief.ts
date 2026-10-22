@@ -528,6 +528,9 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
  const repairIssue = repairing ? String(round?.issue ?? '') : '';
  const repairExp = repairing ? repairExpectation(repairIssue) : null;
  const repairDetail = repairing ? String(round?.detail ?? '').trim() : '';
+ // The repair card's work line names the feature being fixed: the run's own
+ // building feature row. Absent when no feature is building.
+ const repairFixing = repairing ? (await buildFeedForRun(db, scope.projectId, runId))?.current : undefined;
  const repairBody = repairExp && repairDetail !== ''
 	? `${repairDetail} I found it before handing the preview to you.`
 	: repairExp
@@ -542,7 +545,7 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
   primaryAction: { label: ready ? 'Try the app' : 'View activity', kind: ready ? 'preview' : 'inspect', targetId },
   ...(checks ? { checks } : {}),
   ...(build ? { build } : {}),
-  ...(repairExp ? { repair: { expectation: repairExp } } : {}),
+  ...(repairExp ? { repair: { expectation: repairExp, ...(repairFixing ? { fixing: repairFixing } : {}) } } : {}),
   ...(footer ? { footer } : {}),
  }];
 }

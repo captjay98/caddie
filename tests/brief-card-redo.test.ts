@@ -321,7 +321,12 @@ describe('repair card: body from detail + fixed expectation panel (step 2)', () 
 			expect(repair!.summary).toBe(`${detail} I found it before handing the preview to you.`);
 			// The panel is the FIXED expectation for the check, NOT the detail.
 			// Mutation proof: drop the `repair` field assignment and this is undefined.
-			expect(repair!.repair).toEqual({ expectation: 'Save something, restart the app, and it must still be there.' });
+			expect(repair!.repair).toEqual({
+				expectation: 'Save something, restart the app, and it must still be there.',
+				// The feature being fixed is the build's own building feature row,
+				// never a sentence written for the mockup.
+				fixing: 'Save and sync entries',
+			});
 			// No line appears twice: the panel expectation is not the body, and
 			// the body does not contain the expectation.
 			expect(repair!.repair!.expectation).not.toBe(repair!.summary);

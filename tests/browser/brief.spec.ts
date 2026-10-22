@@ -126,7 +126,7 @@ interface BriefCard {
 	planItems?: { title: string; detail?: string }[];
 	fit?: { reasons: string[]; cautions: string[] };
 	checks?: { passed: number; items: string[]; version?: string };
-	repair?: { expectation: string };
+	repair?: { expectation: string; fixing?: string };
 	footer?: { appName: string; version?: string };
 	nextStep?: string;
 	build?: { current?: string; features: { title: string; state: 'built' | 'building' | 'waiting' }[]; builtCount: number; lastUpdatedAt?: string };
@@ -1108,7 +1108,7 @@ test.describe('redo — each card matches its mockup', () => {
 
 	test('repair card: no rail + "what needs fixing" panel + checks line', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-		await stubAccount(context, { cards: [{ ...REPAIR_CARD, checks: { passed: 7, items: ['a', 'b'] } }], unseenCount: 1 });
+		await stubAccount(context, { cards: [{ ...REPAIR_CARD, checks: { passed: 7, items: ['a', 'b'] }, repair: { expectation: 'Save something, restart the app, and it must still be there.', fixing: 'Save and sync entries' } }], unseenCount: 1 });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/?pane=brief`);
 		const repair = page.getByTestId('decision-card').first();
@@ -1117,7 +1117,10 @@ test.describe('redo — each card matches its mockup', () => {
 		// The panel reads the fixed expectation, never the card body sentence.
 		await expect(repair.getByTestId('card-repair')).toContainText('What needs fixing');
 		await expect(repair.getByTestId('card-repair')).toContainText('Save something, restart the app, and it must still be there.');
-		await expect(repair.getByTestId('card-repair-fix')).toContainText('7 checks passed');
+		// The work line names the feature from the build record; the count is of
+		// features (what it really counts), not "checks".
+		await expect(repair.getByTestId('card-repair-now')).toHaveText('Now fixing: Save and sync entries');
+		await expect(repair.getByTestId('card-repair-fix')).toContainText('7 features passed');
 		await expect(repair.getByTestId('card-repair-reassure')).toContainText("I’ll run the checks again after the fix.");
 		await context.close();
 	});

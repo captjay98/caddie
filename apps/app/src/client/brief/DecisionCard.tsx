@@ -233,18 +233,22 @@ export function DecisionCardView(props: {
 							<p>{card.repair.expectation}</p>
 						</div>
 					) : null}
-					{card.checks ? (
+					{card.checks || card.repair?.fixing ? (
 						<div className="compact-card-panel">
 							<div className="compact-card-active">
 								<span className="compact-card-pulse" aria-hidden="true" />
-								<h4 data-testid="card-repair-now">Updating how entries are saved</h4>
+								{/* The feature from the build record, never mockup text. */}
+								<h4 data-testid="card-repair-now">{card.repair?.fixing ? `Now fixing: ${card.repair.fixing}` : 'Fixing it now'}</h4>
 							</div>
-							<p className="compact-card-fix" data-testid="card-repair-fix">
-								<span className="compact-card-icon" aria-hidden="true"><Icon name="check" title="" /></span>
-								<span>{card.checks.passed} {card.checks.passed === 1 ? 'check passed' : 'checks passed'}</span>
-								<span>·</span>
-								<span>1 being repaired</span>
-							</p>
+							{card.checks ? (
+								<p className="compact-card-fix" data-testid="card-repair-fix">
+									<span className="compact-card-icon" aria-hidden="true"><Icon name="check" title="" /></span>
+									{/* It counts passed features, so it says features. */}
+									<span>{card.checks.passed} {card.checks.passed === 1 ? 'feature passed' : 'features passed'}</span>
+									<span>·</span>
+									<span>1 being repaired</span>
+								</p>
+							) : null}
 						</div>
 					) : null}
 					<p className="compact-card-note" data-testid="card-repair-reassure">
