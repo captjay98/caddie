@@ -624,3 +624,29 @@ test('Earlier loads archived decisions on demand and retains the exact decision 
  expect(requests).toHaveLength(1);
  await context.close();
 });
+
+test('the Brief flows two cards per row on a wide pane and stacks them when narrow', async ({ browser }) => {
+	// Two open "big" cards (an approval + a blocked result). The home Brief sits
+	// beside the chat (each ~half the window), so a 1600px window gives a ~730px
+	// Brief pane — wide enough for the auto-fit grid to flow two-up; a phone
+	// width drops it to one column.
+	const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+	await stubAccount(context, { cards: [APPROVAL_A, BLOCKED_A], unseenCount: 2 });
+	const page = await context.newPage();
+	await page.goto(`${BASE}/app/?pane=brief`);
+
+	const cards = page.getByTestId('decision-card');
+	await expect(cards).toHaveCount(2);
+	const wideBoxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
+	expect(wideBoxes[0] && wideBoxes[1]).toBeTruthy();
+	// Same top edge, different left — i.e. one row, two columns.
+	expect(Math.abs((wideBoxes[0]!.y) - (wideBoxes[1]!.y))).toBeLessThanOrEqual(2);
+	expect(wideBoxes[1]!.x).toBeGreaterThan(wideBoxes[0]!.x + wideBoxes[0]!.width / 2);
+
+	// At a phone width the same two cards stack one per row.
+	await page.setViewportSize({ width: 390, height: 844 });
+	const narrowBoxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
+	expect(narrowBoxes[1]!.y).toBeGreaterThan(narrowBoxes[0]!.y + narrowBoxes[0]!.height / 2);
+	expect(Math.abs((narrowBoxes[0]!.x) - (narrowBoxes[1]!.x))).toBeLessThanOrEqual(2);
+	await context.close();
+});

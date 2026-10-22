@@ -5747,13 +5747,18 @@ a.btn-ghost.topbar-nav-link {
 	color: var(--color-muted);
 }
 
-/* Account brief grouping: one section header per project. */
+/* Account brief grouping: one section header per project. Decision cards flow
+ * two-up on a wide Brief pane and drop to one column when it narrows (auto-fit
+ * at a 340px min, so ~720px+ shows two). The section header always spans the
+ * full width above the cards. */
 .brief-group {
 	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
 	gap: 0.8rem;
 }
 
 .brief-group-head {
+	grid-column: 1 / -1;
 	margin: 0.4rem 0 0;
 	font-family: var(--font-mono);
 	font-size: var(--r-label);
@@ -8937,7 +8942,12 @@ mark {
 .build-technical > summary, .workflow-app-options > summary, .workflow-updates > summary { padding-block:12px; min-height:44px; font-size:12px; cursor:pointer; color:var(--color-muted); }
 .workflow-app-options[open] { display:grid; gap:14px; }
 .brief-deadlines { display:grid; gap:12px; }
-.brief-done ul { list-style:none; padding:0; display:grid; gap:10px; }
+/* The live Brief (v2): open decision cards flow two-up on a wide pane and drop
+ * to one column when narrow (auto-fit, 340px min → two at ~720px+). The
+ * deadlines block, the Earlier fold and the caught-up line stay full width. */
+.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:12px; }
+.brief-v2 > .brief-deadlines, .brief-v2 > .brief-done, .brief-v2 > .state-detail { grid-column: 1 / -1; }
+.brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:10px; }
 .brief-done li { padding:0; border:0; }
 .brief-done .caddie-card { box-shadow:none; }
 .channel-pane .msg { min-width:0; overflow-wrap:anywhere; }
