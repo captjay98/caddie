@@ -114,4 +114,14 @@ describe('0040 team-mode migration', () => {
 
 		expect(() => reserve('t1', 5)).toThrow(); // turnId is unique (primary key).
 	});
+
+	test('a reservation for a payer with no limit row is refused (the guard fails closed)', () => {
+		// The tests' SQLite doesn't enforce foreign keys, so this proves the
+		// trigger itself refuses, whatever the database's foreign-key setting.
+		expect(() =>
+			sqlite
+				.prepare('insert into build_spend_reservations (turnId, payerId, conversationId, reservedMicros, status, createdAt, updatedAt) values (?,?,?,?,?,?,?)')
+				.run('t-orphan', 'payer-without-limit', 'c1', 1, 'reserved', now, now),
+		).toThrow(/spend_limit_exceeded/);
+	});
 });

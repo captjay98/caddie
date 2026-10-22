@@ -66,8 +66,9 @@ create index "build_spend_reservations_conversation_idx" on "build_spend_reserva
 -- The hard limit, enforced in the insert. settled counts settledMicros of
 -- settled rows (money truly spent); reserved counts reservedMicros of still-open
 -- rows (worst-case liability). released rows count toward neither. A payer with
--- no limit row has nothing to compare against, so the guard does not fire — part
--- A creates the limit row before the first reservation.
+-- no limit row is refused (the limit reads as -1): part A creates the limit row
+-- before the first reservation, so a missing one is a bug, and the guard fails
+-- closed whatever the database's foreign-key setting.
 create trigger "build_spend_reservations_limit_guard"
 before insert on "build_spend_reservations"
 when new."status" = 'reserved'
@@ -82,7 +83,7 @@ begin
     from "build_spend_reservations"
     where "payerId" = new."payerId" and "status" = 'reserved'
   ) + new."reservedMicros"
-  > (select "limitMicros" from "build_spend_limits" where "payerId" = new."payerId");
+  > coalesce((select "limitMicros" from "build_spend_limits" where "payerId" = new."payerId"), -1);
 end;
 
 -- --- architecture_reviews (part B) -------------------------------------------
