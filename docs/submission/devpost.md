@@ -56,6 +56,7 @@ model by role:
 | `app` (in-app AI, fast) | `nemotron-3.5-lightning` | `nvidia/Nemotron-3_5-Lightning` | `apps/app/src/server/app-ai.ts` |
 | `appSuper` (in-app AI, super) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/server/app-ai.ts` |
 | `vision` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts`, `attachments.ts` |
+| `architect` (team mode: architecture review) | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/specialists.ts` (architect delegate), `apps/app/src/server/architecture-review.ts` |
 
 So Caddie uses four NVIDIA Nemotron tiers — **Nemotron 3 Ultra** for
 brainstorming, **Nemotron 3.5 Super VL** for the coordinator conversation, the
