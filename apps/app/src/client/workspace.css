@@ -7501,6 +7501,15 @@ mark {
 .caddie-card .actions > .btn-key { background: var(--card-accent, var(--color-action)); color: #fff; }
 :root[data-theme="dark"] .caddie-card .actions > .btn-key { color: #09121c; }
 .caddie-card .btn-ghost, .caddie-card .detail-toggle { min-height: 38px; border-radius: 9px; }
+/* Text-only quiet action (mockup `cc-quiet`): transparent, muted, sans — the
+ * "Stop build" control on a working card, never the mono detail-toggle look. */
+.caddie-card .compact-card-quiet { padding: 9px 4px; background: transparent; border: 0; color: var(--color-muted); font-family: var(--font-sans, inherit); font-size: 13px; font-weight: 500; letter-spacing: 0; }
+.caddie-card .compact-card-quiet:hover { color: var(--color-bright); }
+/* The gap the mockup keeps below every panel heading ("What you're approving",
+ * "Why it fits", "Before you commit"): the first element after the title is
+ * spaced from it, whatever element it is. */
+.compact-card-panel .compact-card-panel-title { margin: 0 0 10px; }
+.compact-card-panel .compact-card-panel-title + * { margin-top: 0; }
 .caddie-card .actions, .caddie-card .row-actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 20px; }
 .decision-card.caddie-card .card-details { padding: 12px 14px; border-radius: 8px; background: var(--color-raised); margin-top: 13px; font-size: 12px; color: var(--color-muted); }
 .brief-done li { padding: 14px 0; border-bottom: 1px solid var(--color-line); }

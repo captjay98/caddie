@@ -126,6 +126,7 @@ interface BriefCard {
 	planItems?: { title: string; detail?: string }[];
 	fit?: { reasons: string[]; cautions: string[] };
 	checks?: { passed: number; items: string[]; version?: string };
+	repair?: { expectation: string };
 	footer?: { appName: string; version?: string };
 	nextStep?: string;
 	build?: { current?: string; features: { title: string; state: 'built' | 'building' | 'waiting' }[]; builtCount: number; lastUpdatedAt?: string };
@@ -635,11 +636,13 @@ const REPAIR_CARD = card({
 	projectId: 'proj-a',
 	kind: 'result',
 	headline: 'One check needs another pass',
-	summary: 'An offline entry did not survive reopening the app. Caddie is adjusting the build.',
+	summary: 'An offline entry did not survive reopening the app. I found it before handing the preview to you.',
 	status: 'changed',
 	runId: 'run-7',
 	primaryAction: { label: 'View activity', kind: 'inspect', targetId: 'run-7' },
 	key: 'proj-a:result:run-7',
+	repair: { expectation: 'Save something, restart the app, and it must still be there.' },
+	checks: { passed: 7, items: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] },
 });
 
 test.describe('U step 1 — look, footer, build rail', () => {
@@ -672,22 +675,29 @@ test.describe('U step 1 — look, footer, build rail', () => {
 		await context.close();
 	});
 
-	test('a repairing card advances the rail to "Checking" (Building done); desktop + 390px', async ({ browser }) => {
+	test('a repairing card has NO step rail, a "what needs fixing" panel and the reassurance line; desktop + 390px', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context, { cards: [REPAIR_CARD], unseenCount: 1 });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/?pane=brief`);
 
 		const repairing = page.getByTestId('decision-card').filter({ hasText: 'One check needs another pass' });
-		const rail = repairing.getByTestId('card-build-rail');
-		await expect(rail.locator('[data-step="build"]')).toHaveAttribute('data-state', 'done');
-		await expect(rail.locator('[data-step="check"]')).toHaveAttribute('data-state', 'active');
-		await expect(rail.locator('[data-step="preview"]')).toHaveAttribute('data-state', 'pending');
+		// No step rail on a repair card (mockup).
+		await expect(repairing.getByTestId('card-build-rail')).toHaveCount(0);
+		// The "What needs fixing" panel shows the fixed expectation, not the body.
+		await expect(repairing.getByTestId('card-repair')).toContainText('Save something, restart the app, and it must still be there.');
+		// The reassurance line is restored.
+		await expect(repairing.getByTestId('card-repair-reassure')).toContainText("You don’t need to do anything. I’ll run the checks again after the fix.");
+		// "See what happened" is a bordered action; "Stop build" is text-only.
+		await expect(repairing.getByTestId('card-primary-action')).toHaveText('See what happened');
+		await expect(repairing.getByTestId('card-secondary-action')).toHaveText('Stop build');
+		// No filled CTA on a working card.
+		await expect(repairing.locator('.btn-key')).toHaveCount(0);
 		await expect(repairing.getByTestId('card-foot')).toContainText('Preview held until the checks pass.');
 		await repairing.screenshot({ path: join(SHOTS, 'u1-repair-card-desktop-2x.png') });
 
 		await page.setViewportSize({ width: 390, height: 844 });
-		await expect(rail).toBeVisible();
+		await expect(repairing.getByTestId('card-repair')).toBeVisible();
 		await repairing.screenshot({ path: join(SHOTS, 'u1-repair-card-390.png') });
 		await context.close();
 	});
@@ -714,7 +724,7 @@ const DEADLINE_WITH_COUNTDOWN = card({
 	status: 'needs-you',
 	primaryAction: { label: 'Open the schedule', kind: 'review', targetId: 'sch-dl' },
 	key: 'proj-b:deadline:sch-dl',
-	deadline: { daysLeft: 3, dateLabel: 'Friday, 23 October', timeLabel: '17:00', source: 'Farm Innovation Challenge (Africa/Lagos)' },
+	deadline: { daysLeft: 3, dateLabel: 'Friday, 23 October', timeLabel: '17:00', localTimeLabel: '5:00 pm', source: 'Farm Innovation Challenge (Africa/Lagos)' },
 });
 
 test.describe('U step 2 — deadline countdown', () => {
@@ -730,7 +740,9 @@ test.describe('U step 2 — deadline countdown', () => {
 		await expect(row.getByTestId('card-days-left')).toHaveText('3');
 		await expect(countdown).toContainText('days left');
 		await expect(countdown).toContainText('Friday, 23 October');
-		await expect(countdown).toContainText('17:00');
+		// One time line in the reader's own zone; never a bare zoneless "17:00".
+		await expect(countdown).toContainText('5:00 pm · Your local time');
+		await expect(countdown).not.toContainText('17:00');
 		// The source names the schedule + timezone, never a raw id.
 		await expect(countdown).toContainText('Africa/Lagos');
 		await expect(countdown).not.toContainText('sch-dl');
@@ -1086,28 +1098,39 @@ test.describe('redo — each card matches its mockup', () => {
 		await expect(build.getByTestId('card-build-feed-row')).toHaveCount(4);
 		await expect(build.getByTestId('card-build-feed-row').last()).toContainText('Waiting');
 		await expect(build.getByTestId('card-build-update')).toContainText('2 features built');
+		// A card where Caddie is working gets NO filled CTA: "View activity" is a
+		// bordered action and "Stop build" is text-only.
+		await expect(build.locator('.btn-key')).toHaveCount(0);
+		await expect(build.getByTestId('card-primary-action')).toHaveText('View activity');
+		await expect(build.getByTestId('card-secondary-action')).toHaveText('Stop build');
 		await context.close();
 	});
 
-	test('repair card: rail at Checking + "what needs fixing" panel + checks line', async ({ browser }) => {
+	test('repair card: no rail + "what needs fixing" panel + checks line', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context, { cards: [{ ...REPAIR_CARD, checks: { passed: 7, items: ['a', 'b'] } }], unseenCount: 1 });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/?pane=brief`);
 		const repair = page.getByTestId('decision-card').first();
-		await expect(repair.getByTestId('card-build-rail').locator('[data-step="check"]')).toHaveAttribute('data-state', 'active');
+		// No step rail on a repair card (mockup).
+		await expect(repair.getByTestId('card-build-rail')).toHaveCount(0);
+		// The panel reads the fixed expectation, never the card body sentence.
 		await expect(repair.getByTestId('card-repair')).toContainText('What needs fixing');
+		await expect(repair.getByTestId('card-repair')).toContainText('Save something, restart the app, and it must still be there.');
 		await expect(repair.getByTestId('card-repair-fix')).toContainText('7 checks passed');
+		await expect(repair.getByTestId('card-repair-reassure')).toContainText("I’ll run the checks again after the fix.");
 		await context.close();
 	});
 
 	test('ready card: worded chip + green (hue) CTA', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-		await stubAccount(context, { cards: [ready({ checks: { passed: 8, items: ['a'], version: '3' } })], unseenCount: 0 });
+		await stubAccount(context, { cards: [ready({ checks: { passed: 8, items: ['a'], version: '3' }, peek: { appName: 'FarmLog AI', caption: 'A checked preview.' } })], unseenCount: 0 });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/?pane=brief`);
 		const readyCard = page.getByTestId('decision-card').filter({ hasText: 'Your app is ready to try' });
 		await expect(readyCard.getByTestId('card-checks')).toContainText('All 8 features passed their checks');
+		// The app peek is left absent (mockup), even when a peek record exists.
+		await expect(readyCard.getByTestId('card-peek')).toHaveCount(0);
 		// The CTA fill uses the card's green hue (--color-ok), not the blue action.
 		const fill = await readyCard.getByTestId('card-primary-action').evaluate((el) => getComputedStyle(el).backgroundColor);
 		const ok = await readyCard.evaluate((el) => {
@@ -1131,13 +1154,13 @@ test.describe('redo — each card matches its mockup', () => {
 		await context.close();
 	});
 
-	test('deadline card: days-left countdown + "Your time →" local line + submission steps, no schedule wording', async ({ browser }) => {
+	test('deadline card: days-left countdown + local time line + submission steps, no schedule wording', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context, { cards: [card({
 			id: 'brf_hackathon-deadline_proj-a', projectId: 'proj-a', kind: 'deadline',
 			headline: 'Leave time to tell the story', summary: 'The app is one part of the submission.',
 			status: 'needs-you', primaryAction: { label: 'Review submission', kind: 'review', targetId: 'proj-a' },
-			deadline: { daysLeft: 3, dateLabel: 'Friday, 23 October', timeLabel: '17:00', source: 'Farm Innovation Challenge', localTimeLabel: 'Fri, Oct 23, 5:00 pm', steps: [
+			deadline: { daysLeft: 3, dateLabel: 'Friday, 23 October', timeLabel: '17:00', source: 'Farm Innovation Challenge', localTimeLabel: '5:00 pm', steps: [
 				{ title: 'App preview ready', detail: 'Your current build has passed its checks.', done: true },
 				{ title: 'Demo video', detail: 'Not yet attached.', done: false },
 			] },
@@ -1147,7 +1170,9 @@ test.describe('redo — each card matches its mockup', () => {
 		await page.goto(`${BASE}/app/?pane=brief`);
 		const deadline = page.getByTestId('decision-card').first();
 		await expect(deadline.getByTestId('card-days-left')).toHaveText('3');
-		await expect(deadline.getByTestId('card-local-time')).toContainText('Your time →');
+		// One time line in the reader's own zone; never the bare zoneless "17:00".
+		await expect(deadline.getByTestId('card-local-time')).toContainText('5:00 pm · Your local time');
+		await expect(deadline.getByTestId('card-countdown')).not.toContainText('17:00');
 		await expect(deadline.getByTestId('card-deadline-steps').locator('li')).toHaveCount(2);
 		await context.close();
 	});
@@ -1178,6 +1203,8 @@ test.describe('redo — each card matches its mockup', () => {
 		await expect(opp.getByTestId('card-fit-reasons')).toContainText('first-hand');
 		await expect(opp.getByTestId('card-fit-cautions')).toContainText('eligibility');
 		await expect(opp.getByTestId('card-secondary-action')).toHaveText('Save for later');
+		// The kicker reads "Found for you" (mockup), not the generic design label.
+		await expect(opp.locator('.compact-card-kicker')).toContainText('Found for you');
 		await context.close();
 	});
 
@@ -1191,6 +1218,10 @@ test.describe('redo — each card matches its mockup', () => {
 		const earlier = page.getByTestId('decision-card').filter({ hasText: 'You approved the plan' }).first();
 		await expect(earlier.locator('.compact-card-record')).toBeVisible();
 		await expect(earlier.locator('.compact-card-record time')).toBeVisible();
+		// The footer: N completed updates on the left, Read-only history right.
+		const foot = earlier.getByTestId('card-foot');
+		await expect(foot).toContainText('1 completed update');
+		await expect(foot).toContainText('Read-only history');
 		await context.close();
 	});
 });

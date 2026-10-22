@@ -7,11 +7,14 @@ export function CardHeader({ design, context, status, fresh, freshLabel }: {
 }) {
  const view = CARD_DESIGNS[design];
  const pulsing = design === 'build' || design === 'repair';
+ // The opportunity kicker reads "Found for you" (mockup), overriding the
+ // design's generic label without touching the shared card-design map.
+ const label = design === 'opportunity' ? 'Found for you' : view.label;
  return (
   <div className="compact-card-head">
    <span className="compact-card-kicker">
     {pulsing ? <span className="compact-card-pulse" aria-hidden="true" /> : <span className="compact-card-icon" aria-hidden="true"><Icon name={view.icon} title="" /></span>}
-    <span>{context ? <span className="card-context">{context} · </span> : null}{view.label}</span>
+    <span>{context ? <span className="card-context">{context} · </span> : null}{label}</span>
     {/* "· time" freshness, when the caller supplied an updated-at label. */}
     {freshLabel ? <span className="compact-card-fresh" data-testid="card-fresh">· {freshLabel}</span> : null}
    </span>
