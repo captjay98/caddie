@@ -17,7 +17,7 @@ const route = findModelRouteForRole('app');
 const superRoute = findModelRouteForRole('appSuper');
 const NOW = new Date('2026-10-18T12:00:00.000Z');
 
-interface Call { url: string; auth: string | null; body: { model: string; messages: { role: string; content: string }[]; max_tokens: number } }
+interface Call { url: string; auth: string | null; body: { model: string; messages: { role: string; content: unknown }[]; max_tokens: number } }
 
 function provider(reply: (call: Call) => Response | Promise<Response>) {
 	const calls: Call[] = [];
@@ -45,7 +45,7 @@ describe('AI inside apps', () => {
 		addUser(sqlite, 'owner-1', 'owner@example.com');
 		const ws = await createWorkspace(db, 'owner-1', { name: 'W' });
 		projectId = (await createProject(db, await workspaceScopeForUser(db, 'owner-1', ws.id), { workspaceId: ws.id, name: 'Recipes', description: 'x' })).id;
-		deps = { apiKey: 'nebius-test-key', monthlyLimitCents: 100, now: () => NOW };
+		deps = { apiKey: 'nebius-test-key', monthlyLimitCents: 100, appFeatures: false, now: () => NOW };
 	});
 
 	afterEach(() => sqlite.close());
@@ -198,8 +198,120 @@ describe('AI inside apps', () => {
 	});
 
 	test('the allowance comes from the server settings, with a safe default', () => {
-		expect(appAiDepsFromEnv({ NEBIUS_API_KEY: ' k ', APP_AI_MONTHLY_LIMIT_CENTS: '250' })).toEqual({ apiKey: 'k', monthlyLimitCents: 250 });
-		expect(appAiDepsFromEnv({ APP_AI_MONTHLY_LIMIT_CENTS: 'lots' })).toEqual({ apiKey: null, monthlyLimitCents: APP_AI_LIMITS.defaultMonthlyCents });
+		expect(appAiDepsFromEnv({ NEBIUS_API_KEY: ' k ', APP_AI_MONTHLY_LIMIT_CENTS: '250' })).toEqual({ apiKey: 'k', monthlyLimitCents: 250, appFeatures: false });
+		expect(appAiDepsFromEnv({ APP_AI_MONTHLY_LIMIT_CENTS: 'lots' })).toEqual({ apiKey: null, monthlyLimitCents: APP_AI_LIMITS.defaultMonthlyCents, appFeatures: false });
+		// APP_FEATURES on/owner turns photo input on (part M); anything else is off.
+		expect(appAiDepsFromEnv({ APP_FEATURES: 'on' })).toMatchObject({ appFeatures: true });
+		expect(appAiDepsFromEnv({ APP_FEATURES: 'owner' })).toMatchObject({ appFeatures: true });
+		expect(appAiDepsFromEnv({ APP_FEATURES: 'off' })).toMatchObject({ appFeatures: false });
+	});
+
+	// --- Part M: AI that can look at photos --------------------------------
+	//
+	// SIMULATED for the provider (no network, no cost). The outgoing request
+	// body is asserted against a recorded shape; UNVERIFIED until S6 that Token
+	// Factory accepts it for Super VL and what an image actually costs.
+	describe('photos (part M)', () => {
+		const withFeatures = (over: Partial<AppAiDeps> = {}) => ({ ...deps, appFeatures: true, ...over });
+		// A tiny valid base64 blob (content is never decoded here; size is read
+		// from the base64 length).
+		const tinyImage = (bytes: number): string => 'A'.repeat(Math.ceil((bytes * 4) / 3));
+		const imagePart = (over: Record<string, unknown> = {}) => ({ type: 'image', mime: 'image/png', data: tinyImage(1024), ...over });
+		const askPhoto = (extra: Record<string, unknown> = {}, part: Record<string, unknown> = {}) => ({
+			messages: [{ role: 'user', content: [{ type: 'text', text: 'What is in this photo?' }, imagePart(part)] }],
+			tier: 'super',
+			...extra,
+		});
+
+		test('a photo request needs the app_features switch on', async () => {
+			const p = provider(() => answer('A cat.'));
+			// Off: refused before any model call.
+			expect(await runAppAi(db, { ...deps, fetch: p.fetch }, { projectId, mode: 'preview', request: askPhoto() }))
+				.toEqual({ ok: false, reason: 'invalid_request', message: 'This app can\u2019t send photos to the AI.' });
+			expect(p.calls).toHaveLength(0);
+			expect(usageRows()).toHaveLength(0);
+			// On: the call goes through.
+			expect((await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: askPhoto() })).ok).toBe(true);
+			expect(p.calls).toHaveLength(1);
+		});
+
+		test('photos need the super tier, before any model call', async () => {
+			const p = provider(() => answer('ok'));
+			const refused = await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: askPhoto({ tier: 'fast' }) });
+			expect(refused).toEqual({ ok: false, reason: 'invalid_request', message: 'Looking at a photo needs tier "super".' });
+			// Omitted tier defaults to fast, so it is refused too.
+			expect(await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: askPhoto({ tier: undefined }) }))
+				.toMatchObject({ ok: false, reason: 'invalid_request' });
+			expect(p.calls).toHaveLength(0);
+			expect(usageRows()).toHaveLength(0);
+		});
+
+		test('at most four photos per call', async () => {
+			const p = provider(() => answer('ok'));
+			const four = { messages: [{ role: 'user', content: [...Array.from({ length: 4 }, () => imagePart()), { type: 'text', text: 'describe' }] }], tier: 'super' };
+			expect((await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: four })).ok).toBe(true);
+			const five = { messages: [{ role: 'user', content: Array.from({ length: 5 }, () => imagePart()) }], tier: 'super' };
+			expect(await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: five }))
+				.toEqual({ ok: false, reason: 'too_long', message: 'Send at most 4 photos in one call.' });
+			expect(p.calls).toHaveLength(1);
+		});
+
+		test('each photo must be under 1.5 MB (measured on the decoded bytes)', async () => {
+			const p = provider(() => answer('ok'));
+			// Just under the ceiling passes; just over is refused.
+			expect((await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: askPhoto({}, { data: tinyImage(APP_AI_LIMITS.maxImageBytes) }) })).ok).toBe(true);
+			expect(await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: askPhoto({}, { data: tinyImage(APP_AI_LIMITS.maxImageBytes + 4) }) }))
+				.toEqual({ ok: false, reason: 'too_long', message: 'Each photo must be under 1.5 MB.' });
+		});
+
+		test('only JPEG, PNG and WebP; a bad part shape is refused', async () => {
+			const p = provider(() => answer('ok'));
+			expect(await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: askPhoto({}, { mime: 'image/gif' }) }))
+				.toEqual({ ok: false, reason: 'invalid_request', message: 'Photos must be JPEG, PNG or WebP.' });
+			expect(await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: askPhoto({}, { data: '' }) }))
+				.toMatchObject({ ok: false, reason: 'invalid_request', message: 'An image part needs a mime type and base64 data.' });
+			expect(await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: { messages: [{ role: 'user', content: [{ type: 'other' }] }], tier: 'super' } }))
+				.toMatchObject({ ok: false, reason: 'invalid_request' });
+			expect(p.calls).toHaveLength(0);
+		});
+
+		test('the outgoing request sends OpenAI-style image_url parts with a data URL', async () => {
+			const p = provider(() => answer('A ginger cat on a mat.'));
+			const reply = await runAppAi(db, withFeatures({ fetch: p.fetch }), {
+				projectId, mode: 'preview',
+				request: { messages: [{ role: 'user', content: [{ type: 'text', text: 'What is this?' }, { type: 'image', mime: 'image/jpeg', data: 'QUJD' }] }], tier: 'super' },
+			});
+			expect(reply).toEqual({ ok: true, text: 'A ginger cat on a mat.' });
+			// The wire body is a recorded fixture: text part verbatim, image as a data URL.
+			expect(p.calls[0]!.body.model).toBe(superRoute.modelId);
+			expect(p.calls[0]!.body.messages).toEqual([
+				{ role: 'user', content: [
+					{ type: 'text', text: 'What is this?' },
+					{ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,QUJD' } },
+				] },
+			]);
+		});
+
+		test('a plain-string message still goes out as a plain string beside a photo message', async () => {
+			const p = provider(() => answer('ok'));
+			await runAppAi(db, withFeatures({ fetch: p.fetch }), {
+				projectId, mode: 'preview',
+				request: { messages: [{ role: 'system', content: 'You describe photos.' }, { role: 'user', content: [{ type: 'image', mime: 'image/webp', data: 'QUJD' }] }], tier: 'super' },
+			});
+			expect(p.calls[0]!.body.messages[0]).toEqual({ role: 'system', content: 'You describe photos.' });
+			expect(p.calls[0]!.body.messages[1]).toEqual({ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/webp;base64,QUJD' } }] });
+		});
+
+		test('each photo adds a fixed input estimate to the reservation (until S6)', async () => {
+			const p = provider(() => answer('ok'));
+			// A super call with no photo, then the same with two photos: the second
+			// reserves 2 × imageInputTokensEstimate × the route input rate more.
+			await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: { messages: [{ role: 'user', content: 'hi' }], tier: 'super' } });
+			await runAppAi(db, withFeatures({ fetch: p.fetch }), { projectId, mode: 'preview', request: { messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }, imagePart(), imagePart()] }], tier: 'super' } });
+			const [noImage, twoImages] = usageRows();
+			const expectedExtra = 2 * APP_AI_LIMITS.imageInputTokensEstimate * superRoute.inputPriceMinorUnits;
+			expect(Number(twoImages!.reservedMicros) - Number(noImage!.reservedMicros)).toBe(expectedExtra);
+		});
 	});
 
 	test('GET /projects/:id/ai-usage answers the card without caching; scope refusals keep their status', async () => {

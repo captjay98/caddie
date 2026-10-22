@@ -25,9 +25,22 @@ const NEBIUS_BASE_URL = 'https://api.tokenfactory.nebius.com/v1';
 
 export type AppAiMode = 'preview' | 'live';
 export type AppAiFailure = 'invalid_request' | 'too_long' | 'limit_reached' | 'busy' | 'unavailable' | 'failed';
+
+/** The image formats Super VL accepts (part M). */
+export type AppAiImageMime = 'image/jpeg' | 'image/png' | 'image/webp';
+
+/**
+ * A message's content is plain text (the everyday case) or a list of parts so
+ * an app can show the model a photo (part M). An image part carries base64
+ * `data`; the app's server reads the photo with `readFile()` (part L) and sends
+ * it here. Images need the super tier, because Super VL is the vision model.
+ */
+export type AppAiContentPart =
+	| { type: 'text'; text: string }
+	| { type: 'image'; mime: AppAiImageMime; data: string };
 export interface AppAiMessage {
 	role: 'system' | 'user' | 'assistant';
-	content: string;
+	content: string | AppAiContentPart[];
 }
 export type AppAiReply = { ok: true; text: string } | { ok: false; reason: AppAiFailure; message: string };
 
@@ -45,20 +58,47 @@ export const APP_AI_LIMITS = {
 	 * project's monthly allowance.
 	 */
 	maxOutputTokens: 4096,
+	/** Part M image limits. */
+	maxImagesPerCall: 4,
+	/** Per image, measured on the decoded bytes (1.5 MB). */
+	maxImageBytes: 1_500_000,
+	/**
+	 * A fixed per-image input estimate, in tokens, for the worst-case
+	 * reservation. UNVERIFIED until S6: the real per-image cost is one paid
+	 * Super VL call in the owner's Monday campaign. Until then an image is
+	 * reserved at this flat estimate (generous: a 1.5 MB image is far under it
+	 * on any plausible tile-based vision pricing), so the allowance can never be
+	 * under-reserved.
+	 */
+	imageInputTokensEstimate: 2_000,
 } as const;
+
+/** The image MIME types part M accepts. */
+export const APP_AI_IMAGE_MIMES: readonly AppAiImageMime[] = ['image/jpeg', 'image/png', 'image/webp'];
 
 export interface AppAiDeps {
 	/** Caddie's model-provider key; null when AI isn't set up on this server. */
 	apiKey: string | null;
 	monthlyLimitCents: number;
+	/**
+	 * Whether app features (part M photo input among them) are on for this
+	 * call. Off refuses an image request with a plain message; text is never
+	 * gated. Caddie sets this from the project's stamped `appFeatures` / the
+	 * `app_features` switch — never the app. {@link appAiDepsFromEnv} gives the
+	 * `APP_FEATURES` env default as a safe fallback.
+	 */
+	appFeatures: boolean;
 	fetch?: (request: Request) => Promise<Response>;
 	now?: () => Date;
 }
 
-export function appAiDepsFromEnv(env: { NEBIUS_API_KEY?: string; APP_AI_MONTHLY_LIMIT_CENTS?: string }): AppAiDeps {
+export function appAiDepsFromEnv(env: { NEBIUS_API_KEY?: string; APP_AI_MONTHLY_LIMIT_CENTS?: string; APP_FEATURES?: string }): AppAiDeps {
 	const raw = (env.APP_AI_MONTHLY_LIMIT_CENTS ?? '').trim();
 	const parsed = /^\d{1,9}$/.test(raw) ? Number(raw) : APP_AI_LIMITS.defaultMonthlyCents;
-	return { apiKey: env.NEBIUS_API_KEY?.trim() || null, monthlyLimitCents: parsed };
+	// The env var is the switch DEFAULT (platform-switches.ts). `on`/`owner`
+	// mean the feature is available; anything else (including unset) is off.
+	const appFeatures = ((env.APP_FEATURES ?? '').trim() === 'on' || (env.APP_FEATURES ?? '').trim() === 'owner');
+	return { apiKey: env.NEBIUS_API_KEY?.trim() || null, monthlyLimitCents: parsed, appFeatures };
 }
 
 const fail = (reason: AppAiFailure, message: string): AppAiReply => ({ ok: false, reason, message });
@@ -68,8 +108,30 @@ function renewsOn(date: Date): string {
 	return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
 }
 
-/** Validate what the app sent. Forgiving about extra fields; strict about shape and size. */
-function readRequest(input: unknown): { messages: AppAiMessage[]; json: boolean; chars: number; tier: 'fast' | 'super' } | AppAiReply {
+/** Decoded byte length of a base64 string, without decoding it. */
+function base64Bytes(data: string): number {
+	const len = data.length;
+	if (len === 0) return 0;
+	const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+	return Math.floor((len * 3) / 4) - padding;
+}
+
+/** A read request: the validated messages plus what the reservation needs. */
+interface ReadRequest {
+	messages: AppAiMessage[];
+	json: boolean;
+	/** Text characters across all parts (image data never counts). */
+	chars: number;
+	tier: 'fast' | 'super';
+	/** Image parts across all messages (part M). */
+	imageCount: number;
+}
+
+/**
+ * Validate what the app sent. Forgiving about extra fields; strict about shape
+ * and size. `appFeatures` gates image parts (part M): text is never gated.
+ */
+function readRequest(input: unknown, appFeatures: boolean): ReadRequest | AppAiReply {
 	const body = input as { messages?: unknown; json?: unknown; tier?: unknown } | null;
 	if (!body || typeof body !== 'object' || !Array.isArray(body.messages) || body.messages.length === 0) {
 		return fail('invalid_request', 'Send { messages: [{ role: "user", content: "…" }] }.');
@@ -80,26 +142,82 @@ function readRequest(input: unknown): { messages: AppAiMessage[]; json: boolean;
 	if (body.messages.length > APP_AI_LIMITS.maxMessages) {
 		return fail('too_long', `Send at most ${APP_AI_LIMITS.maxMessages} messages.`);
 	}
+	const tier: 'fast' | 'super' = body.tier === 'super' ? 'super' : 'fast';
 	const messages: AppAiMessage[] = [];
 	let chars = 0;
+	let imageCount = 0;
 	for (const item of body.messages as unknown[]) {
 		const message = item as { role?: unknown; content?: unknown } | null;
-		if (!message || (message.role !== 'system' && message.role !== 'user' && message.role !== 'assistant') || typeof message.content !== 'string') {
+		if (!message || (message.role !== 'system' && message.role !== 'user' && message.role !== 'assistant')) {
 			return fail('invalid_request', 'Each message needs a role (system, user or assistant) and text content.');
 		}
-		chars += message.content.length;
-		messages.push({ role: message.role, content: message.content });
+		if (typeof message.content === 'string') {
+			chars += message.content.length;
+			messages.push({ role: message.role, content: message.content });
+			continue;
+		}
+		if (!Array.isArray(message.content) || message.content.length === 0) {
+			return fail('invalid_request', 'Each message needs a role (system, user or assistant) and text content.');
+		}
+		const parts: AppAiContentPart[] = [];
+		for (const raw of message.content as unknown[]) {
+			const part = raw as { type?: unknown; text?: unknown; mime?: unknown; data?: unknown } | null;
+			if (!part || typeof part !== 'object') {
+				return fail('invalid_request', 'Each content part must be { type: "text", text } or { type: "image", mime, data }.');
+			}
+			if (part.type === 'text') {
+				if (typeof part.text !== 'string') return fail('invalid_request', 'A text part needs text.');
+				chars += part.text.length;
+				parts.push({ type: 'text', text: part.text });
+				continue;
+			}
+			if (part.type === 'image') {
+				if (!appFeatures) return fail('invalid_request', 'This app can\u2019t send photos to the AI.');
+				if (typeof part.data !== 'string' || part.data.length === 0 || typeof part.mime !== 'string') {
+					return fail('invalid_request', 'An image part needs a mime type and base64 data.');
+				}
+				if (!(APP_AI_IMAGE_MIMES as readonly string[]).includes(part.mime)) {
+					return fail('invalid_request', 'Photos must be JPEG, PNG or WebP.');
+				}
+				if (tier !== 'super') return fail('invalid_request', 'Looking at a photo needs tier "super".');
+				imageCount += 1;
+				if (imageCount > APP_AI_LIMITS.maxImagesPerCall) return fail('too_long', `Send at most ${APP_AI_LIMITS.maxImagesPerCall} photos in one call.`);
+				if (base64Bytes(part.data) > APP_AI_LIMITS.maxImageBytes) {
+					return fail('too_long', `Each photo must be under ${(APP_AI_LIMITS.maxImageBytes / 1_000_000).toLocaleString('en-US')} MB.`);
+				}
+				parts.push({ type: 'image', mime: part.mime as AppAiImageMime, data: part.data });
+				continue;
+			}
+			return fail('invalid_request', 'Each content part must be { type: "text", text } or { type: "image", mime, data }.');
+		}
+		messages.push({ role: message.role, content: parts });
 	}
-	if (chars === 0) return fail('invalid_request', 'The messages are empty.');
+	if (chars === 0 && imageCount === 0) return fail('invalid_request', 'The messages are empty.');
 	if (chars > APP_AI_LIMITS.maxChars) return fail('too_long', `Keep the messages under ${APP_AI_LIMITS.maxChars.toLocaleString('en-US')} characters in total.`);
 	// Omitted means the everyday fast tier; only an explicit "super" upgrades.
-	return { messages, json: body.json === true, chars, tier: body.tier === 'super' ? 'super' : 'fast' };
+	return { messages, json: body.json === true, chars, tier, imageCount };
 }
 
 /** Worst-case cost in micro-cents: a generous input estimate plus the call's whole output cap. */
-function reservationFor(route: ModelRoute, chars: number, messageCount: number): number {
-	const inputTokens = Math.ceil(chars / 3) + 16 * messageCount;
+function reservationFor(route: ModelRoute, chars: number, messageCount: number, imageCount = 0): number {
+	const inputTokens = Math.ceil(chars / 3) + 16 * messageCount + imageCount * APP_AI_LIMITS.imageInputTokensEstimate;
 	return inputTokens * route.inputPriceMinorUnits + Math.min(route.maxTokens, APP_AI_LIMITS.maxOutputTokens) * route.outputPriceMinorUnits;
+}
+
+/**
+ * One wire message for the provider. Plain text stays a string; a parts list
+ * becomes OpenAI-style content parts, with each image an `image_url` carrying a
+ * data URL. UNVERIFIED until S6: that Token Factory accepts this exact shape
+ * for Super VL and what an image costs (one paid call in the Monday campaign).
+ */
+function toProviderMessage(message: AppAiMessage): { role: string; content: unknown } {
+	if (typeof message.content === 'string') return { role: message.role, content: message.content };
+	const parts = message.content.map((part) =>
+		part.type === 'text'
+			? { type: 'text', text: part.text }
+			: { type: 'image_url', image_url: { url: `data:${part.mime};base64,${part.data}` } },
+	);
+	return { role: message.role, content: parts };
 }
 
 /** The first JSON object in a reply (models sometimes wrap it in a fence or a sentence). */
@@ -131,7 +249,7 @@ async function settle(db: D1Database, id: string, update: { status: 'settled' | 
  */
 export async function runAppAi(db: D1Database, deps: AppAiDeps, input: { projectId: string; mode: AppAiMode; request: unknown }): Promise<AppAiReply> {
 	const now = deps.now?.() ?? new Date();
-	const read = readRequest(input.request);
+	const read = readRequest(input.request, deps.appFeatures);
 	if ('ok' in read) return read;
 	if (!deps.apiKey) return fail('unavailable', "AI isn't available for apps on this Caddie server yet.");
 	if (input.mode === 'live') {
@@ -149,7 +267,7 @@ export async function runAppAi(db: D1Database, deps: AppAiDeps, input: { project
 
 	const route = findModelRouteForRole(read.tier === 'super' ? 'appSuper' : 'app');
 	const month = monthOf(now);
-	const reserved = reservationFor(route, read.chars, read.messages.length);
+	const reserved = reservationFor(route, read.chars, read.messages.length, read.imageCount);
 	const id = `aiu_${crypto.randomUUID()}`;
 	const stamp = now.toISOString();
 	const inserted = await db
@@ -166,10 +284,11 @@ export async function runAppAi(db: D1Database, deps: AppAiDeps, input: { project
 	}
 
 	const jsonRule = 'Reply with one JSON object and nothing else.';
+	const firstIsStringSystem = read.messages[0]?.role === 'system' && typeof read.messages[0].content === 'string';
 	const messages: AppAiMessage[] = !read.json
 		? read.messages
-		: read.messages[0]?.role === 'system'
-			? [{ role: 'system', content: `${read.messages[0].content}\n\n${jsonRule}` }, ...read.messages.slice(1)]
+		: firstIsStringSystem
+			? [{ role: 'system', content: `${read.messages[0]!.content as string}\n\n${jsonRule}` }, ...read.messages.slice(1)]
 			: [{ role: 'system', content: jsonRule }, ...read.messages];
 	const fetchFn = deps.fetch ?? ((request: Request) => fetch(request));
 	let response: Response;
@@ -178,7 +297,7 @@ export async function runAppAi(db: D1Database, deps: AppAiDeps, input: { project
 			new Request(`${NEBIUS_BASE_URL}/chat/completions`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json', authorization: `Bearer ${deps.apiKey}` },
-				body: JSON.stringify({ model: route.modelId, messages, max_tokens: Math.min(route.maxTokens, APP_AI_LIMITS.maxOutputTokens), temperature: 0.4 }),
+				body: JSON.stringify({ model: route.modelId, messages: messages.map(toProviderMessage), max_tokens: Math.min(route.maxTokens, APP_AI_LIMITS.maxOutputTokens), temperature: 0.4 }),
 				signal: timeoutSignal(APP_AI_LIMITS.timeoutMs),
 			}),
 		);
