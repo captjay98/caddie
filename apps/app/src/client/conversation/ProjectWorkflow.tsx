@@ -225,13 +225,17 @@ export function ProjectWorkflow({
           <p className="kicker">{name ?? "YOUR PROJECT"}</p>
           <h3>{planningBlocked ? "Plan needs another pass" : LABEL[workflow.phase]}</h3>
         </div>
-        <button
-          type="button"
-          className="btn-ghost"
-          onClick={() => chrome.openProject(projectId, true)}
-        >
-          Open project
-        </button>
+        {/* In this project's own chat its page is already open (beside the chat
+            on desktop, under it on a phone), so "Open project" would go nowhere. */}
+        {chrome.conversation.kind === "project" && chrome.conversation.projectId === projectId ? null : (
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => chrome.openProject(projectId, true)}
+          >
+            Open project
+          </button>
+        )}
       </div>
       {workflow.phase === "building" || (workflow.phase === "blocked" && active) ? (
         <button type="button" className="btn-ghost" disabled={busy} onClick={async () => {

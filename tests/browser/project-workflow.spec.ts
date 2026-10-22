@@ -1007,6 +1007,20 @@ test('a client-only app shows no Keys section', async ({ page, context }) => {
 	await expect(card.getByTestId('app-keys')).toHaveCount(0);
 });
 
+test('beside its own project page the chat card offers no Open project; in Home chat it still does', async ({ page, context }) => {
+	await fixture(context);
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await page.goto('/app/project?project=proj-workflow');
+	// The project's page is open next to the chat: a button to open it would go nowhere.
+	const beside = page.getByTestId('conversation-panel').getByTestId('project-workflow');
+	await expect(beside.getByRole('heading', { name: 'Your plan is ready' })).toBeVisible();
+	await expect(beside.getByRole('button', { name: 'Open project' })).toHaveCount(0);
+	await page.goto('/app/');
+	const home = page.getByTestId('channel').getByTestId('project-workflow');
+	await expect(home.getByRole('heading', { name: 'Your plan is ready' })).toBeVisible();
+	await expect(home.getByRole('button', { name: 'Open project' })).toBeVisible();
+});
+
 test('mobile Home chat retains the embedded workflow and opens its explicit project only when requested', async ({ page, context }) => {
 	await fixture(context);
 	await page.setViewportSize({ width: 390, height: 844 });
