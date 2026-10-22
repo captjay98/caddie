@@ -132,6 +132,10 @@ async function world() {
     "0028_app_publishing.sql",
     // Track 3: the large-file store (an Android app's preview page and APK).
     "0039_large_content.sql",
+    // Judge accounts (the build-start payer reads them) and team mode (the
+    // spending-limit tables and the workflow mode columns).
+    "0033_judge_accounts.sql",
+    "0040_team_mode.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -2254,5 +2258,31 @@ describe("a paused build tells its owner once per run (plan 5.4)", () => {
       expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
       expect((await readWorkflow(w.db, item.scope))?.detail).toBe("Caddie paused the build.");
     } finally { w.sqlite.close(); }
+  });
+});
+
+describe("part A: a build never starts without its spending limit", () => {
+  test("approving the design fails closed when the limit can't be opened, and approving again works once it can", async () => {
+    const w = await world();
+    try {
+      const item = await designReady(w);
+      // Make the limit store unusable for this one approval.
+      w.sqlite.exec('alter table "build_spend_limits" rename to "build_spend_limits_off"');
+      await expect(
+        decideDesign(w.db, item.scope, { designId: item.design.id, decision: "approved" }),
+      ).rejects.toThrow();
+      // Nothing was decided and the build didn't start.
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("design-review");
+      // With the store back, the same approval starts the build, with a payer.
+      w.sqlite.exec('alter table "build_spend_limits_off" rename to "build_spend_limits"');
+      await decideDesign(w.db, item.scope, { designId: item.design.id, decision: "approved" });
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("building");
+      const row = w.sqlite
+        .query('select "spendPayerId" from build_workflows where projectId = ?')
+        .get(item.scope.projectId) as { spendPayerId: string | null };
+      expect(row.spendPayerId).toMatch(/^build:/);
+    } finally {
+      w.sqlite.close();
+    }
   });
 });

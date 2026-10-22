@@ -31,6 +31,8 @@ import {
   evaluateDesignGate,
 } from "./architecture-gate.ts";
 import { listArchitectureReviews } from "./architecture-review.ts";
+import { openBuildPayer } from "./build-spend.ts";
+import { registerBuildPayer } from "./spend-instrument.ts";
 
 export type WorkflowPhase =
   "planning" | "review" | "design" | "design-review" | "building" | "blocked" | "ready";
@@ -57,6 +59,52 @@ async function rows(db: D1Database, sql: string, ...args: unknown[]) {
       .bind(...args)
       .all()
   ).results as Record<string, unknown>[];
+}
+/**
+ * Part A (plan §A step 1): open the build's spend payer when a build starts,
+ * store it on the workflow (`spendPayerId`), and register the conversationId in
+ * the isolate payer map so the spend interceptor attributes this build's model
+ * calls to it. `bigApps` is read from the workflow (it decides the $40 limit);
+ * the actor's judge status decides $5 vs $2 otherwise. Best-effort and
+ * idempotent: a replayed build start re-uses the existing payer. Returns the
+ * payer id, or null if there is no workflow row to carry it.
+ */
+async function openBuildSpendPayer(
+  db: D1Database,
+  scope: Scope,
+  workflow: BuildWorkflow,
+  opts: { reset?: boolean } = {},
+): Promise<string | null> {
+  // Fails closed: a build must never start without its spending limit, so an
+  // error here propagates and the approve/retry is refused. Callers open the
+  // payer BEFORE they record any decision or consume a judge build start, so a
+  // refusal leaves nothing half-done and the user can simply try again.
+  const bigApps = Number((workflow as unknown as { bigApps?: number }).bigApps) === 1;
+  const { payerId } = await openBuildPayer(db, {
+    runId: workflow.runId,
+    actorId: scope.actorId,
+    bigApps,
+  });
+  // reset=true (a retry): overwrite spendPayerId so the new build gets a fresh
+  // payer and a fresh limit (plan §A: "Retry starts a new build with a new
+  // limit"). Otherwise only fill it when empty, so a replayed start keeps the
+  // first payer.
+  await db
+    .prepare(
+      opts.reset
+        ? "update build_workflows set spendPayerId = ?, updatedAt = ? where projectId = ?"
+        : "update build_workflows set spendPayerId = ?, updatedAt = ? where projectId = ? and spendPayerId is null",
+    )
+    .bind(payerId, now(), scope.projectId)
+    .run();
+  // The stored value wins (a replay keeps the first payer); read it back so the
+  // registry always maps to the payer actually on the row.
+  const stored = (
+    await rows(db, "select spendPayerId from build_workflows where projectId = ?", scope.projectId)
+  )[0]?.["spendPayerId"] as string | null | undefined;
+  const effective = stored ?? payerId;
+  if (effective) registerBuildPayer(workflow.conversationId, effective);
+  return effective ?? null;
 }
 export async function readWorkflow(
   db: D1Database,
@@ -469,8 +517,13 @@ export async function decideDesign(
     }
   }
   // A change request makes Caddie rewrite the brief: one Caddie message.
-  if (input.decision === "approved" && workflow!.phase === "design-review")
+  if (input.decision === "approved" && workflow!.phase === "design-review") {
+    // Part A: approving the design brief STARTS the build. Open its spend payer
+    // first, before any judge admission or decision write, so a build can't
+    // start without its limit and a refusal leaves nothing half-done.
+    await openBuildSpendPayer(db, scope, workflow!);
     await admitJudgeBuildStart(db, scope.actorId, limits);
+  }
   if (
     input.decision === "rejected" &&
     workflow!.phase === "design-review" &&
@@ -1203,6 +1256,10 @@ export async function retryWorkflow(db: D1Database, scope: Scope, key: string, r
   // S07 judge limits: a real retry is one build start, refused BEFORE the
   // resume row and the phase change. Replays (the `previous` check above) and a
   // blocked plan that resumes planning never reach here.
+  // Part A: a retry is a new build start, so it gets a NEW payer and a fresh
+  // D4 limit (plan §A step 1: "Retry starts a new build with a new limit").
+  // Opened first, so a refusal consumes no judge build start.
+  await openBuildSpendPayer(db, scope, workflow, { reset: true });
   await admitJudgeBuildStart(db, scope.actorId, limits);
   // A message parked while blocked (continueProjectFromChat without resumeBlocked)
   // is carried into the retry prompt, not dropped — the same carry resumePlanning

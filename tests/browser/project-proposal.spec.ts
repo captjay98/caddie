@@ -71,7 +71,7 @@ async function fixture(context: BrowserContext, options: { decisionCard?: boolea
 			{ type: 'text', text: 'Here’s the idea written up — start it when you’re happy, or tell me what to change.', state: 'done' },
 			{ type: 'data-projectProposal', data: { proposalId: 'prop-1', homeProjectId: HOME.id } },
             ...(transcriptCards ? transcriptCards.map(data => ({ type: 'data-decision-card', data })) : []),
-            ...(options.spendCard ? [{ type: 'data-approvalCard', data: { approvalId:'spend-1',projectId:CREATED.id,what:'Use the agreed allowance',capMinorUnits:100,currency:'USD',status:'pending' } }] : []),
+            ...(options.spendCard ? [{ type: 'data-approvalCard', data: { approvalId:'spend-1',projectId:CREATED.id,what:'Use the agreed allowance',status:'pending' } }] : []),
             ...(options.decisionCard ? [{ type: 'data-decision-card', data: { id: 'brf_approval_chat', projectId: CREATED.id, kind: 'approval', status: 'needs-you', headline: 'Review this exact project plan', summary: 'A plan awaits your review.', evidenceIds: [], updatedAt: NOW, primaryAction: { kind: 'review', label: 'Review plan from chat', targetId: 'approval-chat' } } }] : []),
 		] }] : [];
 		return route.fulfill({ contentType: 'application/json', headers: { 'stream-next-offset': OFFSET, 'stream-up-to-date': 'true' }, body: JSON.stringify({ v: 1, conversationId, offset: OFFSET, messages, settlements: [] }) });

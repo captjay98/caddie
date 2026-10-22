@@ -229,8 +229,6 @@ export function Coordinator({ id }: AgentProps) {
       approvalId: v.string(),
       projectId: v.string(),
       what: v.string(),
-      capMinorUnits: v.nullable(v.number()),
-      currency: v.nullable(v.string()),
       status: v.picklist(['pending', 'approved', 'rejected', 'expired']),
     }),
   });
@@ -388,8 +386,6 @@ export function Coordinator({ id }: AgentProps) {
       revisionHash: v.string(),
       policyVersion: v.string(),
       what: v.string(),
-      capMinorUnits: v.optional(v.nullable(v.number())),
-      currency: v.optional(v.nullable(v.string())),
     }),
     async run({ data }) {
       const bridge = context.requestApproval;
@@ -401,12 +397,14 @@ export function Coordinator({ id }: AgentProps) {
         revisionHash: data.revisionHash,
         policyVersion: data.policyVersion,
       });
+      // Part A step 6: the card carries NO model-chosen number. The spending
+      // limit the user sees is the build's own D4 limit, shown on the build
+      // card (ApprovalCard shows the server-backed approval, not a cap the
+      // model invented).
       writeApprovalCard({
         approvalId: approval.id,
         projectId: data.projectId,
         what: data.what,
-        capMinorUnits: data.capMinorUnits ?? null,
-        currency: data.currency ?? null,
         status: 'pending',
       });
       return `Approval requested (id ${approval.id}). The user decides with the card in the chat; do not proceed until the server records the decision.`;
