@@ -25,6 +25,9 @@ import { MODEL_ROLES, findModelRouteForRole, type ModelRole } from '../apps/app/
 const REPO_ROOT = join(import.meta.dir, '..');
 const DEVPOST = readFileSync(join(REPO_ROOT, 'docs/submission/devpost.md'), 'utf8');
 const VIDEO = readFileSync(join(REPO_ROOT, 'docs/submission/video-script.md'), 'utf8');
+// README.md carries the same judge-facing claims (Demo URL section, status
+// table), so the banned phrases and the URL guard check it too.
+const README = readFileSync(join(REPO_ROOT, 'README.md'), 'utf8');
 
 /** The role → (route id, model id) truth, resolved from the code. */
 function expectedRoleRows(): Map<ModelRole, { routeId: string; modelId: string }> {
@@ -158,6 +161,9 @@ describe('submission texts: stale sentences are gone from docs/submission/**', (
 		test(`video-script.md no longer contains: "${phrase}" (${why})`, () => {
 			expect(VIDEO.includes(phrase)).toBe(false);
 		});
+		test(`README.md no longer contains: "${phrase}" (${why})`, () => {
+			expect(README.includes(phrase)).toBe(false);
+		});
 	}
 
 	test('the P17 hosted smoke is cited as LIVE VERIFIED with its deployed URL', () => {
@@ -166,6 +172,7 @@ describe('submission texts: stale sentences are gone from docs/submission/**', (
 		// cannot silently drop the URL and the hosted-smoke status.
 		expect(DEVPOST).toContain('https://caddie.jamalibrahim.dev');
 		expect(VIDEO).toContain('https://caddie.jamalibrahim.dev');
+		expect(README).toContain('https://caddie.jamalibrahim.dev');
 	});
 
 	test('neither doc makes the unbacked FarmLog "7 of 7" live-build claim', () => {
@@ -177,7 +184,7 @@ describe('submission texts: stale sentences are gone from docs/submission/**', (
 		// bare "7 of 7 features" assertion, in either doc.
 		const SEVEN_OF_SEVEN = /\b\d+\s+of\s+\d+\s+features\b/i;
 		const FARMLOG_COUNT = /FarmLog[^.\n]*\b\d+\s+of\s+\d+\b/i;
-		for (const [name, doc] of [['devpost.md', DEVPOST], ['video-script.md', VIDEO]] as const) {
+		for (const [name, doc] of [['devpost.md', DEVPOST], ['video-script.md', VIDEO], ['README.md', README]] as const) {
 			expect(SEVEN_OF_SEVEN.test(doc), `${name} asserts an unbacked "N of N features" build claim`).toBe(false);
 			expect(FARMLOG_COUNT.test(doc), `${name} asserts an unbacked FarmLog "N of N" build claim`).toBe(false);
 		}
