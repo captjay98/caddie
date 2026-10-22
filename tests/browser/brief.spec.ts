@@ -608,6 +608,93 @@ test('shared compact cards fit mobile and keep consistent primary actions', asyn
  await context.close();
 });
 
+// --- U (lane 14) step 1: the look, the footer, Earlier and the build rail ----
+const SHOTS = process.env.KIROCREW_SCRATCH ?? '/tmp';
+const BUILD_CARD = card({
+	id: 'brf_workflow_build_run-7',
+	projectId: 'proj-a',
+	kind: 'result',
+	headline: 'Your app is taking shape',
+	summary: 'Caddie is implementing your approved plan and running the checks.',
+	status: 'changed',
+	runId: 'run-7',
+	primaryAction: { label: 'View activity', kind: 'inspect', targetId: 'run-7' },
+	key: 'proj-a:result:run-7',
+});
+const REPAIR_CARD = card({
+	id: 'brf_workflow_repair_run-7',
+	projectId: 'proj-a',
+	kind: 'result',
+	headline: 'One check needs another pass',
+	summary: 'An offline entry did not survive reopening the app. Caddie is adjusting the build.',
+	status: 'changed',
+	runId: 'run-7',
+	primaryAction: { label: 'View activity', kind: 'inspect', targetId: 'run-7' },
+	key: 'proj-a:result:run-7',
+});
+
+test.describe('U step 1 — look, footer, build rail', () => {
+	test('a building card shows the four-stage rail at "Building" and a footer; desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [BUILD_CARD], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const built = page.getByTestId('decision-card').filter({ hasText: 'Your app is taking shape' });
+		const rail = built.getByTestId('card-build-rail');
+		await expect(rail).toBeVisible();
+		// Four named stages, in order.
+		await expect(rail.locator('.compact-card-step')).toHaveText(['Plan approved', 'Building', 'Checking', 'Ready to try']);
+		// Plan approved is done; Building is the active stage; later ones pending.
+		await expect(rail.locator('[data-step="plan"]')).toHaveAttribute('data-state', 'done');
+		await expect(rail.locator('[data-step="build"]')).toHaveAttribute('data-state', 'active');
+		await expect(rail.locator('[data-step="check"]')).toHaveAttribute('data-state', 'pending');
+		await expect(rail.locator('[data-step="preview"]')).toHaveAttribute('data-state', 'pending');
+		// Footer reassurance (derived from design, no ids).
+		const foot = built.getByTestId('card-foot');
+		await expect(foot).toContainText('Preview appears after the checks pass.');
+		await expect(foot).not.toContainText('run-7');
+		await built.screenshot({ path: join(SHOTS, 'u1-build-card-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(rail).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await built.screenshot({ path: join(SHOTS, 'u1-build-card-390.png') });
+		await context.close();
+	});
+
+	test('a repairing card advances the rail to "Checking" (Building done); desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [REPAIR_CARD], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const repairing = page.getByTestId('decision-card').filter({ hasText: 'One check needs another pass' });
+		const rail = repairing.getByTestId('card-build-rail');
+		await expect(rail.locator('[data-step="build"]')).toHaveAttribute('data-state', 'done');
+		await expect(rail.locator('[data-step="check"]')).toHaveAttribute('data-state', 'active');
+		await expect(rail.locator('[data-step="preview"]')).toHaveAttribute('data-state', 'pending');
+		await expect(repairing.getByTestId('card-foot')).toContainText('Preview held until the checks pass.');
+		await repairing.screenshot({ path: join(SHOTS, 'u1-repair-card-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(rail).toBeVisible();
+		await repairing.screenshot({ path: join(SHOTS, 'u1-repair-card-390.png') });
+		await context.close();
+	});
+
+	test('a plan approval card carries a footer and no build rail', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [APPROVAL_A], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const plan = page.getByTestId('decision-card').filter({ hasText: 'Design review is waiting on you' });
+		await expect(plan.getByTestId('card-build-rail')).toHaveCount(0);
+		await expect(plan.getByTestId('card-foot')).toContainText('Nothing starts until you approve.');
+		await context.close();
+	});
+});
+
 test('Earlier loads archived decisions on demand and retains the exact decision target',async({browser})=>{
  const context=await browser.newContext({viewport:{width:390,height:844}});
  await stubAccount(context,{cards:[{...APPROVAL_A,status:'handled',headline:'Recent approval',primaryAction:{kind:'review',label:'View decision',targetId:'ap-1'}}]});

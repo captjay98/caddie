@@ -7,7 +7,7 @@ import { Mascot } from '@caddie/ui/Mascot';
 import { PageSkeleton, StatePanel, StaleChip, failureKind, type StateKind } from '../states.tsx';
 import { Icon } from '../icons.tsx';
 import { DecisionHistory } from './DecisionHistory.tsx';
-import { CardHeader, CardPanel } from './CardFrame.tsx';
+import { CardHeader, CardPanel, BuildRail, CardFooter } from './CardFrame.tsx';
 import { cardDesign, CARD_DESIGNS } from './card-design.ts';
 
 /**
@@ -36,6 +36,32 @@ const ACTION_WORDS: Record<DecisionCardType['primaryAction']['kind'], string> = 
 function evidenceWords(count: number): string {
 	if (count === 0) return 'No evidence is attached yet.';
 	return `It rests on ${count} ${count === 1 ? 'piece' : 'pieces'} of evidence.`;
+}
+
+/**
+ * The footer reassurance line (mockup `cc-bottom`, right side), by design. It
+ * is derived from the card's design alone — no new data — and states the one
+ * thing the mockup keeps bottom-right: that opening the card commits nothing.
+ * A design with no standing reassurance returns null and the footer note is
+ * omitted.
+ */
+function footerNote(design: ReturnType<typeof cardDesign>): string | null {
+	switch (design) {
+		case 'plan':
+			return 'Nothing starts until you approve.';
+		case 'build':
+			return 'Preview appears after the checks pass.';
+		case 'repair':
+			return 'Preview held until the checks pass.';
+		case 'preview':
+			return 'Publishing is a separate decision.';
+		case 'deadline':
+			return 'Deadline linked to its source.';
+		case 'opportunity':
+			return 'Reviewing or saving does not start a build.';
+		default:
+			return null;
+	}
 }
 
 /**
@@ -94,6 +120,7 @@ export function DecisionCardView(props: {
             {props.seen === false ? <span className="sr-only" data-testid="card-unseen">New</span> : null}
 			<h3>{card.headline}</h3>
 			{design === 'plan' ? <CardPanel title="What you’re reviewing"><p className="summary">{card.summary}</p></CardPanel> : <p className="summary">{card.summary}</p>}
+            {design === 'build' || design === 'repair' ? <BuildRail design={design} /> : null}
             {design === 'build' || design === 'repair' ? <p className="compact-card-note">{design === 'repair' ? 'The preview stays held while checks and repairs continue.' : 'Preview appears after the checks pass.'}</p> : null}
             {design === 'plan' ? <p className="compact-card-note">Opening this card does not approve anything. Review the original before deciding.</p> : null}
 			<div className="card-meta" data-testid="card-meta">
@@ -144,6 +171,7 @@ export function DecisionCardView(props: {
 					</details>
 				</div>
 			) : null}
+			<CardFooter subject={props.contextLabel} note={footerNote(design) ?? undefined} />
 		</article>
 	);
 }

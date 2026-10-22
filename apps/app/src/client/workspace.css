@@ -8934,6 +8934,20 @@ mark {
 .compact-card-note { margin:6px 0; font-size:12px; line-height:1.6; color:var(--color-muted); }
 .compact-card-pulse { width:6px; height:6px; flex:none; border-radius:50%; background:var(--card-accent, var(--color-action)); animation:card-pulse 1.8s ease-in-out infinite; }
 @keyframes card-pulse { 50% { opacity:.35; box-shadow:0 0 0 4px color-mix(in srgb,var(--card-accent, var(--color-action)) 12%,transparent); } }
+/* Build rail (mockup "Live build"): four flat stage columns, a 3px top bar per
+ * stage — grey pending, accent active, green done. No new data: derived from
+ * the card's design (build → Building, repair → Checking). */
+.compact-card-rail { list-style:none; margin:14px 0 4px; padding:0; display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+.compact-card-step { display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--color-muted); }
+.compact-card-step::before { content:""; height:3px; border-radius:3px; background:var(--color-line); }
+.compact-card-step[data-state="done"]::before { background:var(--color-ok, #279f76); }
+.compact-card-step[data-state="active"]::before { background:var(--card-accent, var(--color-action)); }
+.compact-card-step[data-state="active"] { color:var(--card-accent, var(--color-action)); font-weight:650; }
+/* Card footer (mockup `cc-bottom`): a quiet divider, subject left, reassurance
+ * right; wraps on a narrow card. Omitted entirely when it would be empty. */
+.compact-card-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px solid var(--color-line); font-size:11px; color:var(--color-muted); }
+.compact-card-foot-note { text-align:right; }
+.compact-card-panel[data-panel-tone="caution"] { background:color-mix(in srgb, var(--color-warn, #c28b34) 7%, transparent); }
 .caddie-card .workflow-heading { margin-block:8px 14px; gap:10px; }
 .caddie-card .workflow-heading h3 { font-size:20px; letter-spacing:-.025em; }
 .project-workflow > .build-progress { border:0; background:transparent; padding:0; box-shadow:none; }
