@@ -3,7 +3,9 @@ import { DEFAULT_APP_LIMITS } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { AppHostError, type AppHost, type AppHostBinding, type ScanResult } from './app-host.ts';
 import { checkApprovalForEffect } from './approvals.ts';
-import { resolveAppSecrets } from './app-secrets.ts';
+import { resolveAppSecrets, listAppSecrets } from './app-secrets.ts';
+import { readSwitch } from './platform-switches.ts';
+import { checkPublishSafety, type OutputVerifyReceipts } from './publish-safety.ts';
 import { appAuthSecret } from './app-sign-in.ts';
 import { readOutputManifest, readPublishBundle, readWorkflow } from './build-workflow.ts';
 import { createD1ContentStore } from './artifacts.ts';
@@ -77,6 +79,20 @@ export interface PublishDeps {
 	authSecret?: string | null;
 	sleep?: (ms: number) => Promise<void>;
 	now?: () => string;
+	/**
+	 * Switch defaults (env) for reading `publish_safety`. Omitted means the env
+	 * fallback ('on') applies — publish safety is on unless the owner turned it
+	 * off through the operator route.
+	 */
+	switchEnv?: { PUBLISH_SAFETY?: string } | null;
+	/**
+	 * Team-mode part G: the output's OWN recorded contract-check receipts, keyed
+	 * by output id, so a publish binds to this exact output. The host supplies it
+	 * once it records receipts (host-checks.ts writes the green/red map); until
+	 * then it is absent and only the bundle key scan runs. Returning null means
+	 * "no receipts for this output" — in team mode that blocks the publish.
+	 */
+	readOutputContractReceipts?: (projectId: string, outputId: string) => Promise<OutputVerifyReceipts | null> | OutputVerifyReceipts | null;
 }
 
 // --- addresses -------------------------------------------------------------------
@@ -382,6 +398,51 @@ async function keysForPublish(db: D1Database, deps: PublishDeps, projectId: stri
 	return resolved.values;
 }
 
+/**
+ * Publish safety (plan part G). Refuses a bundle with a saved app key or a
+ * key-shaped string anywhere in its code, and — in team mode — unless this
+ * output's own verify receipts show the sign-in, second-person and restart
+ * checks green (bound to the output id). `publish_safety=off` logs the findings
+ * and does not block (D6, §11). On a refusal it throws a plain 409 the owner can
+ * act on; the findings are never a secret value, only where and what kind.
+ */
+async function assertPublishSafe(
+	db: D1Database,
+	deps: PublishDeps,
+	scope: Scope,
+	outputId: string,
+	bundle: { js: string; css: string; server: string | null },
+): Promise<void> {
+	const publishSafety = await readSwitch(db, deps.switchEnv ?? null, 'publish_safety');
+	const workflow = await readWorkflow(db, scope).catch(() => null);
+	const teamMode = (workflow as { teamMode?: number } | null)?.teamMode === 1;
+	const savedKeyNames = (await listAppSecrets(db, scope).catch(() => [])).map((s) => s.name);
+	const receipts =
+		teamMode && deps.readOutputContractReceipts ? await deps.readOutputContractReceipts(scope.projectId, outputId) : null;
+
+	const result = checkPublishSafety({
+		outputId,
+		js: bundle.js,
+		css: bundle.css,
+		server: bundle.server,
+		savedKeyNames,
+		teamMode,
+		publishSafety: publishSafety === 'off' ? 'off' : 'on',
+		receipts,
+	});
+
+	if (result.findings.length > 0) {
+		// Always record the findings (kinds + where, never a value) for the owner.
+		console.warn(
+			`publish-safety: ${outputId} — ${result.findings.map((f) => `${f.kind} in ${f.where}`).join('; ')}` +
+				(result.refused ? ' (refused)' : ' (publish_safety off — logged only)'),
+		);
+	}
+	if (result.refused) {
+		throw new ScopeError(409, 'PUBLISH_UNSAFE', result.message ?? 'This version cannot be published yet.');
+	}
+}
+
 async function deployOutput(
 	db: D1Database,
 	deps: PublishDeps,
@@ -391,6 +452,13 @@ async function deployOutput(
 	const now = deps.now ?? (() => new Date().toISOString());
 	const bundle = await readPublishBundle(db, scope, input.outputId);
 	const project = await getProject(db, scope);
+
+	// Publish safety (plan part G), bound to this exact output: refuse a bundle
+	// that ships a saved app key or a key-shaped string, and — in team mode —
+	// unless this output's own verify receipts show the sign-in, second-person
+	// and restart checks green. `publish_safety=off` logs only, never blocks.
+	await assertPublishSafe(db, deps, scope, input.outputId, bundle);
+
 	let publication = await readPublication(db, scope.projectId);
 	if (publication?.status === 'blocked') {
 		throw new ScopeError(403, 'APP_BLOCKED', "This app was taken down for breaking Caddie's rules, so it can't be published.");

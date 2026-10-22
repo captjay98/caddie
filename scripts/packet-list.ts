@@ -330,6 +330,10 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/architecture-block.test.ts',
 			'tests/contract-restart-spike.test.ts',
 			'tests/brief-run.test.ts',
+			// Part E (contract checks) + part G (publish safety), lane 4.
+			'tests/publish-safety.test.ts',
+			'tests/host-checks-contract.test.ts',
+			'tests/contract-checks.test.ts',
 		],
 		browser: [],
 		live: [],
