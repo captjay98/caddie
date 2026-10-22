@@ -22,7 +22,9 @@ import type {
 } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { projectScopeForUser, ScopeError } from './scope.ts';
-import { decideWorkflow, workflowSnapshot, type BuildWorkflow } from './build-workflow.ts';
+import { decideWorkflow, workflowSnapshot, readWorkflow, type BuildWorkflow } from './build-workflow.ts';
+import { listBuildFeatures } from './build-features.ts';
+import { canTryAgainFromSavePoint } from './build-steps.ts';
 import { getProject } from './projects.ts';
 import { buildActivity } from './build-activity.ts';
 
@@ -113,6 +115,7 @@ function actionsOf(
 	stage: ProjectExperience['stage'],
 	hasPlan: boolean,
 	hasPreview: boolean,
+	canTryAgain: boolean,
 ): ExperienceAction[] {
 	switch (stage) {
 		case 'planning':
@@ -146,6 +149,15 @@ function actionsOf(
 				{ kind: 'suggest_change', label: 'Request a change', enabled: true, primary: false },
 			];
 		case 'blocked':
+			// Team mode (part F): a build stopped after three failed tries offers
+			// "try this feature again from the last save point" as the primary
+			// action; the resume (retryWorkflow) stays as a secondary. With team
+			// mode off canTryAgain is false, so only the resume shows (unchanged).
+			if (canTryAgain)
+				return [
+					{ kind: 'try_again', label: 'Try this feature again', enabled: true, primary: true },
+					{ kind: 'retry', label: 'Resume the build', enabled: true, primary: false },
+				];
 			// The button resumes the build (retryWorkflow); a stalled build's
 			// message says "Press Retry to continue from here".
 			return [{ kind: 'retry', label: 'Retry build', enabled: true, primary: true }];
@@ -177,6 +189,19 @@ export async function projectExperience(db: D1Database, scope: Scope): Promise<P
 	// workflow points at AND that plan is approved.
 	const previewCurrent = hasPreview && Boolean(plan) && workflow?.planId === plan!.id && planApproved;
 
+	// Team mode (part F): offer "try this feature again from the last save
+	// point" only on a stopped team-mode build after three failed tries. The
+	// gate reads teamMode + the feature rows; with team mode off it is false, so
+	// the blocked stage shows only the resume action (unchanged behaviour). Read
+	// the full workflow (teamMode) and the feature rows; cheap and only when
+	// blocked.
+	let canTryAgain = false;
+	if (stage === 'blocked') {
+		const full = await readWorkflow(db, scope);
+		const features = full?.planId ? await listBuildFeatures(db, scope.projectId, full.planId) : [];
+		canTryAgain = canTryAgainFromSavePoint(full, features);
+	}
+
 	return {
 		projectId: scope.projectId,
 		version: versionOf(workflow),
@@ -186,7 +211,7 @@ export async function projectExperience(db: D1Database, scope: Scope): Promise<P
 			? { id: previewId, revision: plan ? String(plan.revision) : 'unknown', current: previewCurrent }
 			: null,
 		message: messageOf(stage, workflow, planApproved),
-		actions: actionsOf(stage, hasPlan, hasPreview),
+		actions: actionsOf(stage, hasPlan, hasPreview, canTryAgain),
 	};
 }
 

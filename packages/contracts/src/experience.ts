@@ -56,6 +56,9 @@ export const ExperienceActionKind = v.union([
 	v.literal('suggest_change'),
 	v.literal('stop'),
 	v.literal('retry'),
+	// Team mode (part F): "Try this feature again from the last save point",
+	// offered on a stopped team-mode build after three failed tries.
+	v.literal('try_again'),
 	v.literal('open_preview'),
 	v.literal('resolve_input'),
 ]);

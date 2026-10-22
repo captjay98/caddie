@@ -11,7 +11,7 @@ import type { ExperienceAction, ExperienceStage, ProjectExperience } from '@cadd
 export type NowRoute =
 	| { readonly kind: 'tab'; readonly to: '/design-review' }
 	| { readonly kind: 'chat' }
-	| { readonly kind: 'post'; readonly path: 'workflow/retry' | 'workflow/stop' };
+	| { readonly kind: 'post'; readonly path: 'workflow/retry' | 'workflow/stop' | 'workflow/try-again' };
 
 export interface NowButton {
 	readonly kind: ExperienceAction['kind'];
@@ -59,6 +59,8 @@ function routeFor(kind: ExperienceAction['kind']): NowRoute {
 			return { kind: 'tab', to: '/design-review' };
 		case 'retry':
 			return { kind: 'post', path: 'workflow/retry' };
+		case 'try_again':
+			return { kind: 'post', path: 'workflow/try-again' };
 		case 'stop':
 			return { kind: 'post', path: 'workflow/stop' };
 		case 'review_design':
