@@ -122,6 +122,10 @@ interface BriefCard {
 	runId?: string;
 	key?: string;
 	seen?: boolean;
+	deadline?: { daysLeft: number; dateLabel: string; timeLabel: string; source?: string };
+	planItems?: { title: string; detail?: string }[];
+	fit?: { reasons: string[]; cautions: string[] };
+	checks?: { passed: number; items: string[]; version?: string };
 }
 
 function card(overrides: Partial<BriefCard> & { id: string; projectId: string; kind: BriefCard['kind'] }): BriefCard {
@@ -691,6 +695,57 @@ test.describe('U step 1 — look, footer, build rail', () => {
 		const plan = page.getByTestId('decision-card').filter({ hasText: 'Design review is waiting on you' });
 		await expect(plan.getByTestId('card-build-rail')).toHaveCount(0);
 		await expect(plan.getByTestId('card-foot')).toContainText('Nothing starts until you approve.');
+		await context.close();
+	});
+});
+
+// --- U (lane 14) step 2: the deadline countdown -----------------------------
+const DEADLINE_WITH_COUNTDOWN = card({
+	id: 'brf_schedule_sch-dl',
+	projectId: 'proj-b',
+	kind: 'deadline',
+	headline: 'Farm Innovation Challenge is scheduled',
+	summary: 'Next run Friday, 23 October 2026 at 17:00 (Africa/Lagos).',
+	status: 'needs-you',
+	primaryAction: { label: 'Open the schedule', kind: 'review', targetId: 'sch-dl' },
+	key: 'proj-b:deadline:sch-dl',
+	deadline: { daysLeft: 3, dateLabel: 'Friday, 23 October', timeLabel: '17:00', source: 'Farm Innovation Challenge (Africa/Lagos)' },
+});
+
+test.describe('U step 2 — deadline countdown', () => {
+	test('a deadline card shows the days-left countdown with its readable date; desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [DEADLINE_WITH_COUNTDOWN], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const row = page.getByTestId('brief-deadline-row');
+		const countdown = row.getByTestId('card-countdown');
+		await expect(countdown).toBeVisible();
+		await expect(row.getByTestId('card-days-left')).toHaveText('3');
+		await expect(countdown).toContainText('days left');
+		await expect(countdown).toContainText('Friday, 23 October');
+		await expect(countdown).toContainText('17:00');
+		// The source names the schedule + timezone, never a raw id.
+		await expect(countdown).toContainText('Africa/Lagos');
+		await expect(countdown).not.toContainText('sch-dl');
+		await row.screenshot({ path: join(SHOTS, 'u2-deadline-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(countdown).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await row.screenshot({ path: join(SHOTS, 'u2-deadline-390.png') });
+		await context.close();
+	});
+
+	test('a deadline card with no countdown field falls back to its summary', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [DEADLINE_B], unseenCount: 0 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const row = page.getByTestId('brief-deadline-row');
+		await expect(row.getByTestId('card-countdown')).toHaveCount(0);
+		await expect(row).toContainText('Weekly discovery sweep');
 		await context.close();
 	});
 });

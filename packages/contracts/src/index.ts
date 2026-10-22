@@ -186,6 +186,46 @@ export const DecisionCardSchema = v.pipe(
 		/** True once the actor has marked this card read (explicit action or
 		 *  "mark all read"). Read state NEVER resolves the underlying work. */
 		seen: v.optional(v.boolean()),
+		/**
+		 * OPTIONAL CARD DETAIL FIELDS (Brief cards, lane 14). Every one is
+		 * filled by the server from a REAL record or left absent; the card
+		 * falls back to its summary when a field has no source. Nothing is
+		 * guessed from the summary.
+		 */
+		/** Deadline countdown (deadline cards): days left + a readable date in
+		 *  the deadline's own timezone, and the source it was read from. */
+		deadline: v.optional(
+			v.strictObject({
+				daysLeft: v.pipe(v.number(), v.integer(), v.minValue(0)),
+				dateLabel: v.string(),
+				timeLabel: v.string(),
+				source: v.optional(v.string()),
+			}),
+		),
+		/** "What you're approving" (plan cards): the plan's own feature list,
+		 *  each a title with an optional one-line detail. */
+		planItems: v.optional(
+			v.array(
+				v.strictObject({ title: v.string(), detail: v.optional(v.string()) }),
+			),
+		),
+		/** The fit split (opportunity cards): why it fits and what to confirm
+		 *  before committing, read from the candidate's own requirements. */
+		fit: v.optional(
+			v.strictObject({
+				reasons: v.array(v.string()),
+				cautions: v.array(v.string()),
+			}),
+		),
+		/** The ready card's preview checks: how many checks passed, the named
+		 *  features behind them, and the version tried. */
+		checks: v.optional(
+			v.strictObject({
+				passed: v.pipe(v.number(), v.integer(), v.minValue(0)),
+				items: v.array(v.string()),
+				version: v.optional(v.string()),
+			}),
+		),
 	}),
 	v.readonly(),
 );

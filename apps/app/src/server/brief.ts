@@ -42,6 +42,37 @@ function plainCheck(issue: string): string {
 }
 
 /**
+ * The deadline countdown parts for a card (lane 14 step 2), computed from a
+ * real timestamp in its own timezone: whole days left (floored, never
+ * negative), the date a person reads ("Friday, 23 October"), and the time of
+ * day ("17:00"). Returns null when the timestamp cannot be parsed, so the card
+ * keeps its summary instead of showing "Invalid Date". `nowIso` is passed in
+ * so the count is deterministic in tests.
+ */
+export function deadlineParts(
+	iso: string,
+	timezone: string,
+	nowIso: string,
+): { daysLeft: number; dateLabel: string; timeLabel: string } | null {
+	const when = new Date(iso);
+	const now = new Date(nowIso);
+	if (Number.isNaN(when.getTime()) || Number.isNaN(now.getTime())) return null;
+	const tz = (opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat => {
+		try {
+			return new Intl.DateTimeFormat('en-GB', { ...opts, timeZone: timezone });
+		} catch {
+			return new Intl.DateTimeFormat('en-GB', { ...opts, timeZone: 'UTC' });
+		}
+	};
+	// Days left measured as whole calendar days between the two instants,
+	// floored and clamped at zero — a passed deadline reads "0 days left".
+	const daysLeft = Math.max(0, Math.floor((when.getTime() - now.getTime()) / 86_400_000));
+	const dateLabel = tz({ weekday: 'long', day: 'numeric', month: 'long' }).format(when);
+	const timeLabel = tz({ hour: '2-digit', minute: '2-digit', hour12: false }).format(when);
+	return { daysLeft, dateLabel, timeLabel };
+}
+
+/**
  * UI review board screen 05/06 — the brief feed. `GET /api/projects/:id/brief`
  * reads the project's REAL state and projects it onto the frozen DecisionCard
  * contract; the workspace Brief lane renders what a run, a re-read, a gate or
@@ -264,21 +295,29 @@ async function failedRunCards(db: D1Database, projectId: string): Promise<Decisi
 	return cards;
 }
 
-async function scheduleCards(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
+async function scheduleCards(db: D1Database, scope: Scope, nowIso: string): Promise<DecisionCard[]> {
 	const schedules = await listSchedules(db, scope);
 	return schedules
 		.filter((schedule) => !schedule.paused)
-		.map((schedule) => ({
-			id: newCardId('schedule', schedule.id),
-			projectId: scope.projectId,
-			kind: 'deadline',
-			headline: `${schedule.name} is scheduled`,
-			summary: `Next run ${readableDate(schedule.nextRunAt, schedule.timezone)} (${schedule.timezone}). A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
-			evidenceIds: [],
-			status: 'handled',
-			updatedAt: schedule.updatedAt,
-			primaryAction: { label: 'Open the schedule', kind: 'review', targetId: schedule.id },
-		}));
+		.map((schedule) => {
+			const parts = deadlineParts(schedule.nextRunAt, schedule.timezone, nowIso);
+			return {
+				id: newCardId('schedule', schedule.id),
+				projectId: scope.projectId,
+				kind: 'deadline',
+				headline: `${schedule.name} is scheduled`,
+				summary: `Next run ${readableDate(schedule.nextRunAt, schedule.timezone)} (${schedule.timezone}). A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
+				evidenceIds: [],
+				status: 'handled',
+				updatedAt: schedule.updatedAt,
+				primaryAction: { label: 'Open the schedule', kind: 'review', targetId: schedule.id },
+				// A parseable next-run instant gives the countdown parts; an
+				// unparseable one leaves the field absent and the summary stands.
+				...(parts
+					? { deadline: { ...parts, source: `${schedule.name} (${schedule.timezone})` } }
+					: {}),
+			} satisfies DecisionCard;
+		});
 }
 
 /** The project's brief: every live decision the project's own state demands. */
@@ -323,7 +362,7 @@ export async function projectBrief(db: D1Database, scope: Scope): Promise<Decisi
 			console.error('brief: run-round query failed:', error);
 			return [] as DecisionCard[];
 		}),
-		scheduleCards(db, verified).catch((error) => {
+		scheduleCards(db, verified, nowIso).catch((error) => {
 			console.error('brief: schedule listing failed:', error);
 			return [] as DecisionCard[];
 		}),

@@ -120,6 +120,19 @@ export function DecisionCardView(props: {
             {props.seen === false ? <span className="sr-only" data-testid="card-unseen">New</span> : null}
 			<h3>{card.headline}</h3>
 			{design === 'plan' ? <CardPanel title="What you’re reviewing"><p className="summary">{card.summary}</p></CardPanel> : <p className="summary">{card.summary}</p>}
+            {card.deadline ? (
+                <div className="compact-card-countdown" data-testid="card-countdown">
+                    <div className="compact-card-days">
+                        <b data-testid="card-days-left">{card.deadline.daysLeft}</b>
+                        <span>{card.deadline.daysLeft === 1 ? 'day left' : 'days left'}</span>
+                    </div>
+                    <div className="compact-card-when">
+                        <strong>{card.deadline.dateLabel}</strong>
+                        <p>{card.deadline.timeLabel}</p>
+                        {card.deadline.source ? <p className="compact-card-when-source">{card.deadline.source}</p> : null}
+                    </div>
+                </div>
+            ) : null}
             {design === 'build' || design === 'repair' ? <BuildRail design={design} /> : null}
             {design === 'build' || design === 'repair' ? <p className="compact-card-note">{design === 'repair' ? 'The preview stays held while checks and repairs continue.' : 'Preview appears after the checks pass.'}</p> : null}
             {design === 'plan' ? <p className="compact-card-note">Opening this card does not approve anything. Review the original before deciding.</p> : null}

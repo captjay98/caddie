@@ -567,3 +567,54 @@ describe('brief cards never show raw machine strings', () => {
 		}
 	});
 });
+
+// --- OPTIONAL CARD DETAIL FIELDS (Brief cards, lane 14) --------------------------
+// Each new field comes from a REAL record or is absent — never guessed. The
+// deterministic helper is tested directly; the card-level tests prove the field
+// is attached (or absent) from the same seeded state.
+
+import { deadlineParts } from '../apps/app/src/server/brief.ts';
+
+describe('deadline countdown (lane 14 step 2)', () => {
+	test('deadlineParts counts whole days and reads the date in the deadline timezone', () => {
+		// 3 days + a few hours ahead, in Africa/Lagos (UTC+1). 16:00 UTC = 17:00 WAT.
+		const parts = deadlineParts('2026-10-23T16:00:00.000Z', 'Africa/Lagos', '2026-10-20T08:00:00.000Z');
+		expect(parts).not.toBeNull();
+		expect(parts!.daysLeft).toBe(3);
+		expect(parts!.dateLabel).toContain('October');
+		expect(parts!.dateLabel).toContain('Friday');
+		expect(parts!.timeLabel).toBe('17:00');
+	});
+
+	test('a passed deadline floors at zero days, never negative', () => {
+		const parts = deadlineParts('2026-10-01T00:00:00.000Z', 'UTC', '2026-10-20T08:00:00.000Z');
+		expect(parts!.daysLeft).toBe(0);
+	});
+
+	test('an unparseable timestamp yields no parts, so the card keeps its summary', () => {
+		expect(deadlineParts('not a date', 'UTC', '2026-10-20T08:00:00.000Z')).toBeNull();
+	});
+
+	test('an armed schedule card carries a deadline field; a card with no schedule has none', async () => {
+		const world = makeWorld();
+		try {
+			seedAliceState(world.sqlite);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const schedule = cards.find((card) => card.kind === 'deadline' && card.primaryAction.targetId === 'unit-sch-armed');
+			expect(schedule).toBeDefined();
+			// The field is present, with a readable date and a non-negative count —
+			// mutation proof: drop the `...(parts ? {deadline} : {})` spread in
+			// scheduleCards and this field is undefined.
+			expect(schedule!.deadline).toBeDefined();
+			expect(typeof schedule!.deadline!.daysLeft).toBe('number');
+			expect(schedule!.deadline!.daysLeft).toBeGreaterThanOrEqual(0);
+			expect(schedule!.deadline!.dateLabel).toMatch(/October/);
+			expect(schedule!.deadline!.source).toContain('Africa/Lagos');
+			// A non-deadline card (the pending approval) never carries it.
+			const approval = cards.find((card) => card.kind === 'approval');
+			expect(approval!.deadline).toBeUndefined();
+		} finally {
+			world.sqlite.close();
+		}
+	});
+});
