@@ -1,4 +1,5 @@
 import type { ApprovalAction, DecisionCard, Scope } from '@caddie/contracts';
+import { parsePlanFeatures } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { assertProjectScope } from './scope.ts';
 import { listClaims, surveyClaims } from './evidence/claims.ts';
@@ -6,6 +7,7 @@ import { listArtifacts } from './artifacts.ts';
 import { listSchedules } from './schedules.ts';
 import type { AccountBriefPayload, BriefSummary } from '@caddie/contracts';
 import { listProjectsForActor } from './projects.ts';
+import { listPlanDocRevisions } from './projects.ts';
 import { listCandidates } from './discovery.ts';
 import { listPreviews } from './previews.ts';
 import { listPackages, getReadiness } from './submission.ts';
@@ -157,7 +159,8 @@ interface ApprovalRow {
 	decidedAt: string | null;
 }
 
-async function pendingApprovalCards(db: D1Database, projectId: string, nowIso: string): Promise<DecisionCard[]> {
+async function pendingApprovalCards(db: D1Database, scope: Scope, nowIso: string): Promise<DecisionCard[]> {
+	const projectId = scope.projectId;
 	const rows = await queryAll(
 		db,
 		`select "id", "action", "resourceId", "revisionHash", "createdAt", "expiresAt", "status", "decidedAt"
@@ -174,7 +177,50 @@ async function pendingApprovalCards(db: D1Database, projectId: string, nowIso: s
         projectId,
         nowIso,
 	);
- return rows.map(row => approvalCard(row, projectId, nowIso));
+ const cards = rows.map(row => approvalCard(row, projectId, nowIso));
+ // Step 3: "What you're approving" — fill the plan's own feature list onto a
+ // PENDING card whose plan body really carries a caddie-features block. The
+ // revisions are fetched once; a decided card and a plan with no list stay as
+ // they were (the card then shows its summary).
+ if (cards.some(card => card.status === 'needs-you')) {
+  const items = await planItemsFor(db, scope).catch(error => {
+   console.error('brief: plan-items read failed:', error);
+   return new Map<string, { title: string; detail?: string }[]>();
+  });
+  for (const card of cards) {
+   const resourceId = String((card as { _resourceId?: string })._resourceId ?? '');
+   const list = items.get(resourceId);
+   if (card.status === 'needs-you' && list && list.length > 0) {
+    (card as { planItems?: unknown }).planItems = list;
+   }
+   delete (card as { _resourceId?: string })._resourceId;
+  }
+ }
+ return cards;
+}
+
+/**
+ * The plan's own feature list, keyed by the plan-doc revision id an approval
+ * points at (its `resourceId`). Read from the real plan-doc body's
+ * `caddie-features` block: each feature becomes a title plus its first
+ * `doneWhen` check as the one-line detail. A plan with no block contributes
+ * nothing, so the card keeps its summary — nothing is guessed.
+ */
+async function planItemsFor(db: D1Database, scope: Scope): Promise<Map<string, { title: string; detail?: string }[]>> {
+	const revisions = await listPlanDocRevisions(db, scope);
+	const byResource = new Map<string, { title: string; detail?: string }[]>();
+	for (const revision of revisions) {
+		const parsed = parsePlanFeatures(revision.body);
+		if (!parsed.ok) continue;
+		byResource.set(
+			revision.id,
+			parsed.features.map((feature) => ({
+				title: feature.title,
+				...(feature.doneWhen[0] ? { detail: feature.doneWhen[0] } : {}),
+			})),
+		);
+	}
+	return byResource;
 }
 function approvalCard(row: Record<string, unknown>, projectId: string, nowIso: string): DecisionCard {
 		const approval = row as unknown as ApprovalRow;
@@ -191,7 +237,10 @@ function approvalCard(row: Record<string, unknown>, projectId: string, nowIso: s
 			status: pending ? 'needs-you' : 'handled',
 			updatedAt: pending ? approval.createdAt : approval.decidedAt ?? (outcome === 'expired' ? approval.expiresAt : approval.createdAt),
 			primaryAction: { label: pending ? copy.label : 'View decision', kind: 'review', targetId: approval.id },
-		} satisfies DecisionCard;
+			// Carried off-contract so pendingApprovalCards can match the plan-doc
+			// revision; stripped before the card is returned.
+			_resourceId: approval.resourceId,
+		} as DecisionCard & { _resourceId: string };
 }
 
 export interface ApprovalHistoryPage { cards: DecisionCard[]; next: { at: string; id: string } | null }
@@ -347,7 +396,7 @@ export async function projectBrief(db: D1Database, scope: Scope): Promise<Decisi
 	const verified = await assertProjectScope(db, scope);
 	const nowIso = new Date().toISOString();
 	const [approvals, conflicts, staleArtifacts, failedRuns, schedules, workflow] = await Promise.all([
-		pendingApprovalCards(db, verified.projectId, nowIso),
+		pendingApprovalCards(db, verified, nowIso),
 		conflictCards(db, verified).catch((error) => {
 			// The evidence layer is independent: its absence must not blank the
 			// rest of the brief.

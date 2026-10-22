@@ -618,3 +618,77 @@ describe('deadline countdown (lane 14 step 2)', () => {
 		}
 	});
 });
+
+describe('"What you\u2019re approving" plan list (lane 14 step 3)', () => {
+	const FEATURE_BLOCK = [
+		'# FarmLog AI',
+		'A daily farm log.',
+		'',
+		'```caddie-features',
+		JSON.stringify([
+			{ id: 'daily-records', title: 'Daily records, without the paperwork', doneWhen: ['Add feeding, treatments and observations in one place', 'The entry is still there after a reload'] },
+			{ id: 'offline', title: 'Keep recording when you\u2019re offline', doneWhen: ['Your entries sync when the connection returns'] },
+		]),
+		'```',
+	].join('\n');
+
+	function seedPlanDoc(sqlite: Database, id: string, revision: number, body: string): void {
+		sqlite.prepare(
+			'insert into "plan_doc_revisions" ("id","projectId","kind","revision","bodyHash","body","createdBy","createdAt") values (?,?,?,?,?,?,?,?)',
+		).run(id, 'unit-proj-a', 'prd', revision, `hash-${id}`, body, 'unit-alice', ISO);
+	}
+
+	test('a pending design approval carries the plan\u2019s feature list from its real body', async () => {
+		const world = makeWorld();
+		try {
+			seedAliceState(world.sqlite);
+			// unit-ap-live.resourceId === 'plan-r4'.
+			seedPlanDoc(world.sqlite, 'plan-r4', 4, FEATURE_BLOCK);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const approval = cards.find((card) => card.kind === 'approval' && card.status === 'needs-you');
+			expect(approval).toBeDefined();
+			// Mutation proof: drop the `planItems` assignment in pendingApprovalCards
+			// and this field is undefined.
+			expect(approval!.planItems).toBeDefined();
+			expect(approval!.planItems!.map((item) => item.title)).toEqual([
+				'Daily records, without the paperwork',
+				'Keep recording when you\u2019re offline',
+			]);
+			// The detail is the feature's first doneWhen check, in plain words.
+			expect(approval!.planItems![0]!.detail).toBe('Add feeding, treatments and observations in one place');
+			// No machine id leaks onto the list.
+			for (const item of approval!.planItems!) expect(item.title).not.toMatch(/\b[a-z0-9-]+:[a-z0-9-]+\b/);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a plan with no feature block leaves planItems absent, so the card keeps its summary', async () => {
+		const world = makeWorld();
+		try {
+			seedAliceState(world.sqlite);
+			seedPlanDoc(world.sqlite, 'plan-r4', 4, '# FarmLog AI\nA daily farm log, prose only, no feature block.');
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const approval = cards.find((card) => card.kind === 'approval' && card.status === 'needs-you');
+			expect(approval!.planItems).toBeUndefined();
+			expect(approval!.summary).toContain('Approving this authorises');
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a decided (handled) approval never carries a plan list', async () => {
+		const world = makeWorld();
+		try {
+			seedAliceState(world.sqlite);
+			// plan-r3 belongs to the already-decided unit-ap-done.
+			seedPlanDoc(world.sqlite, 'plan-r3', 3, FEATURE_BLOCK);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const decided = cards.find((card) => card.kind === 'approval' && card.status === 'handled' && card.primaryAction.targetId === 'unit-ap-done');
+			expect(decided).toBeDefined();
+			expect(decided!.planItems).toBeUndefined();
+		} finally {
+			world.sqlite.close();
+		}
+	});
+});

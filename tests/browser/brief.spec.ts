@@ -750,6 +750,59 @@ test.describe('U step 2 — deadline countdown', () => {
 	});
 });
 
+// --- U (lane 14) step 3: "What you're approving" — the plan's list ----------
+const PLAN_WITH_ITEMS = card({
+	id: 'brf_approval_ap-plan',
+	projectId: 'proj-a',
+	kind: 'approval',
+	headline: 'Your farm log, ready to build',
+	summary: 'Approving this authorises specialists building against this plan revision.',
+	status: 'needs-you',
+	primaryAction: { label: 'Approve plan', kind: 'review', targetId: 'ap-plan' },
+	key: 'proj-a:approval:ap-plan',
+	planItems: [
+		{ title: 'Daily records, without the paperwork', detail: 'Add feeding, treatments and observations in one place.' },
+		{ title: 'Keep recording when you’re offline', detail: 'Your entries sync when the connection returns.' },
+		{ title: 'A clear weekly picture', detail: 'Turn your records into a short, useful summary.' },
+	],
+});
+
+test.describe('U step 3 — plan approval list', () => {
+	test('a plan card lists the plan’s features under "What you’re approving"; desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [PLAN_WITH_ITEMS], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const plan = page.getByTestId('decision-card').filter({ hasText: 'Your farm log, ready to build' });
+		const list = plan.getByTestId('card-plan-items');
+		await expect(list).toBeVisible();
+		await expect(list.locator('.compact-card-list-row')).toHaveCount(3);
+		await expect(list).toContainText('Daily records, without the paperwork');
+		await expect(list).toContainText('Your entries sync when the connection returns.');
+		await expect(plan).toContainText('What you’re approving');
+		await plan.screenshot({ path: join(SHOTS, 'u3-plan-items-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(list).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await plan.screenshot({ path: join(SHOTS, 'u3-plan-items-390.png') });
+		await context.close();
+	});
+
+	test('a plan card with no items falls back to "What you’re reviewing" + summary', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [APPROVAL_A], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const plan = page.getByTestId('decision-card').filter({ hasText: 'Design review is waiting on you' });
+		await expect(plan.getByTestId('card-plan-items')).toHaveCount(0);
+		await expect(plan).toContainText('What you’re reviewing');
+		await expect(plan).toContainText('Approving this authorises');
+		await context.close();
+	});
+});
+
 test('Earlier loads archived decisions on demand and retains the exact decision target',async({browser})=>{
  const context=await browser.newContext({viewport:{width:390,height:844}});
  await stubAccount(context,{cards:[{...APPROVAL_A,status:'handled',headline:'Recent approval',primaryAction:{kind:'review',label:'View decision',targetId:'ap-1'}}]});

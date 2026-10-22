@@ -119,7 +119,25 @@ export function DecisionCardView(props: {
             <CardHeader design={design} context={props.contextLabel} status={statusLabel(card)} fresh={props.seen === false} />
             {props.seen === false ? <span className="sr-only" data-testid="card-unseen">New</span> : null}
 			<h3>{card.headline}</h3>
-			{design === 'plan' ? <CardPanel title="What you’re reviewing"><p className="summary">{card.summary}</p></CardPanel> : <p className="summary">{card.summary}</p>}
+			{design === 'plan' ? (
+				card.planItems && card.planItems.length > 0 ? (
+					<CardPanel title="What you’re approving">
+						<ul className="compact-card-list" data-testid="card-plan-items">
+							{card.planItems.map((item, index) => (
+								<li key={index} className="compact-card-list-row">
+									<span className="compact-card-list-mark" aria-hidden="true"><Icon name="sparkCheck" title="" /></span>
+									<span className="compact-card-list-text">
+										<strong>{item.title}</strong>
+										{item.detail ? <small>{item.detail}</small> : null}
+									</span>
+								</li>
+							))}
+						</ul>
+					</CardPanel>
+				) : (
+					<CardPanel title="What you’re reviewing"><p className="summary">{card.summary}</p></CardPanel>
+				)
+			) : <p className="summary">{card.summary}</p>}
             {card.deadline ? (
                 <div className="compact-card-countdown" data-testid="card-countdown">
                     <div className="compact-card-days">
