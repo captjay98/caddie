@@ -192,7 +192,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 	},
 	U05: {
 		tests: ['tests/project-card.test.ts', 'tests/project-proposals.test.ts'],
-		browser: ['tests/browser/discovery.spec.ts', 'tests/browser/discovery-journey.spec.ts', 'tests/browser/projects-v2.spec.ts', 'tests/browser/project-proposal.spec.ts'],
+		browser: ['tests/browser/focused-project-chat.spec.ts', 'tests/browser/discovery.spec.ts', 'tests/browser/discovery-journey.spec.ts', 'tests/browser/projects-v2.spec.ts', 'tests/browser/project-proposal.spec.ts'],
 		live: [],
 	},
 	U06: {

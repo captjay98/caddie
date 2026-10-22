@@ -25,6 +25,7 @@ import { ImportedApp, importedAppTitle } from "../project/ImportedApp.tsx";
 import { CardHeader } from "../brief/CardFrame.tsx";
 import type { CardDesign } from "../brief/card-design.ts";
 import { workflowQueryOptions } from "../workflow-query.ts";
+import { ProjectChatSummary } from "./ProjectChatSummary.tsx";
 
 /** Phases before any build started: the copied app is still the one to try. */
 const BEFORE_BUILD = new Set<WorkflowPhase>(["planning", "review", "design", "design-review"]);
@@ -42,7 +43,18 @@ const STOP_SENTINEL = "Stop requested.";
 /** Approval statuses that mean the plan was approved at some point (server: planWasApproved). */
 const PLAN_EVER_APPROVED: ReadonlySet<string> = new Set(["approved", "revoked", "expired"]);
 /** A server-backed workspace inside the conversation, never model-markdown actions. */
-export function ProjectWorkflow({
+export function ProjectWorkflow(props: {
+  projectId: string;
+  name?: string;
+  showTranscript?: boolean;
+  presentation?: "chat" | "workspace";
+}) {
+  if (props.presentation === "workspace" || props.showTranscript) return <ProjectWorkspace {...props} />;
+  return <ProjectChatSummary projectId={props.projectId} name={props.name} />;
+}
+
+/** Full controls belong in the project workspace, never nested inside chat. */
+function ProjectWorkspace({
   projectId,
   name,
   showTranscript = false,
@@ -169,9 +181,11 @@ export function ProjectWorkflow({
         className="caddie-card project-workflow"
         data-testid="project-workflow"
         data-phase="imported"
+        data-design={importPreview.status === "ready" ? "preview" : "update"}
+        data-tone={importPreview.status === "failed" ? "quiet" : importPreview.status === "ready" ? "green" : "blue"}
         aria-label={name ? `${name} project` : "Your project"}
       >
-        <CardHeader design="preview" context={name} status={importPreview.status === "ready" ? "Ready to try" : "Checking"} />
+        <CardHeader design={importPreview.status === "ready" ? "preview" : "update"} context={name} status={importPreview.status === "ready" ? "Ready to try" : importPreview.status === "failed" ? "Needs attention" : "Checking"} />
       <div className="workflow-heading">
           <div>
             <p className="kicker">{name ?? "YOUR PROJECT"}</p>
@@ -511,7 +525,9 @@ export function ProjectWorkflow({
               : {})}
           />
           {state.data?.previewHasServer ? <TestInbox actorId={chrome.actorId} projectId={projectId} /> : null}
-          <SavedFeatures actorId={chrome.actorId} projectId={projectId} />
+          <details className="workflow-checks"><summary>What Caddie checked</summary>
+            <SavedFeatures actorId={chrome.actorId} projectId={projectId} />
+          </details>
           <details className="workflow-app-options"><summary>App settings, versions & delivery</summary>
           <AppKeys actorId={chrome.actorId} projectId={projectId} hasServer={Boolean(state.data?.previewHasServer)} />
           <PublishApp actorId={chrome.actorId} projectId={projectId} />

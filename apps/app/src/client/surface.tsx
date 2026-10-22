@@ -15,6 +15,7 @@ import { Schedules, type ScheduleRow } from './tasks/Schedules.tsx';
 import { Tasks } from './tasks/Tasks.tsx';
 import { EvidenceDrawer } from './evidence/Drawer.tsx';
 import { ArtifactViewer, type ViewerRevision } from './artifacts/Viewer.tsx';
+import { briefActionRoute } from './brief/navigate.ts';
 import { workflowQueryOptions } from './workflow-query.ts';
 import { DesignReview } from './planning/DesignReview.tsx';
 import { RepositoryPicker, type SelectedRepository } from './repositories/RepositoryPicker.tsx';
@@ -39,11 +40,11 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchJson } from './api.ts';
 import { useWorkspaceChrome } from './workspace/Chrome.tsx';
 import { NowPanel } from './project/NowPanel.tsx';
+import { ProjectWorkflow } from './conversation/ProjectWorkflow.tsx';
 import { relativeUpdated } from './project/now-panel.ts';
 import { ProjectTabs } from './workspace/ProjectTabs.tsx';
-import { journeyFromExperience, projectCardFromCopiedApp, projectCardFromExperience, projectStatus, type CopiedAppSummary } from './workspace/project-status.ts';
+import { projectCardFromCopiedApp, projectCardFromExperience, projectStatus, type CopiedAppSummary } from './workspace/project-status.ts';
 import { Icon } from './icons.tsx';
-import { overviewAppState } from './project/overview-app.ts';
 
 /** A hackathon's deadline in words for its project card (plan 5.7); null when unknown. */
 function dueWords(hackathon: ProjectHackathonLine): string | null {
@@ -663,8 +664,8 @@ function ProjectCard(props: {
 	const parsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
 	const fromWorkflow = parsed?.success ? projectCardFromExperience(parsed.output) : null;
 	const hackathon = props.hackathon ?? null;
-	const personal = !hackathon && !project.contestUrl;
-	const journey = parsed?.success ? journeyFromExperience(parsed.output, { personal }) : null;
+
+	// The four project steps belong inside the project, not on every list card.
 	const letter = iconLetter(project.name);
 	// No workflow yet: a copied app (a judge's example, or a GitHub copy) may
 	// already be ready to try. Read it from the same /workflow answer the
@@ -714,24 +715,11 @@ function ProjectCard(props: {
 					</p>
 				</div>
 			</div>
-			{journey ? (
-				<ol className="project-journey" data-testid={`project-journey-${project.id}`} aria-label="Where this project is">
-					{journey.map((step) => (
-						<li key={step.id} className="project-journey-step" data-state={step.state} aria-current={step.state === 'now' || step.state === 'stop' ? 'step' : undefined}>
-							<span className="project-journey-dot" aria-hidden="true">
-								{step.state === 'done' ? '✓' : step.state === 'stop' ? '✕' : ''}
-							</span>
-							<span className="project-journey-label">{step.label}</span>
-							<span className="project-journey-sub">{step.sub}</span>
-						</li>
-					))}
-				</ol>
-			) : null}
 			<p className="project-card-detail">{card ? card.detail : fallback.detail}</p>
 			<div className="project-card-foot">
 				<span className="project-card-updated">{updated ?? ''}</span>
 				{card ? (
-					card.action.target === 'plan' ? (
+					card.action.target === 'plan' || (parsed?.success && parsed.output.stage === 'design_review') ? (
 						<Link className="btn-key" to="/design-review" search={{ project: project.id } as never} data-testid={`project-next-${project.id}`}>
 							{card.action.label}
 						</Link>
@@ -740,7 +728,12 @@ function ProjectCard(props: {
 							type="button"
 							className="btn-key"
 							data-testid={card.action.target === 'chat' ? `project-continue-${project.id}` : `project-next-${project.id}`}
-							onClick={() => chrome.openProject(project.id, card.action.target === 'chat')}
+							onClick={() => {
+								const previewId = parsed?.success ? parsed.output.preview?.id : null;
+								const readyId = parsed?.success && parsed.output.stage === 'ready' ? previewId : copiedApp?.status === 'ready' ? copiedApp.outputId : null;
+								if (readyId) chrome.goProjectTab('/preview', { project: project.id, preview: readyId, source: 'workflow' });
+								else chrome.openProject(project.id, card.action.target === 'chat');
+							}}
 						>
 							{card.action.label}
 						</button>
@@ -751,10 +744,9 @@ function ProjectCard(props: {
 							<Link className="btn-key" to={onCardRoute(fallback.next, project.id).to as never} search={onCardRoute(fallback.next, project.id).search as never} data-testid={`project-next-${project.id}`}>
 								{fallback.next.primaryAction.label}
 							</Link>
-						) : null}
-						<button type="button" className={fallback.next ? 'btn-ghost' : 'btn-key'} onClick={() => chrome.openProject(project.id, true)} data-testid={`project-continue-${project.id}`}>
+						) : <button type="button" className="btn-key" onClick={() => chrome.openProject(project.id, true)} data-testid={`project-continue-${project.id}`}>
 							Continue with Caddie
-						</button>
+						</button>}
 					</span>
 				)}
 			</div>
@@ -765,323 +757,65 @@ function ProjectCard(props: {
 // --- PROJECT OVERVIEW ------------------------------------------------------------
 
 export function ProjectOverviewPage(): ReactElement {
-	return (
-		<>
-			<div className="shell-loading shell-page">
-				<div className="page-col">
-					<ProjectTabs current="overview" />
-					<ProjectGate>{(projectId) => <ProjectOverviewBody projectId={projectId} />}</ProjectGate>
-				</div>
-			</div>
-		</>
-	);
+	return <div className="shell-loading shell-page"><div className="page-col focused-project-page">
+		<ProjectGate>{projectId => <FocusedProjectHome projectId={projectId} />}</ProjectGate>
+	</div></div>;
 }
 
-function ProjectOverviewBody(props: { projectId: string }): ReactElement {
+/** Opening a project follows its work; explicit step routes stay where the user put them. */
+function FocusedProjectHome({ projectId }: { projectId: string }): ReactElement {
 	const chrome = useWorkspaceChrome();
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
-	const brief = useBriefCards(actor, props.projectId);
-	const workflowBrief = useWorkflowBrief(actor, props.projectId);
-	// The same ProjectExperience the Now panel reads, so the idea/brief cards
-	// can say honestly that Caddie is acting on this project right now.
-	const experience = useProjectExperience(actor, props.projectId);
-	const experienceParsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
-	const experienceStage = experienceParsed?.success ? experienceParsed.output.stage : null;
-	const workingStages: readonly string[] = ['planning', 'building', 'checking', 'repairing'];
-	// version 0 is the projection's no-workflow fallback (stage 'planning'),
-	// not evidence that any work has started.
-	const working = experienceParsed?.success === true && experienceParsed.output.version > 0 && experienceStage !== null && workingStages.includes(experienceStage);
-	const navigate = useNavigate();
-	// The full brief opens in a modal, NOT an inline <details>, so revealing it
-	// never shifts the Overview layout (user steering, 2026-10-15).
-	const [briefOpen, setBriefOpen] = useState(false);
-
-	// "Your app" (review F04): the same truth as the Now panel and the Projects
-	// card. The checked preview comes from the experience projection (polled);
-	// a project with no workflow yet may have a copied app (GitHub copy or a
-	// judge's example), read from the same /workflow answer and polled while it
-	// is being checked. A live private share link (P07 previews API, metadata
-	// only) is a separate line, never the source of "is there an app".
-	const noWorkflow = experienceParsed?.success === true && experienceParsed.output.version === 0;
-	const copied = useQuery({
-		...workflowQueryOptions(chrome.actorId, props.projectId),
-		enabled: Boolean(chrome.actorId) && noWorkflow,
-	});
-	const [share, setShare] = useState<{ live: boolean; createdAt: string | null } | null>(null);
-	useEffect(() => {
-		let cancelled = false;
-		void fetch(`/api/projects/${encodeURIComponent(props.projectId)}/previews`, { credentials: 'same-origin' })
-			.then((res) => { if (!res.ok) throw new Error('Could not load previews'); return res.json(); })
-			.then((body: { previews?: { revoked: boolean; expiresAt: string; createdAt: string }[] } | null) => {
-				if (cancelled) return;
-				const now = Date.now();
-				const live = (body?.previews ?? []).find((p) => !p.revoked && new Date(p.expiresAt).getTime() > now);
-				setShare({ live: Boolean(live), createdAt: live?.createdAt ?? null });
-			})
-			.catch(() => {
-				if (!cancelled) setShare(null);
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [props.projectId]);
-	const app = overviewAppState({
-		experience: experience.isError ? null : experience.data === undefined ? undefined : experienceParsed?.success ? experienceParsed.output : null,
-		copiedApp: noWorkflow ? (copied.data?.importPreview ?? null) : null,
-		share,
-	});
-    // A checked app has its own refreshable view; opening it never requires chat.
-    const tryApp = () => {
-        const previewId = experienceParsed?.success ? experienceParsed.output.preview?.id : null;
-        const outputId = previewId ?? copied.data?.importPreview?.outputId;
-        if (outputId) chrome.goProjectTab('/preview', { project: props.projectId, preview: outputId, source: 'workflow' });
-    };
-
-	const cards = brief.data?.cards ?? [];
-	const open = cards.filter((c) => c.status !== 'handled');
-	const done = cards.filter((c) => c.status === 'handled');
-	const next = open[0] ?? null;
-	const nextDeadline = useMemo(() => {
-		const nexts = cards
-			.filter((c) => c.kind === 'deadline')
-			.map((c) => {
-				const m = /Next run ([^ (]+)/.exec(c.summary);
-				return m ? m[1].slice(0, 10) : null;
-			})
-			.filter((v): v is string => v !== null)
-			.sort();
-		return nexts[0] ?? null;
-	}, [cards]);
-
-	function onCardAction(card: DecisionCardType) {
-		const search = { project: props.projectId };
-		switch (card.kind) {
-			case 'approval':
-				chrome.goProjectTab('/design-review', search);
-				break;
-			case 'change':
-				chrome.goProjectTab(
-					card.evidenceIds.length > 0 ? '/evidence' : '/artifacts',
-					card.evidenceIds.length > 0 ? { ...search, claim: card.primaryAction.targetId } : search,
-				);
-				break;
-			case 'deadline':
-				chrome.goProjectTab('/schedules', search);
-				break;
-			case 'result':
-				chrome.goProjectTab('/runs', search);
-		}
-	}
-
-	return (
-		<div className="settings-stack">
-			{brief.isPending ? (
-				<StatePanel kind="loading" title="Loading this project…" />
-			) : brief.error ? (
-				<StatePanel kind={failureKind(brief.error)} detail={brief.error instanceof Error ? brief.error.message : undefined} onRetry={() => void brief.refetch()} />
-			) : (
-				<>
-					<div className="overview-grid">
-					<div className="overview-main">
-					{/* Now: what Caddie is doing on this project and the next action,
-					    from the shared ProjectExperience projection. Projects with no
-					    workflow yet keep the decision-card next step below. */}
-					<NowPanel
-						projectId={props.projectId}
-						fallback={
-					<section className="card-surface settings-panel" data-testid="overview-next-step">
-						<p className="kicker" data-tone="action">
-							NEXT STEP
-						</p>
-						{next ? (
-							<>
-								<h2 className="ev-title">{next.headline}</h2>
-								<p className="page-lede">{next.summary}</p>
-								<div className="row-actions">
-									<button
-										type="button"
-										className="btn-key"
-										data-testid="overview-next-action"
-										onClick={() => {
-											void navigate({
-												to: onCardRoute(next, props.projectId).to as never,
-												search: onCardRoute(next, props.projectId).search as never,
-											});
-										}}
-									>
-										{next.primaryAction.label}
-									</button>
-								</div>
-							</>
-						) : (
-							<>
-								<h2 className="ev-title">{cards.length === 0 ? "Let’s get started" : "Nothing needs you right now"}</h2>
-								<p className="page-lede">
-									{cards.length === 0 ? "Tell Caddie what you want to make. Your plan, decisions, and progress will appear here." : "You can keep working with Caddie or review your project below."}
-								</p>
-                                <div className="row-actions">
-                                    <button type="button" className="btn-key" onClick={() => chrome.openProject(props.projectId, true)}>Continue with Caddie</button>
-                                </div>
-							</>
-						)}
-					</section>
-						}
-					/>
-					</div>
-
-					<aside className="overview-side">
-					{/* Your idea: the one-line idea, with the brief Caddie wrote one click away.
-					    While Caddie is acting on this project the card says so — the brief
-					    never sits silent while a build runs (owner steering, 2026-10-15). */}
-					<section className="card-surface settings-panel" data-testid="overview-idea">
-						<p className="kicker">Your idea</p>
-						<p className="overview-idea-line">
-							{chrome.selectedProject?.description || 'Tell Caddie what you want to make and the idea appears here.'}
-						</p>
-						{workflowBrief.data ? (
-							<button
-								type="button"
-								className="r-link overview-brief-open"
-								data-testid="overview-brief-open"
-								onClick={() => setBriefOpen(true)}
-							>
-								Read the full brief
-							</button>
-						) : null}
-						{working ? (
-							<p className="overview-build-note" data-testid="overview-brief-building">
-								<span className="now-live" aria-hidden="true" />
-								Caddie is working on this right now — its status is in “Now” above.
-							</p>
-						) : null}
-					</section>
-
-					{/* Your app: the real app state, never a fake screenshot (review F04). */}
-					<section className="card-surface settings-panel" data-testid="overview-preview" data-state={app.kind}>
-						<p className="kicker">Your app</p>
-						<div className="overview-app">
-							<span className="overview-app-phone" data-live={app.kind === 'ready' ? 'true' : 'false'} aria-hidden="true" />
-							{app.kind === 'checking' ? (
-								<p className="state-detail">Checking your app…</p>
-							) : app.kind === 'unavailable' ? (
-								<p className="state-detail">Your app’s status couldn’t be read just now.</p>
-							) : app.kind === 'ready' ? (
-								<div className="overview-app-body">
-									<p className="state-detail" data-testid="overview-preview-ready">
-										{app.source === 'example'
-											? 'An example app Caddie built is ready to try.'
-											: app.source === 'github'
-												? 'Your app from GitHub is ready to try.'
-												: app.current
-													? 'Your app is ready to try.'
-													: 'An earlier version of your app is ready to try. The latest plan isn’t built yet.'}
-									</p>
-									<button type="button" className="btn-key" data-testid="overview-try-app" onClick={tryApp}>
-										Try your app
-									</button>
-									{app.share ? (
-										<p className="state-detail overview-app-share" data-testid="overview-preview-share">
-											A private share link is also live{app.share.createdAt ? ` (created ${new Date(app.share.createdAt).toLocaleDateString()})` : ''}.
-										</p>
-									) : null}
-								</div>
-							) : app.kind === 'building' ? (
-								<p className="state-detail" data-testid="overview-preview-building">
-									Caddie is getting your app ready. It shows here once its checks pass.
-								</p>
-							) : app.kind === 'failed' ? (
-								<div className="overview-app-body">
-									<p className="state-detail" data-testid="overview-preview-failed">
-										{app.message ?? 'Your code is saved, but it didn’t build yet. Tell Caddie what you’d like, and it fixes the build first.'}
-									</p>
-									<button type="button" className="btn-ghost" onClick={() => chrome.openProject(props.projectId, true)}>
-										Continue with Caddie
-									</button>
-								</div>
-							) : (
-								<p className="state-detail" data-testid="overview-preview-none">
-									Your app appears here once its design is approved and built.
-								</p>
-							)}
-						</div>
-					</section>
-					</aside>
-					</div>
-
-					<details className="card-surface settings-panel" data-testid="overview-todo" id="todo">
-                        <summary className="ev-head">To-dos</summary>
-						<Tasks projectId={props.projectId} embedded />
-					</details>
-
-					{done.length > 0 ? (
-						<details className="card-surface settings-panel" data-testid="overview-recent">
-							<summary className="ev-head">What happened recently · {done.length}</summary>
-							<ul>
-								{done.map((card) => (
-									<li key={card.id} data-testid="overview-recent-item">
-										<b>{card.headline}</b> — {card.summary}
-									</li>
-								))}
-							</ul>
-						</details>
-					) : null}
-
-					{briefOpen && workflowBrief.data ? (
-						<div
-							className="modal-backdrop"
-							data-testid="overview-brief-backdrop"
-							onMouseDown={() => setBriefOpen(false)}
-						>
-							<div
-								className="commit-panel card-surface overview-brief-modal"
-								role="dialog"
-								aria-modal="true"
-								aria-label="Full project brief"
-								data-testid="overview-brief-modal"
-								onMouseDown={(e) => e.stopPropagation()}
-							>
-								<div className="r-section-head">
-									<p className="kicker" data-tone="action">The full brief</p>
-									<button type="button" className="btn-ghost" data-testid="overview-brief-close" onClick={() => setBriefOpen(false)}>
-										Close
-									</button>
-								</div>
-								{working ? (
-									<p className="overview-brief-status" data-testid="overview-brief-status">
-										<span className="now-live" aria-hidden="true" />
-										Caddie is acting on this brief right now — progress is in “Now” on the project page.
-									</p>
-								) : null}
-								{/* The brief is stored as plain prose; it renders as paragraphs
-								    (the same Markdown the plan body gets) instead of one collapsed
-								    wall of text. */}
-								<div className="overview-brief-text" data-testid="overview-brief-text">
-									<Markdown text={workflowBrief.data} />
-								</div>
-							</div>
-						</div>
-					) : null}
-				</>
-			)}
+	const experience = useProjectExperience(actor, projectId);
+	const workflow = useQuery(workflowQueryOptions(chrome.actorId, projectId));
+	if (experience.isPending || workflow.isPending) return <PageSkeleton page="build" label="Reading your project…" />;
+	if (workflow.error) return <StatePanel kind={failureKind(workflow.error)} title="Your project could not be loaded" onRetry={() => void workflow.refetch()} />;
+	const parsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
+	const stage = parsed?.success && parsed.output.version > 0 ? parsed.output.stage : null;
+	const phase = workflow.data?.workflow?.phase;
+	const planNotApproved = parsed?.success && parsed.output.plan?.approved === false;
+	const step = stage === 'planning_blocked' || (stage === 'stopped' && planNotApproved) ? 'plan' : stage === 'ready' || stage === 'repairing' || stage === 'checking' ? 'check'
+		: stage === 'building' || stage === 'blocked' || stage === 'stopped' ? 'build'
+		: phase === 'building' || phase === 'blocked' ? 'build' : phase === 'ready' ? 'check' : 'plan';
+	return <>
+		<ProjectTabs current={step} />
+		<div className="focused-project-content" data-testid="focused-project-home" data-step={step}>
+			{workflow.data?.workflow || workflow.data?.importPreview ? <ProjectWorkflow projectId={projectId} presentation="workspace" />
+				: <section className="focused-project-empty"><h2>What would you like to build?</h2><p className="page-lede">Tell Caddie what this project should do. Your plan appears here before anything is built.</p><button type="button" className="btn-key" onClick={() => chrome.openProject(projectId, true)}>Continue with Caddie</button></section>}
 		</div>
-	);
+		<ProjectSupportingDetails projectId={projectId} />
+	</>;
+}
+
+/** Useful context stays reachable, without competing with the current step. */
+function ProjectSupportingDetails({ projectId }: { projectId: string }): ReactElement {
+	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const brief = useBriefCards(actor, projectId);
+	const workflowBrief = useWorkflowBrief(actor, projectId);
+	const [tasksOpen, setTasksOpen] = useState(false);
+	const experience = useProjectExperience(actor, projectId);
+	const parsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
+	const earlierPreview = parsed?.success && parsed.output.stage !== 'ready' ? parsed.output.preview?.id : null;
+	return <div className="project-supporting" data-testid="project-supporting-details">
+		{earlierPreview ? <button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/preview', { project: projectId, preview: earlierPreview, source: 'workflow' })}>Try the earlier saved app</button> : null}
+		<details><summary>Project brief</summary>{workflowBrief.data ? <Markdown text={workflowBrief.data} /> : <p className="state-detail">{workflowBrief.isPending ? 'Reading the brief…' : workflowBrief.error ? 'The brief could not be loaded. Try opening this section again after refreshing.' : chrome.selectedProject?.description || 'The brief appears after you plan with Caddie.'}</p>}</details>
+		<details data-testid="overview-todo" id="todo" onToggle={event => setTasksOpen(event.currentTarget.open)}><summary>To-dos</summary>{tasksOpen ? <Tasks projectId={projectId} embedded /> : null}</details>
+		<details data-testid="overview-recent"><summary>Earlier decisions & updates</summary>
+			{brief.isPending ? <p>Reading the project’s updates…</p> : brief.error ? <StatePanel kind="error" title="Updates could not be loaded" onRetry={() => void brief.refetch()} /> :
+				(brief.data?.cards ?? []).length ? <ul className="project-history-list">{brief.data!.cards.map(card => <li key={card.id}><strong>{card.headline}</strong><p className="state-detail">{card.summary}</p><button type="button" className="r-link" onClick={() => { const route = onCardRoute(card, projectId); chrome.goProjectTab(route.to, route.search); }}>Open details</button></li>)}</ul> : <p className="state-detail">Decisions and updates will be kept here.</p>}
+		</details>
+		<nav className="project-resource-links" aria-label="Project resources">
+			<Link to="/runs" search={{ project: projectId, tab: 'files' }}>Files & code</Link>
+			<Link to="/runs" search={{ project: projectId, tab: 'activity' }}>Build history</Link>
+			<Link to="/schedules" search={{ project: projectId }}>Routines</Link>
+		</nav>
+	</div>;
 }
 
 /** Route for an overview card action (same targeting rules as the brief). */
-function onCardRoute(card: DecisionCardType, projectId: string): { to: string; search: Record<string, string | undefined> } {
-	const search = { project: projectId };
-	switch (card.kind) {
-		case 'approval':
-			return { to: '/design-review', search };
-		case 'deadline':
-			return { to: '/schedules', search };
-		case 'result':
-			return { to: '/runs', search };
-		case 'change':
-			return card.evidenceIds.length > 0
-				? { to: '/evidence', search: { ...search, claim: card.primaryAction.targetId } }
-				: { to: '/artifacts', search };
-	}
+function onCardRoute(card: DecisionCardType, _projectId: string): { to: string; search: Record<string, string | undefined> } {
+	return briefActionRoute(card);
 }
 
 // --- PLAN (design gate) ----------------------------------------------------------
@@ -1090,9 +824,9 @@ export function DesignReviewPage(): ReactElement {
 	return (
 		<>
 			<div className="shell-loading shell-page">
-				<div className="page-col">
+				<div className="page-col focused-project-page">
 					<ProjectTabs current="plan" />
-					<ProjectGate skeleton={{ page: 'plan', label: 'Reading your plan…' }}>{(projectId) => <DesignReviewBody projectId={projectId} />}</ProjectGate>
+					<ProjectGate skeleton={{ page: 'plan', label: 'Reading your plan…' }}>{(projectId) => <><div className="focused-project-content"><DesignReviewBody projectId={projectId} /></div><ProjectSupportingDetails projectId={projectId} /></>}</ProjectGate>
 				</div>
 			</div>
 		</>
@@ -1111,6 +845,7 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
 	const planDocs = usePlanDocRevisions(actor, props.projectId);
 	// The build's own phase: once the plan is approved, the Plan tab follows it (plan 5.3).
 	const buildPhase = useWorkflowPhase(actor, props.projectId);
+	const fullWorkflow = useQuery(workflowQueryOptions(chrome.actorId, props.projectId));
 	// PRD revisions share a counter; spec/note counters are incomparable.
     const revisions = [...(planDocs.data?.revisions ?? [])].filter((revision) => revision.kind === 'prd').sort((a, b) => b.revision - a.revision);
     const latest = revisions[0];
@@ -1133,6 +868,8 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
             <button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/design-review', { project: props.projectId })}>View current plan</button>
         </section>;
     }
+	const planEverApproved = ['approved', 'revoked', 'expired'].includes(fullWorkflow.data?.approval?.status ?? '');
+	if (buildPhase.data === 'design' || buildPhase.data === 'design-review' || (buildPhase.data === 'blocked' && !planEverApproved)) return <ProjectWorkflow projectId={props.projectId} presentation="workspace" />;
 	return (
 		<DesignReview
             autoBuild
@@ -1159,7 +896,7 @@ export function RunsPage(): ReactElement {
 	return (
 		<>
 			<div className="shell-loading shell-page">
-				<div className="page-col">
+				<div className="page-col focused-project-page">
 					<ProjectTabs current="build" />
 					<ProjectGate skeleton={{ page: 'build', label: 'Reading your builds…' }}>{(projectId) => <RunsBody projectId={projectId} />}</ProjectGate>
 				</div>
@@ -1180,17 +917,19 @@ function RunsBody(props: { projectId: string }): ReactElement {
 	const search = useSearch({ strict: false }) as { tab?: 'activity' | 'files' };
 	const tab = search.tab === 'files' ? 'files' : 'activity';
 	const runBindings = useRunBindings(actor, props.projectId);
+	const workflow = useQuery(workflowQueryOptions(chrome.actorId, props.projectId));
 	const artifactRevisions = useArtifactRevisions<ViewerRevision>(actor, props.projectId);
 	const [changeOpen, setChangeOpen] = useState(false);
 	const [changeText, setChangeText] = useState('');
-	// The first read of this project's builds: the Build page's own shape (plan 5.6).
-	if (runBindings.isPending) return <PageSkeleton page="build" label="Reading your builds…" />;
+	// Secondary history never blocks the independent live workflow controls.
 	return (
 		<div className="settings-stack">
 			{/* The build's status from its own record, exactly as the chat card and
 			    the project home show it (plan 3.5). It once followed this browser's
 			    chat connection, so a paused build said nothing here. */}
-			<NowPanel projectId={props.projectId} fallback={<></>} />
+			<div className="focused-project-content"><ProjectWorkflow projectId={props.projectId} presentation="workspace" /></div>
+			{!workflow.isPending && !workflow.data?.workflow && !workflow.data?.importPreview ? <NowPanel projectId={props.projectId} fallback={<p className="state-detail">The build appears here after you approve a plan.</p>} /> : null}
+			<details className="project-secondary" open={Boolean(search.tab)} data-testid="project-build-resources"><summary>Build history & files</summary>
 			<div className="r-section-head">
 				<div>
 					<p className="kicker" data-tone="action">
@@ -1200,7 +939,7 @@ function RunsBody(props: { projectId: string }): ReactElement {
 					{tab === 'files' ? null : (
 						<p className="page-lede">
 							Every build Caddie runs for this project, newest first — so you can reopen a working
-							version, see what it built, or ask for a change. Approve a plan in the chat and the
+							version, see what it built, or ask for a change. Approve a plan in the Plan step and the
 							next build appears here.
 						</p>
 					)}
@@ -1211,7 +950,7 @@ function RunsBody(props: { projectId: string }): ReactElement {
 						role="tab"
 						aria-selected={tab === 'activity'}
 						data-testid="build-tab-activity"
-						onClick={() => void navigate({ to: '/runs', search: { project: props.projectId, tab: undefined } })}
+						onClick={() => void navigate({ to: '/runs', search: { project: props.projectId, tab: 'activity' } })}
 					>
 						Builds
 					</button>
@@ -1247,6 +986,8 @@ function RunsBody(props: { projectId: string }): ReactElement {
 					onAskChange={() => setChangeOpen(true)}
 				/>
 			)}
+			</details>
+			<ProjectSupportingDetails projectId={props.projectId} />
 			{changeOpen ? (
 				<div className="modal-backdrop" data-testid="change-request-backdrop" onMouseDown={() => setChangeOpen(false)}>
 					<div className="commit-panel card-surface" data-testid="change-request-window" onMouseDown={(e) => e.stopPropagation()}>
@@ -1298,7 +1039,7 @@ export function ArtifactsPage(): ReactElement {
 	return (
 		<>
 			<div className="shell-loading shell-page">
-				<div className="page-col">
+				<div className="page-col focused-project-page">
 					<ProjectTabs current="build" />
 					<ProjectGate>{(projectId) => <ArtifactsBody projectId={projectId} />}</ProjectGate>
 				</div>
@@ -1326,7 +1067,7 @@ export function SchedulesPage(): ReactElement {
 	return (
 		<>
 			<div className="shell-loading shell-page">
-				<div className="page-col">
+				<div className="page-col focused-project-page">
 					<ProjectTabs current="build" />
 					<ProjectGate>{(projectId) => <Schedules projectId={projectId} />}</ProjectGate>
 				</div>
@@ -1341,7 +1082,7 @@ export function TasksPage(): ReactElement {
 	return (
 		<>
 			<div className="shell-loading shell-page">
-				<div className="page-col">
+				<div className="page-col focused-project-page">
 					<ProjectTabs current="build" />
 					<ProjectGate>{(projectId) => <Tasks projectId={projectId} />}</ProjectGate>
 				</div>
@@ -1356,7 +1097,7 @@ export function SubmissionPage(): ReactElement {
 	return (
 		<>
 			<div className="shell-loading shell-page">
-				<div className="page-col">
+				<div className="page-col focused-project-page">
 					<ProjectTabs current="submission" />
 					<ProjectGate>{(projectId) => <SubmissionPackage projectId={projectId} />}</ProjectGate>
 					<ProjectGateSoft>
@@ -1384,8 +1125,8 @@ export function EvidencePage(): ReactElement {
 	return (
 		<>
 			<div className="shell-loading shell-page">
-				<div className="page-col">
-					<ProjectTabs current="submission" />
+				<div className="page-col focused-project-page">
+					<ProjectTabs current="check" />
 					<ProjectGate>{(projectId) => <CheckBody projectId={projectId} openScore={search.open === 'score'} focusClaimType={search.claim} />}</ProjectGate>
 				</div>
 			</div>
@@ -1403,6 +1144,7 @@ export function EvidencePage(): ReactElement {
  */
 function CheckBody(props: { projectId: string; openScore: boolean; focusClaimType?: string }): ReactElement {
 	const chrome = useWorkspaceChrome();
+	const workflow = useQuery(workflowQueryOptions(chrome.actorId, props.projectId));
 	const personal = !chrome.selectedProject?.contestUrl;
 	const base = `/api/projects/${encodeURIComponent(props.projectId)}/submission`;
 	const [packages, setPackages] = useState<readonly { id: string; title: string }[] | null>(null);
@@ -1455,6 +1197,8 @@ function CheckBody(props: { projectId: string; openScore: boolean; focusClaimTyp
 
 	return (
 		<div className="settings-stack">
+			<div className="focused-project-content" data-testid="project-app-checks">{workflow.data?.workflow?.phase === 'ready' || workflow.data?.workflow?.phase === 'building' || workflow.data?.importPreview ? <ProjectWorkflow projectId={props.projectId} presentation="workspace" /> : <section><h2>Try and check your app</h2><p className="state-detail">{workflow.isPending ? 'Reading the latest build…' : workflow.error ? 'The build could not be loaded. Open Build to retry.' : 'The app and its checks appear here after the build.'}</p><button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/runs', { project: props.projectId })}>Open Build</button></section>}</div>
+			<details className="project-secondary" open={props.openScore || Boolean(props.focusClaimType)} data-testid="project-entry-checks"><summary>{personal ? 'Project evidence' : 'Submission readiness, rules & judging'}</summary>
 			{/* N of M ready (§4): from the real checklist, never an estimate. */}
 			<section className="card-surface settings-panel" data-testid="check-readiness">
 				<p className="kicker" data-tone="action">
@@ -1524,6 +1268,8 @@ function CheckBody(props: { projectId: string; openScore: boolean; focusClaimTyp
 			    own header and sections — wrapping it in another fold made cards
 			    three deep (owner steering, 2026-10-15), so it renders directly. */}
 			<EvidenceDrawer projectId={props.projectId} focusClaimType={props.focusClaimType} />
+			</details>
+			<ProjectSupportingDetails projectId={props.projectId} />
 		</div>
 	);
 }

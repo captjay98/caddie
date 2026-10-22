@@ -174,7 +174,7 @@ test.describe('Projects v2 (U05)', () => {
 		// A pending decision is explicit rather than an inferred percentage.
 		await expect(row.getByTestId('project-step-text-proj-a')).toContainText('Decision needed');
         await expect(row.getByTestId('project-next-proj-a')).toBeVisible();
-        await expect(row.getByTestId('project-continue-proj-a')).toBeVisible();
+        await expect(row.getByTestId('project-continue-proj-a')).toHaveCount(0);
 
 		// One line of what Caddie is doing: the newest card's summary.
 		await expect(row).toContainText('The drafted plan waits for your decision.');
@@ -364,7 +364,7 @@ test.describe('the project card shows the app, its steps and its hackathon (plan
 		message: 'Caddie is building your app.', actions: [],
 	});
 
-	test('a building project for a hackathon: letter tile, contest and days left, and where it is in four steps', async ({ browser }) => {
+	test('a building project for a hackathon: letter tile, contest and days left, and one continuation', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 		await stubAccount(context);
 		await context.route('**/api/projects', (route) => json(route, 200, { projects: [HOME, PROJ_A, PROJ_C] }));
@@ -385,23 +385,20 @@ test.describe('the project card shows the app, its steps and its hackathon (plan
 		const rgb = `rgb(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)})`;
 		await expect(tile).toHaveCSS('background-color', rgb);
 		await expect(row.getByTestId('project-contest-proj-a')).toHaveText('Nebius x NVIDIA Global AI Hackathon · Due in 4 days');
-		const steps = row.getByTestId('project-journey-proj-a').locator('li');
-		await expect(steps).toHaveCount(4);
-		expect(await steps.evaluateAll((items) => items.map((li) => `${li.querySelector('.project-journey-label')?.textContent}:${li.getAttribute('data-state')}`))).toEqual([
-			'Plan:done', 'Build:now', 'Check:todo', 'Submit:todo',
-		]);
-		await expect(steps.nth(1)).toHaveAttribute('aria-current', 'step');
+		await expect(row.locator('.project-journey')).toHaveCount(0);
+		await expect(row.getByTestId('project-step-text-proj-a')).toContainText('Building');
+		await expect(row.locator('.project-card-foot').getByRole('button')).toHaveCount(1);
 
 		// A personal project: no hackathon line, and its last step is Share.
 		const notes = page.getByTestId('project-row-proj-c');
 		await expect(notes.getByTestId('project-tile-proj-c')).toHaveText('N');
 		await expect(notes.getByTestId('project-contest-proj-c')).toHaveCount(0);
-		await expect(notes.getByTestId('project-journey-proj-c').locator('.project-journey-label').last()).toHaveText('Share');
+		await expect(notes.locator('.project-journey')).toHaveCount(0);
 		if (process.env.CARD_SHOTS) await page.getByTestId('project-list').screenshot({ path: `${process.env.CARD_SHOTS}/project-card-desktop.png` });
 		await context.close();
 	});
 
-	test('on a phone the card keeps the tile, the contest line and the four steps', async ({ browser }) => {
+	test('on a phone the card keeps the tile, the contest line and one continuation', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
 		await stubAccount(context);
 		await context.route('**/api/projects/proj-a/experience', (route) => json(route, 200, building('proj-a')));
@@ -414,7 +411,8 @@ test.describe('the project card shows the app, its steps and its hackathon (plan
 		const row = page.getByTestId('project-row-proj-a');
 		await expect(row.getByTestId('project-tile-proj-a')).toBeVisible();
 		await expect(row.getByTestId('project-contest-proj-a')).toHaveText('Nebius x NVIDIA Global AI Hackathon · Due today');
-		await expect(row.getByTestId('project-journey-proj-a').locator('li')).toHaveCount(4);
+		await expect(row.locator('.project-journey')).toHaveCount(0);
+		await expect(row.getByTestId('project-next-proj-a')).toBeVisible();
 		const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 		expect(overflow).toBe(0);
 		if (process.env.CARD_SHOTS) await row.screenshot({ path: `${process.env.CARD_SHOTS}/project-card-phone.png` });

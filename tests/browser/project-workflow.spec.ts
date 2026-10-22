@@ -4,6 +4,7 @@ import { flutterProbePage } from './support/flutter-probe.ts';
 import jsQR from 'jsqr';
 import { androidQrSvg } from '../../apps/app/src/server/android-qr.ts';
 import { decodePng } from './support/png.ts';
+import { previewDocument } from '../../apps/app/src/shared/preview-frame.ts';
 
 /** Real composed SPA + real Flue SDK HTTP requests; auth, workflows, model
  * transcript and generated HTML are SIMULATED at their network boundaries.
@@ -32,6 +33,10 @@ async function fixture(context: BrowserContext, options: { android?: boolean; ph
 	const rollbacks: Record<string, unknown>[] = [];
 	let failedAdmissions = options.failAdmission ?? 0;
 	let failedPreviews = options.failPreview ?? 0;
+	// The server stores a /seed POST under a seedRef and replays it into the
+	// next /document render; the fixture keeps one slot so saved todos survive a
+	// reload, matching the real https-frame storage bridge.
+	let seedStore: Record<string, string> = Object.create(null);
 	const workflow = {
 		projectId: PROJECT.id, runId: 'run-project-workflow', conversationId: 'conv-project-workflow', sourceConversationId: 'conv-home-workflow',
 		brief: 'Build a modern beautiful minimal todo app.', phase: options.phase ?? 'review' as Phase, planId: currentPlan.id,
@@ -310,6 +315,19 @@ async function fixture(context: BrowserContext, options: { android?: boolean; ph
 		if (path.includes('/workflow/preview/')) {
 			previewReads++;
 			if (failedPreviews-- > 0) return json(route, 403, { error: 'preview_denied' });
+			// The https-frame flow (2026-10-22): the client POSTs /seed with the
+			// current saved storage and gets a seedRef, then GETs /document?seed=…
+			// as the real iframe src. The fixture keeps the storage and replays it
+			// through previewDocument, exactly like the server's bridge.
+			if (!options.flutter && path.endsWith('/seed') && request.method() === 'POST') {
+				const body = (request.postDataJSON() ?? {}) as { storage?: Record<string, string> };
+				if (body.storage && Object.keys(body.storage).length > 0) seedStore = body.storage;
+				return json(route, 200, { seedRef: 'seed-1' });
+			}
+			if (!options.flutter && path.endsWith('/document')) {
+				const nonce = new URL(request.url()).searchParams.get('nonce') ?? '';
+				return route.fulfill({ contentType: 'text/html', body: previewDocument(TODO, nonce, seedStore, false, 'web') });
+			}
 			// Track 3: an Android app's preview page, and its /api relay.
 			if (options.flutter && request.method() === 'POST' && path.endsWith('/app')) {
 				const relayed = request.postDataJSON() as { method: string; path: string };
@@ -389,8 +407,8 @@ const DESIGN_BRIEF = [
 
 test('design review shows each mocked screen at phone and desktop width, script-free, then approves the build', async ({ page, context }) => {
 	const state = await fixture(context, { phase: 'design-review', approved: true, designBody: DESIGN_BRIEF });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'design-review');
 	await expect(card.getByRole('heading', { name: 'Your design is ready' })).toBeVisible();
 	// The prose renders without the raw mock fences.
@@ -463,8 +481,8 @@ test('design review shows each mocked screen at phone and desktop width, script-
 
 test('the plan review lists what will be built as a checklist, never as raw JSON', async ({ page, context }) => {
 	await fixture(context, { planBody: FEATURE_PLAN });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'review');
 	const list = card.getByTestId('plan-features');
 	await expect(list.getByRole('heading', { name: 'What Caddie will build · 2' })).toBeVisible();
@@ -472,10 +490,9 @@ test('the plan review lists what will be built as a checklist, never as raw JSON
 	await expect(card.getByTestId('plan-feature-log-feed').locator('li')).toHaveText(['Saving 12 kg shows 12 kg in today’s list', 'The entry is still there after a reload']);
 	await expect(card).not.toContainText('caddie-features');
 	await expect(card).not.toContainText('"doneWhen"');
-    const parent = card.locator('xpath=ancestor::div[contains(@class,"bubble")]');
-    expect(await parent.evaluate(el=>getComputedStyle(el).borderTopWidth)).toBe('0px');
-    expect(await parent.evaluate(el=>getComputedStyle(el).paddingLeft)).toBe('0px');
-    expect(await card.evaluate(el=>getComputedStyle(el).borderRadius)).toBe('13px');
+    // In the focused workspace the plan review is NOT wrapped in a chat bubble
+    // — there is no bubble border or inset padding to undo.
+    expect(await card.locator('xpath=ancestor::div[contains(@class,"bubble")]').count()).toBe(0);
 });
 
 test('a finished build shows each feature and rolls back to a save point in two clicks', async ({ page, context }) => {
@@ -488,9 +505,10 @@ test('a finished build shows each feature and rolls back to a save point in two 
 			featureView('view-dashboard', 'See the feed dashboard', 2),
 		],
 	});
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
+	await card.getByText('What Caddie checked', { exact: true }).click();
 	const features = card.getByTestId('build-features');
 	await expect(features.getByRole('heading', { name: 'Features · 2 of 2 done' })).toBeVisible();
 	await expect(card.getByTestId('build-feature-log-feed')).toContainText('Done · 1 test passing');
@@ -509,20 +527,20 @@ test('a finished build shows each feature and rolls back to a save point in two 
 	await expect(card.getByTestId('build-feature-view-dashboard')).toHaveAttribute('data-status', 'pending');
 });
 
-test('Home chat shows a readable project plan; approval admits the correct build and acknowledges its durable key', async ({ page, context }) => {
-	const openedProjectTransports: string[] = [];
-    page.on('request', request => {
-        if (new URL(request.url()).pathname === '/agents/coordinator/conv-project-workflow') openedProjectTransports.push(request.url());
-    });
+test('The project workspace shows a readable plan; approval admits the correct build and acknowledges its durable key', async ({ page, context }) => {
+	// The persistent composer lives in the chrome, so opening a project may
+	// CONNECT to its existing run's transport on load. That is not a paid
+	// action — the real guarantee is that no work is ADMITTED and no new run is
+	// created merely by viewing the project (asserted via state.admissions below).
 	const state = await fixture(context);
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveCount(1);
 	await expect(card).toHaveAttribute('data-phase', 'review');
 	await expect(card.getByRole('heading', { name: 'Minimal Todo app' })).toBeVisible();
 	await expect(card.locator('li')).toHaveText(['Add tasks', 'Complete and delete tasks', 'Save tasks in your browser']);
-	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
-    expect(openedProjectTransports).toHaveLength(0);
+	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'project');
+    expect(state.admissions).toHaveLength(0);
 	await card.getByRole('button', { name: 'Approve plan' }).click();
 	await expect(card).toHaveAttribute('data-phase', 'building');
 	expect(state.decisions).toEqual([{ planId: 'plan-1', decision: 'approved' }]);
@@ -530,17 +548,17 @@ test('Home chat shows a readable project plan; approval admits the correct build
 	// and NO ack of its own — the decision route delivered + acked server-side.
 	expect(state.admissions).toHaveLength(0);
 	expect(state.acks).toHaveLength(0);
-	await expect(page).toHaveURL(`${BASE}/app/`);
-	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
+	await expect(page).toHaveURL(`${BASE}/app/project?project=proj-workflow`);
+	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'project');
 	await page.reload();
-	await expect(page.getByTestId('channel').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'building');
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'building');
 	expect(state.admissions).toHaveLength(0);
 });
 
 test('feedback requires text, continues planning in the target conversation and returns a new readable revision after reload', async ({ page, context }) => {
 	const state = await fixture(context);
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await card.getByRole('button', { name: 'Suggest a change' }).click();
 	await expect(card.getByRole('button', { name: 'Send feedback' })).toBeDisabled();
 	await card.getByLabel('What should change?').fill('Please include active and completed filters.');
@@ -552,10 +570,10 @@ test('feedback requires text, continues planning in the target conversation and 
 	expect(state.admissions).toHaveLength(0);
 	state.revise();
 	await page.reload();
-	await expect(page.getByTestId('channel').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'review');
-	await expect(page.getByTestId('channel').getByTestId('project-workflow').locator('li')).toContainText(['Filter active and completed tasks']);
-	await page.getByTestId('channel').getByTestId('project-workflow').getByRole('button', { name: 'Approve plan' }).click();
-	await expect(page.getByTestId('channel').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'building');
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'review');
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow').locator('li')).toContainText(['Filter active and completed tasks']);
+	await page.getByTestId('focused-project-home').getByTestId('project-workflow').getByRole('button', { name: 'Approve plan' }).click();
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'building');
 	expect(state.decisions[1]).toEqual({ planId: 'plan-2', decision: 'approved' });
 	expect(state.admissions).toHaveLength(0);
 });
@@ -566,8 +584,8 @@ test('R02: a pending planning project is server-owned — the browser makes no a
 	// with a pending slot must not trigger a browser coordinator admission and
 	// must not surface a "could not continue" client error.
 	const state = await fixture(context, { phase: 'planning', pending: true });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'planning');
 	// No client-driven dispatch: no admission, no ack, no continuation error.
 	expect(state.admissions).toHaveLength(0);
@@ -575,10 +593,10 @@ test('R02: a pending planning project is server-owned — the browser makes no a
 	await expect(card.getByRole('alert')).toHaveCount(0);
 });
 
-test('ready app remains inside Home chat, has access-error retry, and persists generated todos across reload', async ({ page, context }) => {
+test('ready app stays in the project workspace, has access-error retry, and persists generated todos across reload', async ({ page, context }) => {
 	const state = await fixture(context, { phase: 'ready', failPreview: 1 });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	await expect(card.getByRole('alert')).toContainText('You do not have access');
 	await card.getByRole('button', { name: 'Try again' }).click();
@@ -588,10 +606,13 @@ test('ready app remains inside Home chat, has access-error retry, and persists g
 	await expect(preview.getByRole('listitem')).toHaveText('Review real Caddie journey');
 	await expect.poll(() => page.evaluate("localStorage.getItem('caddie:preview:actor-workflow:proj-workflow')")).toContain('Review real Caddie journey');
 	await page.reload();
-	await expect(page.getByTestId('channel').getByTestId('project-workflow').frameLocator('iframe').getByRole('listitem')).toHaveText('Review real Caddie journey');
-	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow').frameLocator('iframe').getByRole('listitem')).toHaveText('Review real Caddie journey');
+	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'project');
 	expect(state.admissions).toHaveLength(0);
-	expect(state.previewReads).toBe(3);
+	// The https-frame preview reads in two steps (POST /seed + GET /document),
+	// so one failed load, one retry and one reload touch the preview 7 times
+	// (the old single-step srcDoc flow read 3).
+	expect(state.previewReads).toBe(7);
 });
 
 test('a finished build saves its code as a pull request and merges it only after an explicit approval', async ({ page, context }) => {
@@ -599,9 +620,9 @@ test('a finished build saves its code as a pull request and merges it only after
 	// Evidence only: CADDIE_SHOTS=<dir> saves each panel state; CADDIE_SHOTS_MOBILE=1 runs at 390px.
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
 	await page.getByText('App settings, versions & delivery', { exact: true }).click();
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const panel = card.getByTestId('save-github');
 	const shot = async (name: string) => {
@@ -661,8 +682,8 @@ test('an Android app runs its real Flutter web build in the preview frame and re
 		if (/Content Security Policy|Refused to/i.test(message.text())) blocked.push(message.text());
 	});
 	page.on('pageerror', (error) => consoleLines.push(`[pageerror] ${error.message}`));
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const frame = card.locator('iframe[data-kind="flutter"]');
 	await expect(frame).toBeVisible();
@@ -699,9 +720,9 @@ test('an app with a server lists the keys it needs; a key is pasted once and nev
 	const state = await fixture(context, { phase: 'ready', keys: true });
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
 	await page.getByText('App settings, versions & delivery', { exact: true }).click();
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const panel = card.getByTestId('app-keys');
 	const shot = async (name: string) => {
@@ -756,9 +777,9 @@ test('Publish puts the checked app on the web in one click, then unpublishes it 
 	const state = await fixture(context, { phase: 'ready', publish: true });
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
 	await page.getByText('App settings, versions & delivery', { exact: true }).click();
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const panel = card.getByTestId('publish-app');
 	const shot = async (name: string) => {
@@ -813,9 +834,9 @@ test('a new version waits for the safety check, then goes live on its own', asyn
 	state.publish.checkPolls = 2;
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
 	await page.getByText('App settings, versions & delivery', { exact: true }).click();
-	const panel = page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-app');
+	const panel = page.getByTestId('focused-project-home').getByTestId('project-workflow').getByTestId('publish-app');
 	await panel.getByTestId('publish-go').click();
 	const checking = panel.getByTestId('publish-checking');
 	await expect(checking).toContainText('Caddie is checking the new version for safety before visitors see it.');
@@ -840,9 +861,9 @@ test('a taken-down app says why and offers no way to publish', async ({ page, co
 	};
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
 	await page.getByText('App settings, versions & delivery', { exact: true }).click();
-	const panel = page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-app');
+	const panel = page.getByTestId('focused-project-home').getByTestId('project-workflow').getByTestId('publish-app');
 	const blocked = panel.getByTestId('publish-blocked');
 	await expect(blocked).toContainText('This app was taken down for breaking Caddie’s rules');
 	await expect(blocked).toContainText("Reason: Caddie's safety check flagged a new version (Phishing).");
@@ -858,26 +879,26 @@ test('a taken-down app says why and offers no way to publish', async ({ page, co
 test('Publish waits for the keys the app needs, and says plainly when publishing is not set up', async ({ page, context }) => {
 	const state = await fixture(context, { phase: 'ready', publish: true });
 	state.publish.status.missingKeys = ['WEATHER_API_KEY'];
-	await page.goto(`${BASE}/app/`);
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
 	await page.getByText('App settings, versions & delivery', { exact: true }).click();
-	const panel = page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-app');
+	const panel = page.getByTestId('focused-project-home').getByTestId('project-workflow').getByTestId('publish-app');
 	await expect(panel.getByTestId('publish-needs-keys')).toHaveText('Add the keys this app needs first: WEATHER_API_KEY.');
 	await expect(panel.getByTestId('publish-go')).toBeDisabled();
 
 	state.publish.status = { ...state.publish.status, available: false, reason: "Publishing isn't set up on this Caddie server yet." };
 	await page.reload();
 	await page.getByText('App settings, versions & delivery', { exact: true }).click();
-	await expect(page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-unavailable')).toHaveText("Publishing isn't set up on this Caddie server yet.");
-	await expect(page.getByTestId('channel').getByTestId('project-workflow').getByTestId('publish-go')).toHaveCount(0);
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow').getByTestId('publish-unavailable')).toHaveText("Publishing isn't set up on this Caddie server yet.");
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow').getByTestId('publish-go')).toHaveCount(0);
 });
 
 test('Versions lists every checked build and goes back to an earlier one in two clicks', async ({ page, context }) => {
 	const state = await fixture(context, { phase: 'ready', versions: 3 });
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
 	await page.getByText('App settings, versions & delivery', { exact: true }).click();
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const panel = card.getByTestId('app-versions');
 	const shot = async (name: string) => {
@@ -917,9 +938,9 @@ test("AI in your app shows this month's answers and allowance; when it runs out 
 	};
 	const ai = { calls: 12, usedPercent: 4, limitReached: false };
 	await fixture(context, { phase: 'ready', ai });
-	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
 	await page.getByText('App settings, versions & delivery', { exact: true }).click();
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const panel = card.getByTestId('app-ai');
 	await expect(panel.getByRole('heading', { name: 'AI in your app' })).toBeVisible();
@@ -951,8 +972,8 @@ test('the test inbox shows the sign-in codes the app sent while you tried it, ne
 			{ to: 'ada.lovelace@example.com', code: '123456', createdAt: new Date(now - 3 * 60_000).toISOString() },
 		],
 	});
-	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	const inbox = card.getByTestId('test-inbox');
 	await expect(inbox.getByRole('heading', { name: 'Test inbox' })).toBeVisible();
@@ -973,8 +994,8 @@ test('the test inbox shows the sign-in codes the app sent while you tried it, ne
 
 test('an app that sent no sign-in codes shows no test inbox', async ({ page, context }) => {
 	await fixture(context, { phase: 'ready', inbox: [] });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	await expect(card.getByRole('link', { name: 'Download app' })).toBeVisible();
 	await expect(card.getByTestId('test-inbox')).toHaveCount(0);
@@ -982,8 +1003,8 @@ test('an app that sent no sign-in codes shows no test inbox', async ({ page, con
 
 test('an app that never used AI shows no AI section', async ({ page, context }) => {
 	await fixture(context, { phase: 'ready' });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	await expect(card.getByRole('link', { name: 'Download app' })).toBeVisible();
 	await expect(card.getByTestId('app-ai')).toHaveCount(0);
@@ -991,8 +1012,8 @@ test('an app that never used AI shows no AI section', async ({ page, context }) 
 
 test('one version needs no Versions list', async ({ page, context }) => {
 	await fixture(context, { phase: 'ready', versions: 1 });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	await expect(card.getByRole('link', { name: 'Download app' })).toBeVisible();
 	await expect(card.getByTestId('app-versions')).toHaveCount(0);
@@ -1000,42 +1021,28 @@ test('one version needs no Versions list', async ({ page, context }) => {
 
 test('a client-only app shows no Keys section', async ({ page, context }) => {
 	await fixture(context, { phase: 'ready' });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	await expect(card.getByRole('link', { name: 'Download app' })).toBeVisible();
 	await expect(card.getByTestId('app-keys')).toHaveCount(0);
 });
 
-test('beside its own project page the chat card offers no Open project; in Home chat it still does', async ({ page, context }) => {
-	await fixture(context);
-	await page.setViewportSize({ width: 1440, height: 900 });
-	await page.goto('/app/project?project=proj-workflow');
-	// The project's page is open next to the chat: a button to open it would go nowhere.
-	const beside = page.getByTestId('conversation-panel').getByTestId('project-workflow');
-	await expect(beside.getByRole('heading', { name: 'Your plan is ready' })).toBeVisible();
-	await expect(beside.getByRole('button', { name: 'Open project' })).toHaveCount(0);
-	await page.goto('/app/');
-	const home = page.getByTestId('channel').getByTestId('project-workflow');
-	await expect(home.getByRole('heading', { name: 'Your plan is ready' })).toBeVisible();
-	await expect(home.getByRole('button', { name: 'Open project' })).toBeVisible();
-});
-
-test('mobile Home chat retains the embedded workflow and opens its explicit project only when requested', async ({ page, context }) => {
+test('project chat summarizes the same plan and opens its full workspace on mobile', async ({ page, context }) => {
 	await fixture(context);
 	await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(`${BASE}/app/?pane=channel`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
-	await expect(card.getByRole('heading', { name: 'Your plan is ready' })).toBeVisible();
-	await card.getByRole('button', { name: 'Open project' }).click();
-	await expect(page).toHaveURL(/project=proj-workflow/);
-	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'project');
+	await page.goto('/app/project?project=proj-workflow&pane=channel');
+	const summary = page.getByTestId('workflow-summary');
+	await expect(summary.getByRole('button', { name: 'Review plan' })).toBeVisible();
+	await expect(summary.locator('iframe')).toHaveCount(0);
+	await summary.getByRole('button', { name: 'Review plan' }).click();
+	await expect(page).toHaveURL(/design-review\?project=proj-workflow/);
+	await expect(page.getByTestId('project-tab-plan')).toHaveAttribute('aria-current', 'page');
 });
-
 
 test('repeated project handoffs keep one live card and one preview', async ({ context, page }) => {
   await fixture(context, { phase: 'ready', repeatHandoff: true });
-  await page.goto('/app/?pane=channel');
+  await page.goto('/app/project?project=proj-workflow');
   await expect(page.getByTestId('project-workflow')).toHaveCount(1);
   await expect(page.getByTestId('interactive-preview')).toHaveCount(1);
   await expect(page.frameLocator('iframe[title="Your app preview"]').getByRole('heading', { name: 'Todoer' })).toBeVisible();
@@ -1086,8 +1093,8 @@ test('the build card is one card: nothing inside it is drawn as a card of its ow
 			commands: [{ command: 'bun run build', outcome: 'ok', exitCode: 0, testsPassed: null, testsFailed: null, at: NOW, durationMs: 4_000, role: 'frontend' }],
 		},
 	});
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'building');
 	await expect(card.getByTestId('build-stages')).toBeVisible();
 	await expect(card.getByTestId('build-features')).toBeVisible();
@@ -1100,7 +1107,7 @@ test('the build card is one card: nothing inside it is drawn as a card of its ow
 		await card.evaluate((el) => el.scrollIntoView({ block: 'start' }));
 		await card.screenshot({ path: `${dir}/build-card-desktop.png` });
 		await page.setViewportSize({ width: 390, height: 844 });
-		await page.goto(`${BASE}/app/?pane=channel`);
+		await page.goto(`${BASE}/app/project?project=proj-workflow`);
 		await expect(card.getByTestId('build-stages')).toBeVisible();
 		await card.evaluate((el) => el.scrollIntoView({ block: 'start' }));
 		await card.screenshot({ path: `${dir}/build-card-mobile.png` });
@@ -1110,7 +1117,7 @@ test('the build card is one card: nothing inside it is drawn as a card of its ow
 
 test('Stop build is one request (the server stops the running turn) and retains the stopped project', async ({ context, page }) => {
   const fx = await fixture(context, { phase: 'building' });
-  await page.goto('/app/?pane=channel');
+  await page.goto('/app/project?project=proj-workflow');
   await page.getByRole('button', { name: 'Stop build', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Needs attention' })).toBeVisible();
   await expect(page.getByTestId('project-workflow')).toContainText('Your plan and files are retained');
@@ -1129,7 +1136,7 @@ test('the check history is in words: a raw check result is never shown (plan 3.3
     // A payload from before plan 3.3: the server now words these, and the page never shows one either.
     { issue: 'feature-2:browser-bundle', round: 'repair_attempt', outcome: 'failed', detail: '{"check":"browser-bundle","passed":false,"exitCode":1,"stdout":"","stderr":"error"}', at: NOW },
   ] });
-  await page.goto('/app/?pane=channel');
+  await page.goto('/app/project?project=proj-workflow');
   const history = page.getByTestId('build-history');
   await history.locator('summary').click();
   await expect(history.getByTestId('build-history-item')).toHaveCount(2);
@@ -1140,7 +1147,7 @@ test('the check history is in words: a raw check result is never shown (plan 3.3
 
 test('a plan stuck before approval reads as a plan to continue, never as a failed build', async ({ context, page }) => {
   await fixture(context, { phase: 'blocked' });
-  await page.goto('/app/?pane=channel');
+  await page.goto('/app/project?project=proj-workflow');
   const card = page.getByTestId('project-workflow');
   await expect(card.getByRole('heading', { name: 'Plan needs another pass' })).toBeVisible();
   await expect(card).toContainText("Caddie didn't finish the plan");
@@ -1153,8 +1160,8 @@ test('right after a GitHub import, the card builds the copied app and then shows
 	// Evidence only: CADDIE_SHOTS=<dir> saves each state; CADDIE_SHOTS_MOBILE=1 runs at 390px.
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	const shot = async (name: string) => {
 		const dir = process.env.CADDIE_SHOTS;
 		if (!dir) return;
@@ -1184,8 +1191,8 @@ test("a judge's example (S07b) is ready to try at once, in its own words", async
 	const state = await fixture(context, { imported: { status: 'ready', noWorkflow: true, example: true } });
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
-	await page.goto(`${BASE}/app/${mobile ? '?pane=channel' : ''}`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'imported');
 	await expect(card.getByRole('heading', { name: 'An example app to try' })).toBeVisible();
 	await expect(card.getByTestId('imported-app-ready')).toHaveText('Caddie built Farm Log. Try it, then tell Caddie what you’d like to change, and it builds on this code.');
@@ -1202,8 +1209,8 @@ test("a judge's example (S07b) is ready to try at once, in its own words", async
 
 test('while Caddie plans, the copied app stays in the card under the plan', async ({ page, context }) => {
 	await fixture(context, { phase: 'review', imported: { status: 'ready' } });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card.getByRole('heading', { name: 'Your plan is ready' })).toBeVisible();
 	const section = card.getByTestId('imported-app');
 	await expect(section.getByRole('heading', { name: 'Your app from GitHub' })).toBeVisible();
@@ -1212,8 +1219,8 @@ test('while Caddie plans, the copied app stays in the card under the plan', asyn
 
 test("once the first build has its own preview, the copied app's section is gone", async ({ page, context }) => {
 	await fixture(context, { phase: 'ready', imported: { status: 'ready' } });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	await expect(card.getByTestId('workflow-ready-detail')).toBeVisible();
 	await expect(card.getByTestId('imported-app')).toHaveCount(0);
@@ -1222,8 +1229,8 @@ test("once the first build has its own preview, the copied app's section is gone
 test("a copy Caddie couldn't build says why in plain words", async ({ page, context }) => {
 	const message = "Caddie couldn't build this app the way it was copied, so there's nothing to try yet. Your code is saved as version 1. Tell Caddie what you'd like, and it fixes the build first.";
 	const state = await fixture(context, { imported: { status: 'failed', noWorkflow: true, message } });
-	await page.goto(`${BASE}/app/`);
-	const card = page.getByTestId('channel').getByTestId('project-workflow');
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card.getByRole('heading', { name: 'Your code is copied' })).toBeVisible();
 	await expect(card.getByTestId('imported-app-failed')).toHaveText(message);
 	await expect(card.locator('iframe')).toHaveCount(0);
@@ -1240,9 +1247,9 @@ for (const device of [
   try {
     await fixture(context, { phase: 'ready', android: true, flutter: { page: '<html><body>Browser preview</body></html>', relayed: [] } });
     await context.route('https://caddie.test/a/**', route => route.fulfill({ contentType: 'application/vnd.android.package-archive', headers: { 'content-disposition': 'attachment; filename="test.apk"' }, body: Buffer.from([0x50, 0x4b, 3, 4]) }));
-    const page = await context.newPage(); await page.goto(`${BASE}/app/`);
+    const page = await context.newPage(); await page.goto(`${BASE}/app/project?project=proj-workflow`);
     await page.getByText('App settings, versions & delivery', { exact: true }).click();
-    const panel = page.getByTestId('channel').getByTestId('android-download');
+    const panel = page.getByTestId('focused-project-home').getByTestId('android-download');
     await expect(panel).toContainText('Its server works after you publish');
     const download = page.waitForEvent('download');
     await panel.getByRole('button', { name: device.label, exact: true }).click();
@@ -1267,7 +1274,7 @@ for (const device of [
 
 test('app preview expands without resetting the frame, opens outside chat, and refreshes the exact build', async ({ page, context }) => {
  await fixture(context,{phase:'ready'});
- await page.goto(`${BASE}/app/`);
+ await page.goto(`${BASE}/app/project?project=proj-workflow`);
  const preview = page.getByTestId('interactive-preview').first();
  const app = preview.frameLocator('iframe');
  await app.getByLabel('New task').fill('Keep my draft in full screen');
@@ -1296,15 +1303,25 @@ test('a share preview opens its own revision and an expired share never substitu
  let expired = false;
  const requests: string[] = [];
  await context.route('**/api/projects/proj-workflow/previews', route => json(route,200,{previews:[{id:'share-exact',revisionId:'original-revision',revoked:false,expiresAt:expired ? '2020-01-01T00:00:00.000Z' : '2999-01-01T00:00:00.000Z'}]}));
- await context.route('**/api/projects/proj-workflow/artifact-revisions/*/content', route => {requests.push(new URL(route.request().url()).pathname);return route.fulfill({contentType:'text/html',body:'<h1>The original app</h1>'});});
+ // The https-frame flow loads the iframe from /document (seeded via /seed), not /content.
+ await context.route('**/api/projects/proj-workflow/artifact-revisions/*/**', route => {
+  const path = new URL(route.request().url()).pathname;
+  requests.push(path);
+  if (path.endsWith('/seed') && route.request().method() === 'POST') return json(route,200,{seedRef:'seed-1'});
+  if (path.endsWith('/document')) return route.fulfill({contentType:'text/html',body:previewDocument('<h1>The original app</h1>','n',Object.create(null),false,'web')});
+  return route.fulfill({contentType:'text/html',body:'<h1>The original app</h1>'});
+ });
  await page.goto(`${BASE}/app/preview?project=proj-workflow&preview=share-exact&source=share`);
  await expect(page.getByTestId('preview-page').frameLocator('iframe').getByText('The original app')).toBeVisible();
- expect(requests).toEqual(['/api/projects/proj-workflow/artifact-revisions/original-revision/content']);
+ expect(requests.every(p => p.includes('/artifact-revisions/original-revision/'))).toBe(true);
+ expect(requests.some(p => p.endsWith('/document'))).toBe(true);
+ const loadedCount = requests.length;
  expired = true;
  await page.reload();
  await expect(page.getByText('This preview is no longer available')).toBeVisible();
  await expect(page.getByTestId('preview-page')).toHaveCount(0);
- expect(requests).toHaveLength(1);
+ // An expired share serves nothing new — the revision is never re-fetched.
+ expect(requests).toHaveLength(loadedCount);
 });
 
 test('a copied app opens outside chat with its own server bridge', async({page,context})=>{
@@ -1312,7 +1329,10 @@ test('a copied app opens outside chat with its own server bridge', async({page,c
  await context.route('**/api/projects/proj-workflow/workflow',route=>json(route,200,{workflow:null,plan:null,approval:null,importPreview:{status:'ready',origin:'github',repoFullName:'owner/app',versionSeq:1,outputId:'output-imported',hasServer:true,message:null}}));
  const requests:string[]=[];
  await context.route('**/api/projects/proj-workflow/workflow/preview/output-imported**',route=>{
-  if(new URL(route.request().url()).pathname.endsWith('/metadata')) return json(route,200,{outputId:'output-imported',kind:'web',hasServer:true});
+  const path=new URL(route.request().url()).pathname;
+  if(path.endsWith('/metadata')) return json(route,200,{outputId:'output-imported',kind:'web',hasServer:true});
+  if(path.endsWith('/seed') && route.request().method()==='POST') return json(route,200,{seedRef:'seed-1'});
+  if(path.endsWith('/document')) return route.fulfill({contentType:'text/html',body:previewDocument(`<button onclick="fetch('/api/save',{method:'POST'}).then(r=>r.json()).then(r=>document.querySelector('p').textContent=r.saved?'Saved through the app server':'Failed')">Save entry</button><p></p>`,new URL(route.request().url()).searchParams.get('nonce')??'',Object.create(null),true,'web')});
   if(route.request().method()==='POST'){requests.push(route.request().postDataJSON().path);return json(route,200,{status:200,headers:[['content-type','application/json']],body:Buffer.from('{"saved":true}').toString('base64')});}
   return route.fulfill({contentType:'text/html',body:`<button onclick="fetch('/api/save',{method:'POST'}).then(r=>r.json()).then(r=>document.querySelector('p').textContent=r.saved?'Saved through the app server':'Failed')">Save entry</button><p></p>`});
  });
@@ -1331,6 +1351,8 @@ test('an older preview keeps its own web/server metadata while the current build
   const path=new URL(route.request().url()).pathname;
   requests.push(`${route.request().method()} ${path}`);
   if(path.endsWith('/metadata')) return json(route,200,{outputId:'old-server-output',kind:'web',hasServer:true});
+  if(path.endsWith('/seed') && route.request().method()==='POST') return json(route,200,{seedRef:'seed-1'});
+  if(path.endsWith('/document')) return route.fulfill({contentType:'text/html',body:previewDocument(`<button onclick="fetch('/api/original').then(r=>r.text()).then(t=>document.querySelector('p').textContent=t)">Check original</button><p></p>`,new URL(route.request().url()).searchParams.get('nonce')??'',Object.create(null),true,'web')});
   if(route.request().method()==='POST') return json(route,200,{status:200,headers:[],body:Buffer.from('Still the original server').toString('base64')});
   return route.fulfill({contentType:'text/html',body:`<button onclick="fetch('/api/original').then(r=>r.text()).then(t=>document.querySelector('p').textContent=t)">Check original</button><p></p>`});
  });

@@ -26,7 +26,7 @@ import { hackathonChips, oneLineIdea } from './project-header.ts';
  * retargets.
  */
 
-export type ProjectTabId = 'overview' | 'plan' | 'build' | 'submission';
+export type ProjectTabId = 'overview' | 'plan' | 'build' | 'check' | 'submission';
 
 /** A step's status in words, from real data only. */
 export interface StepStatus {
@@ -149,7 +149,8 @@ export function ProjectTabs(props: {
 	const showRoutineDeadline = deadline && !chips.some((chip) => chip.id === 'deadline');
 
 	return (
-		<header className="project-head" data-testid="project-header">
+		<header className="project-head focused-project-head" data-testid="project-header">
+			<Link to="/projects" search={{}} className="project-back"><Icon name="arrowLeft" title="" /> Projects</Link>
 			<div className="project-head-title">
 				<span className="project-head-text">
 					<Link

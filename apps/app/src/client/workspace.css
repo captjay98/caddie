@@ -9196,3 +9196,93 @@ mark {
 .cdp-key-note { margin:12px 0 0; font-size:.86rem; line-height:1.55; }
 .cdp-entry-summary { padding:12px 0; font-size:.86rem; line-height:1.55; }
 @media(max-width:400px) { .cdp-key-details dl > div { grid-template-columns:96px minmax(0,1fr); gap:12px; } }
+
+/* Focused project workspace — approved 2026-10-22. One work surface;
+   compact contextual updates use the same state without embedding it twice. */
+.project-card { border-radius:13px; padding:18px; gap:12px; }
+.project-card-main { gap:12px; }
+.project-card-head { align-items:flex-start; gap:10px; }
+.project-card-head .row-title { font-size:17px; line-height:1.35; overflow-wrap:anywhere; min-height:44px; display:flex; align-items:center; }
+.project-card-tile { width:36px; height:36px; border-radius:11px; margin-top:4px; }
+.project-card .project-card-pill { border:0; background:none; box-shadow:none; padding:4px 0; border-radius:0; white-space:normal; justify-content:flex-end; font-size:12px; line-height:1.4; max-width:48%; text-align:right; }
+.project-card-purpose { font-size:14px; line-height:1.55; margin:4px 0 0; -webkit-line-clamp:2; }
+.project-card-contest { font-size:12px; line-height:1.4; margin:4px 0; }
+.project-card-detail { font-size:13px; line-height:1.5; color:var(--color-muted); margin:0; }
+.project-card-foot { border-top:0; padding-top:0; gap:12px; }
+.project-card-foot .btn-key { min-height:44px; font-size:13px; padding:9px 14px; }
+.project-back { display:inline-flex; align-items:center; gap:6px; color:var(--color-muted); min-height:44px; text-decoration:none; font-size:13px; align-self:start; }
+.focused-project-page { gap:22px; }
+.focused-project-head { padding:0; border:0; background:none; gap:12px; }
+.focused-project-head .project-head-name { font-size:24px; line-height:1.25; letter-spacing:-.025em; }
+.focused-project-head .project-head-for { line-height:1.5; font-size:14px; margin-top:6px; }
+.focused-project-head .project-head-settings { min-width:44px; min-height:44px; }
+.focused-project-head .project-head-chips { gap:8px 14px; }
+.focused-project-head .project-chip { border:0; padding:0; border-radius:0; background:none; font-size:12px; line-height:1.5; }
+.focused-project-head .project-steps-compact { display:none; }
+.focused-project-head .project-steps { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; overflow:visible; padding:0; border-bottom:1px solid var(--color-line); }
+.focused-project-head .project-step { border:0; border-radius:0; min-width:0; min-height:48px; padding:10px 4px; background:none; box-shadow:none; display:flex; justify-content:center; align-items:center; position:relative; }
+.focused-project-head .project-step.current { color:var(--color-action); background:none; }
+.focused-project-head .project-step.current::after { content:''; height:2px; position:absolute; inset-inline:10px; bottom:-1px; background:var(--color-action); }
+.focused-project-head .step-top { justify-content:center; font-size:13px; gap:6px; }
+.focused-project-head .step-num { width:18px; height:18px; min-width:18px; font-size:11px; }
+.focused-project-head .step-state { display:none; }
+.focused-project-content { min-width:0; }
+.focused-project-content > .project-workflow,
+.focused-project-content .build-progress,
+.focused-project-content .settings-panel,
+.focused-project-content .imported-app { border:0; background:transparent; border-radius:0; padding:0; box-shadow:none; }
+.focused-project-content > .project-workflow { gap:18px; }
+.focused-project-content > .project-workflow > .compact-card-head { margin:0; padding:0; }
+.focused-project-content > .project-workflow > .compact-card-head .compact-card-kicker { display:none; }
+.focused-project-content > .project-workflow > .compact-card-head .compact-card-badge { border:0; padding:0; background:none; margin:0; }
+.focused-project-content .workflow-heading .kicker { display:none; }
+.focused-project-content .workflow-heading h3 { font-size:21px; line-height:1.3; letter-spacing:-.02em; }
+.focused-project-content .build-progress > .compact-card-head,
+.focused-project-content .project-workflow .build-head-kicker { display:none; }
+.focused-project-content .workflow-plan { border:0; border-radius:0; padding:0; background:none; }
+.focused-project-content .build-stages { display:flex; flex-wrap:wrap; gap:8px 16px; border:0; margin:12px 0; }
+.focused-project-content .build-stage { border:0; border-radius:0; background:none; padding:0; }
+.focused-project-content .build-stage-detail,.focused-project-content .build-stage-dur { display:none; }
+.focused-project-content .build-feature-list,.focused-project-content .build-features { border:0; padding:0; background:none; box-shadow:none; }
+.focused-project-content .workflow-heading > .btn-ghost { display:none; }
+.project-supporting { display:grid; gap:0; margin-top:20px; border-top:1px solid var(--color-line); min-width:0; }
+.project-supporting > details,.project-secondary { border:0; border-bottom:1px solid var(--color-line); border-radius:0; background:none; padding:0; min-width:0; }
+.project-supporting > details > summary,.project-secondary > summary { display:list-item; min-height:48px; padding:14px 0; font-size:13px; color:var(--color-muted); cursor:pointer; }
+.project-supporting > details[open],.project-secondary[open] { padding-bottom:16px; }
+.project-supporting .card-surface,.project-secondary .settings-panel { border:0; background:none; border-radius:0; box-shadow:none; padding:14px 0; }
+.project-resource-links { display:flex; flex-wrap:wrap; gap:8px 18px; padding:8px 0; }
+.project-resource-links a { display:inline-flex; align-items:center; min-height:44px; color:var(--color-muted); font-size:12px; }
+.project-history-list { list-style:none; padding:0; margin:0; display:grid; gap:14px; }
+.project-history-list li { padding:12px 0; border-bottom:1px solid var(--color-line); }
+.project-chat-summary { padding:14px; border-radius:13px; }
+.project-chat-summary h3 { font-size:17px; line-height:1.35; margin:0; }
+.project-chat-summary .state-detail { font-size:13px; line-height:1.5; }
+.project-chat-summary .compact-card-head { margin-bottom:2px; }
+.project-chat-summary .compact-card-kicker { font-size:12px; }
+.project-chat-summary .compact-card-badge { white-space:normal; text-align:right; font-size:11px; }
+.project-chat-summary .workflow-summary-progress,.project-chat-summary .workflow-summary-history { border:0; background:none; padding:0; margin:0; }
+.project-chat-summary summary { min-height:44px; padding:10px 0; color:var(--color-muted); font-size:12px; }
+.workflow-summary-features { list-style:none; margin:0; padding:0; }
+.workflow-summary-features li { display:flex; justify-content:space-between; gap:12px; padding:9px 0; border-top:1px solid var(--color-line); font-size:12px; }
+.focused-project-content :is(input,select,textarea) { font-size:16px; }
+.focused-project-page :is(.btn-key,.btn-ghost) { min-height:44px; border-radius:13px; }
+@media(max-width:760px) {
+ .project-card { padding:16px; }
+ .project-card-head { flex-wrap:wrap; gap:0 10px; }
+ .project-card .project-card-pill { max-width:100%; text-align:left; justify-content:flex-start; }
+ .project-card-foot { flex-wrap:wrap; }
+ .focused-project-head .project-head-name { font-size:22px; }
+ .focused-project-head .project-head-settings span { display:none; }
+ .focused-project-head .project-steps { margin-inline:0; width:100%; }
+ .focused-project-head .step-top { font-size:12px; gap:5px; }
+ .focused-project-head .step-num { width:16px; height:16px; min-width:16px; }
+ .focused-project-page { gap:18px; }
+ .focused-project-content .workflow-heading h3 { font-size:19px; }
+ .focused-project-content .row-actions { flex-wrap:wrap; }
+ .project-chat-summary .card-context { overflow-wrap:anywhere; }
+}
+.focused-project-content .project-workflow > .compact-card-panel { border:0; border-radius:0; background:none; padding:0; box-shadow:none; }
+.focused-project-head .project-head-title { flex-wrap:nowrap; }
+.focused-project-head .project-head-text { flex:1; }
+.focused-project-head .project-head-name { overflow-wrap:anywhere; }
+.focused-project-head .project-head-for { white-space:normal; overflow:visible; }
