@@ -386,6 +386,11 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// lifecycle, cancel-keeps-until-renewal and the no-full-card-number
 			// invariant, run against the real routes in a materialised app.
 			'tests/payments-files.test.ts',
+			// Lane 9 (part L): generated photo/file uploads — chunked at 700 KB,
+			// a 5 MB byte-identical roundtrip (sha256), wrong-sha256/oversize/type
+			// refusal, the 100 MB app cap, B-privacy, and the browser shrink/split
+			// helpers.
+			'tests/files-files.test.ts',
 		],
 		browser: ['tests/browser/brief.spec.ts'],
 		live: [],
