@@ -4,23 +4,25 @@ import type { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement } f
 /**
  * ConvResize — the resizable Caddie panel (v2 shell, HANDOFF §3.2).
  *
- * The panel is a FRACTION of the window, never pixels: default 40%, minimum
- * 340px, maximum min(60% of the window, window − 520px) so the content column
- * never drops under 520px. The fraction persists per browser (localStorage,
- * rounded to 4 decimals) and is re-clamped on every window resize, so a saved
- * fraction never means an off-screen panel after the window changes.
+ * The panel is a FRACTION of the window, never pixels: default 50% (half the
+ * window, owner direction 2026-10-22), minimum 340px, maximum min(60% of the
+ * window, window − 520px) so the content column never drops under 520px; at
+ * every desktop width (≥1081px) half fits within that. A width the person
+ * set persists per browser (localStorage, rounded to 4 decimals) and is
+ * re-clamped on every window resize, so a saved fraction never means an
+ * off-screen panel after the window changes.
  *
  * The handle is a real ARIA separator: focusable, arrow keys ±2% (Shift ±10%),
  * Home = minimum, End = maximum, Enter/double-click = reset to the default.
  * While dragging (or while the handle is focused) a small tip shows the live
- * percentage, marked "· default" at exactly 40%.
+ * percentage, marked "· default" at exactly 50%.
  *
  * Storage key `caddie:conv-frac` is a plain number string — same `caddie:`
  * prefix family as `caddie-theme` and `caddie:last-dest:*`, never the
  * prototype's `caddie2.*` demo keys.
  */
 
-export const CONV_DEFAULT_FRAC = 0.4;
+export const CONV_DEFAULT_FRAC = 0.5;
 export const CONV_MIN_PX = 340;
 /** The page always keeps at least this much of the window. */
 export const CONTENT_MIN_PX = 520;
@@ -62,7 +64,7 @@ export interface ConvWidth {
 	maxPx: number;
 	/** Set the fraction (clamped). `persist=false` keeps the drag ephemeral. */
 	setFrac: (frac: number, persist?: boolean) => void;
-	/** Back to the 40% default (persists). */
+	/** Back to the default, half the window (persists). */
 	reset: () => void;
 }
 
@@ -223,7 +225,7 @@ export function ConvResizeHandle(props: { width: ConvWidth }): ReactElement {
 				aria-valuemin={Math.round((CONV_MIN_PX / windowWidth()) * 100)}
 				aria-valuemax={Math.round((convMaxPx() / windowWidth()) * 100)}
 				aria-valuetext={`Caddie takes ${pct}% of the window`}
-				title="Drag to resize · double-click resets to 40%"
+				title={`Drag to resize · double-click resets to ${Math.round(CONV_DEFAULT_FRAC * 100)}%`}
 				onPointerDown={onPointerDown}
 				onPointerMove={onPointerMove}
 				onPointerUp={endDrag}

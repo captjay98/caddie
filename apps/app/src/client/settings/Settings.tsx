@@ -490,7 +490,7 @@ function AppearanceSection(): ReactElement {
 					<button type="button" className="btn-ghost" data-testid="appearance-reset-width" onClick={convWidth.reset}>
 						Reset Caddie width
 					</button>
-					<span className="settings-row-detail">Back to 40% of the window.</span>
+					<span className="settings-row-detail">Back to half the window.</span>
 				</div>
 			</div>
 		</section>

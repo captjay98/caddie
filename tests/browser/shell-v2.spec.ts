@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
  * What U01 guarantees (HANDOFF §3.1–§3.3, §3.9):
  *   - Three viewport bands: ≥1081 two-panel desktop, 761–1080 tablet overlay
  *     (min(420px,100vw) + scrim from a top-bar Caddie button), ≤760 mobile.
- *   - The Caddie panel is a FRACTION of the window: default 40%, min 340px,
+ *   - The Caddie panel is a FRACTION of the window: default 50%, min 340px,
  *     max min(60%, window − 520px) — the content column never drops under
  *     520px. Drag + full keyboard resize (±2%, Shift ±10%, Home, End, Enter),
  *     double-click reset, ARIA separator semantics, percent tip.
@@ -159,7 +159,7 @@ async function stubAccount(context: BrowserContext) {
 // --- tests ----------------------------------------------------------------------
 
 test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
-	test('desktop opens the panel at 40% of the window by default (±1px)', async ({ browser }) => {
+	test('desktop opens the panel at 50% of the window by default (±1px)', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context);
 		const page = await context.newPage();
@@ -170,15 +170,19 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		await expect(panel).toBeVisible();
 		const box = await panel.boundingBox();
 		const innerWidth = await page.evaluate(() => window.innerWidth);
-		expect(Math.round(innerWidth * 0.4)).toBe(576);
-		expect(Math.abs((box?.width ?? 0) - innerWidth * 0.4)).toBeLessThanOrEqual(1);
+		expect(Math.round(innerWidth * 0.5)).toBe(720);
+		expect(Math.abs((box?.width ?? 0) - innerWidth * 0.5)).toBeLessThanOrEqual(1);
 
 		// The resize handle is a real ARIA separator with percent semantics.
 		const handle = page.getByTestId('conv-resize-handle');
 		await expect(handle).toHaveAttribute('role', 'separator');
 		await expect(handle).toHaveAttribute('aria-orientation', 'vertical');
-		await expect(handle).toHaveAttribute('aria-valuenow', '40');
-		await expect(handle).toHaveAttribute('aria-valuetext', 'Caddie takes 40% of the window');
+		await expect(handle).toHaveAttribute('aria-valuenow', '50');
+		await expect(handle).toHaveAttribute('aria-valuetext', 'Caddie takes 50% of the window');
+
+		// The smallest desktop width keeps half too, with the page still ≥520px.
+		await page.setViewportSize({ width: 1081, height: 900 });
+		await expect.poll(async () => Math.round((await panel.boundingBox())?.width ?? 0)).toBe(Math.round(1081 * 0.5));
 		await context.close();
 	});
 
@@ -261,15 +265,15 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		await expect(handle).toHaveAttribute('aria-valuemin', '24'); // 340/1440 ≈ 23.6 → 24
 		await expect(handle).toHaveAttribute('aria-valuetext', 'Caddie takes 24% of the window');
 
-		// Enter resets to the 40% default.
+		// Enter resets to the 50% default.
 		await handle.press('Enter');
-		expect(await widthOf()).toBe(576);
-		await expect(handle).toHaveAttribute('aria-valuenow', '40');
+		expect(await widthOf()).toBe(720);
+		await expect(handle).toHaveAttribute('aria-valuenow', '50');
 
 		// Double-click also resets: drive to max, then dblclick.
 		await handle.press('End');
 		await handle.dblclick();
-		expect(await widthOf()).toBe(576);
+		expect(await widthOf()).toBe(720);
 		await context.close();
 	});
 
