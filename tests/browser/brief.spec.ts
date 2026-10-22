@@ -998,3 +998,38 @@ test('the Brief flows two cards per row on a wide pane and stacks them when narr
 	expect(Math.abs((narrowBoxes[0]!.x) - (narrowBoxes[1]!.x))).toBeLessThanOrEqual(2);
 	await context.close();
 });
+
+test('U — two rich cards (plan + fit) flow two-up at 1440 with the chat at half, and stack at 390', async ({ browser }) => {
+	// Lane 14 measurement: at 1440px with the chat at half the window the Brief
+	// pane is ~651px, so the 300px min card width flows two rich cards per row
+	// there (the plan item list and the fit split stay readable), and a phone
+	// width drops them to one column.
+	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	await stubAccount(context, {
+		cards: [
+			PLAN_WITH_ITEMS,
+			opportunity({ fit: { reasons: ['A real problem you know first-hand.'], cautions: ['Regional eligibility still needs confirming.', 'A short demo video is required.'] } }),
+		],
+		unseenCount: 1,
+	});
+	const page = await context.newPage();
+	await page.goto(`${BASE}/app/?pane=brief`);
+
+	const cards = page.getByTestId('decision-card');
+	await expect(cards).toHaveCount(2);
+	const wide = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
+	// Same top edge, different left — one row, two columns.
+	expect(Math.abs(wide[0]!.y - wide[1]!.y)).toBeLessThanOrEqual(2);
+	expect(wide[1]!.x).toBeGreaterThan(wide[0]!.x + wide[0]!.width / 2);
+	// Each card is at least the 300px minimum, so the lists stay readable.
+	expect(wide[0]!.width).toBeGreaterThanOrEqual(300);
+	// The plan list and the fit split both still render in the narrowed cards.
+	await expect(page.getByTestId('card-plan-items')).toBeVisible();
+	await expect(page.getByTestId('card-fit-cautions')).toBeVisible();
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	const narrow = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
+	expect(narrow[1]!.y).toBeGreaterThan(narrow[0]!.y + narrow[0]!.height / 2);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	await context.close();
+});

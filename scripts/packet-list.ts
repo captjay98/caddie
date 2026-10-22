@@ -334,8 +334,12 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// steps and the S2 spike; the Try-again-from-save-point handler.
 			'tests/part-boundaries.test.ts',
 			'tests/try-again.test.ts',
+			// Lane 14 (part U): the Brief cards — the deadline countdown, the
+			// plan approval list, the opportunity fit split and the ready card's
+			// preview checks, each field filled from a real record or absent.
+			'tests/brief.test.ts',
 		],
-		browser: [],
+		browser: ['tests/browser/brief.spec.ts'],
 		live: [],
 	},
 	// --- Verification net (S01) ----------------------------------------------

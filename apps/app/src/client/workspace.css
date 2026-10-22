@@ -8989,9 +8989,15 @@ mark {
 /* The live Brief (v2): open decision cards flow two-up on a wide pane and drop
  * to one column when narrow (auto-fit, 340px min → two at ~720px+). The
  * deadlines block, the Earlier fold and the caught-up line stay full width. */
-.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:12px; }
+/* The live Brief (v2): open decision cards flow two-up on a wide pane and drop
+ * to one column when narrow. Lane 14 measured the Brief pane at 1440px with the
+ * chat at half the window — the pane is ~651px, so the min card width is 300px:
+ * two 300px cards + the 12px gap (612px) fit two-up there and stay readable for
+ * the plan and fit lists, while a phone width drops cleanly to one column. The
+ * deadlines block, the Earlier fold and the caught-up line stay full width. */
+.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:12px; }
 .brief-v2 > .brief-deadlines, .brief-v2 > .brief-done, .brief-v2 > .state-detail { grid-column: 1 / -1; }
-.brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:10px; }
+.brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:10px; }
 .brief-done li { padding:0; border:0; }
 .brief-done .caddie-card { box-shadow:none; }
 .channel-pane .msg { min-width:0; overflow-wrap:anywhere; }
