@@ -191,6 +191,57 @@ describe('opportunity fit split from the fit evaluator (step 7)', () => {
 	});
 });
 
+describe('hackathon deadline card (step 6)', () => {
+	// The project is for a hackathon (an accepted proposal) whose stored Home
+	// listing carries a parseable date range; projectHackathon reads the
+	// deadline from it, never from a schedule.
+	function seedHackathon(sqlite: Database): void {
+		sqlite.exec(`
+			insert into "projects" ("id","workspaceId","name","kind","status","createdAt","updatedAt") values
+				('unit-home','unit-ws-a','Home','home','active','${ISO}','${ISO}');
+			insert into "discovery_feed_runs" ("id","projectId","requestedBy","requestedAt","candidateCount") values
+				('feed-h','unit-home','unit-alice','${ISO}',1);
+			insert into "discovery_candidates" ("id","projectId","source","url","title","summary","requirementsJson","status","feedRunId","firstSeenAt","updatedAt") values
+				('cand-h','unit-home','local-seed','https://contest.example/fic','Farm Innovation Challenge','Oct 1, 2026 - Oct 23, 2026','[]','accepted','feed-h','${ISO}','${ISO}');
+			insert into "project_proposals" ("id","actorId","workspaceId","homeProjectId","sourceConversationId","name","idea","brief","hackathonTitle","hackathonUrl","status","projectId","createdAt","updatedAt") values
+				('prop-h','unit-alice','unit-ws-a','unit-home','conv-h','Farm log','idea','brief','Farm Innovation Challenge','https://contest.example/fic','accepted','unit-proj-a','${ISO}','${ISO}');
+		`);
+	}
+
+	test('the deadline card reads the real hackathon deadline (days left + local-time line), not a schedule', async () => {
+		const world = makeWorld();
+		try {
+			seedHackathon(world.sqlite);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const deadline = cards.find((card) => card.id.startsWith('brf_hackathon-deadline_'));
+			expect(deadline).toBeDefined();
+			expect(deadline!.kind).toBe('deadline');
+			// Mutation proof: return [] from hackathonDeadlineCard and this card is
+			// absent entirely.
+			expect(deadline!.deadline).toBeDefined();
+			expect(typeof deadline!.deadline!.daysLeft).toBe('number');
+			// The source is the hackathon title, never a schedule name.
+			expect(deadline!.deadline!.source).toBe('Farm Innovation Challenge');
+			// Mutation proof: drop the localTimeLabel spread and this is undefined.
+			expect(deadline!.deadline!.localTimeLabel).toBeDefined();
+			// It carries NO schedule field (it is a hackathon, not a schedule).
+			expect(deadline!.schedule).toBeUndefined();
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a project with no hackathon deadline produces no hackathon deadline card', async () => {
+		const world = makeWorld();
+		try {
+			const cards = await projectBrief(world.db, world.aliceScope);
+			expect(cards.find((card) => card.id.startsWith('brf_hackathon-deadline_'))).toBeUndefined();
+		} finally {
+			world.sqlite.close();
+		}
+	});
+});
+
 describe('pending plan card: next step + footer (steps 1-2)', () => {
 	function seedPendingPlan(sqlite: Database): void {
 		sqlite.exec(`

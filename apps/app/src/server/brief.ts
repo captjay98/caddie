@@ -10,7 +10,8 @@ import { listProjectsForActor } from './projects.ts';
 import { listPlanDocRevisions } from './projects.ts';
 import { listCandidates, computeFit } from './discovery.ts';
 import { listPreviews } from './previews.ts';
-import { listPackages, getReadiness } from './submission.ts';
+import { listPackages, getReadiness, getPackage } from './submission.ts';
+import { projectHackathon } from './project-hackathon.ts';
 import { STOP_SENTINEL } from './project-experience.ts';
 
 /** Format an ISO timestamp as a date a person reads, in the schedule's own
@@ -370,24 +371,89 @@ async function scheduleCards(db: D1Database, scope: Scope, nowIso: string): Prom
 	return schedules
 		.filter((schedule) => !schedule.paused)
 		.map((schedule) => {
-			const parts = deadlineParts(schedule.nextRunAt, schedule.timezone, nowIso);
+			// A SCHEDULE is not a hackathon deadline: it says plainly when it
+			// next runs, with NO days-left countdown and NO Deadline badge (lane
+			// 14 step 6). The `schedule` field drives that wording; the card
+			// carries no `deadline` block, so statusLabel reads "Scheduled".
+			const nextRunLabel = `${readableDate(schedule.nextRunAt, schedule.timezone)} (${schedule.timezone})`;
 			return {
 				id: newCardId('schedule', schedule.id),
 				projectId: scope.projectId,
 				kind: 'deadline',
 				headline: `${schedule.name} is scheduled`,
-				summary: `Next run ${readableDate(schedule.nextRunAt, schedule.timezone)} (${schedule.timezone}). A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
+				summary: `A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
 				evidenceIds: [],
 				status: 'handled',
 				updatedAt: schedule.updatedAt,
 				primaryAction: { label: 'Open the schedule', kind: 'review', targetId: schedule.id },
-				// A parseable next-run instant gives the countdown parts; an
-				// unparseable one leaves the field absent and the summary stands.
-				...(parts
-					? { deadline: { ...parts, source: `${schedule.name} (${schedule.timezone})` } }
-					: {}),
+				schedule: { name: schedule.name, nextRunLabel },
 			} satisfies DecisionCard;
 		});
+}
+
+/**
+ * The hackathon deadline card (lane 14 step 6): the REAL hackathon deadline
+ * the project card already shows (projectHackathon — the accepted proposal's
+ * event, or the project's contestUrl, with the deadline parsed from the stored
+ * listing), never a schedule's nextRunAt. It carries the days-left countdown,
+ * the deadline in the reader's own locale ("Your time → …"), and the
+ * submission steps from the project's real submission package checklist. No
+ * hackathon, or no parseable deadline → no card (the project simply has none).
+ */
+async function hackathonDeadlineCard(db: D1Database, scope: Scope, nowIso: string): Promise<DecisionCard[]> {
+	const hackathon = await projectHackathon(db, scope, Date.parse(nowIso) || Date.now());
+	if (!hackathon || !hackathon.deadline) return [];
+	// The deadline instant is the END of the deadline day (projectHackathon
+	// stores a YYYY-MM-DD). Render the countdown + date/time in UTC (the stored
+	// deadline has no timezone) and a reader-locale "Your time →" line.
+	const deadlineIso = `${hackathon.deadline}T23:59:59Z`;
+	const parts = deadlineParts(deadlineIso, 'UTC', nowIso);
+	if (!parts) return [];
+	const when = new Date(deadlineIso);
+	// The reader's own local time (TheCard "Your time →" line), from the host
+	// locale/timezone — deterministic enough for display, never a claim.
+	let localTimeLabel: string | undefined;
+	try {
+		localTimeLabel = new Intl.DateTimeFormat('en-US', {
+			weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+		}).format(when);
+	} catch {
+		localTimeLabel = undefined;
+	}
+	// The submission steps from the real checklist of the project's submission
+	// package, when one exists. A 'verified' item is done; everything else is
+	// still to do. No package → no steps (the countdown stands alone).
+	let steps: { title: string; detail?: string; done: boolean }[] | undefined;
+	try {
+		const packages = await listPackages(db, scope);
+		if (packages[0]) {
+			const pkg = await getPackage(db, scope, packages[0].id);
+			const items = pkg.checklist
+				.filter((item) => item.requirementText.trim() !== '')
+				.map((item) => ({ title: item.requirementText, done: item.status === 'verified' }));
+			if (items.length > 0) steps = items;
+		}
+	} catch (error) {
+		console.error('brief: deadline submission steps failed:', error);
+	}
+	return [{
+		id: newCardId('hackathon-deadline', scope.projectId),
+		projectId: scope.projectId,
+		kind: 'deadline',
+		headline: 'Leave time to tell the story',
+		summary: 'The app is one part of the submission. Your demo and project write-up still need a final pass.',
+		evidenceIds: [],
+		status: hackathon.ended ? 'handled' : 'needs-you',
+		updatedAt: nowIso,
+		primaryAction: { label: 'Review submission', kind: 'review', targetId: scope.projectId },
+		deadline: {
+			...parts,
+			source: hackathon.title,
+			...(localTimeLabel ? { localTimeLabel } : {}),
+			...(steps ? { steps } : {}),
+		},
+		...(hackathon.title ? { footer: { appName: hackathon.title, version: 'Submission' } } : {}),
+	} satisfies DecisionCard];
 }
 
 /** The project's brief: every live decision the project's own state demands. */
@@ -539,7 +605,7 @@ async function checksForRun(
 export async function projectBrief(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
 	const verified = await assertProjectScope(db, scope);
 	const nowIso = new Date().toISOString();
-	const [approvals, conflicts, staleArtifacts, failedRuns, schedules, workflow] = await Promise.all([
+	const [approvals, conflicts, staleArtifacts, failedRuns, schedules, workflow, hackathonDeadline] = await Promise.all([
 		pendingApprovalCards(db, verified, nowIso),
 		conflictCards(db, verified).catch((error) => {
 			// The evidence layer is independent: its absence must not blank the
@@ -560,8 +626,12 @@ export async function projectBrief(db: D1Database, scope: Scope): Promise<Decisi
 			return [] as DecisionCard[];
 		}),
         workflowCards(db, verified),
+		hackathonDeadlineCard(db, verified, nowIso).catch((error) => {
+			console.error('brief: hackathon deadline read failed:', error);
+			return [] as DecisionCard[];
+		}),
 	]);
-	const all = [...approvals, ...conflicts, ...staleArtifacts, ...failedRuns, ...schedules, ...workflow];
+	const all = [...approvals, ...conflicts, ...staleArtifacts, ...failedRuns, ...schedules, ...workflow, ...hackathonDeadline];
 	const sorted = all.sort((a, b) => {
 			const rank = STATUS_RANK[a.status] - STATUS_RANK[b.status];
 			if (rank !== 0) return rank;
