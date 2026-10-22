@@ -34,7 +34,7 @@ export interface PublishRouterOptions {
 }
 
 const sessionScope = (env: Env, request: Request, projectId: string) => requireProjectScope(env.DB, env, request.headers, projectId);
-const envDeps = (env: Env) => publishDepsFromEnv(env);
+const envDeps = (env: Env) => publishDepsFromEnv(env, env.DB);
 
 function errorJson(error: unknown): { status: number; body: { error: string; message?: string } } {
 	if (error instanceof ScopeError) return { status: error.status, body: { error: error.code, message: error.message } };
