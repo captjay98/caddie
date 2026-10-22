@@ -162,7 +162,9 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 		live: [],
 	},
 	P17: {
-		tests: ['tests/deploy-preflight.test.ts', 'tests/live-receipts.test.ts'],
+		// The one-command deploy orchestrator (roadmap item 1) is driven by a
+		// fake runner — no remote call — and proves the deploy safety contract.
+		tests: ['tests/deploy-preflight.test.ts', 'tests/live-receipts.test.ts', 'tests/deploy-script.test.ts'],
 		browser: ['tests/browser/release.spec.ts'],
 		live: ['tests/live/release.spec.ts'],
 	},
