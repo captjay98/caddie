@@ -885,6 +885,77 @@ test.describe('U step 4 — opportunity fit split', () => {
 	});
 });
 
+// --- U (lane 14) step 5: the ready card's preview checks --------------------
+function ready(overrides: Partial<BriefCard>): BriefCard {
+	return card({
+		id: 'brf_workflow_preview_prev-1',
+		projectId: 'proj-a',
+		kind: 'result',
+		headline: 'Your app is ready to try',
+		summary: 'Open the checked app preview. Your plan and build remain available.',
+		status: 'handled',
+		runId: 'run-7',
+		primaryAction: { label: 'Try the app', kind: 'preview', targetId: 'prev-1' },
+		key: 'proj-a:result:prev-1',
+		...overrides,
+	});
+}
+
+test.describe('U step 5 — ready card preview checks', () => {
+	test('a ready card shows the passed-checks count and the feature names; desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, {
+			cards: [ready({ checks: { passed: 8, items: ['Daily activity log', 'Search and filters', 'Save and sync entries'], version: 'Version 3' } })],
+			unseenCount: 0,
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const readyCard = page.getByTestId('decision-card').filter({ hasText: 'Your app is ready to try' });
+		const chips = readyCard.getByTestId('card-checks');
+		await expect(chips).toBeVisible();
+		await expect(chips).toContainText('8 checks passed');
+		await expect(readyCard.getByTestId('card-check-item')).toHaveCount(3);
+		await expect(chips).toContainText('Daily activity log');
+		await expect(chips).toContainText('Version 3');
+		// A plain feature name on the chip, never a check id.
+		await expect(chips).not.toContainText('feature-');
+		await readyCard.screenshot({ path: join(SHOTS, 'u5-ready-checks-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(chips).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await readyCard.screenshot({ path: join(SHOTS, 'u5-ready-checks-390.png') });
+		await context.close();
+	});
+
+	test('more than three features fold to a "+N more" chip, singular check reads "check passed"', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, {
+			cards: [ready({ checks: { passed: 1, items: ['A', 'B', 'C', 'D', 'E'] } })],
+			unseenCount: 0,
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const chips = page.getByTestId('card-checks');
+		await expect(chips).toContainText('1 check passed');
+		await expect(page.getByTestId('card-check-item')).toHaveCount(3);
+		await expect(chips).toContainText('+2 more');
+		await context.close();
+	});
+
+	test('a ready card with no checks field shows only its summary', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [ready({})], unseenCount: 0 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const readyCard = page.getByTestId('decision-card').filter({ hasText: 'Your app is ready to try' });
+		await expect(readyCard.getByTestId('card-checks')).toHaveCount(0);
+		await expect(readyCard).toContainText('Open the checked app preview');
+		await context.close();
+	});
+});
+
 test('Earlier loads archived decisions on demand and retains the exact decision target',async({browser})=>{
  const context=await browser.newContext({viewport:{width:390,height:844}});
  await stubAccount(context,{cards:[{...APPROVAL_A,status:'handled',headline:'Recent approval',primaryAction:{kind:'review',label:'View decision',targetId:'ap-1'}}]});

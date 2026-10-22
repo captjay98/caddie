@@ -743,3 +743,55 @@ describe('the fit split (lane 14 step 4)', () => {
 		}
 	});
 });
+
+describe('the ready card\u2019s preview checks (lane 14 step 5)', () => {
+	function seedReady(sqlite: Database, withFeatures: boolean): void {
+		sqlite.prepare(
+			`insert into "build_workflows" (projectId, runId, conversationId, intakeKey, brief, phase, previewId, updatedAt)
+			 values ('unit-proj-a','unit-run-ready','unit-conv-ready','unit-intake-ready','Farm log.','ready','prev-exact','${ISO}')`,
+		).run();
+		if (withFeatures) {
+			sqlite.exec(`
+				insert into "build_features" ("projectId","runId","planId","featureId","position","title","doneWhen","status","attempts","testsPassed","updatedAt") values
+					('unit-proj-a','unit-run-ready','plan-r','log',1,'Daily activity log','[]','passed',0,4,'${ISO}'),
+					('unit-proj-a','unit-run-ready','plan-r','search',2,'Search and filters','[]','passed',0,6,'${ISO}'),
+					('unit-proj-a','unit-run-ready','plan-r','offline',3,'Save and sync entries','[]','passed',0,8,'${ISO}'),
+					('unit-proj-a','unit-run-ready','plan-r','pending',4,'Not done yet','[]','building',0,null,'${ISO}');
+			`);
+		}
+	}
+
+	test('a ready card lists the passed checks and their feature names from real rows', async () => {
+		const world = makeWorld();
+		try {
+			seedReady(world.sqlite, true);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const ready = cards.find((card) => card.id.startsWith('brf_workflow_preview_'));
+			expect(ready).toBeDefined();
+			// Mutation proof: drop the `...(checks ? {checks} : {})` spread and this
+			// field is undefined.
+			expect(ready!.checks).toBeDefined();
+			// Only the three PASSED features count; the building one is excluded.
+			expect(ready!.checks!.passed).toBe(3);
+			expect(ready!.checks!.items).toEqual(['Daily activity log', 'Search and filters', 'Save and sync entries']);
+			// Plain feature names, never an internal check id.
+			for (const item of ready!.checks!.items) expect(item).not.toMatch(/\b[a-z0-9-]+:[a-z0-9-]+\b/);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a ready card with no passed features carries no checks field, so it keeps its summary', async () => {
+		const world = makeWorld();
+		try {
+			seedReady(world.sqlite, false);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const ready = cards.find((card) => card.id.startsWith('brf_workflow_preview_'));
+			expect(ready).toBeDefined();
+			expect(ready!.checks).toBeUndefined();
+			expect(ready!.summary).toContain('Open the checked app preview');
+		} finally {
+			world.sqlite.close();
+		}
+	});
+});

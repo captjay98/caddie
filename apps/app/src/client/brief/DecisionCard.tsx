@@ -169,6 +169,18 @@ export function DecisionCardView(props: {
                     ) : null}
                 </div>
             ) : null}
+            {card.checks ? (
+                <div className="compact-card-chips" data-testid="card-checks">
+                    <span className="compact-card-chip compact-card-chip-ok">
+                        <b aria-hidden="true">✓</b> {card.checks.passed} {card.checks.passed === 1 ? 'check passed' : 'checks passed'}
+                    </span>
+                    {card.checks.items.slice(0, 3).map((item, index) => (
+                        <span key={index} className="compact-card-chip" data-testid="card-check-item">{item}</span>
+                    ))}
+                    {card.checks.items.length > 3 ? <span className="compact-card-chip">+{card.checks.items.length - 3} more</span> : null}
+                    {card.checks.version ? <span className="compact-card-chip">{card.checks.version}</span> : null}
+                </div>
+            ) : null}
             {design === 'build' || design === 'repair' ? <BuildRail design={design} /> : null}
             {design === 'build' || design === 'repair' ? <p className="compact-card-note">{design === 'repair' ? 'The preview stays held while checks and repairs continue.' : 'Preview appears after the checks pass.'}</p> : null}
             {design === 'plan' ? <p className="compact-card-note">Opening this card does not approve anything. Review the original before deciding.</p> : null}

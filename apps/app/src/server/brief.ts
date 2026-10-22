@@ -382,6 +382,10 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
  const repairing = phase === 'building' && round?.outcome === 'failed';
  const ready = phase === 'ready' && typeof workflow.previewId === 'string';
  const targetId = ready ? String(workflow.previewId) : runId;
+ // Step 5: on a READY card, the preview checks — how many features passed and
+ // their names, read from the real build_features rows for this run. Absent
+ // (so the card keeps its summary) when no rows have passed yet.
+ const checks = ready ? await checksForRun(db, scope.projectId, runId) : null;
  return [{
   id: newCardId(`workflow_${ready ? 'preview' : repairing ? 'repair' : phase === 'blocked' ? 'blocked' : 'build'}`, targetId),
   projectId: scope.projectId, runId, kind: 'result',
@@ -389,7 +393,38 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
   summary: ready ? 'Open the checked app preview. Your plan and build remain available.' : repairing ? plainCheck(String(round?.issue ?? '')) : String(workflow.detail ?? (phase === 'blocked' ? 'The build stopped. Your plan and saved files are retained.' : 'Caddie is implementing your approved plan and running the checks.')),
   evidenceIds: [], status: ready ? 'handled' : phase === 'blocked' ? 'blocked' : 'changed', updatedAt: String(workflow.updatedAt),
   primaryAction: { label: ready ? 'Try the app' : 'View activity', kind: ready ? 'preview' : 'inspect', targetId },
+  ...(checks ? { checks } : {}),
  }];
+}
+
+/**
+ * The preview checks behind a ready card (lane 14 step 5), from the real
+ * build_features rows for this run: how many features passed, and their names
+ * (the features a person recognises, never an internal check id). Returns null
+ * when no feature has passed, so the ready card keeps its summary. The feature
+ * table may not exist on an older project — a missing table is treated as "no
+ * checks", never an error.
+ */
+async function checksForRun(
+	db: D1Database,
+	projectId: string,
+	runId: string,
+): Promise<{ passed: number; items: string[]; version?: string } | null> {
+	let rows: Record<string, unknown>[];
+	try {
+		rows = await queryAll(
+			db,
+			`select "title" from "build_features" where "projectId" = ? and "runId" = ? and "status" = 'passed' order by "position" asc`,
+			projectId,
+			runId,
+		);
+	} catch (error) {
+		if (String(error).includes('no such table')) return null;
+		throw error;
+	}
+	const items = rows.map((row) => String(row.title)).filter((title) => title.trim() !== '');
+	if (items.length === 0) return null;
+	return { passed: items.length, items };
 }
 
 export async function projectBrief(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
