@@ -47,6 +47,16 @@ import {
   type SpecialistBuildContext,
 } from "./specialists.ts";
 
+/**
+ * Team mode (part B): the coordinator's review loop. Every design is reviewed
+ * by the architect before it is shown for approval (the gate refuses an
+ * unreviewed block), and when two reviews in a row still find safety problems
+ * the plan changes instead of the design. Writing a new plan revision sends the
+ * build back to plan review (workflowSnapshot). Team mode only.
+ */
+export const TEAM_MODE_REVIEW_LOOP_INSTRUCTION =
+  "TEAM MODE REVIEW: after a design revision is saved, delegate to the architect to review its caddie-architecture block before telling the user it is ready. Fix every security issue it reports in a NEW design revision, then ask for another review; advisory notes are shown to the user and never block. If the architect says the plan must change (two reviews in a row found safety problems), stop revising the design: write a new plan revision (write_plan_note kind 'prd') that removes the cause, and tell the user in one plain sentence why the plan changed. That sends the build back to plan review.";
+
 export interface CoordinatorHostContext extends SpecialistBuildContext {
   currentPlanRevision: () => string;
   homeOverview: string | null;
@@ -138,9 +148,10 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
    */
   recordArchitectureReview?: (input: {
     blockHash: string;
-    round: number;
+    /** Ignored by the host, which numbers rounds itself. */
+    round?: number;
     issues: { severity: "security" | "advisory"; path: string; message: string }[];
-  }) => Promise<{ round: number; security: number; advisory: number }>;
+  }) => Promise<{ round: number; security: number; advisory: number; mustChangePlan?: boolean }>;
   /**
    * B06: create a PENDING approval on the server (the agent-facing request
    * bridge). Returns the server approval id; the user's Allow / Not now
@@ -630,6 +641,7 @@ export function Coordinator({ id }: AgentProps) {
     if (context.teamMode === true) {
       useInstruction(TEAM_MODE_DESIGN_INSTRUCTION);
       if (context.bigApps === true) useInstruction(TEAM_MODE_BIG_APPS_DESIGN_INSTRUCTION);
+      useInstruction(TEAM_MODE_REVIEW_LOOP_INSTRUCTION);
     }
   }
   return "Caddie helps solo builders discover, plan, build, verify and share software through one continuous conversation.";

@@ -159,7 +159,7 @@ describe('record_architecture_review tool', () => {
 		const tool = makeRecordArchitectureReview({
 			record: async (input) => {
 				seen.push(input);
-				return { round: input.round, security: securityIssues(input.issues as ReviewIssue[]).length, advisory: advisoryIssues(input.issues as ReviewIssue[]).length };
+				return { round: 1, security: securityIssues(input.issues as ReviewIssue[]).length, advisory: advisoryIssues(input.issues as ReviewIssue[]).length };
 			},
 		});
 		const result = (await tool.run({ data: { blockHash: HASH_A, round: 1, issues: [sec(), adv()] } } as never)) as { output: string };
@@ -172,5 +172,91 @@ describe('record_architecture_review tool', () => {
 		const tool = makeRecordArchitectureReview({ record: async () => ({ round: 2, security: 0, advisory: 1 }) });
 		const result = (await tool.run({ data: { blockHash: HASH_A, round: 2, issues: [adv()] } } as never)) as { output: string };
 		expect(result.output).toContain('no security issues');
+	});
+});
+
+// --- the review cycle (lead fix) ------------------------------------------------
+// Caddie numbers the rounds itself, and the "two rounds with safety problems"
+// count spans design revisions: a normal loop revises the block between reviews,
+// so a per-block count would never reach two. A new plan revision starts a new
+// cycle; a replayed review is not a new round.
+
+describe('the review cycle: Caddie numbers rounds and the safety count spans revisions', () => {
+	let sqlite: Database;
+	let db: D1Database;
+	let projectId: string;
+	const HASH_C = architectureBlockHash('{"version":2,"c":3}');
+	const T = (minute: number) => `2026-10-22T12:${String(minute).padStart(2, '0')}:00.000Z`;
+
+	beforeEach(async () => {
+		({ sqlite, db } = migratedDatabase());
+		addUser(sqlite, 'owner-1', 'owner@example.com');
+		const ws = await createWorkspace(db, 'owner-1', { name: 'W' });
+		const project = await createProject(db, await workspaceScopeForUser(db, 'owner-1', ws.id), { workspaceId: ws.id, name: 'Farm', description: 'A farm app' });
+		projectId = project.id;
+	});
+	afterEach(() => sqlite.close());
+
+	/** A new plan (PRD) revision written at `createdAt`. */
+	let planRevision = 0;
+	function writePlan(createdAt: string) {
+		planRevision += 1;
+		sqlite
+			.prepare('insert into plan_doc_revisions (id,projectId,kind,revision,bodyHash,body,createdBy,createdAt) values (?,?,?,?,?,?,?,?)')
+			.run(`prd-${createdAt}`, projectId, 'prd', planRevision, `hash-${createdAt}`, '# Plan', 'owner-1', createdAt);
+	}
+
+	test('Caddie numbers the rounds; a round the model sends is ignored', async () => {
+		const first = await recordArchitectureReview(db, projectId, { blockHash: HASH_A, round: 7, issues: [sec()] }, T(1));
+		expect(first.round).toBe(1);
+		const second = await recordArchitectureReview(db, projectId, { blockHash: HASH_B, issues: [sec('Still open.')] }, T(2));
+		expect(second.round).toBe(2);
+	});
+
+	test('two safety rounds on two different block revisions mean the plan must change', async () => {
+		await recordArchitectureReview(db, projectId, { blockHash: HASH_A, issues: [sec()] }, T(1));
+		await recordArchitectureReview(db, projectId, { blockHash: HASH_B, issues: [sec('Still open.')] }, T(2));
+		const verdict = reviewVerdict(await listArchitectureReviews(db, projectId), HASH_B);
+		expect(verdict.blocks).toBe(true);
+		expect(verdict.mustChangePlan).toBe(true);
+	});
+
+	test('a clean round between them resets the count', async () => {
+		await recordArchitectureReview(db, projectId, { blockHash: HASH_A, issues: [sec()] }, T(1));
+		await recordArchitectureReview(db, projectId, { blockHash: HASH_B, issues: [] }, T(2));
+		await recordArchitectureReview(db, projectId, { blockHash: HASH_C, issues: [sec('New problem.')] }, T(3));
+		const verdict = reviewVerdict(await listArchitectureReviews(db, projectId), HASH_C);
+		expect(verdict.blocks).toBe(true);
+		expect(verdict.mustChangePlan).toBe(false);
+	});
+
+	test('a new plan revision starts a new cycle', async () => {
+		writePlan(T(0));
+		await recordArchitectureReview(db, projectId, { blockHash: HASH_A, issues: [sec()] }, T(1));
+		await recordArchitectureReview(db, projectId, { blockHash: HASH_B, issues: [sec('Still open.')] }, T(2));
+		expect(reviewVerdict(await listArchitectureReviews(db, projectId), HASH_B).mustChangePlan).toBe(true);
+		// The plan changes: the old rounds no longer count.
+		writePlan(T(3));
+		expect(await listArchitectureReviews(db, projectId)).toHaveLength(0);
+		const next = await recordArchitectureReview(db, projectId, { blockHash: HASH_C, issues: [sec('One left.')] }, T(4));
+		expect(next.round).toBe(3); // numbering continues across cycles
+		const verdict = reviewVerdict(await listArchitectureReviews(db, projectId), HASH_C);
+		expect(verdict.blocks).toBe(true);
+		expect(verdict.mustChangePlan).toBe(false);
+	});
+
+	test('replaying the same review does not add a round', async () => {
+		await recordArchitectureReview(db, projectId, { blockHash: HASH_A, issues: [sec()] }, T(1));
+		const replay = await recordArchitectureReview(db, projectId, { blockHash: HASH_A, issues: [sec()] }, T(2));
+		expect(replay.round).toBe(1);
+		expect(await listArchitectureReviews(db, projectId)).toHaveLength(1);
+		expect(reviewVerdict(await listArchitectureReviews(db, projectId), HASH_A).mustChangePlan).toBe(false);
+	});
+
+	test('the tool tells the coordinator plainly when the plan must change', async () => {
+		const tool = makeRecordArchitectureReview({ record: async () => ({ round: 2, security: 1, advisory: 0, mustChangePlan: true }) });
+		const result = (await tool.run({ data: { blockHash: HASH_B, issues: [sec()] } } as never)) as { output: string };
+		expect(result.output).toContain('plan must change');
+		expect(result.output).toContain('new plan revision');
 	});
 });

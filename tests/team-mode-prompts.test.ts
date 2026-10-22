@@ -82,3 +82,13 @@ describe('part B: the architect delegate on the Ultra role', () => {
 		expect(ARCHITECT_INSTRUCTION).toContain('READ-ONLY');
 	});
 });
+
+describe('part B: the coordinator review loop (lead fix)', () => {
+	test('every design is reviewed by the architect, and the plan changes when the architect says so', async () => {
+		const { TEAM_MODE_REVIEW_LOOP_INSTRUCTION } = await import('../apps/app/src/agents/coordinator.ts');
+		expect(TEAM_MODE_REVIEW_LOOP_INSTRUCTION).toContain('delegate to the architect');
+		expect(TEAM_MODE_REVIEW_LOOP_INSTRUCTION).toContain('NEW design revision');
+		expect(TEAM_MODE_REVIEW_LOOP_INSTRUCTION).toContain('plan must change');
+		expect(TEAM_MODE_REVIEW_LOOP_INSTRUCTION).toContain("write_plan_note kind 'prd'");
+	});
+});
