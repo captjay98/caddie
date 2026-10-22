@@ -482,6 +482,14 @@ export function createTestCaddie(
     codeFor: (email) => codes.get(email.trim().toLowerCase()),
     async ai(request) {
       requests.push(request);
+      // This stand-in must refuse exactly what the real platform refuses, or a
+      // broken call passes the app's own tests and fails only in production.
+      // HerdVoice, 2026-10-22: the app asked for tier "balanced", which the
+      // platform answers with { ok: false, reason: "invalid_request" } — the
+      // stand-in accepted it, the tests passed, and the judge got an app that
+      // could never analyse anything.
+      const refusal = refusalFor(request);
+      if (refusal) return refusal;
       const answer = typeof reply === "function" ? reply(request) : reply;
       return typeof answer === "string" ? { ok: true, text: answer } : answer;
     },
@@ -491,6 +499,23 @@ export function createTestCaddie(
       return { ok: true };
     },
   };
+}
+
+/** The refusals Caddie's platform makes before it ever calls a model. */
+function refusalFor(request: CaddieAiRequest): CaddieAiReply | null {
+  const tier = (request as { tier?: unknown }).tier;
+  if (tier !== undefined && tier !== "fast" && tier !== "super") {
+    return { ok: false, reason: "invalid_request", message: 'Choose tier "fast" or "super".' };
+  }
+  if (!Array.isArray(request.messages) || request.messages.length === 0) {
+    return { ok: false, reason: "invalid_request", message: "Send at least one message." };
+  }
+  for (const message of request.messages) {
+    if (!message || typeof message.content !== "string" || !message.content.trim()) {
+      return { ok: false, reason: "invalid_request", message: "Every message needs some content." };
+    }
+  }
+  return null;
 }
 `),
 

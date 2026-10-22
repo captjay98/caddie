@@ -20,8 +20,30 @@ const HOST = join(REPO, "apps", "app", "src", "server", "coordinator-host.ts");
 const MANIFEST = join(REPO, "tests", "acceptance", "manifest.json");
 const TEMPLATE = join(REPO, "stacks", "react-hono", "template");
 
-describe("R03 single recipe — chat build uses the shared recipe", () => {
-  test("coordinator-host imports the shared scaffold, not inline literals", () => {
+describe("the app's test harness stands in for the platform's AI faithfully", () => {
+  // HerdVoice, 2026-10-22: the app asked for tier "balanced". The platform
+  // answers that with { ok: false, reason: "invalid_request" } and the app's
+  // analysis never ran — but the test harness accepted anything, so the app's
+  // own tests passed and the build was green. The stand-in must refuse what
+  // the real thing refuses.
+  test("the scaffold's fake AI refuses an unknown tier with the platform's wording", () => {
+    const harness = SCAFFOLD_FILES["test/setup/caddie.ts"] ?? "";
+    expect(harness).toContain("Choose tier");
+    expect(harness).toContain('"fast"');
+    expect(harness).toContain('"super"');
+    // And it must refuse an empty conversation, like the host does.
+    expect(harness).toContain("invalid_request");
+  });
+
+  test("the platform's own AI route refuses the same tiers", () => {
+    const host = readFileSync(join(REPO, "apps", "app", "src", "server", "app-ai.ts"), "utf8");
+    expect(host).toContain("Choose tier");
+    expect(host).toContain("'fast'");
+    expect(host).toContain("'super'");
+  });
+});
+
+describe("R03 single recipe — chat build uses the shared recipe", () => {  test("coordinator-host imports the shared scaffold, not inline literals", () => {
     const src = readFileSync(HOST, "utf8");
     // The chat host must import the ONE shared source...
     expect(src).toContain("scaffold.ts");

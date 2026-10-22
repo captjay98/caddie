@@ -112,8 +112,6 @@ export function InteractivePreview(props: {
     props.contentUrl ??
     `/api/projects/${encodeURIComponent(props.projectId)}/artifact-revisions/${encodeURIComponent(props.artifactId)}/content`;
   const scope = `${props.actorId}\n${props.projectId}\n${props.artifactId}\n${contentUrl}\n${attempt}`;
-  /** A built app's preview: its frame is served by Caddie over https. */
-  const workflowFrame = contentUrl.includes("/workflow/preview/");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -192,36 +190,7 @@ export function InteractivePreview(props: {
     window.addEventListener("message", onMessage);
     void (async () => {
       try {
-        const response = await fetch(contentUrl, {
-          credentials: "same-origin",
-          signal: controller.signal,
-        });
-        if (!response.ok)
-          throw new Error(
-            response.status === 401
-              ? "Sign in again to open this preview."
-              : response.status === 403
-                ? "You do not have access to this preview."
-                : "The preview could not be loaded.",
-          );
-        if (
-          !response.headers
-            .get("content-type")
-            ?.toLowerCase()
-            .startsWith("text/html")
-        )
-          throw new Error("This artifact is not an interactive app preview.");
-        const limit = kind === "flutter" ? FLUTTER_PREVIEW_LIMIT : PREVIEW_LIMIT;
-        if (Number(response.headers.get("content-length")) > limit)
-          throw new Error(
-            "This preview is too large to open here. Download it instead.",
-          );
-        const html = await response.text();
-        if (new TextEncoder().encode(html).byteLength > limit)
-          throw new Error(
-            "This preview is too large to open here. Download it instead.",
-          );
-        if (!active) return;
+        // The app's own saved data (its localStorage in the preview).
         let seed: Record<string, string> = Object.create(null);
         try {
           seed =
@@ -231,47 +200,65 @@ export function InteractivePreview(props: {
         } catch {
           setStorageWarning(true);
         }
-        // A built app's frame is loaded from Caddie's own https URL, not from a
-        // `srcdoc` attribute: a srcdoc frame reports the protocol `about:`, and
-        // an app that checks its own origin before it fetches then believes it
-        // is offline and never calls its server (HerdVoice, 2026-10-22). The
-        // frame stays sandboxed without `allow-same-origin`, so its origin is
-        // still opaque.
-        if (workflowFrame && kind !== "flutter") {
-          const seeded = await fetch(`${contentUrl}/seed`, {
+        const limit = kind === "flutter" ? FLUTTER_PREVIEW_LIMIT : PREVIEW_LIMIT;
+        const tooLarge = () => new Error("This preview is too large to open here. Download it instead.");
+        const accessError = (status: number) =>
+          status === 401
+            ? "Sign in again to open this preview."
+            : status === 403
+              ? "You do not have access to this preview."
+              : null;
+
+        if (kind !== "flutter") {
+          // The frame is loaded from Caddie's own https URL, not from a `srcdoc`
+          // attribute: a srcdoc frame reports the protocol `about:`, and an app
+          // that checks its own origin before it fetches then believes it is
+          // offline and never calls its server (HerdVoice, 2026-10-22). The
+          // frame stays sandboxed without `allow-same-origin`, so its origin is
+          // still opaque. The frame document lives beside the content:
+          // .../workflow/preview/<id> for a built app, .../artifact-revisions/<rev>
+          // for an imported one.
+          const documentBase = contentUrl.replace(/\/content$/, "");
+          const seeded = await fetch(`${documentBase}/seed`, {
             method: "POST",
             credentials: "same-origin",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ storage: seed }),
             signal: controller.signal,
           });
-          if (!seeded.ok)
-            throw new Error(
-              seeded.status === 401
-                ? "Sign in again to open this preview."
-                : seeded.status === 403
-                  ? "You do not have access to this preview."
-                  : "The preview's saved data could not be prepared.",
-            );
+          if (!seeded.ok) throw new Error(accessError(seeded.status) ?? "The preview's saved data could not be prepared.");
           const { seedRef } = (await seeded.json()) as { seedRef?: string };
           if (!seedRef) throw new Error("The preview's saved data could not be prepared.");
-          const frameUrl = `${contentUrl}/document?nonce=${encodeURIComponent(nonce)}&seed=${encodeURIComponent(seedRef)}`;
+          const frameUrl = `${documentBase}/document?nonce=${encodeURIComponent(nonce)}&seed=${encodeURIComponent(seedRef)}`;
           const frame = await fetch(frameUrl, { credentials: "same-origin", signal: controller.signal });
-          if (!frame.ok)
-            throw new Error(
-              frame.status === 401
-                ? "Sign in again to open this preview."
-                : frame.status === 403
-                  ? "You do not have access to this preview."
-                  : "The preview could not be loaded.",
-            );
+          if (!frame.ok) throw new Error(accessError(frame.status) ?? "The preview could not be loaded.");
           if (!frame.headers.get("content-type")?.toLowerCase().startsWith("text/html"))
             throw new Error("This artifact is not an interactive app preview.");
+          if (Number(frame.headers.get("content-length")) > limit) throw tooLarge();
           await frame.text();
           if (!active) return;
           setLoaded({ scope, url: frameUrl });
           return;
         }
+
+        // Flutter's preview page is composed here (its assets and its engine
+        // are not Caddie's to serve), so it stays a `srcdoc` frame.
+        const response = await fetch(contentUrl, {
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(accessError(response.status) ?? "The preview could not be loaded.");
+        if (
+          !response.headers
+            .get("content-type")
+            ?.toLowerCase()
+            .startsWith("text/html")
+        )
+          throw new Error("This artifact is not an interactive app preview.");
+        if (Number(response.headers.get("content-length")) > limit) throw tooLarge();
+        const html = await response.text();
+        if (new TextEncoder().encode(html).byteLength > limit) throw tooLarge();
+        if (!active) return;
         setLoaded({ scope, document: previewDocument(html, nonce, seed, Boolean(appRequestUrl), kind) });
       } catch (failure) {
         if (active)

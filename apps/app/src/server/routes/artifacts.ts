@@ -3,6 +3,8 @@ import type { AuthEnv } from '../auth.ts';
 import { createAuthRouter } from './auth.ts';
 import { createProjectsRouter } from './projects.ts';
 import { ScopeError, requireProjectScope } from '../scope.ts';
+import { createD1ContentStore } from '../artifacts.ts';
+import { previewDocument, previewSeed } from '../../shared/preview-frame.ts';
 import {
 	diffArtifactRevisions,
 	getArtifact,
@@ -119,6 +121,62 @@ export function createArtifactsRouter(): Hono<{ Bindings: Env }> {
 			c.req.param('projectId'),
 		);
 		return c.json({ artifact: await getArtifact(c.env.DB, scope, c.req.param('revisionId') ?? '') });
+	});
+
+	// The frame document for an imported app: the app's own page plus the
+	// preview's storage shim, served over https so the app sees the protocol it
+	// will see in production. A `srcdoc` frame reports the protocol `about:`,
+	// and an app that checks its own origin before it fetches then believes it
+	// is offline (HerdVoice, 2026-10-22 — the same defect, the same fix).
+	router.post('/projects/:projectId/artifact-revisions/:revisionId/seed', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		const body = (await c.req.json().catch(() => ({}))) as { storage?: unknown };
+		const storage = previewSeed(body.storage);
+		if (!storage) throw new ScopeError(400, 'invalid_request', 'The preview\'s saved data could not be read.');
+		const { contentHash } = await createD1ContentStore(c.env.DB).put(new TextEncoder().encode(JSON.stringify(storage)));
+		return c.json({ seedRef: contentHash });
+	});
+
+	router.get('/projects/:projectId/artifact-revisions/:revisionId/document', async (c) => {
+		const scope = await requireProjectScope(
+			c.env.DB,
+			c.env,
+			c.req.raw.headers,
+			c.req.param('projectId'),
+		);
+		const nonce = c.req.query('nonce') ?? '';
+		if (!/^[A-Za-z0-9-]{8,64}$/.test(nonce)) throw new ScopeError(400, 'invalid_request', 'A preview nonce is required.');
+		const { revision, bytes } = await readArtifact(
+			c.env.DB,
+			scope,
+			c.req.param('revisionId') ?? '',
+		);
+		const appHtml = new TextDecoder().decode(bytes);
+		let seed: Record<string, string> = Object.create(null);
+		const seedRef = c.req.query('seed') ?? '';
+		if (seedRef) {
+			const stored = await createD1ContentStore(c.env.DB).get(seedRef);
+			if (stored) {
+				try {
+					seed = previewSeed(JSON.parse(new TextDecoder().decode(stored))) ?? seed;
+				} catch {
+					seed = Object.create(null);
+				}
+			}
+		}
+		const html = previewDocument(appHtml, nonce, seed, false, 'web');
+		return new Response(html, {
+			headers: {
+				'content-type': 'text/html; charset=utf-8',
+				'cache-control': 'private, max-age=60',
+				'x-content-type-options': 'nosniff',
+			},
+		});
 	});
 
 	// --- content: inline view (sandboxed, no download dance) -----------------------------

