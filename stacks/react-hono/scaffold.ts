@@ -2,6 +2,11 @@ import { recipe } from "./recipe.ts";
 import { SCAFFOLD_LOCKFILE } from "./scaffold-lock.ts";
 import { SERVER_FILES } from "./server-files.ts";
 import { AUTH_FILES } from "./auth-files.ts";
+// Lane 9: the recipe kit (charts + polling) ships in every app; payments (J)
+// and file uploads (L) are generated only when the block declares them.
+import { KIT_FILES } from "./kit-files.ts";
+import { PAYMENTS_FILES } from "./payments-files.ts";
+import { FILES_FILES } from "./files-files.ts";
 
 /**
  * The ONE generic scaffold + command set for the react-hono stack (R03).
@@ -213,6 +218,9 @@ const BASE_FILES: Readonly<Record<string, string>> = {
 	...SERVER_FILES,
 	// Sign-in for the app's own users (stacks/react-hono/auth-files.ts).
 	...AUTH_FILES,
+	// The recipe kit every app may use: charts (SVG, no new library) and
+	// usePolling for refreshing data (stacks/react-hono/kit-files.ts, part O).
+	...KIT_FILES,
 };
 
 /**
@@ -230,3 +238,16 @@ export const SCAFFOLD_BASE_FILES = BASE_FILES;
 
 /** The recipe version this scaffold is bound to (recorded on receipts). */
 export const SCAFFOLD_RECIPE_VERSION = recipe.version;
+
+/**
+ * App-feature files GENERATED CONDITIONALLY, not part of every app (part B):
+ * the host merges `payments` when the block declares payments, and `files` when
+ * a table declares a `file` field. They are NOT in SCAFFOLD_FILES because an
+ * app without those features must not carry their protected tables and routes.
+ * (The kit — charts and polling — ships in every app and is already in
+ * SCAFFOLD_FILES.)
+ */
+export const SCAFFOLD_FEATURE_FILES = {
+	payments: PAYMENTS_FILES,
+	files: FILES_FILES,
+} as const;

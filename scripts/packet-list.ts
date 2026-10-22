@@ -391,6 +391,10 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// refusal, the 100 MB app cap, B-privacy, and the browser shrink/split
 			// helpers.
 			'tests/files-files.test.ts',
+			// Lane 9 (part O starter files): the recipe kit — caddie/charts.tsx
+			// (SVG bar/line/donut, no new library, screen-reader table) and
+			// caddie/poll.ts (usePolling, pausing while the tab is hidden).
+			'tests/kit-files.test.ts',
 		],
 		browser: ['tests/browser/brief.spec.ts'],
 		live: [],
