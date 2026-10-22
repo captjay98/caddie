@@ -601,7 +601,7 @@ export async function acknowledgeDispatch(
     .bind(now(), scope.projectId, key)
     .run();
 }
-export async function requireBuildApproval(db: D1Database, scope: Scope) {
+export async function requireBuildApproval(db: D1Database, scope: Scope, pauseScope: RepairPauseScope = {}) {
   const { workflow, plan } = await workflowSnapshot(db, scope);
   if (!workflow || !plan || workflow.phase !== "building")
     throw new ScopeError(
@@ -609,7 +609,7 @@ export async function requireBuildApproval(db: D1Database, scope: Scope) {
       "BUILD_NOT_APPROVED",
       "Show the plan and wait for the review controls before building.",
     );
-  const pause = await workflowRepairPause(db, workflow.runId);
+  const pause = await workflowRepairPause(db, workflow.runId, pauseScope);
   if (pause.paused)
     throw new ScopeError(
       409,
@@ -1116,15 +1116,31 @@ export async function readBuildOutput(
   return bytes;
 }
 
+/**
+ * Whose spent tries pause the caller. Omitted: every issue in the run (today's
+ * build, where one builder works at a time). `featureIds` (part P, a module
+ * builder): only the issues of those features, `<featureId>:<check>`, so a
+ * module that spent its three tries never pauses another module working in
+ * parallel. An empty list owns no issue, so it never pauses.
+ */
+export interface RepairPauseScope {
+  featureIds?: readonly string[];
+}
 /** Explicit user recovery starts a fresh repair window; previous failures remain evidence. */
-export async function workflowRepairPause(db: D1Database, runId: string) {
+export async function workflowRepairPause(db: D1Database, runId: string, pauseScope: RepairPauseScope = {}) {
+  const ids = pauseScope.featureIds;
+  // instr(issue, '<id>:') = 1 means the issue starts with that feature's prefix
+  // (an exact prefix test: no LIKE wildcards to escape in a feature id).
+  const owned =
+    ids === undefined ? "" : ids.length === 0 ? " and 0" : ` and (${ids.map(() => "instr(issue, ?) = 1").join(" or ")})`;
   const result = await rows(
     db,
     `select issue,count(*) failed from run_rounds where runId=? and round='repair_attempt' and outcome='failed'
-  and rowid > coalesce((select afterRoundRowId from workflow_resumes where runId=? order by rowid desc limit 1),0)
+  and rowid > coalesce((select afterRoundRowId from workflow_resumes where runId=? order by rowid desc limit 1),0)${owned}
   group by issue having count(*) >= 3`,
     runId,
     runId,
+    ...(ids ?? []).map((id) => `${id}:`),
   );
   return {
     paused: result.length > 0,

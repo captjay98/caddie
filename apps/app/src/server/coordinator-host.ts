@@ -32,6 +32,7 @@ import {
   setWorkflowBlocker,
   storeBuildOutput,
   workflowRepairPause,
+  type RepairPauseScope,
   continueProjectFromChat,
 } from "./build-workflow.ts";
 import { stackCatalog } from "./stacks.ts";
@@ -251,6 +252,11 @@ export async function createCoordinatorContext(
   /** Narrow a feature row list to the module's own features (identity otherwise). */
   const scopeToModule = (rows: BuildFeatureRow[]): BuildFeatureRow[] =>
     moduleFeatureIds ? rows.filter((row) => moduleFeatureIds.has(row.featureId)) : rows;
+  // Part P: whose spent tries pause this host. A module builder counts only its
+  // own features' issues, so one module that spent its three tries never
+  // refuses or stops another module working in parallel. The coordinator's own
+  // build keeps today's rule: every issue in the run.
+  const pauseScope: RepairPauseScope = moduleFeatureIds ? { featureIds: [...moduleFeatureIds] } : {};
 
   // Team mode (part P, gap 2): in MODULE scope a pause or an honest block stops
   // ONLY this module and frees its slot — the build phase stays `building` and
@@ -463,7 +469,7 @@ export async function createCoordinatorContext(
   const ensureSession = async () => {
     if (isHome)
       throw new SandboxError(409, "HOME_NO_SANDBOX", "Create a project first.");
-    await requireBuildApproval(env.DB, scope);
+    await requireBuildApproval(env.DB, scope, pauseScope);
     if (
       !env.CONTREE_BASE_URL ||
       !env.CONTREE_API_TOKEN ||
@@ -680,7 +686,7 @@ export async function createCoordinatorContext(
     issuePrefix?: string,
   ) => {
     signal?.throwIfAborted();
-    const { workflow, plan } = await requireBuildApproval(env.DB, scope);
+    const { workflow, plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     await scaffold();
     // Team mode (part E): write the generated contract files from the approved
     // design BEFORE every check run, so the contract test matches the design.
@@ -693,7 +699,7 @@ export async function createCoordinatorContext(
     const receipts: { check: string; passed: boolean; exitCode: number | null; stdout: string; stderr: string; operationKey: string }[] = [];
     for (const check of commands) {
       const operationKey = `${mode}:${runId}:${plan.id}:${attempt}:${check.check}`;
-      await requireBuildApproval(env.DB, scope);
+      await requireBuildApproval(env.DB, scope, pauseScope);
       const checkStarted = new Date().toISOString();
       // The dependencies check is the ONE verified install step: fetch every
       // pinned tarball, verify its sha512 against bun.lock, extract it, then
@@ -761,7 +767,7 @@ export async function createCoordinatorContext(
           outcome: "failed",
           detail: checkSentence(receipts.at(-1) ?? {}),
         });
-        const paused = (await workflowRepairPause(env.DB, workflow.runId))
+        const paused = (await workflowRepairPause(env.DB, workflow.runId, pauseScope))
           .paused;
         if (paused)
           await pauseOrStop(
@@ -795,7 +801,7 @@ export async function createCoordinatorContext(
           outcome: "failed",
           detail: sentence,
         });
-        const paused = (await workflowRepairPause(env.DB, workflow.runId)).paused;
+        const paused = (await workflowRepairPause(env.DB, workflow.runId, pauseScope)).paused;
         if (paused)
           await pauseOrStop(
             "Caddie could not get the app's contract checks (sign-in, privacy, restart) passing after three attempts. Your plan and files are saved. The app is not ready to try yet.",
@@ -807,7 +813,7 @@ export async function createCoordinatorContext(
   };
   const runChecks = async (attempt: string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
-    const { plan } = await requireBuildApproval(env.DB, scope);
+    const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     // Failures count toward the feature being built, not one build-wide bucket.
     const current = currentFeature(scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan)));
     const outcome = await runHostChecks("checks", attempt, signal, current?.featureId);
@@ -828,7 +834,7 @@ export async function createCoordinatorContext(
   };
   /** The host decides what is built next: the first feature that has not passed. */
   const buildNextFeature = async () => {
-    const { plan } = await requireBuildApproval(env.DB, scope);
+    const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     const rows = scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan));
     const current = currentFeature(rows);
     if (!current)
@@ -861,7 +867,7 @@ export async function createCoordinatorContext(
    */
   const finishFeature = async (featureId: string, attempt: string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
-    const { plan } = await requireBuildApproval(env.DB, scope);
+    const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     const rows = scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan));
     const current = currentFeature(rows);
     if (!current)
@@ -924,7 +930,7 @@ export async function createCoordinatorContext(
           outcome: "failed",
           detail: boundary.message,
         });
-        const paused = (await workflowRepairPause(env.DB, runId)).paused;
+        const paused = (await workflowRepairPause(env.DB, runId, pauseScope)).paused;
         await recordFeatureAttempt(env.DB, current, paused);
         if (paused)
           await pauseOrStop(
@@ -967,7 +973,7 @@ export async function createCoordinatorContext(
     signal?.throwIfAborted();
     {
       // The preview is published only after every planned feature has passed.
-      const { plan } = await requireBuildApproval(env.DB, scope);
+      const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
       const rows = await ensureBuildFeatures(env.DB, scope, runId, plan);
       const pending = currentFeature(rows);
       if (pending)
@@ -1059,7 +1065,7 @@ export async function createCoordinatorContext(
           outcome: "failed",
           detail: checkSentence(receipt),
         });
-        const paused = (await workflowRepairPause(env.DB, workflow.runId)).paused;
+        const paused = (await workflowRepairPause(env.DB, workflow.runId, pauseScope)).paused;
         if (paused)
           await setWorkflowBlocker(
             env.DB,
@@ -1313,7 +1319,7 @@ export async function createCoordinatorContext(
     verifyBuild,
     runChecks,
     requestAppKey: async (input) => {
-      await requireBuildApproval(env.DB, scope);
+      await requireBuildApproval(env.DB, scope, pauseScope);
       const key = await requestAppSecret(env.DB, scope, input);
       return { name: key.name, status: key.status };
     },
@@ -1367,7 +1373,7 @@ export async function createCoordinatorContext(
       }
     },
     delegateRepair: async (input) => {
-      await requireBuildApproval(env.DB, scope);
+      await requireBuildApproval(env.DB, scope, pauseScope);
       await recordRepairRound(env.DB, scope, runId, {
         issue: input.issue,
         round: input.round as "diagnosis",
