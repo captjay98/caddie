@@ -331,9 +331,12 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/contract-restart-spike.test.ts',
 			'tests/brief-run.test.ts',
 			// Lane 5 (parts D + F): part boundaries, the start/finish/restore
-			// steps and the S2 spike; the Try-again-from-save-point handler.
+			// steps and the S2 spike; the Try-again-from-save-point handler; the
+			// real snapshot ports over the driver; the Try-again card button.
 			'tests/part-boundaries.test.ts',
 			'tests/try-again.test.ts',
+			'tests/part-snapshot.test.ts',
+			'tests/try-again-card.test.ts',
 		],
 		browser: [],
 		live: [],
