@@ -975,6 +975,48 @@ The D13 and D14 changes (`shared/preview-frame.ts` and
 `client/artifacts/InteractivePreview.tsx`) are lane 1's, and only after your
 yes.
 
+### Outside the switches: U. The Brief cards (lane 14)
+
+This is the UI work that was under way before this plan. It doesn't depend
+on any team-mode part, and it's on for everyone, so it runs alongside the
+build.
+
+- **The design.** You accepted seven card mockups on Oct 20: Plan approval,
+  Live build, Repairing, Preview ready, Deadline, Opportunity fit and Earlier,
+  with Compact spacing and 13px corners (`docs/plans/2026-10-20-caddie-ui-review.md`).
+  - The mockups are in
+    `/Users/captjay98/.codex/visualizations/2026/10/20/01a156e1-6c71-7120-8b86-2f4f02367ff6/caddie-card-review.html`.
+  - The reference is the old Caddie's `src/components/TheCard.tsx` and
+    `src/styles/halo.css` (read-only).
+  - Already done: one card family (34f673c), plain words on the card face
+    (652a76d), and two cards per row when there's room (54f4d54).
+- **What's left, in this order:**
+  1. The look, the footer, Earlier and the build rail. These need no new
+     data.
+  2. The deadline countdown.
+  3. "What you're approving": the plan's list.
+  4. The fit split: "Why it fits" and "Before you commit".
+  5. The ready card's preview checks.
+- **Data rule.** Steps 2-5 need new optional fields on the card, filled by
+  the server in `server/brief.ts` from real records. A card today carries
+  only its headline, summary, kind, status, main action and evidence ids.
+  Nothing is guessed from the summary; when the server can't supply a field,
+  the card shows today's summary.
+- **Card rules:**
+  - one filled button per card;
+  - plain-English labels;
+  - no ids on the card face.
+- **Two cards per row on a 1440 px screen.** That needs a narrower minimum
+  card width, about 300 px. Lane 14 measures it with the richer cards and
+  picks the narrowest width that keeps the plan and fit lists readable, with
+  screenshots at 2x on desktop and 390 px on a phone.
+- **Tests,** each with a mutation proof:
+  - each new field comes from a real record or is absent;
+  - each step's card is checked in the browser on desktop and phone;
+  - the existing Brief browser tests still pass.
+- **When.** It starts in wave 2 and lands by Saturday. You review it with the
+  new screens on Sunday, and it ships in the Sunday base deploy.
+
 ## 6. Spikes (before the parts that depend on them)
 
 | Spike | When | Proves |
@@ -1018,6 +1060,7 @@ screenshots at 2x on desktop and 390 px on a phone.
 | 11 AI photos and platform | worker | M, the K types | `server/app-ai.ts`, `stacks/react-hono/server-files.ts`, `stacks/react-hono/auth-files.ts` |
 | 12 Parallel builders | worker | P, S3 | `agents/module-builder.ts`, `server/modules.ts`, `server/module-slots.ts` |
 | 13 Joining and room | worker | Q, R, S5 | `server/integration.ts`, `server/code-versions.ts`, `server/code-store.ts`, the chunked bundle path in `server/preview-runtime.ts` |
+| 14 Brief cards | worker | U | `client/brief/**`, `server/brief.ts`, the Brief and card rules in `client/workspace.css`, their tests; the new card fields in `packages/contracts/src/index.ts` (draft; lead applies) |
 
 `preview-runtime.ts` is shared by lanes 10 and 13, on separate functions, and
 the lead merges the two in order.
@@ -1034,7 +1077,7 @@ runs first, and the same worker then continues into its lane.
    - S1, then A;
    - S4, then E.
 2. **After foundations merge:** A, B's review tool and gate, D and F (with
-   S2), E and G.
+   S2), E and G, and U (the Brief cards, lane 14).
 3. **Then:**
    - P (with S3), which also proposes its wrangler entry for the ModuleBuilder
      Durable Object class to lane 1;
@@ -1060,7 +1103,7 @@ Rules for every lane:
 | Thu 22 | Wave 1 from 17:30: foundations, B's pure parts, H, I, S1 and S4. | none |
 | Fri 23 | Foundations merge; waves 2 and 3. Lane 2's block v2 by 12:00 (lanes 4, 12 and 13 align to it). S2, S3 and S4. Smoke build. | One smoke build (paid, small) |
 | Sat 24 | Wave 4. Parts land; the lead merges. Small and big flows end to end with a scripted model. S5. | The S5 deploy go |
-| Sun 25 | Full gate. Local acceptance for both flows. Fixes. You review the new screens on the running app. | Screen review |
+| Sun 25 | Full gate. Local acceptance for both flows. Fixes. You review the new screens and the Brief cards on the running app. Base deploy (section 11): migrations, the ModuleBuilder class and the Brief cards, every new switch off. | Screen review; the base deploy go |
 | Mon 26 | The campaign (cap $150), including S6. Fixes between runs. | Approve the $150 |
 | Tue 27 | 18:00: decide each switch (section 10). Push and deploy with the chosen values. | Decide; give the deploy go |
 | Wed 28 | Final small demo app on production. If `big_apps` passed: Caddie builds FarmOps on production (big-app limit, $40). Recording. Final texts. | Record the Caddie video; the FarmOps build go |
@@ -1110,10 +1153,20 @@ the key scan in part G and part H ship regardless.
 
 ## 11. Rollback plans
 
+Every Caddie deploy follows `docs/runbooks/production-deploy.md` (the steps)
+and `docs/runbooks/deployment-explained.md` (why, and the traps): the
+release check, a production build, preflight, a dry run, migrations before
+code, the deploy, the live smoke check, and the evidence record.
+
 - **Switches** flip without a redeploy through the operator route, and each
-  flip is logged.
+  flip is logged. Never flip one with `wrangler secret put`, because that
+  deploys a new version at once.
 - **Before every deploy,** record the live Worker version id.
-  `wrangler rollback` restores it in about a minute.
+  `wrangler rollback` restores it in about a minute, except across a Durable
+  Object migration: Cloudflare refuses that rollback. So the new ModuleBuilder
+  class and migrations 0040 and later go out first, in a **base deploy** on
+  Sunday with every new switch off. Tuesday's deploy is then code only and can
+  be rolled back.
 - **Migrations 0040 and later only add,** so rolling back the code leaves
   them unused and there's nothing to undo.
 - **Spending limit wrongly blocking good builds:** `spend_enforcement=off`.

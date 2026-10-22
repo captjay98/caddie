@@ -4,6 +4,9 @@ The owner runs this (gate G4), or authorizes each step marked **[remote]**.
 Nothing else leaves the Mac. Run commands from the repo root unless a step
 says `apps/app`.
 
+For the mental model — why each step exists, the traps, and the
+simplification roadmap — read `deployment-explained.md` alongside this file.
+
 The procedure was rehearsed locally on 2026-10-19 with a dummy D1 id and
 domain. The rehearsal covered the production build, preflight, the dry run
 with the repo's wrangler, and the migrations against a fresh local D1.
