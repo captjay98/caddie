@@ -38,6 +38,8 @@ import { buildActivity } from "../build-activity.ts";
 import { checkImportedApp, importPreviewDepsFromEnv, readImportPreview, type ImportPreviewEnv } from "../import-preview.ts";
 import { acceptProposal, dismissProposal, getProposal } from "../project-proposals.ts";
 import { projectHackathon, projectHackathonsForActor } from "../project-hackathon.ts";
+import { createD1ContentStore } from "../artifacts.ts";
+import { previewDocument, previewSeed } from "../../shared/preview-frame.ts";
 import { ApprovePlanCommandSchema } from "@caddie/contracts";
 import * as v from "valibot";
 
@@ -345,6 +347,57 @@ export function createBuildWorkflowRouter(
     const manifest = await readOutputManifest(c.env.DB, scope, outputId);
     if (!manifest) throw new ScopeError(404, "preview_not_found", "No such preview in this project.");
     return c.json({ outputId, kind: manifest.kind, hasServer: manifest.hasServer });
+  });
+
+  // The preview FRAME document: the app's own page plus the preview's storage
+  // and fetch shims, served over https.
+  //
+  // Why it is served instead of being set as the frame's `srcdoc`: a srcdoc
+  // frame reports the protocol `about:`, and a generated app that checks its
+  // own origin before it fetches (`window.location.protocol === "https:"`)
+  // then decides it is offline and never calls its server at all. HerdVoice,
+  // 2026-10-22: a green build whose app showed "You're offline — showing
+  // saved cases" in the preview, while the relay answered every request when
+  // called directly. The frame stays sandboxed WITHOUT `allow-same-origin`, so
+  // its origin is still opaque: the app can neither read the workspace's
+  // origin nor script the page around it.
+  router.post("/projects/:projectId/workflow/preview/:outputId/seed", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const body = (await c.req.json().catch(() => ({}))) as { storage?: unknown };
+    const storage = previewSeed(body.storage);
+    if (!storage) throw new ScopeError(400, "invalid_request", "The preview's saved data could not be read.");
+    const { contentHash } = await createD1ContentStore(c.env.DB).put(new TextEncoder().encode(JSON.stringify(storage)));
+    return c.json({ seedRef: contentHash });
+  });
+
+  router.get("/projects/:projectId/workflow/preview/:outputId/document", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const outputId = c.req.param("outputId");
+    const nonce = c.req.query("nonce") ?? "";
+    if (!/^[A-Za-z0-9-]{8,64}$/.test(nonce)) throw new ScopeError(400, "invalid_request", "A preview nonce is required.");
+    const bytes = await readBuildOutput(c.env.DB, scope, outputId);
+    const appHtml = new TextDecoder().decode(bytes);
+    const bundle = await readBuildBundle(c.env.DB, scope, outputId).catch(() => null);
+    let seed: Record<string, string> = Object.create(null);
+    const seedRef = c.req.query("seed") ?? "";
+    if (seedRef) {
+      const stored = await createD1ContentStore(c.env.DB).get(seedRef);
+      if (stored) {
+        try {
+          seed = previewSeed(JSON.parse(new TextDecoder().decode(stored))) ?? seed;
+        } catch {
+          seed = Object.create(null);
+        }
+      }
+    }
+    const html = previewDocument(appHtml, nonce, seed, bundle !== null, "web");
+    return new Response(html, {
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "private, max-age=60",
+        "x-content-type-options": "nosniff",
+      },
+    });
   });
 
   router.get("/projects/:projectId/workflow/preview/:outputId", async (c) => {
