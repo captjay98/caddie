@@ -275,12 +275,30 @@ function approvalCard(row: Record<string, unknown>, projectId: string, nowIso: s
 		const copy = APPROVAL_COPY[approval.action];
 		const pending = approval.status === 'pending' && approval.expiresAt > nowIso;
             const outcome = approval.status === 'pending' ? 'expired' : approval.status;
+		// The plan approval is the one a non-technical person meets: say what
+		// approving does and what they decided, in plain words (the outcome word
+		// stays in the summary, so history always shows it).
+		const plan = approval.action === 'design';
+		const PLAN_OUTCOME: Record<string, { headline: string; summary: string }> = {
+			approved: { headline: 'You approved the plan', summary: 'This plan was approved.' },
+			rejected: { headline: 'You turned the plan down', summary: 'This plan was rejected.' },
+			revoked: { headline: 'The plan approval was withdrawn', summary: 'This plan approval was revoked.' },
+			expired: { headline: 'The plan approval expired', summary: 'This plan expired before a decision.' },
+			superseded: { headline: 'A newer plan replaced this one', summary: 'This plan was superseded by a newer one.' },
+		};
+		const planDecided = PLAN_OUTCOME[outcome] ?? { headline: 'Plan decided', summary: `This plan was ${outcome}.` };
 		return {
 			id: newCardId('approval', approval.id),
 			projectId: String(row.projectId ?? projectId),
 			kind: 'approval',
-			headline: pending ? copy.title : `${copy.label.replace(/^Review /, '')} — ${outcome}`,
-			summary: pending ? `Approving this authorises ${copy.authorises}` : `Decision ${outcome}. Open the record to read the exact revision it concerned. This does not authorise a new action.`,
+			headline: pending ? (plan ? 'Your plan is ready to build' : copy.title) : plan ? planDecided.headline : `${copy.label.replace(/^Review /, '')} — ${outcome}`,
+			summary: pending
+				? plan
+					? 'Approve it and Caddie starts building. Nothing is published until you decide.'
+					: `Approving this authorises ${copy.authorises}`
+				: plan
+					? `${planDecided.summary} Open it to read the plan.`
+					: `Decision ${outcome}. Open the record to read the exact revision it concerned. This does not authorise a new action.`,
 			evidenceIds: [],
 			status: pending ? 'needs-you' : 'handled',
 			updatedAt: pending ? approval.createdAt : approval.decidedAt ?? (outcome === 'expired' ? approval.expiresAt : approval.createdAt),

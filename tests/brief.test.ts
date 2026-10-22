@@ -189,7 +189,14 @@ describe('brief feed (projectBrief)', () => {
 		const needsYou = cards.filter((card) => card.status === 'needs-you');
 		expect(needsYou.length).toBe(1);
 		expect(needsYou[0]!.kind).toBe('approval');
-		expect(needsYou[0]!.summary).toContain('Approving this authorises');
+		// A plain promise for a non-technical person, never "authorises specialists
+		// building against this plan revision".
+		expect(needsYou[0]!.headline).toBe('Your plan is ready to build');
+		expect(needsYou[0]!.summary).toBe('Approve it and Caddie starts building. Nothing is published until you decide.');
+		// The decided plan reads as what the person did.
+		const decided = cards.find((card) => card.kind === 'approval' && card.status === 'handled' && card.id.includes('unit-ap-done'));
+		expect(decided?.headline).toBe('You approved the plan');
+		for (const card of cards.filter((c) => c.kind === 'approval')) expect(card.summary).not.toMatch(/authoris|revision|specialists/);
 		expect(needsYou[0]!.primaryAction).toEqual({
 			label: 'Review the design',
 			kind: 'review',
@@ -675,7 +682,7 @@ describe('"What you\u2019re approving" plan list (lane 14 step 3)', () => {
 			const cards = await projectBrief(world.db, world.aliceScope);
 			const approval = cards.find((card) => card.kind === 'approval' && card.status === 'needs-you');
 			expect(approval!.planItems).toBeUndefined();
-			expect(approval!.summary).toContain('Approving this authorises');
+			expect(approval!.summary).toBe('Approve it and Caddie starts building. Nothing is published until you decide.');
 		} finally {
 			world.sqlite.close();
 		}
