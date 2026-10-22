@@ -125,20 +125,32 @@ export type WorkflowPhase = import('../../server/build-workflow.ts').WorkflowPha
  */
 export function workflowSteps(
 	phase: WorkflowPhase | null,
-	opts?: { personal?: boolean; checkReady?: { verified: number; total: number } | null },
+	opts?: {
+		personal?: boolean;
+		checkReady?: { verified: number; total: number } | null;
+		/**
+		 * Whether the plan was approved, from the project status (the same
+		 * truth as the Now card). It tells a paused build from a stuck plan,
+		 * which the `blocked` phase alone cannot. Unknown keeps the cautious
+		 * wording.
+		 */
+		planApproved?: boolean;
+	},
 ): Partial<Record<ProjectStepId, StepStatus>> {
 	const steps: Partial<Record<ProjectStepId, StepStatus>> = {};
+	const pausedBuild = phase === 'blocked' && opts?.planApproved === true;
+	const stuckPlan = phase === 'blocked' && opts?.planApproved === false;
 	// Plan. `blocked` is ambiguous at the coarse-phase level (a stuck plan vs a
-	// build that paused after approval), so it must NOT claim "Approved" — only
-	// a genuinely post-approval phase (building/ready) earns the green check.
+	// build that paused after approval), so it claims "Approved" only when the
+	// project status says the plan was approved.
 	if (phase === 'planning') steps.plan = { text: 'Caddie is drafting it', tone: 'neutral' };
 	else if (phase === 'review') steps.plan = { text: 'Ready for you to review', tone: 'needs' };
     else if (phase === 'design') steps.plan = { text: 'Caddie is designing the screens', tone: 'neutral' };
     else if (phase === 'design-review') steps.plan = { text: 'Design ready for you to review', tone: 'needs' };
-	else if (phase === 'blocked') steps.plan = { text: 'Paused — check with Caddie', tone: 'needs' };
+	else if (phase === 'blocked' && !pausedBuild) steps.plan = { text: 'Paused — check with Caddie', tone: 'needs' };
 	else if (phase) steps.plan = { text: 'Approved', tone: 'done' };
 	// Build
-	if (phase === 'planning' || phase === 'review' || phase === 'design' || phase === 'design-review') steps.build = { text: 'After you approve', tone: 'neutral' };
+	if (phase === 'planning' || phase === 'review' || phase === 'design' || phase === 'design-review' || stuckPlan) steps.build = { text: 'After you approve', tone: 'neutral' };
 	else if (phase === 'building') steps.build = { text: 'Caddie is building it', tone: 'neutral' };
 	else if (phase === 'blocked') steps.build = { text: 'Needs your help', tone: 'needs' };
 	else if (phase === 'ready') steps.build = { text: 'Ready to try', tone: 'done' };
@@ -166,8 +178,10 @@ export function workflowSteps(
  * Caddie plans or waits for review, Build while building or blocked, Check
  * once the app is ready. Unknown phase (no workflow yet) → none highlighted.
  */
-export function activeStep(phase: WorkflowPhase | null): ProjectStepId | null {
+export function activeStep(phase: WorkflowPhase | null, opts?: { planApproved?: boolean }): ProjectStepId | null {
 	if (phase === 'planning' || phase === 'review' || phase === 'design' || phase === 'design-review') return 'plan';
+	// A plan that got stuck before approval is still at Plan (unknown: Build, as before).
+	if (phase === 'blocked' && opts?.planApproved === false) return 'plan';
 	if (phase === 'building' || phase === 'blocked') return 'build';
 	if (phase === 'ready') return 'check';
 	return null;

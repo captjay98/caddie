@@ -279,6 +279,47 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await phone.close();
 	});
 
+	test('Steps: a build paused after approval keeps Plan approved; a plan stuck before approval stays on Plan', async ({ browser }) => {
+		// Both read `blocked` as the workflow phase; only the project status
+		// knows whether the plan was approved (the Now card's truth).
+		const paused = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+		await stubAccount(paused, {
+			workflowPhase: 'blocked',
+			experience: {
+				projectId: 'proj-a', version: Date.now(), stage: 'blocked', plan: { id: 'plan-2', revision: '2', approved: true }, preview: null,
+				message: 'Caddie stopped making progress on the build for 12 minutes, so it was paused. Your plan and files are saved. Press Retry to continue from here.',
+				actions: [{ kind: 'retry', label: 'Retry build', enabled: true, primary: true }],
+			},
+		});
+		const page = await paused.newPage();
+		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('overview-now-title')).toHaveText('Caddie needs something from you');
+		await expect(page.getByTestId('project-tab-plan')).toContainText('Approved');
+		await expect(page.getByTestId('project-tab-plan')).not.toContainText('Paused');
+		await expect(page.getByTestId('project-tab-plan')).toHaveClass(/\bdone\b/);
+		await expect(page.getByTestId('project-tab-build')).toContainText('Needs your help');
+		await expect(page.getByTestId('project-tab-build')).toHaveAttribute('data-active', 'true');
+		await paused.close();
+
+		const stuck = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+		await stubAccount(stuck, {
+			workflowPhase: 'blocked',
+			experience: {
+				projectId: 'proj-a', version: Date.now(), stage: 'planning_blocked', plan: { id: 'plan-1', revision: '1', approved: false }, preview: null,
+				message: "Caddie couldn't finish writing your plan. Nothing has been built yet — tell Caddie to continue and it will pick up your request and feedback.",
+				actions: [{ kind: 'retry', label: 'Continue the plan', enabled: true, primary: true }],
+			},
+		});
+		const stuckPage = await stuck.newPage();
+		await stuckPage.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(stuckPage.getByTestId('overview-now-title')).toHaveText("Caddie couldn't finish your plan");
+		await expect(stuckPage.getByTestId('project-tab-plan')).toContainText('Paused — check with Caddie');
+		await expect(stuckPage.getByTestId('project-tab-plan')).toHaveAttribute('data-active', 'true');
+		await expect(stuckPage.getByTestId('project-tab-build')).toContainText('After you approve');
+		await expect(stuckPage.getByTestId('project-tab-build')).not.toContainText('Needs your help');
+		await stuck.close();
+	});
+
 	test('Header: hackathon chips and a labelled Settings button; no banner or duplicate chat input', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubAccount(context, {

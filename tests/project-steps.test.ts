@@ -44,3 +44,27 @@ describe('step wording', () => {
 		expect(workflowSteps('blocked').build).toEqual({ text: 'Needs your help', tone: 'needs' });
 	});
 });
+
+/**
+ * "Paused" alone can't tell a stuck plan from a paused build (the workflow
+ * phase is `blocked` for both). The project status knows whether the plan was
+ * approved, so the steps say the same thing as the Now card.
+ */
+describe('a pause after approval vs a stuck plan', () => {
+	test('a build paused after approval: Plan stays approved, Build needs you, Build is where the work is', () => {
+		const steps = workflowSteps('blocked', { planApproved: true });
+		expect(steps.plan).toEqual({ text: 'Approved', tone: 'done' });
+		expect(steps.build).toEqual({ text: 'Needs your help', tone: 'needs' });
+		expect(activeStep('blocked', { planApproved: true })).toBe('build');
+	});
+	test('a plan that got stuck before approval: Plan needs you, Build has not started, Plan is where the work is', () => {
+		const steps = workflowSteps('blocked', { planApproved: false });
+		expect(steps.plan).toEqual({ text: 'Paused — check with Caddie', tone: 'needs' });
+		expect(steps.build).toEqual({ text: 'After you approve', tone: 'neutral' });
+		expect(activeStep('blocked', { planApproved: false })).toBe('plan');
+	});
+	test('approval unknown (the status could not be read): the cautious wording stays', () => {
+		expect(workflowSteps('blocked').plan).toEqual({ text: 'Paused — check with Caddie', tone: 'needs' });
+		expect(activeStep('blocked')).toBe('build');
+	});
+});

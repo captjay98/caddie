@@ -4,7 +4,7 @@ import type { ReactElement } from 'react';
 import { Icon } from '../icons.tsx';
 import { WORDS } from '../copy.ts';
 import { useWorkspaceChrome } from './Chrome.tsx';
-import { useProjectHackathon, useWorkflowPhase } from '../queries.ts';
+import { useProjectExperience, useProjectHackathon, useWorkflowPhase } from '../queries.ts';
 import { activeStep, workflowSteps } from './project-status.ts';
 import { hackathonChips, oneLineIdea } from './project-header.ts';
 
@@ -66,12 +66,17 @@ export function ProjectTabs(props: {
 	// count) overrides by passing `steps` explicitly; both are real server
 	// state, never a client guess.
 	const phase = useWorkflowPhase(actor, project?.id ?? null);
+	// Whether the plan was approved, from the project status (the same shared
+	// query as the Now card): it tells a paused build from a stuck plan, which
+	// the `blocked` phase alone cannot. Unknown while it loads or if it fails.
+	const experience = useProjectExperience(actor, project?.id ?? null);
+	const planApproved = experience.data ? experience.data.plan?.approved === true : undefined;
 	const derivedSteps = useMemo(
-		() => (project ? workflowSteps(phase.data ?? null, { personal: isPersonal }) : undefined),
-		[project, phase.data, isPersonal],
+		() => (project ? workflowSteps(phase.data ?? null, { personal: isPersonal, planApproved }) : undefined),
+		[project, phase.data, isPersonal, planApproved],
 	);
 	const steps = props.steps ?? derivedSteps;
-	const active = project ? activeStep(phase.data ?? null) : null;
+	const active = project ? activeStep(phase.data ?? null, { planApproved }) : null;
 	const activeIndex = active ? STEPS.findIndex((step) => step.id === active) : -1;
 	const activeLabel = active ? (active === 'submission' ? lastLabel : STEPS[activeIndex]!.label) : null;
 
