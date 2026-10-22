@@ -7,7 +7,7 @@ import { Mascot } from '@caddie/ui/Mascot';
 import { PageSkeleton, StatePanel, StaleChip, failureKind, type StateKind } from '../states.tsx';
 import { Icon } from '../icons.tsx';
 import { DecisionHistory } from './DecisionHistory.tsx';
-import { CardHeader, CardPanel } from './CardFrame.tsx';
+import { CardHeader, CardPanel, BuildRail, CardFooter } from './CardFrame.tsx';
 import { cardDesign, CARD_DESIGNS } from './card-design.ts';
 
 /**
@@ -36,6 +36,32 @@ const ACTION_WORDS: Record<DecisionCardType['primaryAction']['kind'], string> = 
 function evidenceWords(count: number): string {
 	if (count === 0) return 'No evidence is attached yet.';
 	return `It rests on ${count} ${count === 1 ? 'piece' : 'pieces'} of evidence.`;
+}
+
+/**
+ * The footer reassurance line (mockup `cc-bottom`, right side), by design. It
+ * is derived from the card's design alone — no new data — and states the one
+ * thing the mockup keeps bottom-right: that opening the card commits nothing.
+ * A design with no standing reassurance returns null and the footer note is
+ * omitted.
+ */
+function footerNote(design: ReturnType<typeof cardDesign>): string | null {
+	switch (design) {
+		case 'plan':
+			return 'Nothing starts until you approve.';
+		case 'build':
+			return 'Preview appears after the checks pass.';
+		case 'repair':
+			return 'Preview held until the checks pass.';
+		case 'preview':
+			return 'Publishing is a separate decision.';
+		case 'deadline':
+			return 'Deadline linked to its source.';
+		case 'opportunity':
+			return 'Reviewing or saving does not start a build.';
+		default:
+			return null;
+	}
 }
 
 /**
@@ -93,7 +119,69 @@ export function DecisionCardView(props: {
             <CardHeader design={design} context={props.contextLabel} status={statusLabel(card)} fresh={props.seen === false} />
             {props.seen === false ? <span className="sr-only" data-testid="card-unseen">New</span> : null}
 			<h3>{card.headline}</h3>
-			{design === 'plan' ? <CardPanel title="What you’re reviewing"><p className="summary">{card.summary}</p></CardPanel> : <p className="summary">{card.summary}</p>}
+			{design === 'plan' ? (
+				card.planItems && card.planItems.length > 0 ? (
+					<CardPanel title="What you’re approving">
+						<ul className="compact-card-list" data-testid="card-plan-items">
+							{card.planItems.map((item, index) => (
+								<li key={index} className="compact-card-list-row">
+									<span className="compact-card-list-mark" aria-hidden="true"><Icon name="sparkCheck" title="" /></span>
+									<span className="compact-card-list-text">
+										<strong>{item.title}</strong>
+										{item.detail ? <small>{item.detail}</small> : null}
+									</span>
+								</li>
+							))}
+						</ul>
+					</CardPanel>
+				) : (
+					<CardPanel title="What you’re reviewing"><p className="summary">{card.summary}</p></CardPanel>
+				)
+			) : <p className="summary">{card.summary}</p>}
+            {card.deadline ? (
+                <div className="compact-card-countdown" data-testid="card-countdown">
+                    <div className="compact-card-days">
+                        <b data-testid="card-days-left">{card.deadline.daysLeft}</b>
+                        <span>{card.deadline.daysLeft === 1 ? 'day left' : 'days left'}</span>
+                    </div>
+                    <div className="compact-card-when">
+                        <strong>{card.deadline.dateLabel}</strong>
+                        <p>{card.deadline.timeLabel}</p>
+                        {card.deadline.source ? <p className="compact-card-when-source">{card.deadline.source}</p> : null}
+                    </div>
+                </div>
+            ) : null}
+            {card.fit && (card.fit.reasons.length > 0 || card.fit.cautions.length > 0) ? (
+                <div className="compact-card-split" data-testid="card-fit">
+                    {card.fit.reasons.length > 0 ? (
+                        <CardPanel title="Why it fits">
+                            <ul className="compact-card-notes" data-testid="card-fit-reasons">
+                                {card.fit.reasons.map((reason, index) => <li key={index}>{reason}</li>)}
+                            </ul>
+                        </CardPanel>
+                    ) : null}
+                    {card.fit.cautions.length > 0 ? (
+                        <CardPanel title="Before you commit" tone="caution">
+                            <ul className="compact-card-notes" data-testid="card-fit-cautions">
+                                {card.fit.cautions.map((caution, index) => <li key={index}>{caution}</li>)}
+                            </ul>
+                        </CardPanel>
+                    ) : null}
+                </div>
+            ) : null}
+            {card.checks ? (
+                <div className="compact-card-chips" data-testid="card-checks">
+                    <span className="compact-card-chip compact-card-chip-ok">
+                        <b aria-hidden="true">✓</b> {card.checks.passed} {card.checks.passed === 1 ? 'check passed' : 'checks passed'}
+                    </span>
+                    {card.checks.items.slice(0, 3).map((item, index) => (
+                        <span key={index} className="compact-card-chip" data-testid="card-check-item">{item}</span>
+                    ))}
+                    {card.checks.items.length > 3 ? <span className="compact-card-chip">+{card.checks.items.length - 3} more</span> : null}
+                    {card.checks.version ? <span className="compact-card-chip">{card.checks.version}</span> : null}
+                </div>
+            ) : null}
+            {design === 'build' || design === 'repair' ? <BuildRail design={design} /> : null}
             {design === 'build' || design === 'repair' ? <p className="compact-card-note">{design === 'repair' ? 'The preview stays held while checks and repairs continue.' : 'Preview appears after the checks pass.'}</p> : null}
             {design === 'plan' ? <p className="compact-card-note">Opening this card does not approve anything. Review the original before deciding.</p> : null}
 			<div className="card-meta" data-testid="card-meta">
@@ -144,6 +232,7 @@ export function DecisionCardView(props: {
 					</details>
 				</div>
 			) : null}
+			<CardFooter subject={props.contextLabel} note={footerNote(design) ?? undefined} />
 		</article>
 	);
 }

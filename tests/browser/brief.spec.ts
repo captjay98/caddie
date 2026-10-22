@@ -122,6 +122,10 @@ interface BriefCard {
 	runId?: string;
 	key?: string;
 	seen?: boolean;
+	deadline?: { daysLeft: number; dateLabel: string; timeLabel: string; source?: string };
+	planItems?: { title: string; detail?: string }[];
+	fit?: { reasons: string[]; cautions: string[] };
+	checks?: { passed: number; items: string[]; version?: string };
 }
 
 function card(overrides: Partial<BriefCard> & { id: string; projectId: string; kind: BriefCard['kind'] }): BriefCard {
@@ -608,6 +612,350 @@ test('shared compact cards fit mobile and keep consistent primary actions', asyn
  await context.close();
 });
 
+// --- U (lane 14) step 1: the look, the footer, Earlier and the build rail ----
+const SHOTS = process.env.KIROCREW_SCRATCH ?? '/tmp';
+const BUILD_CARD = card({
+	id: 'brf_workflow_build_run-7',
+	projectId: 'proj-a',
+	kind: 'result',
+	headline: 'Your app is taking shape',
+	summary: 'Caddie is implementing your approved plan and running the checks.',
+	status: 'changed',
+	runId: 'run-7',
+	primaryAction: { label: 'View activity', kind: 'inspect', targetId: 'run-7' },
+	key: 'proj-a:result:run-7',
+});
+const REPAIR_CARD = card({
+	id: 'brf_workflow_repair_run-7',
+	projectId: 'proj-a',
+	kind: 'result',
+	headline: 'One check needs another pass',
+	summary: 'An offline entry did not survive reopening the app. Caddie is adjusting the build.',
+	status: 'changed',
+	runId: 'run-7',
+	primaryAction: { label: 'View activity', kind: 'inspect', targetId: 'run-7' },
+	key: 'proj-a:result:run-7',
+});
+
+test.describe('U step 1 — look, footer, build rail', () => {
+	test('a building card shows the four-stage rail at "Building" and a footer; desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [BUILD_CARD], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const built = page.getByTestId('decision-card').filter({ hasText: 'Your app is taking shape' });
+		const rail = built.getByTestId('card-build-rail');
+		await expect(rail).toBeVisible();
+		// Four named stages, in order.
+		await expect(rail.locator('.compact-card-step')).toHaveText(['Plan approved', 'Building', 'Checking', 'Ready to try']);
+		// Plan approved is done; Building is the active stage; later ones pending.
+		await expect(rail.locator('[data-step="plan"]')).toHaveAttribute('data-state', 'done');
+		await expect(rail.locator('[data-step="build"]')).toHaveAttribute('data-state', 'active');
+		await expect(rail.locator('[data-step="check"]')).toHaveAttribute('data-state', 'pending');
+		await expect(rail.locator('[data-step="preview"]')).toHaveAttribute('data-state', 'pending');
+		// Footer reassurance (derived from design, no ids).
+		const foot = built.getByTestId('card-foot');
+		await expect(foot).toContainText('Preview appears after the checks pass.');
+		await expect(foot).not.toContainText('run-7');
+		await built.screenshot({ path: join(SHOTS, 'u1-build-card-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(rail).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await built.screenshot({ path: join(SHOTS, 'u1-build-card-390.png') });
+		await context.close();
+	});
+
+	test('a repairing card advances the rail to "Checking" (Building done); desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [REPAIR_CARD], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const repairing = page.getByTestId('decision-card').filter({ hasText: 'One check needs another pass' });
+		const rail = repairing.getByTestId('card-build-rail');
+		await expect(rail.locator('[data-step="build"]')).toHaveAttribute('data-state', 'done');
+		await expect(rail.locator('[data-step="check"]')).toHaveAttribute('data-state', 'active');
+		await expect(rail.locator('[data-step="preview"]')).toHaveAttribute('data-state', 'pending');
+		await expect(repairing.getByTestId('card-foot')).toContainText('Preview held until the checks pass.');
+		await repairing.screenshot({ path: join(SHOTS, 'u1-repair-card-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(rail).toBeVisible();
+		await repairing.screenshot({ path: join(SHOTS, 'u1-repair-card-390.png') });
+		await context.close();
+	});
+
+	test('a plan approval card carries a footer and no build rail', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [APPROVAL_A], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const plan = page.getByTestId('decision-card').filter({ hasText: 'Design review is waiting on you' });
+		await expect(plan.getByTestId('card-build-rail')).toHaveCount(0);
+		await expect(plan.getByTestId('card-foot')).toContainText('Nothing starts until you approve.');
+		await context.close();
+	});
+});
+
+// --- U (lane 14) step 2: the deadline countdown -----------------------------
+const DEADLINE_WITH_COUNTDOWN = card({
+	id: 'brf_schedule_sch-dl',
+	projectId: 'proj-b',
+	kind: 'deadline',
+	headline: 'Farm Innovation Challenge is scheduled',
+	summary: 'Next run Friday, 23 October 2026 at 17:00 (Africa/Lagos).',
+	status: 'needs-you',
+	primaryAction: { label: 'Open the schedule', kind: 'review', targetId: 'sch-dl' },
+	key: 'proj-b:deadline:sch-dl',
+	deadline: { daysLeft: 3, dateLabel: 'Friday, 23 October', timeLabel: '17:00', source: 'Farm Innovation Challenge (Africa/Lagos)' },
+});
+
+test.describe('U step 2 — deadline countdown', () => {
+	test('a deadline card shows the days-left countdown with its readable date; desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [DEADLINE_WITH_COUNTDOWN], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const row = page.getByTestId('brief-deadline-row');
+		const countdown = row.getByTestId('card-countdown');
+		await expect(countdown).toBeVisible();
+		await expect(row.getByTestId('card-days-left')).toHaveText('3');
+		await expect(countdown).toContainText('days left');
+		await expect(countdown).toContainText('Friday, 23 October');
+		await expect(countdown).toContainText('17:00');
+		// The source names the schedule + timezone, never a raw id.
+		await expect(countdown).toContainText('Africa/Lagos');
+		await expect(countdown).not.toContainText('sch-dl');
+		await row.screenshot({ path: join(SHOTS, 'u2-deadline-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(countdown).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await row.screenshot({ path: join(SHOTS, 'u2-deadline-390.png') });
+		await context.close();
+	});
+
+	test('a deadline card with no countdown field falls back to its summary', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [DEADLINE_B], unseenCount: 0 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const row = page.getByTestId('brief-deadline-row');
+		await expect(row.getByTestId('card-countdown')).toHaveCount(0);
+		await expect(row).toContainText('Weekly discovery sweep');
+		await context.close();
+	});
+});
+
+// --- U (lane 14) step 3: "What you're approving" — the plan's list ----------
+const PLAN_WITH_ITEMS = card({
+	id: 'brf_approval_ap-plan',
+	projectId: 'proj-a',
+	kind: 'approval',
+	headline: 'Your farm log, ready to build',
+	summary: 'Approving this authorises specialists building against this plan revision.',
+	status: 'needs-you',
+	primaryAction: { label: 'Approve plan', kind: 'review', targetId: 'ap-plan' },
+	key: 'proj-a:approval:ap-plan',
+	planItems: [
+		{ title: 'Daily records, without the paperwork', detail: 'Add feeding, treatments and observations in one place.' },
+		{ title: 'Keep recording when you’re offline', detail: 'Your entries sync when the connection returns.' },
+		{ title: 'A clear weekly picture', detail: 'Turn your records into a short, useful summary.' },
+	],
+});
+
+test.describe('U step 3 — plan approval list', () => {
+	test('a plan card lists the plan’s features under "What you’re approving"; desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [PLAN_WITH_ITEMS], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const plan = page.getByTestId('decision-card').filter({ hasText: 'Your farm log, ready to build' });
+		const list = plan.getByTestId('card-plan-items');
+		await expect(list).toBeVisible();
+		await expect(list.locator('.compact-card-list-row')).toHaveCount(3);
+		await expect(list).toContainText('Daily records, without the paperwork');
+		await expect(list).toContainText('Your entries sync when the connection returns.');
+		await expect(plan).toContainText('What you’re approving');
+		await plan.screenshot({ path: join(SHOTS, 'u3-plan-items-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(list).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await plan.screenshot({ path: join(SHOTS, 'u3-plan-items-390.png') });
+		await context.close();
+	});
+
+	test('a plan card with no items falls back to "What you’re reviewing" + summary', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [APPROVAL_A], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const plan = page.getByTestId('decision-card').filter({ hasText: 'Design review is waiting on you' });
+		await expect(plan.getByTestId('card-plan-items')).toHaveCount(0);
+		await expect(plan).toContainText('What you’re reviewing');
+		await expect(plan).toContainText('Approving this authorises');
+		await context.close();
+	});
+});
+
+// --- U (lane 14) step 4: the fit split --------------------------------------
+function opportunity(overrides: Partial<BriefCard>): BriefCard {
+	return card({
+		id: 'brf_opportunity_cand-1',
+		projectId: 'home-1',
+		kind: 'result',
+		headline: 'A suitable opportunity is saved: Farm Innovation Challenge',
+		summary: "A sample from Caddie's built-in feed, not a real contest yet.",
+		status: 'handled',
+		primaryAction: { label: 'Review opportunity', kind: 'inspect', targetId: 'cand-1' },
+		key: 'home-1:result:cand-1',
+		...overrides,
+	});
+}
+
+test.describe('U step 4 — opportunity fit split', () => {
+	test('both sides render as a two-up split when each has content; desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, {
+			cards: [opportunity({ fit: {
+				reasons: ['A real problem you know first-hand.', 'Offline tools are relevant to the brief.'],
+				cautions: ['Regional eligibility still needs confirming.', 'A short demo video is required.'],
+			} })],
+			unseenCount: 0,
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const opp = page.getByTestId('decision-card').filter({ hasText: 'Farm Innovation Challenge' });
+		const split = opp.getByTestId('card-fit');
+		await expect(split).toBeVisible();
+		await expect(opp).toContainText('Why it fits');
+		await expect(opp).toContainText('Before you commit');
+		await expect(opp.getByTestId('card-fit-reasons').locator('li')).toHaveCount(2);
+		await expect(opp.getByTestId('card-fit-cautions').locator('li')).toHaveCount(2);
+		await expect(split).toContainText('A real problem you know first-hand.');
+		await expect(split).toContainText('Regional eligibility still needs confirming.');
+		// Two columns on a wide card: the two panels share a top edge.
+		const panels = await split.locator('.compact-card-panel').all();
+		const boxes = await Promise.all(panels.map((p) => p.boundingBox()));
+		expect(Math.abs(boxes[0]!.y - boxes[1]!.y)).toBeLessThanOrEqual(2);
+		expect(boxes[1]!.x).toBeGreaterThan(boxes[0]!.x + boxes[0]!.width / 2);
+		await opp.screenshot({ path: join(SHOTS, 'u4-fit-split-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		// Stacked on a phone: the second panel drops below the first.
+		const narrow = await Promise.all((await split.locator('.compact-card-panel').all()).map((p) => p.boundingBox()));
+		expect(narrow[1]!.y).toBeGreaterThan(narrow[0]!.y + narrow[0]!.height / 2);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await opp.screenshot({ path: join(SHOTS, 'u4-fit-split-390.png') });
+		await context.close();
+	});
+
+	test('only "Before you commit" renders when there are no reasons (the real saved-candidate shape)', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, {
+			cards: [opportunity({ fit: { reasons: [], cautions: ['Regional eligibility still needs confirming.'] } })],
+			unseenCount: 0,
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const opp = page.getByTestId('decision-card').filter({ hasText: 'Farm Innovation Challenge' });
+		await expect(opp.getByTestId('card-fit-cautions')).toBeVisible();
+		// No empty "Why it fits" heading is rendered.
+		await expect(opp.getByTestId('card-fit-reasons')).toHaveCount(0);
+		await expect(opp).not.toContainText('Why it fits');
+		await expect(opp).toContainText('Before you commit');
+		await context.close();
+	});
+
+	test('an opportunity with no fit field shows only its summary', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [opportunity({})], unseenCount: 0 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const opp = page.getByTestId('decision-card').filter({ hasText: 'Farm Innovation Challenge' });
+		await expect(opp.getByTestId('card-fit')).toHaveCount(0);
+		await expect(opp).toContainText("built-in feed");
+		await context.close();
+	});
+});
+
+// --- U (lane 14) step 5: the ready card's preview checks --------------------
+function ready(overrides: Partial<BriefCard>): BriefCard {
+	return card({
+		id: 'brf_workflow_preview_prev-1',
+		projectId: 'proj-a',
+		kind: 'result',
+		headline: 'Your app is ready to try',
+		summary: 'Open the checked app preview. Your plan and build remain available.',
+		status: 'handled',
+		runId: 'run-7',
+		primaryAction: { label: 'Try the app', kind: 'preview', targetId: 'prev-1' },
+		key: 'proj-a:result:prev-1',
+		...overrides,
+	});
+}
+
+test.describe('U step 5 — ready card preview checks', () => {
+	test('a ready card shows the passed-checks count and the feature names; desktop + 390px', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, {
+			cards: [ready({ checks: { passed: 8, items: ['Daily activity log', 'Search and filters', 'Save and sync entries'], version: 'Version 3' } })],
+			unseenCount: 0,
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+
+		const readyCard = page.getByTestId('decision-card').filter({ hasText: 'Your app is ready to try' });
+		const chips = readyCard.getByTestId('card-checks');
+		await expect(chips).toBeVisible();
+		await expect(chips).toContainText('8 checks passed');
+		await expect(readyCard.getByTestId('card-check-item')).toHaveCount(3);
+		await expect(chips).toContainText('Daily activity log');
+		await expect(chips).toContainText('Version 3');
+		// A plain feature name on the chip, never a check id.
+		await expect(chips).not.toContainText('feature-');
+		await readyCard.screenshot({ path: join(SHOTS, 'u5-ready-checks-desktop-2x.png') });
+
+		await page.setViewportSize({ width: 390, height: 844 });
+		await expect(chips).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await readyCard.screenshot({ path: join(SHOTS, 'u5-ready-checks-390.png') });
+		await context.close();
+	});
+
+	test('more than three features fold to a "+N more" chip, singular check reads "check passed"', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, {
+			cards: [ready({ checks: { passed: 1, items: ['A', 'B', 'C', 'D', 'E'] } })],
+			unseenCount: 0,
+		});
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const chips = page.getByTestId('card-checks');
+		await expect(chips).toContainText('1 check passed');
+		await expect(page.getByTestId('card-check-item')).toHaveCount(3);
+		await expect(chips).toContainText('+2 more');
+		await context.close();
+	});
+
+	test('a ready card with no checks field shows only its summary', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { cards: [ready({})], unseenCount: 0 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const readyCard = page.getByTestId('decision-card').filter({ hasText: 'Your app is ready to try' });
+		await expect(readyCard.getByTestId('card-checks')).toHaveCount(0);
+		await expect(readyCard).toContainText('Open the checked app preview');
+		await context.close();
+	});
+});
+
 test('Earlier loads archived decisions on demand and retains the exact decision target',async({browser})=>{
  const context=await browser.newContext({viewport:{width:390,height:844}});
  await stubAccount(context,{cards:[{...APPROVAL_A,status:'handled',headline:'Recent approval',primaryAction:{kind:'review',label:'View decision',targetId:'ap-1'}}]});
@@ -648,5 +996,40 @@ test('the Brief flows two cards per row on a wide pane and stacks them when narr
 	const narrowBoxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
 	expect(narrowBoxes[1]!.y).toBeGreaterThan(narrowBoxes[0]!.y + narrowBoxes[0]!.height / 2);
 	expect(Math.abs((narrowBoxes[0]!.x) - (narrowBoxes[1]!.x))).toBeLessThanOrEqual(2);
+	await context.close();
+});
+
+test('U — two rich cards (plan + fit) flow two-up at 1440 with the chat at half, and stack at 390', async ({ browser }) => {
+	// Lane 14 measurement: at 1440px with the chat at half the window the Brief
+	// pane is ~651px, so the 300px min card width flows two rich cards per row
+	// there (the plan item list and the fit split stay readable), and a phone
+	// width drops them to one column.
+	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	await stubAccount(context, {
+		cards: [
+			PLAN_WITH_ITEMS,
+			opportunity({ fit: { reasons: ['A real problem you know first-hand.'], cautions: ['Regional eligibility still needs confirming.', 'A short demo video is required.'] } }),
+		],
+		unseenCount: 1,
+	});
+	const page = await context.newPage();
+	await page.goto(`${BASE}/app/?pane=brief`);
+
+	const cards = page.getByTestId('decision-card');
+	await expect(cards).toHaveCount(2);
+	const wide = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
+	// Same top edge, different left — one row, two columns.
+	expect(Math.abs(wide[0]!.y - wide[1]!.y)).toBeLessThanOrEqual(2);
+	expect(wide[1]!.x).toBeGreaterThan(wide[0]!.x + wide[0]!.width / 2);
+	// Each card is at least the 300px minimum, so the lists stay readable.
+	expect(wide[0]!.width).toBeGreaterThanOrEqual(300);
+	// The plan list and the fit split both still render in the narrowed cards.
+	await expect(page.getByTestId('card-plan-items')).toBeVisible();
+	await expect(page.getByTestId('card-fit-cautions')).toBeVisible();
+
+	await page.setViewportSize({ width: 390, height: 844 });
+	const narrow = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
+	expect(narrow[1]!.y).toBeGreaterThan(narrow[0]!.y + narrow[0]!.height / 2);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 	await context.close();
 });

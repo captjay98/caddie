@@ -567,3 +567,231 @@ describe('brief cards never show raw machine strings', () => {
 		}
 	});
 });
+
+// --- OPTIONAL CARD DETAIL FIELDS (Brief cards, lane 14) --------------------------
+// Each new field comes from a REAL record or is absent — never guessed. The
+// deterministic helper is tested directly; the card-level tests prove the field
+// is attached (or absent) from the same seeded state.
+
+import { deadlineParts } from '../apps/app/src/server/brief.ts';
+
+describe('deadline countdown (lane 14 step 2)', () => {
+	test('deadlineParts counts whole days and reads the date in the deadline timezone', () => {
+		// 3 days + a few hours ahead, in Africa/Lagos (UTC+1). 16:00 UTC = 17:00 WAT.
+		const parts = deadlineParts('2026-10-23T16:00:00.000Z', 'Africa/Lagos', '2026-10-20T08:00:00.000Z');
+		expect(parts).not.toBeNull();
+		expect(parts!.daysLeft).toBe(3);
+		expect(parts!.dateLabel).toContain('October');
+		expect(parts!.dateLabel).toContain('Friday');
+		expect(parts!.timeLabel).toBe('17:00');
+	});
+
+	test('a passed deadline floors at zero days, never negative', () => {
+		const parts = deadlineParts('2026-10-01T00:00:00.000Z', 'UTC', '2026-10-20T08:00:00.000Z');
+		expect(parts!.daysLeft).toBe(0);
+	});
+
+	test('an unparseable timestamp yields no parts, so the card keeps its summary', () => {
+		expect(deadlineParts('not a date', 'UTC', '2026-10-20T08:00:00.000Z')).toBeNull();
+	});
+
+	test('an armed schedule card carries a deadline field; a card with no schedule has none', async () => {
+		const world = makeWorld();
+		try {
+			seedAliceState(world.sqlite);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const schedule = cards.find((card) => card.kind === 'deadline' && card.primaryAction.targetId === 'unit-sch-armed');
+			expect(schedule).toBeDefined();
+			// The field is present, with a readable date and a non-negative count —
+			// mutation proof: drop the `...(parts ? {deadline} : {})` spread in
+			// scheduleCards and this field is undefined.
+			expect(schedule!.deadline).toBeDefined();
+			expect(typeof schedule!.deadline!.daysLeft).toBe('number');
+			expect(schedule!.deadline!.daysLeft).toBeGreaterThanOrEqual(0);
+			expect(schedule!.deadline!.dateLabel).toMatch(/October/);
+			expect(schedule!.deadline!.source).toContain('Africa/Lagos');
+			// A non-deadline card (the pending approval) never carries it.
+			const approval = cards.find((card) => card.kind === 'approval');
+			expect(approval!.deadline).toBeUndefined();
+		} finally {
+			world.sqlite.close();
+		}
+	});
+});
+
+describe('"What you\u2019re approving" plan list (lane 14 step 3)', () => {
+	const FEATURE_BLOCK = [
+		'# FarmLog AI',
+		'A daily farm log.',
+		'',
+		'```caddie-features',
+		JSON.stringify([
+			{ id: 'daily-records', title: 'Daily records, without the paperwork', doneWhen: ['Add feeding, treatments and observations in one place', 'The entry is still there after a reload'] },
+			{ id: 'offline', title: 'Keep recording when you\u2019re offline', doneWhen: ['Your entries sync when the connection returns'] },
+		]),
+		'```',
+	].join('\n');
+
+	function seedPlanDoc(sqlite: Database, id: string, revision: number, body: string): void {
+		sqlite.prepare(
+			'insert into "plan_doc_revisions" ("id","projectId","kind","revision","bodyHash","body","createdBy","createdAt") values (?,?,?,?,?,?,?,?)',
+		).run(id, 'unit-proj-a', 'prd', revision, `hash-${id}`, body, 'unit-alice', ISO);
+	}
+
+	test('a pending design approval carries the plan\u2019s feature list from its real body', async () => {
+		const world = makeWorld();
+		try {
+			seedAliceState(world.sqlite);
+			// unit-ap-live.resourceId === 'plan-r4'.
+			seedPlanDoc(world.sqlite, 'plan-r4', 4, FEATURE_BLOCK);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const approval = cards.find((card) => card.kind === 'approval' && card.status === 'needs-you');
+			expect(approval).toBeDefined();
+			// Mutation proof: drop the `planItems` assignment in pendingApprovalCards
+			// and this field is undefined.
+			expect(approval!.planItems).toBeDefined();
+			expect(approval!.planItems!.map((item) => item.title)).toEqual([
+				'Daily records, without the paperwork',
+				'Keep recording when you\u2019re offline',
+			]);
+			// The detail is the feature's first doneWhen check, in plain words.
+			expect(approval!.planItems![0]!.detail).toBe('Add feeding, treatments and observations in one place');
+			// No machine id leaks onto the list.
+			for (const item of approval!.planItems!) expect(item.title).not.toMatch(/\b[a-z0-9-]+:[a-z0-9-]+\b/);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a plan with no feature block leaves planItems absent, so the card keeps its summary', async () => {
+		const world = makeWorld();
+		try {
+			seedAliceState(world.sqlite);
+			seedPlanDoc(world.sqlite, 'plan-r4', 4, '# FarmLog AI\nA daily farm log, prose only, no feature block.');
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const approval = cards.find((card) => card.kind === 'approval' && card.status === 'needs-you');
+			expect(approval!.planItems).toBeUndefined();
+			expect(approval!.summary).toContain('Approving this authorises');
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a decided (handled) approval never carries a plan list', async () => {
+		const world = makeWorld();
+		try {
+			seedAliceState(world.sqlite);
+			// plan-r3 belongs to the already-decided unit-ap-done.
+			seedPlanDoc(world.sqlite, 'plan-r3', 3, FEATURE_BLOCK);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const decided = cards.find((card) => card.kind === 'approval' && card.status === 'handled' && card.primaryAction.targetId === 'unit-ap-done');
+			expect(decided).toBeDefined();
+			expect(decided!.planItems).toBeUndefined();
+		} finally {
+			world.sqlite.close();
+		}
+	});
+});
+
+describe('the fit split (lane 14 step 4)', () => {
+	function seedHomeWithCandidate(sqlite: Database, requirementsJson: string): void {
+		sqlite.exec(`
+			insert into "projects" ("id","workspaceId","name","kind","status","createdAt","updatedAt") values
+				('unit-home-f','unit-ws-a','Home','home','active','${ISO}','${ISO}');
+			insert into "discovery_feed_runs" ("id","projectId","requestedBy","requestedAt","candidateCount") values
+				('unit-feed-f','unit-home-f','unit-alice','${ISO}',1);
+			insert into "discovery_candidates" ("id","projectId","source","url","title","summary","requirementsJson","status","feedRunId","firstSeenAt","updatedAt") values
+				('cand_fit','unit-home-f','local-seed','https://contest.example/fit','Farm Innovation Challenge','x',?,'accepted','unit-feed-f','${ISO}','${ISO}');
+		`.replace('?', `'${requirementsJson.replace(/'/g, "''")}'`));
+	}
+
+	test('"Before you commit" is filled from the candidate\u2019s real requirements; "Why it fits" stays empty (no source)', async () => {
+		const world = makeWorld();
+		try {
+			seedHomeWithCandidate(world.sqlite, JSON.stringify([
+				{ text: 'Regional eligibility still needs confirming.', claimType: 'eligibility' },
+				{ text: 'A short demo video is required.', claimType: 'submission' },
+			]));
+			const brief = await accountBrief(world.db, 'unit-alice');
+			const opp = brief.cards.find((card) => card.headline.includes('Farm Innovation Challenge'));
+			expect(opp).toBeDefined();
+			// Mutation proof: remove the `...(cautions.length ? {fit} : {})` spread
+			// in opportunityCards and this field is undefined.
+			expect(opp!.fit).toBeDefined();
+			expect(opp!.fit!.cautions).toEqual([
+				'Regional eligibility still needs confirming.',
+				'A short demo video is required.',
+			]);
+			// No fabricated positive reasons — the source does not carry them.
+			expect(opp!.fit!.reasons).toEqual([]);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a candidate with no requirements carries no fit field, so the card keeps its summary', async () => {
+		const world = makeWorld();
+		try {
+			seedHomeWithCandidate(world.sqlite, '[]');
+			const brief = await accountBrief(world.db, 'unit-alice');
+			const opp = brief.cards.find((card) => card.headline.includes('Farm Innovation Challenge'));
+			expect(opp).toBeDefined();
+			expect(opp!.fit).toBeUndefined();
+			expect(opp!.summary).toMatch(/sample/i);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+});
+
+describe('the ready card\u2019s preview checks (lane 14 step 5)', () => {
+	function seedReady(sqlite: Database, withFeatures: boolean): void {
+		sqlite.prepare(
+			`insert into "build_workflows" (projectId, runId, conversationId, intakeKey, brief, phase, previewId, updatedAt)
+			 values ('unit-proj-a','unit-run-ready','unit-conv-ready','unit-intake-ready','Farm log.','ready','prev-exact','${ISO}')`,
+		).run();
+		if (withFeatures) {
+			sqlite.exec(`
+				insert into "build_features" ("projectId","runId","planId","featureId","position","title","doneWhen","status","attempts","testsPassed","updatedAt") values
+					('unit-proj-a','unit-run-ready','plan-r','log',1,'Daily activity log','[]','passed',0,4,'${ISO}'),
+					('unit-proj-a','unit-run-ready','plan-r','search',2,'Search and filters','[]','passed',0,6,'${ISO}'),
+					('unit-proj-a','unit-run-ready','plan-r','offline',3,'Save and sync entries','[]','passed',0,8,'${ISO}'),
+					('unit-proj-a','unit-run-ready','plan-r','pending',4,'Not done yet','[]','building',0,null,'${ISO}');
+			`);
+		}
+	}
+
+	test('a ready card lists the passed checks and their feature names from real rows', async () => {
+		const world = makeWorld();
+		try {
+			seedReady(world.sqlite, true);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const ready = cards.find((card) => card.id.startsWith('brf_workflow_preview_'));
+			expect(ready).toBeDefined();
+			// Mutation proof: drop the `...(checks ? {checks} : {})` spread and this
+			// field is undefined.
+			expect(ready!.checks).toBeDefined();
+			// Only the three PASSED features count; the building one is excluded.
+			expect(ready!.checks!.passed).toBe(3);
+			expect(ready!.checks!.items).toEqual(['Daily activity log', 'Search and filters', 'Save and sync entries']);
+			// Plain feature names, never an internal check id.
+			for (const item of ready!.checks!.items) expect(item).not.toMatch(/\b[a-z0-9-]+:[a-z0-9-]+\b/);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	test('a ready card with no passed features carries no checks field, so it keeps its summary', async () => {
+		const world = makeWorld();
+		try {
+			seedReady(world.sqlite, false);
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const ready = cards.find((card) => card.id.startsWith('brf_workflow_preview_'));
+			expect(ready).toBeDefined();
+			expect(ready!.checks).toBeUndefined();
+			expect(ready!.summary).toContain('Open the checked app preview');
+		} finally {
+			world.sqlite.close();
+		}
+	});
+});

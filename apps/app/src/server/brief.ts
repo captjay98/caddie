@@ -1,4 +1,5 @@
 import type { ApprovalAction, DecisionCard, Scope } from '@caddie/contracts';
+import { parsePlanFeatures } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { assertProjectScope } from './scope.ts';
 import { listClaims, surveyClaims } from './evidence/claims.ts';
@@ -6,6 +7,7 @@ import { listArtifacts } from './artifacts.ts';
 import { listSchedules } from './schedules.ts';
 import type { AccountBriefPayload, BriefSummary } from '@caddie/contracts';
 import { listProjectsForActor } from './projects.ts';
+import { listPlanDocRevisions } from './projects.ts';
 import { listCandidates } from './discovery.ts';
 import { listPreviews } from './previews.ts';
 import { listPackages, getReadiness } from './submission.ts';
@@ -39,6 +41,37 @@ function plainCheck(issue: string): string {
 	const raw = issue.trim();
 	if (raw.length > 0 && raw.includes(' ') && !/\b[a-z0-9-]+:[a-z0-9-]+\b/i.test(raw)) return raw;
 	return 'A check did not pass yet. Caddie is adjusting the build and will run the checks again.';
+}
+
+/**
+ * The deadline countdown parts for a card (lane 14 step 2), computed from a
+ * real timestamp in its own timezone: whole days left (floored, never
+ * negative), the date a person reads ("Friday, 23 October"), and the time of
+ * day ("17:00"). Returns null when the timestamp cannot be parsed, so the card
+ * keeps its summary instead of showing "Invalid Date". `nowIso` is passed in
+ * so the count is deterministic in tests.
+ */
+export function deadlineParts(
+	iso: string,
+	timezone: string,
+	nowIso: string,
+): { daysLeft: number; dateLabel: string; timeLabel: string } | null {
+	const when = new Date(iso);
+	const now = new Date(nowIso);
+	if (Number.isNaN(when.getTime()) || Number.isNaN(now.getTime())) return null;
+	const tz = (opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat => {
+		try {
+			return new Intl.DateTimeFormat('en-GB', { ...opts, timeZone: timezone });
+		} catch {
+			return new Intl.DateTimeFormat('en-GB', { ...opts, timeZone: 'UTC' });
+		}
+	};
+	// Days left measured as whole calendar days between the two instants,
+	// floored and clamped at zero — a passed deadline reads "0 days left".
+	const daysLeft = Math.max(0, Math.floor((when.getTime() - now.getTime()) / 86_400_000));
+	const dateLabel = tz({ weekday: 'long', day: 'numeric', month: 'long' }).format(when);
+	const timeLabel = tz({ hour: '2-digit', minute: '2-digit', hour12: false }).format(when);
+	return { daysLeft, dateLabel, timeLabel };
 }
 
 /**
@@ -126,7 +159,8 @@ interface ApprovalRow {
 	decidedAt: string | null;
 }
 
-async function pendingApprovalCards(db: D1Database, projectId: string, nowIso: string): Promise<DecisionCard[]> {
+async function pendingApprovalCards(db: D1Database, scope: Scope, nowIso: string): Promise<DecisionCard[]> {
+	const projectId = scope.projectId;
 	const rows = await queryAll(
 		db,
 		`select "id", "action", "resourceId", "revisionHash", "createdAt", "expiresAt", "status", "decidedAt"
@@ -143,7 +177,50 @@ async function pendingApprovalCards(db: D1Database, projectId: string, nowIso: s
         projectId,
         nowIso,
 	);
- return rows.map(row => approvalCard(row, projectId, nowIso));
+ const cards = rows.map(row => approvalCard(row, projectId, nowIso));
+ // Step 3: "What you're approving" — fill the plan's own feature list onto a
+ // PENDING card whose plan body really carries a caddie-features block. The
+ // revisions are fetched once; a decided card and a plan with no list stay as
+ // they were (the card then shows its summary).
+ if (cards.some(card => card.status === 'needs-you')) {
+  const items = await planItemsFor(db, scope).catch(error => {
+   console.error('brief: plan-items read failed:', error);
+   return new Map<string, { title: string; detail?: string }[]>();
+  });
+  for (const card of cards) {
+   const resourceId = String((card as { _resourceId?: string })._resourceId ?? '');
+   const list = items.get(resourceId);
+   if (card.status === 'needs-you' && list && list.length > 0) {
+    (card as { planItems?: unknown }).planItems = list;
+   }
+   delete (card as { _resourceId?: string })._resourceId;
+  }
+ }
+ return cards;
+}
+
+/**
+ * The plan's own feature list, keyed by the plan-doc revision id an approval
+ * points at (its `resourceId`). Read from the real plan-doc body's
+ * `caddie-features` block: each feature becomes a title plus its first
+ * `doneWhen` check as the one-line detail. A plan with no block contributes
+ * nothing, so the card keeps its summary — nothing is guessed.
+ */
+async function planItemsFor(db: D1Database, scope: Scope): Promise<Map<string, { title: string; detail?: string }[]>> {
+	const revisions = await listPlanDocRevisions(db, scope);
+	const byResource = new Map<string, { title: string; detail?: string }[]>();
+	for (const revision of revisions) {
+		const parsed = parsePlanFeatures(revision.body);
+		if (!parsed.ok) continue;
+		byResource.set(
+			revision.id,
+			parsed.features.map((feature) => ({
+				title: feature.title,
+				...(feature.doneWhen[0] ? { detail: feature.doneWhen[0] } : {}),
+			})),
+		);
+	}
+	return byResource;
 }
 function approvalCard(row: Record<string, unknown>, projectId: string, nowIso: string): DecisionCard {
 		const approval = row as unknown as ApprovalRow;
@@ -160,7 +237,10 @@ function approvalCard(row: Record<string, unknown>, projectId: string, nowIso: s
 			status: pending ? 'needs-you' : 'handled',
 			updatedAt: pending ? approval.createdAt : approval.decidedAt ?? (outcome === 'expired' ? approval.expiresAt : approval.createdAt),
 			primaryAction: { label: pending ? copy.label : 'View decision', kind: 'review', targetId: approval.id },
-		} satisfies DecisionCard;
+			// Carried off-contract so pendingApprovalCards can match the plan-doc
+			// revision; stripped before the card is returned.
+			_resourceId: approval.resourceId,
+		} as DecisionCard & { _resourceId: string };
 }
 
 export interface ApprovalHistoryPage { cards: DecisionCard[]; next: { at: string; id: string } | null }
@@ -264,21 +344,29 @@ async function failedRunCards(db: D1Database, projectId: string): Promise<Decisi
 	return cards;
 }
 
-async function scheduleCards(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
+async function scheduleCards(db: D1Database, scope: Scope, nowIso: string): Promise<DecisionCard[]> {
 	const schedules = await listSchedules(db, scope);
 	return schedules
 		.filter((schedule) => !schedule.paused)
-		.map((schedule) => ({
-			id: newCardId('schedule', schedule.id),
-			projectId: scope.projectId,
-			kind: 'deadline',
-			headline: `${schedule.name} is scheduled`,
-			summary: `Next run ${readableDate(schedule.nextRunAt, schedule.timezone)} (${schedule.timezone}). A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
-			evidenceIds: [],
-			status: 'handled',
-			updatedAt: schedule.updatedAt,
-			primaryAction: { label: 'Open the schedule', kind: 'review', targetId: schedule.id },
-		}));
+		.map((schedule) => {
+			const parts = deadlineParts(schedule.nextRunAt, schedule.timezone, nowIso);
+			return {
+				id: newCardId('schedule', schedule.id),
+				projectId: scope.projectId,
+				kind: 'deadline',
+				headline: `${schedule.name} is scheduled`,
+				summary: `Next run ${readableDate(schedule.nextRunAt, schedule.timezone)} (${schedule.timezone}). A finished run reports here and in the project's activity; a refused or failed read is named, never guessed.`,
+				evidenceIds: [],
+				status: 'handled',
+				updatedAt: schedule.updatedAt,
+				primaryAction: { label: 'Open the schedule', kind: 'review', targetId: schedule.id },
+				// A parseable next-run instant gives the countdown parts; an
+				// unparseable one leaves the field absent and the summary stands.
+				...(parts
+					? { deadline: { ...parts, source: `${schedule.name} (${schedule.timezone})` } }
+					: {}),
+			} satisfies DecisionCard;
+		});
 }
 
 /** The project's brief: every live decision the project's own state demands. */
@@ -294,6 +382,10 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
  const repairing = phase === 'building' && round?.outcome === 'failed';
  const ready = phase === 'ready' && typeof workflow.previewId === 'string';
  const targetId = ready ? String(workflow.previewId) : runId;
+ // Step 5: on a READY card, the preview checks — how many features passed and
+ // their names, read from the real build_features rows for this run. Absent
+ // (so the card keeps its summary) when no rows have passed yet.
+ const checks = ready ? await checksForRun(db, scope.projectId, runId) : null;
  return [{
   id: newCardId(`workflow_${ready ? 'preview' : repairing ? 'repair' : phase === 'blocked' ? 'blocked' : 'build'}`, targetId),
   projectId: scope.projectId, runId, kind: 'result',
@@ -301,14 +393,45 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
   summary: ready ? 'Open the checked app preview. Your plan and build remain available.' : repairing ? plainCheck(String(round?.issue ?? '')) : String(workflow.detail ?? (phase === 'blocked' ? 'The build stopped. Your plan and saved files are retained.' : 'Caddie is implementing your approved plan and running the checks.')),
   evidenceIds: [], status: ready ? 'handled' : phase === 'blocked' ? 'blocked' : 'changed', updatedAt: String(workflow.updatedAt),
   primaryAction: { label: ready ? 'Try the app' : 'View activity', kind: ready ? 'preview' : 'inspect', targetId },
+  ...(checks ? { checks } : {}),
  }];
+}
+
+/**
+ * The preview checks behind a ready card (lane 14 step 5), from the real
+ * build_features rows for this run: how many features passed, and their names
+ * (the features a person recognises, never an internal check id). Returns null
+ * when no feature has passed, so the ready card keeps its summary. The feature
+ * table may not exist on an older project — a missing table is treated as "no
+ * checks", never an error.
+ */
+async function checksForRun(
+	db: D1Database,
+	projectId: string,
+	runId: string,
+): Promise<{ passed: number; items: string[]; version?: string } | null> {
+	let rows: Record<string, unknown>[];
+	try {
+		rows = await queryAll(
+			db,
+			`select "title" from "build_features" where "projectId" = ? and "runId" = ? and "status" = 'passed' order by "position" asc`,
+			projectId,
+			runId,
+		);
+	} catch (error) {
+		if (String(error).includes('no such table')) return null;
+		throw error;
+	}
+	const items = rows.map((row) => String(row.title)).filter((title) => title.trim() !== '');
+	if (items.length === 0) return null;
+	return { passed: items.length, items };
 }
 
 export async function projectBrief(db: D1Database, scope: Scope): Promise<DecisionCard[]> {
 	const verified = await assertProjectScope(db, scope);
 	const nowIso = new Date().toISOString();
 	const [approvals, conflicts, staleArtifacts, failedRuns, schedules, workflow] = await Promise.all([
-		pendingApprovalCards(db, verified.projectId, nowIso),
+		pendingApprovalCards(db, verified, nowIso),
 		conflictCards(db, verified).catch((error) => {
 			// The evidence layer is independent: its absence must not blank the
 			// rest of the brief.
@@ -323,7 +446,7 @@ export async function projectBrief(db: D1Database, scope: Scope): Promise<Decisi
 			console.error('brief: run-round query failed:', error);
 			return [] as DecisionCard[];
 		}),
-		scheduleCards(db, verified).catch((error) => {
+		scheduleCards(db, verified, nowIso).catch((error) => {
 			console.error('brief: schedule listing failed:', error);
 			return [] as DecisionCard[];
 		}),
@@ -466,6 +589,12 @@ async function opportunityCards(db: D1Database, scope: Scope): Promise<DecisionC
 			const summary = live
 				? 'Read from a live contest listing. Explore ideas for it when you are ready.'
 				: "A sample from Caddie's built-in feed, not a real contest yet. Explore ideas for it when you are ready.";
+			// Step 4: the fit split. "Before you commit" is filled from the
+			// candidate's OWN stated requirements (eligibility / tech rules it
+			// lists) — a real record. "Why it fits" has no stored source on a
+			// saved candidate, so reasons stays empty and the card renders only
+			// the cautions side. Nothing positive is invented from the summary.
+			const cautions = candidate.requirements.map((req) => req.text).filter((text) => text.trim() !== '');
 			return {
 				id: newCardId('opportunity', candidate.id),
 				projectId: scope.projectId,
@@ -476,6 +605,7 @@ async function opportunityCards(db: D1Database, scope: Scope): Promise<DecisionC
 				status: 'handled',
 				updatedAt: candidate.updatedAt,
 				primaryAction: { label: 'Review opportunity', kind: 'inspect', targetId: candidate.id },
+				...(cautions.length > 0 ? { fit: { reasons: [], cautions } } : {}),
 			} satisfies DecisionCard;
 		});
 }

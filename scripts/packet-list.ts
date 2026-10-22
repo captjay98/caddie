@@ -353,8 +353,12 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// Lane 5 follow-up: the real snapshot reads and the Try-again card.
 			'tests/part-snapshot.test.ts',
 			'tests/try-again-card.test.ts',
+			// Lane 14 (part U): the Brief cards — the deadline countdown, the
+			// plan approval list, the opportunity fit split and the ready card's
+			// preview checks, each field filled from a real record or absent.
+			'tests/brief.test.ts',
 		],
-		browser: [],
+		browser: ['tests/browser/brief.spec.ts'],
 		live: [],
 	},
 	// --- Verification net (S01) ----------------------------------------------

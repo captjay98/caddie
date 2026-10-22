@@ -8934,6 +8934,50 @@ mark {
 .compact-card-note { margin:6px 0; font-size:12px; line-height:1.6; color:var(--color-muted); }
 .compact-card-pulse { width:6px; height:6px; flex:none; border-radius:50%; background:var(--card-accent, var(--color-action)); animation:card-pulse 1.8s ease-in-out infinite; }
 @keyframes card-pulse { 50% { opacity:.35; box-shadow:0 0 0 4px color-mix(in srgb,var(--card-accent, var(--color-action)) 12%,transparent); } }
+/* Build rail (mockup "Live build"): four flat stage columns, a 3px top bar per
+ * stage — grey pending, accent active, green done. No new data: derived from
+ * the card's design (build → Building, repair → Checking). */
+.compact-card-rail { list-style:none; margin:14px 0 4px; padding:0; display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+.compact-card-step { display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--color-muted); }
+.compact-card-step::before { content:""; height:3px; border-radius:3px; background:var(--color-line); }
+.compact-card-step[data-state="done"]::before { background:var(--color-ok, #279f76); }
+.compact-card-step[data-state="active"]::before { background:var(--card-accent, var(--color-action)); }
+.compact-card-step[data-state="active"] { color:var(--card-accent, var(--color-action)); font-weight:650; }
+/* Card footer (mockup `cc-bottom`): a quiet divider, subject left, reassurance
+ * right; wraps on a narrow card. Omitted entirely when it would be empty. */
+.compact-card-foot { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px solid var(--color-line); font-size:11px; color:var(--color-muted); }
+.compact-card-foot-note { text-align:right; }
+.compact-card-panel[data-panel-tone="caution"] { background:color-mix(in srgb, var(--color-warn, #c28b34) 7%, transparent); }
+/* Deadline countdown (mockup `cc-countdown`): a big days-left number beside the
+ * readable date, on an accent-tinted panel. Amber via the card's deadline tone. */
+.compact-card-countdown { display:flex; align-items:center; gap:20px; margin:14px 0 4px; padding:16px; border-radius:10px; background:color-mix(in srgb, var(--card-accent, var(--color-action)) 8%, transparent); }
+.compact-card-days { display:flex; flex-direction:column; align-items:center; min-width:52px; font-size:12px; color:var(--card-accent, var(--color-action)); }
+.compact-card-days b { font-size:40px; font-weight:650; line-height:1.05; letter-spacing:-.05em; }
+.compact-card-when { min-width:0; border-left:1px solid color-mix(in srgb, var(--card-accent, var(--color-action)) 25%, transparent); padding-left:16px; }
+.compact-card-when strong { font-size:13px; font-weight:600; }
+.compact-card-when p { margin:3px 0 0; font-size:12px; color:var(--color-muted); }
+@media(max-width:600px){ .compact-card-countdown { gap:14px; padding:14px; } .compact-card-when { padding-left:12px; } }
+/* Plan "What you're approving" / fit rows (mockup `cc-rows`/`cc-row`): an
+ * accent-tinted mark, a title and a muted one-line detail. */
+.compact-card-list { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
+.compact-card-list-row { display:flex; align-items:flex-start; gap:10px; min-width:0; }
+.compact-card-list-mark { flex:none; margin-top:2px; color:var(--card-accent, var(--color-action)); display:flex; }
+.compact-card-list-mark svg { width:15px; height:15px; }
+.compact-card-list-text { min-width:0; }
+.compact-card-list-text strong { display:block; font-size:13px; font-weight:550; }
+.compact-card-list-text small { display:block; font-size:12px; color:var(--color-muted); line-height:1.5; }
+/* Fit split (mockup `cc-split`): two tinted panels side by side on a wide card,
+ * stacked when narrow. Each side renders only when it has content. */
+.compact-card-split { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0 4px; }
+.compact-card-split .compact-card-panel { margin:0; }
+.compact-card-notes { list-style:none; margin:0; padding:0; display:grid; gap:6px; }
+.compact-card-notes li { font-size:12px; line-height:1.55; color:var(--color-muted); }
+@media(max-width:600px){ .compact-card-split { grid-template-columns:1fr; } }
+/* Preview checks chips (mockup `cc-docs`/`cc-doc`): the passed-checks count, the
+ * named features behind them, and the version — quiet bordered chips. */
+.compact-card-chips { display:flex; flex-wrap:wrap; gap:6px; margin:12px 0 4px; }
+.compact-card-chip { font-size:11px; border:1px solid var(--color-line); border-radius:6px; padding:4px 8px; color:var(--color-muted); background:var(--color-raised); }
+.compact-card-chip-ok b { color:var(--color-ok, #279f76); margin-right:4px; font-weight:500; }
 .caddie-card .workflow-heading { margin-block:8px 14px; gap:10px; }
 .caddie-card .workflow-heading h3 { font-size:20px; letter-spacing:-.025em; }
 .project-workflow > .build-progress { border:0; background:transparent; padding:0; box-shadow:none; }
@@ -8945,9 +8989,15 @@ mark {
 /* The live Brief (v2): open decision cards flow two-up on a wide pane and drop
  * to one column when narrow (auto-fit, 340px min → two at ~720px+). The
  * deadlines block, the Earlier fold and the caught-up line stay full width. */
-.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:12px; }
+/* The live Brief (v2): open decision cards flow two-up on a wide pane and drop
+ * to one column when narrow. Lane 14 measured the Brief pane at 1440px with the
+ * chat at half the window — the pane is ~651px, so the min card width is 300px:
+ * two 300px cards + the 12px gap (612px) fit two-up there and stay readable for
+ * the plan and fit lists, while a phone width drops cleanly to one column. The
+ * deadlines block, the Earlier fold and the caught-up line stay full width. */
+.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:12px; }
 .brief-v2 > .brief-deadlines, .brief-v2 > .brief-done, .brief-v2 > .state-detail { grid-column: 1 / -1; }
-.brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:10px; }
+.brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:10px; }
 .brief-done li { padding:0; border:0; }
 .brief-done .caddie-card { box-shadow:none; }
 .channel-pane .msg { min-width:0; overflow-wrap:anywhere; }
