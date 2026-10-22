@@ -106,6 +106,49 @@ describe('submission texts: stale sentences are gone from docs/submission/**', (
 			phrase: 'plan and build both run on GLM-5.3-Flash',
 			why: 'the original model-table defect: build runs on Super VL',
 		},
+		// The hosted demo IS deployed and the P17 hosted smoke is LIVE VERIFIED
+		// (docs/release-evidence.md; docs/live-receipts.json receipt
+		// lr_5bf0b08f5db1bbcb against https://caddie.jamalibrahim.dev). These
+		// stale HOSTED-DEMO phrasings must not come back. They are pinned
+		// specifically — a plain "not deployed" about Publish (Workers for
+		// Platforms), the public repo URL, or custom domains stays allowed,
+		// because those genuinely have no receipt.
+		{
+			phrase: 'hosted demo is not deployed',
+			why: 'the hosted demo IS deployed; P17 smoke is LIVE VERIFIED (receipt lr_5bf0b08f5db1bbcb)',
+		},
+		{
+			phrase: 'the hosted demo as *NOT BUILT / not deployed*',
+			why: 'the hosted demo is no longer NOT BUILT — it is deployed and smoke-verified',
+		},
+		{
+			phrase: 'records the hosted demo as not built',
+			why: 'the README no longer records the hosted demo as not built',
+		},
+		{
+			phrase: 'Hosted demo URL:** NOT BUILT / not deployed',
+			why: 'the hosted demo URL exists (https://caddie.jamalibrahim.dev) and the P17 row is LIVE VERIFIED',
+		},
+		{
+			phrase: 'P17 hosted row) — **does not exist yet**',
+			why: 'the P17 hosted row exists in docs/release-evidence.md with receipt lr_5bf0b08f5db1bbcb',
+		},
+		{
+			phrase: 'owner-gated and not deployed',
+			why: 'production is deployed to https://caddie.jamalibrahim.dev (2026-10-22, commit 5f3574a)',
+		},
+		{
+			phrase: 'Production is not deployed yet',
+			why: 'production is deployed; the local-recording banner must not claim otherwise',
+		},
+		{
+			phrase: 'hosted demo is pending deployment',
+			why: 'the README "Demo URL" section must give the deployed URL, not "pending deployment"',
+		},
+		{
+			phrase: 'no live demo URL to give you yet',
+			why: 'the live demo URL is https://caddie.jamalibrahim.dev',
+		},
 	];
 
 	for (const { phrase, why } of BANNED) {
@@ -117,11 +160,26 @@ describe('submission texts: stale sentences are gone from docs/submission/**', (
 		});
 	}
 
-	test('neither doc claims FarmLog finished a live 7-of-7 build (no repo receipt backs it)', () => {
-		// The only assertion of this is the plan's own prose; no live receipt,
-		// feature ledger or execution-ledger row records it, so it stays out of
-		// the judge-facing texts.
-		expect(DEVPOST).not.toMatch(/FarmLog/i);
-		expect(VIDEO).not.toMatch(/FarmLog/i);
+	test('the P17 hosted smoke is cited as LIVE VERIFIED with its deployed URL', () => {
+		// The positive guard: once the stale "not deployed" phrasing is gone,
+		// pin that the real state is actually present, so a future rewrite
+		// cannot silently drop the URL and the hosted-smoke status.
+		expect(DEVPOST).toContain('https://caddie.jamalibrahim.dev');
+		expect(VIDEO).toContain('https://caddie.jamalibrahim.dev');
+	});
+
+	test('neither doc makes the unbacked FarmLog "7 of 7" live-build claim', () => {
+		// A plain FarmLog mention (e.g. as a build EXAMPLE) is allowed. What is
+		// banned is the specific "N of N features" live-build claim: the only
+		// place that appears is the plan's own prose — no live receipt, feature
+		// ledger or execution-ledger row records it — so it stays out of the
+		// judge-facing texts. Match "<n> of <n>" near a FarmLog mention, and the
+		// bare "7 of 7 features" assertion, in either doc.
+		const SEVEN_OF_SEVEN = /\b\d+\s+of\s+\d+\s+features\b/i;
+		const FARMLOG_COUNT = /FarmLog[^.\n]*\b\d+\s+of\s+\d+\b/i;
+		for (const [name, doc] of [['devpost.md', DEVPOST], ['video-script.md', VIDEO]] as const) {
+			expect(SEVEN_OF_SEVEN.test(doc), `${name} asserts an unbacked "N of N features" build claim`).toBe(false);
+			expect(FARMLOG_COUNT.test(doc), `${name} asserts an unbacked FarmLog "N of N" build claim`).toBe(false);
+		}
 	});
 });

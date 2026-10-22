@@ -10,7 +10,7 @@ replace a placeholder with an invented value.
 | Placeholder | What the owner must supply |
 | :--- | :--- |
 | `<REPO-URL>` | The public GitHub repository URL. **The repo does not exist yet** (D5/G3; no remote is configured). |
-| `<DEMO-URL>` | The hosted demo URL. **Does not exist yet** — production is owner-gated (S10/G4) and `README.md` records the hosted demo as *NOT BUILT / not deployed*. |
+| `<DEMO-URL>` | The hosted demo URL. **Deployed and live-verified:** production runs at `https://caddie.jamalibrahim.dev` (owner-gated deploy, S10/G4), and the P17 hosted acceptance smoke is **LIVE VERIFIED** there — `tests/live/release.spec.ts` 5/5 PASS, `docs/live-receipts.json` receipt `lr_5bf0b08f5db1bbcb` (deploy 2026-10-22, commit `5f3574a`). The owner still confirms the exact URL to paste into the Devpost form. |
 | `<VIDEO-URL>` | The YouTube URL of the uploaded demo video (public or unlisted). **Not recorded yet** — see `docs/submission/video-script.md`. |
 | the judge access code | Filled in **only** in the Devpost form's testing-instructions field, never in this repo. The placeholder for it lives solely in the testing-instructions template in §6. |
 
@@ -87,9 +87,11 @@ build driven by Caddie's agents has not been run live yet.
 
 **Honest status.** The app is a working build that makes real runtime calls to
 Token Factory and runs the pipeline locally and in recorded live runs. The
-**hosted demo is not deployed yet**, and Publish (Workers for Platforms) is not
-live-verified. The README's status table records both as not built/not deployed
-rather than implying otherwise. Full labels are in §7.
+**hosted demo is deployed at `https://caddie.jamalibrahim.dev`** and its P17
+hosted acceptance smoke is **LIVE VERIFIED** (5/5 PASS, receipt
+`lr_5bf0b08f5db1bbcb`, deploy 2026-10-22). Publish (Workers for Platforms) is
+still **not** live-verified. The README's status table records each surface at
+its real status rather than implying otherwise. Full labels are in §7.
 
 <!--
   SOFTWARE-TEAM MODE: not shipped. The team-mode build programme
@@ -147,11 +149,13 @@ the date it was observed; nothing here is a general impression.
   fixed it. The same failure mode showed on Nemotron 3.5 Lightning at 512
   (2026-10-18).
 - **Nemotron 3.5 Lightning couldn't do the structured rules-reading job
-  (2026-10-20).** Tried as the `helper` model, on the real rules prompt at
-  temperature 0 it returned 17,867 chars of narrated reasoning and no JSON
-  even at the 4,096 cap (`finish_reason: length`), so `helper` was reverted to
-  Nemotron 3 Nano the same day. Both cost the same ($0.06/$0.24 per Mtok), so
-  nothing was lost.
+  (2026-10-20).** Tried as the `helper` model, on the real rules prompt it
+  returned `finish_reason: length` with no parseable JSON even at the route's
+  4,096-token output cap, and its narration came back inside `content` rather
+  than `reasoning_content` (so the claim parser read null) — recorded in the
+  execution ledger's 2026-10-20 `probe-lightning` run (1,482 in / 4,096 out).
+  `helper` was reverted to Nemotron 3 Nano the same day. Both cost the same
+  ($0.06/$0.24 per Mtok), so nothing was lost.
 - **The 3.x Nemotron ids don't accept image input (2026-10-15).** Every 3.x
   Nemotron route 400s an image ("This model does not support image input");
   only the 3.5 Super VL id does. The id spellings are also inconsistent and
@@ -236,10 +240,13 @@ same table.)
 ## 5. Repo, demo and video URLs
 
 - **Repository:** `<REPO-URL>` — **does not exist yet.**
-- **Live demo:** `<DEMO-URL>` — **does not exist yet.** Production is
-  owner-gated (S10/G4); `README.md` records the hosted demo as *NOT BUILT / not
-  deployed*, and `docs/release-evidence.md` records the hosted smoke (P17) as
-  BLOCKED without `CADDIE_RELEASE_URL`.
+- **Live demo:** `<DEMO-URL>` — **deployed and live-verified.** Production runs
+  at `https://caddie.jamalibrahim.dev` (owner-gated deploy, S10/G4);
+  `docs/release-evidence.md` records the hosted acceptance smoke (P17) as
+  **LIVE VERIFIED** (`tests/live/release.spec.ts` 5/5 PASS against that origin),
+  and `docs/live-receipts.json` holds the latest receipt `lr_5bf0b08f5db1bbcb`
+  (deploy 2026-10-22, commit `5f3574a`). The owner confirms the exact URL for
+  the Devpost form.
 - **Video:** `<VIDEO-URL>` — **not recorded yet.** Upload to YouTube as public
   or unlisted. See `docs/submission/video-script.md`. If production is not
   ready, the video is recorded on a local build with live models and the live
@@ -321,9 +328,11 @@ status.
   `P05-live`"; and the P09 React+Hono journey. Re-probed live on 2026-10-18
   (G1 listing probe) and 2026-10-19 (`scripts/probe-lightning.ts`, ledger
   "Owner review follow-ups").
-- **Caveat:** these live calls were made from a local/dev origin under owner
-  authorization. The **hosted** deployment is not live-verified
-  (`README.md` status table).
+- **Caveat:** these live *model* calls were made from a local/dev origin under
+  owner authorization. The hosted deployment itself is live and smoke-verified
+  (P17, `https://caddie.jamalibrahim.dev`, receipt `lr_5bf0b08f5db1bbcb`), but a
+  model round-trip through the hosted origin needs an interactive owner sign-in,
+  so the P05 model-route receipt stays local/dev (`README.md` status table).
 
 ### (b) At least one NVIDIA open-source model — **LIVE VERIFIED** (recorded 2026-10-18)
 
@@ -344,7 +353,9 @@ status.
 
 ### Honest gaps (state these rather than overclaim)
 
-- **Hosted demo URL:** NOT BUILT / not deployed (`README.md`).
+- **Hosted demo URL:** LIVE VERIFIED — deployed at
+  `https://caddie.jamalibrahim.dev`; the P17 hosted acceptance smoke is 5/5 PASS
+  (receipt `lr_5bf0b08f5db1bbcb`, `docs/release-evidence.md`).
 - **Publish / Worker Loader / Cloudflare Artifacts / Web Risk on a deployed
   Worker:** implemented and locally tested, **not** live-verified on a deployed
   Worker (`README.md`; `docs/release-evidence.md`).

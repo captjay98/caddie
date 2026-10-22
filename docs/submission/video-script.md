@@ -10,21 +10,23 @@ is under 3:00 with audio that names Nebius Token Factory and NVIDIA Nemotron;
 the submission plan (S12) asks for at most 2:45 and this cut leaves a ~5 second
 margin below even that.
 
-**Where to record.** On the hosted production deployment **when it exists**
-(S10/G4). Production is currently **owner-gated and not deployed**
-(`README.md`, "Hosted demo (the judge URL)" = *NOT BUILT / not deployed*;
-`docs/release-evidence.md`). If production is not ready, record on a **local
-build with live models and the live sandbox** — and say so on screen. A local
-recording is **not** evidence of the hosted deployment and must not be
-presented as the hosted demo. If the recording is made locally, include the
-lower-third described in "Local-recording banner" below.
+**Where to record.** On the hosted production deployment, which is **live**
+(S10/G4): production runs at `https://caddie.jamalibrahim.dev` and its P17
+hosted acceptance smoke is **LIVE VERIFIED** (`docs/release-evidence.md`,
+"Hosted acceptance smoke" = 5/5 PASS; `docs/live-receipts.json` receipt
+`lr_5bf0b08f5db1bbcb`, deploy 2026-10-22). Record against that origin. If for
+any reason you record on a **local build with live models and the live
+sandbox** instead, say so on screen — a local recording is **not** evidence of
+the hosted deployment and must not be presented as the hosted demo, and in that
+case include the lower-third described in "Local-recording banner" below.
 
 **What the recording may and may not claim.** The full-fact labels are in the
-final section. Short version: model round-trips, the sandbox and Tavily are
-**LIVE VERIFIED** as recorded runs (see the final section); the **hosted demo,
-Publish/Worker-Loader-on-a-deployed-Worker, Cloudflare Artifacts and custom
-domains are not live-verified**. Do not say "live on the internet" about
-Publish unless production is actually deployed and the publish ran there.
+final section. Short version: model round-trips, the sandbox, Tavily and the
+**hosted deployment itself (P17 smoke)** are **LIVE VERIFIED** as recorded runs
+(see the final section); **Publish/Worker-Loader-on-a-deployed-Worker,
+Cloudflare Artifacts and custom domains are not live-verified**. Do not say
+"live on the internet" about **Publish** unless the publish actually ran on the
+deployed Worker.
 
 ---
 
@@ -35,8 +37,10 @@ Run this before you press record. Everything here is checkable in the repo.
 ### What must be running
 
 - [ ] The build to record against, running, and reached at its base URL.
-      - Production (preferred): the deployed Worker, URL recorded in
-        `docs/release-evidence.md` (P17 hosted row) — **does not exist yet**.
+      - Production (preferred): the deployed Worker at
+        `https://caddie.jamalibrahim.dev`, recorded in
+        `docs/release-evidence.md` (P17 hosted row, 5/5 PASS, receipt
+        `lr_5bf0b08f5db1bbcb`).
       - Local fallback: `bun run dev` (dev server pinned to
         `http://localhost:5176`; SPA under `/app`), per `README.md` → "Run it
         locally".
@@ -247,14 +251,16 @@ Super VL`) so the narration and the screen agree.
 
 ### Local-recording banner
 
-If production is not deployed and the take is recorded locally, keep a
-persistent lower-third on screen or state it aloud at the top:
+Production **is** deployed, so the preferred take is against the hosted origin
+and needs no banner. Only if you deliberately record on a local build instead,
+keep a persistent lower-third on screen or state it aloud at the top:
 
-> "Recorded on a local build with live models and the live sandbox. Production
-> is not deployed yet, so this is not the hosted demo."
+> "Recorded on a local build with live models and the live sandbox — not the
+> hosted deployment."
 
-This is a **required** disclosure. A local recording is **not** LIVE VERIFIED
-evidence of the hosted deployment.
+This disclosure is **required for a local take**. A local recording is **not**
+LIVE VERIFIED evidence of the hosted deployment (which is verified separately —
+P17 smoke, receipt `lr_5bf0b08f5db1bbcb`).
 
 ---
 
@@ -296,7 +302,7 @@ status this repo records. If a claim is not below, do not say it.
 | Keys (app secrets) | **LOCAL VERIFIED** | `apps/app/src/client/project/AppKeys.tsx`; saving keys needs `APP_SECRETS_KEYS` (`docs/setup/owner-inputs.md`). |
 | Publish (Workers for Platforms) | **NOT DEPLOYED / LOCAL VERIFIED only** | `apps/app/src/client/project/PublishApp.tsx`; `README.md` status table; `docs/release-evidence.md`. |
 | Worker Loader preview / Artifacts / Web Risk on a **deployed** Worker | **Not live-verified** | `README.md` status table. |
-| Hosted demo URL accessible to judges | **NOT BUILT / not deployed** | `README.md` status table. |
+| Hosted demo URL accessible to judges | **LIVE VERIFIED** — deployed at `https://caddie.jamalibrahim.dev` | `docs/release-evidence.md` (P17 hosted row, 5/5 PASS); `docs/live-receipts.json` receipt `lr_5bf0b08f5db1bbcb`. |
 | The template app installs and builds in the sandbox (`verified-install.ts` on `tag:tt-base:1`) | **LIVE VERIFIED** (recorded 2026-10-19) | `README.md` status table; `scripts/probe-sandbox-scaffold.ts`; ledger item 3 receipt. A full build driven by Caddie's agents is **not yet live**: don't present the template run as one. |
 | Code is written, run and tested in Token Factory (sandbox API at `https://api.tokenfactory.nebius.com/sandboxes`) | **LIVE VERIFIED** for the sandbox and the template install (2026-10-06, 2026-10-19) | `README.md` "The sandbox and Caddie's checks". Say "in Nebius Token Factory"; don't call it "Token Factory Sandboxes" (the rules don't use that name). |
 

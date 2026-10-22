@@ -52,12 +52,11 @@ captures.
 
 ### Demo URL
 
-**Not yet available — the hosted demo is pending deployment.** Production
-deployment is a separate, owner-gated step (the plan's gate `G4`); it has not
-happened, so there is **no live demo URL to give you yet**. When the owner
-deploys, this section gets the URL — nothing has been stubbed in here that would
-later need retracting. Until then, the only way to try Caddie is
-[locally](#run-it-locally).
+**Live at `https://caddie.jamalibrahim.dev`.** Production deployment is a
+separate, owner-gated step (the plan's gate `G4`); it has happened, and the P17
+hosted acceptance smoke is **LIVE VERIFIED** against that origin — 5/5 PASS,
+`docs/live-receipts.json` receipt `lr_5bf0b08f5db1bbcb` (deploy 2026-10-22,
+commit `5f3574a`). You can also try Caddie [locally](#run-it-locally).
 
 ### Getting in (once the demo is live)
 
@@ -116,8 +115,8 @@ gate, rate limits and refusals in `tests/judge-access.test.ts`
 
 ### A two-minute path to try
 
-*Applies once the demo is deployed.* If it is not deployed yet, run it locally
-instead — see [Run it locally](#run-it-locally).
+*The demo is deployed at `https://caddie.jamalibrahim.dev`.* You can also run it
+locally instead — see [Run it locally](#run-it-locally).
 
 1. Open the demo URL and click **"Judging the hackathon? Use your access code"**.
    Enter the access code from the Devpost testing instructions, choose a judge
@@ -292,7 +291,7 @@ such rather than omitted.
 | Install Caddie on a phone (web app) | **LOCAL VERIFIED** in Chromium; **not tried on a phone** | `apps/app/public/manifest.webmanifest`, `apps/app/public/sw.js`, `tests/pwa.test.ts`, `tests/browser/pwa.spec.ts`. Opened with no connection, the app says it is offline (it no longer shows sign-in). A link shared to Caddie from another app lands in the chat box and is never sent for you. The service worker never caches `/api` or `/agents`. Not yet installed on a real Android phone or iPhone. |
 | Install a published app on a phone | **LOCAL VERIFIED** in Chromium; **not tried on a phone**, publishing not deployed | `apps/app/src/server/published-page.ts`, `app-icons.ts`, `tests/published-page.test.ts`, `tests/app-icons.test.ts`, `tests/browser/app-install.spec.ts`. Every publish adds a web app manifest and home-screen icons (the app's first letter on a colour picked for it), so Chrome on Android offers Install app and an iPhone's Add to Home Screen opens it full screen. Chromium's own install check passes on the exact published files under the dispatch Worker's CSP. No service worker, so a new publish is never hidden behind a cached copy. |
 | Landing page product art / workspace illustrations | **SIMULATED** | Labelled on the page itself: illustrative compositions, not live captures. |
-| **Hosted demo (the judge URL)** | **NOT BUILT / not deployed** | Production deploy is owner-gated. There is no demo URL yet. |
+| **Hosted demo (the judge URL)** | **LIVE VERIFIED** | Deployed at `https://caddie.jamalibrahim.dev` (owner-gated deploy, 2026-10-22); the P17 hosted acceptance smoke is 5/5 PASS, `docs/live-receipts.json` receipt `lr_5bf0b08f5db1bbcb`, recorded in `docs/release-evidence.md`. |
 | App publishing (Workers for Platforms) | **Not deployed** | The dispatch Worker is **PROPOSED** (`workers/dispatch/wrangler.jsonc`); the publish service and `/api` routes exist locally. |
 | Custom domains for published apps | **Not built** | Only the plan and the adapter's headroom exist; nothing is configured. |
 | Cloudflare Artifacts code store, Web Risk safety scan, Worker Loader preview on a **deployed** Worker | **Not live-verified** | Implemented and locally tested; never run on a deployed Worker. |
