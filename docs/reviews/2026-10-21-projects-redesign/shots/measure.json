@@ -1,0 +1,326 @@
+{
+	"b-overview/project-empty-phone": {
+		"boxes": 2,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 1007,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"b-overview/project-review-phone": {
+		"boxes": 2,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 938,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"b-overview/list-phone": {
+		"boxes": 5,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 1038,
+		"cardHeights": [
+			147,
+			147,
+			126,
+			126,
+			126
+		],
+		"cardsOnFirstScreen": 4
+	},
+	"b-overview/project-building-phone": {
+		"boxes": 2,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 938,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"b-overview/project-blocked-desktop": {
+		"boxes": 2,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"b-overview/project-empty-desktop": {
+		"boxes": 2,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"b-overview/project-building-desktop": {
+		"boxes": 2,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"b-overview/project-blocked-phone": {
+		"boxes": 2,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 1028,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"b-overview/project-review-desktop": {
+		"boxes": 2,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"b-overview/project-ready-desktop": {
+		"boxes": 2,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"b-overview/project-ready-phone": {
+		"boxes": 2,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 938,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"b-overview/list-desktop": {
+		"boxes": 5,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 826,
+		"cardHeights": [
+			143,
+			143,
+			122,
+			122,
+			122
+		],
+		"cardsOnFirstScreen": 5
+	},
+	"c-journey/project-empty-phone": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 836,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"c-journey/project-review-phone": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 1389,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"c-journey/list-phone": {
+		"boxes": 5,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 1081,
+		"cardHeights": [
+			143,
+			143,
+			143,
+			143,
+			143
+		],
+		"cardsOnFirstScreen": 4
+	},
+	"c-journey/project-building-phone": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 944,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"c-journey/project-blocked-desktop": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"c-journey/project-empty-desktop": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"c-journey/project-building-desktop": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"c-journey/project-blocked-phone": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 925,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"c-journey/project-review-desktop": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 989,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"c-journey/project-ready-desktop": {
+		"boxes": 2,
+		"depth": 2,
+		"chatBoxes": 1,
+		"pageHeight": 905,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"c-journey/project-ready-phone": {
+		"boxes": 2,
+		"depth": 2,
+		"chatBoxes": 0,
+		"pageHeight": 1292,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"c-journey/list-desktop": {
+		"boxes": 5,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 867,
+		"cardHeights": [
+			139,
+			139,
+			139,
+			139,
+			139
+		],
+		"cardsOnFirstScreen": 5
+	},
+	"a-focus/project-empty-phone": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 689,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"a-focus/project-review-phone": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 1242,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"a-focus/list-phone": {
+		"boxes": 5,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 996,
+		"cardHeights": [
+			126,
+			126,
+			126,
+			126,
+			126
+		],
+		"cardsOnFirstScreen": 4
+	},
+	"a-focus/project-building-phone": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 817,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"a-focus/project-blocked-desktop": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"a-focus/project-empty-desktop": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"a-focus/project-building-desktop": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"a-focus/project-blocked-phone": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 778,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"a-focus/project-review-desktop": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 844,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"a-focus/project-ready-desktop": {
+		"boxes": 2,
+		"depth": 2,
+		"chatBoxes": 1,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"a-focus/project-ready-phone": {
+		"boxes": 2,
+		"depth": 2,
+		"chatBoxes": 0,
+		"pageHeight": 1107,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"a-focus/list-desktop": {
+		"boxes": 5,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 826,
+		"cardHeights": [
+			122,
+			122,
+			122,
+			122,
+			122
+		],
+		"cardsOnFirstScreen": 5
+	}
+}

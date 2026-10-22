@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-palette="caddie">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projects redesign · three options for review</title>
+<link rel="stylesheet" href="assets/app.css">
+<style>
+body { margin: 0; background: var(--color-ink); color: var(--color-bright); font-family: var(--font-ui); }
+.b-wrap { max-width: 1240px; margin: 0 auto; padding: 32px 24px 80px; display: grid; gap: 34px; }
+h1 { margin: 0; font-size: 30px; letter-spacing: -0.02em; }
+h2 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.015em; }
+h3 { margin: 18px 0 8px; font-size: 15px; color: var(--color-muted); font-weight: 650; }
+p, li, dd, td { line-height: 1.6; }
+.b-lede { margin: 0; max-width: 900px; color: var(--color-muted); font-size: 15px; }
+.b-small { margin: 8px 0 0; color: var(--color-muted); font-size: 13px; }
+a { color: var(--color-action); }
+section { display: grid; gap: 10px; }
+.b-box { padding: 16px 18px; border: 1px solid var(--color-line); border-radius: 13px; background: var(--color-raised); }
+.b-box ul, .b-box ol { margin: 0; padding-left: 1.2rem; display: grid; gap: 4px; }
+.b-sheet, .b-frame img { display: block; width: 100%; border-radius: 12px; border: 1px solid var(--color-line); }
+.b-facts { margin: 4px 0 8px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.b-facts div { padding: 12px 14px; border: 1px solid var(--color-line); border-radius: 13px; background: var(--color-raised); }
+.b-facts dt { font-size: 11px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }
+.b-facts dd { margin: 4px 0 0; font-size: 14px; }
+.b-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.b-tab { min-height: 40px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--color-line); background: transparent; color: var(--color-muted); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.b-tab[aria-pressed='true'] { border-color: var(--color-action); background: color-mix(in srgb, var(--color-action) 16%, transparent); color: var(--color-bright); }
+.b-pair { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
+.b-pair figure { margin: 0; display: grid; gap: 6px; }
+.b-pair figcaption { font-size: 13px; font-weight: 600; color: var(--color-muted); }
+.b-frame { max-height: 760px; overflow: auto; border-radius: 12px; }
+.b-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.b-table th, .b-table td { padding: 10px 12px; border-bottom: 1px solid var(--color-line); text-align: left; vertical-align: top; }
+.b-table thead th { color: var(--color-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.b-table tbody th { width: 26%; color: var(--color-muted); font-weight: 600; }
+code { font-family: var(--font-mono); font-size: 12.5px; }
+@media (max-width: 900px) { .b-pair, .b-facts { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main class="b-wrap">
+<header>
+<h1>Projects redesign · three options for your review</h1>
+<p class="b-lede">You said the Projects cards, the project page and its details are overwhelming. These are three ways to fix it, shown in all five states on desktop and on a 390px phone. Nothing in the app has changed: these pages use the app’s real stylesheet and real page frame, and every state’s words and build lists are what the app shows for that state today. The projects are examples. 21 October 2026.</p>
+</header>
+
+<section class="b-box">
+<h2>Kept in every option</h2>
+<ul>
+<li>The four phone tabs (Caddie, Brief, Discover, Projects) and the chat box above them; the chat beside the page on desktop.</li>
+<li>The steps Plan → Build → Check → Submit (Share for a personal project).</li>
+<li>The card look you approved on 20 October: compact spacing, 13px corners, one outer frame.</li>
+</ul>
+<h3>Rules every option follows</h3>
+<ol>
+<li>One header: the name once, its state once, then the hackathon and deadline on one line.</li>
+<li>The current step’s work is one card; nothing inside it is drawn as another card.</li>
+<li>The chat beside a project page doesn’t repeat the project card. It shows one line, such as “Building your app · 2 of 7 features done · On this page”.</li>
+<li>One main button per screen; everything else is quiet.</li>
+<li>The brief, history, files, to-dos and settings are one tap away, not all on the page at once.</li>
+<li>Every word comes from the same project status the chat and the Brief use. No made-up progress.</li>
+</ol>
+</section>
+
+<section id="today">
+<h2>Today</h2>
+<img class="b-sheet" src="shots/sheet-today.png" alt="Today: the project page while building and the Projects list on desktop, and six phone screens">
+<div class="b-box"><ul>
+<li>On desktop the build shows twice: in the page’s Now card, and again in the chat beside it as a full project card, whose “Open project” button opens the page you are already on.</li>
+<li>A card inside a card: the Now card wraps the “Building your app” card.</li>
+<li>On a phone the name shows twice, the hackathon chips take two rows, and the steps show twice (the “Step 2 of 4” line with its bar, then four step buttons).</li>
+<li>“Your idea” repeats the line under the name word for word, and “Your app” is an empty placeholder until the app exists.</li>
+<li>A Projects card is 229px tall on desktop and 266px on a phone, so 2 fit on the first phone screen.</li>
+</ul></div>
+</section>
+
+<section class="b-option" id="a-focus">
+<h2>Option A · Focused: one step at a time</h2>
+<p class="b-lede">Opening a project goes straight to the step the work is on. The page shows that step’s work and nothing else; the four steps are one row of tabs.</p>
+<dl class="b-facts"><div><dt>Best when</dt><dd>You come back to act: approve the plan, try the app, get a paused build going again. The work is the first thing on the page.</dd></div><div><dt>Costs</dt><dd>No single summary of the whole project; finished and later steps are a tab away.</dd></div><div><dt>Projects card</dt><dd>Leanest: name, state, one line on what it is, when it last changed, one button.</dd></div></dl>
+<img class="b-sheet" src="shots/sheet-a-focus.png" alt="Option A: the project page while building and the Projects list on desktop, and six phone screens">
+<h3>Every state, whole page</h3>
+<div class="b-tabs" role="group" aria-label="State"><button type="button" class="b-tab" data-option="a-focus" data-state="review" aria-pressed="false">Plan to approve</button><button type="button" class="b-tab" data-option="a-focus" data-state="building" aria-pressed="true">Building</button><button type="button" class="b-tab" data-option="a-focus" data-state="ready" aria-pressed="false">Ready to try</button><button type="button" class="b-tab" data-option="a-focus" data-state="blocked" aria-pressed="false">Needs you</button><button type="button" class="b-tab" data-option="a-focus" data-state="empty" aria-pressed="false">No plan yet</button></div>
+<div class="b-pair">
+<figure class="b-desk"><figcaption>Desktop · <a data-live="desktop" href="screens/a-focus/project-building-desktop.html">open the page</a></figcaption><div class="b-frame"><img data-shot="desktop" src="shots/a-focus/project-building-desktop-full.png" alt="Option A, desktop"></div></figure>
+<figure class="b-phone"><figcaption>Phone · <a data-live="phone" href="screens/a-focus/project-building-phone.html">open the page</a></figcaption><div class="b-frame"><img data-shot="phone" src="shots/a-focus/project-building-phone-full.png" alt="Option A, phone"></div></figure>
+</div>
+<p class="b-small">Projects list: <a href="screens/a-focus/list-desktop.html">desktop</a> · <a href="screens/a-focus/list-phone.html">phone</a></p>
+</section>
+<section class="b-option" id="b-overview">
+<h2>Option B · Overview: a short summary, one tap into each step</h2>
+<p class="b-lede">Opening a project shows the four steps as rows with their status in words; the current one carries its one button. A step’s details open on its own page.</p>
+<dl class="b-facts"><div><dt>Best when</dt><dd>You want to see the whole project before acting, especially on a phone, where a list of rows is natural.</dd></div><div><dt>Costs</dt><dd>One more tap to reach the build’s details, and each step still needs its own page (it would be option A’s card on its own).</dd></div><div><dt>Projects card</dt><dd>Option A’s card plus the hackathon and its deadline on one line.</dd></div></dl>
+<img class="b-sheet" src="shots/sheet-b-overview.png" alt="Option B: the project page while building and the Projects list on desktop, and six phone screens">
+<h3>Every state, whole page</h3>
+<div class="b-tabs" role="group" aria-label="State"><button type="button" class="b-tab" data-option="b-overview" data-state="review" aria-pressed="false">Plan to approve</button><button type="button" class="b-tab" data-option="b-overview" data-state="building" aria-pressed="true">Building</button><button type="button" class="b-tab" data-option="b-overview" data-state="ready" aria-pressed="false">Ready to try</button><button type="button" class="b-tab" data-option="b-overview" data-state="blocked" aria-pressed="false">Needs you</button><button type="button" class="b-tab" data-option="b-overview" data-state="empty" aria-pressed="false">No plan yet</button></div>
+<div class="b-pair">
+<figure class="b-desk"><figcaption>Desktop · <a data-live="desktop" href="screens/b-overview/project-building-desktop.html">open the page</a></figcaption><div class="b-frame"><img data-shot="desktop" src="shots/b-overview/project-building-desktop-full.png" alt="Option B, desktop"></div></figure>
+<figure class="b-phone"><figcaption>Phone · <a data-live="phone" href="screens/b-overview/project-building-phone.html">open the page</a></figcaption><div class="b-frame"><img data-shot="phone" src="shots/b-overview/project-building-phone-full.png" alt="Option B, phone"></div></figure>
+</div>
+<p class="b-small">Projects list: <a href="screens/b-overview/list-desktop.html">desktop</a> · <a href="screens/b-overview/list-phone.html">phone</a></p>
+</section>
+<section class="b-option" id="c-journey">
+<h2>Option C · Journey: where it’s been and where it’s going</h2>
+<p class="b-lede">The four steps as a timeline: finished steps say what happened and when, the current step opens in place with its work, later steps say what happens next.</p>
+<dl class="b-facts"><div><dt>Best when</dt><dd>You want the story on one page: what’s done and when, what Caddie is doing, and what happens next.</dd></div><div><dt>Costs</dt><dd>The longest page of the three, and the current step’s work sits lower than in A.</dd></div><div><dt>Projects card</dt><dd>Your Oct 20 pick, slimmer: the letter tile and the four steps on one line instead of four columns with notes.</dd></div></dl>
+<img class="b-sheet" src="shots/sheet-c-journey.png" alt="Option C: the project page while building and the Projects list on desktop, and six phone screens">
+<h3>Every state, whole page</h3>
+<div class="b-tabs" role="group" aria-label="State"><button type="button" class="b-tab" data-option="c-journey" data-state="review" aria-pressed="false">Plan to approve</button><button type="button" class="b-tab" data-option="c-journey" data-state="building" aria-pressed="true">Building</button><button type="button" class="b-tab" data-option="c-journey" data-state="ready" aria-pressed="false">Ready to try</button><button type="button" class="b-tab" data-option="c-journey" data-state="blocked" aria-pressed="false">Needs you</button><button type="button" class="b-tab" data-option="c-journey" data-state="empty" aria-pressed="false">No plan yet</button></div>
+<div class="b-pair">
+<figure class="b-desk"><figcaption>Desktop · <a data-live="desktop" href="screens/c-journey/project-building-desktop.html">open the page</a></figcaption><div class="b-frame"><img data-shot="desktop" src="shots/c-journey/project-building-desktop-full.png" alt="Option C, desktop"></div></figure>
+<figure class="b-phone"><figcaption>Phone · <a data-live="phone" href="screens/c-journey/project-building-phone.html">open the page</a></figcaption><div class="b-frame"><img data-shot="phone" src="shots/c-journey/project-building-phone-full.png" alt="Option C, phone"></div></figure>
+</div>
+<p class="b-small">Projects list: <a href="screens/c-journey/list-desktop.html">desktop</a> · <a href="screens/c-journey/list-phone.html">phone</a></p>
+</section>
+
+<section id="compare">
+<h2>Side by side</h2>
+<table class="b-table"><thead><tr><th></th><th>Today</th><th>A</th><th>B</th><th>C</th></tr></thead><tbody>
+<tr><th scope="row">Opening a project shows</th><td>Header, four step boxes, a Now card with the build card inside it, Your idea, Your app, then folds</td><td>The current step’s work</td><td>A summary of the four steps</td><td>The whole journey, current step open</td></tr>
+<tr><th scope="row">Projects card height, desktop</th><td>229 px</td><td>122 px</td><td>143 px</td><td>139 px</td></tr>
+<tr><th scope="row">Projects cards on the first screen (desktop / phone)</th><td>3 / 2</td><td>5 / 4</td><td>5 / 4</td><td>5 / 4</td></tr>
+<tr><th scope="row">Framed boxes on the page while building (deepest nesting)</th><td>5 (2)</td><td>1 (1)</td><td>2 (1)</td><td>1 (1)</td></tr>
+<tr><th scope="row">Page length while building, phone</th><td>1729 px</td><td>817 px</td><td>938 px</td><td>944 px</td></tr>
+<tr><th scope="row">Chat beside the page (desktop)</th><td>An empty-state card and a second copy of the project card</td><td>One status line</td><td>One status line</td><td>One status line</td></tr>
+</tbody></table>
+<p class="b-small">Measured in Chromium at 1440×900 and 390×844 on these pages. A framed box is anything bordered on all sides and rounded, at least 120×36, buttons and links excluded. Phone page length is the content height; the options fold the feature list (one tap), today shows it open.</p>
+</section>
+
+<section id="recommend" class="b-box">
+<h2>My recommendation</h2>
+<p>Option A for the project page, with option B’s Projects card. A is the plan’s own baseline (one header and the steps, then the current step’s work), has the least to read, and puts the button you need first in every state. B’s card keeps the deadline visible for hackathon projects for one extra line. C reads well but is the longest page, and B adds a tap before you see the work.</p>
+</section>
+
+<section id="found" class="b-box">
+<h2>Found while preparing this (today’s app)</h2>
+<ol>
+<li>A paused build says “Press Retry to continue from here” (<code>apps/app/src/server/build-workflow.ts</code>, the stalled-build message), but its button says “Review next step” (<code>apps/app/src/server/project-experience.ts</code>, the blocked stage’s action).</li>
+<li>While a build is paused, the Plan step says “Paused — check with Caddie” in amber although the plan was approved: the steps read the workflow phase (<code>apps/app/src/client/workspace/project-status.ts</code>, <code>workflowSteps</code>), which can’t tell a stuck plan from a paused build, while the Now card reads the project status, which knows the plan was approved. The options use the project status.</li>
+<li>While building, the server marks “Stop build” as the main action, so the Now card draws it as the blue main button. The options make it quiet.</li>
+<li>The chat beside the project page shows “Open project” for the project you are on.</li>
+</ol>
+</section>
+
+<section id="questions" class="b-box">
+<h2>Questions for you</h2>
+<ol>
+<li>Which project page: A, B or C? Mixing is fine, for example A’s page with C’s card.</li>
+<li>Which Projects card: A (leanest), B (adds the hackathon and deadline) or C (keeps the letter tile and the steps)?</li>
+<li>Is one status line in the chat beside a project page right? All three options assume it.</li>
+<li>Should the two wording mismatches above (the Retry button, Plan showing “Paused”) be fixed now, on their own?</li>
+</ol>
+<p class="b-small">Not drawn yet: the step pages option B would open (they would reuse A’s card), the Check and Submit steps’ own content, the light theme, and 320px phones. They come with the build.</p>
+</section>
+
+<section id="how" class="b-box">
+<h2>How these were made</h2>
+<ul>
+<li><code>tools/capture-today.ts</code> runs the real built app (<code>apps/app/dist</code>) on <code>127.0.0.1:4179</code> with every API answered by test data, the way the browser tests do, and saves today’s screens, the page frame and the real build lists.</li>
+<li><code>tools/build-mockups.ts</code> puts each option’s page content into that frame (36 pages), with a snapshot of the app’s stylesheet; <code>assets/review.css</code> holds the few new styles, built from the app’s own colours.</li>
+<li><code>tools/shoot-mockups.ts</code> takes the screenshots and the measurements; <code>tools/build-board.ts</code> writes this page.</li>
+</ul>
+<h3>Words these pages use that the app doesn’t yet</h3>
+<ul><li>"Not started yet" under Plan for a project with no plan yet (today the step shows nothing).</li><li>"On this page" on the one-line project status in the chat beside the project.</li><li>Option B's "This project" group and its row descriptions.</li><li>Option C's dated lines on finished steps ("Approved Oct 19 · version 2") and its "what happens next" lines.</li></ul>
+</section>
+</main>
+<script>
+for (const tab of document.querySelectorAll('.b-tab')) {
+	tab.addEventListener('click', () => {
+		const { option, state } = tab.dataset;
+		const section = document.getElementById(option);
+		for (const t of section.querySelectorAll('.b-tab')) t.setAttribute('aria-pressed', String(t === tab));
+		for (const vp of ['desktop', 'phone']) {
+			section.querySelector('[data-shot="' + vp + '"]').src = 'shots/' + option + '/project-' + state + '-' + vp + '-full.png';
+			section.querySelector('[data-live="' + vp + '"]').href = 'screens/' + option + '/project-' + state + '-' + vp + '.html';
+		}
+	});
+}
+</script>
+</body>
+</html>

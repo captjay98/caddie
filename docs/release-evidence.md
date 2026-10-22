@@ -237,6 +237,46 @@ from the previous release.
   into every worker that loads the server modules, and the schedules fixture
   worker (no `.md` loader) failed to boot until the rule moved.
 
+## Production deploy (2026-10-22): the preview works, and the build cannot be wrong
+
+The fix for the blank/offline preview, plus the guard that stops a build from
+resolving the wrong environment.
+
+| Item | Value |
+|---|---|
+| URL | https://caddie.jamalibrahim.dev |
+| Version id | `e42bf1e0-b2cb-48eb-9e5b-2fd68cc8476f` (preview fix) |
+| Commit | `ddb5797` (preview fix), `b41bbd5` (compose guard) |
+| Release gate | typecheck clean; 1,746 unit/service tests, 0 fail (133 files); packets BUILD, P05, P12, U04, NET green; 11/11 preview browser specs (one new) |
+| Build | production `apps/app/dist` + composed assets, 0 collisions |
+| D1 | no new migrations (`0039` is current) |
+| Deploy | `wrangler deploy --config dist/caddie_app/wrangler.json --secrets-file .prod.vars` (account id explicit) |
+| Smoke | P17 live 5/5 PASS, receipt `lr_52d5d8cca4ba8306` at `ddb579701b20` |
+| Behavior | the HerdVoice preview now reaches its own server: the offline banner is gone, an animal can be added, and it survives a reload (screenshot in `docs/evidence/2026-10-20-herdvoice-demo/`) |
+
+**What changed**
+
+- A built app's preview frame is served by Caddie over https (the server
+  composes the frame document: the app's page plus the preview's storage and
+  fetch shims) instead of being set as a `srcdoc` attribute. A `srcdoc`
+  frame reports the protocol `about:`, and HerdVoice's app asked "can I reach
+  the API?" by testing `window.location.protocol` — so it decided it was
+  offline and never called its server, while the relay answered every
+  request when called directly. The frame stays sandboxed WITHOUT
+  `allow-same-origin`, so its origin is still opaque. The app's saved data
+  travels as a content-addressed seed and comes back inside the served
+  document.
+- The frame document is composed in one leaf module
+  (`apps/app/src/shared/preview-frame.ts`) that the client and the server
+  both use, and the storage rule moved with it.
+- Builders are told the truth: the preview frame's origin is opaque, so
+  never gate a request on `location.protocol`/`origin`/`hostname`.
+- The compose step now fails the build when the composed Worker config does
+  not carry the environment the build asked for. The Cloudflare Vite plugin
+  resolved the top-level config once instead of `env.production`, and the
+  deploy refused the result (a local D1 placeholder); the build must not be
+  able to succeed in that state.
+
 ## Verification net (S01, 2026-10-18)
 
 The 2026-10-06 gate above is kept as a dated receipt; this is the net that

@@ -1,0 +1,126 @@
+{
+	"list-desktop": {
+		"boxes": 5,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 1206,
+		"cardHeights": [
+			229,
+			229,
+			211,
+			227,
+			168
+		],
+		"cardsOnFirstScreen": 3
+	},
+	"list-phone": {
+		"boxes": 5,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 1491,
+		"cardHeights": [
+			250,
+			266,
+			209,
+			241,
+			168
+		],
+		"cardsOnFirstScreen": 2
+	},
+	"list-empty-desktop": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"list-empty-phone": {
+		"boxes": 1,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 793,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"project-review-desktop": {
+		"boxes": 4,
+		"depth": 1,
+		"chatBoxes": 2,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"project-review-phone": {
+		"boxes": 4,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 901,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"project-building-desktop": {
+		"boxes": 5,
+		"depth": 2,
+		"chatBoxes": 2,
+		"pageHeight": 1218,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"project-building-phone": {
+		"boxes": 5,
+		"depth": 2,
+		"chatBoxes": 0,
+		"pageHeight": 1729,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"project-ready-desktop": {
+		"boxes": 4,
+		"depth": 1,
+		"chatBoxes": 2,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"project-ready-phone": {
+		"boxes": 4,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 1277,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"project-blocked-desktop": {
+		"boxes": 4,
+		"depth": 1,
+		"chatBoxes": 2,
+		"pageHeight": 838,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"project-blocked-phone": {
+		"boxes": 4,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 1337,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"project-empty-desktop": {
+		"boxes": 4,
+		"depth": 1,
+		"chatBoxes": 1,
+		"pageHeight": 826,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	},
+	"project-empty-phone": {
+		"boxes": 4,
+		"depth": 1,
+		"chatBoxes": 0,
+		"pageHeight": 884,
+		"cardHeights": [],
+		"cardsOnFirstScreen": 0
+	}
+}
