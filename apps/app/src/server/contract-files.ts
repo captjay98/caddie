@@ -353,6 +353,19 @@ function apiTs(): string {
 		'  delete: <T>(path: string) => request<T>("DELETE", path),',
 		'};',
 		'',
+		'// Team apps: the team the person is looking at. A screen that shows team',
+		'// records reads it with currentTeamId() and, when none is set, uses the',
+		'// person\'s first team (from the team list route) and saves it with',
+		'// setCurrentTeamId(). A team picker calls setCurrentTeamId() too. Caddie\'s',
+		'// check sets it before it opens a team screen.',
+		'const TEAM_KEY = "caddie.teamId";',
+		'export function currentTeamId(): string | null {',
+		'  try { return globalThis.localStorage?.getItem(TEAM_KEY) ?? null; } catch { return null; }',
+		'}',
+		'export function setCurrentTeamId(teamId: string): void {',
+		'  try { globalThis.localStorage?.setItem(TEAM_KEY, teamId); } catch { /* storage unavailable */ }',
+		'}',
+		'',
 	].join('\n');
 }
 
@@ -523,31 +536,52 @@ function subjectFor(routes: TableRoutes): SubjectMeta {
  * plain sentence (never a skip or an early return), so a weak app cannot pass
  * by having nothing checked.
  */
-function contractTestTs(block: ArchitectureBlock): string {
+function contractTestTs(block: ArchitectureBlock, features?: readonly string[]): string {
+	// Plan part E checks "the routes of passed features plus the current one".
+	// During a build the host passes those feature ids; the final check passes
+	// none, so the whole design is driven. Only this TEST is scoped: the route
+	// table in caddie/contract.ts stays whole, so every route is registered from
+	// the first feature (an unbuilt one answers 501). In a scoped test a check
+	// whose route is a later feature waits for it; a route that IS in scope but
+	// cannot be exercised still fails with a plain sentence.
+	const scoped = features !== undefined;
+	const inScope = new Set(features ?? []);
+	const view: ArchitectureBlock = scoped ? { ...block, routes: block.routes.filter((r) => inScope.has(r.feature)) } : block;
+
 	// The person subject: the first person-owned table with a create route.
-	const personTable = block.tables.find((t) => t.owner === 'person' && block.routes.some((r) => r.table === t.name && r.op === 'create'));
-	const person = personTable ? subjectFor(routesForTable(block, personTable.name)) : null;
+	const personTable = block.tables.find((t) => t.owner === 'person' && view.routes.some((r) => r.table === t.name && r.op === 'create'));
+	const person = personTable ? subjectFor(routesForTable(view, personTable.name)) : null;
 
 	// Team mode: the team registry table, a team-owned child table (its records
 	// live under /api/teams/:teamId/…), the team create/list routes, and the
 	// role and admin routes step 6 exercises.
 	const teamTable = block.team?.table ?? null;
 	const teamChildTable = block.tables.find(
-		(t) => t.owner === 'team' && t.name !== teamTable && block.routes.some((r) => r.table === t.name && r.op === 'create'),
+		(t) => t.owner === 'team' && t.name !== teamTable && view.routes.some((r) => r.table === t.name && r.op === 'create'),
 	);
-	const team = teamChildTable ? subjectFor(routesForTable(block, teamChildTable.name)) : null;
-	const teamCreate = teamTable ? block.routes.find((r) => r.table === teamTable && r.op === 'create') ?? null : null;
-	const teamList = teamTable ? block.routes.find((r) => r.table === teamTable && r.op === 'list') ?? null : null;
+	const team = teamChildTable ? subjectFor(routesForTable(view, teamChildTable.name)) : null;
+	const teamCreate = teamTable ? view.routes.find((r) => r.table === teamTable && r.op === 'create') ?? null : null;
+	const teamList = teamTable ? view.routes.find((r) => r.table === teamTable && r.op === 'list') ?? null : null;
+	// The team checks start once a team can be started (its create route built).
+	const hasTeam = block.team !== null && (!scoped || teamCreate !== null);
 	// A team-role:<role> route (step 6: refuses C, allows A who holds creatorRole).
-	const roleRoute = block.routes.find((r) => teamRoleOf(r.access as Access) !== null) ?? null;
+	const roleRoute = view.routes.find((r) => teamRoleOf(r.access as Access) !== null) ?? null;
 	// An admin route (step 6: refuses B, allows the first account).
-	const adminRoute = block.routes.find((r) => r.access === 'admin') ?? null;
+	const adminRoute = view.routes.find((r) => r.access === 'admin') ?? null;
 
-	// Step 8: screens that show a table (and are not screen-only).
+	// Step 8: each screen that shows a table is checked against the record the
+	// test saved for that table: the team subject's (opened as the current team)
+	// or the person subject's. A screen of another table has no record to look
+	// for, so it is not checked here — checking it against this record would
+	// fail a correct app.
 	const screenOnly = new Set(block.screenOnly);
 	const tableScreens = block.screens
 		.filter((s) => !screenOnly.has(s.id) && s.shows.length > 0)
-		.map((s) => ({ id: s.id, path: s.path, shows: s.shows }));
+		.flatMap((s) => {
+			const kind =
+				hasTeam && team && s.shows.includes(team.table) ? 'team' : person && s.shows.includes(person.table) ? 'person' : null;
+			return kind ? [{ id: s.id, path: s.path, kind }] : [];
+		});
 
 	// Step 9: declared test-mode features. A declared feature with no generated
 	// check makes the test-mode phase FAIL (see the phase below).
@@ -559,7 +593,8 @@ function contractTestTs(block: ArchitectureBlock): string {
 	};
 
 	const meta = {
-		hasTeam: block.team !== null,
+		scoped,
+		hasTeam,
 		creatorRole: block.team?.creatorRole ?? null,
 		otherRole: block.team ? block.team.roles.find((r) => r !== block.team!.creatorRole) ?? block.team.roles[0]! : null,
 		teamTable,
@@ -588,6 +623,8 @@ function contractTestTs(block: ArchitectureBlock): string {
 		'const FILE = process.env.CADDIE_TEST_DB_FILE!;',
 		'const META = ' + j(meta) + ' as const;',
 		'const HANDOFF = FILE + ".handoff.json";',
+		'/** The current-team key caddie/api.ts keeps (currentTeamId); step 8 sets it. */',
+		'const TEAM_KEY = "caddie.teamId";',
 		'',
 		'function req(path: string, init: RequestInit, env: unknown) { return app.request(path, init, env as any); }',
 		'const jsonHeaders = (extra: Record<string, string> = {}) => ({ "content-type": "application/json", ...extra });',
@@ -649,12 +686,16 @@ function contractTestTs(block: ArchitectureBlock): string {
 		'      await seedMember(env, t1Id, user.id, META.creatorRole!);',
 		'      handoff.t1Id = t1Id;',
 		'',
-		'      if (!META.team || !META.team.createId) throw new Error("A team app must let a member add a record under its team, but no team-owned record route is declared.");',
-		'      const res = await req(path(META.team.createPath!, t1Id), { method: META.team.createMethod!, headers: jsonHeaders(headers), body: JSON.stringify(META.team.createBody) }, env);',
-		'      expect([200, 201], `A creating a team record failed: ${res.status} ${await res.clone().text()}`).toContain(res.status);',
-		'      const row = (await res.json()) as Row;',
-		'      for (const field of META.team.response) expect(field in row, `the reply is missing the declared field "${field}" (step 7)`).toBe(true);',
-		'      handoff.teamRecordId = row[META.team.idField];',
+		'      if (!META.team || !META.team.createId) {',
+		'        // Scoped: the team records are a later feature; the team itself is checked now.',
+		'        if (!META.scoped) throw new Error("A team app must let a member add a record under its team, but no team-owned record route is declared.");',
+		'      } else {',
+		'        const res = await req(path(META.team.createPath!, t1Id), { method: META.team.createMethod!, headers: jsonHeaders(headers), body: JSON.stringify(META.team.createBody) }, env);',
+		'        expect([200, 201], `A creating a team record failed: ${res.status} ${await res.clone().text()}`).toContain(res.status);',
+		'        const row = (await res.json()) as Row;',
+		'        for (const field of META.team.response) expect(field in row, `the reply is missing the declared field "${field}" (step 7)`).toBe(true);',
+		'        handoff.teamRecordId = row[META.team.idField];',
+		'      }',
 		'    }',
 		'',
 		'    if (META.person && META.person.createId) {',
@@ -665,7 +706,7 @@ function contractTestTs(block: ArchitectureBlock): string {
 		'      handoff.personRecordId = row[META.person.idField];',
 		'    }',
 		'',
-		'    if (!META.person?.createId && !META.hasTeam) throw new Error("No create route could be exercised, so nothing proves the app saves anything.");',
+		'    if (!META.scoped && !META.person?.createId && !META.hasTeam) throw new Error("No create route could be exercised, so nothing proves the app saves anything.");',
 		'    await writeHandoff(handoff);',
 		'  });',
 		'}',
@@ -677,7 +718,7 @@ function contractTestTs(block: ArchitectureBlock): string {
 		'    const h = await readHandoff();',
 		'    const headers = { cookie: String(h.aCookie) };',
 		'',
-		'    if (META.hasTeam && META.team) {',
+		'    if (META.hasTeam && META.team && (META.team.readPath || !META.scoped)) {',
 		'      if (!META.team.readPath) throw new Error("A team app must let a member read a saved record, but no team read route is declared.");',
 		'      const byId = await req(path(META.team.readPath, h.t1Id, h.teamRecordId), { method: META.team.readMethod, headers }, env);',
 		'      expect(byId.status, `reading A\'s team record after restart failed: ${byId.status}`).toBe(200);',
@@ -706,7 +747,8 @@ function contractTestTs(block: ArchitectureBlock): string {
 		'    const h = await readHandoff();',
 		'    const headers = jsonHeaders({ cookie: String(h.aCookie) });',
 		'    const subj = META.hasTeam && META.team ? META.team : META.person;',
-		'    if (!subj) return; // no subject at all is already caught in create',
+		'    if (!subj) return; // nothing saved to change: no record route is built yet (scoped), or create already failed',
+		'    if (!subj.updatePath && META.scoped) return; // the change route is a later feature',
 		'    if (!subj.updatePath || !subj.updateField) throw new Error("The app declares no way to change a saved record, so a change cannot be proven to stick.");',
 		'    const teamId = META.hasTeam && META.team ? h.t1Id : undefined;',
 		'    const recId = META.hasTeam && META.team ? h.teamRecordId : h.personRecordId;',
@@ -726,7 +768,10 @@ function contractTestTs(block: ArchitectureBlock): string {
 		'    if (!h.updatedField) return;',
 		'    const headers = { cookie: String(h.aCookie) };',
 		'    const subj = META.hasTeam && META.team ? META.team : META.person;',
-		'    if (!subj || !subj.readPath) throw new Error("The app cannot read a record back, so a saved change cannot be checked.");',
+		'    if (!subj || !subj.readPath) {',
+		'      if (META.scoped) return; // the read route is a later feature',
+		'      throw new Error("The app cannot read a record back, so a saved change cannot be checked.");',
+		'    }',
 		'    const teamId = META.hasTeam && META.team ? h.t1Id : undefined;',
 		'    const recId = META.hasTeam && META.team ? h.teamRecordId : h.personRecordId;',
 		'    const res = await req(path(subj.readPath, teamId, recId), { method: subj.readMethod, headers }, env);',
@@ -785,7 +830,10 @@ function contractTestTs(block: ArchitectureBlock): string {
 				'  test("teams and roles: member C reads, outsider B cannot; role and admin routes (step 6)", async () => {',
 				'    const env = createFileEnv(FILE);',
 				'    const h = await readHandoff();',
-				'    if (!META.team || !META.team.readPath) throw new Error("A team app must let a teammate read the team\'s records, but no team read route is declared.");',
+				'    // The record checks need a saved team record and its read route. In a scoped',
+				'    // test they wait for that feature; the team list, role and admin checks run now.',
+				'    const records = Boolean(META.team && META.team.readPath && h.teamRecordId !== undefined);',
+				'    if (!records && !META.scoped) throw new Error("A team app must let a teammate read the team\'s records, but no team read route is declared.");',
 				'    // C joins T1 with a non-creator role; B owns a separate team T2.',
 				'    const { user: c, headers: cHeaders } = await signInForTest(app, env, "cas@example.com");',
 				'    await seedMember(env, h.t1Id, c.id, META.otherRole!);',
@@ -796,8 +844,11 @@ function contractTestTs(block: ArchitectureBlock): string {
 				'      expect([200, 201]).toContain(t2.status);',
 				'      t2Id = ((await t2.json()) as Row)["id"];',
 				'      await seedMember(env, t2Id, b.id, META.creatorRole!);',
+				'      // Step 8 opens B\'s screens with B\'s own team T2 as the current team.',
+				'      await writeHandoff({ ...h, t2Id });',
 				'    }',
 				'',
+				'    if (records) {',
 				'    // C can read and list T1\'s records.',
 				'    const cRead = await req(path(META.team.readPath, h.t1Id, h.teamRecordId), { method: META.team.readMethod, headers: cHeaders }, env);',
 				'    expect(cRead.status, "a teammate C cannot read the team\'s record").toBe(200);',
@@ -837,6 +888,12 @@ function contractTestTs(block: ArchitectureBlock): string {
 				'        const after = await (await req(path(META.team.readPath, h.t1Id, h.teamRecordId), { method: META.team.readMethod, headers: { cookie: String(h.aCookie) } }, env)).json() as Row;',
 				'        expect(String(after[META.team.updateField]), "B changed A\'s record through B\'s own team — the route does not filter by team").toBe(String(before[META.team.updateField]));',
 				'      }',
+				'      if (META.team.deletePath) {',
+				'        await req(path(META.team.deletePath, t2Id, h.teamRecordId), { method: META.team.deleteMethod!, headers: bHeaders }, env);',
+				'        const still = await req(path(META.team.readPath, h.t1Id, h.teamRecordId), { method: META.team.readMethod, headers: { cookie: String(h.aCookie) } }, env);',
+				'        expect(still.status, "B deleted A\'s record through B\'s own team — the route does not filter by team").toBe(200);',
+				'      }',
+				'    }',
 				'    }',
 				'    if (META.teamList && t2Id !== null) {',
 				'      const bList = await req(META.teamList.path.replace(/:[a-zA-Z]+/g, "x"), { method: META.teamList.method, headers: bHeaders }, env);',
@@ -871,7 +928,7 @@ function contractTestTs(block: ArchitectureBlock): string {
 		(meta.screens.length > 0
 			? [
 				'  test("each table screen shows A\'s saved record and not B\'s (step 8)", async () => {',
-				'    if (typeof document === "undefined") throw new Error("This app\'s screen could not be rendered to check it shows saved data (no DOM available). Install happy-dom, do not change lockfiles.");',
+				'    if (typeof document === "undefined") throw new Error("This app\'s screens could not be opened for the check: the starter\'s browser-page test setup (happy-dom, in bunfig.toml and test/setup/) is missing. Put it back as the starter had it.");',
 				'    const env = createFileEnv(FILE);',
 				'    const h = await readHandoff();',
 				'    // Route the screen\'s fetch at the real server, as the chosen person.',
@@ -890,32 +947,51 @@ function contractTestTs(block: ArchitectureBlock): string {
 				'      try { entry = await import("../src/App"); } catch { entry = null; }',
 				'      const App = entry && (entry.App || entry.default);',
 				'      if (!App) throw new Error("This app\'s screen could not be rendered to check it shows saved data (no src/App export).");',
-				'      // A team screen needs the team id in the route; a person screen does not.',
-				'      const hashFor = (p: string) => (META.hasTeam && META.team ? `${p}/${h.t1Id}` : p);',
-				'      const subj = META.hasTeam && META.team ? META.team : META.person;',
-				'      // The needle is A\'s CURRENT saved value (read live), not a stale handoff value.',
-				'      let needle = "";',
-				'      if (subj && subj.listPath) {',
-				'        const lr = await req(path(subj.listPath, META.hasTeam && META.team ? h.t1Id : undefined), { headers: { cookie: String(h.aCookie) } }, env);',
-				'        if (lr.status === 200) {',
-				'          const rows = (await lr.json()) as Row[];',
-				'          const mine = rows.find((r) => String(r[subj.idField]) === String(META.hasTeam && META.team ? h.teamRecordId : h.personRecordId)) ?? rows[0];',
-				'          if (mine) { const v = Object.entries(mine).find(([k, val]) => k !== subj.idField && typeof val === "string" && String(val).length > 0); needle = v ? String(v[1]) : ""; }',
+				'      /** A\'s saved value to look for: the longest text A typed into the record, read live (it may have changed). */',
+				'      const needleFor = async (kind: "team" | "person"): Promise<string> => {',
+				'        const subj = kind === "team" ? META.team : META.person;',
+				'        if (!subj) return "";',
+				'        const recId = kind === "team" ? h.teamRecordId : h.personRecordId;',
+				'        const teamId = kind === "team" ? h.t1Id : undefined;',
+				'        const aHeaders = { cookie: String(h.aCookie) };',
+				'        let row: Row | null = null;',
+				'        if (subj.readPath) {',
+				'          const r = await req(path(subj.readPath, teamId, recId), { method: subj.readMethod, headers: aHeaders }, env);',
+				'          if (r.status === 200) row = (await r.json()) as Row;',
 				'        }',
-				'      }',
+				'        if (!row && subj.listPath) {',
+				'          const r = await req(path(subj.listPath, teamId), { method: subj.listMethod, headers: aHeaders }, env);',
+				'          if (r.status === 200) row = ((await r.json()) as Row[]).find((x) => String(x[subj.idField]) === String(recId)) ?? null;',
+				'        }',
+				'        if (!row) return "";',
+				'        const found = row;',
+				'        const typed = Object.keys(subj.createBody).map((k) => found[k]).filter((v): v is string => typeof v === "string" && v.length > 0);',
+				'        const pool = typed.length > 0 ? typed : Object.entries(found).filter(([k, v]) => k !== subj.idField && !/(Id|At)$/.test(k) && typeof v === "string" && v.length > 0).map(([, v]) => String(v));',
+				'        return [...pool].sort((x, y) => y.length - x.length)[0] ?? "";',
+				'      };',
 				'      for (const sc of META.screens) {',
+				'        const needle = await needleFor(sc.kind);',
 				'        if (!needle) throw new Error(`The ${sc.id} screen cannot be checked: no saved value was found to look for.`);',
-				'        // Render for A: the record must appear.',
+				'        // Render for A, with A\'s team T1 as the current team: the record must appear.',
 				'        activeCookie = String(h.aCookie);',
-				'        location.hash = hashFor(sc.path);',
+				'        if (sc.kind === "team") localStorage.setItem(TEAM_KEY, String(h.t1Id));',
+				'        else localStorage.removeItem(TEAM_KEY);',
+				'        location.hash = sc.kind === "team" ? sc.path.replace(/:teamId\\b/g, String(h.t1Id)) : sc.path;',
 				'        render(React.createElement(App));',
 				'        await waitFor(() => expect(document.body.textContent || "").toContain(needle), { timeout: 4000 }).catch(() => {',
-				'          throw new Error(`The ${sc.id} screen does not show a record the server saved (it may read the browser instead of the server).`);',
+				'          throw new Error(',
+				'            sc.kind === "team"',
+				'              ? `The ${sc.id} screen does not show the team\'s saved record. A team screen shows the records of the team in currentTeamId() from caddie/api.ts (the person\'s first team when none is set), read from the server.`',
+				'              : `The ${sc.id} screen does not show a record the server saved (it may read the browser instead of the server).`,',
+				'          );',
 				'        });',
 				'        cleanup();',
-				'        // Render for B: the record must NOT appear.',
+				'        // Render for B, with B\'s own team current: the record must NOT appear.',
 				'        activeCookie = String((await signInForTest(app, createFileEnv(FILE), "bo@example.com")).cookie);',
-				'        location.hash = hashFor(sc.path);',
+				'        const bTeam = h.t2Id !== undefined && h.t2Id !== null ? String(h.t2Id) : null;',
+				'        if (sc.kind === "team" && bTeam) localStorage.setItem(TEAM_KEY, bTeam);',
+				'        else localStorage.removeItem(TEAM_KEY);',
+				'        location.hash = sc.kind === "team" && bTeam ? sc.path.replace(/:teamId\\b/g, bTeam) : sc.path;',
 				'        render(React.createElement(App));',
 				'        await new Promise((r) => setTimeout(r, 500));',
 				'        expect(document.body.textContent || "", `the ${sc.id} screen shows another person\'s record to B`).not.toContain(needle);',
@@ -923,6 +999,7 @@ function contractTestTs(block: ArchitectureBlock): string {
 				'      }',
 				'    } finally {',
 				'      (globalThis as any).fetch = realFetch;',
+				'      localStorage.removeItem(TEAM_KEY);',
 				'    }',
 				'  });',
 			].join('\n')
@@ -951,7 +1028,10 @@ function contractTestTs(block: ArchitectureBlock): string {
 		'    if (!h || h.skipDelete) return; // no delete route — already reported in privacy-screen',
 		'    const headers = { cookie: String(h.aCookie) };',
 		'    const subj = META.hasTeam && META.team ? META.team : META.person;',
-		'    if (!subj || !subj.readPath) throw new Error("The app cannot read a record back, so a delete cannot be checked.");',
+		'    if (!subj || !subj.readPath) {',
+		'      if (META.scoped) return; // the read route is a later feature',
+		'      throw new Error("The app cannot read a record back, so a delete cannot be checked.");',
+		'    }',
 		'    const teamId = META.hasTeam && META.team ? h.t1Id : undefined;',
 		'    const read = await req(path(subj.readPath, teamId, h.deletedId), { method: subj.readMethod, headers }, env);',
 		'    expect(read.status, "a deleted record is still readable after a restart").toBe(404);',
@@ -989,12 +1069,15 @@ function contractTestTs(block: ArchitectureBlock): string {
  * architecture block. Deterministic (declaration order throughout), so part E's
  * generation is snapshot-testable. `kind === 'big'` adds caddie/modules.ts.
  */
-export function generateContractFiles(block: ArchitectureBlock, options: { kind: ContractKind }): GeneratedContractFiles {
+export function generateContractFiles(
+	block: ArchitectureBlock,
+	options: { kind: ContractKind; features?: readonly string[] },
+): GeneratedContractFiles {
 	const files: Record<string, string> = {
 		'caddie/contract.ts': contractTs(block),
 		'caddie/api.ts': apiTs(),
 		'caddie/router.tsx': routerTsx(block),
-		'caddie/contract.test.ts': contractTestTs(block),
+		'caddie/contract.test.ts': contractTestTs(block, options.features),
 		'test/setup/d1-file.ts': D1_FILE,
 	};
 	if (options.kind === 'big') files['caddie/modules.ts'] = modulesTs(block);

@@ -68,6 +68,7 @@ import { FEATURE_DELEGATION_RULE } from "../agents/delegation.ts";
 import {
   currentFeature,
   ensureBuildFeatures,
+  featuresInContractScope,
   listBuildFeatures,
   markFeatureBuilding,
   recordFeatureAttempt,
@@ -279,6 +280,16 @@ export async function createCoordinatorContext(
     const current = currentFeature(await listBuildFeatures(env.DB, scope.projectId, snap.plan.id));
     return current?.featureId ?? null;
   };
+  /**
+   * Team mode (part E): the features the contract check covers while the app
+   * is being built — the passed ones plus the current one. The final check
+   * (verify) covers the whole design instead.
+   */
+  const contractScope = async (): Promise<string[]> => {
+    const snap = await workflowSnapshot(env.DB, scope).catch(() => null);
+    if (!snap?.plan) return [];
+    return featuresInContractScope(await listBuildFeatures(env.DB, scope.projectId, snap.plan.id));
+  };
 
   /** restore_files for a build role: put out-of-area files back from the part's
    *  start image, acting only on what the boundary check reports out of area. */
@@ -312,11 +323,11 @@ export async function createCoordinatorContext(
   // the contract test always matches the design the user approved. Written at
   // hand-out and before every check run. A no-op with team mode off, or when no
   // design is approved yet (nothing to generate from).
-  const writeGeneratedContractFiles = async (): Promise<boolean> => {
+  const writeGeneratedContractFiles = async (features?: readonly string[]): Promise<boolean> => {
     if (!teamMode) return false;
     const block = await getApprovedBlock(env.DB, scope.projectId).catch(() => null);
     if (!block) return false;
-    const files = writeContractFiles(block, bigApps ? "big" : "small");
+    const files = writeContractFiles(block, bigApps ? "big" : "small", features);
     const { driver, id } = await ensureSession();
     await driver.uploadFiles(
       id,
@@ -570,7 +581,9 @@ export async function createCoordinatorContext(
     await scaffold();
     // Team mode (part E): write the generated contract files from the approved
     // design BEFORE every check run, so the contract test matches the design.
-    await writeGeneratedContractFiles();
+    // During the build it covers the passed features plus the current one; the
+    // final verify covers the whole design.
+    await writeGeneratedContractFiles(mode === "verify" ? undefined : await contractScope());
     await guardBudget();
     const { driver, id } = await ensureSession();
     const commands = hostCheckCommands(stack);
@@ -661,8 +674,10 @@ export async function createCoordinatorContext(
     // gates the feature exactly like a failing base check — a repair round with
     // its plain sentence, counted toward the feature's repair pause — and the
     // per-check green/red map rides back for part G's output receipts (verify).
+    // Gated on team mode alone: the phases run in the sandbox session and need
+    // nothing from the snapshot client the part boundary uses.
     let contractChecks: ContractCheckMap | null = null;
-    if (teamMode && inspect) {
+    if (teamMode) {
       const contract = await runContractPhases(attempt, signal);
       contractChecks = contract.checks;
       if (!contract.passed) {
@@ -720,7 +735,7 @@ export async function createCoordinatorContext(
     // builder sees the approved contract. No-ops with team mode off.
     if (teamMode) {
       await clearActivePart(env.DB, scope).catch(() => {});
-      await writeGeneratedContractFiles().catch(() => false);
+      await writeGeneratedContractFiles(await contractScope()).catch(() => false);
     }
     return {
       done: false,

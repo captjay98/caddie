@@ -139,3 +139,75 @@ describe('part E: the generated test is never vacuous and bites on declared feat
 		expect(src).toContain('META.admin');
 	});
 });
+
+// --- lead fixes: feature scope, screen subjects, the current team ------------
+
+/** The META object embedded in a generated contract test. */
+function metaOf(src: string): Record<string, unknown> {
+	const line = src.split('\n').find((l) => l.startsWith('const META = '));
+	if (!line) throw new Error('no META line in the generated test');
+	return JSON.parse(line.slice('const META = '.length, line.lastIndexOf(' as const;'))) as Record<string, unknown>;
+}
+
+describe('part E: the check covers the features built so far (passed plus the current one)', () => {
+	test('scoped to crews+admin: no team record subject, no role route, no screen yet; the admin route is kept', () => {
+		const src = writeContractFiles(TEAM_BLOCK, 'small', ['crews', 'admin'])['caddie/contract.test.ts']!;
+		const meta = metaOf(src);
+		expect(meta.scoped).toBe(true);
+		expect(meta.hasTeam).toBe(true); // crews.create is built, so T1 can be started
+		expect(meta.team).toBeNull(); // logs routes are a later feature
+		expect(meta.role).toBeNull(); // the boss-only route is a logs route
+		expect(meta.admin).not.toBeNull();
+		expect(meta.screens).toEqual([]);
+	});
+
+	test('the whole design (the final check) drives everything and is not scoped', () => {
+		const meta = metaOf(writeContractFiles(TEAM_BLOCK, 'small')['caddie/contract.test.ts']!);
+		expect(meta.scoped).toBe(false);
+		expect((meta.team as { table: string }).table).toBe('logs');
+		expect(meta.role).not.toBeNull();
+		expect(meta.screens).toEqual([{ id: 'logs', path: '#/logs', kind: 'team' }]);
+	});
+
+	test('the route table in caddie/contract.ts stays whole, so every route is registered from feature 1', () => {
+		const scoped = writeContractFiles(TEAM_BLOCK, 'small', ['crews'])['caddie/contract.ts']!;
+		const whole = writeContractFiles(TEAM_BLOCK, 'small')['caddie/contract.ts']!;
+		expect(scoped).toBe(whole);
+	});
+
+	test('a scope with no team feature yet runs the person checks only', () => {
+		const meta = metaOf(writeContractFiles(TEAM_BLOCK, 'small', ['admin'])['caddie/contract.test.ts']!);
+		expect(meta.hasTeam).toBe(false);
+		expect(meta.person).toBeNull();
+	});
+});
+
+describe('part E: each screen is checked against the record of the table it shows', () => {
+	const twoTables: ArchitectureBlock = {
+		...NOTES_BLOCK,
+		tables: [
+			...NOTES_BLOCK.tables,
+			{ name: 'tags', module: 'app', plain: 'A tag', owner: 'person', fields: [{ name: 'label', type: 'text', references: null }] },
+		],
+		routes: [
+			...NOTES_BLOCK.routes,
+			{ id: 'tags.create', module: 'app', feature: 'tags', op: 'create', method: 'POST', path: '/api/tags', table: 'tags', plain: 'Add a tag', access: 'person', request: [{ name: 'label', type: 'text', example: 'Urgent' }], response: ['id', 'label'] },
+		] as ArchitectureBlock['routes'],
+		screens: [...NOTES_BLOCK.screens, { id: 'tags', module: 'app', path: '#/tags', plain: 'Your tags', shows: ['tags'] }],
+	};
+
+	test('a screen of another table is not checked against the notes record', () => {
+		const meta = metaOf(writeContractFiles(twoTables, 'small')['caddie/contract.test.ts']!);
+		expect((meta.person as { table: string }).table).toBe('notes');
+		expect(meta.screens).toEqual([{ id: 'notes', path: '#/notes', kind: 'person' }]);
+	});
+});
+
+describe('part E: team screens show the current team', () => {
+	test('caddie/api.ts carries currentTeamId and setCurrentTeamId, and the check sets the team before opening a team screen', () => {
+		const files = writeContractFiles(TEAM_BLOCK, 'small');
+		expect(files['caddie/api.ts']).toContain('export function currentTeamId()');
+		expect(files['caddie/api.ts']).toContain('export function setCurrentTeamId(');
+		expect(files['caddie/contract.test.ts']).toContain('localStorage.setItem(TEAM_KEY');
+	});
+});

@@ -181,7 +181,15 @@ export async function runTeamModeContractChecks(run: PhaseRunner): Promise<Contr
  * check run (and when a feature is handed out), so the contract test always
  * matches the approved design. Thin wrapper over the generator so generation
  * and the checks stay in one module.
+ *
+ * `features`: the features built so far (passed plus the current one). The
+ * generated test then checks only their routes and screens (plan part E); the
+ * route table stays whole. Omit it for the final check of the whole design.
  */
-export function writeContractFiles(block: ArchitectureBlock, kind: ContractKind): Readonly<Record<string, string>> {
-	return generateContractFiles(block, { kind }).files;
+export function writeContractFiles(
+	block: ArchitectureBlock,
+	kind: ContractKind,
+	features?: readonly string[],
+): Readonly<Record<string, string>> {
+	return generateContractFiles(block, { kind, ...(features ? { features } : {}) }).files;
 }

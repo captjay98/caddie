@@ -80,7 +80,10 @@ export function applyFixture(app: FixtureApp, fixture: ContractFixture, block: A
 	}
 	// The generated contract files for THIS fixture's block (contract.ts and
 	// contract.test.ts differ per block), overwriting the materialise-time set.
-	for (const [path, text] of Object.entries(generateContractFiles(block, { kind: 'small' }).files)) write(app.dir, path, text);
+	// A fixture that names its built features gets the feature-scoped test, as
+	// the host writes it during a build.
+	const generated = generateContractFiles(block, { kind: 'small', ...(fixture.features ? { features: fixture.features } : {}) });
+	for (const [path, text] of Object.entries(generated.files)) write(app.dir, path, text);
 	for (const [path, text] of Object.entries(fixture.files)) write(app.dir, path, text);
 	// Fresh database file for each fixture run.
 	for (const suffix of ['', '-wal', '-shm', '.handoff.json']) {

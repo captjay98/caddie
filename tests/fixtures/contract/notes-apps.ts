@@ -64,6 +64,12 @@ export interface ContractFixture {
 	readonly mustFail: ReadonlyArray<'create' | 'read' | 'privacy-screen' | 'test-mode'>;
 	/** builder files, keyed by path relative to the app root. */
 	readonly files: Readonly<Record<string, string>>;
+	/**
+	 * The features built so far (passed plus the current one). The host scopes
+	 * the generated contract test to them; omitted means the whole design, as
+	 * at the final check.
+	 */
+	readonly features?: readonly string[];
 }
 
 // --- the CORRECT app: owner-scoped CRUD, a screen that uses caddie/api --------
@@ -310,16 +316,25 @@ const TEAM_SERVER = [
 	'',
 ].join('\n');
 
-/** The team screen: lists the crew\'s logs through caddie/api, reading the teamId from the hash. */
+/**
+ * The team screen: lists the logs of the team the person is looking at, read
+ * with currentTeamId() from caddie/api (the person's first crew when none is
+ * set), always through caddie/api.
+ */
 const TEAM_SCREEN = [
 	'import { useEffect, useState } from "react";',
-	'import { api } from "../caddie/api";',
+	'import { api, currentTeamId } from "../caddie/api";',
 	'',
 	'export function LogsScreen() {',
 	'  const [texts, setTexts] = useState<string[] | null>(null);',
 	'  useEffect(() => {',
-	'    const teamId = (location.hash.split("/")[2]) || "";',
-	'    api.get<{ id: string; text: string }[]>(`/api/teams/${teamId}/logs`).then((rows) => setTexts(rows.map((r) => r.text))).catch(() => setTexts([]));',
+	'    (async () => {',
+	'      let teamId = currentTeamId();',
+	'      if (!teamId) teamId = (await api.get<{ id: string }[]>("/api/crews"))[0]?.id ?? null;',
+	'      if (!teamId) return setTexts([]);',
+	'      const rows = await api.get<{ id: string; text: string }[]>(`/api/teams/${teamId}/logs`);',
+	'      setTexts(rows.map((r) => r.text));',
+	'    })().catch(() => setTexts([]));',
 	'  }, []);',
 	'  if (texts === null) return <p>Loading…</p>;',
 	'  return <ul>{texts.map((t) => <li key={t}>{t}</li>)}</ul>;',
@@ -327,17 +342,26 @@ const TEAM_SCREEN = [
 	'',
 ].join('\n');
 
-/** The team app shell: mounts LogsScreen at #/logs/<teamId>. */
+/** The team app shell: mounts LogsScreen at exactly #/logs, as caddie/router.tsx matches. */
 const TEAM_APP = [
 	'import { LogsScreen } from "./LogsScreen";',
 	'',
 	'export function App() {',
 	'  const hash = typeof location !== "undefined" ? location.hash : "";',
-	'  if (hash.startsWith("#/logs")) return <LogsScreen />;',
+	'  if (hash === "#/logs") return <LogsScreen />;',
 	'  return <main><h1>Your app</h1></main>;',
 	'}',
 	'',
 ].join('\n');
+
+/** An app shell with no screens built yet (the logs feature comes later). */
+const TEAM_SHELL_APP = ['export function App() {', '  return <main><h1>Your app</h1></main>;', '}', ''].join('\n');
+
+/** CORRECT but minimal: reads only currentTeamId(), with no first-team fallback. */
+const TEAM_CURRENT_ONLY_SCREEN = TEAM_SCREEN.replace(
+	'      if (!teamId) teamId = (await api.get<{ id: string }[]>("/api/crews"))[0]?.id ?? null;\n',
+	'',
+);
 
 /** BAD: the team update writes without the teamId filter, so an outsider changes it. */
 const TEAM_NO_FILTER_SERVER = TEAM_SERVER
@@ -359,6 +383,24 @@ const TEAM_UPDATE_NOT_SAVED_SERVER = TEAM_SERVER.replace(
 	'await c.env.DB.prepare("update logs set text = ?, updatedAt = ? where id = ? and teamId = ?").bind(text, now(), c.req.param("id"), teamId).run();',
 	'// bug: the update is dropped, nothing is saved',
 );
+
+/** BAD: the team delete has no teamId filter, so B deletes A's log through B's own crew. */
+const TEAM_DELETE_NO_FILTER_SERVER = TEAM_SERVER.replace(
+	'await c.env.DB.prepare("delete from logs where id = ? and teamId = ?").bind(c.req.param("id"), teamId).run();',
+	'void teamId; await c.env.DB.prepare("delete from logs where id = ?").bind(c.req.param("id")).run();',
+);
+
+/** CORRECT, but its replies carry teamId before text (real apps return whole rows). */
+const TEAM_WIDE_ROWS_SERVER = TEAM_SERVER.replace(
+	'select id, text from logs where id = ? and teamId = ?',
+	'select id, teamId, text from logs where id = ? and teamId = ?',
+).replace(
+	'select id, text from logs where teamId = ? order by id',
+	'select id, teamId, text from logs where teamId = ? order by id',
+);
+
+/** Only the crews and admin features are built: every logs route is still a 501. */
+const TEAM_CREWS_ONLY_SERVER = TEAM_SERVER.replace(/ {2}"logs\.create"[\s\S]*?(?= {2}"admin\.ping")/, '');
 
 /** BAD team screen: reads localStorage, so the saved log never shows on screen. */
 const TEAM_LOCALSTORAGE_SCREEN = [
@@ -439,6 +481,45 @@ export const TEAM_FIXTURES: readonly ContractFixture[] = [
 		plain: 'A team screen reads localStorage, so the saved log never shows on screen.',
 		mustFail: ['privacy-screen'],
 		files: { 'src/server.ts': TEAM_SERVER, 'src/LogsScreen.tsx': TEAM_LOCALSTORAGE_SCREEN, 'src/App.tsx': TEAM_APP, 'migrations/0001_schema.sql': TEAM_MIGRATION },
+	},
+	{
+		id: 'team-delete-without-team-filter',
+		plain: 'A team delete with no team filter, so an outsider deletes the crew\'s record through their own crew.',
+		mustFail: ['privacy-screen'],
+		files: { 'src/server.ts': TEAM_DELETE_NO_FILTER_SERVER, 'src/LogsScreen.tsx': TEAM_SCREEN, 'src/App.tsx': TEAM_APP, 'migrations/0001_schema.sql': TEAM_MIGRATION },
+	},
+	{
+		id: 'team-correct-wide-rows',
+		plain: 'A correct team app whose replies carry teamId before the text.',
+		mustFail: [],
+		files: { 'src/server.ts': TEAM_WIDE_ROWS_SERVER, 'src/LogsScreen.tsx': TEAM_SCREEN, 'src/App.tsx': TEAM_APP, 'migrations/0001_schema.sql': TEAM_MIGRATION },
+	},
+	{
+		id: 'team-screen-reads-current-team',
+		plain: 'A correct team screen that shows exactly the team in currentTeamId().',
+		mustFail: [],
+		files: { 'src/server.ts': TEAM_SERVER, 'src/LogsScreen.tsx': TEAM_CURRENT_ONLY_SCREEN, 'src/App.tsx': TEAM_APP, 'migrations/0001_schema.sql': TEAM_MIGRATION },
+	},
+];
+
+/**
+ * Feature scope (plan part E: "for the routes of passed features plus the
+ * current one"). The same half-built app passes when only its built features
+ * are checked, and fails against the whole design.
+ */
+export const TEAM_SCOPED_FIXTURES: readonly ContractFixture[] = [
+	{
+		id: 'team-crews-built',
+		plain: 'Only the crews and admin features are built; checked for those features, it passes.',
+		mustFail: [],
+		features: ['crews', 'admin'],
+		files: { 'src/server.ts': TEAM_CREWS_ONLY_SERVER, 'src/App.tsx': TEAM_SHELL_APP, 'migrations/0001_schema.sql': TEAM_MIGRATION },
+	},
+	{
+		id: 'team-crews-built-whole-design',
+		plain: 'The same half-built app checked against the whole design fails: its logs are not built yet.',
+		mustFail: ['create'],
+		files: { 'src/server.ts': TEAM_CREWS_ONLY_SERVER, 'src/App.tsx': TEAM_SHELL_APP, 'migrations/0001_schema.sql': TEAM_MIGRATION },
 	},
 ];
 

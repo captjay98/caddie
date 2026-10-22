@@ -12,6 +12,7 @@ import { materializeFixtureApp, applyFixture, runPhase, type FixtureApp } from '
 import {
 	CONTRACT_FIXTURES,
 	TEAM_FIXTURES,
+	TEAM_SCOPED_FIXTURES,
 	TEAM_BLOCK,
 	NOTES_BLOCK,
 	LOCALSTORAGE_SCREEN,
@@ -39,6 +40,24 @@ describe('part E: the static check — screens reach the server only through cad
 	});
 });
 
+/**
+ * Why each bad app must fail: the first failing phase's output must carry this
+ * sentence, so a check that breaks for an unrelated reason can't stand in for
+ * the check the defect targets.
+ */
+const WHY: Readonly<Record<string, string>> = {
+	'kept-in-memory': "reading A's record after restart failed",
+	'dummy-row-serves-memory': "reading A's record after restart failed",
+	'no-owner-filter': "B can read A's record",
+	'update-not-saved': 'the change was not saved',
+	'screen-reads-localstorage': 'does not show a record the server saved',
+	'team-route-without-team-filter': 'the route does not filter by team',
+	'team-update-not-saved': 'the change was not saved',
+	'team-screen-reads-localstorage': "does not show the team's saved record",
+	'team-delete-without-team-filter': "B deleted A's record through B's own team",
+	'team-crews-built-whole-design': 'This route is not built yet',
+};
+
 /** Assert a fixture passes the phases it should and fails exactly the ones it must. */
 function assertFixture(app: FixtureApp, fixture: ContractFixture, block: ArchitectureBlock): void {
 	applyFixture(app, fixture, block);
@@ -53,6 +72,10 @@ function assertFixture(app: FixtureApp, fixture: ContractFixture, block: Archite
 			expect(g[phase]!.ok, `${fixture.id}: ${phase} should PASS but failed:\n${g[phase]!.out}`).toBe(true);
 		}
 	} else {
+		const why = WHY[fixture.id];
+		expect(why, `${fixture.id}: a bad app needs its expected failure sentence in WHY`).toBeDefined();
+		const firstRed = PHASES.find((phase) => must.has(phase))!;
+		expect(g[firstRed]!.out, `${fixture.id}: ${firstRed} failed, but not for the reason its defect should give`).toContain(why!);
 		// Each named phase must be RED; every earlier phase must be GREEN so the
 		// failure is a real bite, not a phase that never ran.
 		for (let i = 0; i < PHASES.length; i++) {
@@ -90,6 +113,18 @@ describe('part E: the contract check runs the real team apps', () => {
 	afterAll(() => app?.cleanup());
 
 	for (const fixture of TEAM_FIXTURES) {
+		test(`${fixture.id}: ${fixture.plain}`, () => assertFixture(app, fixture, TEAM_BLOCK), SLOW);
+	}
+});
+
+describe('part E: the check covers only the features built so far (passed plus the current one)', () => {
+	let app: FixtureApp;
+	beforeAll(() => {
+		app = materializeFixtureApp();
+	}, SLOW);
+	afterAll(() => app?.cleanup());
+
+	for (const fixture of TEAM_SCOPED_FIXTURES) {
 		test(`${fixture.id}: ${fixture.plain}`, () => assertFixture(app, fixture, TEAM_BLOCK), SLOW);
 	}
 });

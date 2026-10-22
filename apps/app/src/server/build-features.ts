@@ -117,6 +117,16 @@ export function currentFeature(rows: readonly BuildFeatureRow[]): BuildFeatureRo
 	return rows.find((row) => row.status !== 'passed') ?? null;
 }
 
+/**
+ * The features a team-mode contract check covers during a build (plan part E:
+ * "the routes of passed features plus the current one"). Later features are
+ * left out, so a half-built app isn't failed for routes nobody has built yet.
+ */
+export function featuresInContractScope(rows: readonly BuildFeatureRow[]): string[] {
+	const current = currentFeature(rows);
+	return rows.filter((row) => row.status === 'passed' || row === current).map((row) => row.featureId);
+}
+
 /** The passing-test count the last green feature reached (0 before any). */
 export function testsBaseline(rows: readonly BuildFeatureRow[]): number {
 	return rows.reduce((max, row) => (row.status === 'passed' && row.testsPassed !== null ? Math.max(max, row.testsPassed) : max), 0);
