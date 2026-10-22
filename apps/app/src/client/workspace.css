@@ -9019,6 +9019,17 @@ mark {
 .compact-card-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
 .compact-card-chip { font-size:11px; border:1px solid var(--color-line); border-radius:6px; padding:4px 8px; color:var(--color-muted); background:var(--color-panel); }
 .compact-card-chip-ok b { color:var(--card-accent, var(--color-ok, #279f76)); margin-right:4px; font-weight:500; }
+/* Ready card live peek (owner, 2026-10-22): the mockup's app frame, holding
+ * the REAL running preview at half size. The viewport clips; the frame is
+ * twice the viewport and scaled to 0.5; nothing inside takes a click. */
+.compact-card-peek { margin:18px 0 0; border:1px solid var(--color-line); border-radius:10px; overflow:hidden; background:var(--color-panel); }
+.compact-card-peek-head { display:flex; justify-content:space-between; gap:12px; padding:10px 14px; font-size:11px; font-weight:600; color:var(--color-text); border-bottom:1px solid var(--color-line); }
+.compact-card-peek-head span + span { font-weight:500; color:var(--color-muted); }
+.compact-card-peek-viewport { position:relative; height:200px; overflow:hidden; pointer-events:none; user-select:none; background:#fff; }
+.compact-card-peek-frame { width:200%; height:400px; transform:scale(0.5); transform-origin:0 0; }
+.compact-card-peek[data-kind='flutter'] .compact-card-peek-frame { width:200%; height:800px; }
+.compact-card-peek[data-kind='flutter'] .compact-card-peek-viewport { height:400px; }
+.compact-card-peek-wait { margin:0; padding:16px; font-size:12px; color:var(--color-muted); }
 /* Active-line (mockup `cc-active-line`): the "Now: <feature>" / repair heading
  * row with its hue icon or pulse. */
 .compact-card-active { display:flex; gap:9px; align-items:center; }

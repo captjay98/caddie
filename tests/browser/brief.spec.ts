@@ -130,7 +130,7 @@ interface BriefCard {
 	footer?: { appName: string; version?: string };
 	nextStep?: string;
 	build?: { current?: string; features: { title: string; state: 'built' | 'building' | 'waiting' }[]; builtCount: number; lastUpdatedAt?: string };
-	peek?: { appName: string; caption?: string; imageUrl?: string };
+	peek?: { appName: string; caption?: string; imageUrl?: string; previewId?: string; previewKind?: 'web' | 'flutter'; previewHasServer?: boolean };
 	schedule?: { name: string; nextRunLabel: string };
 }
 
@@ -1154,6 +1154,42 @@ test.describe('redo — each card matches its mockup', () => {
 		});
 		expect(fill).toBe(ok);
 		expect(fill).not.toBe(action);
+		await context.close();
+	});
+
+	test('ready card: a live, scaled, inert view of its own checked preview (owner, 2026-10-22)', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, {
+			cards: [ready({ checks: { passed: 8, items: ['a'], version: '3' }, peek: { appName: 'FarmLog AI', previewId: 'prev-1', previewKind: 'web', previewHasServer: false } })],
+			unseenCount: 0,
+		});
+		// The card's own preview: the same seed + document endpoints the full
+		// preview uses, answering a tiny real page.
+		let seeded = 0;
+		await context.route('**/api/projects/proj-a/workflow/preview/prev-1/seed', (route) => {
+			seeded += 1;
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ seedRef: 'seed-1' }) });
+		});
+		await context.route('**/api/projects/proj-a/workflow/preview/prev-1/document**', (route) =>
+			route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><body><h1>Hello from FarmLog</h1></body></html>' }),
+		);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const readyCard = page.getByTestId('decision-card').filter({ hasText: 'Your app is ready to try' });
+		const peek = readyCard.getByTestId('card-peek');
+		await expect(peek).toBeVisible();
+		await expect(peek).toContainText('FarmLog AI');
+		await expect(peek).toContainText('Live preview');
+		// The real app runs in the frame, loaded from THIS card's preview.
+		const frame = peek.getByTestId('peek-frame');
+		await expect(frame).toHaveAttribute('src', /\/workflow\/preview\/prev-1\/document\?/);
+		await expect(page.frameLocator('[data-testid="peek-frame"]').getByRole('heading', { name: 'Hello from FarmLog' })).toBeVisible();
+		expect(seeded).toBe(1);
+		// Not clickable or focusable: "Try the app" is how a person opens it.
+		const viewport = peek.locator('.compact-card-peek-viewport');
+		await expect(viewport).toHaveAttribute('inert', '');
+		expect(await viewport.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
+		await expect(frame).toHaveAttribute('tabindex', '-1');
 		await context.close();
 	});
 

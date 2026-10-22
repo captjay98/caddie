@@ -211,6 +211,11 @@ export function useWorkspaceChrome(): WorkspaceChromeContextValue {
 	return value;
 }
 
+/** The chrome when inside WorkspaceChrome, else null (cards also render outside it). */
+export function useOptionalWorkspaceChrome(): WorkspaceChromeContextValue | null {
+	return useContext(WorkspaceChromeContext);
+}
+
 interface WorkspaceChromeProps {
 	/** Which global destination this route is — controls aria-current + scope. */
 	nav: WorkspaceNavId;

@@ -6,6 +6,7 @@ import { formatTimeAgo } from '@caddie/ui/time';
 import { Mascot } from '@caddie/ui/Mascot';
 import { PageSkeleton, StatePanel, StaleChip, failureKind, type StateKind } from '../states.tsx';
 import { Icon } from '../icons.tsx';
+import { ReadyPeek } from './ReadyPeek.tsx';
 import { DecisionHistory } from './DecisionHistory.tsx';
 import { CardHeader, CardPanel, BuildRail, CardFooter } from './CardFrame.tsx';
 import { cardDesign, CARD_DESIGNS } from './card-design.ts';
@@ -303,6 +304,7 @@ export function DecisionCardView(props: {
                     ) : null}
                 </div>
             ) : null}
+            {design === 'preview' ? <ReadyPeek card={card} /> : null}
             {design === 'preview' && card.checks ? (
                 <div className="compact-card-chips" data-testid="card-checks">
                     <span className="compact-card-chip compact-card-chip-ok">

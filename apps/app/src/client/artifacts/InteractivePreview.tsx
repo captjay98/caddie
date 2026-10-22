@@ -84,6 +84,11 @@ export function InteractivePreview(props: {
   /** "flutter": an Android app's browser preview (Track 3), in a phone-sized frame. */
   kind?: "web" | "flutter";
   standalone?: boolean;
+  /**
+   * The Brief ready card's live mini view: only the running app's frame, with
+   * no toolbar, notes or reset. The card scales it down and makes it inert.
+   */
+  peek?: boolean;
 }): ReactElement {
   const frame = useRef<HTMLIFrameElement>(null);
   const windowRef = useRef<HTMLDialogElement>(null);
@@ -275,6 +280,31 @@ export function InteractivePreview(props: {
       window.removeEventListener("message", onMessage);
     };
   }, [scope, props.actorId, props.projectId, props.artifactId, contentUrl, props.appRequestUrl, kind]);
+
+  if (props.peek) {
+    // The ready card's live mini view: the same frame, bridge and sandbox as
+    // the full preview, with nothing around it. Out of the tab order: the
+    // card's "Try the app" button is how a person opens it.
+    return loaded?.scope === scope ? (
+      <iframe
+        ref={frame}
+        title="A live view of your app"
+        name="caddie-preview-peek"
+        sandbox="allow-scripts allow-forms"
+        referrerPolicy="no-referrer"
+        src={loaded.url}
+        srcDoc={loaded.document}
+        data-kind={kind}
+        data-testid="peek-frame"
+        tabIndex={-1}
+        style={{ width: "100%", height: "100%", border: 0, background: "#fff" }}
+      />
+    ) : (
+      <p role="status" className="compact-card-peek-wait">
+        {error ? "The live view isn’t available right now." : "Opening a live view…"}
+      </p>
+    );
+  }
 
   return (
     <dialog open ref={windowRef} className={expanded ? "app-preview-window expanded" : "app-preview-window"} aria-label="App preview window" onCancel={event => { event.preventDefault(); toggleExpanded(); }}>
