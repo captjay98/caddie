@@ -602,3 +602,122 @@ describe('migration 0043 — the integration_merge_locks table (part Q)', () => 
 		expect(() => sqlite.prepare('insert into "integration_merge_locks" ("projectId","buildSeq","holder","expiresAt","createdAt") values (?,?,?,?,?)').run('p', 1, 'core', 'z', 't')).not.toThrow();
 	});
 });
+
+// --- lead review of the five fixes (8f444b4) ---------------------------------
+
+/** A db whose FIRST holder-scoped lock release runs `hook` just before it. */
+function releaseRace(db: D1Database, hook: () => Promise<void>): D1Database {
+	let fired = false;
+	const bindable = (target: object, method: string | symbol) => {
+		const value = Reflect.get(target, method);
+		return typeof value === 'function' ? value.bind(target) : value;
+	};
+	return new Proxy(db as object, {
+		get(target, prop) {
+			if (prop !== 'prepare') return bindable(target, prop);
+			return (sql: string) => {
+				const stmt = (target as D1Database).prepare(sql);
+				const isRelease = sql.startsWith('delete from "integration_merge_locks"') && sql.includes('"holder" = ?');
+				if (fired || !isRelease) return stmt;
+				fired = true;
+				return new Proxy(stmt as object, {
+					get(s, p) {
+						if (p !== 'bind') return bindable(s, p);
+						return (...args: unknown[]) => {
+							const bound = (s as { bind: (...a: unknown[]) => object }).bind(...args);
+							return new Proxy(bound, {
+								get(b, q) {
+									if (q !== 'run') return bindable(b, q);
+									return async () => {
+										await hook();
+										return (b as { run: () => Promise<unknown> }).run();
+									};
+								},
+							});
+						};
+					},
+				});
+			};
+		},
+	}) as D1Database;
+}
+
+describe('part Q: lead review of the merge fixes', () => {
+	test("a failure in another module whose repair brings no new snapshot never copies that module's folders from the merging module", async () => {
+		const { db, scope } = await seedProject();
+		await setModuleStatus(db, scope.projectId, BUILD_SEQ, 'core', 'merged');
+		// feed's builder also edited core's folder: a stray, never to be merged.
+		const snap = new FakeSnapshot(new Map([
+			['src/server/feed/feed.ts', 'ok'],
+			['src/server/core/animals.ts', 'edited by the feed builder'],
+		]));
+		const { deps, written } = makeDeps(snap, {
+			checksSequence: [
+				{ passed: false, failures: [{ check: 'behavior-tests', file: 'src/server/core/animals.ts' }] },
+				{ passed: true, failures: [] },
+			],
+		});
+		const result = await mergeFinishedModule(db, scope, { runId: 'r', moduleId: 'feed', checkpointRef: 'feed-img' }, deps);
+		expect(result.merged).toBe(true);
+		expect(result.strayFiles).toContain('src/server/core/animals.ts');
+		// MUTATION PROOF: track the owner at the merging module's ref when its
+		// repair returns null, and round 2 copies core's folder out of feed's
+		// snapshot, merging the stray.
+		expect(written.map((w) => w.path)).not.toContain('src/server/core/animals.ts');
+	});
+
+	test('an already-merged module that was repaired stays merged with its new snapshot, without an extra merge', async () => {
+		const { db, scope } = await seedProject();
+		await setModuleStatus(db, scope.projectId, BUILD_SEQ, 'core', 'merged', { checkpointRef: 'core-old' });
+		const feedSnap = new FakeSnapshot(new Map([['src/server/feed/feed.ts', 'ok']]));
+		const coreFixed = new FakeSnapshot(new Map([['src/server/core/animals.ts', 'fixed']]));
+		const pick = (ref: string) => (ref === 'core-fixed' ? coreFixed : feedSnap);
+		const sequence = [
+			{ passed: false, failures: [{ check: 'behavior-tests', file: 'src/server/core/animals.ts' }] as CheckFailure[] },
+			{ passed: true, failures: [] as CheckFailure[] },
+		];
+		let checkRuns = 0;
+		const { deps, saves, written } = makeDeps(feedSnap, {
+			readModuleSnapshot: (ref) => pick(ref).port(),
+			readModuleFile: async (ref, path) => Buffer.from(pick(ref).files.get(path) ?? '', 'utf8').toString('base64'),
+			runChecks: async () => {
+				checkRuns += 1;
+				return sequence.shift() ?? { passed: true, failures: [] };
+			},
+			dispatchRepair: async ({ moduleId }) => (moduleId === 'core' ? 'core-fixed' : null),
+		});
+		const result = await mergeFinishedModule(db, scope, { runId: 'r', moduleId: 'feed', checkpointRef: 'feed-img' }, deps);
+		expect(result.merged).toBe(true);
+		// Round 2 copied core's FIXED file.
+		expect(written.map((w) => w.path)).toContain('src/server/core/animals.ts');
+		const core = await getModule(db, scope.projectId, BUILD_SEQ, 'core');
+		expect(core?.checkpointRef).toBe('core-fixed');
+		// MUTATION PROOF: store the repaired owner as 'passed' and the drain merges
+		// core all over again: a third check run and a second save point.
+		expect(core?.status).toBe('merged');
+		expect(checkRuns).toBe(2);
+		expect(saves).toHaveLength(1);
+	});
+
+	test("a module that finishes between the drain's last look and the release is still merged", async () => {
+		const { db, scope } = await seedProject();
+		const snap = new FakeSnapshot(new Map([
+			['src/server/core/animals.ts', 'a'],
+			['src/server/feed/feed.ts', 'f'],
+		]));
+		const { deps } = makeDeps(snap);
+		let raced: { queued?: boolean } | null = null;
+		// Just before core's holder releases the lock, feed finishes: the lock is
+		// still held, so feed is queued for the holder.
+		const racing = releaseRace(db, async () => {
+			raced = await mergeFinishedModule(db, scope, { runId: 'r', moduleId: 'feed', checkpointRef: 'feed-img' }, deps);
+		});
+		const result = await mergeFinishedModule(racing, scope, { runId: 'r', moduleId: 'core', checkpointRef: 'core-img' }, deps);
+		expect(result.merged).toBe(true);
+		expect(raced).not.toBeNull();
+		expect(raced!.queued).toBe(true);
+		// MUTATION PROOF: no look after the release, and feed waits as 'passed'
+		// with nobody left to merge it.
+		expect((await getModule(db, scope.projectId, BUILD_SEQ, 'feed'))?.status).toBe('merged');
+	});
+});

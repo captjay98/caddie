@@ -42,7 +42,7 @@ import {
 	inArea,
 	normalizePath,
 } from './part-manifests.ts';
-import { getModule, listModules, setModuleStatus } from './module-slots.ts';
+import { type ModuleRow, getModule, listModules, setModuleStatus } from './module-slots.ts';
 
 /** How many repair rounds a module gets before it is marked "not merged" (part Q). */
 export const MAX_MERGE_REPAIR_ROUNDS = 2;
@@ -406,9 +406,17 @@ async function mergeOneModule(
 			const name = await mergedSavePointName(db, scope.projectId, buildSeq, moduleId, block.modules.map((m) => m.id));
 			await deps.savePoint(name);
 			// item 1: persist each repaired module's new ref on its row, so a later
-			// read of the board sees the fixed snapshot, not the stale one.
+			// read of the board sees the fixed snapshot, not the stale one. A
+			// repaired module other than this one KEEPS its status: an
+			// already-merged module stays merged (its fixed folders were copied
+			// this round), and a waiting one is drained later from its new ref.
 			for (const [id, ref] of refs) {
-				await setModuleStatus(db, scope.projectId, buildSeq, id, id === moduleId ? 'merged' : 'passed', { checkpointRef: ref });
+				if (id === moduleId) {
+					await setModuleStatus(db, scope.projectId, buildSeq, id, 'merged', { checkpointRef: ref });
+					continue;
+				}
+				const row = await getModule(db, scope.projectId, buildSeq, id);
+				if (row) await setModuleStatus(db, scope.projectId, buildSeq, id, row.status, { checkpointRef: ref });
 			}
 			return {
 				moduleId,
@@ -450,8 +458,10 @@ async function mergeOneModule(
 		}
 		for (const [owner, failures] of byOwner) {
 			const newRef = await deps.dispatchRepair({ moduleId: owner, failures });
+			// Only a NEW snapshot is copied next round. With none, nothing of the
+			// owner's is re-read: its folders must never come out of the merging
+			// module's snapshot, where they are strays (lead review, 2026-10-23).
 			if (newRef) refs.set(owner, newRef);
-			else if (!refs.has(owner)) refs.set(owner, refs.get(moduleId)!);
 		}
 		rounds += 1;
 	}
@@ -492,8 +502,36 @@ export async function mergeFinishedModule(
 	// lock will drain it even if this call cannot take the lock itself.
 	await setModuleStatus(db, scope.projectId, buildSeq, input.moduleId, 'passed', { checkpointRef: input.checkpointRef });
 
-	const got = await acquireIntegrationLock(db, scope.projectId, buildSeq, holder, now());
-	if (!got) {
+	const results = new Map<string, MergeResult>();
+	const waitingNow = async (): Promise<ModuleRow[]> => {
+		const order = block.modules.map((m) => m.id);
+		return (await listModules(db, scope.projectId, buildSeq))
+			.filter((m) => m.status === 'passed' && m.checkpointRef !== null && !results.has(m.moduleId))
+			.sort((a, b) => order.indexOf(a.moduleId) - order.indexOf(b.moduleId));
+	};
+	let held = false;
+	for (;;) {
+		// Another holder has it: its drain merges every 'passed' module, ours too.
+		if (!(await acquireIntegrationLock(db, scope.projectId, buildSeq, holder, now()))) break;
+		held = true;
+		try {
+			// Drain every "passed" module in block order, re-checking after each
+			// sweep for a module that finished mid-drain (item 3).
+			for (let waiting = await waitingNow(); waiting.length > 0; waiting = await waitingNow()) {
+				for (const m of waiting) {
+					results.set(m.moduleId, await mergeOneModule(db, scope, deps, holder, m.moduleId, m.checkpointRef!));
+				}
+			}
+		} finally {
+			await releaseIntegrationLock(db, scope.projectId, buildSeq, holder);
+		}
+		// Look again AFTER the release (lead review, 2026-10-23): a module that
+		// finished between the drain's last look and the release could not take
+		// the lock, so it is waiting on us. Re-acquire and merge it; if someone
+		// else takes the lock first, their drain merges it.
+		if ((await waitingNow()).length === 0) break;
+	}
+	if (!held) {
 		// Another merge holds the lock; its drain will merge this module.
 		return {
 			moduleId: input.moduleId,
@@ -505,25 +543,6 @@ export async function mergeFinishedModule(
 			acquiredLock: false,
 			queued: true,
 		};
-	}
-
-	const results = new Map<string, MergeResult>();
-	try {
-		// Drain every "passed" module in block order, re-checking after each sweep
-		// for a module that finished mid-drain, so none is left behind (item 3).
-		for (;;) {
-			const modules = await listModules(db, scope.projectId, buildSeq);
-			const order = block.modules.map((m) => m.id);
-			const waiting = modules
-				.filter((m) => m.status === 'passed' && m.checkpointRef !== null && !results.has(m.moduleId))
-				.sort((a, b) => order.indexOf(a.moduleId) - order.indexOf(b.moduleId));
-			if (waiting.length === 0) break;
-			for (const m of waiting) {
-				results.set(m.moduleId, await mergeOneModule(db, scope, deps, holder, m.moduleId, m.checkpointRef!));
-			}
-		}
-	} finally {
-		await releaseIntegrationLock(db, scope.projectId, buildSeq, holder);
 	}
 
 	// This call's own module: either the drain merged it here, or (a race where
