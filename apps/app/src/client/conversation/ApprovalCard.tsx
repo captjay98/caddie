@@ -3,7 +3,7 @@ import type { ReactElement } from 'react';
 import * as v from 'valibot';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
-import { CardHeader, CardPanel } from '../brief/CardFrame.tsx';
+import { CardHeader } from '../brief/CardFrame.tsx';
 import { fetchJson, postJson } from '../api.ts';
 
 /**
@@ -22,8 +22,6 @@ export const ApprovalCardData = v.pipe(
 		approvalId: v.string(),
 		projectId: v.string(),
 		what: v.string(),
-		capMinorUnits: v.nullable(v.number()),
-		currency: v.nullable(v.string()),
 		status: v.picklist(['pending', 'approved', 'rejected', 'expired']),
 	}),
 	v.readonly(),
@@ -98,20 +96,10 @@ export function ApprovalCardView(props: { data: ApprovalCardPayload }): ReactEle
 		}
 	}
 
-	const cap =
-		data.capMinorUnits == null
-			? 'Caddie will ask before anything costs money.'
-			: `Uses up to ${(data.capMinorUnits / 100).toLocaleString(undefined, {
-					style: 'currency',
-					currency: data.currency ?? 'USD',
-					maximumFractionDigits: 0,
-				})}.`;
-
 	return (
 		<div className="approval-card caddie-card" data-testid="approval-card" data-status={status} data-design={status === "pending" ? "plan" : "earlier"} data-tone={status === "pending" ? "blue" : "quiet"}>
             <CardHeader design={status === 'pending' ? 'plan' : 'earlier'} status={STATUS_LABEL[status]} />
             <h3 className="approval-what">{data.what}</h3>
-            <CardPanel title="Spending limit"><p className="state-detail">{cap}</p></CardPanel>
 			{status === 'pending' ? (
 				<div className="row-actions">
 					<button type="button" className="btn-key" data-testid="approval-allow" disabled={busy} onClick={() => void decide('approved')}>

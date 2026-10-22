@@ -1,7 +1,11 @@
 import { createAgentRouter } from '@flue/runtime/routing';
+import { instrument } from '@flue/runtime';
+import { getCloudflareContext } from '@flue/runtime/cloudflare';
 import { Hono } from 'hono';
 import { Hello } from './agents/hello.ts';
 import { registerNebiusProvider } from './agents/providers.ts';
+import { makeSpendInstrumentation } from './server/spend-instrument.ts';
+import { blockBuildByPayer } from './server/build-spend.ts';
 import { Coordinator } from './agents/coordinator.ts';
 import { createBuildWorkflowRouter } from './server/routes/build-workflow.ts';
 import { createAuthRouter } from './server/routes/auth.ts';
@@ -90,6 +94,28 @@ type Env = {
 };
 
 registerNebiusProvider();
+
+// Part A (plan §A): the spending limit, checked before every model call. The
+// instrumentation is installed ONCE per isolate (instrument() is idempotent on
+// the same object, and lives/dies with the isolate on Cloudflare). Its D1
+// handle and switch env are resolved lazily per call via getCloudflareContext —
+// there is no request-scoped binding at module load, but the interceptor and
+// the `turn` observer both run inside the request handler's async context,
+// where the binding is live (S1 proved D1 is reachable there). A refused
+// reservation sets the build blocker (by the workflow's stored spendPayerId)
+// and throws, so the call never reaches Token Factory.
+instrument(
+	makeSpendInstrumentation({
+		resolve: () => {
+			const env = getCloudflareContext().env as unknown as { DB?: AuthEnv['DB'] } & Record<string, unknown>;
+			return env?.DB ? { db: env.DB, env } : null;
+		},
+		setBlocker: (payerId, message) => {
+			const env = getCloudflareContext().env as unknown as { DB?: AuthEnv['DB'] };
+			if (env?.DB) return blockBuildByPayer(env.DB, payerId, message);
+		},
+	}),
+);
 
 const app = new Hono<{ Bindings: Env }>();
 

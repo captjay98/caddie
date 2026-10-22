@@ -26,6 +26,8 @@ import { getLarge, putLarge } from "./large-content.ts";
 import { findModelRouteForRole } from "../agents/providers.ts";
 import { FEATURE_DELEGATION_RULE } from "../agents/delegation.ts";
 import { stampProjectModes, type SwitchEnv } from "./platform-switches.ts";
+import { openBuildPayer } from "./build-spend.ts";
+import { registerBuildPayer } from "./spend-instrument.ts";
 
 export type WorkflowPhase =
   "planning" | "review" | "design" | "design-review" | "building" | "blocked" | "ready";
@@ -52,6 +54,57 @@ async function rows(db: D1Database, sql: string, ...args: unknown[]) {
       .bind(...args)
       .all()
   ).results as Record<string, unknown>[];
+}
+/**
+ * Part A (plan §A step 1): open the build's spend payer when a build starts,
+ * store it on the workflow (`spendPayerId`), and register the conversationId in
+ * the isolate payer map so the spend interceptor attributes this build's model
+ * calls to it. `bigApps` is read from the workflow (it decides the $40 limit);
+ * the actor's judge status decides $5 vs $2 otherwise. Best-effort and
+ * idempotent: a replayed build start re-uses the existing payer. Returns the
+ * payer id, or null if there is no workflow row to carry it.
+ */
+async function openBuildSpendPayer(
+  db: D1Database,
+  scope: Scope,
+  workflow: BuildWorkflow,
+  opts: { reset?: boolean } = {},
+): Promise<string | null> {
+  // Best-effort: payer creation meters the build but must never break the
+  // build-start path. A harness with a partial schema (no judge_accounts /
+  // build_spend_limits) or any transient DB error degrades to "no payer", which
+  // the spend interceptor treats as pass-through, rather than failing the
+  // approve/retry the user clicked.
+  try {
+    const bigApps = Number((workflow as unknown as { bigApps?: number }).bigApps) === 1;
+    const { payerId } = await openBuildPayer(db, {
+      runId: workflow.runId,
+      actorId: scope.actorId,
+      bigApps,
+    });
+    // reset=true (a retry): overwrite spendPayerId so the new build gets a fresh
+    // payer and a fresh limit (plan §A: "Retry starts a new build with a new
+    // limit"). Otherwise only fill it when empty, so a replayed start keeps the
+    // first payer.
+    await db
+      .prepare(
+        opts.reset
+          ? "update build_workflows set spendPayerId = ?, updatedAt = ? where projectId = ?"
+          : "update build_workflows set spendPayerId = ?, updatedAt = ? where projectId = ? and spendPayerId is null",
+      )
+      .bind(payerId, now(), scope.projectId)
+      .run();
+    // The stored value wins (a replay keeps the first payer); read it back so the
+    // registry always maps to the payer actually on the row.
+    const stored = (
+      await rows(db, "select spendPayerId from build_workflows where projectId = ?", scope.projectId)
+    )[0]?.["spendPayerId"] as string | null | undefined;
+    const effective = stored ?? payerId;
+    if (effective) registerBuildPayer(workflow.conversationId, effective);
+    return effective ?? null;
+  } catch {
+    return null;
+  }
 }
 export async function readWorkflow(
   db: D1Database,
@@ -476,6 +529,10 @@ export async function decideDesign(
   // or re-queue a design pass).
   if (workflow!.phase === "design-review" && !decisions.length) {
     const phase = input.decision === "approved" ? "building" : "design";
+    // Part A: approving the design brief STARTS the build — open its spend
+    // payer here (the one build-start point in this function), so every model
+    // call the build makes is metered against the D4 limit.
+    if (input.decision === "approved") await openBuildSpendPayer(db, scope, workflow!);
     const message =
       input.decision === "approved"
         ? `The authenticated design review approved the design brief ${design.id}. Build the approved plan feature by feature, implementing it to match the design brief: call build_next_feature, delegate exactly that feature with its doneWhen checks, then finish_feature; when every feature has passed, run QA with verify_build. ${FEATURE_DELEGATION_RULE} Stop honestly on blockers.`
@@ -1141,6 +1198,9 @@ export async function retryWorkflow(db: D1Database, scope: Scope, key: string, r
   // resume row and the phase change. Replays (the `previous` check above) and a
   // blocked plan that resumes planning never reach here.
   await admitJudgeBuildStart(db, scope.actorId, limits);
+  // Part A: a retry is a new build start, so it gets a NEW payer and a fresh
+  // D4 limit (plan §A step 1: "Retry starts a new build with a new limit").
+  await openBuildSpendPayer(db, scope, workflow, { reset: true });
   // A message parked while blocked (continueProjectFromChat without resumeBlocked)
   // is carried into the retry prompt, not dropped — the same carry resumePlanning
   // does. Both the parked body and any explicit request are appended.
