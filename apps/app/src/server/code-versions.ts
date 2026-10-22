@@ -10,11 +10,21 @@
  * Artifacts is not configured (local dev, tests, a deployment without it). It
  * keeps complete snapshots whose file bytes live in the content-addressed
  * artifact_content table, so identical files across versions are stored once.
+ *
+ * Room for big apps (plan part R): a snapshot goes up to 2,000 files and 48 MB
+ * (CODE_STORE_CAPS). A project's source file stays under D1's 2,000,000-byte
+ * single-value limit, so it lands in `artifact_content` as one row; a file at
+ * or over that limit (a bundled artifact a version may carry) is stored in the
+ * chunked `large_content` table instead — the same content-addressed scheme,
+ * split into sub-2 MB chunks — so the local store can hold a big-app snapshot
+ * without Cloudflare Artifacts. Reads check `artifact_content` first, then
+ * `large_content`, so a file written by either path reads back identically.
  */
 import type { Scope } from '@caddie/contracts';
 import type { D1Database } from './auth.ts';
 import { base64ToBytes, bytesToBase64 } from './adapters/contree.ts';
-import { createD1ContentStore, sha256Hex, type ArtifactContentStore } from './artifacts.ts';
+import { D1_MAX_VALUE_BYTES, createD1ContentStore, sha256Hex, type ArtifactContentStore } from './artifacts.ts';
+import { getLarge, putLarge } from './large-content.ts';
 import {
 	CodeStoreError,
 	assertValidSnapshot,
@@ -31,6 +41,8 @@ interface TreeRow {
 	path: string;
 	size: number;
 	sha256: string;
+	/** True when the bytes live in the chunked large_content table, not artifact_content. */
+	large?: boolean;
 }
 
 async function rows(db: D1Database, sql: string, ...params: unknown[]): Promise<Record<string, unknown>[]> {
@@ -76,8 +88,17 @@ export class LocalCodeStore implements CodeStore {
 		const tree: TreeRow[] = [];
 		for (const file of [...input.files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))) {
 			const bytes = base64ToBytes(file.contentBase64);
-			const stored = await this.content.put(bytes);
-			tree.push({ path: file.path, size: bytes.byteLength, sha256: stored.contentHash });
+			// A project source file is under D1's single-value limit and lands in
+			// artifact_content; a file at or over it (a big-app bundled artifact,
+			// plan part R) goes to the chunked large_content table instead. Both
+			// are content-addressed by sha256, so identical bytes dedupe either way.
+			if (bytes.byteLength >= D1_MAX_VALUE_BYTES) {
+				const stored = await putLarge(this.db, bytes);
+				tree.push({ path: file.path, size: bytes.byteLength, sha256: stored.sha256, large: true });
+			} else {
+				const stored = await this.content.put(bytes);
+				tree.push({ path: file.path, size: bytes.byteLength, sha256: stored.contentHash });
+			}
 		}
 		const createdAt = new Date().toISOString();
 		const treeJson = JSON.stringify(tree);
@@ -137,7 +158,9 @@ export class LocalCodeStore implements CodeStore {
 	async readFile(repo: string, commit: string, path: string): Promise<Uint8Array> {
 		const entry = (await this.treeOf(repo, commit)).find((item) => item.path === path);
 		if (!entry) throw new CodeStoreError('FILE_NOT_FOUND', `${path} is not in that version.`, 404);
-		const bytes = await this.content.get(entry.sha256);
+		// Big-app bundled artifacts (plan part R) live in the chunked large_content
+		// table; everything else in artifact_content. The tree entry says which.
+		const bytes = entry.large ? await getLarge(this.db, entry.sha256) : await this.content.get(entry.sha256);
 		if (!bytes) throw new CodeStoreError('UPSTREAM', `${path} could not be read.`, 502);
 		return bytes;
 	}

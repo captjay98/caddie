@@ -19,6 +19,10 @@
  * preview-database.ts.
  */
 
+import type { D1Database } from './auth.ts';
+import { D1_MAX_VALUE_BYTES, createD1ContentStore } from './artifacts.ts';
+import { getLarge, putLarge } from './large-content.ts';
+
 // --- shapes shared by the shim, the gateway and the Durable Object -----------
 
 export type PreviewStatementMode = 'all' | 'raw';
@@ -634,4 +638,86 @@ export async function runPreviewApp(input: {
 		'The app took longer than 15 seconds to answer.',
 	);
 	return responseToBridge(response);
+}
+
+// ---------------------------------------------------------------------------
+// Room for big apps: the chunked preview/server bundle path (plan part R).
+//
+// A small app's preview page, script and server bundle each fit in one D1
+// value (under D1_MAX_VALUE_BYTES = 2,000,000 bytes) and are stored in the
+// content-addressed `artifact_content` table. A BIG app's can be larger — a
+// preview bundle over 2 MB loads as separate `main.js` and `main.css`, and a
+// server bundle over 2 MB needs more than one value. Either way the bytes go
+// into the chunked `large_content` table (sub-2 MB chunks, 64 MB per value),
+// so a bundle that production D1 would refuse as one value is stored and served
+// whole.
+//
+// These are the ONLY preview-runtime pieces lane 13 owns; the lead wires them
+// into build-workflow's prepareOutput / storeBundleManifest. They are pure
+// storage helpers (no cloudflare: import), so they run under Bun like the rest
+// of this module.
+// ---------------------------------------------------------------------------
+
+/** Where a stored preview blob's bytes live. */
+export type PreviewBlobStore = 'inline' | 'chunked';
+
+/** A reference to one stored preview blob (a page, a script, a server bundle). */
+export interface PreviewBlobRef {
+	/** 'inline' = one artifact_content value; 'chunked' = large_content. */
+	readonly store: PreviewBlobStore;
+	/** The content hash — the artifact_content key or the large_content sha256. */
+	readonly sha256: string;
+	/** The byte length, so a reader can size its buffer / show the size. */
+	readonly bytes: number;
+}
+
+/** The chunk threshold: bytes at or over this go to large_content, else inline. */
+export const PREVIEW_INLINE_LIMIT = D1_MAX_VALUE_BYTES;
+
+/**
+ * Store one preview blob, choosing the store by size: under the single-value
+ * limit it goes to `artifact_content` (one row); at or over it, to the chunked
+ * `large_content` table. Content-addressed in both stores, so identical bytes
+ * dedupe. Returns the reference `loadPreviewBlob` reads back.
+ */
+export async function storePreviewBlob(db: D1Database, bytes: Uint8Array): Promise<PreviewBlobRef> {
+	if (bytes.byteLength >= PREVIEW_INLINE_LIMIT) {
+		const stored = await putLarge(db, bytes);
+		return { store: 'chunked', sha256: stored.sha256, bytes: bytes.byteLength };
+	}
+	const stored = await createD1ContentStore(db).put(bytes);
+	return { store: 'inline', sha256: stored.contentHash, bytes: bytes.byteLength };
+}
+
+/** Read one preview blob back from whichever store `storePreviewBlob` chose. */
+export async function loadPreviewBlob(db: D1Database, ref: PreviewBlobRef): Promise<Uint8Array | null> {
+	return ref.store === 'chunked' ? getLarge(db, ref.sha256) : createD1ContentStore(db).get(ref.sha256);
+}
+
+/** A big app's client bundle as separate, independently-stored script and styles. */
+export interface ChunkedClientBundle {
+	readonly js: PreviewBlobRef;
+	readonly css: PreviewBlobRef;
+}
+
+/**
+ * Store a client bundle as SEPARATE `main.js` and `main.css` blobs (plan part
+ * R: "a bundle over 2 MB loads as separate chunked main.js and main.css").
+ * Splitting them means a 3 MB script + a 200 KB stylesheet never has to fit in
+ * one value — each takes the inline or chunked store on its own size.
+ */
+export async function storeChunkedClientBundle(db: D1Database, bundle: { js: string; css: string }): Promise<ChunkedClientBundle> {
+	const enc = new TextEncoder();
+	return {
+		js: await storePreviewBlob(db, enc.encode(bundle.js)),
+		css: await storePreviewBlob(db, enc.encode(bundle.css)),
+	};
+}
+
+/** Read a chunked client bundle back to its `{ js, css }` text. A missing part is empty. */
+export async function loadChunkedClientBundle(db: D1Database, bundle: ChunkedClientBundle): Promise<{ js: string; css: string }> {
+	const dec = new TextDecoder();
+	const js = await loadPreviewBlob(db, bundle.js);
+	const css = await loadPreviewBlob(db, bundle.css);
+	return { js: js ? dec.decode(js) : '', css: css ? dec.decode(css) : '' };
 }
