@@ -25,6 +25,7 @@ import { createD1ContentStore, D1_MAX_VALUE_BYTES } from "./artifacts.ts";
 import { getLarge, putLarge } from "./large-content.ts";
 import { findModelRouteForRole } from "../agents/providers.ts";
 import { FEATURE_DELEGATION_RULE } from "../agents/delegation.ts";
+import { stampProjectModes, type SwitchEnv } from "./platform-switches.ts";
 
 export type WorkflowPhase =
   "planning" | "review" | "design" | "design-review" | "building" | "blocked" | "ready";
@@ -200,6 +201,7 @@ export async function startProjectFromChat(
 export async function ensureWorkflow(
   db: D1Database,
   scope: Scope,
+  env?: SwitchEnv | null,
 ): Promise<BuildWorkflow> {
   const existing = await readWorkflow(db, scope);
   if (existing) return existing;
@@ -212,9 +214,13 @@ export async function ensureWorkflow(
       modelRouteId: findModelRouteForRole("build").id,
       payerId: scope.actorId,
     }));
+  // Team mode is decided once, when the workflow is created, and stamped on it
+  // (section 4): `insert or ignore` means an existing workflow never changes
+  // mode. Flutter projects and judge accounts resolve per stampProjectModes.
+  const modes = await stampProjectModes(db, env, scope.actorId, binding.stackId);
   await db
     .prepare(
-      "insert or ignore into build_workflows (projectId,runId,conversationId,intakeKey,brief,phase,updatedAt) values (?,?,?,?,?,?,?)",
+      "insert or ignore into build_workflows (projectId,runId,conversationId,intakeKey,brief,phase,teamMode,bigApps,appFeatures,updatedAt) values (?,?,?,?,?,?,?,?,?,?)",
     )
     .bind(
       scope.projectId,
@@ -223,6 +229,9 @@ export async function ensureWorkflow(
       `existing:${scope.projectId}`,
       project.description ?? project.name,
       "planning",
+      modes.teamMode ? 1 : 0,
+      modes.bigApps ? 1 : 0,
+      modes.appFeatures ? 1 : 0,
       now(),
     )
     .run();

@@ -566,6 +566,11 @@ export * from './projects.ts';
 export * from './experience.ts';
 export * from './interests.ts';
 export * from './features.ts';
+export * from './architecture.ts';
 export * from './demo-contract.ts';
 export * from './app-icon.ts';
 export * from './publish.ts';
+
+// --- software-team mode (2026-10-22 plan, section 4) --------------------------
+
+export * from './team-mode.ts';
