@@ -285,7 +285,30 @@ async function seed(block: ArchitectureBlock): Promise<{ sqlite: Database; db: D
 		JSON.stringify(block),
 		'```',
 	].join('\n');
-	await createPlanDocRevision(db, scope, { kind: 'design', body: design });
+	const revision = await createPlanDocRevision(db, scope, { kind: 'design', body: design });
+	// The part areas are read ONLY from the APPROVED design revision
+	// (build-steps.readApprovedBlock -> getApprovedBlock), so stamp this
+	// revision as approved on the workflow, as the design-review gate does in a
+	// real build. Without it getApprovedBlock returns null and start_part
+	// refuses with NO_APPROVED_DESIGN.
+	const stamp = new Date().toISOString();
+	await db
+		.prepare(
+			'insert into "build_workflows" ("projectId","runId","conversationId","intakeKey","brief","phase","updatedAt","approvedDesignRevisionId") ' +
+				'values (?,?,?,?,?,?,?,?) ' +
+				'on conflict ("projectId") do update set "approvedDesignRevisionId" = excluded."approvedDesignRevisionId"',
+		)
+		.bind(
+			scope.projectId,
+			`run_${scope.projectId}`,
+			`conv_${scope.projectId}`,
+			`intake_${scope.projectId}`,
+			'brief',
+			'building',
+			stamp,
+			revision.id,
+		)
+		.run();
 	return { sqlite, db, scope };
 }
 
