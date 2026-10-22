@@ -361,6 +361,9 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// plan approval list, the opportunity fit split and the ready card's
 			// preview checks, each field filled from a real record or absent.
 			'tests/brief.test.ts',
+			// Lane 14 redo: each card's fields from real records (build feed,
+			// repair body + expectation, deadline, fit, footers).
+			'tests/brief-card-redo.test.ts',
 			// Lane 12 (part P): the ModuleBuilder agent + parallel-module
 			// orchestration — the D12 slot caps, dependency order, at-least-once
 			// harmlessness, module feature scope, a stopped module not stopping
