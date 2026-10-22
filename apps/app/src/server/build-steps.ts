@@ -26,8 +26,9 @@
 
 import type { D1Database } from './auth.ts';
 import type { Scope } from '@caddie/contracts';
-import { parseArchitectureBlock, type ArchitectureBlock } from '@caddie/contracts';
+import type { ArchitectureBlock } from '@caddie/contracts';
 import { ScopeError } from './scope.ts';
+import { getApprovedBlock } from './architecture-gate.ts';
 import { REPAIR_PAUSE_THRESHOLD } from '../agents/permissions.ts';
 import {
 	type BuildFeatureRow,
@@ -106,31 +107,22 @@ function isAreaRole(value: string): value is AreaRole {
 }
 
 async function readApprovedBlock(db: D1Database, scope: Scope): Promise<ArchitectureBlock> {
-	// The design revision bound to the build (parts B/E/G). Fall back to the
-	// latest design revision when a build has not stamped one yet (tests, and
-	// the first design-review pass).
-	const bound = (
-		await db
-			.prepare(
-				'select r.body as body from build_workflows w join plan_doc_revisions r on r.id = w.approvedDesignRevisionId where w.projectId = ?',
-			)
-			.bind(scope.projectId)
-			.all<{ body: string }>()
-	).results?.[0];
-	const body =
-		bound?.body ??
-		(
-			await db
-				.prepare(
-					"select body from plan_doc_revisions where projectId = ? and kind = 'design' order by revision desc limit 1",
-				)
-				.bind(scope.projectId)
-				.all<{ body: string }>()
-		).results?.[0]?.body;
-	if (!body) throw new ScopeError(409, 'NO_DESIGN', 'There is no approved design to read the app areas from.');
-	const parsed = parseArchitectureBlock(body);
-	if (!parsed.ok) throw new ScopeError(409, 'NO_ARCHITECTURE', `The design has no usable architecture block: ${parsed.error}`);
-	return parsed.block;
+	// The areas a part may touch are read ONLY from the design revision the
+	// build approved (lane 2's getApprovedBlock, which reads
+	// build_workflows.approvedDesignRevisionId). No approved revision means
+	// refuse: a part must never be checked against a design the user did not
+	// approve — the earlier "fall back to the latest design" let an
+	// unapproved, in-flight revision define the areas. The gate
+	// (architecture-gate.ts) stamps approvedDesignRevisionId on approval, so in
+	// a real team-mode build this is always set before a part starts.
+	const block = await getApprovedBlock(db, scope.projectId);
+	if (!block)
+		throw new ScopeError(
+			409,
+			'NO_APPROVED_DESIGN',
+			'There is no approved design to read the app areas from. The design must be approved before a part can start.',
+		);
+	return block;
 }
 
 async function loadStoredPart(db: D1Database, projectId: string, partKey: string): Promise<StoredPart | null> {

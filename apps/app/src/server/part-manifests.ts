@@ -198,38 +198,69 @@ async function safeList(
 	}
 }
 
+/** How many files are hashed at once in buildManifest (item 3). */
+export const MANIFEST_READ_CONCURRENCY = 16;
+
 /**
  * Walk the app's source folders and record every file's path + sha256. Reads
  * only through the snapshot port (the committed image's inspect API), so a
  * file written by ANY means — a write tool, or a Node / Python / package
  * script — is seen identically. Generated and protected paths are skipped.
+ *
+ * The directory walk is sequential (each level depends on the one above), but
+ * the per-file sha256 reads — `buildManifest`'s real cost: one inspect download
+ * per file over the network — run with BOUNDED CONCURRENCY
+ * (MANIFEST_READ_CONCURRENCY at a time) instead of one after another. The
+ * result is DETERMINISTIC regardless of which read finishes first: every entry
+ * is written to the slot its path was collected into, and the list is sorted by
+ * path at the end, so the manifest (and its diff) is identical to the
+ * sequential version.
  */
 export async function buildManifest(port: SnapshotReadPort): Promise<PartManifest> {
-	const files: ManifestEntry[] = [];
 	const roots: string[] = [];
+	const paths: string[] = [];
 	for (const root of MANIFEST_ROOTS) {
 		const top = await safeList(port, root);
 		if (top.length === 0) continue;
 		roots.push(root);
-		await walk(port, root, top, files);
+		await collectPaths(port, root, top, paths);
 	}
+	// Hash with bounded concurrency; each result lands in its own slot so order
+	// never depends on completion order. The final sort makes it deterministic.
+	const files: ManifestEntry[] = new Array(paths.length);
+	let next = 0;
+	const worker = async (): Promise<void> => {
+		for (;;) {
+			const index = next++;
+			if (index >= paths.length) return;
+			const path = paths[index]!;
+			files[index] = { path: normalizePath(path), sha256: await port.sha256(path) };
+		}
+	};
+	const workers = Math.min(MANIFEST_READ_CONCURRENCY, Math.max(1, paths.length));
+	await Promise.all(Array.from({ length: workers }, () => worker()));
 	files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 	return { roots, files };
 }
 
-async function walk(
+/**
+ * Collect the workspace-relative paths of every (non-generated) file under a
+ * directory, depth-first. Listing is sequential (a child dir is only known
+ * after its parent is listed); the hashing that follows is concurrent.
+ */
+async function collectPaths(
 	port: SnapshotReadPort,
 	dir: string,
 	entries: Array<{ name: string; isDir: boolean }>,
-	out: ManifestEntry[],
+	out: string[],
 ): Promise<void> {
 	for (const entry of entries) {
 		const childPath = `${dir}/${entry.name}`;
 		if (isGeneratedPath(childPath)) continue;
 		if (entry.isDir) {
-			await walk(port, childPath, await safeList(port, childPath), out);
+			await collectPaths(port, childPath, await safeList(port, childPath), out);
 		} else {
-			out.push({ path: normalizePath(childPath), sha256: await port.sha256(childPath) });
+			out.push(childPath);
 		}
 	}
 }

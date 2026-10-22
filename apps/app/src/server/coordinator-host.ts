@@ -39,7 +39,28 @@ import { recordBuildActivity } from "./build-activity.ts";
 import { checkServerStarts, type WorkerLoaderLike } from "./preview-runtime.ts";
 import { SCAFFOLD_FILES } from "../../../../stacks/react-hono/scaffold.ts";
 import { FLUTTER_SCAFFOLD_FILES } from "../../../../stacks/flutter/scaffold.ts";
-import { hostCheckCommands, testsPassed } from "./host-checks.ts";
+import { hostCheckCommands, testsPassed, writeContractFiles, runTeamModeContractChecks, type ContractPhase } from "./host-checks.ts";
+import { ContreeClient } from "./adapters/contree.ts";
+import { snapshotReadPort, snapshotWritePort, type ImageInspect } from "./part-snapshot.ts";
+import {
+  startPart,
+  finishPart,
+  clearActivePart,
+  activePart,
+  restoreFiles,
+} from "./build-steps.ts";
+import { areaFor, SMALL_APP_MODULE, type AreaRole } from "./part-manifests.ts";
+import { getApprovedBlock } from "./architecture-gate.ts";
+import {
+  recordArchitectureReview,
+  securityIssues,
+  advisoryIssues,
+} from "./architecture-review.ts";
+import {
+  recordOutputContractReceipts,
+  readOutputContractReceipts,
+  type ContractCheckMap,
+} from "./output-contract-receipts.ts";
 import { projectScopeForUser, ScopeError } from "./scope.ts";
 import { requestAppSecret } from "./app-secrets.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
@@ -176,6 +197,174 @@ export async function createCoordinatorContext(
   let planRevision = run.planRevision;
   const sessionId = `session:${runId}`;
   const root = `/workspace/${scope.projectId}`;
+
+  // --- Software-team mode (parts B/C/D/E/G) --------------------------------
+  // The workflow row carries the stamped teamMode/bigApps flags. Everything
+  // below is a NO-OP with teamMode = 0: no part is started, no contract check
+  // runs, no architect delegate is mounted, so the build path is exactly as it
+  // was. Read the flags ONCE here (the context is rebuilt per tool call).
+  const teamModeRow = await (async () => {
+    try {
+      const res = await env.DB.prepare(
+        'select "teamMode","bigApps" from "build_workflows" where "projectId" = ?',
+      )
+        .bind(scope.projectId)
+        .all<{ teamMode: number | null; bigApps: number | null }>();
+      return res.results?.[0];
+    } catch {
+      // A workflow table without the team-mode columns (a partial-migration
+      // test harness) is simply not team-mode.
+      return undefined;
+    }
+  })();
+  const teamMode = Number(teamModeRow?.teamMode ?? 0) === 1;
+  const bigApps = Number(teamModeRow?.bigApps ?? 0) === 1;
+
+  // The image-level inspect surface the part-snapshot ports read a COMMITTED
+  // image through — exactly Contree's inspect API (inspectList/Download/
+  // Archive), never a command in the session (a command would run
+  // model-influenced code). Built straight from env, so no private driver
+  // field is reached. Absent when the sandbox is not configured; the part
+  // helpers then no-op (they are only called in a configured team-mode build).
+  const inspect: ImageInspect | null =
+    env.CONTREE_BASE_URL && env.CONTREE_API_TOKEN && env.CONTREE_PROJECT_ID
+      ? new ContreeClient({
+          baseUrl: env.CONTREE_BASE_URL,
+          apiToken: env.CONTREE_API_TOKEN,
+          platformProjectId: env.CONTREE_PROJECT_ID,
+        })
+      : null;
+
+  /** The current committed image of the live session (what finish_part reads). */
+  const currentImage = async (): Promise<string> => {
+    const { driver, id } = await ensureSession();
+    return (await driver.checkpoint(id)).checkpointRef;
+  };
+  /** A read port over a given COMMITTED image (start image for start_part,
+   *  current image for finish/boundary). */
+  const readPortFor = (image: string) => snapshotReadPort(inspect!, image, root);
+  /** A write port for restore_files: reads the part's start image, writes back
+   *  into the live session in one commit. */
+  const writePortFor = async (startImage: string) => {
+    const { driver, id } = await ensureSession();
+    return snapshotWritePort(inspect!, startImage, driver, id, root);
+  };
+
+  // The part a build role owns right now. Resolved from the stored pointer; if
+  // none is active for this role's module yet, the part is STARTED here from
+  // the current committed image (the latest save point — nothing is committed
+  // between hand-out and the builder's first write), so the manifest is the
+  // pre-feature state. Only a configured team-mode build reaches this; with
+  // team mode off it is never called (the guard is not mounted) and returns
+  // null defensively.
+  const ensureActivePart = async (
+    role: AreaRole,
+    moduleId?: string,
+  ): Promise<{ role: string; area: ReturnType<typeof areaFor> } | null> => {
+    if (!teamMode || !inspect) return null;
+    const existing = await activePart(env.DB, scope, moduleId);
+    if (existing) return { role: existing.role, area: existing.area };
+    // Start the part from the current committed image for this role.
+    const image = await currentImage();
+    const started = await startPart(env.DB, scope, readPortFor(image), {
+      featureId: (await currentFeatureId()) ?? "feature",
+      role,
+      ...(moduleId ? { moduleId } : {}),
+    });
+    const fresh = await activePart(env.DB, scope, started.moduleId);
+    return fresh ? { role: fresh.role, area: fresh.area } : null;
+  };
+
+  /** The id of the feature being built (for the part's featureId), or null. */
+  const currentFeatureId = async (): Promise<string | null> => {
+    const snap = await workflowSnapshot(env.DB, scope).catch(() => null);
+    if (!snap?.plan) return null;
+    const current = currentFeature(await listBuildFeatures(env.DB, scope.projectId, snap.plan.id));
+    return current?.featureId ?? null;
+  };
+
+  /** restore_files for a build role: put out-of-area files back from the part's
+   *  start image, acting only on what the boundary check reports out of area. */
+  const restorePartFiles = async (
+    paths: string[],
+    moduleId?: string,
+  ): Promise<{ restored: string[]; deleted: string[]; reported: string[]; skipped: string[] }> => {
+    if (!teamMode || !inspect)
+      throw new ScopeError(409, "NO_ACTIVE_PART", "No part is in progress, so there is nothing to restore.");
+    const part = await activePart(env.DB, scope, moduleId);
+    if (!part)
+      throw new ScopeError(409, "NO_ACTIVE_PART", "No part is in progress, so there is nothing to restore.");
+    const read = readPortFor(await currentImage());
+    const write = await writePortFor(part.startImage);
+    return restoreFiles(env.DB, scope, { read, write }, paths, moduleId);
+  };
+
+  /** finish_part on the CURRENT image: refuse out-of-area changes, else clear
+   *  the module's active pointer. A no-op (ok) when no part is active. */
+  const finishActivePart = async (moduleId?: string) => {
+    if (!teamMode || !inspect) return { ok: true as const };
+    const read = readPortFor(await currentImage());
+    const result = await finishPart(env.DB, scope, read, moduleId);
+    if (result.ok) await clearActivePart(env.DB, scope, moduleId);
+    return result;
+  };
+
+  // Team mode (part E): the generated contract files (caddie/contract.ts,
+  // api.ts, router.tsx, modules.ts, contract.test.ts, test/setup/d1-file.ts)
+  // are written into the working copy from the APPROVED architecture block, so
+  // the contract test always matches the design the user approved. Written at
+  // hand-out and before every check run. A no-op with team mode off, or when no
+  // design is approved yet (nothing to generate from).
+  const writeGeneratedContractFiles = async (): Promise<boolean> => {
+    if (!teamMode) return false;
+    const block = await getApprovedBlock(env.DB, scope.projectId).catch(() => null);
+    if (!block) return false;
+    const files = writeContractFiles(block, bigApps ? "big" : "small");
+    const { driver, id } = await ensureSession();
+    await driver.uploadFiles(
+      id,
+      Object.entries(files).map(([path, text]) => ({
+        path: `${root}/${path}`,
+        contentBase64: bytesToBase64(new TextEncoder().encode(text)),
+      })),
+    );
+    return true;
+  };
+
+  // Team mode (part E): run the generated contract test in phases, in order,
+  // against ONE file database so create (process 1) and read (process 2) really
+  // cross a restart. Each phase is the HOST's own check path — a FIXED command
+  // (never a model command) with CADDIE_CONTRACT_PHASE and CADDIE_TEST_DB_FILE
+  // set. Returns the per-check green/red map and the first plain failure
+  // sentence (host-checks.runTeamModeContractChecks gates on exit code AND
+  // counts). The db file lives under the app's own scratch dir, fresh per run.
+  const CONTRACT_TEST_FILE = "caddie/contract.test.ts";
+  const runContractPhases = async (attempt: string, signal?: AbortSignal) => {
+    const { driver: runDriver, id } = await ensureSession();
+    const dbFile = `.caddie-scratch/contract-${attempt.replace(/[^A-Za-z0-9_-]/g, "_")}.sqlite`;
+    const runner = async (phase: ContractPhase) => {
+      signal?.throwIfAborted();
+      const operationKey = `contract:${runId}:${attempt}:${phase}`;
+      const result = await runDriver.execute({
+        sessionId: id,
+        // Fixed command; the phase and the one db file are passed as env, never
+        // as a model-supplied command. `read` reuses the file `create` wrote.
+        command: `bun test ${CONTRACT_TEST_FILE}`,
+        operationKey,
+        signal,
+        timeoutMs: 120_000,
+        cwd: root,
+        env: {
+          ...runtimeEnv,
+          CADDIE_CONTRACT_PHASE: phase,
+          CADDIE_TEST_DB_FILE: `${root}/${dbFile}`,
+        },
+      });
+      // A null exit code (never observed) is treated as a failure, not a pass.
+      return { exitCode: result.exitCode ?? 1, output: `${result.stdout}\n${result.stderr}` };
+    };
+    return runTeamModeContractChecks(runner);
+  };
   // Track 3: an Android app (stackId 'flutter') builds in the Flutter image,
   // with its own scaffold, commands and builder instructions.
   const stack: "react-hono" | "flutter" = run.stackId === "flutter" ? "flutter" : "react-hono";
@@ -382,6 +571,9 @@ export async function createCoordinatorContext(
     signal?.throwIfAborted();
     const { workflow, plan } = await requireBuildApproval(env.DB, scope);
     await scaffold();
+    // Team mode (part E): write the generated contract files from the approved
+    // design BEFORE every check run, so the contract test matches the design.
+    await writeGeneratedContractFiles();
     await guardBudget();
     const { driver, id } = await ensureSession();
     const commands = hostCheckCommands(stack);
@@ -467,7 +659,34 @@ export async function createCoordinatorContext(
         return { passed: false as const, paused, receipts, workflow, plan, driver, id };
       }
     }
-    return { passed: true as const, paused: false, receipts, workflow, plan, driver, id };
+    // Team mode (part E): the base checks (install/tests/build) passed; now run
+    // the generated contract test in phases against one file db. A failing phase
+    // gates the feature exactly like a failing base check — a repair round with
+    // its plain sentence, counted toward the feature's repair pause — and the
+    // per-check green/red map rides back for part G's output receipts (verify).
+    let contractChecks: ContractCheckMap | null = null;
+    if (teamMode && inspect) {
+      const contract = await runContractPhases(attempt, signal);
+      contractChecks = contract.checks;
+      if (!contract.passed) {
+        const sentence = contract.failureSentence ?? "A team-mode contract check did not pass.";
+        await recordRepairRound(env.DB, scope, workflow.runId, {
+          issue: issuePrefix ? `${issuePrefix}:contract` : "contract",
+          round: "repair_attempt",
+          outcome: "failed",
+          detail: sentence,
+        });
+        const paused = (await workflowRepairPause(env.DB, workflow.runId)).paused;
+        if (paused)
+          await setWorkflowBlocker(
+            env.DB,
+            scope,
+            "Caddie could not get the app's contract checks (sign-in, privacy, restart) passing after three attempts. Your plan and files are saved. The app is not ready to try yet.",
+          );
+        return { passed: false as const, paused, receipts, workflow, plan, driver, id, contractChecks };
+      }
+    }
+    return { passed: true as const, paused: false, receipts, workflow, plan, driver, id, contractChecks };
   };
   const runChecks = async (attempt: string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
@@ -498,6 +717,14 @@ export async function createCoordinatorContext(
     if (!current)
       return { done: true, next: "Every feature passed. Ask QA to run verify_build to publish the preview." };
     await markFeatureBuilding(env.DB, current);
+    // Team mode (parts D/E): a new feature starts a FRESH part — clear any
+    // stale pointer so the builder's first write starts its part from the
+    // current save point — and write the generated contract files so the
+    // builder sees the approved contract. No-ops with team mode off.
+    if (teamMode) {
+      await clearActivePart(env.DB, scope).catch(() => {});
+      await writeGeneratedContractFiles().catch(() => false);
+    }
     return {
       done: false,
       feature: { id: current.featureId, title: current.title, doneWhen: current.doneWhen },
@@ -562,6 +789,36 @@ export async function createCoordinatorContext(
       };
     }
     const { checkpointRef } = await outcome.driver.checkpoint(outcome.id);
+    // Team mode (part D): the part boundary is checked on the NEW committed
+    // image — a change OUTSIDE the builder's area (by a write tool OR a script)
+    // is refused and counts as a failed try, so the save point only ever
+    // captures an in-area feature. A clean finish clears the module's active
+    // pointer. A no-op with team mode off (no part was ever started).
+    if (teamMode && inspect) {
+      const boundary = await finishActivePart();
+      if (!boundary.ok) {
+        await recordRepairRound(env.DB, scope, runId, {
+          issue: `${current.featureId}:part-boundary`,
+          operationKey: `feature:${runId}:${plan.id}:${featureId}:${attempt}:part-boundary`,
+          round: "repair_attempt",
+          outcome: "failed",
+          detail: boundary.message,
+        });
+        const paused = (await workflowRepairPause(env.DB, runId)).paused;
+        await recordFeatureAttempt(env.DB, current, paused);
+        if (paused)
+          await setWorkflowBlocker(
+            env.DB,
+            scope,
+            `“${current.title}” kept changing files outside its area after three tries. The features before it are saved. The app is not ready to try yet.`,
+          );
+        return {
+          passed: false,
+          paused,
+          next: `${boundary.message} Put those files back with restore_files (or leave them to their own part), then call finish_feature again.`,
+        };
+      }
+    }
     await recordFeaturePassed(env.DB, current, { checkpointRef, testsPassed: passing });
     const after = currentFeature(await listBuildFeatures(env.DB, scope.projectId, plan.id));
     return {
@@ -609,6 +866,7 @@ export async function createCoordinatorContext(
         next: `Delegate a focused repair for the failing check, then run verify_build again. ${FEATURE_DELEGATION_RULE}`,
       };
     const { workflow, plan, driver, id, receipts } = outcome;
+    const verifyContractChecks = outcome.contractChecks ?? null;
     signal?.throwIfAborted();
     const final = await driver.getOperationReceipt(
       `verify:${runId}:${plan.id}:${attempt}:browser-bundle`,
@@ -732,6 +990,16 @@ export async function createCoordinatorContext(
           ? { server, migrations, flutterWeb: built.page, ...(storedAndroid ? { android: storedAndroid } : {}) }
           : { server, migrations, client: { js: built.js, css: built.css } },
     });
+    // Team mode (part G): bind this output's contract-check results (sign-in,
+    // second-person, restart) to its id, so publish-safety can refuse a publish
+    // whose own output was not green. The verify run above produced the map.
+    if (teamMode && verifyContractChecks) {
+      try {
+        await recordOutputContractReceipts(env.DB, scope.projectId, output.outputId, verifyContractChecks);
+      } catch (error) {
+        console.error("verify_build: contract receipts not saved:", error instanceof Error ? error.message : error);
+      }
+    }
     if (source) {
       try {
         const features = await listBuildFeatures(env.DB, scope.projectId, plan.id);
@@ -767,6 +1035,37 @@ export async function createCoordinatorContext(
     sessionId,
     runId,
     stackId: stack,
+    // Software-team mode (parts B/C/D): the flags the planner/build prompts and
+    // the architect delegate key off. Stamped on the workflow; false by default.
+    teamMode,
+    bigApps,
+    // Team mode (part B): the architect delegate's one write — record a review
+    // round. Absent with team mode off, so the coordinator does not mount the
+    // architect. The host closure does the project-scoped insert and returns
+    // the per-severity counts the tool reports back.
+    recordArchitectureReview: teamMode
+      ? async (input: {
+          blockHash: string;
+          round: number;
+          issues: { severity: "security" | "advisory"; path: string; message: string }[];
+        }) => {
+          const stored = await recordArchitectureReview(env.DB, scope.projectId, input);
+          return {
+            round: stored.round,
+            security: securityIssues(stored.issues).length,
+            advisory: advisoryIssues(stored.issues).length,
+          };
+        }
+      : undefined,
+    // Team mode (part D): the active part for a build role (the write-tool
+    // guard resolves this), and restore_files. Both are absent with team mode
+    // off, so the specialists mount neither the guard nor restore_files.
+    activePartForRole: teamMode
+      ? (role: AreaRole, moduleId?: string) => ensureActivePart(role, moduleId)
+      : undefined,
+    restorePartFiles: teamMode
+      ? (paths: string[], moduleId?: string) => restorePartFiles(paths, moduleId)
+      : undefined,
     projectId: scope.projectId,
     homeOverview,
     actorContext: actor.text,

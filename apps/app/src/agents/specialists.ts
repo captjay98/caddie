@@ -11,8 +11,11 @@ import {
  makeVerifyBuild,
 	makeRunChecks,
 	makeRequestAppKey,
+	makeRestoreFiles,
+	type PartGuard,
 	type SandboxToolDeps,
 } from './tools.ts';
+import type { Area, AreaRole } from '../server/part-manifests.ts';
 import type { ToolDefinition } from '@flue/runtime';
 import { useInstruction, useSkill, useSubagent, useTool } from '@flue/runtime';
 import { findModelRouteForRole } from './providers.ts';
@@ -49,6 +52,27 @@ export interface SpecialistBuildContext {
   teamMode?: boolean;
   /** A big app (part C): modules are planned and built independently, core first. */
   bigApps?: boolean;
+  /**
+   * Team mode (part D): resolve (and lazily START from the current save point)
+   * the active part for a BUILD role, so the write-tool guard can refuse
+   * another role or an out-of-area path early. Returns the ACTIVE part's role +
+   * area, or null when none is active and none can be started. Absent with team
+   * mode off, so the guard is not mounted and writes behave exactly as before.
+   */
+  activePartForRole?: (
+    role: AreaRole,
+    moduleId?: string,
+  ) => Promise<{ role: string; area: Area } | null>;
+  /**
+   * Team mode (part D): restore_files for a build role — put the out-of-area
+   * files finish_part listed back from the part's start image, acting only on
+   * what is currently out of area. Absent with team mode off (restore_files is
+   * not mounted).
+   */
+  restorePartFiles?: (
+    paths: string[],
+    moduleId?: string,
+  ) => Promise<{ restored: string[]; deleted: string[]; reported: string[]; skipped: string[] }>;
  verifyBuild?: (operationKey:string, signal?:AbortSignal)=>Promise<unknown>;
 	/** Host-run project checks for build roles (run_checks); never publishes a preview. */
 	runChecks?: (operationKey: string, signal?: AbortSignal) => Promise<unknown>;
@@ -230,6 +254,19 @@ export function specialistInstruction(role: SpecialistRole, teamMode: boolean): 
 /** Build one specialist's agent function with its policy's tools mounted. */
 export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildContext) {
 	const allowed = ROLE_TOOL_POLICY[role];
+	// Team mode (part D): a build role carries a part guard whose `active()`
+	// resolves (and lazily starts) the active part for THIS role, so the write
+	// tool refuses another role's part or an out-of-area path early, and
+	// restore_files puts out-of-area files back. Both are absent with team mode
+	// off (context.activePartForRole/restorePartFiles undefined), so the guard
+	// is undefined and restore_files mounts a plain "no active part" refusal —
+	// exactly today's behaviour. 'other' is never a write role.
+	const guardRole: AreaRole | null =
+		role === 'backend' || role === 'frontend' || role === 'mobile' ? role : null;
+	const partGuard: PartGuard | undefined =
+		guardRole && context.activePartForRole
+			? { role: guardRole, active: () => context.activePartForRole!(guardRole) }
+			: undefined;
 	// Loosely typed on purpose: each tool carries its own input schema; the
 	// mount loop only needs name -> definition.
 	const toolFor: Record<string, ToolDefinition> = {
@@ -237,7 +274,14 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 		write_plan_note: makeWritePlanNote({ writePlanNote: context.writePlanNote }),
 		sandbox_exec: makeSandboxExec({ driver: context.driver, sessionId: context.sessionId, runId: context.runId }),
 		read_sandbox_file: makeReadSandboxFile({ driver: context.driver, sessionId: context.sessionId }),
-		write_sandbox_file: makeWriteSandboxFile({ driver: context.driver, sessionId: context.sessionId }),
+		write_sandbox_file: makeWriteSandboxFile({ driver: context.driver, sessionId: context.sessionId, ...(partGuard ? { partGuard } : {}) }),
+		restore_files: makeRestoreFiles({
+			restore: context.restorePartFiles
+				? (paths) => context.restorePartFiles!(paths)
+				: async () => {
+						throw new Error('There is no part in progress, so there is nothing to restore.');
+					},
+		}),
 		delegate_repair: makeDelegateRepair({ delegate: context.delegateRepair }),
 		record_verification: makeRecordVerification({ record: context.recordVerification }),
  verify_build: makeVerifyBuild({verify: context.verifyBuild ?? (async () => { throw new Error('Host checks are not configured.'); })}),
