@@ -11,8 +11,11 @@ import { type Area, inArea } from '../server/part-manifests.ts';
  * the snapshot diff in finish_part. It is optional: outside team mode no guard
  * is mounted, so `assertInArea` is never called and behaviour is unchanged.
  *
- * `active()` returns null when no part is in progress (then every write is
- * allowed, as today). `role` is the role this tool instance was mounted for.
+ * `active()` returns null when no part is in progress FOR THIS BUILDER'S MODULE
+ * (then every write is allowed, as today). `role` is the role this tool
+ * instance was mounted for. Part P runs up to 4 module builders at once, each
+ * on its own copy, so the guard resolves the active part by module — hence the
+ * guard is mounted per (role, module) and `active()` closes over that module.
  */
 export interface PartGuard {
 	role: string;
@@ -468,19 +471,22 @@ const RestoreFilesInput = v.strictObject({
  * refused with a plain message.
  */
 export function makeRestoreFiles(deps: {
-	restore: (paths: string[]) => Promise<{ restored: string[]; absentAtStart: string[] }>;
+	restore: (paths: string[]) => Promise<{ restored: string[]; deleted: string[]; reported: string[]; skipped: string[] }>;
 }) {
 	return defineTool({
 		name: 'restore_files',
 		description:
-			'Put files back to exactly what they were when this part started, in one call. Use it when finish_part lists an out-of-area change you did not mean to make. Names workspace-relative paths; a path that did not exist at the start of the part is not restorable (remove it instead).',
+			'Put out-of-area files back to exactly what they were when this part started, in one call. Use it for the paths finish_part lists as out of area. A path you changed IN your area, or did not change, is left alone. An out-of-area file you ADDED is removed when possible, otherwise it is reported for you to remove.',
 		input: RestoreFilesInput,
 		run: async (ctx) => {
 			const result = await deps.restore([...ctx.data.paths]);
 			const parts: string[] = [];
 			if (result.restored.length > 0) parts.push(`restored ${result.restored.length}: ${result.restored.join(', ')}`);
-			if (result.absentAtStart.length > 0)
-				parts.push(`not restorable (absent at start — remove instead): ${result.absentAtStart.join(', ')}`);
+			if (result.deleted.length > 0) parts.push(`removed ${result.deleted.length} out-of-area add(s): ${result.deleted.join(', ')}`);
+			if (result.reported.length > 0)
+				parts.push(`remove these out-of-area adds yourself: ${result.reported.join(', ')}`);
+			if (result.skipped.length > 0)
+				parts.push(`left alone (in area or unchanged): ${result.skipped.join(', ')}`);
 			return { output: parts.join('; ') || 'nothing to restore' };
 		},
 	});
