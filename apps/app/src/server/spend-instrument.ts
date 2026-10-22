@@ -146,9 +146,14 @@ export async function resolveTurnPayer(db: D1Database, ctx: FlueExecutionContext
 			if (moduleRow.payerId) return moduleRow.payerId;
 			throw new ModulePayerMissingError(instanceId);
 		}
-		// No module row: not actually a module build (an unrelated id that happens
-		// to look like one) — fall through to the coordinator/chat path.
+		// No module row: only Caddie dispatches ids of this shape (ModuleBuilder
+		// is dispatch-only; chat and coordinator ids are conv_<hex>), so this is a
+		// lost or broken module build. Refuse: it must never run unmetered.
+		throw new ModulePayerMissingError(instanceId);
 	}
+	// A ModuleBuilder's own turn under any other id (a malformed dispatch) has no
+	// build to charge either: refuse rather than fall through to chat.
+	if (ctx.agentName === 'ModuleBuilder') throw new ModulePayerMissingError(instanceId);
 
 	// D1, read fresh on every call: Caddie addresses a build's coordinator as
 	// /agents/coordinator/<build_workflows.conversationId>, and Flue makes that

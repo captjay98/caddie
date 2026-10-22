@@ -345,14 +345,22 @@ describe('the build shared spend limit — a ModuleBuilder turn (part A / part P
 		sqlite.close();
 	});
 
-	test('an unknown module id (no build_modules row) is not a module turn — falls through to chat pass-through', async () => {
+	test('an unknown module id (no build_modules row) is REFUSED, never run unmetered', async () => {
 		const { sqlite, db } = await seedProject();
 		_resetPayerRegistry();
-		// A colon id that LOOKS like a module instance but has no row: not a module
-		// build, so it must not refuse — it falls through and (no workflow row
-		// either) passes through as ordinary chat (null).
-		const payer = await resolveTurnPayer(db, { instanceId: 'proj:0:ghost', conversationId: 'nope' } as never);
-		expect(payer).toBeNull();
+		// Only Caddie dispatches ids of the module-builder shape (ModuleBuilder is
+		// dispatch-only; chat ids are conv_<hex>). A module-shaped id with no row is
+		// a lost or broken module build, so its model call must not pass through.
+		await expect(resolveTurnPayer(db, { instanceId: 'proj:0:ghost', conversationId: 'nope' } as never)).rejects.toBeInstanceOf(ModulePayerMissingError);
+		sqlite.close();
+	});
+
+	test('a ModuleBuilder turn under any id with no payer is REFUSED (agent name checked too)', async () => {
+		const { sqlite, db } = await seedProject();
+		_resetPayerRegistry();
+		await expect(
+			resolveTurnPayer(db, { instanceId: 'not-module-shaped', conversationId: 'x', agentName: 'ModuleBuilder' } as never),
+		).rejects.toBeInstanceOf(ModulePayerMissingError);
 		sqlite.close();
 	});
 
