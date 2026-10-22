@@ -571,7 +571,7 @@ test.describe('card details in words (plan 5.5)', () => {
 		await expect(details.getByText('run run-9')).toBeVisible();
 
 		const approval = page.getByTestId('decision-card').filter({ hasText: 'Design review is waiting on you' });
-		await approval.getByTestId('card-detail-toggle').click();
+		await approval.getByTestId('card-secondary-action').click();
 		await expect(approval.getByTestId('card-details-words').locator('li')).toHaveText([
 			'It rests on 2 pieces of evidence.',
 			'“Review the design” opens it for you to review; nothing changes until you decide.',
@@ -604,7 +604,7 @@ test('shared compact cards fit mobile and keep consistent primary actions', asyn
  const page = await context.newPage();
  await page.goto(`${BASE}/app/?pane=brief`);
  await expect(page.getByTestId('decision-card').filter({ visible: true })).toHaveCount(2);
- for (const action of await page.getByTestId('card-primary-action').filter({ visible: true }).all()) expect((await action.boundingBox())?.height).toBeGreaterThanOrEqual(48);
+ for (const action of await page.getByTestId('card-primary-action').filter({ visible: true }).all()) expect((await action.boundingBox())?.height).toBeGreaterThanOrEqual(44);
  await page.getByTestId('brief-done').getByText('Earlier · 1').click();
  await page.screenshot({ path: testInfo.outputPath('shared-cards-mobile.png'), fullPage: true });
  await page.setViewportSize({ width: 320, height: 568 });
@@ -797,8 +797,9 @@ test.describe('U step 3 — plan approval list', () => {
 		await page.goto(`${BASE}/app/?pane=brief`);
 		const plan = page.getByTestId('decision-card').filter({ hasText: 'Design review is waiting on you' });
 		await expect(plan.getByTestId('card-plan-items')).toHaveCount(0);
-		await expect(plan).toContainText('What you’re reviewing');
-		await expect(plan).toContainText('Approving this authorises');
+		// With no feature list the card keeps its summary as the lede (no
+		// "What you're reviewing" panel): the authorises scope reads inline.
+		await expect(plan.locator('.summary')).toContainText('Approving this authorises');
 		await context.close();
 	});
 });
@@ -914,11 +915,10 @@ test.describe('U step 5 — ready card preview checks', () => {
 		const readyCard = page.getByTestId('decision-card').filter({ hasText: 'Your app is ready to try' });
 		const chips = readyCard.getByTestId('card-checks');
 		await expect(chips).toBeVisible();
-		await expect(chips).toContainText('8 checks passed');
-		await expect(readyCard.getByTestId('card-check-item')).toHaveCount(3);
-		await expect(chips).toContainText('Daily activity log');
-		await expect(chips).toContainText('Version 3');
-		// A plain feature name on the chip, never a check id.
+		// Mockup 4 wording: a chip that says WHAT it counts, not "8 checks passed".
+		await expect(chips).toContainText('All 8 features passed their checks');
+		await expect(chips.getByTestId('card-check-version')).toContainText('Version 3');
+		// Never a raw check id on a chip.
 		await expect(chips).not.toContainText('feature-');
 		await readyCard.screenshot({ path: join(SHOTS, 'u5-ready-checks-desktop-2x.png') });
 
@@ -929,18 +929,18 @@ test.describe('U step 5 — ready card preview checks', () => {
 		await context.close();
 	});
 
-	test('more than three features fold to a "+N more" chip, singular check reads "check passed"', async ({ browser }) => {
+	test('the ready chip says what it counts; a single feature reads "feature passed its check"', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context, {
-			cards: [ready({ checks: { passed: 1, items: ['A', 'B', 'C', 'D', 'E'] } })],
+			cards: [ready({ checks: { passed: 1, items: ['A'] } })],
 			unseenCount: 0,
 		});
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/?pane=brief`);
 		const chips = page.getByTestId('card-checks');
-		await expect(chips).toContainText('1 check passed');
-		await expect(page.getByTestId('card-check-item')).toHaveCount(3);
-		await expect(chips).toContainText('+2 more');
+		await expect(chips).toContainText('All 1 feature passed its check');
+		// No per-feature chips (mockup 4 shows the count + version, not each name).
+		await expect(page.getByTestId('card-check-item')).toHaveCount(0);
 		await context.close();
 	});
 
@@ -973,11 +973,12 @@ test('Earlier loads archived decisions on demand and retains the exact decision 
  await context.close();
 });
 
-test('the Brief flows two cards per row on a wide pane and stacks them when narrow', async ({ browser }) => {
-	// Two open "big" cards (an approval + a blocked result). The home Brief sits
-	// beside the chat (each ~half the window), so a 1600px window gives a ~730px
-	// Brief pane — wide enough for the auto-fit grid to flow two-up; a phone
-	// width drops it to one column.
+test('the Brief never flows two narrow cards per row: each card keeps the mockup width', async ({ browser }) => {
+	// Lane rule (2026-10-22): show two per row ONLY when each card gets >=440px.
+	// The Brief pane (beside the chat) does not reach two 440px columns at
+	// realistic widths, so the cards render ONE per row at the mockup width
+	// (>=440, capped at 584) — never the rejected ~300px two-up. A phone width
+	// also stacks them.
 	const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
 	await stubAccount(context, { cards: [APPROVAL_A, BLOCKED_A], unseenCount: 2 });
 	const page = await context.newPage();
@@ -987,23 +988,25 @@ test('the Brief flows two cards per row on a wide pane and stacks them when narr
 	await expect(cards).toHaveCount(2);
 	const wideBoxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
 	expect(wideBoxes[0] && wideBoxes[1]).toBeTruthy();
-	// Same top edge, different left — i.e. one row, two columns.
-	expect(Math.abs((wideBoxes[0]!.y) - (wideBoxes[1]!.y))).toBeLessThanOrEqual(2);
-	expect(wideBoxes[1]!.x).toBeGreaterThan(wideBoxes[0]!.x + wideBoxes[0]!.width / 2);
+	// One per row: the second card is below the first, not beside it.
+	expect(wideBoxes[1]!.y).toBeGreaterThan(wideBoxes[0]!.y + wideBoxes[0]!.height / 2);
+	// Each card is at the mockup width, never the rejected narrow two-up width.
+	expect(wideBoxes[0]!.width).toBeGreaterThanOrEqual(440);
+	expect(wideBoxes[0]!.width).toBeLessThanOrEqual(584 + 2);
 
-	// At a phone width the same two cards stack one per row.
+	// At a phone width the same two cards stack one per row with no overflow.
 	await page.setViewportSize({ width: 390, height: 844 });
 	const narrowBoxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
 	expect(narrowBoxes[1]!.y).toBeGreaterThan(narrowBoxes[0]!.y + narrowBoxes[0]!.height / 2);
-	expect(Math.abs((narrowBoxes[0]!.x) - (narrowBoxes[1]!.x))).toBeLessThanOrEqual(2);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 	await context.close();
 });
 
-test('U — two rich cards (plan + fit) flow two-up at 1440 with the chat at half, and stack at 390', async ({ browser }) => {
-	// Lane 14 measurement: at 1440px with the chat at half the window the Brief
-	// pane is ~651px, so the 300px min card width flows two rich cards per row
-	// there (the plan item list and the fit split stay readable), and a phone
-	// width drops them to one column.
+test('U — two rich cards (plan + fit) render at the mockup width one-up on a half-window pane, and stack at 390', async ({ browser }) => {
+	// Lane rule (2026-10-22): at 1440px with the chat at half the window the
+	// Brief pane is ~651px — NOT wide enough for two 440px columns — so the rich
+	// cards render ONE per row at the mockup width, and the plan list + fit
+	// split stay readable. A phone width also stacks them.
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 	await stubAccount(context, {
 		cards: [
@@ -1017,13 +1020,14 @@ test('U — two rich cards (plan + fit) flow two-up at 1440 with the chat at hal
 
 	const cards = page.getByTestId('decision-card');
 	await expect(cards).toHaveCount(2);
-	const wide = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
-	// Same top edge, different left — one row, two columns.
-	expect(Math.abs(wide[0]!.y - wide[1]!.y)).toBeLessThanOrEqual(2);
-	expect(wide[1]!.x).toBeGreaterThan(wide[0]!.x + wide[0]!.width / 2);
-	// Each card is at least the 300px minimum, so the lists stay readable.
-	expect(wide[0]!.width).toBeGreaterThanOrEqual(300);
-	// The plan list and the fit split both still render in the narrowed cards.
+	const boxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
+	// One per row: the second card sits below the first, not beside it.
+	expect(boxes[1]!.y).toBeGreaterThan(boxes[0]!.y + boxes[0]!.height / 2);
+	// Each card clears the 440px minimum (capped at 584), so the lists read at
+	// the mockup type scale rather than the rejected narrow width.
+	expect(boxes[0]!.width).toBeGreaterThanOrEqual(440);
+	expect(boxes[0]!.width).toBeLessThanOrEqual(584 + 2);
+	// The plan list and the fit split both still render.
 	await expect(page.getByTestId('card-plan-items')).toBeVisible();
 	await expect(page.getByTestId('card-fit-cautions')).toBeVisible();
 

@@ -7514,6 +7514,8 @@ mark {
 @media(max-width: 600px) {
  .caddie-card { padding: 18px; }
  .decision-card.caddie-card h3 { font-size: 21px; }
+ /* Mobile tap targets: the mockup lifts the CTA/secondary to 44px on phones. */
+ .caddie-card .actions .btn-key, .caddie-card .actions .btn-ghost, .caddie-card .actions .detail-toggle { min-height: 44px; }
 }
 .welcome-replay {
  min-height: 44px;

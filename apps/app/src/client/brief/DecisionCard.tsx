@@ -189,9 +189,11 @@ export function DecisionCardView(props: {
 					</ul>
 				</CardPanel>
 			) : null}
-			{design === 'build' && card.build ? (
+			{design === 'build' ? (
 				<>
 					<BuildRail design={design} />
+					{card.build ? (
+					<>
 					<div className="compact-card-panel">
 						{card.build.current ? (
 							<div className="compact-card-active">
@@ -213,6 +215,10 @@ export function DecisionCardView(props: {
 						<span className="compact-card-icon" aria-hidden="true"><Icon name="refresh" title="" /></span>
 						<span>Last update {card.build.lastUpdatedAt ? formatTimeAgo(card.build.lastUpdatedAt, props.now) : 'just now'} · {card.build.builtCount} {card.build.builtCount === 1 ? 'feature' : 'features'} built</span>
 					</p>
+					</>
+					) : (
+						<p className="compact-card-note"><span className="compact-card-icon" aria-hidden="true"><Icon name="info" title="" /></span><span>Preview appears after the checks pass.</span></p>
+					)}
 				</>
 			) : null}
 			{design === 'repair' ? (
