@@ -237,6 +237,26 @@ from the previous release.
   into every worker that loads the server modules, and the schedules fixture
   worker (no `.md` loader) failed to boot until the rule moved.
 
+## Production deploy (2026-10-22): the focused project workspace and the post-morning fixes
+
+Owner-directed deploy ("deploy my latest changes immediately", this session):
+everything on `main` since the morning deploy — six commits, headed by the
+focused project workspace.
+
+| Item | Value |
+|---|---|
+| URL | https://caddie.jamalibrahim.dev |
+| Version id | `c7e7cc7a-1b52-426c-84c1-01eedd3fb7f2` |
+| Commit | `5f3574a` (deployed tree = main HEAD, no uncommitted code) |
+| Release gate | `release-check.ts` 49 PASS / 0 FAIL (deployment-authorization gate satisfied by the owner's instruction in-session); `deploy-preflight.ts` 18 PASS / 2 WARN (WARNs are the known shared dev/prod provider keys, recorded at G4) |
+| Build | `CLOUDFLARE_ENV=production bun run build`; 205 public assets, 0 collisions; dry-run listed DB, LOADER, PREVIEW_DB and both Flue agents |
+| D1 | no new migrations (`0039` is current; `d1 migrations apply --remote` reported none pending) |
+| Deploy | `wrangler deploy --secrets-file .prod.vars` from `apps/app` |
+| Smoke | P17 live 5/5 PASS, receipt `lr_5bf0b08f5db1bbcb` at `5f3574a46804`; live SPA asset hash `index-DcYqzncY.js` equals the local production build |
+| Behavior | ships `5f3574a` focused project workspace (four steps, compact chat, flat page) plus `652a76d` brief card plain words, `4fd6a9f` half-window chat on large screens, `1f249a7` card self-link removal, `245529a` paused-after-approval keeps Plan approved, `f7bb7c0` honest paused/running build buttons |
+
+Owner sign-in after the smoke is the remaining by-hand step (runbook §7).
+
 ## Production deploy (2026-10-22): the preview works, and the build cannot be wrong
 
 The fix for the blank/offline preview, plus the guard that stops a build from
