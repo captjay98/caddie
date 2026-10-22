@@ -274,9 +274,11 @@ export const MODEL_ROLES = {
 	/** Cheap bounded helper calls (query shaping, summarization). LIBERATED AS
 	 *  AN EXPERIMENT ON 2026-10-20 (owner asked to try Nemotron-3.5-Lightning)
 	 *  and REVERTED AGAIN the same day: on the real rules prompt at temperature
-	 *  0 the model returned 17,867 chars of narrated reasoning and no JSON even
-	 *  at the route's 4,096 cap (`finish_reason: length`); the G1 probe at 512
-	 *  also failed. Nano keeps its reasoning in `reasoning_content` and returns
+	 *  0 the model returned `finish_reason: length` with no parseable JSON at
+	 *  the route's 4,096 cap (1,482 in / 4,096 out), its narration inside
+	 *  `content` rather than `reasoning_content` (execution-ledger
+	 *  probe-lightning receipt, 2026-10-20); the G1 probe at 512 also failed.
+	 *  Nano keeps its reasoning in `reasoning_content` and returns
 	 *  claims whose quotes are verbatim in the page — provided the output cap is
 	 *  generous, see its entry. Both routes cost the same ($0.06/$0.24), so
 	 *  staying on Nano gives up no saving. */
