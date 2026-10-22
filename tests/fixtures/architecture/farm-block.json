@@ -1,0 +1,4411 @@
+{
+  "version": 2,
+  "signIn": "required",
+  "team": {
+    "table": "farms",
+    "plain": "A farm and the people on it",
+    "roles": [
+      "owner",
+      "manager",
+      "worker"
+    ],
+    "creatorRole": "owner"
+  },
+  "modules": [
+    {
+      "id": "core",
+      "plain": "Farms, people and roles",
+      "dependsOn": []
+    },
+    {
+      "id": "structures",
+      "plain": "Barns, pens and animals",
+      "dependsOn": [
+        "core"
+      ]
+    },
+    {
+      "id": "events",
+      "plain": "Farm events, health and production",
+      "dependsOn": [
+        "structures"
+      ]
+    },
+    {
+      "id": "feed",
+      "plain": "Feed stock and use",
+      "dependsOn": [
+        "structures"
+      ]
+    },
+    {
+      "id": "money",
+      "plain": "Sales, expenses and suppliers",
+      "dependsOn": [
+        "core"
+      ]
+    },
+    {
+      "id": "tasks",
+      "plain": "Tasks for the team",
+      "dependsOn": [
+        "core"
+      ]
+    },
+    {
+      "id": "insights",
+      "plain": "AI insights on photos",
+      "dependsOn": [
+        "structures"
+      ]
+    },
+    {
+      "id": "notifications",
+      "plain": "Notifications and invites",
+      "dependsOn": [
+        "core"
+      ]
+    },
+    {
+      "id": "subscriptions",
+      "plain": "Subscriptions in test mode",
+      "dependsOn": [
+        "core"
+      ]
+    }
+  ],
+  "tables": [
+    {
+      "name": "farms",
+      "module": "core",
+      "plain": "A farm and the people on it",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "name",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "region",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "members",
+      "module": "core",
+      "plain": "A person on a farm",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "personName",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "role",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "structures",
+      "module": "structures",
+      "plain": "A barn or pen",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "name",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "farmId",
+          "type": "text",
+          "references": "farms"
+        }
+      ]
+    },
+    {
+      "name": "units",
+      "module": "structures",
+      "plain": "A production unit",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "label",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "structureId",
+          "type": "text",
+          "references": "structures"
+        }
+      ]
+    },
+    {
+      "name": "animals",
+      "module": "structures",
+      "plain": "Each animal",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "tag",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "unitId",
+          "type": "text",
+          "references": "units"
+        },
+        {
+          "name": "weight",
+          "type": "real",
+          "references": null
+        },
+        {
+          "name": "alive",
+          "type": "boolean",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "events",
+      "module": "events",
+      "plain": "Something that happened",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "animalId",
+          "type": "text",
+          "references": "animals"
+        },
+        {
+          "name": "at",
+          "type": "datetime",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "health_records",
+      "module": "events",
+      "plain": "A health check",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "animalId",
+          "type": "text",
+          "references": "animals"
+        },
+        {
+          "name": "note",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "production_logs",
+      "module": "events",
+      "plain": "Daily production",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "unitId",
+          "type": "text",
+          "references": "units"
+        },
+        {
+          "name": "amount",
+          "type": "real",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "feed_stock",
+      "module": "feed",
+      "plain": "Feed in store",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "name",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "kg",
+          "type": "real",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "feed_uses",
+      "module": "feed",
+      "plain": "Feed given out",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "feedId",
+          "type": "text",
+          "references": "feed_stock"
+        },
+        {
+          "name": "unitId",
+          "type": "text",
+          "references": "units"
+        },
+        {
+          "name": "kg",
+          "type": "real",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "feed_orders",
+      "module": "feed",
+      "plain": "A feed order",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "feedId",
+          "type": "text",
+          "references": "feed_stock"
+        },
+        {
+          "name": "kg",
+          "type": "real",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "suppliers",
+      "module": "money",
+      "plain": "A supplier",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "name",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "phone",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "sales",
+      "module": "money",
+      "plain": "A sale",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "item",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "amountMinor",
+          "type": "integer",
+          "references": null
+        },
+        {
+          "name": "at",
+          "type": "datetime",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "expenses",
+      "module": "money",
+      "plain": "An expense",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "reason",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "amountMinor",
+          "type": "integer",
+          "references": null
+        },
+        {
+          "name": "supplierId",
+          "type": "text",
+          "references": "suppliers"
+        }
+      ]
+    },
+    {
+      "name": "invoices",
+      "module": "money",
+      "plain": "An invoice",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "supplierId",
+          "type": "text",
+          "references": "suppliers"
+        },
+        {
+          "name": "amountMinor",
+          "type": "integer",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "tasks",
+      "module": "tasks",
+      "plain": "A task",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "title",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "done",
+          "type": "boolean",
+          "references": null
+        },
+        {
+          "name": "assigneeId",
+          "type": "text",
+          "references": "members"
+        }
+      ]
+    },
+    {
+      "name": "task_comments",
+      "module": "tasks",
+      "plain": "A comment on a task",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "taskId",
+          "type": "text",
+          "references": "tasks"
+        },
+        {
+          "name": "body",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "photos",
+      "module": "insights",
+      "plain": "A photo",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "animalId",
+          "type": "text",
+          "references": "animals"
+        },
+        {
+          "name": "image",
+          "type": "file",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "insights",
+      "module": "insights",
+      "plain": "An AI insight",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "photoId",
+          "type": "text",
+          "references": "photos"
+        },
+        {
+          "name": "text",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "notifications",
+      "module": "notifications",
+      "plain": "A notification",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "title",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "body",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "seen",
+          "type": "boolean",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "invites",
+      "module": "notifications",
+      "plain": "An invitation",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "email",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "token",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "billing_profiles",
+      "module": "subscriptions",
+      "plain": "A billing profile",
+      "owner": "person",
+      "fields": [
+        {
+          "name": "planId",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "receipts",
+      "module": "subscriptions",
+      "plain": "A test receipt",
+      "owner": "person",
+      "fields": [
+        {
+          "name": "amountMinor",
+          "type": "integer",
+          "references": null
+        },
+        {
+          "name": "outcome",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "breeds",
+      "module": "core",
+      "plain": "A breed (shared reference)",
+      "owner": "shared",
+      "fields": [
+        {
+          "name": "name",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "settings",
+      "module": "core",
+      "plain": "Farm settings",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "key",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "value",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "vaccinations",
+      "module": "events",
+      "plain": "A vaccination",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "animalId",
+          "type": "text",
+          "references": "animals"
+        },
+        {
+          "name": "vaccine",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "weights",
+      "module": "events",
+      "plain": "A weigh-in",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "animalId",
+          "type": "text",
+          "references": "animals"
+        },
+        {
+          "name": "kg",
+          "type": "real",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "feed_formulas",
+      "module": "feed",
+      "plain": "A feed formula",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "name",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "note",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "payments_in",
+      "module": "money",
+      "plain": "A customer payment",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "saleId",
+          "type": "text",
+          "references": "sales"
+        },
+        {
+          "name": "amountMinor",
+          "type": "integer",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "budgets",
+      "module": "money",
+      "plain": "A budget line",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "label",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "amountMinor",
+          "type": "integer",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "task_lists",
+      "module": "tasks",
+      "plain": "A list of tasks",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "name",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "insight_feedback",
+      "module": "insights",
+      "plain": "Was an insight useful",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "insightId",
+          "type": "text",
+          "references": "insights"
+        },
+        {
+          "name": "useful",
+          "type": "boolean",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "alerts",
+      "module": "notifications",
+      "plain": "An alert rule",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "metric",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "threshold",
+          "type": "real",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "plan_changes",
+      "module": "subscriptions",
+      "plain": "A plan change",
+      "owner": "person",
+      "fields": [
+        {
+          "name": "fromPlan",
+          "type": "text",
+          "references": null
+        },
+        {
+          "name": "toPlan",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "production_targets",
+      "module": "events",
+      "plain": "A production target",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "unitId",
+          "type": "text",
+          "references": "units"
+        },
+        {
+          "name": "target",
+          "type": "real",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "supplier_contacts",
+      "module": "money",
+      "plain": "A supplier contact",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "supplierId",
+          "type": "text",
+          "references": "suppliers"
+        },
+        {
+          "name": "name",
+          "type": "text",
+          "references": null
+        }
+      ]
+    },
+    {
+      "name": "mortality",
+      "module": "events",
+      "plain": "A mortality record",
+      "owner": "team",
+      "fields": [
+        {
+          "name": "animalId",
+          "type": "text",
+          "references": "animals"
+        },
+        {
+          "name": "cause",
+          "type": "text",
+          "references": null
+        }
+      ]
+    }
+  ],
+  "routes": [
+    {
+      "id": "farms.create",
+      "module": "core",
+      "feature": "farm-registry",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/farms",
+      "table": "farms",
+      "plain": "Add to farms",
+      "access": "signed-in",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Green Acres"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "farms.read",
+      "module": "core",
+      "feature": "farm-registry",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/farms/:id",
+      "table": "farms",
+      "plain": "See one farms",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "farms.list",
+      "module": "core",
+      "feature": "farm-registry",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/farms",
+      "table": "farms",
+      "plain": "List farms",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "farms.update",
+      "module": "core",
+      "feature": "farm-registry",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/farms/:id",
+      "table": "farms",
+      "plain": "Change a farms",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Green Acres"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "farms.delete",
+      "module": "core",
+      "feature": "farm-registry",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/farms/:id",
+      "table": "farms",
+      "plain": "Remove a farms",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "members.create",
+      "module": "core",
+      "feature": "people",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/members",
+      "table": "members",
+      "plain": "Add to members",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "personName",
+          "type": "text",
+          "example": "Ada"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "members.read",
+      "module": "core",
+      "feature": "people",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/members/:id",
+      "table": "members",
+      "plain": "See one members",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "members.list",
+      "module": "core",
+      "feature": "people",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/members",
+      "table": "members",
+      "plain": "List members",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "members.update",
+      "module": "core",
+      "feature": "people",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/members/:id",
+      "table": "members",
+      "plain": "Change a members",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "personName",
+          "type": "text",
+          "example": "Ada"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "members.delete",
+      "module": "core",
+      "feature": "people",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/members/:id",
+      "table": "members",
+      "plain": "Remove a members",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "structures.create",
+      "module": "structures",
+      "feature": "structures",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/structures",
+      "table": "structures",
+      "plain": "Add to structures",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Barn A"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "structures.read",
+      "module": "structures",
+      "feature": "structures",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/structures/:id",
+      "table": "structures",
+      "plain": "See one structures",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "structures.list",
+      "module": "structures",
+      "feature": "structures",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/structures",
+      "table": "structures",
+      "plain": "List structures",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "structures.update",
+      "module": "structures",
+      "feature": "structures",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/structures/:id",
+      "table": "structures",
+      "plain": "Change a structures",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Barn A"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "structures.delete",
+      "module": "structures",
+      "feature": "structures",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/structures/:id",
+      "table": "structures",
+      "plain": "Remove a structures",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "units.create",
+      "module": "structures",
+      "feature": "units",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/units",
+      "table": "units",
+      "plain": "Add to units",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "label",
+          "type": "text",
+          "example": "Pen 3"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "units.read",
+      "module": "structures",
+      "feature": "units",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/units/:id",
+      "table": "units",
+      "plain": "See one units",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "units.list",
+      "module": "structures",
+      "feature": "units",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/units",
+      "table": "units",
+      "plain": "List units",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "units.update",
+      "module": "structures",
+      "feature": "units",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/units/:id",
+      "table": "units",
+      "plain": "Change a units",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "label",
+          "type": "text",
+          "example": "Pen 3"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "units.delete",
+      "module": "structures",
+      "feature": "units",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/units/:id",
+      "table": "units",
+      "plain": "Remove a units",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "animals.create",
+      "module": "structures",
+      "feature": "animals",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/animals",
+      "table": "animals",
+      "plain": "Add to animals",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "tag",
+          "type": "text",
+          "example": "A-128"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "animals.read",
+      "module": "structures",
+      "feature": "animals",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/animals/:id",
+      "table": "animals",
+      "plain": "See one animals",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "animals.list",
+      "module": "structures",
+      "feature": "animals",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/animals",
+      "table": "animals",
+      "plain": "List animals",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "animals.update",
+      "module": "structures",
+      "feature": "animals",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/animals/:id",
+      "table": "animals",
+      "plain": "Change a animals",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "tag",
+          "type": "text",
+          "example": "A-128"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "animals.delete",
+      "module": "structures",
+      "feature": "animals",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/animals/:id",
+      "table": "animals",
+      "plain": "Remove a animals",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "events.create",
+      "module": "events",
+      "feature": "events",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/events",
+      "table": "events",
+      "plain": "Add to events",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "kind",
+          "type": "text",
+          "example": "birth"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "events.read",
+      "module": "events",
+      "feature": "events",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/events/:id",
+      "table": "events",
+      "plain": "See one events",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "events.list",
+      "module": "events",
+      "feature": "events",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/events",
+      "table": "events",
+      "plain": "List events",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "events.update",
+      "module": "events",
+      "feature": "events",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/events/:id",
+      "table": "events",
+      "plain": "Change a events",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "kind",
+          "type": "text",
+          "example": "birth"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "events.delete",
+      "module": "events",
+      "feature": "events",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/events/:id",
+      "table": "events",
+      "plain": "Remove a events",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "health_records.create",
+      "module": "events",
+      "feature": "health",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/health_records",
+      "table": "health_records",
+      "plain": "Add to health_records",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "note",
+          "type": "text",
+          "example": "Vaccinated"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "health_records.read",
+      "module": "events",
+      "feature": "health",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/health_records/:id",
+      "table": "health_records",
+      "plain": "See one health_records",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "health_records.list",
+      "module": "events",
+      "feature": "health",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/health_records",
+      "table": "health_records",
+      "plain": "List health_records",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "health_records.update",
+      "module": "events",
+      "feature": "health",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/health_records/:id",
+      "table": "health_records",
+      "plain": "Change a health_records",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "note",
+          "type": "text",
+          "example": "Vaccinated"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "health_records.delete",
+      "module": "events",
+      "feature": "health",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/health_records/:id",
+      "table": "health_records",
+      "plain": "Remove a health_records",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "production_logs.create",
+      "module": "events",
+      "feature": "production",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/production_logs",
+      "table": "production_logs",
+      "plain": "Add to production_logs",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "amount",
+          "type": "text",
+          "example": "12.5"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "production_logs.read",
+      "module": "events",
+      "feature": "production",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/production_logs/:id",
+      "table": "production_logs",
+      "plain": "See one production_logs",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "production_logs.list",
+      "module": "events",
+      "feature": "production",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/production_logs",
+      "table": "production_logs",
+      "plain": "List production_logs",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "production_logs.update",
+      "module": "events",
+      "feature": "production",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/production_logs/:id",
+      "table": "production_logs",
+      "plain": "Change a production_logs",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "amount",
+          "type": "text",
+          "example": "12.5"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "production_logs.delete",
+      "module": "events",
+      "feature": "production",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/production_logs/:id",
+      "table": "production_logs",
+      "plain": "Remove a production_logs",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "feed_stock.create",
+      "module": "feed",
+      "feature": "feed-stock",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/feed_stock",
+      "table": "feed_stock",
+      "plain": "Add to feed_stock",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Layer mash"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_stock.read",
+      "module": "feed",
+      "feature": "feed-stock",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/feed_stock/:id",
+      "table": "feed_stock",
+      "plain": "See one feed_stock",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_stock.list",
+      "module": "feed",
+      "feature": "feed-stock",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/feed_stock",
+      "table": "feed_stock",
+      "plain": "List feed_stock",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_stock.update",
+      "module": "feed",
+      "feature": "feed-stock",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/feed_stock/:id",
+      "table": "feed_stock",
+      "plain": "Change a feed_stock",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Layer mash"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_stock.delete",
+      "module": "feed",
+      "feature": "feed-stock",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/feed_stock/:id",
+      "table": "feed_stock",
+      "plain": "Remove a feed_stock",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "feed_uses.create",
+      "module": "feed",
+      "feature": "feed-use",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/feed_uses",
+      "table": "feed_uses",
+      "plain": "Add to feed_uses",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "kg",
+          "type": "text",
+          "example": "8"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_uses.read",
+      "module": "feed",
+      "feature": "feed-use",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/feed_uses/:id",
+      "table": "feed_uses",
+      "plain": "See one feed_uses",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_uses.list",
+      "module": "feed",
+      "feature": "feed-use",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/feed_uses",
+      "table": "feed_uses",
+      "plain": "List feed_uses",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_uses.update",
+      "module": "feed",
+      "feature": "feed-use",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/feed_uses/:id",
+      "table": "feed_uses",
+      "plain": "Change a feed_uses",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "kg",
+          "type": "text",
+          "example": "8"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_uses.delete",
+      "module": "feed",
+      "feature": "feed-use",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/feed_uses/:id",
+      "table": "feed_uses",
+      "plain": "Remove a feed_uses",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "feed_orders.create",
+      "module": "feed",
+      "feature": "feed-orders",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/feed_orders",
+      "table": "feed_orders",
+      "plain": "Add to feed_orders",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "kg",
+          "type": "text",
+          "example": "500"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_orders.read",
+      "module": "feed",
+      "feature": "feed-orders",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/feed_orders/:id",
+      "table": "feed_orders",
+      "plain": "See one feed_orders",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_orders.list",
+      "module": "feed",
+      "feature": "feed-orders",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/feed_orders",
+      "table": "feed_orders",
+      "plain": "List feed_orders",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_orders.update",
+      "module": "feed",
+      "feature": "feed-orders",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/feed_orders/:id",
+      "table": "feed_orders",
+      "plain": "Change a feed_orders",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "kg",
+          "type": "text",
+          "example": "500"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_orders.delete",
+      "module": "feed",
+      "feature": "feed-orders",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/feed_orders/:id",
+      "table": "feed_orders",
+      "plain": "Remove a feed_orders",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "suppliers.create",
+      "module": "money",
+      "feature": "suppliers",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/suppliers",
+      "table": "suppliers",
+      "plain": "Add to suppliers",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "AgriCo"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "suppliers.read",
+      "module": "money",
+      "feature": "suppliers",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/suppliers/:id",
+      "table": "suppliers",
+      "plain": "See one suppliers",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "suppliers.list",
+      "module": "money",
+      "feature": "suppliers",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/suppliers",
+      "table": "suppliers",
+      "plain": "List suppliers",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "suppliers.update",
+      "module": "money",
+      "feature": "suppliers",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/suppliers/:id",
+      "table": "suppliers",
+      "plain": "Change a suppliers",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "AgriCo"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "suppliers.delete",
+      "module": "money",
+      "feature": "suppliers",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/suppliers/:id",
+      "table": "suppliers",
+      "plain": "Remove a suppliers",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "sales.create",
+      "module": "money",
+      "feature": "sales",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/sales",
+      "table": "sales",
+      "plain": "Add to sales",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "item",
+          "type": "text",
+          "example": "Eggs"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "sales.read",
+      "module": "money",
+      "feature": "sales",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/sales/:id",
+      "table": "sales",
+      "plain": "See one sales",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "sales.list",
+      "module": "money",
+      "feature": "sales",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/sales",
+      "table": "sales",
+      "plain": "List sales",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "sales.update",
+      "module": "money",
+      "feature": "sales",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/sales/:id",
+      "table": "sales",
+      "plain": "Change a sales",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "item",
+          "type": "text",
+          "example": "Eggs"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "sales.delete",
+      "module": "money",
+      "feature": "sales",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/sales/:id",
+      "table": "sales",
+      "plain": "Remove a sales",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "expenses.create",
+      "module": "money",
+      "feature": "expenses",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/expenses",
+      "table": "expenses",
+      "plain": "Add to expenses",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "reason",
+          "type": "text",
+          "example": "Feed"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "expenses.read",
+      "module": "money",
+      "feature": "expenses",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/expenses/:id",
+      "table": "expenses",
+      "plain": "See one expenses",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "expenses.list",
+      "module": "money",
+      "feature": "expenses",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/expenses",
+      "table": "expenses",
+      "plain": "List expenses",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "expenses.update",
+      "module": "money",
+      "feature": "expenses",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/expenses/:id",
+      "table": "expenses",
+      "plain": "Change a expenses",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "reason",
+          "type": "text",
+          "example": "Feed"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "expenses.delete",
+      "module": "money",
+      "feature": "expenses",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/expenses/:id",
+      "table": "expenses",
+      "plain": "Remove a expenses",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "invoices.create",
+      "module": "money",
+      "feature": "invoices",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/invoices",
+      "table": "invoices",
+      "plain": "Add to invoices",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "amountMinor",
+          "type": "text",
+          "example": "9000"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "invoices.read",
+      "module": "money",
+      "feature": "invoices",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/invoices/:id",
+      "table": "invoices",
+      "plain": "See one invoices",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "invoices.list",
+      "module": "money",
+      "feature": "invoices",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/invoices",
+      "table": "invoices",
+      "plain": "List invoices",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "invoices.update",
+      "module": "money",
+      "feature": "invoices",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/invoices/:id",
+      "table": "invoices",
+      "plain": "Change a invoices",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "amountMinor",
+          "type": "text",
+          "example": "9000"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "invoices.delete",
+      "module": "money",
+      "feature": "invoices",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/invoices/:id",
+      "table": "invoices",
+      "plain": "Remove a invoices",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "tasks.create",
+      "module": "tasks",
+      "feature": "tasks",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/tasks",
+      "table": "tasks",
+      "plain": "Add to tasks",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "title",
+          "type": "text",
+          "example": "Clean pen 3"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "tasks.read",
+      "module": "tasks",
+      "feature": "tasks",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/tasks/:id",
+      "table": "tasks",
+      "plain": "See one tasks",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "tasks.list",
+      "module": "tasks",
+      "feature": "tasks",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/tasks",
+      "table": "tasks",
+      "plain": "List tasks",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "tasks.update",
+      "module": "tasks",
+      "feature": "tasks",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/tasks/:id",
+      "table": "tasks",
+      "plain": "Change a tasks",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "title",
+          "type": "text",
+          "example": "Clean pen 3"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "tasks.delete",
+      "module": "tasks",
+      "feature": "tasks",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/tasks/:id",
+      "table": "tasks",
+      "plain": "Remove a tasks",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "task_comments.create",
+      "module": "tasks",
+      "feature": "task-comments",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/task_comments",
+      "table": "task_comments",
+      "plain": "Add to task_comments",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "body",
+          "type": "text",
+          "example": "Done by noon"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "task_comments.read",
+      "module": "tasks",
+      "feature": "task-comments",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/task_comments/:id",
+      "table": "task_comments",
+      "plain": "See one task_comments",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "task_comments.list",
+      "module": "tasks",
+      "feature": "task-comments",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/task_comments",
+      "table": "task_comments",
+      "plain": "List task_comments",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "task_comments.update",
+      "module": "tasks",
+      "feature": "task-comments",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/task_comments/:id",
+      "table": "task_comments",
+      "plain": "Change a task_comments",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "body",
+          "type": "text",
+          "example": "Done by noon"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "task_comments.delete",
+      "module": "tasks",
+      "feature": "task-comments",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/task_comments/:id",
+      "table": "task_comments",
+      "plain": "Remove a task_comments",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "photos.create",
+      "module": "insights",
+      "feature": "photos",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/photos",
+      "table": "photos",
+      "plain": "Add to photos",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "image",
+          "type": "text",
+          "example": "file-id"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "photos.read",
+      "module": "insights",
+      "feature": "photos",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/photos/:id",
+      "table": "photos",
+      "plain": "See one photos",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "photos.list",
+      "module": "insights",
+      "feature": "photos",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/photos",
+      "table": "photos",
+      "plain": "List photos",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "photos.update",
+      "module": "insights",
+      "feature": "photos",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/photos/:id",
+      "table": "photos",
+      "plain": "Change a photos",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "image",
+          "type": "text",
+          "example": "file-id"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "photos.delete",
+      "module": "insights",
+      "feature": "photos",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/photos/:id",
+      "table": "photos",
+      "plain": "Remove a photos",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "insights.create",
+      "module": "insights",
+      "feature": "insights",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/insights",
+      "table": "insights",
+      "plain": "Add to insights",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "text",
+          "type": "text",
+          "example": "Looks healthy"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "insights.read",
+      "module": "insights",
+      "feature": "insights",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/insights/:id",
+      "table": "insights",
+      "plain": "See one insights",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "insights.list",
+      "module": "insights",
+      "feature": "insights",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/insights",
+      "table": "insights",
+      "plain": "List insights",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "insights.update",
+      "module": "insights",
+      "feature": "insights",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/insights/:id",
+      "table": "insights",
+      "plain": "Change a insights",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "text",
+          "type": "text",
+          "example": "Looks healthy"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "insights.delete",
+      "module": "insights",
+      "feature": "insights",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/insights/:id",
+      "table": "insights",
+      "plain": "Remove a insights",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "notifications.create",
+      "module": "notifications",
+      "feature": "notifications",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/notifications",
+      "table": "notifications",
+      "plain": "Add to notifications",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "title",
+          "type": "text",
+          "example": "Low feed"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "notifications.read",
+      "module": "notifications",
+      "feature": "notifications",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/notifications/:id",
+      "table": "notifications",
+      "plain": "See one notifications",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "notifications.list",
+      "module": "notifications",
+      "feature": "notifications",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/notifications",
+      "table": "notifications",
+      "plain": "List notifications",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "notifications.update",
+      "module": "notifications",
+      "feature": "notifications",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/notifications/:id",
+      "table": "notifications",
+      "plain": "Change a notifications",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "title",
+          "type": "text",
+          "example": "Low feed"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "notifications.delete",
+      "module": "notifications",
+      "feature": "notifications",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/notifications/:id",
+      "table": "notifications",
+      "plain": "Remove a notifications",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "invites.create",
+      "module": "notifications",
+      "feature": "invites",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/invites",
+      "table": "invites",
+      "plain": "Add to invites",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "email",
+          "type": "text",
+          "example": "friend@example.com"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "invites.read",
+      "module": "notifications",
+      "feature": "invites",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/invites/:id",
+      "table": "invites",
+      "plain": "See one invites",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "invites.list",
+      "module": "notifications",
+      "feature": "invites",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/invites",
+      "table": "invites",
+      "plain": "List invites",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "invites.update",
+      "module": "notifications",
+      "feature": "invites",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/invites/:id",
+      "table": "invites",
+      "plain": "Change a invites",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "email",
+          "type": "text",
+          "example": "friend@example.com"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "invites.delete",
+      "module": "notifications",
+      "feature": "invites",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/invites/:id",
+      "table": "invites",
+      "plain": "Remove a invites",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "billing_profiles.create",
+      "module": "subscriptions",
+      "feature": "billing",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/billing_profiles",
+      "table": "billing_profiles",
+      "plain": "Add to billing_profiles",
+      "access": "person",
+      "request": [
+        {
+          "name": "planId",
+          "type": "text",
+          "example": "pro"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "billing_profiles.read",
+      "module": "subscriptions",
+      "feature": "billing",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/billing_profiles/:id",
+      "table": "billing_profiles",
+      "plain": "See one billing_profiles",
+      "access": "person",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "billing_profiles.list",
+      "module": "subscriptions",
+      "feature": "billing",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/billing_profiles",
+      "table": "billing_profiles",
+      "plain": "List billing_profiles",
+      "access": "person",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "billing_profiles.update",
+      "module": "subscriptions",
+      "feature": "billing",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/billing_profiles/:id",
+      "table": "billing_profiles",
+      "plain": "Change a billing_profiles",
+      "access": "person",
+      "request": [
+        {
+          "name": "planId",
+          "type": "text",
+          "example": "pro"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "billing_profiles.delete",
+      "module": "subscriptions",
+      "feature": "billing",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/billing_profiles/:id",
+      "table": "billing_profiles",
+      "plain": "Remove a billing_profiles",
+      "access": "person",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "receipts.create",
+      "module": "subscriptions",
+      "feature": "receipts",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/receipts",
+      "table": "receipts",
+      "plain": "Add to receipts",
+      "access": "person",
+      "request": [
+        {
+          "name": "outcome",
+          "type": "text",
+          "example": "paid"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "receipts.read",
+      "module": "subscriptions",
+      "feature": "receipts",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/receipts/:id",
+      "table": "receipts",
+      "plain": "See one receipts",
+      "access": "person",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "receipts.list",
+      "module": "subscriptions",
+      "feature": "receipts",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/receipts",
+      "table": "receipts",
+      "plain": "List receipts",
+      "access": "person",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "receipts.update",
+      "module": "subscriptions",
+      "feature": "receipts",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/receipts/:id",
+      "table": "receipts",
+      "plain": "Change a receipts",
+      "access": "person",
+      "request": [
+        {
+          "name": "outcome",
+          "type": "text",
+          "example": "paid"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "receipts.delete",
+      "module": "subscriptions",
+      "feature": "receipts",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/receipts/:id",
+      "table": "receipts",
+      "plain": "Remove a receipts",
+      "access": "person",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "breeds.list",
+      "module": "core",
+      "feature": "breeds",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/breeds",
+      "table": "breeds",
+      "plain": "List breeds",
+      "access": "signed-in",
+      "request": [],
+      "response": [
+        "id",
+        "name"
+      ]
+    },
+    {
+      "id": "settings.create",
+      "module": "core",
+      "feature": "settings",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/settings",
+      "table": "settings",
+      "plain": "Add to settings",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "key",
+          "type": "text",
+          "example": "timezone"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "settings.read",
+      "module": "core",
+      "feature": "settings",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/settings/:id",
+      "table": "settings",
+      "plain": "See one settings",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "settings.list",
+      "module": "core",
+      "feature": "settings",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/settings",
+      "table": "settings",
+      "plain": "List settings",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "settings.update",
+      "module": "core",
+      "feature": "settings",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/settings/:id",
+      "table": "settings",
+      "plain": "Change a settings",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "key",
+          "type": "text",
+          "example": "timezone"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "settings.delete",
+      "module": "core",
+      "feature": "settings",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/settings/:id",
+      "table": "settings",
+      "plain": "Remove a settings",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "vaccinations.create",
+      "module": "events",
+      "feature": "vaccinations",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/vaccinations",
+      "table": "vaccinations",
+      "plain": "Add to vaccinations",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "vaccine",
+          "type": "text",
+          "example": "Newcastle"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "vaccinations.read",
+      "module": "events",
+      "feature": "vaccinations",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/vaccinations/:id",
+      "table": "vaccinations",
+      "plain": "See one vaccinations",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "vaccinations.list",
+      "module": "events",
+      "feature": "vaccinations",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/vaccinations",
+      "table": "vaccinations",
+      "plain": "List vaccinations",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "vaccinations.update",
+      "module": "events",
+      "feature": "vaccinations",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/vaccinations/:id",
+      "table": "vaccinations",
+      "plain": "Change a vaccinations",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "vaccine",
+          "type": "text",
+          "example": "Newcastle"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "vaccinations.delete",
+      "module": "events",
+      "feature": "vaccinations",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/vaccinations/:id",
+      "table": "vaccinations",
+      "plain": "Remove a vaccinations",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "weights.create",
+      "module": "events",
+      "feature": "weights",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/weights",
+      "table": "weights",
+      "plain": "Add to weights",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "kg",
+          "type": "text",
+          "example": "2.3"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "weights.read",
+      "module": "events",
+      "feature": "weights",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/weights/:id",
+      "table": "weights",
+      "plain": "See one weights",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "weights.list",
+      "module": "events",
+      "feature": "weights",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/weights",
+      "table": "weights",
+      "plain": "List weights",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "weights.update",
+      "module": "events",
+      "feature": "weights",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/weights/:id",
+      "table": "weights",
+      "plain": "Change a weights",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "kg",
+          "type": "text",
+          "example": "2.3"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "weights.delete",
+      "module": "events",
+      "feature": "weights",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/weights/:id",
+      "table": "weights",
+      "plain": "Remove a weights",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "feed_formulas.create",
+      "module": "feed",
+      "feature": "formulas",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/feed_formulas",
+      "table": "feed_formulas",
+      "plain": "Add to feed_formulas",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Starter"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_formulas.read",
+      "module": "feed",
+      "feature": "formulas",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/feed_formulas/:id",
+      "table": "feed_formulas",
+      "plain": "See one feed_formulas",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_formulas.list",
+      "module": "feed",
+      "feature": "formulas",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/feed_formulas",
+      "table": "feed_formulas",
+      "plain": "List feed_formulas",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_formulas.update",
+      "module": "feed",
+      "feature": "formulas",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/feed_formulas/:id",
+      "table": "feed_formulas",
+      "plain": "Change a feed_formulas",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Starter"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "feed_formulas.delete",
+      "module": "feed",
+      "feature": "formulas",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/feed_formulas/:id",
+      "table": "feed_formulas",
+      "plain": "Remove a feed_formulas",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "payments_in.create",
+      "module": "money",
+      "feature": "payments-in",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/payments_in",
+      "table": "payments_in",
+      "plain": "Add to payments_in",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "amountMinor",
+          "type": "text",
+          "example": "1500"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "payments_in.read",
+      "module": "money",
+      "feature": "payments-in",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/payments_in/:id",
+      "table": "payments_in",
+      "plain": "See one payments_in",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "payments_in.list",
+      "module": "money",
+      "feature": "payments-in",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/payments_in",
+      "table": "payments_in",
+      "plain": "List payments_in",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "payments_in.update",
+      "module": "money",
+      "feature": "payments-in",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/payments_in/:id",
+      "table": "payments_in",
+      "plain": "Change a payments_in",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "amountMinor",
+          "type": "text",
+          "example": "1500"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "payments_in.delete",
+      "module": "money",
+      "feature": "payments-in",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/payments_in/:id",
+      "table": "payments_in",
+      "plain": "Remove a payments_in",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "budgets.create",
+      "module": "money",
+      "feature": "budgets",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/budgets",
+      "table": "budgets",
+      "plain": "Add to budgets",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "label",
+          "type": "text",
+          "example": "Feed Q1"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "budgets.read",
+      "module": "money",
+      "feature": "budgets",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/budgets/:id",
+      "table": "budgets",
+      "plain": "See one budgets",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "budgets.list",
+      "module": "money",
+      "feature": "budgets",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/budgets",
+      "table": "budgets",
+      "plain": "List budgets",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "budgets.update",
+      "module": "money",
+      "feature": "budgets",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/budgets/:id",
+      "table": "budgets",
+      "plain": "Change a budgets",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "label",
+          "type": "text",
+          "example": "Feed Q1"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "budgets.delete",
+      "module": "money",
+      "feature": "budgets",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/budgets/:id",
+      "table": "budgets",
+      "plain": "Remove a budgets",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "task_lists.create",
+      "module": "tasks",
+      "feature": "task-lists",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/task_lists",
+      "table": "task_lists",
+      "plain": "Add to task_lists",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Morning round"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "task_lists.read",
+      "module": "tasks",
+      "feature": "task-lists",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/task_lists/:id",
+      "table": "task_lists",
+      "plain": "See one task_lists",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "task_lists.list",
+      "module": "tasks",
+      "feature": "task-lists",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/task_lists",
+      "table": "task_lists",
+      "plain": "List task_lists",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "task_lists.update",
+      "module": "tasks",
+      "feature": "task-lists",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/task_lists/:id",
+      "table": "task_lists",
+      "plain": "Change a task_lists",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Morning round"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "task_lists.delete",
+      "module": "tasks",
+      "feature": "task-lists",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/task_lists/:id",
+      "table": "task_lists",
+      "plain": "Remove a task_lists",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "insight_feedback.create",
+      "module": "insights",
+      "feature": "insight-feedback",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/insight_feedback",
+      "table": "insight_feedback",
+      "plain": "Add to insight_feedback",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "useful",
+          "type": "text",
+          "example": "true"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "insight_feedback.read",
+      "module": "insights",
+      "feature": "insight-feedback",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/insight_feedback/:id",
+      "table": "insight_feedback",
+      "plain": "See one insight_feedback",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "insight_feedback.list",
+      "module": "insights",
+      "feature": "insight-feedback",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/insight_feedback",
+      "table": "insight_feedback",
+      "plain": "List insight_feedback",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "insight_feedback.update",
+      "module": "insights",
+      "feature": "insight-feedback",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/insight_feedback/:id",
+      "table": "insight_feedback",
+      "plain": "Change a insight_feedback",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "useful",
+          "type": "text",
+          "example": "true"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "insight_feedback.delete",
+      "module": "insights",
+      "feature": "insight-feedback",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/insight_feedback/:id",
+      "table": "insight_feedback",
+      "plain": "Remove a insight_feedback",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "alerts.create",
+      "module": "notifications",
+      "feature": "alerts",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/alerts",
+      "table": "alerts",
+      "plain": "Add to alerts",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "metric",
+          "type": "text",
+          "example": "feed_kg"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "alerts.read",
+      "module": "notifications",
+      "feature": "alerts",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/alerts/:id",
+      "table": "alerts",
+      "plain": "See one alerts",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "alerts.list",
+      "module": "notifications",
+      "feature": "alerts",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/alerts",
+      "table": "alerts",
+      "plain": "List alerts",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "alerts.update",
+      "module": "notifications",
+      "feature": "alerts",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/alerts/:id",
+      "table": "alerts",
+      "plain": "Change a alerts",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "metric",
+          "type": "text",
+          "example": "feed_kg"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "alerts.delete",
+      "module": "notifications",
+      "feature": "alerts",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/alerts/:id",
+      "table": "alerts",
+      "plain": "Remove a alerts",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "plan_changes.create",
+      "module": "subscriptions",
+      "feature": "plan-changes",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/plan_changes",
+      "table": "plan_changes",
+      "plain": "Add to plan_changes",
+      "access": "person",
+      "request": [
+        {
+          "name": "toPlan",
+          "type": "text",
+          "example": "farm"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "plan_changes.read",
+      "module": "subscriptions",
+      "feature": "plan-changes",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/plan_changes/:id",
+      "table": "plan_changes",
+      "plain": "See one plan_changes",
+      "access": "person",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "plan_changes.list",
+      "module": "subscriptions",
+      "feature": "plan-changes",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/plan_changes",
+      "table": "plan_changes",
+      "plain": "List plan_changes",
+      "access": "person",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "plan_changes.update",
+      "module": "subscriptions",
+      "feature": "plan-changes",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/plan_changes/:id",
+      "table": "plan_changes",
+      "plain": "Change a plan_changes",
+      "access": "person",
+      "request": [
+        {
+          "name": "toPlan",
+          "type": "text",
+          "example": "farm"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "plan_changes.delete",
+      "module": "subscriptions",
+      "feature": "plan-changes",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/plan_changes/:id",
+      "table": "plan_changes",
+      "plain": "Remove a plan_changes",
+      "access": "person",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "production_targets.create",
+      "module": "events",
+      "feature": "targets",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/production_targets",
+      "table": "production_targets",
+      "plain": "Add to production_targets",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "target",
+          "type": "text",
+          "example": "100"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "production_targets.read",
+      "module": "events",
+      "feature": "targets",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/production_targets/:id",
+      "table": "production_targets",
+      "plain": "See one production_targets",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "production_targets.list",
+      "module": "events",
+      "feature": "targets",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/production_targets",
+      "table": "production_targets",
+      "plain": "List production_targets",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "production_targets.update",
+      "module": "events",
+      "feature": "targets",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/production_targets/:id",
+      "table": "production_targets",
+      "plain": "Change a production_targets",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "target",
+          "type": "text",
+          "example": "100"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "production_targets.delete",
+      "module": "events",
+      "feature": "targets",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/production_targets/:id",
+      "table": "production_targets",
+      "plain": "Remove a production_targets",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "supplier_contacts.create",
+      "module": "money",
+      "feature": "supplier-contacts",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/supplier_contacts",
+      "table": "supplier_contacts",
+      "plain": "Add to supplier_contacts",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Jane"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "supplier_contacts.read",
+      "module": "money",
+      "feature": "supplier-contacts",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/supplier_contacts/:id",
+      "table": "supplier_contacts",
+      "plain": "See one supplier_contacts",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "supplier_contacts.list",
+      "module": "money",
+      "feature": "supplier-contacts",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/supplier_contacts",
+      "table": "supplier_contacts",
+      "plain": "List supplier_contacts",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "supplier_contacts.update",
+      "module": "money",
+      "feature": "supplier-contacts",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/supplier_contacts/:id",
+      "table": "supplier_contacts",
+      "plain": "Change a supplier_contacts",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "name",
+          "type": "text",
+          "example": "Jane"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "supplier_contacts.delete",
+      "module": "money",
+      "feature": "supplier-contacts",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/supplier_contacts/:id",
+      "table": "supplier_contacts",
+      "plain": "Remove a supplier_contacts",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "mortality.create",
+      "module": "events",
+      "feature": "mortality",
+      "op": "create",
+      "method": "POST",
+      "path": "/api/teams/:teamId/mortality",
+      "table": "mortality",
+      "plain": "Add to mortality",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "cause",
+          "type": "text",
+          "example": "Illness"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "mortality.read",
+      "module": "events",
+      "feature": "mortality",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/teams/:teamId/mortality/:id",
+      "table": "mortality",
+      "plain": "See one mortality",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "mortality.list",
+      "module": "events",
+      "feature": "mortality",
+      "op": "list",
+      "method": "GET",
+      "path": "/api/teams/:teamId/mortality",
+      "table": "mortality",
+      "plain": "List mortality",
+      "access": "team",
+      "request": [],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "mortality.update",
+      "module": "events",
+      "feature": "mortality",
+      "op": "update",
+      "method": "PUT",
+      "path": "/api/teams/:teamId/mortality/:id",
+      "table": "mortality",
+      "plain": "Change a mortality",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "cause",
+          "type": "text",
+          "example": "Illness"
+        }
+      ],
+      "response": [
+        "id"
+      ]
+    },
+    {
+      "id": "mortality.delete",
+      "module": "events",
+      "feature": "mortality",
+      "op": "delete",
+      "method": "DELETE",
+      "path": "/api/teams/:teamId/mortality/:id",
+      "table": "mortality",
+      "plain": "Remove a mortality",
+      "access": "team-role:owner",
+      "request": [],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "admin.overview",
+      "module": "core",
+      "feature": "admin",
+      "op": "read",
+      "method": "GET",
+      "path": "/api/admin/overview",
+      "table": null,
+      "plain": "Admin overview",
+      "access": "admin",
+      "request": [],
+      "response": [
+        "counts"
+      ]
+    },
+    {
+      "id": "insights.run",
+      "module": "insights",
+      "feature": "insights",
+      "op": "action",
+      "method": "POST",
+      "path": "/api/insights/run",
+      "table": null,
+      "plain": "Make an insight from a photo",
+      "access": "team",
+      "request": [
+        {
+          "name": "photoId",
+          "type": "text",
+          "example": "file-id"
+        }
+      ],
+      "response": [
+        "text"
+      ]
+    },
+    {
+      "id": "invites.send",
+      "module": "notifications",
+      "feature": "invites",
+      "op": "action",
+      "method": "POST",
+      "path": "/api/teams/:teamId/invites/send",
+      "table": null,
+      "plain": "Send an invite",
+      "access": "team-role:owner",
+      "request": [
+        {
+          "name": "email",
+          "type": "text",
+          "example": "friend@example.com"
+        }
+      ],
+      "response": [
+        "ok"
+      ]
+    },
+    {
+      "id": "jobs.daily-summary",
+      "module": "notifications",
+      "feature": "summaries",
+      "op": "action",
+      "method": "POST",
+      "path": "/api/jobs/daily-summary",
+      "table": null,
+      "plain": "Sum up yesterday",
+      "access": "job",
+      "request": [],
+      "response": [
+        "summary"
+      ]
+    },
+    {
+      "id": "billing.export",
+      "module": "subscriptions",
+      "feature": "billing",
+      "op": "action",
+      "method": "POST",
+      "path": "/api/billing/export",
+      "table": null,
+      "plain": "Export billing",
+      "access": "signed-in",
+      "request": [],
+      "response": [
+        "url"
+      ]
+    }
+  ],
+  "screens": [
+    {
+      "id": "farms",
+      "module": "core",
+      "path": "#/farms",
+      "plain": "Your farms",
+      "shows": [
+        "farms"
+      ]
+    },
+    {
+      "id": "members",
+      "module": "core",
+      "path": "#/members",
+      "plain": "Your members",
+      "shows": [
+        "members"
+      ]
+    },
+    {
+      "id": "structures",
+      "module": "structures",
+      "path": "#/structures",
+      "plain": "Your structures",
+      "shows": [
+        "structures"
+      ]
+    },
+    {
+      "id": "units",
+      "module": "structures",
+      "path": "#/units",
+      "plain": "Your units",
+      "shows": [
+        "units"
+      ]
+    },
+    {
+      "id": "animals",
+      "module": "structures",
+      "path": "#/animals",
+      "plain": "Your animals",
+      "shows": [
+        "animals"
+      ]
+    },
+    {
+      "id": "events",
+      "module": "events",
+      "path": "#/events",
+      "plain": "Your events",
+      "shows": [
+        "events"
+      ]
+    },
+    {
+      "id": "health-records",
+      "module": "events",
+      "path": "#/health-records",
+      "plain": "Your health_records",
+      "shows": [
+        "health_records"
+      ]
+    },
+    {
+      "id": "production-logs",
+      "module": "events",
+      "path": "#/production-logs",
+      "plain": "Your production_logs",
+      "shows": [
+        "production_logs"
+      ]
+    },
+    {
+      "id": "feed-stock",
+      "module": "feed",
+      "path": "#/feed-stock",
+      "plain": "Your feed_stock",
+      "shows": [
+        "feed_stock"
+      ]
+    },
+    {
+      "id": "feed-uses",
+      "module": "feed",
+      "path": "#/feed-uses",
+      "plain": "Your feed_uses",
+      "shows": [
+        "feed_uses"
+      ]
+    },
+    {
+      "id": "feed-orders",
+      "module": "feed",
+      "path": "#/feed-orders",
+      "plain": "Your feed_orders",
+      "shows": [
+        "feed_orders"
+      ]
+    },
+    {
+      "id": "suppliers",
+      "module": "money",
+      "path": "#/suppliers",
+      "plain": "Your suppliers",
+      "shows": [
+        "suppliers"
+      ]
+    },
+    {
+      "id": "sales",
+      "module": "money",
+      "path": "#/sales",
+      "plain": "Your sales",
+      "shows": [
+        "sales"
+      ]
+    },
+    {
+      "id": "expenses",
+      "module": "money",
+      "path": "#/expenses",
+      "plain": "Your expenses",
+      "shows": [
+        "expenses"
+      ]
+    },
+    {
+      "id": "invoices",
+      "module": "money",
+      "path": "#/invoices",
+      "plain": "Your invoices",
+      "shows": [
+        "invoices"
+      ]
+    },
+    {
+      "id": "tasks",
+      "module": "tasks",
+      "path": "#/tasks",
+      "plain": "Your tasks",
+      "shows": [
+        "tasks"
+      ]
+    },
+    {
+      "id": "task-comments",
+      "module": "tasks",
+      "path": "#/task-comments",
+      "plain": "Your task_comments",
+      "shows": [
+        "task_comments"
+      ]
+    },
+    {
+      "id": "photos",
+      "module": "insights",
+      "path": "#/photos",
+      "plain": "Your photos",
+      "shows": [
+        "photos"
+      ]
+    },
+    {
+      "id": "insights",
+      "module": "insights",
+      "path": "#/insights",
+      "plain": "Your insights",
+      "shows": [
+        "insights"
+      ]
+    },
+    {
+      "id": "notifications",
+      "module": "notifications",
+      "path": "#/notifications",
+      "plain": "Your notifications",
+      "shows": [
+        "notifications"
+      ]
+    },
+    {
+      "id": "invites",
+      "module": "notifications",
+      "path": "#/invites",
+      "plain": "Your invites",
+      "shows": [
+        "invites"
+      ]
+    },
+    {
+      "id": "billing-profiles",
+      "module": "subscriptions",
+      "path": "#/billing-profiles",
+      "plain": "Your billing_profiles",
+      "shows": [
+        "billing_profiles"
+      ]
+    },
+    {
+      "id": "receipts",
+      "module": "subscriptions",
+      "path": "#/receipts",
+      "plain": "Your receipts",
+      "shows": [
+        "receipts"
+      ]
+    },
+    {
+      "id": "breeds",
+      "module": "core",
+      "path": "#/breeds",
+      "plain": "Breeds",
+      "shows": [
+        "breeds"
+      ]
+    },
+    {
+      "id": "settings",
+      "module": "core",
+      "path": "#/settings",
+      "plain": "Your settings",
+      "shows": [
+        "settings"
+      ]
+    },
+    {
+      "id": "vaccinations",
+      "module": "events",
+      "path": "#/vaccinations",
+      "plain": "Your vaccinations",
+      "shows": [
+        "vaccinations"
+      ]
+    },
+    {
+      "id": "weights",
+      "module": "events",
+      "path": "#/weights",
+      "plain": "Your weights",
+      "shows": [
+        "weights"
+      ]
+    },
+    {
+      "id": "feed-formulas",
+      "module": "feed",
+      "path": "#/feed-formulas",
+      "plain": "Your feed_formulas",
+      "shows": [
+        "feed_formulas"
+      ]
+    },
+    {
+      "id": "payments-in",
+      "module": "money",
+      "path": "#/payments-in",
+      "plain": "Your payments_in",
+      "shows": [
+        "payments_in"
+      ]
+    },
+    {
+      "id": "budgets",
+      "module": "money",
+      "path": "#/budgets",
+      "plain": "Your budgets",
+      "shows": [
+        "budgets"
+      ]
+    },
+    {
+      "id": "task-lists",
+      "module": "tasks",
+      "path": "#/task-lists",
+      "plain": "Your task_lists",
+      "shows": [
+        "task_lists"
+      ]
+    },
+    {
+      "id": "insight-feedback",
+      "module": "insights",
+      "path": "#/insight-feedback",
+      "plain": "Your insight_feedback",
+      "shows": [
+        "insight_feedback"
+      ]
+    },
+    {
+      "id": "alerts",
+      "module": "notifications",
+      "path": "#/alerts",
+      "plain": "Your alerts",
+      "shows": [
+        "alerts"
+      ]
+    },
+    {
+      "id": "plan-changes",
+      "module": "subscriptions",
+      "path": "#/plan-changes",
+      "plain": "Your plan_changes",
+      "shows": [
+        "plan_changes"
+      ]
+    },
+    {
+      "id": "production-targets",
+      "module": "events",
+      "path": "#/production-targets",
+      "plain": "Your production_targets",
+      "shows": [
+        "production_targets"
+      ]
+    },
+    {
+      "id": "supplier-contacts",
+      "module": "money",
+      "path": "#/supplier-contacts",
+      "plain": "Your supplier_contacts",
+      "shows": [
+        "supplier_contacts"
+      ]
+    },
+    {
+      "id": "mortality",
+      "module": "events",
+      "path": "#/mortality",
+      "plain": "Your mortality",
+      "shows": [
+        "mortality"
+      ]
+    },
+    {
+      "id": "admin",
+      "module": "core",
+      "path": "#/admin",
+      "plain": "Admin",
+      "shows": []
+    }
+  ],
+  "services": [
+    {
+      "id": "weather",
+      "plain": "Weather for each farm",
+      "keyName": "WEATHER_API_KEY",
+      "keyPage": "https://example.com/keys"
+    }
+  ],
+  "ai": [
+    {
+      "id": "photo-insight",
+      "plain": "Looks at an animal photo",
+      "route": "insights.run",
+      "tier": "super",
+      "images": true
+    }
+  ],
+  "payments": {
+    "currency": "USD",
+    "plans": [
+      {
+        "id": "pro",
+        "plain": "Pro",
+        "priceMinor": 900,
+        "interval": "month"
+      },
+      {
+        "id": "farm",
+        "plain": "Farm",
+        "priceMinor": 4900,
+        "interval": "month"
+      }
+    ],
+    "locked": [
+      {
+        "route": "billing.export",
+        "plans": [
+          "pro",
+          "farm"
+        ]
+      }
+    ]
+  },
+  "emails": [
+    {
+      "id": "invite",
+      "plain": "Invites someone to the farm",
+      "route": "invites.send",
+      "to": "request-field:email"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "daily-summary",
+      "plain": "Sums up yesterday",
+      "route": "jobs.daily-summary",
+      "every": "day"
+    }
+  ],
+  "screenOnly": [
+    "calculator"
+  ]
+}
