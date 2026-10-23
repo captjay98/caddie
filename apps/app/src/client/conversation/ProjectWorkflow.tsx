@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useFlueAgent } from "@flue/react";
 import { Markdown } from "@caddie/ui/Markdown";
 import type { PlanDocRevision, ApprovalRecord } from "@caddie/contracts";
-import { splitFeatureBlock, splitDesignMocks } from "@caddie/contracts";
+import { splitFeatureBlock, splitDesignMocks, splitArchitectureBlock } from "@caddie/contracts";
 import type { BuildWorkflow, WorkflowPhase } from "../../server/build-workflow.ts";
 import { fetchJson, postJson } from "../api.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
@@ -26,6 +26,7 @@ import { CardHeader } from "../brief/CardFrame.tsx";
 import type { CardDesign } from "../brief/card-design.ts";
 import { workflowQueryOptions } from "../workflow-query.ts";
 import { ProjectChatSummary } from "./ProjectChatSummary.tsx";
+import { DesignOverviewPanel, designApprovalHold, useDesignOverview } from "../planning/DesignReview.tsx";
 
 /** Phases before any build started: the copied app is still the one to try. */
 const BEFORE_BUILD = new Set<WorkflowPhase>(["planning", "review", "design", "design-review"]);
@@ -69,6 +70,9 @@ function ProjectWorkspace({
     enabled: Boolean(chrome.actorId && chrome.homeProject?.id !== projectId),
   });
   const workflow = state.data?.workflow;
+  // "How your app works" and its safety review, read only while the design is
+  // up for review (it decides whether the design can be approved).
+  const designOverview = useDesignOverview(workflow?.phase === "design-review" ? projectId : null);
   const activity = useBuildActivity({ actorId: chrome.actorId }, workflow?.phase === "building" ? projectId : null, false);
   const repairing = workflow?.phase === "building" && Boolean(activity.data && (activity.data.openIssues > 0 || activity.data.timeline?.stages.some(stage => stage.state === "failed")));
   const repoQuery = useProjectRepo(
@@ -352,8 +356,13 @@ function ProjectWorkspace({
       ) : null}
       {workflow.phase === "design-review" && state.data?.design ? (
         <>
+          {/* "How your app works" (team mode, part B): the plain summary and
+              the safety review of this exact design, read before approving. */}
+          {designOverview ? <DesignOverviewPanel overview={designOverview} framed={false} /> : null}
           {(() => {
-            const { display, mocks } = splitDesignMocks(state.data.design.body);
+            // The caddie-architecture block is machine-readable JSON for
+            // Caddie's checks; the person reads the summary above instead.
+            const { display, mocks } = splitDesignMocks(splitArchitectureBlock(state.data.design.body).display);
             return (
               <>
                 {mocks.length > 0 ? <DesignMockPreview mocks={mocks} /> : null}
@@ -376,7 +385,7 @@ function ProjectWorkspace({
           <div className="row-actions">
             <button
               className="btn-key"
-              disabled={busy}
+              disabled={busy || designApprovalHold(designOverview) !== null}
               data-testid="workflow-approve-design"
               onClick={() => void decideDesignBrief("approved")}
             >
@@ -390,6 +399,11 @@ function ProjectWorkspace({
               Suggest a change
             </button>
           </div>
+          {designApprovalHold(designOverview) ? (
+            <p className="state-detail" data-testid="workflow-approve-hold">
+              {designApprovalHold(designOverview)}
+            </p>
+          ) : null}
           {changes ? (
             <form
               onSubmit={(e) => {

@@ -13,7 +13,8 @@ import { Icon } from '../icons.tsx';
 /**
  * Build progress for a BIG app (team mode, plan part P and section 7, screen 2):
  * its parts (modules) side by side, each with its state in the plain word the
- * person reads — waiting, building, joined, not joined or stopped. A big app
+ * person reads — waiting, building, built (joining next), joined, not joined
+ * or stopped. A big app
  * splits into parts built by several builders at once, so this replaces the
  * single server-and-screens view a small app shows.
  *
@@ -73,27 +74,17 @@ export function ModuleBoard(props: { modules: readonly ModuleProgressItem[] }): 
 	);
 }
 
-/** The spending-limit stop panel (part A). */
+/** The spending-limit stop (part A): only what the blocker sentence leaves out — what retrying does. */
 export function SpendStopPanel(props: { stop: SpendStop }): ReactElement {
 	return (
-		<section className="spend-stop" data-testid="spend-stop" role="status">
-			<span className="spend-stop-mark" aria-hidden="true">
-				<Icon name="alert" title="" />
-			</span>
-			<div className="spend-stop-body">
-				<p className="spend-stop-message" data-testid="spend-stop-message">
-					{props.stop.message}
-				</p>
-				<p className="spend-stop-saved" data-testid="spend-stop-saved">
-					{props.stop.saved}
-				</p>
-			</div>
-		</section>
+		<p className="spend-stop" data-testid="spend-stop">
+			{props.stop.note}
+		</p>
 	);
 }
 
 function ModuleMark({ state }: { state: ModuleProgressState }): ReactElement {
-	if (state === 'joined') return <Icon name="check" title="joined" />;
+	if (state === 'joined' || state === 'built') return <Icon name="check" title={state === 'joined' ? 'joined' : 'built'} />;
 	if (state === 'building') return <span className="module-progress-spinner" />;
 	if (state === 'not-joined' || state === 'stopped') return <Icon name="alert" title={state} />;
 	return <span className="module-progress-dot" />;
@@ -104,6 +95,8 @@ function stateLine(module: ModuleProgressItem): string {
 	switch (module.state) {
 		case 'joined':
 			return 'In your app';
+		case 'built':
+			return 'Built · joining your app next';
 		case 'building':
 			return 'Building now';
 		case 'not-joined':

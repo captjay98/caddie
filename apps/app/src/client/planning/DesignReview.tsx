@@ -655,37 +655,65 @@ export function DesignReview(props: {
 }
 
 /**
- * "How your app works" — the plain-words view of the approved architecture a
- * non-technical person reads before the build starts (team mode, plan part B
- * and section 7, screen 1). It reads the shared experience projection's
- * `design` field: what the app stores, who can see what (people, teams,
- * roles), its screens, its parts (modules, for a big app), payments and emails
- * when declared, and the architect review's findings — where a security issue
- * blocks approval until it is fixed.
- *
- * It renders NOTHING when there is no overview (a non-team-mode project, or a
- * design without a `caddie-architecture` block): no bare heading, no empty
- * card. Every line comes from the real block and review — nothing is guessed.
+ * The shared experience projection's "How your app works" overview for a
+ * project, or null when there is none (a non-team-mode project, or a design
+ * without a `caddie-architecture` block). Pass null to skip the read.
  */
-export function HowYourAppWorks(props: { projectId: string }): ReactElement | null {
+export function useDesignOverview(projectId: string | null): DesignOverview | null {
   const chrome = useWorkspaceChrome();
-  const experience = useProjectExperience(
-    { actorId: chrome.actorId },
-    props.projectId,
-  );
+  const experience = useProjectExperience({ actorId: chrome.actorId }, projectId);
   if (!experience.data) return null;
   const parsed = v.safeParse(ProjectExperienceSchema, experience.data);
-  if (!parsed.success || !parsed.output.design) return null;
-  return <DesignOverviewPanel overview={parsed.output.design} />;
+  return parsed.success ? (parsed.output.design ?? null) : null;
 }
 
-/** The overview card itself (pure presentation), so it can be read from a prop. */
+/**
+ * "How your app works" on the Plan tab, once the design is approved: what the
+ * person approved, in plain words (team mode, plan part B, section 7 screen 1).
+ * Before approval the same panel is shown where the design is decided
+ * (ProjectWorkflow's design review), so here it renders NOTHING until this
+ * exact design was approved: no bare heading, no empty card.
+ */
+export function HowYourAppWorks(props: { projectId: string }): ReactElement | null {
+  const overview = useDesignOverview(props.projectId);
+  if (!overview?.approved) return null;
+  return <DesignOverviewPanel overview={overview} />;
+}
+
+/**
+ * Why this design can't be approved yet, in one plain sentence, or null when it
+ * can. Mirrors the server's design gate: a team-mode design needs the safety
+ * review of this exact design, with no open security issue.
+ */
+export function designApprovalHold(overview: DesignOverview | null): string | null {
+  if (!overview) return null;
+  if (!overview.review) return "Caddie hasn’t finished the safety check of this design yet, so it can’t be approved.";
+  if (overview.review.blocks) return "Caddie has to fix the safety problems above before you can approve this design.";
+  return null;
+}
+
+/**
+ * The overview itself (pure presentation). `framed` draws it as its own card
+ * (the Plan tab); unframed, it sits inside the design-review card without a
+ * card of its own.
+ */
 export function DesignOverviewPanel(props: {
   overview: DesignOverview;
+  framed?: boolean;
 }): ReactElement {
   const { overview } = props;
+  const framed = props.framed ?? true;
   const big = overview.app === "big";
   const review = overview.review;
+  const Heading = framed ? "h2" : "h3";
+  const Sub = framed ? "h3" : "h4";
+  const lede = overview.approved
+    ? big
+      ? "Your app is built in parts. Here is what it does, in plain words."
+      : "Here is what your app does, in plain words."
+    : big
+      ? "Your app is big, so it is built in parts. Here is what it does, in plain words."
+      : "Here is what your app does, in plain words, before anything is built.";
   // A big app groups its screens under their part; a small app lists them flat.
   const screensByModule = new Map<string, string[]>();
   for (const screen of overview.screens) {
@@ -695,21 +723,18 @@ export function DesignOverviewPanel(props: {
   }
   return (
     <section
-      className="card-surface settings-panel how-app-works"
+      className={framed ? "card-surface settings-panel how-app-works" : "how-app-works how-app-works-inline"}
       data-testid="how-app-works"
       data-app={overview.app}
+      data-approved={overview.approved ? "true" : "false"}
     >
       <div className="r-section-head">
         <div>
-          <p className="kicker" data-tone="action">
-            BEFORE YOU APPROVE
+          <p className="kicker" data-tone="action" data-testid="how-app-kicker">
+            {overview.approved ? "What you approved" : "Before you approve"}
           </p>
-          <h2 className="ev-title">How your app works</h2>
-          <p className="page-lede">
-            {big
-              ? "Your app is big, so it is built in parts. Here is what it does, in plain words."
-              : "Here is what your app does, in plain words, before anything is built."}
-          </p>
+          <Heading className="ev-title">How your app works</Heading>
+          <p className="page-lede">{lede}</p>
         </div>
       </div>
 
@@ -723,9 +748,9 @@ export function DesignOverviewPanel(props: {
         >
           {review.security.length > 0 ? (
             <div className="how-app-block" data-testid="how-app-security" role="alert">
-              <h3 className="how-app-block-head">
+              <Sub className="how-app-block-head">
                 Caddie must fix these before building
-              </h3>
+              </Sub>
               <ul className="how-app-list">
                 {review.security.map((message, i) => (
                   <li key={i}>{message}</li>
@@ -739,7 +764,7 @@ export function DesignOverviewPanel(props: {
           )}
           {review.advisory.length > 0 ? (
             <div className="how-app-advisory" data-testid="how-app-advisory">
-              <h3 className="how-app-block-head">Things to consider</h3>
+              <Sub className="how-app-block-head">Things to consider</Sub>
               <ul className="how-app-list">
                 {review.advisory.map((message, i) => (
                   <li key={i}>{message}</li>
@@ -759,7 +784,7 @@ export function DesignOverviewPanel(props: {
             key={section.key}
             data-testid={`how-app-section-${section.key}`}
           >
-            <h3 className="how-app-section-head">{section.heading}</h3>
+            <Sub className="how-app-section-head">{section.heading}</Sub>
             <ul className="how-app-list">
               {section.lines.map((line, i) => (
                 <li key={i}>{line}</li>
@@ -772,7 +797,7 @@ export function DesignOverviewPanel(props: {
       {/* Its parts (modules), for a big app. */}
       {big && overview.modules && overview.modules.length > 0 ? (
         <div className="how-app-section" data-testid="how-app-modules">
-          <h3 className="how-app-section-head">Its parts</h3>
+          <Sub className="how-app-section-head">Its parts</Sub>
           <ul className="how-app-list">
             {overview.modules.map((module) => (
               <li key={module.id}>{module.plain}</li>
@@ -783,7 +808,7 @@ export function DesignOverviewPanel(props: {
 
       {/* Its screens, grouped by part when the app is big. */}
       <div className="how-app-section" data-testid="how-app-screens">
-        <h3 className="how-app-section-head">Its screens</h3>
+        <Sub className="how-app-section-head">Its screens</Sub>
         {big ? (
           (overview.modules ?? []).map((module) => {
             const screens = screensByModule.get(module.id) ?? [];

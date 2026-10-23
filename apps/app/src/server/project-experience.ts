@@ -38,7 +38,6 @@ import { buildActivity } from './build-activity.ts';
 import { summariseArchitecture } from './architecture-summary.ts';
 import { architectureBlockHash, listArchitectureReviews, reviewVerdict } from './architecture-review.ts';
 import { listModules, type ModuleRow, type ModuleStatus } from './module-slots.ts';
-import { formatLimit, payerLimitMicros } from './build-spend.ts';
 
 /** The sentinel stopWorkflow writes into detail; distinguishes stop from repair/infra block. */
 export const STOP_SENTINEL = 'Stop requested.';
@@ -63,10 +62,12 @@ const SMALL_APP_MODULE = 'app';
  * - `screens` are the declared screens in plain words, grouped by module.
  * - `modules` is present only for a big app (the parts side by side).
  * - `review` carries the architect's findings, security apart from advisory.
+ * - `approved` says whether the person approved this exact design revision.
  */
 export function designOverviewFrom(
 	block: ArchitectureBlock,
 	review: DesignReviewFindings | null,
+	opts: { approved?: boolean } = {},
 ): DesignOverview {
 	const big = block.modules.length > 1;
 	const screens: DesignScreen[] = block.screens.map((s) => ({ plain: s.plain, module: s.module }));
@@ -74,6 +75,7 @@ export function designOverviewFrom(
 		app: big ? 'big' : 'small',
 		sections: summariseArchitecture(block),
 		screens,
+		approved: opts.approved === true,
 	};
 	if (big) {
 		const modules: DesignModule[] = block.modules.map((m) => ({ id: m.id, plain: m.plain }));
@@ -88,7 +90,9 @@ export function designOverviewFrom(
  * Map a stored module status to the plain state the person reads:
  *   pending     — waiting (a dependency or a slot is not ready yet);
  *   building    — building (a builder is on it);
- *   passed/merged — joined (its part is in the app);
+ *   passed      — built (its own checks passed; it is joined in next, so it
+ *                 is not in the app yet);
+ *   merged      — joined (its part is in the app);
  *   not-merged  — not joined (a round of joining failed);
  *   stopped     — stopped (it stopped; the rest kept going).
  */
@@ -97,6 +101,7 @@ export function moduleProgressState(status: ModuleStatus): ModuleProgressState {
 		case 'building':
 			return 'building';
 		case 'passed':
+			return 'built';
 		case 'merged':
 			return 'joined';
 		case 'not-merged':
@@ -112,12 +117,14 @@ export function moduleProgressState(status: ModuleStatus): ModuleProgressState {
 /**
  * The per-module board for the build-progress screen. Each module's plain name
  * comes from the approved block; a module missing from the block falls back to
- * its id. `waitingFor` lists the unfinished dependencies of a waiting module,
- * so the screen can say "Money: waiting for Farms". Pure.
+ * its id. `waitingFor` lists the dependencies of a waiting module that are not
+ * merged yet (a dependent starts from the merged app, so a dependency that has
+ * only passed its own checks still holds it), so the screen can say "Money:
+ * waiting for Farms". Pure.
  */
 export function moduleBoardToProgress(rows: readonly ModuleRow[], block: ArchitectureBlock | null): ModuleProgressItem[] {
 	const plainOf = new Map((block?.modules ?? []).map((m) => [m.id, m.plain] as const));
-	const finished = new Set(rows.filter((r) => r.status === 'passed' || r.status === 'merged').map((r) => r.moduleId));
+	const merged = new Set(rows.filter((r) => r.status === 'merged').map((r) => r.moduleId));
 	return rows.map((row) => {
 		const state = moduleProgressState(row.status);
 		const item: ModuleProgressItem = {
@@ -126,7 +133,7 @@ export function moduleBoardToProgress(rows: readonly ModuleRow[], block: Archite
 			state,
 		};
 		if (state === 'waiting') {
-			const waitingFor = row.dependsOn.filter((dep) => !finished.has(dep)).map((dep) => plainOf.get(dep) ?? dep);
+			const waitingFor = row.dependsOn.filter((dep) => !merged.has(dep)).map((dep) => plainOf.get(dep) ?? dep);
 			if (waitingFor.length > 0) return { ...item, waitingFor };
 		}
 		return item;
@@ -138,20 +145,20 @@ export function moduleBoardToProgress(rows: readonly ModuleRow[], block: Archite
 /** The sentinel the spend interceptor writes into detail when a build stops at its limit. */
 export const SPEND_STOP_SENTINEL = 'reached its spending limit';
 
+/** What retrying a spend-stopped build does (part A: a retry opens a fresh limit). */
+export const SPEND_STOP_RETRY_NOTE = 'Retrying starts the build again with a new spending limit.';
+
 /**
  * The spending-limit stop, when a build stopped because it reached its limit.
- * The limit message carries the real limit (formatted from micros); "what is
- * saved" is the fixed plain line. Returns null when the stop is not a spend
- * stop. Pure.
+ * The stop sentence ("This build reached its spending limit of $5.00. Your
+ * plan and files are saved.", SpendLimitError) is already the blocker detail
+ * every blocked view shows, so this adds only what that sentence leaves out:
+ * what retrying does. Returns null when the stop is not a spend stop. Pure.
  */
-export function spendStopFrom(workflow: BuildWorkflow | null, limitMicros: number | null): SpendStop | null {
+export function spendStopFrom(workflow: BuildWorkflow | null): SpendStop | null {
 	const detail = workflow?.detail?.trim() ?? '';
 	if (workflow?.phase !== 'blocked' || !detail.includes(SPEND_STOP_SENTINEL)) return null;
-	const message =
-		limitMicros !== null
-			? `This build reached its spending limit of ${formatLimit(limitMicros)}.`
-			: 'This build reached its spending limit.';
-	return { message, saved: 'Your plan and files are saved.' };
+	return { note: SPEND_STOP_RETRY_NOTE };
 }
 
 /** Derive a monotonic version from the workflow's updatedAt (no new column). */
@@ -297,7 +304,7 @@ function actionsOf(
 
 /** Build the shared projection from a workflow snapshot. Pure. */
 export async function projectExperience(db: D1Database, scope: Scope): Promise<ProjectExperience> {
-	const { workflow, plan, approval, design } = await workflowSnapshot(db, scope);
+	const { workflow, plan, approval, design, designApproval } = await workflowSnapshot(db, scope);
 	const planApproved = approval?.status === 'approved';
 	// A block is a stuck PLAN only when this revision was never approved. A
 	// revoked/expired approval is a stopped BUILD (retry is then denied by the
@@ -329,9 +336,9 @@ export async function projectExperience(db: D1Database, scope: Scope): Promise<P
 	// Design review and build-progress screens read. All optional and
 	// read-only: computed only when the real source exists, absent otherwise,
 	// so a non-team-mode project's projection is byte-identical to before.
-	const design_overview = await designOverviewFor(db, scope, design);
+	const design_overview = await designOverviewFor(db, scope, design, designApproval?.status === 'approved');
 	const modules = await moduleProgressFor(db, scope, design);
-	const spendStop = await spendStopFor(db, scope, workflow);
+	const spendStop = spendStopFrom(workflow);
 
 	return {
 		projectId: scope.projectId,
@@ -359,12 +366,12 @@ type DesignDoc = { readonly body: string } | null;
  * block does not parse (a non-team-mode or pre-block design) — the screen then
  * shows nothing.
  */
-async function designOverviewFor(db: D1Database, scope: Scope, design: DesignDoc): Promise<DesignOverview | null> {
+async function designOverviewFor(db: D1Database, scope: Scope, design: DesignDoc, approved: boolean): Promise<DesignOverview | null> {
 	if (!design?.body) return null;
 	const parsed = parseArchitectureBlock(design.body);
 	if (!parsed.ok) return null;
 	const review = await reviewFindingsFor(db, scope, design.body);
-	return designOverviewFrom(parsed.block, review);
+	return designOverviewFrom(parsed.block, review, { approved });
 }
 
 /** The architect's findings for the exact block in `body`, or null before the architect ran. */
@@ -403,23 +410,6 @@ async function latestModuleBuildSeq(db: D1Database, projectId: string): Promise<
 		.all<{ seq: number | null }>();
 	const seq = res.results?.[0]?.seq;
 	return typeof seq === 'number' ? seq : null;
-}
-
-/** The spending-limit stop, when a build stopped at its limit, reading the real limit. */
-async function spendStopFor(db: D1Database, scope: Scope, workflow: BuildWorkflow | null): Promise<SpendStop | null> {
-	if (workflow?.phase !== 'blocked') return null;
-	const payerId = await spendPayerIdFor(db, scope.projectId);
-	const limit = payerId ? await payerLimitMicros(db, payerId) : null;
-	return spendStopFrom(workflow, limit);
-}
-
-/** The build's spend payer id (not on the BuildWorkflow interface), or null. */
-async function spendPayerIdFor(db: D1Database, projectId: string): Promise<string | null> {
-	const res = await db
-		.prepare('select "spendPayerId" from build_workflows where projectId = ?')
-		.bind(projectId)
-		.all<{ spendPayerId: string | null }>();
-	return res.results?.[0]?.spendPayerId ?? null;
 }
 
 /**
