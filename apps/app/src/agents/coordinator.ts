@@ -617,7 +617,7 @@ export function Coordinator({ id }: AgentProps) {
       kind: "signal",
       type: "build_incomplete",
       body: progress?.current
-        ? `The build is not finished: feature ${progress.current.position} of ${progress.total}, “${progress.current.title}”, is next. Call build_next_feature, delegate exactly that feature with its doneWhen checks, then call finish_feature. ${FEATURE_DELEGATION_RULE} If a prerequisite is unavailable call report_blocker; never claim completion.`
+        ? `The build is not finished: feature ${progress.current.position} of ${progress.total}, “${progress.current.title}”, is next. Call build_next_feature, delegate exactly that feature with its doneWhen checks, and have it built to match the approved design brief. Then call finish_feature. ${FEATURE_DELEGATION_RULE} If a prerequisite is unavailable call report_blocker; never claim completion.`
         : "Work is not verified. Call build_next_feature to see what remains; when every feature has passed, run QA with verify_build. If a prerequisite is unavailable call report_blocker; never claim completion.",
     });
   });

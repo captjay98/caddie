@@ -23,4 +23,5 @@ export const FEATURE_DELEGATION_RULE =
 	"the Android target to mobile. " +
 	"If a feature needs both sides, delegate the client part to frontend and the server part to backend, in that order, and tell each one the other part's contract (routes, request and response shape) so they fit. " +
 	"tech-lead keeps the plan of record, the review and the repair decisions; it does not write the feature. " +
-	"Give every delegate the feature's doneWhen checks verbatim and require a test per check.";
+	"Give every delegate the feature's doneWhen checks verbatim and require a test per check. " +
+	"Tell every delegate to read the approved design brief (read_project_context [\"design\"]) and build each screen this feature touches to match it — its layout, components, the empty, loading and error states, and the mockups — so the app looks the way the user approved, not a default stack layout.";

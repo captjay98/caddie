@@ -1053,7 +1053,7 @@ export async function createCoordinatorContext(
       position: current.position,
       total: rows.length,
       alreadyBuilt: rows.filter((row) => row.status === "passed").map((row) => row.title),
-      next: `Delegate ONLY this feature to the implementation specialist, with its doneWhen checks: build it, add at least one test in src/*.test.tsx for each check, and get run_checks green. ${FEATURE_DELEGATION_RULE} Then call finish_feature with featureId "${current.featureId}". Do not start another feature.`,
+      next: `Delegate ONLY this feature to the implementation specialist, with its doneWhen checks: build it to match the approved design brief (its screens, components and empty/loading/error states), add at least one test in src/*.test.tsx for each check, and get run_checks green. ${FEATURE_DELEGATION_RULE} Then call finish_feature with featureId "${current.featureId}". Do not start another feature.`,
     };
   };
   /**

@@ -129,7 +129,7 @@ export function makeReadProjectContext(deps: {
 	return defineTool({
 		name: 'read_project_context',
 		description:
-			'Read the current project context: the latest plan documents for the bound project.',
+			'Read the current project context by KIND, not by file name. Pass one or more of these kind names: "brief" (the original request), "prd" (the approved product requirements), "design" (the approved design brief, with its screen layouts and mockups), "spec" (the technical spec), "scope", "kernel", "note", "feedback" and "profile". Pass the kind name itself (e.g. "design"), never a path or file name like "AGENTS.md", "prd.md" or "/kernel.txt" — those read nothing.',
 		input: ReadProjectContextInput,
 		run: async (ctx) => {
 			const sections: string[] = [];
@@ -150,7 +150,7 @@ export function makeWritePlanNote(deps: {
 	return defineTool({
 		name: 'write_plan_note',
 		description:
-			'Append a plan note (kernel/scope/prd/spec/note) to the project. Immutable revisions; never edits acceptance surfaces.',
+			'Append a plan note (kernel/scope/prd/design/spec/note) to the project. Immutable revisions; never edits acceptance surfaces.',
 		input: WritePlanNoteInput,
 		run: async (ctx) => {
 			await deps.writePlanNote({

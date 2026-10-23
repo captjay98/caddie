@@ -141,7 +141,9 @@ export const BUILD_RECIPE_INSTRUCTION =
 	'When the app has caddie/payments.ts (the plan takes payments, in TEST MODE: no money moves), call mountPayments(app, { currency, plans }) once in src/server.ts with the plan\'s currency and plans, start each locked route with const locked = await planAccess(c, ["<plan id>"]); if (locked) return locked;, and use the screens in caddie/Billing.tsx; test with the card 4242 4242 4242 4242 (paid) and 4000 0000 0000 0002 (declined). ' +
 	'When the app has caddie/files.ts (a record keeps a photo or file), call mountFiles(app) once in src/server.ts, upload from React with uploadFile(file) from caddie/upload.ts (it shrinks photos and sends them in parts), show one with fileUrl(id), and read one in a route with readFile(c, id). ' +
 	'Your app also runs inside the preview: a sandboxed frame whose origin is opaque and whose localStorage is a small proxy, with its own /api calls relayed to its server. So never gate a request on window.location.protocol, window.location.origin or window.location.hostname, and never read them to decide whether the server is reachable — the frame is not the address your app will have when it is published. Just call fetch("/api/...") and handle the failure; a request that fails is an offline app, not a reason to skip the call. ' +
-	'The host creates the scaffold only after approval. Read the full brief, prd, spec and feedback. Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass. ' +
+	'The host creates the scaffold only after approval. Read the full brief, prd, spec and feedback. ' +
+	'Read the approved design brief too (read_project_context ["design"]): build each screen this feature touches to match it — its layout and regions, the named components, the interaction pattern for each input, and the empty, loading and error states — and follow its html-mock blocks, so the app looks the way the user approved rather than a default React layout. ' +
+	'Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass. ' +
 	RECIPES;
 
 /**
@@ -170,7 +172,9 @@ export const FLUTTER_RECIPE_INSTRUCTION =
 	'When the app needs a key for an outside service, call request_app_key and call that service ONLY from src/server.ts with c.env.<NAME>; never put a key in Dart code, a file, a test or a log. When a feature needs AI, call c.env.CADDIE.ai({ messages: [{ role, content }], json? }) from src/server.ts (Caddie pays; no key), returning 503 with reply.message when ok is false; caddie/ai.ts shows the shapes and test/setup/ai.ts the test double. ' +
 	'Keep the app usable in a phone-sized window: one column, no fixed widths, large touch targets. The browser preview may only fetch the app\'s own /api routes. ' +
 	'During a build the coordinator hands you ONE feature with its doneWhen checks: build only that feature, keep earlier features working, and add at least one test in test/app/*_test.dart (or src/*.test.ts for a server-only check) for each doneWhen check (the host refuses to finish a feature that adds no new passing tests). ' +
-	'The host creates the scaffold only after approval. Read the full brief, prd, spec and feedback. Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass.';
+	'The host creates the scaffold only after approval. Read the full brief, prd, spec and feedback. ' +
+	'Read the approved design brief too (read_project_context ["design"]): build each screen this feature touches to match it — its layout and regions, the named components, the interaction pattern for each input, and the empty, loading and error states — and follow its html-mock blocks, so the app looks the way the user approved rather than a default Material layout. ' +
+	'Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass.';
 
 /** The build recipe for a run's kind of app. */
 export function recipeInstructionFor(stackId: string | undefined): string {
