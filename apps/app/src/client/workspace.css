@@ -5330,7 +5330,15 @@ a.btn-ghost.topbar-nav-link {
 	align-items: center;
 	gap: 0.9rem;
 	padding: 0.15rem 0 0.9rem;
+	/* Owner 2026-10-23: centre the header in the same 640px column as the
+	   cards, so it sits over them instead of hugging the left edge. */
+	width: 100%;
+	max-width: 640px;
+	margin-inline: auto;
+	justify-content: center;
+	text-align: left;
 }
+.home-head-main { text-align: left; }
 
 .home-head-disc {
 	flex: 0 0 auto;
