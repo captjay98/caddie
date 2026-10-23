@@ -139,6 +139,8 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     total: number;
     passed: number;
     current: { id: string; title: string; position: number } | null;
+    /** Big apps: the foundation is done and its parts are still being built by their own builders. */
+    waitingOnParts?: boolean;
   } | null>;
   blockBuild: (reason: string) => Promise<void>;
   /**
@@ -589,6 +591,11 @@ export function Coordinator({ id }: AgentProps) {
     // The host owns the feature order. The nudge budget is PER FEATURE: a
     // feature that passed is progress, so the next one starts a fresh budget.
     const progress = await authority.featureProgress();
+    // Big apps (part P): the parts are being built by their own builders and
+    // Caddie messages this conversation when they are joined. Nothing is
+    // unfinished here, so settle without a nudge (a nudge would spend the
+    // budget and then block a build that is progressing).
+    if (progress?.waitingOnParts) return;
     const focus = progress?.current ? `feature:${progress.current.id}` : "verify";
     const used = focus === continuationFocus ? continuations : 0;
     if (used >= 2) {

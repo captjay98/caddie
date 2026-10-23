@@ -2193,6 +2193,127 @@ describe("host-driven feature loop", () => {
       expect((started?.body as { image?: string })?.image).toBe(savePoint);
     } finally { await stub.stop(); w.sqlite.close(); }
   });
+
+  // --- Big apps (plan part P steps 1-2) -------------------------------------
+  // A team-mode build with big apps on whose approved design is the 9-module
+  // farm fixture. The plan lists one core feature, one structures feature and
+  // one money feature. The REAL coordinator host runs against the sandbox
+  // stub; the module dispatcher is a fake that records what would be sent.
+  const FARM_BLOCK = readFileSync(new URL("./fixtures/architecture/farm-block.json", import.meta.url), "utf8");
+  const BIG_PRD = FEATURE_PRD.replace(
+    /```caddie-features[\s\S]*?```/,
+    [
+      "```caddie-features",
+      JSON.stringify([
+        { id: "farm-registry", title: "Register your farms", doneWhen: ["A saved farm is listed"] },
+        { id: "structures", title: "Add barns and pens", doneWhen: ["A saved barn is listed"] },
+        { id: "sales", title: "Record a sale", doneWhen: ["A saved sale is listed"] },
+      ]),
+      "```",
+    ].join("\n"),
+  );
+  async function bigBuild(w: Awaited<ReturnType<typeof world>>, opts: { bigApps?: boolean } = {}) {
+    const item = await featureBuild(w, BIG_PRD);
+    w.sqlite
+      .prepare('update plan_doc_revisions set body = ? where id = ?')
+      .run(`# Farm design\n\n\`\`\`caddie-architecture\n${FARM_BLOCK}\n\`\`\``, item.design.id);
+    w.sqlite
+      .prepare('update build_workflows set "teamMode" = 1, "bigApps" = ?, "approvedDesignRevisionId" = ? where projectId = ?')
+      .run(opts.bigApps === false ? 0 : 1, item.design.id, item.scope.projectId);
+    return item;
+  }
+  function bigStub() {
+    const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+    stub.seedImage("tag:feature:1");
+    stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+    stub.setBehavior("bun test caddie/contract.test.ts", { stdout: "3 pass\n0 fail" });
+    return stub;
+  }
+
+  test("a big build: the coordinator builds only the foundation's features, then starts the parts whose dependencies are joined", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const item = await bigBuild(w);
+      const dispatched: Array<{ moduleId: string; buildSeq: number; features: readonly string[]; instanceId: string }> = [];
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, {
+        dispatchModuleBuilder: (input) => {
+          dispatched.push(input);
+        },
+      });
+      // MUTATION: drop the foundation scope (featureInScope) and the
+      // coordinator is handed all three features (total 3, structures next).
+      const first = (await host.buildNextFeature()) as { feature: { id: string }; total: number };
+      expect(first).toMatchObject({ feature: { id: "farm-registry" }, total: 1 });
+
+      const passed = (await host.finishFeature("farm-registry", "big-1")) as { passed: boolean; partsStarted?: boolean; next: string };
+      expect(passed).toMatchObject({ passed: true, partsStarted: true });
+      expect(passed.next).toContain("end your turn now");
+
+      // Core's dependents start, up to the 4 builder slots, in the design's
+      // order; a dependent with no planned feature is joined at once instead.
+      // structures and money have features; tasks, notifications and
+      // subscriptions have none, so they never take a builder.
+      expect(dispatched.map((d) => [d.moduleId, [...d.features]])).toEqual([
+        ["structures", ["structures"]],
+        ["money", ["sales"]],
+      ]);
+      expect(dispatched[0]?.instanceId).toBe(`${item.scope.projectId}:${dispatched[0]?.buildSeq}:structures`);
+      const status = (moduleId: string) =>
+        (w.sqlite.query('select "status" from build_modules where "projectId" = ? and "moduleId" = ?').get(item.scope.projectId, moduleId) as { status: string }).status;
+      expect(status("core")).toBe("merged");
+      expect(status("tasks")).toBe("merged");
+      // events waits on structures, but no planned feature belongs to it, so
+      // there is nothing to wait for: it is joined at once too.
+      expect(status("events")).toBe("merged");
+      expect(status("structures")).toBe("building");
+      expect(status("money")).toBe("building");
+
+      // While the parts build the coordinator has nothing to do: the progress
+      // says so (its finish hook then settles instead of nudging), and the next
+      // feature call answers "waiting", never "every feature passed".
+      expect(await host.featureProgress()).toMatchObject({ current: null, waitingOnParts: true });
+      expect(await host.buildNextFeature()).toMatchObject({ done: false, waiting: true });
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("building");
+      // Asking again starts nothing twice.
+      expect(dispatched.length).toBe(2);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("a big build with no way to start the part builders says so plainly", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const item = await bigBuild(w);
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      await host.buildNextFeature();
+      await rejectsCode(host.finishFeature("farm-registry", "big-2"), "PARTS_UNAVAILABLE");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("with big apps off the same design is built by one builder, exactly as before", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const item = await bigBuild(w, { bigApps: false });
+      const dispatched: string[] = [];
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, {
+        dispatchModuleBuilder: (input) => {
+          dispatched.push(input.moduleId);
+        },
+      });
+      expect(await host.buildNextFeature()).toMatchObject({ feature: { id: "farm-registry" }, total: 3 });
+      const passed = (await host.finishFeature("farm-registry", "small-1")) as { passed: boolean; partsStarted?: boolean; next: string };
+      expect(passed.passed).toBe(true);
+      expect(passed.partsStarted).toBeUndefined();
+      expect(passed.next).toContain("Add barns and pens");
+      expect(dispatched).toEqual([]);
+      expect(w.count("build_modules")).toBe(0);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
 });
 
 describe("a paused build tells its owner once per run (plan 5.4)", () => {

@@ -79,7 +79,8 @@ import {
   testsBaseline,
 } from "./build-features.ts";
 import { openWorkingCopy } from "./working-copy.ts";
-import { stopModule, failModule, openModuleWorkingCopy } from "./modules.ts";
+import { stopModule, failModule, openModuleWorkingCopy, type DispatchModuleBuilder } from "./modules.ts";
+import { bigBuildOutcome, bigBuildSeq, foundationModuleOf, isBigBlock, moduleOfFeature, startAfterFoundation } from "./big-build.ts";
 import { runVerifiedInstall } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { checkSentence, newTestsSentence } from "./round-detail.ts";
@@ -158,10 +159,20 @@ export interface CoordinatorEnvironment {
   /** Worker Loader (backend previews + the runs-on-Cloudflare check). Absent: the check is skipped honestly. */
   LOADER?: WorkerLoaderLike;
 }
+/**
+ * What the agent that owns the host can do that the host cannot do itself:
+ * start a ModuleBuilder (Flue dispatch lives with the agent files, so the host
+ * never imports an agent). Optional: absent, a big app's parts cannot start
+ * and the foundation step says so plainly.
+ */
+export interface CoordinatorHostDeps {
+  dispatchModuleBuilder?: DispatchModuleBuilder;
+}
 /** Called inside the owning DO, including alarms/recovery; no HTTP module globals. */
 export async function resolveCoordinatorContext(
   env: CoordinatorEnvironment,
   conversationId: string,
+  deps: CoordinatorHostDeps = {},
 ): Promise<CoordinatorHostContext> {
   if (!env?.DB) throw new Error("Coordinator D1 binding is unavailable.");
   const run = await lookupRunByConversation(env.DB, conversationId);
@@ -172,7 +183,7 @@ export async function resolveCoordinatorContext(
       "No actor-bound conversation exists.",
     );
   const scope = await projectScopeForUser(env.DB, run.createdBy, run.projectId);
-  return createCoordinatorContext(env, scope, run.runId, run);
+  return createCoordinatorContext(env, scope, run.runId, run, undefined, deps);
 }
 /**
  * Team mode (part P): resolve a MODULE-SCOPED host context for a ModuleBuilder.
@@ -186,6 +197,7 @@ export async function resolveCoordinatorContext(
 export async function resolveModuleBuilderContext(
   env: CoordinatorEnvironment,
   input: { conversationId: string; moduleId: string; buildSeq: number; features: readonly string[] },
+  deps: CoordinatorHostDeps = {},
 ): Promise<CoordinatorHostContext> {
   if (!env?.DB) throw new Error("Coordinator D1 binding is unavailable.");
   const run = await lookupRunByConversation(env.DB, input.conversationId);
@@ -196,7 +208,7 @@ export async function resolveModuleBuilderContext(
     moduleId: input.moduleId,
     buildSeq: input.buildSeq,
     features: input.features,
-  });
+  }, deps);
 }
 export async function createCoordinatorContext(
   env: CoordinatorEnvironment,
@@ -216,6 +228,7 @@ export async function createCoordinatorContext(
    *     collide on one project-wide active-part pointer).
    */
   moduleScope?: { moduleId: string; buildSeq: number; features: readonly string[] },
+  hostDeps: CoordinatorHostDeps = {},
 ): Promise<CoordinatorHostContext> {
   const projectRows = await env.DB.prepare(
     "select kind from projects where id = ?",
@@ -250,14 +263,21 @@ export async function createCoordinatorContext(
   const moduleFeatureIds: ReadonlySet<string> | null = moduleScope
     ? new Set(moduleScope.features)
     : null;
-  /** Narrow a feature row list to the module's own features (identity otherwise). */
+  // Which features this host builds: a module builder's own; in a big build the
+  // coordinator's are the foundation module's (set below once the approved
+  // design is read); otherwise every feature (null), i.e. today's behaviour.
+  let featureInScope: ((featureId: string) => boolean) | null = moduleFeatureIds
+    ? (featureId) => moduleFeatureIds.has(featureId)
+    : null;
+  /** Narrow a feature row list to this host's own features (identity otherwise). */
   const scopeToModule = (rows: BuildFeatureRow[]): BuildFeatureRow[] =>
-    moduleFeatureIds ? rows.filter((row) => moduleFeatureIds.has(row.featureId)) : rows;
+    featureInScope ? rows.filter((row) => featureInScope!(row.featureId)) : rows;
   // Part P: whose spent tries pause this host. A module builder counts only its
   // own features' issues, so one module that spent its three tries never
   // refuses or stops another module working in parallel. The coordinator's own
-  // build keeps today's rule: every issue in the run.
-  const pauseScope: RepairPauseScope = moduleFeatureIds ? { featureIds: [...moduleFeatureIds] } : {};
+  // build keeps today's rule (every issue in the run), except in a big build,
+  // where it counts only the foundation module's features (set below).
+  let pauseScope: RepairPauseScope = moduleFeatureIds ? { featureIds: [...moduleFeatureIds] } : {};
 
   // Team mode (part P, gap 2): in MODULE scope a pause or an honest block stops
   // ONLY this module and frees its slot — the build phase stays `building` and
@@ -311,6 +331,55 @@ export async function createCoordinatorContext(
   // stamped with app features (server/app-feature-files.ts).
   const appFeatures = Number(teamModeRow?.appFeatures ?? 0) === 1;
 
+  // Big apps (plan part P): when the approved design has more than one module,
+  // the coordinator builds ONLY the foundation module's features in the normal
+  // loop; once those are saved, the other modules go to their own builders
+  // (big-build.ts). Null in every other build, which is then unchanged.
+  const bigBlock = teamMode && bigApps && !moduleScope
+    ? await getApprovedBlock(env.DB, scope.projectId).then((block) => (isBigBlock(block) ? block : null)).catch(() => null)
+    : null;
+  if (bigBlock) {
+    const foundation = foundationModuleOf(bigBlock);
+    const inFoundation = (featureId: string) => moduleOfFeature(bigBlock, featureId) === foundation;
+    featureInScope = inFoundation;
+    const planBody = (await workflowSnapshot(env.DB, scope).catch(() => null))?.plan?.body ?? "";
+    const planned = parsePlanFeatures(planBody);
+    pauseScope = { featureIds: planned.ok ? planned.features.map((f) => f.id).filter(inFoundation) : [] };
+  }
+  /** The build's spend payer: one payer per build, so it also names this build's modules. */
+  const buildPayer = async (): Promise<string | null> => {
+    const res = await env.DB.prepare('select "spendPayerId" from "build_workflows" where "projectId" = ?')
+      .bind(scope.projectId)
+      .all<{ spendPayerId: string | null }>();
+    return res.results?.[0]?.spendPayerId ?? null;
+  };
+  /** Where this big build's modules stand, or null before its foundation step. */
+  const partsOutcome = async () => {
+    const seq = await bigBuildSeq(env.DB, scope.projectId, await buildPayer());
+    return seq === null ? null : { buildSeq: seq, ...(await bigBuildOutcome(env.DB, scope.projectId, seq)) };
+  };
+  /** The foundation step: seed the other modules and start the ready ones (idempotent). */
+  const startParts = async (foundationRef: string, planId: string) => {
+    if (!bigBlock) return null;
+    if (!hostDeps.dispatchModuleBuilder)
+      throw new ScopeError(503, "PARTS_UNAVAILABLE", "This app is built in parts, but Caddie can't start the part builders here.");
+    const featureIds = (await listBuildFeatures(env.DB, scope.projectId, planId)).map((row) => row.featureId);
+    return startAfterFoundation(env.DB, scope, {
+      runId,
+      block: bigBlock,
+      featureIds,
+      payerId: await buildPayer(),
+      foundationRef,
+      dispatch: hostDeps.dispatchModuleBuilder,
+    });
+  };
+  const PARTS_BUILDING_NEXT =
+    "The core of the app is built and saved. Its other parts are now being built at the same time by their own builders. There is nothing for you to build: end your turn now. Caddie messages you when every part is joined.";
+  /** The save point of the last passed feature in a row list (the foundation's, for a big build). */
+  const lastSavePoint = (rows: BuildFeatureRow[]): string | null =>
+    [...rows]
+      .filter((row) => row.status === "passed" && row.checkpointRef)
+      .sort((a, b) => b.position - a.position)[0]?.checkpointRef ?? null;
   // The image-level inspect surface the part-snapshot ports read a COMMITTED
   // image through — exactly Contree's inspect API (inspectList/Download/
   // Archive), never a command in the session (a command would run
@@ -843,10 +912,25 @@ export async function createCoordinatorContext(
     const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     const rows = scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan));
     const current = currentFeature(rows);
-    if (!current)
+    if (!current) {
+      // Big apps (part P): the foundation is done; its parts are built by
+      // their own builders. Start them if a dropped call never did, then the
+      // coordinator waits until every part is joined, stopped or blocked.
+      if (bigBlock) {
+        let parts = await partsOutcome();
+        if (!parts) {
+          const foundationRef = lastSavePoint(rows);
+          if (foundationRef) {
+            await startParts(foundationRef, plan.id);
+            parts = await partsOutcome();
+          }
+        }
+        if (parts && !parts.done) return { done: false, waiting: true, next: PARTS_BUILDING_NEXT };
+      }
       return { done: true, next: moduleId
         ? `Every feature of the "${moduleId}" module passed. The module is done.`
         : "Every feature passed. Ask QA to run verify_build to publish the preview." };
+    }
     await markFeatureBuilding(env.DB, current);
     // Team mode (parts D/E): a new feature starts a FRESH part — clear any
     // stale pointer so the builder's first write starts its part from the
@@ -951,6 +1035,12 @@ export async function createCoordinatorContext(
     }
     await recordFeaturePassed(env.DB, current, { checkpointRef, testsPassed: passing });
     const after = currentFeature(scopeToModule(await listBuildFeatures(env.DB, scope.projectId, plan.id)));
+    // Big apps (part P step 2): the foundation module's last feature is saved,
+    // so this save point is the foundation every other module starts from.
+    if (!after && bigBlock) {
+      await startParts(checkpointRef, plan.id);
+      return { passed: true, feature: current.title, testsPassed: passing, partsStarted: true, next: PARTS_BUILDING_NEXT };
+    }
     return {
       passed: true,
       feature: current.title,
@@ -969,6 +1059,14 @@ export async function createCoordinatorContext(
     const rows = scopeToModule(await listBuildFeatures(env.DB, scope.projectId, plan.id));
     if (rows.length === 0) return null;
     const current = currentFeature(rows);
+    // Big apps (part P): with the foundation done and its parts still being
+    // built by their own builders, the coordinator has nothing to do; saying
+    // so keeps its finish hook from nudging (and then blocking) the build.
+    if (!current && bigBlock) {
+      const parts = await partsOutcome();
+      if (parts && !parts.done)
+        return { total: rows.length, passed: rows.filter((row) => row.status === "passed").length, current: null, waitingOnParts: true };
+    }
     return {
       total: rows.length,
       passed: rows.filter((row) => row.status === "passed").length,

@@ -3,6 +3,28 @@ import {
   resolveCoordinatorContext,
   type CoordinatorEnvironment,
 } from "../server/coordinator-host.ts";
+import { dispatch } from "@flue/runtime";
+import type { DispatchModuleBuilder } from "../server/modules.ts";
+import { ModuleBuilder } from "./module-builder.ts";
+
+/**
+ * Big apps (plan part P step 2): start, or continue, one module's builder.
+ * Flue's dispatch is at-least-once and keyed by the instance id
+ * `<projectId>:<buildSeq>:<moduleId>`, so starting the same module twice
+ * joins the one already running. The seed data names the build's conversation
+ * (so the builder resolves the same run and scope as the coordinator), its
+ * module, its build sequence and its features; it is recorded only when the
+ * instance is created.
+ */
+export function moduleBuilderDispatcher(conversationId: string): DispatchModuleBuilder {
+  return async (input) => {
+    await dispatch(ModuleBuilder, {
+      id: input.instanceId,
+      message: input.message,
+      initialData: { conversationId, moduleId: input.moduleId, buildSeq: input.buildSeq, features: [...input.features] },
+    });
+  };
+}
 
 /** Only serializable presentation data persists; env/secrets/functions never do. */
 export interface CoordinatorSnapshot {
@@ -63,7 +85,7 @@ export function scopedCoordinatorContext(
   conversationId: string,
   snapshot: CoordinatorSnapshot | null,
 ) {
-  const resolve = () => resolveCoordinatorContext(env, conversationId);
+  const resolve = () => resolveCoordinatorContext(env, conversationId, { dispatchModuleBuilder: moduleBuilderDispatcher(conversationId) });
   const context: CoordinatorHostContext = {
     runId: snapshot?.runId ?? `uninitialized:${conversationId}`,
     sessionId: snapshot?.sessionId ?? `uninitialized:${conversationId}`,

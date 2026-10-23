@@ -96,6 +96,7 @@ export async function startAfterFoundation(
 	},
 ): Promise<{ buildSeq: number; started: ModuleRow[] }> {
 	const foundation = foundationModuleOf(input.block);
+	const features = moduleFeatureMap(input.block, input.featureIds);
 	let buildSeq = await bigBuildSeq(db, scope.projectId, input.payerId);
 	if (buildSeq === null) {
 		buildSeq = await nextBuildSeq(db, scope.projectId);
@@ -105,9 +106,15 @@ export async function startAfterFoundation(
 			modules: input.block.modules.map((m) => ({ moduleId: m.id, dependsOn: m.dependsOn })),
 		});
 		await setModuleStatus(db, scope.projectId, buildSeq, foundation, 'merged', { checkpointRef: input.foundationRef });
+		// A module none of the plan's features belong to has nothing to build:
+		// it is joined as it stands (the foundation), so it never holds a
+		// builder slot and its dependents are not kept waiting on it.
+		for (const m of input.block.modules) {
+			if (m.id !== foundation && (features.get(m.id)?.length ?? 0) === 0)
+				await setModuleStatus(db, scope.projectId, buildSeq, m.id, 'merged', { checkpointRef: input.foundationRef });
+		}
 	}
 	const latestJoined = (await getModule(db, scope.projectId, buildSeq, foundation))?.checkpointRef ?? input.foundationRef;
-	const features = moduleFeatureMap(input.block, input.featureIds);
 	const started = await startReadyModules(db, scope, {
 		runId: input.runId,
 		buildSeq,

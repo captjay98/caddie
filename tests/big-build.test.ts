@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { migratedDatabase, addUser } from './fixtures/sqlite-d1.ts';
 import { createWorkspace, createProject } from '../apps/app/src/server/projects.ts';
 import { projectScopeForUser } from '../apps/app/src/server/scope.ts';
@@ -107,6 +108,32 @@ describe('the foundation step (part P steps 1-2)', () => {
 		expect(rows.every((r) => r.payerId === 'pay-1')).toBe(true);
 	});
 
+	test('a module with no planned features has nothing to build: it is joined at once and never takes a builder', async () => {
+		const { db, scope } = await seedProject();
+		await payer(db, 'pay-1');
+		const dispatched: string[] = [];
+		// No planned feature belongs to feed, so feed is joined at the foundation
+		// save point and money (which waits on core and feed) starts right away.
+		await startAfterFoundation(db, scope, {
+			runId: 'run-1',
+			block: block(),
+			featureIds: ['farms', 'sales'],
+			payerId: 'pay-1',
+			foundationRef: 'ckpt-foundation',
+			dispatch: (d) => {
+				dispatched.push(d.moduleId);
+			},
+		});
+		const rows = await listModules(db, scope.projectId, 0);
+		expect(rows.map((r) => [r.moduleId, r.status])).toEqual([
+			['core', 'merged'],
+			['feed', 'merged'],
+			['money', 'building'],
+		]);
+		expect((await getModule(db, scope.projectId, 0, 'feed'))?.checkpointRef).toBe('ckpt-foundation');
+		expect(dispatched).toEqual(['money']);
+	});
+
 	test('running the foundation step again for the same build is harmless: no second seed, no second start', async () => {
 		const { db, scope } = await seedProject();
 		await payer(db, 'pay-1');
@@ -163,5 +190,32 @@ describe('when the big build as a whole is settled', () => {
 			{ moduleId: 'feed', reason: 'stopped' },
 			{ moduleId: 'money', reason: 'waits-on-missing' },
 		]);
+	});
+});
+
+// --- the agent files (source guards: Flue agents don't run in a unit test) ----
+
+describe('the agents wire the big build', () => {
+	const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
+
+	test("the coordinator's finish hook settles without a nudge while the parts build", () => {
+		// A nudge here would spend the per-feature budget and then block a
+		// build whose parts are still being built by their own builders.
+		const src = read('../apps/app/src/agents/coordinator.ts');
+		const settle = src.indexOf('if (progress?.waitingOnParts) return;');
+		const nudge = src.indexOf('const focus = progress?.current ? `feature:');
+		expect(settle).toBeGreaterThan(-1);
+		expect(nudge).toBeGreaterThan(settle);
+	});
+
+	test('the coordinator host gets a real ModuleBuilder dispatcher carrying the seed data the builder validates', () => {
+		const src = read('../apps/app/src/agents/host-context.ts');
+		expect(src).toContain('resolveCoordinatorContext(env, conversationId, { dispatchModuleBuilder: moduleBuilderDispatcher(conversationId) })');
+		expect(src).toMatch(
+			/dispatch\(ModuleBuilder, \{\s*id: input\.instanceId,\s*message: input\.message,\s*initialData: \{ conversationId, moduleId: input\.moduleId, buildSeq: input\.buildSeq, features: \[\.\.\.input\.features\] \},/,
+		);
+		// ...which matches the builder's own seed schema field for field.
+		const builder = read('../apps/app/src/agents/module-builder.ts');
+		for (const field of ['conversationId:', 'moduleId:', 'buildSeq:', 'features:']) expect(builder).toContain(field);
 	});
 });
