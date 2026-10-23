@@ -304,6 +304,18 @@ describe('checkArchitecture — every rule refuses with its message', () => {
 	test('path: reserved /api/caddie/', () =>
 		refuses((b) => (b.routes[0]!.path = '/api/caddie/notes'), 'small', 'path.reserved', 'keeps for itself'));
 
+	// P2 (review 2026-10-23): a declared field named like a column Caddie always
+	// adds (id/createdAt/updatedAt or the owner column) would make the generated
+	// CREATE TABLE emit a duplicate column and fail at build time — refuse it.
+	test('field: a reserved column name (createdAt) is refused', () =>
+		refuses((b) => b.tables[0]!.fields.push({ name: 'createdAt', type: 'text', references: null }), 'small', 'field.reserved', 'adds automatically'));
+
+	test('field: the owner column name (ownerId) is refused on a person-owned table', () =>
+		refuses((b) => b.tables[0]!.fields.push({ name: 'ownerId', type: 'text', references: null }), 'small', 'field.reserved', 'ownerId'));
+
+	test('field: a field name repeated within a table is refused', () =>
+		refuses((b) => b.tables[0]!.fields.push({ name: 'body', type: 'text', references: null }), 'small', 'field.duplicate', 'more than once'));
+
 	test('module: table in an unknown module', () =>
 		refuses((b) => (b.tables[0]!.module = 'ghost'), 'small', 'module.unknown', 'does not have'));
 

@@ -125,6 +125,29 @@ export function checkArchitecture(
 	const tableByName = new Map(block.tables.map((t) => [t.name, t]));
 	const routeById = new Map(block.routes.map((r) => [r.id, r]));
 
+	// --- reserved / duplicate field names (P2, review 2026-10-23) ------------
+	// The generated schema ALWAYS emits id, createdAt and updatedAt, plus an
+	// owner column (ownerId for a person-owned table, teamId for a team-owned
+	// one). A declared field with one of those names — or a name repeated within
+	// the table — makes the generated CREATE TABLE emit a duplicate column and
+	// fail at build time. Reject it here, before the design is approved.
+	for (let t = 0; t < block.tables.length; t += 1) {
+		const table = block.tables[t]!;
+		const ownerCol = table.owner === 'person' ? 'ownerId' : table.owner === 'team' ? 'teamId' : null;
+		const reserved = new Set(['id', 'createdAt', 'updatedAt', ...(ownerCol ? [ownerCol] : [])]);
+		const seen = new Set<string>();
+		for (let f = 0; f < table.fields.length; f += 1) {
+			const name = table.fields[f]!.name;
+			if (reserved.has(name)) {
+				add('field.reserved', `tables.${t}.fields.${f}`, `The "${table.name}" field "${name}" uses a name Caddie adds automatically (id, createdAt, updatedAt${ownerCol ? `, ${ownerCol}` : ''}). Rename it.`);
+			}
+			if (seen.has(name)) {
+				add('field.duplicate', `tables.${t}.fields.${f}`, `The "${table.name}" table declares the field "${name}" more than once. Each field name must be unique.`);
+			}
+			seen.add(name);
+		}
+	}
+
 	// --- caps (D7 + extras) --------------------------------------------------
 	const features = featureIds(block);
 	if (kind === 'small') {

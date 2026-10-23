@@ -78,11 +78,6 @@ function readRequest(input: unknown): ReadEmail | AppEmailReply {
 	return { to, subject, text, template };
 }
 
-async function count(db: D1Database, sql: string, ...values: unknown[]): Promise<number> {
-	const row = (await db.prepare(sql).bind(...values).all()).results?.[0] as { n?: number } | undefined;
-	return Number(row?.n ?? 0);
-}
-
 /**
  * Store one email in the project's test inbox. Nothing is sent. The caller
  * (app-platform.ts) decides whether the app may send at all; this function
@@ -98,19 +93,38 @@ export async function sendAppEmail(
 	if ('ok' in read) return read;
 
 	const hourAgo = new Date(now.getTime() - 60 * 60_000).toISOString();
-	if ((await count(db, 'select count(*) as "n" from "app_test_emails" where "projectId" = ? and "createdAt" > ?', input.projectId, hourAgo)) >= APP_EMAIL_LIMITS.perAppPerHour) {
+	const stamp = now.toISOString();
+	// P2 (review 2026-10-23): admit atomically. A count-then-insert let two
+	// concurrent sends both pass the hourly limit; this inserts ONLY when the
+	// count in the last hour is still under the cap, in the same statement.
+	const admit = (await db
+		.prepare(
+			'insert into "app_test_emails" ("id","projectId","mode","toEmail","subject","textBody","template","createdAt") ' +
+				'select ?,?,?,?,?,?,?,? ' +
+				'where (select count(*) from "app_test_emails" where "projectId" = ? and "createdAt" > ?) < ?',
+		)
+		.bind(
+			`ate_${crypto.randomUUID()}`,
+			input.projectId,
+			input.mode,
+			read.to,
+			read.subject,
+			read.text,
+			read.template,
+			stamp,
+			input.projectId,
+			hourAgo,
+			APP_EMAIL_LIMITS.perAppPerHour,
+		)
+		.run()) as { meta?: { changes?: number } };
+	if (!admit.meta?.changes) {
 		return fail('busy', 'This app has sent a lot of emails in the last hour. Try again later.');
 	}
-
-	const stamp = now.toISOString();
-	await db.batch([
-		db
-			.prepare('insert into "app_test_emails" ("id","projectId","mode","toEmail","subject","textBody","template","createdAt") values (?,?,?,?,?,?,?,?)')
-			.bind(`ate_${crypto.randomUUID()}`, input.projectId, input.mode, read.to, read.subject, read.text, read.template, stamp),
-		db
-			.prepare('delete from "app_test_emails" where "projectId" = ? and "id" not in (select "id" from "app_test_emails" where "projectId" = ? order by "createdAt" desc, "rowid" desc limit ?)')
-			.bind(input.projectId, input.projectId, APP_EMAIL_LIMITS.inboxKeep),
-	]);
+	// Keep only the newest inboxKeep messages for this app.
+	await db
+		.prepare('delete from "app_test_emails" where "projectId" = ? and "id" not in (select "id" from "app_test_emails" where "projectId" = ? order by "createdAt" desc, "rowid" desc limit ?)')
+		.bind(input.projectId, input.projectId, APP_EMAIL_LIMITS.inboxKeep)
+		.run();
 	return { ok: true, delivered: 'test-inbox' };
 }
 

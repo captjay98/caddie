@@ -70,6 +70,19 @@ describe('emails from apps', () => {
 		expect((await send(good({ subject: 'later' }), 'preview', later)).ok).toBe(true);
 	});
 
+	test('P2: concurrent sends at the cap never exceed the hourly limit (atomic admission)', async () => {
+		// Fill to one below the cap, then fire many sends at once. A count-then-
+		// insert would let several pass against the same stale count and overshoot;
+		// the atomic insert admits exactly one more.
+		for (let i = 0; i < APP_EMAIL_LIMITS.perAppPerHour - 1; i++) expect((await send(good({ subject: `pre${i}` }))).ok).toBe(true);
+		const results = await Promise.all(Array.from({ length: 8 }, (_, i) => send(good({ subject: `race${i}` }))));
+		const accepted = results.filter((r) => r.ok).length;
+		expect(accepted).toBe(1); // only the one remaining slot
+		// The stored inbox never exceeds the cap.
+		const stored = await listTestEmails(db, await projectScopeForUser(db, 'owner-1', projectId), 100);
+		expect(stored.length).toBeLessThanOrEqual(APP_EMAIL_LIMITS.perAppPerHour);
+	});
+
 	test('a bad address, a list of addresses, and oversize fields are refused before anything is stored', async () => {
 		for (const request of [
 			null,
