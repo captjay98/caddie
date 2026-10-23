@@ -35,7 +35,7 @@
  * and no test ever touches the network.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -68,6 +68,8 @@ export interface DeployDeps {
 	readonly fileExists?: (path: string) => boolean;
 	/** Lists a directory's entries; defaults to node:fs readdirSync. */
 	readonly listDir?: (path: string) => string[];
+	/** Appends UTF-8 text to a file; defaults to node:fs. Used for the evidence file. */
+	readonly appendFile?: (path: string, text: string) => void;
 	/** The wall clock, so the evidence row is deterministic in tests. */
 	readonly now?: () => Date;
 	/** Sink for progress lines (default: console.log). */
@@ -196,6 +198,20 @@ export function lastDeployedCommit(receiptsText: string): string | null {
 			.filter((r) => r.packet === 'P17' && typeof r.commit === 'string')
 			.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')));
 		return p17[0]?.commit ?? null;
+	} catch {
+		return null;
+	}
+}
+
+/** The newest P17 receipt's id — the smoke receipt for the evidence section. */
+export function latestP17ReceiptId(receiptsText: string): string | null {
+	try {
+		const parsed: unknown = JSON.parse(receiptsText);
+		if (!Array.isArray(parsed)) return null;
+		const p17 = (parsed as { packet?: string; id?: string; at?: string }[])
+			.filter((r) => r.packet === 'P17' && typeof r.id === 'string')
+			.sort((a, b) => String(b.at ?? '').localeCompare(String(a.at ?? '')));
+		return p17[0]?.id ?? null;
 	} catch {
 		return null;
 	}
@@ -528,24 +544,40 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	for (const line of effective) log(`    switch ${line}`);
 	record({ name: 'switches', ok: true, command: switchesArgv, detail: `${effective.length} effective switch value(s) (read-only)` });
 
-	// --- Step 12: build the evidence row (printed, never committed) ----------
+	// --- Step 12: APPEND the evidence section to docs/release-evidence.md -----
+	// Item G: the run writes its own evidence section (never docs/live-receipts.json,
+	// which the smoke run owns). The smoke receipt id comes from the newest P17
+	// entry in docs/live-receipts.json that the smoke just wrote.
 	const date = now().toISOString().slice(0, 10);
 	const passCount = steps.filter((s) => s.ok).length;
-	evidenceRow = [
-		`| ${date}`,
-		releaseUrl,
-		`\`${versionId}\``,
-		`\`${head.slice(0, 7)}\``,
-		`${passCount} steps OK`,
-		pending.length > 0 ? pending.join(' ') : 'none',
-		headTags.join(' '),
-		`P17 live 5/5`,
-		`${liveHash} == dist |`,
-	].join(' | ');
-	log('    evidence row (NOT committed — commit it yourself):');
-	log(`    ${evidenceRow}`);
-	log(`    git add docs/release-evidence.md && git commit -m "release evidence: ${versionId}"`);
-	record({ name: 'evidence', ok: true, detail: 'row printed; commit it yourself (this script never writes docs/release-evidence.md)' });
+	const versionLabel = versionId ?? '(unparsed)';
+	const receiptId = fileExists(receiptsPath) ? latestP17ReceiptId(readFile(receiptsPath)) ?? '(none)' : '(none)';
+	const migrationsApplied = pending.length > 0 ? pending.join(', ') : 'none';
+	const doTagsLabel = headTags.length > 0 ? headTags.join(', ') : 'none';
+	const section = [
+		'',
+		`## Production deploy (${date}, bun run deploy)`,
+		'',
+		'| Field | Value |',
+		'| :--- | :--- |',
+		`| URL | ${releaseUrl} |`,
+		`| Version ID | \`${versionLabel}\` |`,
+		`| Commit | \`${head.slice(0, 7)}\` |`,
+		`| Rollback ID | \`${rollbackId ?? '(none)'}\` |`,
+		`| Gate | release-check + preflight, ${passCount} steps OK |`,
+		`| Migrations applied | ${migrationsApplied} |`,
+		`| DO tags | ${doTagsLabel} |`,
+		`| Smoke receipt | \`${receiptId}\` |`,
+		`| Hash match | ${liveHash} == dist |`,
+		'',
+	].join('\n');
+	const evidencePath = join(deps.repoRoot, 'docs', 'release-evidence.md');
+	const appendFile = deps.appendFile ?? ((path: string, text: string) => appendFileSync(path, text, 'utf8'));
+	appendFile(evidencePath, section);
+	evidenceRow = section;
+	log('    appended an evidence section to docs/release-evidence.md — commit it yourself:');
+	log(`    git add docs/release-evidence.md docs/live-receipts.json && git commit -m "release evidence: ${versionLabel}"`);
+	record({ name: 'evidence', ok: true, detail: 'evidence section appended to docs/release-evidence.md (docs/live-receipts.json is never written here)' });
 
 	return finish();
 }

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
 	builtBindings,
 	lastDeployedCommit,
+	latestP17ReceiptId,
 	parseAppliedMigrations,
 	parseLatestDeploymentId,
 	parsePendingMigrations,
@@ -101,6 +102,8 @@ interface Harness {
 	deps: DeployDeps;
 	commands: string[][];
 	logs: string[];
+	/** Every (path, text) the script appended — the real fs is never touched. */
+	appends: { path: string; text: string }[];
 }
 
 function ok(stdout = ''): RunResult {
@@ -110,6 +113,7 @@ function ok(stdout = ''): RunResult {
 function makeHarness(over: HarnessOverrides = {}): Harness {
 	const commands: string[][] = [];
 	const logs: string[] = [];
+	const appends: { path: string; text: string }[] = [];
 	const headDoTags = over.headDoTags ?? ['v1', 'v2', 'v3', 'v4'];
 	const priorDoTags = over.priorDoTags ?? ['v1', 'v2', 'v3', 'v4'];
 	const localMigrations = over.localMigrations ?? ['0001_a.sql', '0002_b.sql'];
@@ -183,10 +187,11 @@ function makeHarness(over: HarnessOverrides = {}): Harness {
 		},
 		fileExists: (path: string) => files[path] !== undefined || path === `${APP}/migrations`,
 		listDir: (path: string) => (path === `${APP}/migrations` ? localMigrations : []),
+		appendFile: (path: string, text: string) => appends.push({ path, text }),
 		now: () => new Date('2026-10-23T00:00:00Z'),
 		log: (line: string) => logs.push(line),
 	};
-	return { deps, commands, logs };
+	return { deps, commands, logs, appends };
 }
 
 const REHEARSAL: DeployOptions = { yes: false, withSecrets: false, acceptDoMigration: false };
@@ -395,22 +400,53 @@ describe('deploy.ts — the flag & drift rules', () => {
 	});
 });
 
-describe('deploy.ts — evidence', () => {
-	test('an evidence row is produced and printed, and docs are NOT written here', () => {
+describe('deploy.ts — evidence (item G)', () => {
+	test('an evidence section is APPENDED to docs/release-evidence.md; docs/live-receipts.json is never written', () => {
 		const h = makeHarness();
 		const result = runDeploy(DEPLOY, h.deps);
 		expect(result.ok).toBe(true);
-		expect(result.evidenceRow).toBeTruthy();
-		expect(result.evidenceRow).toContain(NEW_VERSION_ID);
-		expect(result.evidenceRow).toContain('2026-10-23');
-		expect(result.evidenceRow).toContain(HOST);
-		// printed, with the manual commit command
-		expect(h.logs.some((l) => l.includes('git add docs/release-evidence.md'))).toBe(true);
-		// no command writes the receipts or the evidence file
+		expect(h.appends.length).toBe(1);
+		expect(h.appends[0]!.path).toContain('docs/release-evidence.md');
+		const text = h.appends[0]!.text;
+		expect(text).toContain('## Production deploy (2026-10-23, bun run deploy)');
+		expect(text).toContain(NEW_VERSION_ID);
+		expect(text).toContain(HOST);
+		expect(text).toContain(ROLLBACK_ID);
+		expect(text).toContain('lr_deadbeefcafef00d');
+		expect(text).toContain('== dist');
+		// the manual commit command names both docs files
+		expect(h.logs.some((l) => l.includes('git add docs/release-evidence.md docs/live-receipts.json'))).toBe(true);
+		// the script never writes docs/live-receipts.json — not via a command, not via append
 		for (const c of joinAll(h.commands)) {
 			expect(c.includes('live-receipts.json')).toBe(false);
 			expect(c.includes('release-evidence.md')).toBe(false);
 		}
+		for (const a of h.appends) expect(a.path).not.toContain('live-receipts.json');
+	});
+
+	test('the version reads (unparsed) in the evidence when the deploy has no Version ID (items E+G)', () => {
+		const h = makeHarness({ deployOutput: 'Total Upload: 1 KiB\nDeployed caddie-app\n' });
+		const result = runDeploy(DEPLOY, h.deps);
+		expect(result.ok).toBe(true);
+		expect(h.appends[0]!.text).toContain('(unparsed)');
+	});
+
+	test('a missing P17 receipt records (none) as the smoke receipt id', () => {
+		const h = makeHarness({ noReceiptsFile: true });
+		const result = runDeploy({ ...DEPLOY, acceptDoMigration: true }, h.deps);
+		expect(result.ok).toBe(true);
+		expect(h.appends[0]!.text).toContain('Smoke receipt | `(none)`');
+	});
+
+	test('latestP17ReceiptId reads the id of the newest P17 receipt', () => {
+		const text = JSON.stringify([
+			{ packet: 'P17', id: 'lr_old', at: '2026-10-01T00:00:00Z' },
+			{ packet: 'P17', id: 'lr_new', at: '2026-10-22T00:00:00Z' },
+			{ packet: 'P04', id: 'lr_other', at: '2026-10-25T00:00:00Z' },
+		]);
+		expect(latestP17ReceiptId(text)).toBe('lr_new');
+		expect(latestP17ReceiptId('[]')).toBeNull();
+		expect(latestP17ReceiptId('not json')).toBeNull();
 	});
 });
 
