@@ -416,6 +416,14 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// architecture block + review + module board + stop into the plain
 			// shapes the Design review and build-progress screens read.
 			'tests/design-overview.test.ts',
+			// Lane 10 (parts K + N): emails from apps stored to the test inbox
+			// (never sent, the limits, bad-address refusal, cross-project
+			// isolation); the test-inbox route returning codes + emails together;
+			// and Run-now job signatures (the host signer matches the generated
+			// access check, stale/forged calls refused) with the run records.
+			'tests/app-email.test.ts',
+			'tests/test-inbox.test.ts',
+			'tests/app-job.test.ts',
 		],
 		browser: [
 			'tests/browser/brief.spec.ts',
@@ -425,6 +433,9 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// board, the spending-limit stop, and the Try-again button).
 			'tests/browser/design-review-team.spec.ts',
 			'tests/browser/build-progress-team.spec.ts',
+			// Lane 10 (screen 3): the test inbox with a code and an email marked
+			// "Not sent — test mode", and the jobs list with Run now and a run.
+			'tests/browser/screen3-team.spec.ts',
 		],
 		live: [],
 	},
