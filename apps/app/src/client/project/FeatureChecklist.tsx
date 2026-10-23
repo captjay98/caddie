@@ -1,9 +1,12 @@
-import { useState, type ReactElement } from 'react';
+import { useRef, useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { parsePlanFeatures, WHOLE_PLAN_FEATURE, type BuildFeatureView } from '@caddie/contracts';
+import * as v from 'valibot';
+import { parsePlanFeatures, WHOLE_PLAN_FEATURE, ProjectExperienceSchema, type BuildFeatureView } from '@caddie/contracts';
 import { Icon } from '../icons.tsx';
 import { postJson } from '../api.ts';
-import { useBuildActivity } from '../queries.ts';
+import { useBuildActivity, useProjectExperience } from '../queries.ts';
+import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
+import { ModuleProgress } from './ModuleProgress.tsx';
 
 /**
  * The plan's feature list, as the person approving it reads it: what will be
@@ -42,12 +45,86 @@ export function hasFeatureList(features: readonly BuildFeatureView[]): boolean {
  * The feature list for a finished or stopped build, where the save points are
  * actionable (rollback is refused while a build runs). Reads the same polled
  * activity query as the progress view.
+ *
+ * On a BIG app (team mode, plan part P) it also shows the parts board and the
+ * spending-limit stop through {@link ModuleProgress}, and — where the build
+ * offers it (part F) — the "Try again from the last save point" button. All of
+ * these render nothing when they have no source, so a plain small-app build is
+ * exactly as before.
  */
 export function SavedFeatures(props: { actorId: string; projectId: string }): ReactElement | null {
 	const activity = useBuildActivity({ actorId: props.actorId }, props.projectId);
 	const features = activity.data?.features ?? [];
-	if (!hasFeatureList(features)) return null;
-	return <BuildFeatureList projectId={props.projectId} features={features} />;
+	const hasList = hasFeatureList(features);
+	return (
+		<>
+			{/* Big app: its parts side by side + the spending-limit stop. Self-nulls for a small app. */}
+			<ModuleProgress projectId={props.projectId} />
+			{/* Part F: the Try-again button, only when the build offers it. */}
+			<TryAgainButton projectId={props.projectId} />
+			{hasList ? <BuildFeatureList projectId={props.projectId} features={features} /> : null}
+		</>
+	);
+}
+
+/**
+ * "Try this feature again from the last save point" (plan part F). The button
+ * appears ONLY where the build offers it: the experience projection carries a
+ * `try_again` action on a stopped build after three failed tries, and nowhere
+ * else. One click posts the real try-again route; the key is reused until it
+ * succeeds, so a double click is one try-again.
+ */
+export function TryAgainButton(props: { projectId: string }): ReactElement | null {
+	const chrome = useWorkspaceChrome();
+	const experience = useProjectExperience({ actorId: chrome.actorId }, props.projectId);
+	const queryClient = useQueryClient();
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const tryKey = useRef<string | null>(null);
+	if (!experience.data) return null;
+	const parsed = v.safeParse(ProjectExperienceSchema, experience.data);
+	if (!parsed.success) return null;
+	const action = parsed.output.actions.find((a) => a.kind === 'try_again');
+	if (!action) return null;
+
+	const run = async () => {
+		setBusy(true);
+		setError(null);
+		try {
+			tryKey.current ??= `try-again:${globalThis.crypto.randomUUID()}`;
+			await postJson(`/api/projects/${encodeURIComponent(props.projectId)}/workflow/try-again`, { key: tryKey.current });
+			tryKey.current = null;
+			await Promise.all([
+				queryClient.invalidateQueries({ queryKey: ['experience'] }),
+				queryClient.invalidateQueries({ queryKey: ['build-activity'] }),
+			]);
+			await experience.refetch();
+		} catch (cause) {
+			setError(cause instanceof Error ? cause.message : 'The try-again did not go through.');
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return (
+		<div className="try-again" data-testid="try-again">
+			<button
+				type="button"
+				className="btn-key"
+				data-testid="try-again-button"
+				disabled={busy || !action.enabled}
+				onClick={() => void run()}
+			>
+				<Icon name="arrowLeft" title="" /> {busy ? 'Trying again…' : action.label}
+			</button>
+			<span className="try-again-note">Caddie goes back to the last save point and builds the stuck part again.</span>
+			{error ? (
+				<p className="try-again-error" role="alert">
+					{error}
+				</p>
+			) : null}
+		</div>
+	);
 }
 
 /**

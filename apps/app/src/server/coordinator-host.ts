@@ -53,6 +53,7 @@ import {
 } from "./build-steps.ts";
 import { areaFor, SMALL_APP_MODULE, type AreaRole } from "./part-manifests.ts";
 import { getApprovedBlock } from "./architecture-gate.ts";
+import { appFeatureFiles } from "./app-feature-files.ts";
 import {
   recordArchitectureReview,
   reviewOutcome,
@@ -293,10 +294,10 @@ export async function createCoordinatorContext(
   const teamModeRow = await (async () => {
     try {
       const res = await env.DB.prepare(
-        'select "teamMode","bigApps" from "build_workflows" where "projectId" = ?',
+        'select "teamMode","bigApps","appFeatures" from "build_workflows" where "projectId" = ?',
       )
         .bind(scope.projectId)
-        .all<{ teamMode: number | null; bigApps: number | null }>();
+        .all<{ teamMode: number | null; bigApps: number | null; appFeatures: number | null }>();
       return res.results?.[0];
     } catch {
       // A workflow table without the team-mode columns (a partial-migration
@@ -306,6 +307,9 @@ export async function createCoordinatorContext(
   })();
   const teamMode = Number(teamModeRow?.teamMode ?? 0) === 1;
   const bigApps = Number(teamModeRow?.bigApps ?? 0) === 1;
+  // Parts J and L: the generated payments/upload files go only to a project
+  // stamped with app features (server/app-feature-files.ts).
+  const appFeatures = Number(teamModeRow?.appFeatures ?? 0) === 1;
 
   // The image-level inspect surface the part-snapshot ports read a COMMITTED
   // image through — exactly Contree's inspect API (inspectList/Download/
@@ -413,7 +417,9 @@ export async function createCoordinatorContext(
     if (!teamMode) return false;
     const block = await getApprovedBlock(env.DB, scope.projectId).catch(() => null);
     if (!block) return false;
-    const files = writeContractFiles(block, bigApps ? "big" : "small", features);
+    // Parts J and L: the test-mode payments/upload files the block declares
+    // ride along (nothing without app features), so a builder can't drop them.
+    const files = { ...appFeatureFiles(block, { appFeatures }), ...writeContractFiles(block, bigApps ? "big" : "small", features) };
     const { driver, id } = await ensureSession();
     await driver.uploadFiles(
       id,

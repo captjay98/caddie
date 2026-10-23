@@ -476,3 +476,30 @@ In dependency order; provider-side steps in
 10. **Contest entry (if entering)** — check the current official contest
     rules and prior-work disclosure; a fresh repo establishes nothing by
     itself.
+
+## Production deploy (2026-10-23): the software-team-mode base deploy, every new switch off
+
+Owner's go: "deploy what we have so far" (2026-10-23, 01:54 Lagos). This is the
+plan's base deploy (section 11), done before Sunday: the new database tables,
+the ModuleBuilder Durable Object class and the Brief cards, with team mode, big
+apps and app features off. Deployed from `feat/team-mode` (main `f496fd2` is an
+ancestor of it; main is checked out by another agent, so it was not moved).
+
+| Item | Value |
+| :--- | :--- |
+| URL | https://caddie.jamalibrahim.dev |
+| Version id | `82e33af7-2bae-419b-931c-48841356258e` |
+| Commit | `ba86c2d` (`feat/team-mode`) |
+| Previous version | `c7e7cc7a-1b52-426c-84c1-01eedd3fb7f2`. Cloudflare refuses a rollback to it: this deploy adds Durable Object migration `v4` (`FlueModuleBuilderAgent`). Fixes go forward |
+| Gate | release-check 50 PASS / 0 FAIL / 5 BLOCKED (owner inputs and stale live receipts); preflight 19 PASS / 0 WARN / 0 FAIL |
+| Dry run | lists DB, LOADER, PREVIEW_DB and FlueCoordinatorAgent, FlueHelloAgent, FlueModuleBuilderAgent |
+| D1 | before the code: `0040_team_mode`, `0041_output_contract_receipts`, `0042_module_builders`, `0043_integration_lock` (39 applied before, 43 after; no remote migration missing from the repo) |
+| Switches | no stored rows and no env defaults: team_mode, big_apps, app_features **off**; spend_enforcement, publish_safety **on** (the defaults) |
+| Smoke | P17 live 5/5, receipt `lr_b7c96effc7926c8b` (LIVE VERIFIED) |
+| Bytes | live `/app/` serves `index-HxCQXzxm.js`, the same file as the local production build |
+| Not checked | a human sign-in after this deploy (the owner's step) |
+
+Live for every account now: the spending limit on every build (standard $5,
+judges $2), publish safety, the Brief cards with the ready card's live view,
+the plan-approval wording, and AI on photos only where app features are on
+(nowhere yet). Everything else ships dark behind the off switches.

@@ -171,6 +171,16 @@ export function routeByModelId(requestedModel: string | undefined | null): Model
 }
 
 /**
+ * The route to price a paying build's call at when its model can't be resolved
+ * (an id not in the table, or no turn_request yet): the costliest route's worst
+ * case, so a paying build never makes an unpriced call (fail-closed; the settle
+ * path still records the real cost).
+ */
+export function costliestRoute(): ModelRoute {
+	return [...MODEL_ROUTES].sort((a, b) => estimateCallMicros(b, undefined) - estimateCallMicros(a, undefined))[0]!;
+}
+
+/**
  * The worst-case cost of one model call, in micros (plan §A step 2 "estimate").
  *   input  = the turn_request's own size at 1 token per 2 chars, when known;
  *            else the route's context window capped at 200k tokens;

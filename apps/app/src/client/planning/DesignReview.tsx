@@ -1,13 +1,16 @@
 import { resumeWorkflow } from "../conversation/workflow-dispatch.ts";
 import { useState } from "react";
+import * as v from "valibot";
 import { Link } from "@tanstack/react-router";
 import { Markdown } from "@caddie/ui/Markdown";
-import type { ApprovalRecord } from "@caddie/contracts";
-import { splitFeatureBlock } from "@caddie/contracts";
+import type { ApprovalRecord, DesignOverview } from "@caddie/contracts";
+import { splitFeatureBlock, ProjectExperienceSchema } from "@caddie/contracts";
 import { PlanFeatureList } from "../project/FeatureChecklist.tsx";
 import type { ReactElement } from "react";
 import { formatTimeAgo } from "@caddie/ui/time";
 import { postJson } from "../api.ts";
+import { useProjectExperience } from "../queries.ts";
+import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
 import { PageSkeleton, StatePanel, failureKind } from "../states.tsx";
 import { CopyableId } from "../copyable.tsx";
 import type { WorkflowPhase } from "../workspace/project-status.ts";
@@ -379,6 +382,13 @@ export function DesignReview(props: {
         </div>
       </section>
 
+      {/* "How your app works" (team mode, plan part B): the approved
+          architecture in plain words — what it stores, who can see what, its
+          screens, its parts (big app), payments and emails, and the architect
+          review's findings. Self-fetched from the shared experience projection;
+          absent for a non-team-mode project, so nothing shows. */}
+      <HowYourAppWorks projectId={props.projectId} />
+
       {props.approvalError ? (
         <StatePanel
           kind={failureKind(props.approvalError)}
@@ -641,5 +651,162 @@ export function DesignReview(props: {
         </details>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * "How your app works" — the plain-words view of the approved architecture a
+ * non-technical person reads before the build starts (team mode, plan part B
+ * and section 7, screen 1). It reads the shared experience projection's
+ * `design` field: what the app stores, who can see what (people, teams,
+ * roles), its screens, its parts (modules, for a big app), payments and emails
+ * when declared, and the architect review's findings — where a security issue
+ * blocks approval until it is fixed.
+ *
+ * It renders NOTHING when there is no overview (a non-team-mode project, or a
+ * design without a `caddie-architecture` block): no bare heading, no empty
+ * card. Every line comes from the real block and review — nothing is guessed.
+ */
+export function HowYourAppWorks(props: { projectId: string }): ReactElement | null {
+  const chrome = useWorkspaceChrome();
+  const experience = useProjectExperience(
+    { actorId: chrome.actorId },
+    props.projectId,
+  );
+  if (!experience.data) return null;
+  const parsed = v.safeParse(ProjectExperienceSchema, experience.data);
+  if (!parsed.success || !parsed.output.design) return null;
+  return <DesignOverviewPanel overview={parsed.output.design} />;
+}
+
+/** The overview card itself (pure presentation), so it can be read from a prop. */
+export function DesignOverviewPanel(props: {
+  overview: DesignOverview;
+}): ReactElement {
+  const { overview } = props;
+  const big = overview.app === "big";
+  const review = overview.review;
+  // A big app groups its screens under their part; a small app lists them flat.
+  const screensByModule = new Map<string, string[]>();
+  for (const screen of overview.screens) {
+    const list = screensByModule.get(screen.module) ?? [];
+    list.push(screen.plain);
+    screensByModule.set(screen.module, list);
+  }
+  return (
+    <section
+      className="card-surface settings-panel how-app-works"
+      data-testid="how-app-works"
+      data-app={overview.app}
+    >
+      <div className="r-section-head">
+        <div>
+          <p className="kicker" data-tone="action">
+            BEFORE YOU APPROVE
+          </p>
+          <h2 className="ev-title">How your app works</h2>
+          <p className="page-lede">
+            {big
+              ? "Your app is big, so it is built in parts. Here is what it does, in plain words."
+              : "Here is what your app does, in plain words, before anything is built."}
+          </p>
+        </div>
+      </div>
+
+      {/* The architect's review — security issues block approval, advisory
+          issues are shown. Only drawn when the architect has run. */}
+      {review ? (
+        <div
+          className="how-app-review"
+          data-testid="how-app-review"
+          data-blocks={review.blocks ? "true" : "false"}
+        >
+          {review.security.length > 0 ? (
+            <div className="how-app-block" data-testid="how-app-security" role="alert">
+              <h3 className="how-app-block-head">
+                Caddie must fix these before building
+              </h3>
+              <ul className="how-app-list">
+                {review.security.map((message, i) => (
+                  <li key={i}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="how-app-safe" data-testid="how-app-safe">
+              Caddie’s safety review found nothing that blocks building.
+            </p>
+          )}
+          {review.advisory.length > 0 ? (
+            <div className="how-app-advisory" data-testid="how-app-advisory">
+              <h3 className="how-app-block-head">Things to consider</h3>
+              <ul className="how-app-list">
+                {review.advisory.map((message, i) => (
+                  <li key={i}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* The plain-words sections: what it stores, who can see what, sign-in,
+          outside services, AI, and test-mode features. Each is non-empty. */}
+      <div className="how-app-sections">
+        {overview.sections.map((section) => (
+          <div
+            className="how-app-section"
+            key={section.key}
+            data-testid={`how-app-section-${section.key}`}
+          >
+            <h3 className="how-app-section-head">{section.heading}</h3>
+            <ul className="how-app-list">
+              {section.lines.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      {/* Its parts (modules), for a big app. */}
+      {big && overview.modules && overview.modules.length > 0 ? (
+        <div className="how-app-section" data-testid="how-app-modules">
+          <h3 className="how-app-section-head">Its parts</h3>
+          <ul className="how-app-list">
+            {overview.modules.map((module) => (
+              <li key={module.id}>{module.plain}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {/* Its screens, grouped by part when the app is big. */}
+      <div className="how-app-section" data-testid="how-app-screens">
+        <h3 className="how-app-section-head">Its screens</h3>
+        {big ? (
+          (overview.modules ?? []).map((module) => {
+            const screens = screensByModule.get(module.id) ?? [];
+            if (screens.length === 0) return null;
+            return (
+              <div className="how-app-screen-group" key={module.id}>
+                <span className="how-app-screen-group-head">{module.plain}</span>
+                <ul className="how-app-list">
+                  {screens.map((plain, i) => (
+                    <li key={i}>{plain}</li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })
+        ) : (
+          <ul className="how-app-list">
+            {overview.screens.map((screen, i) => (
+              <li key={i}>{screen.plain}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }

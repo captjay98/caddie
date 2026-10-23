@@ -7,6 +7,7 @@ import {
 	D4_LIMIT_MICROS,
 	MICROS_PER_UNIT,
 	buildPayerId,
+	costliestRoute,
 	createBuildPayer,
 	estimateCallMicros,
 	openBuildPayer,
@@ -20,7 +21,8 @@ import {
 	spendCapMicros,
 	spendSnapshot,
 } from '../apps/app/src/server/build-spend.ts';
-import { findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
+import { findModelRouteForRole, MODEL_ROUTES } from '../apps/app/src/agents/providers.ts';
+import { readFileSync } from 'node:fs';
 
 /**
  * Part A — the money logic of the spending limit (plan §A), against a REAL
@@ -209,5 +211,24 @@ describe('Part A — build-spend money logic (trigger-enforced D1)', () => {
 		const snap = await spendSnapshot(db, 'build:p:1');
 		expect(snap.reservedMicros + snap.settledMicros).toBeLessThanOrEqual(snap.limitMicros!);
 		expect(snap.reservedMicros).toBe(3_000_000);
+	});
+});
+
+describe('Part A — a call on an unknown model route is never unpriced (lead fix)', () => {
+	test('costliestRoute is the route with the highest worst-case estimate', () => {
+		const top = costliestRoute();
+		for (const route of MODEL_ROUTES) {
+			expect(estimateCallMicros(top, undefined)).toBeGreaterThanOrEqual(estimateCallMicros(route, undefined));
+		}
+		// MUTATION PROOF: pick the cheapest instead and this fails.
+		const cheapest = Math.min(...MODEL_ROUTES.map((r) => estimateCallMicros(r, undefined)));
+		expect(estimateCallMicros(top, undefined)).toBeGreaterThan(cheapest);
+	});
+
+	test('the interceptor prices an unresolved route at the costliest route instead of passing it through', () => {
+		const source = readFileSync(new URL('../apps/app/src/server/spend-instrument.ts', import.meta.url), 'utf8');
+		// MUTATION PROOF: restore the unpriced pass-through and this fails.
+		expect(source).not.toContain('if (!resolvedRoute) return next();');
+		expect(source).toContain('resolvedRoute ?? costliestRoute()');
 	});
 });

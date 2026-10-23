@@ -29,6 +29,7 @@ import { stampProjectModes, type SwitchEnv } from "./platform-switches.ts";
 import {
   architectureKindForBuild,
   evaluateDesignGate,
+  availableFeatures,
 } from "./architecture-gate.ts";
 import { listArchitectureReviews } from "./architecture-review.ts";
 import { openBuildPayer, spendCapMicros } from "./build-spend.ts";
@@ -509,6 +510,9 @@ export async function decideDesign(
     const gate = evaluateDesignGate(design.body, {
       kind: architectureKindForBuild(await isBigAppsWorkflow(db, scope.projectId)),
       reviews: await listArchitectureReviews(db, scope.projectId),
+      // Test-mode features Caddie can run for this project (J-N): payments and
+      // uploads come with its app features; emails and jobs aren't built yet.
+      available: availableFeatures(await isAppFeaturesWorkflow(db, scope.projectId)),
     });
     if (!gate.ok) {
       throw new ScopeError(
@@ -585,8 +589,13 @@ async function isBigAppsWorkflow(db: D1Database, projectId: string): Promise<boo
   return (await workflowModeFlag(db, projectId, "bigApps")) === 1;
 }
 
+/** True when this project's workflow was stamped with app features (parts J-N). */
+async function isAppFeaturesWorkflow(db: D1Database, projectId: string): Promise<boolean> {
+  return (await workflowModeFlag(db, projectId, "appFeatures")) === 1;
+}
+
 /** Read one team-mode flag off the workflow row (migration 0040 columns). */
-async function workflowModeFlag(db: D1Database, projectId: string, column: "teamMode" | "bigApps"): Promise<number> {
+async function workflowModeFlag(db: D1Database, projectId: string, column: "teamMode" | "bigApps" | "appFeatures"): Promise<number> {
   const found = await rows(db, `select ${column} from build_workflows where projectId = ?`, projectId);
   return Number(found[0]?.[column] ?? 0);
 }
