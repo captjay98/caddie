@@ -517,10 +517,13 @@ export function createBuildWorkflowRouter(
     return c.json({ messages, emails }, 200, { "cache-control": "no-store" });
   });
 
-  // The latest "Run now" job runs with their one-line summaries (any member).
+  // The declared jobs and the latest "Run now" runs with their one-line
+  // summaries (any member). The jobs come from the approved design.
   router.get("/projects/:projectId/workflow/job-runs", async (c) => {
     const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
-    return c.json({ runs: await listJobRuns(c.env.DB, scope) }, 200, { "cache-control": "no-store" });
+    const [block, runs] = await Promise.all([getApprovedBlock(c.env.DB, scope.projectId), listJobRuns(c.env.DB, scope)]);
+    const jobs = (block?.jobs ?? []).map((j) => ({ id: j.id, plain: j.plain, every: j.every }));
+    return c.json({ jobs, runs }, 200, { "cache-control": "no-store" });
   });
 
   // "Run now" for one declared job (plan part N). Caddie signs a call to the

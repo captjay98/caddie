@@ -9692,3 +9692,41 @@ mark {
 		grid-template-columns: 1fr;
 	}
 }
+
+/* Test inbox: emails (lane 10, part K). Matches the codes list above. */
+.test-inbox-emails { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
+.test-inbox-email { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--color-line-soft); border-radius: 13px; background: var(--color-raised); }
+.test-inbox-email-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.test-inbox-email-subject { font-size: 13px; font-weight: 600; color: var(--color-bright); overflow-wrap: anywhere; }
+.test-inbox-email-to { font-size: var(--r-meta); color: var(--color-muted); overflow-wrap: anywhere; }
+.test-inbox-email-text { margin: 2px 0 0; font-size: 13px; color: var(--color-text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.test-inbox-tag { justify-self: start; margin-top: 2px; font-size: var(--r-meta); color: var(--color-muted); padding: 2px 8px; border: 1px solid var(--color-line-soft); border-radius: 999px; }
+
+/* App jobs with Run now (lane 10, part N). */
+.app-jobs { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-line-soft); }
+.app-jobs-head { display: flex; align-items: center; gap: 8px; }
+.app-jobs-head h4 { margin: 0; font-size: 14px; color: var(--color-bright); }
+.app-jobs-head > svg { color: var(--color-muted); flex: none; }
+.app-jobs-note { margin: 0; }
+.app-jobs-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.app-jobs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--color-line-soft); }
+.app-jobs-row:first-child { border-top: 0; padding-top: 2px; }
+.app-jobs-plain { font-size: 13px; color: var(--color-bright); overflow-wrap: anywhere; }
+.app-jobs-run { display: inline-flex; align-items: center; gap: 6px; flex: none; font: inherit; font-size: 13px; color: var(--color-bright); padding: 5px 12px; border: 1px solid var(--color-line); border-radius: 13px; background: var(--color-raised); cursor: pointer; }
+.app-jobs-run:hover:not(:disabled) { background: var(--color-lift); }
+.app-jobs-run:disabled { opacity: 0.6; cursor: default; }
+.app-jobs-run > svg { width: 14px; height: 14px; }
+.app-jobs-runs { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; }
+.app-jobs-run-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: baseline; gap: 8px; padding: 6px 0; border-top: 1px solid var(--color-line-soft); }
+.app-jobs-dot { width: 7px; height: 7px; border-radius: 999px; align-self: center; background: var(--color-muted); }
+.app-jobs-dot-done { background: var(--color-ok); }
+.app-jobs-dot-failed { background: var(--color-danger); }
+.app-jobs-dot-running { background: var(--color-warn); }
+.app-jobs-run-job { font-size: var(--r-meta); color: var(--color-muted); white-space: nowrap; }
+.app-jobs-run-summary { font-size: 13px; color: var(--color-text); overflow-wrap: anywhere; }
+.app-jobs-when { font-size: var(--r-meta); color: var(--color-muted); white-space: nowrap; }
+@media (max-width: 480px) {
+  .app-jobs-run-row { grid-template-columns: auto minmax(0, 1fr); }
+  .app-jobs-run-summary { grid-column: 1 / -1; }
+  .app-jobs-when { grid-column: 1 / -1; }
+}

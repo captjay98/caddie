@@ -21,6 +21,7 @@ import { PublishApp } from "../project/PublishApp.tsx";
 import { AppVersions } from "../project/AppVersions.tsx";
 import { AppAi } from "../project/AppAi.tsx";
 import { TestInbox } from "../project/TestInbox.tsx";
+import { AppJobs } from "../project/AppJobs.tsx";
 import { ImportedApp, importedAppTitle } from "../project/ImportedApp.tsx";
 import { CardHeader } from "../brief/CardFrame.tsx";
 import type { CardDesign } from "../brief/card-design.ts";
@@ -525,6 +526,7 @@ function ProjectWorkspace({
               : {})}
           />
           {state.data?.previewHasServer ? <TestInbox actorId={chrome.actorId} projectId={projectId} /> : null}
+          {state.data?.previewHasServer ? <AppJobs actorId={chrome.actorId} projectId={projectId} outputId={workflow.previewId} /> : null}
           <details className="workflow-checks"><summary>What Caddie checked</summary>
             <SavedFeatures actorId={chrome.actorId} projectId={projectId} />
           </details>
