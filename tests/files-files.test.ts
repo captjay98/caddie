@@ -43,6 +43,38 @@ describe('part L: generated file-upload files — structure', () => {
 		for (const type of ALLOWED_FILE_TYPES) expect(server).toContain(type);
 	});
 
+	// FINDING #8 (review 2026-10-23): the per-app 100 MB quota must count
+	// uploading files, not just ready ones, and reserve atomically — a
+	// count-then-insert on 'ready' alone let two concurrent starts overshoot.
+	test('the start reservation counts ready AND uploading bytes, atomically', () => {
+		// The quota check is an insert ... select ... where, so the reservation is
+		// made in the same statement the cap is checked, and uploading counts.
+		expect(server).toContain("status in ('ready','uploading')");
+		expect(server).toMatch(/insert into caddie_files[\s\S]*select[\s\S]*where \(select coalesce\(sum\(bytes\)/);
+	});
+
+	test('two starts near the cap cannot both reserve (behavioural, real migration + the real insert)', async () => {
+		const { Database } = await import('bun:sqlite');
+		const db = new Database(':memory:');
+		for (const stmt of migration.split(';').map((s) => s.trim()).filter(Boolean)) db.exec(stmt);
+		const CAP = 100 * 1024 * 1024;
+		// The exact atomic insert the generated start route runs.
+		const INSERT =
+			"insert into caddie_files (id, ownerId, teamId, name, mime, bytes, sha256, parts, status, createdAt) " +
+			"select ?, 'owner', null, ?, 'text/plain', ?, ?, 1, 'uploading', '2026-10-23' " +
+			"where (select coalesce(sum(bytes), 0) from caddie_files where status in ('ready','uploading')) + ? <= ?";
+		const start = (id: string, bytes: number) =>
+			db.prepare(INSERT).run(id, id, bytes, "0".repeat(64), bytes, CAP);
+		// First near-cap upload (cap minus 1 byte) is admitted.
+		expect(start('a', CAP - 1).changes).toBe(1);
+		// A second upload of 2 bytes would overshoot — refused, because the first
+		// (still 'uploading') already counts against the cap.
+		expect(start('b', 2).changes).toBe(0);
+		// Exactly one row was reserved.
+		expect((db.prepare("select count(*) as n from caddie_files").get() as { n: number }).n).toBe(1);
+		db.close();
+	});
+
 	test('the files migration sorts after auth and before the generated schema', () => {
 		expect('migrations/0000_caddie_files.sql' > 'migrations/0000_caddie_auth.sql').toBe(true);
 		expect('migrations/0000_caddie_files.sql' < 'migrations/0001_schema.sql').toBe(true);

@@ -214,19 +214,27 @@ export function mountFiles<E extends { Bindings: FilesEnv }>(app: Hono<E>): void
     if (!ALLOWED_FILE_TYPES.includes(mime)) return c.json({ error: "That kind of file isn't allowed." }, 415);
     if (size <= 0 || size > MAX_FILE_BYTES) return c.json({ error: "A file can be at most 5 MB." }, 413);
     if (!/^[0-9a-f]{64}$/.test(sha256)) return c.json({ error: "A file needs its sha256." }, 400);
-    // 100 MB per app: the finished files plus this one.
-    const used = await env.DB.prepare("select coalesce(sum(bytes), 0) as total from caddie_files where status = 'ready'").first<{ total: number }>();
-    if ((used?.total ?? 0) + size > MAX_APP_BYTES) return c.json({ error: "This app has reached its 100 MB of files." }, 413);
     if (teamId) {
       const member = await env.DB.prepare("select 1 as ok from team_members where teamId = ? and personId = ?").bind(teamId, user.id).first<{ ok: number }>();
       if (!member) return c.json({ error: "You're not on that team." }, 403);
     }
     const id = crypto.randomUUID();
     const parts = Math.max(1, Math.ceil(size / MAX_PART_BYTES));
-    await env.DB
-      .prepare("insert into caddie_files (id, ownerId, teamId, name, mime, bytes, sha256, parts, status, createdAt) values (?, ?, ?, ?, ?, ?, ?, ?, 'uploading', ?)")
-      .bind(id, user.id, teamId, name, mime, size, sha256, parts, new Date().toISOString())
+    // FINDING #8 (review 2026-10-23): 100 MB per app, counted atomically across
+    // READY and UPLOADING files. A count-then-insert that read only 'ready'
+    // bytes let two concurrent starts both pass against the same free space and
+    // overshoot the cap. This single statement inserts ONLY when the sum of
+    // every ready+uploading file's declared bytes, plus this one, fits the cap —
+    // so the reservation is made in the same step the cap is checked.
+    const res = await env.DB
+      .prepare(
+        "insert into caddie_files (id, ownerId, teamId, name, mime, bytes, sha256, parts, status, createdAt) " +
+          "select ?, ?, ?, ?, ?, ?, ?, ?, 'uploading', ? " +
+          "where (select coalesce(sum(bytes), 0) from caddie_files where status in ('ready','uploading')) + ? <= ?",
+      )
+      .bind(id, user.id, teamId, name, mime, size, sha256, parts, new Date().toISOString(), size, MAX_APP_BYTES)
       .run();
+    if (!res.meta.changes) return c.json({ error: "This app has reached its 100 MB of files." }, 413);
     return c.json({ id, parts, partBytes: MAX_PART_BYTES });
   });
 
