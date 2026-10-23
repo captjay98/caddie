@@ -490,7 +490,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	record({ name: 'smoke', ok: true, command: smokeArgv, detail: `P17 live 5/5; live hash ${liveHash} == dist` });
 
 	// --- Step 10: read-only switch report ------------------------------------
-	const switchesArgv = [WRANGLER, APP, 'd1', 'execute', 'caddie', '--remote', '--env', 'production', '--command', 'select key, value from platform_switches'];
+	const switchesArgv = [WRANGLER, APP, 'd1', 'execute', 'caddie', '--remote', '--config', 'wrangler.jsonc', '--env', 'production', '--command', 'select key, value from platform_switches'];
 	const switches = run(switchesArgv, { cwd: appDir });
 	if (switches.exitCode !== 0) {
 		return stop({ name: 'switches', ok: false, command: switchesArgv, detail: `exit ${switches.exitCode}` });

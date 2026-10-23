@@ -432,3 +432,13 @@ describe('deploy.ts — item B: parseAppliedMigrations', () => {
 		expect(parseAppliedMigrations('no rows')).toEqual([]);
 	});
 });
+
+describe('deploy.ts — item C: every d1 execute carries --config wrangler.jsonc', () => {
+	test('the applied-migrations query and the switch report both pass --config wrangler.jsonc', () => {
+		const h = makeHarness();
+		runDeploy(DEPLOY, h.deps);
+		const executes = joinAll(h.commands).filter((c) => c.includes('d1 execute'));
+		expect(executes.length).toBeGreaterThanOrEqual(2);
+		for (const c of executes) expect(c).toContain('--config wrangler.jsonc');
+	});
+});
