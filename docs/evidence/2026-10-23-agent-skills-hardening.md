@@ -157,14 +157,17 @@ Files: `stacks/react-hono/kit-files.ts` (`caddie/icons.tsx`),
   2 guards fail; restore (cmp) → 6 pass. **LOCAL VERIFIED**. single-recipe green,
   typecheck clean.
 
-### Pre-existing failure (not mine)
+### Install tests: wrong Bun version, not a pre-existing failure (corrected by the parent session)
 
-`tests/kit-files.test.ts` → "part O: kit components run for real" FAILS with
-`bun install --frozen-lockfile … Unknown lockfile version / lockfile is frozen`.
-Reproduced on base `ca612b6` with my scaffold change reverted — it is an
-environmental sandbox issue (the sandbox Bun cannot read the frozen lockfile),
-NOT introduced by this work. **BLOCKED / pre-existing** (the 5 structural
-kit-files tests pass).
+`tests/kit-files.test.ts` "part O: kit components run for real" (and 5 more
+install-based tests in `recipes` and `contract-checks`) failed here with
+`bun install --frozen-lockfile … Unknown lockfile version`. The cause was the
+Bun the work ran under: mise "latest" is 1.3.14, which cannot read the
+generated app's `bun.lock` (lockfileVersion 2). CI pins Bun 1.4.0
+(`.github/workflows/ci.yml`). Re-run with Bun 1.4.0 on this branch:
+`bun test tests/kit-files.test.ts tests/recipes.test.ts tests/contract-checks.test.ts`
+→ **46 pass / 0 fail. LOCAL VERIFIED.** The earlier "BLOCKED / pre-existing"
+label was wrong.
 
 ### 2f — adapted craft rules
 
@@ -263,8 +266,8 @@ SKILL.md, `tests/skills-solid.test.ts`.
   tests/icon-kit.test.ts tests/agent-permissions.test.ts
   tests/single-recipe.test.ts` → 119 pass / 0 fail. **LOCAL VERIFIED**.
 - `bun run typecheck` → clean throughout. **LOCAL VERIFIED**.
-- Pre-existing failure kept separate: kit-files "part O: kit components run for
-  real" (sandbox frozen-lockfile), reproduced on base. **BLOCKED / pre-existing**.
+- Install-based tests (kit-files part O, recipes, contract-checks): they failed
+  only under Bun 1.3.14; with CI's Bun 1.4.0 they pass, 46 / 0. **LOCAL VERIFIED**.
 - Focused browser specs: NOT run — none of these changes alter a rendered page
   path in a way a browser spec would catch over the unit guards, and the host is
   under memory pressure. **DEFERRED**.
