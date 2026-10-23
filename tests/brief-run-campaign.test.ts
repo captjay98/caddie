@@ -163,6 +163,24 @@ describe('runCampaign orchestration (steps 1-6)', () => {
 		expect(rows[0].complete.reason).toMatch(/browser/);
 	});
 
+	test('a browser check that cannot finish is recorded as failed, and the next brief still runs', async () => {
+		// A real browser can time out or crash; a campaign of many builds must
+		// not stop at the first one. MUTATION: drop the catch around step 4 and
+		// runCampaign rejects with the browser's error.
+		let checks = 0;
+		const s = seams({
+			browserCheck: async () => {
+				checks += 1;
+				if (checks === 1) throw new Error('Timeout 120000ms exceeded waiting for the Code field');
+				return { verdict: 'pass', passed: true, aPersisted: true, bRendered: true, bIsolated: true, reason: 'ok' };
+			},
+		});
+		const { rows, ledger } = await runCampaign([brief('moodloop'), brief('farmlog')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
+		expect(rows.map((r) => r.complete.complete)).toEqual([false, true]);
+		expect(rows[0].stopReason).toContain('browser fail: the browser check could not finish: Timeout 120000ms exceeded');
+		expect(ledger.runs.length).toBe(2);
+	});
+
 	test('the cap refuses a build once the REAL spend tables leave no room (item 3, D5)', async () => {
 		// The REAL spend tables report $0 before build a and $4 before build b.
 		// The cap is enforced from THAT, not the ledger: b's $5 LIMIT can't fit

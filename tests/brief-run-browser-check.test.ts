@@ -102,7 +102,25 @@ describe('signInAppUser (item 2): email-code sign-in through the generated app',
 	test('throws a plain error when no code arrives within the attempts', async () => {
 		const page = fakePage();
 		const readInbox: InboxReader = async () => ({ messages: [] });
-		await expect(signInAppUser(page, readInbox, { projectId: 'proj_1', email: 'a@campaign.test', attempts: 3 })).rejects.toThrow(/no sign-in code arrived/);
+		await expect(signInAppUser(page, readInbox, { projectId: 'proj_1', email: 'a@campaign.test', attempts: 3, sleep: async () => {} })).rejects.toThrow(/no sign-in code arrived/);
+	});
+
+	test('never enters a code that was already in the inbox before asking, and waits between reads', async () => {
+		// An earlier try left a code for the same address. Entering it would
+		// fail (it is used or expired), so only a code that arrives AFTER this
+		// request counts. The new code lands on the 2nd read after asking.
+		// MUTATION: drop the "already there" exclusion and 111111 is entered.
+		const page = fakePage();
+		const stale = { to: 'a@campaign.test', code: '111111', createdAt: '2026-10-26T09:00:00.000Z' };
+		const fresh = { to: 'a@campaign.test', code: '333333', createdAt: '2026-10-26T10:00:00.000Z' };
+		const inboxes: TestInbox[] = [{ messages: [stale] }, { messages: [stale] }, { messages: [fresh, stale] }];
+		let reads = 0;
+		const readInbox: InboxReader = async () => inboxes[Math.min(reads++, inboxes.length - 1)];
+		const slept: number[] = [];
+		await signInAppUser(page, readInbox, { projectId: 'proj_1', email: 'a@campaign.test', attempts: 5, sleep: async (ms) => void slept.push(ms) });
+		expect(page.steps).toEqual(['requestCode:a@campaign.test', 'enterCode:333333']);
+		// One real pause between the two reads after asking (never a busy loop).
+		expect(slept).toEqual([500]);
 	});
 });
 

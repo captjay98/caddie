@@ -103,11 +103,23 @@ export interface TestInbox {
  * arrived yet, so the browser flow can poll. Matching is case-insensitive on
  * the address, mirroring the app's own lower-casing of emails.
  */
-export function readInboxCode(inbox: TestInbox, email: string): string | null {
+/** A test-inbox message's identity (two sends of the same code differ by time). */
+export function inboxMessageKey(message: { code: string; createdAt: string }): string {
+	return `${message.createdAt}|${message.code}`;
+}
+
+/** The keys of every message for `email` now in the inbox (the "already there" set). */
+export function inboxKeysFor(inbox: TestInbox, email: string): Set<string> {
+	const want = email.trim().toLowerCase();
+	return new Set((inbox.messages ?? []).filter((m) => m.to.trim().toLowerCase() === want).map(inboxMessageKey));
+}
+
+export function readInboxCode(inbox: TestInbox, email: string, exclude: ReadonlySet<string> = new Set()): string | null {
 	const want = email.trim().toLowerCase();
 	let newest: { code: string; createdAt: string } | null = null;
 	for (const message of inbox.messages ?? []) {
 		if (message.to.trim().toLowerCase() !== want) continue;
+		if (exclude.has(inboxMessageKey(message))) continue;
 		if (!newest || message.createdAt > newest.createdAt) newest = { code: message.code, createdAt: message.createdAt };
 	}
 	return newest ? newest.code : null;

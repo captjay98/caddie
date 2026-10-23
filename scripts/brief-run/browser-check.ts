@@ -29,7 +29,7 @@
  * until run live against a ready build; the data parts (target pick, inbox code
  * read) and the JUDGEMENT are proven offline.
  */
-import { readInboxCode, type RecordTarget, type TestInbox } from './app-users.ts';
+import { inboxKeysFor, readInboxCode, type RecordTarget, type TestInbox } from './app-users.ts';
 
 export interface BrowserCheckInput {
 	/** The dev base and the preview URL for the ready build. */
@@ -106,22 +106,27 @@ export interface AppUserPage {
 export type InboxReader = (projectId: string) => Promise<TestInbox>;
 
 /**
- * Run one app user's sign-in through the generated app's email-code flow: ask
- * for a code, poll the owner-session test inbox until the newest code for this
- * email arrives (bounded by `attempts`), then enter it. Pure over the page and
- * inbox seams.
+ * Run one app user's sign-in through the generated app's email-code flow: note
+ * the codes already in the inbox for this email, ask for a code, then read the
+ * owner-session test inbox until a NEW code for this email arrives (bounded by
+ * `attempts`, pausing `waitMs` between reads), and enter it. A code that was
+ * there before asking (an earlier try) is never entered. Pure over the page,
+ * inbox and sleep seams.
  */
 export async function signInAppUser(
 	page: AppUserPage,
 	readInbox: InboxReader,
-	opts: { projectId: string; email: string; attempts?: number },
+	opts: { projectId: string; email: string; attempts?: number; waitMs?: number; sleep?: (ms: number) => Promise<void> },
 ): Promise<void> {
-	await page.requestCode(opts.email);
+	const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+	const waitMs = opts.waitMs ?? 500;
 	const attempts = opts.attempts ?? 30;
+	const already = inboxKeysFor(await readInbox(opts.projectId), opts.email);
+	await page.requestCode(opts.email);
 	let code: string | null = null;
 	for (let i = 0; i < attempts && code === null; i++) {
-		code = readInboxCode(await readInbox(opts.projectId), opts.email);
-		if (code === null && i < attempts - 1) await new Promise((r) => setTimeout(r, 0));
+		code = readInboxCode(await readInbox(opts.projectId), opts.email, already);
+		if (code === null && i < attempts - 1) await sleep(waitMs);
 	}
 	if (code === null) throw new Error(`no sign-in code arrived in the test inbox for ${opts.email}`);
 	await page.enterCode(code);

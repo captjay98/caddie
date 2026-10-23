@@ -2,7 +2,8 @@
 /**
  * Campaign runner — plan `docs/plans/2026-10-22-software-team-mode.md` part I
  * (lane 8). It drives the REAL Caddie HTTP API on a local `bun run dev`
- * (127.0.0.1) as signed-in test accounts, starts a project from each brief,
+ * (127.0.0.1) as the owner (the session saved by `--sign-in`), starts a
+ * project from each brief,
  * accepts the proposal, approves the design, waits for the build, reads results
  * from the local D1, runs a Playwright browser check, judges "complete", and
  * scores section 10's go/no-go marks. It enforces the campaign cap (D5) before
@@ -378,18 +379,16 @@ export type GateResult =
 export function gate(env: Record<string, string | undefined>): GateResult {
 	const authorized = env.CADDIE_LIVE_AUTHORIZED === '1';
 	const baseUrl = env.CADDIE_DEV_BASE_URL;
-	const accountsPresent = Boolean(
-		env.TEST_ACCOUNT_A_EMAIL && env.TEST_ACCOUNT_B_EMAIL && env.TEST_ACCOUNT_C_EMAIL,
-	);
+	// No test accounts: the live run uses the owner's saved sign-in (--sign-in),
+	// and the browser check's two users are users of the built app.
 	const missing = [
 		!authorized && 'CADDIE_LIVE_AUTHORIZED=1 (explicit authorization in the process env, never from .dev.vars)',
 		!baseUrl && 'CADDIE_DEV_BASE_URL (the local `bun run dev` base, e.g. http://127.0.0.1:5173)',
-		!accountsPresent && 'TEST_ACCOUNT_{A,B,C}_EMAIL (the signed-in test accounts A, B, C)',
 	].filter(Boolean) as string[];
 	if (missing.length > 0) {
 		return {
 			ok: false,
-			reason: `BLOCKED — the live campaign requires explicit authorization and local test credentials. Missing: ${missing.join('; ')}.`,
+			reason: `BLOCKED — the live campaign requires explicit authorization and the local base URL. Missing: ${missing.join('; ')}.`,
 		};
 	}
 	return { ok: true, env: env as Record<string, string> };
@@ -620,21 +619,29 @@ export async function runCampaign(
 		let browserVerdict: BrowserCheckResult['verdict'] | 'skipped' = 'skipped';
 		let browserReason = 'build not ready';
 		if (drive.outcome === 'ready' && drive.previewId) {
-			const designDoc = await seams.readDesignDoc(drive.projectId);
-			const choice = pickRecordTargetFromDesign(designDoc);
-			const check = await seams.browserCheck({
-				base: seams.base,
-				previewUrl: `${seams.base}/api/projects/${drive.projectId}/workflow/preview/${drive.previewId}`,
-				ownerCookie: seams.ownerCookie,
-				projectId: drive.projectId,
-				target: choice.applicable ? choice.target : null,
-				markerA: `campaign-${brief.id}-a-${Date.now()}`,
-				markerB: `campaign-${brief.id}-b-${Date.now()}`,
-				timeoutMs: 2 * 60 * 1000,
-			});
-			browserPassed = check.verdict === 'pass';
-			browserVerdict = check.verdict;
-			browserReason = check.reason;
+			// A real browser can time out or crash: that is this build's failed
+			// check, recorded with its reason, never the end of the campaign.
+			try {
+				const designDoc = await seams.readDesignDoc(drive.projectId);
+				const choice = pickRecordTargetFromDesign(designDoc);
+				const check = await seams.browserCheck({
+					base: seams.base,
+					previewUrl: `${seams.base}/api/projects/${drive.projectId}/workflow/preview/${drive.previewId}`,
+					ownerCookie: seams.ownerCookie,
+					projectId: drive.projectId,
+					target: choice.applicable ? choice.target : null,
+					markerA: `campaign-${brief.id}-a-${Date.now()}`,
+					markerB: `campaign-${brief.id}-b-${Date.now()}`,
+					timeoutMs: 2 * 60 * 1000,
+				});
+				browserPassed = check.verdict === 'pass';
+				browserVerdict = check.verdict;
+				browserReason = check.reason;
+			} catch (error) {
+				browserPassed = false;
+				browserVerdict = 'fail';
+				browserReason = `the browser check could not finish: ${error instanceof Error ? error.message : String(error)}`;
+			}
 		}
 		void browserVerdict;
 
@@ -758,7 +765,7 @@ async function main(): Promise<number> {
 	const base = gated.env.CADDIE_DEV_BASE_URL;
 	console.error(
 		`brief-run: gate open — base ${base}, mode ${mode}, ` +
-			`test accounts A/B/C present, model key ${redact(gated.env.NEBIUS_API_KEY)}. No secret values are printed.`,
+			`signing in with the owner's saved session, model key ${redact(gated.env.NEBIUS_API_KEY)}. No secret values are printed.`,
 	);
 
 	// Build the REAL seams. These touch the network / wrangler / Chromium and
@@ -785,7 +792,7 @@ async function main(): Promise<number> {
 			path: authPath,
 			baseUrl: base,
 			probe: async (cookieHeader) => {
-				const res = await client.sessionFromCookieHeader({ label: 'A', sub: 'owner', email: gated.env.TEST_ACCOUNT_A_EMAIL, name: 'Owner' }, cookieHeader).fetch('/api/home-project');
+				const res = await client.sessionFromCookieHeader({ label: 'A', sub: 'owner', email: 'owner', name: 'Owner' }, cookieHeader).fetch('/api/home-project');
 				return res.status;
 			},
 		});
@@ -799,8 +806,8 @@ async function main(): Promise<number> {
 	}
 	// A is the owner's session; B is the same owner session (the two browser-app
 	// users in item 2 are both driven from the owner's one Caddie session).
-	const sessionA = client.sessionFromCookieHeader({ label: 'A', sub: 'owner', email: gated.env.TEST_ACCOUNT_A_EMAIL, name: 'Owner' }, ownerCookieHeader);
-	const sessionB = client.sessionFromCookieHeader({ label: 'B', sub: 'owner', email: gated.env.TEST_ACCOUNT_A_EMAIL, name: 'Owner' }, ownerCookieHeader);
+	const sessionA = client.sessionFromCookieHeader({ label: 'A', sub: 'owner', email: 'owner', name: 'Owner' }, ownerCookieHeader);
+	const sessionB = client.sessionFromCookieHeader({ label: 'B', sub: 'owner', email: 'owner', name: 'Owner' }, ownerCookieHeader);
 
 	// The workspace the fresh account lands in. The home-project route returns
 	// it; a missing workspace is a live-only gap and surfaces as a thrown error.
@@ -814,7 +821,11 @@ async function main(): Promise<number> {
 	const { readNewestProposal } = await import('./brief-run/d1-reader.ts');
 	const d1 = wranglerD1Query(REPO);
 	const session = (await sessionA.json<{ user?: { id?: string } }>(`/api/auth/get-session`).catch(() => ({}) as { user?: { id?: string } }));
-	const payerId = session.user?.id ?? gated.env.TEST_ACCOUNT_A_EMAIL;
+	const payerId = session.user?.id;
+	if (!payerId) {
+		console.error('brief-run: Caddie did not say who is signed in. Run `bun scripts/brief-run.ts --sign-in` again, then rerun.');
+		return 1;
+	}
 	const readProposal: ProposalReader = (opts) => readNewestProposal(d1, opts);
 	const coordinatorSend: CoordinatorSend = async ({ conversationId, idempotencyKey, body }) => {
 		const res = await sessionA.fetch(`/agents/coordinator/${encodeURIComponent(conversationId)}`, {
@@ -825,15 +836,13 @@ async function main(): Promise<number> {
 		if (!res.ok) throw new Error(`coordinator send → HTTP ${res.status}`);
 	};
 
-	// Item 2: read the approved design DOCUMENT markdown for a project, so the
-	// browser check can pick the person-owned record from its architecture
-	// block. GET /workflow returns the design document; its markdown is under
-	// `design.document` (the field carrying the caddie-architecture block).
+	// Item 2: read the design markdown for a project, so the browser check can
+	// pick the person-owned record from its architecture block. GET /workflow
+	// returns the latest design revision as `design` (a plan_doc_revisions row);
+	// its `body` carries the caddie-architecture block.
 	const readDesignDoc = async (projectId: string): Promise<string> => {
-		const snap = await sessionA
-			.json<{ design?: { document?: string; body?: string; markdown?: string } | null }>(`/api/projects/${projectId}/workflow`)
-			.catch(() => ({ design: null }));
-		return snap.design?.document ?? snap.design?.markdown ?? snap.design?.body ?? '';
+		const snap = await sessionA.json<{ design?: { body?: string } | null }>(`/api/projects/${projectId}/workflow`);
+		return snap.design?.body ?? '';
 	};
 
 	const briefs = loadBriefs(BRIEFS_DIR);

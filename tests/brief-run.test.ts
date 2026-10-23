@@ -63,13 +63,13 @@ describe('gate (honesty: BLOCKED without explicit authorization)', () => {
 		}
 	});
 
-	test('gate opens only with the flag AND credentials present', () => {
+	test('gate opens with the flag and the local base URL alone: no test accounts are needed', () => {
+		// The live run signs in with the owner's saved session (--sign-in), and
+		// the browser check's two users are users OF THE BUILT APP, so the old
+		// TEST_ACCOUNT_{A,B,C}_EMAIL variables are not asked for any more.
 		const result = gate({
 			CADDIE_LIVE_AUTHORIZED: '1',
 			CADDIE_DEV_BASE_URL: 'http://127.0.0.1:5173',
-			TEST_ACCOUNT_A_EMAIL: 'a@example.com',
-			TEST_ACCOUNT_B_EMAIL: 'b@example.com',
-			TEST_ACCOUNT_C_EMAIL: 'c@example.com',
 		});
 		expect(result.ok).toBe(true);
 	});
