@@ -88,7 +88,7 @@ import { runVerifiedInstall } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { checkSentence, newTestsSentence } from "./round-detail.ts";
 import { projectStatusForActor } from "./project-experience.ts";
-import { FEATURE_BLOCK_GUIDE, parseDemoContract, parsePlanFeatures } from "@caddie/contracts";
+import { FEATURE_BLOCK_GUIDE, parseDemoContract, parsePlanFeatures, themeSaveError, THEME_BLOCK_GUIDE } from "@caddie/contracts";
 import { collectSourceSnapshot } from "./source-export.ts";
 import { recordCodeVersion } from "./code-versions.ts";
 import { codeStoreFor } from "./code-store-env.ts";
@@ -1668,6 +1668,16 @@ export async function createCoordinatorContext(
         const features = parsePlanFeatures(input.body);
         if (!features.ok)
           throw new Error(`PLAN_FEATURES_INVALID: not saved — ${features.error}. ${FEATURE_BLOCK_GUIDE}`);
+      }
+      // A design brief must carry a valid caddie-theme block, so every app gets
+      // its own validated look. Refuse a new save with no valid theme (hex +
+      // WCAG AA), mirroring the PRD demo-contract refusal; a plain line the
+      // designer can fix. Old saved designs are read, never re-saved, so they
+      // stay readable.
+      if (input.kind === "design") {
+        const themeError = themeSaveError(input.body);
+        if (themeError)
+          throw new Error(`THEME_INVALID: not saved — ${themeError}. ${THEME_BLOCK_GUIDE}`);
       }
       const revision = await createPlanDocRevision(env.DB, scope, {
         kind: input.kind as "prd",

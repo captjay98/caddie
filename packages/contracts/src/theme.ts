@@ -254,6 +254,18 @@ export function themeToCssVars(theme: AppTheme): string {
 	return lines.join('\n');
 }
 
+/**
+ * The refusal message for saving a design with no valid theme, or null when the
+ * body carries a valid theme. The host throws `THEME_INVALID: not saved — …`
+ * from writePlanNote for kind "design", mirroring the PRD demo-contract
+ * refusal, so the designer gets a plain line it can fix. Reading an older design
+ * with no theme never calls this, so old saved designs stay readable.
+ */
+export function themeSaveError(body: string): string | null {
+	const parsed = parseAppTheme(body);
+	return parsed.ok ? null : parsed.error;
+}
+
 /** What the designer must write (shown in instructions and refusals). */
 export const THEME_BLOCK_GUIDE =
 	`Give the app its OWN look with ONE fenced ${THEME_BLOCK_INFO} block in the design brief, a JSON object:\n` +

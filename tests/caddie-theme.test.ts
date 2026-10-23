@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   THEME_BLOCK_INFO,
   THEME_BLOCK_GUIDE,
   parseAppTheme,
   splitThemeBlock,
   themeToCssVars,
+  themeSaveError,
   type AppTheme,
 } from "../packages/contracts/src/theme.ts";
 
@@ -124,5 +127,22 @@ describe("part 2 — the guide names the required roles for the designer", () =>
     expect(THEME_BLOCK_GUIDE).toContain(THEME_BLOCK_INFO);
     for (const role of ["bg", "surface", "text", "primary", "onPrimary"]) expect(THEME_BLOCK_GUIDE).toContain(role);
     expect(THEME_BLOCK_GUIDE.toLowerCase()).toContain("system font");
+  });
+});
+
+describe("part 2 — a design save with no valid theme is refused (host wiring)", () => {
+  test("themeSaveError is null for a good theme, a message otherwise", () => {
+    expect(themeSaveError(block(GOOD))).toBeNull();
+    expect(themeSaveError("# Design\n\nno theme")).toContain(THEME_BLOCK_INFO);
+    const badContrast = { ...GOOD, colors: { ...GOOD.colors, text: "#BBBBBB" } };
+    expect((themeSaveError(block(badContrast)) ?? "").toLowerCase()).toContain("contrast");
+  });
+
+  test("writePlanNote refuses a design save with no valid theme, mirroring the PRD refusal", () => {
+    const host = readFileSync(join(import.meta.dir, "..", "apps", "app", "src", "server", "coordinator-host.ts"), "utf8");
+    // The design branch of writePlanNote calls the shared helper and throws a
+    // plain THEME_INVALID refusal, the same shape as DEMO_CONTRACT_INVALID.
+    expect(host).toContain("themeSaveError(input.body)");
+    expect(host).toContain("THEME_INVALID: not saved");
   });
 });
