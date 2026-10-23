@@ -899,7 +899,6 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
 	if (buildPhase.data === 'design' || buildPhase.data === 'design-review' || (buildPhase.data === 'blocked' && !planEverApproved)) return <ProjectWorkflow projectId={props.projectId} presentation="workspace" />;
 	return (
 		<DesignReview
-            autoBuild
             key={`${chrome.actorId}:${props.projectId}:${latest?.id ?? 'empty'}`}
             approval={approval.data?.approval ?? null}
             approvalPending={Boolean(latest) && approval.isPending}

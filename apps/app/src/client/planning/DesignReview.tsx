@@ -32,11 +32,11 @@ import type { WorkflowPhase } from "../workspace/project-status.ts";
  *   - re-deciding is the server's typed 409 to surface, never hidden client
  *     state.
  *
- * The decision posts to the authenticated user surface:
+ * The decision posts to the project workflow, which owns the revision-bound
+ * plan approval and, on approve, advances to the design step:
  *
- *   POST /api/approvals { intent: { projectId, action: 'design',
- *          resourceId: <planRevisionId>, revisionHash: <bodyHash>,
- *          policyVersion }, decision: 'approved' | 'rejected' }
+ *   POST /api/projects/:projectId/workflow/decision
+ *        { planId: <planRevisionId>, decision: 'approved' | 'rejected', note? }
  *
  * decidedBy is always the session-derived actor server-side; no input here
  * can name one.
@@ -78,11 +78,8 @@ function buildFollow(
 
 export function DesignReview(props: {
   projectId: string;
-  autoBuild?: boolean;
   /** Newest first, matching the plan-docs list route's ordering. */
   planRevisions: readonly DesignReviewRevision[];
-  /** Part of the approval intent hash; stable per policy revision. */
-  policyVersion?: string;
   approval?: ApprovalRecord | null;
   approvalPending?: boolean;
   approvalError?: unknown;
@@ -99,7 +96,6 @@ export function DesignReview(props: {
   error?: unknown;
   retry?: () => void;
 }): ReactElement {
-  const policyVersion = props.policyVersion ?? "v1";
   const [busy, setBusy] = useState<"approved" | "rejected" | null>(null);
   const [records, setRecords] = useState<DecisionRecord[]>([]);
   const [decisionError, setDecisionError] = useState<string | null>(null);
@@ -162,50 +158,17 @@ export function DesignReview(props: {
     setBusy(decision);
     setDecisionError(null);
     try {
-      let payload: { approval: { id: string; status: string } | null };
-      if (props.autoBuild) {
-        payload = await postJson(
-          `/api/projects/${encodeURIComponent(props.projectId)}/workflow/decision`,
-          {
-            planId: revision.id,
-            decision,
-            note: decision === "rejected" ? changeNote.trim() : undefined,
-          },
-        );
-      } else {
-        payload = await postJson<{ approval: { id: string; status: string } }>(
-          "/api/approvals",
-          {
-            intent: {
-              projectId: props.projectId,
-              action: "design",
-              resourceId: revision.id,
-              revisionHash: revision.bodyHash,
-              policyVersion,
-            },
-            decision,
-          },
-        );
-        // A dated decision record — the newest is the live outcome; older
-        // ones stay on screen instead of being overwritten.
-        if (!payload.approval) throw new Error('The decision could not be confirmed. Refresh the plan before trying again.');
-        if (decision === "rejected") {
-          try {
-            await postJson(
-              `/api/projects/${encodeURIComponent(props.projectId)}/plan-docs/${encodeURIComponent(revision.id)}/decision`,
-              {
-                decision: "changes",
-                note: changeNote.trim(),
-                approvalId: payload.approval.id,
-              },
-            );
-          } catch {
-            throw new Error(
-              "The decision was saved, but your feedback could not be saved. Please try again.",
-            );
-          }
-        }
-      }
+      // The ONE live path: the workflow owns the revision-bound plan approval
+      // and, on approve, advances to the design step. (A legacy approvals-only
+      // branch was removed — it was never reachable; autoBuild is always on.)
+      const payload: { approval: { id: string; status: string } | null } = await postJson(
+        `/api/projects/${encodeURIComponent(props.projectId)}/workflow/decision`,
+        {
+          planId: revision.id,
+          decision,
+          note: decision === "rejected" ? changeNote.trim() : undefined,
+        },
+      );
       props.onDecisionSaved?.();
       setWindowOpen(null);
       const savedApproval = payload.approval;
@@ -213,14 +176,12 @@ export function DesignReview(props: {
         { decision, revisionId: revision.id, status: savedApproval.status, at: new Date().toISOString() },
         ...prev,
       ]);
-      if (props.autoBuild) {
-        try {
-          await resumeWorkflow(props.projectId);
-        } catch (error) {
-          setDecisionError(
-            `Your decision is saved, but Caddie could not continue. Open the project in Chat to retry. ${error instanceof Error ? error.message : ""}`,
-          );
-        }
+      try {
+        await resumeWorkflow(props.projectId);
+      } catch (error) {
+        setDecisionError(
+          `Your decision is saved, but Caddie could not continue. Open the project in Chat to retry. ${error instanceof Error ? error.message : ""}`,
+        );
       }
     } catch (error) {
       setDecisionError(
@@ -315,7 +276,7 @@ export function DesignReview(props: {
 
   const decisionControls = <>
         <p className="page-lede" data-testid="approve-meaning">
-          {props.autoBuild && !latestRecord ? 'Next, Caddie prepares the screens for you to review. Building starts only after you approve the design.' : APPROVE_MEANING}
+          {latestRecord ? APPROVE_MEANING : 'Next, Caddie prepares the screens for you to review. Building starts only after you approve the design.'}
         </p>
         <div className="row-actions">
           {follow ? (
@@ -494,7 +455,7 @@ export function DesignReview(props: {
               Approve plan version {latest.revision}?
             </h3>
             <p className="state-detail">
-              {props.autoBuild ? 'Next, Caddie prepares the screens for you to review.' : 'This records your approval of this plan.'}
+              Next, Caddie prepares the screens for you to review.
             </p>
             {/* Only say something if it is genuinely useful here: a spending
                limit the owner actually set. At plan-approval there is no app to
