@@ -347,6 +347,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/publish-safety.test.ts',
 			'tests/host-checks-contract.test.ts',
 			'tests/contract-checks.test.ts',
+			'tests/contract-batch.test.ts',
 			// Part A (spending limit), lane 3: the S1 spike, the money logic and
 			// the instrument wiring.
 			'tests/spend-instrument-spike.test.ts',
