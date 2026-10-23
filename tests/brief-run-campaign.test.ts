@@ -49,13 +49,22 @@ function readySession(profile: AccountProfile, runId = 'run_1'): AccountSession 
 	});
 }
 
-/** A D1 seam answering a fully-green build for `micros` spend. */
+/** A D1 seam answering a fully-green team-mode build for `micros` spend. */
 function greenD1(micros: number): D1Query {
 	return async (sql) => {
-		if (/build_workflows/.test(sql)) return [{ phase: 'ready', detail: null, spendPayerId: 'payer_1' }];
+		if (/build_workflows/.test(sql)) return [{ runId: 'run_1', planId: 'plan_1', phase: 'ready', detail: null, previewId: 'out_1', spendPayerId: 'payer_1' }];
 		if (/build_features/.test(sql)) return [{ total: 5, passed: 5 }];
-		if (/build_steps/.test(sql)) return [{ result: 'green' }];
-		if (/contract_checks/.test(sql)) return [{ total: 2, green: 2 }];
+		// run_verifications: the latest receipt per check (all passed).
+		if (/run_verifications/.test(sql)) return [
+			{ checkName: 'dependencies', passed: 1 },
+			{ checkName: 'behaviour-tests', passed: 1 },
+			{ checkName: 'server-starts', passed: 1 },
+		];
+		// output_contract_receipts: one green receipt (all required checks true).
+		if (/output_contract_receipts/.test(sql)) return [
+			{ checksJson: JSON.stringify({ 'sign-in': true, 'second-person': true, restart: true }) },
+		];
+		if (/run_rounds/.test(sql)) return [{ total: 0 }];
 		if (/build_spend_reservations/.test(sql)) return [{ settled: micros, reserved: 0 }];
 		if (/build_spend_limits/.test(sql)) return [{ limitMicros: 5 * USD }];
 		return [];

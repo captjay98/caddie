@@ -9,18 +9,44 @@
  * NEVER writes.
  *
  * All SQL goes through an injected `D1Query` seam, so the whole reader is
- * driven offline in tests with a fake that returns canned rows — no wrangler,
- * no DB, no dev server. The real seam (`wranglerD1Query`) is built by the
+ * driven offline in tests with a fake that returns canned rows — AND against a
+ * REAL SQLite database built by applying every migration in order (see
+ * tests/brief-run-d1-reader.test.ts), with rows inserted the way the app
+ * writes them. The real wrangler seam (`wranglerD1Query`) is built by the
  * runner only behind the live gate.
  *
- * What it reads (plan part I + section 4 table names, published first):
- *   - features passed            → the build's feature rows for its runId;
- *   - verify_build               → the verify step's result;
- *   - every contract receipt     → the per-module contract-check rows;
- *   - spend from the build payer  → build_spend_reservations summed for the
- *                                   workflow's spendPayerId, against
- *                                   build_spend_limits;
- *   - the stop reason            → the workflow phase/detail.
+ * The REAL tables it reads (checked against apps/app/migrations/*.sql; the
+ * reader uses only tables that exist):
+ *   - build_workflows (0018 + 0040)  → runId, planId, phase, detail,
+ *                                       previewId, spendPayerId. phase is one
+ *                                       of planning|review|building|blocked|
+ *                                       ready. The table's primary key is
+ *                                       projectId; one workflow per project.
+ *   - build_features (0023)          → one row per feature of the approved
+ *                                       plan for this runId; status is
+ *                                       pending|building|passed|failed.
+ *   - run_verifications (0005)       → the host QA receipts: one append-only
+ *                                       row per check, `passed` an integer 0/1,
+ *                                       `planRevision` the plan.id it ran
+ *                                       under. "verify_build is green" mirrors
+ *                                       the app's own completion gate
+ *                                       (runs.ts evaluateCompletion): the
+ *                                       LATEST row per check under the current
+ *                                       plan revision must all have passed, and
+ *                                       there must be at least one.
+ *   - output_contract_receipts (0041) → team mode's per-output contract-check
+ *                                       receipts; `checks` a JSON object over
+ *                                       the required checks (sign-in,
+ *                                       second-person, restart). A receipt is
+ *                                       green when every required check is
+ *                                       true. No receipt exists outside team
+ *                                       mode.
+ *   - run_rounds (0005)              → the repair/verification history; the
+ *                                       repair rounds count is surfaced for the
+ *                                       report.
+ *   - build_spend_reservations /
+ *     build_spend_limits (0040)      → the build payer's real spend (settled +
+ *                                       reserved) and its limit.
  */
 
 /** A read-only query seam: run a SELECT, get rows back as plain objects. */
@@ -34,17 +60,29 @@ function lit(value: string): string {
 export interface BuildResults {
 	projectId: string;
 	runId: string;
-	/** The workflow phase as the stop reason: ready | blocked | stopped-equivalent. */
+	/** The plan revision the current workflow is on (build_workflows.planId). */
+	planId: string | null;
+	/** The workflow phase as the stop reason: one of planning|review|building|blocked|ready. */
 	phase: string;
 	/** The workflow's human stop/blocker detail, if any. */
 	detail: string | null;
+	/** The published preview id, when the build produced one. */
+	previewId: string | null;
 	featuresTotal: number;
 	featuresPassed: number;
 	everyFeaturePassed: boolean;
+	/** Checks whose LATEST receipt under the current plan revision passed. */
+	verifyChecksTotal: number;
+	verifyChecksPassed: number;
+	/** The names of checks whose latest receipt failed (for the report). */
+	verifyFailedChecks: string[];
 	verifyBuildGreen: boolean;
-	contractChecksTotal: number;
-	contractChecksGreen: number;
+	/** Team-mode contract receipts: one per output, each over the required checks. */
+	contractReceiptsTotal: number;
+	contractReceiptsGreen: number;
 	everyContractCheckGreen: boolean;
+	/** Repair rounds recorded for this build (run_rounds, round='repair_attempt'). */
+	repairRounds: number;
 	/** The build payer id carried on the workflow, or null if none opened. */
 	spendPayerId: string | null;
 	/** Settled + reserved micros for this build's payer. */
@@ -58,10 +96,33 @@ function num(row: Record<string, unknown> | undefined, key: string): number {
 	return typeof v === 'number' ? v : Number(v ?? 0) || 0;
 }
 
+function str(row: Record<string, unknown> | undefined, key: string): string | null {
+	const v = row?.[key];
+	return v == null ? null : String(v);
+}
+
+/** The three required team-mode contract checks (publish-safety.REQUIRED_TEAM_MODE_CHECKS). */
+export const REQUIRED_CONTRACT_CHECKS = ['sign-in', 'second-person', 'restart'] as const;
+
+/** A single receipt's `checks` JSON is green when every required check is true. */
+function receiptIsGreen(checksJson: string): boolean {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(checksJson);
+	} catch {
+		return false;
+	}
+	if (!parsed || typeof parsed !== 'object') return false;
+	const obj = parsed as Record<string, unknown>;
+	return REQUIRED_CONTRACT_CHECKS.every((check) => obj[check] === true);
+}
+
 /**
  * Read one build's results for a project + runId. Each read is its own SELECT
  * so a fake seam can answer them independently and a real failure names the
- * table that was missing.
+ * table that was missing. The aggregation (latest-receipt-per-check, parsing
+ * contract-receipt JSON) is done HERE rather than in SQL, so the same logic
+ * runs over the wrangler seam and over a real SQLite database in tests.
  */
 export async function readBuildResults(
 	query: D1Query,
@@ -69,16 +130,19 @@ export async function readBuildResults(
 ): Promise<BuildResults> {
 	const { projectId, runId } = opts;
 
+	// The workflow: one row per project (projectId is the primary key). We also
+	// confirm it is this build's runId so a stale read of an older run is caught.
 	const wf = (
 		await query(
-			`select phase, detail, spendPayerId from build_workflows where projectId = ${lit(
-				projectId,
-			)} and runId = ${lit(runId)} limit 1`,
+			`select runId, planId, phase, detail, previewId, spendPayerId ` +
+				`from build_workflows where projectId = ${lit(projectId)} and runId = ${lit(runId)} limit 1`,
 		)
 	)[0];
+	const planId = str(wf, 'planId');
 	const phase = String(wf?.phase ?? 'unknown');
-	const detail = wf?.detail == null ? null : String(wf.detail);
-	const spendPayerId = wf?.spendPayerId == null ? null : String(wf.spendPayerId);
+	const detail = str(wf, 'detail');
+	const previewId = str(wf, 'previewId');
+	const spendPayerId = str(wf, 'spendPayerId');
 
 	// Features: total and passed for this build's runId.
 	const feat = (
@@ -90,25 +154,49 @@ export async function readBuildResults(
 	const featuresTotal = num(feat, 'total');
 	const featuresPassed = num(feat, 'passed');
 
-	// verify_build: the verify step's result row for this build.
-	const verify = (
-		await query(
-			`select result from build_steps where projectId = ${lit(projectId)} and runId = ${lit(
-				runId,
-			)} and step = 'verify_build' order by rowid desc limit 1`,
-		)
-	)[0];
-	const verifyBuildGreen = String(verify?.result ?? '') === 'green';
+	// verify_build: mirror the app's completion gate (runs.ts evaluateCompletion).
+	// The host records append-only receipts in run_verifications, one row per
+	// check (`dependencies`, the behaviour tests, the browser bundle,
+	// `server-starts`, …). The build is verified when the LATEST row per check —
+	// under the CURRENT plan revision — all passed, and there is at least one.
+	// We read every receipt under the plan revision ordered newest-first and
+	// reduce to the latest per check, exactly as the app does.
+	const verifyRows = planId
+		? await query(
+				`select "check" as checkName, passed from run_verifications ` +
+					`where runId = ${lit(runId)} and planRevision = ${lit(planId)} order by rowid desc`,
+			)
+		: [];
+	const latestByCheck = new Map<string, boolean>();
+	for (const row of verifyRows) {
+		const checkName = String(row.checkName ?? '');
+		if (checkName === '') continue;
+		if (!latestByCheck.has(checkName)) latestByCheck.set(checkName, num(row, 'passed') === 1);
+	}
+	const verifyChecksTotal = latestByCheck.size;
+	const verifyFailedChecks = [...latestByCheck.entries()].filter(([, passed]) => !passed).map(([c]) => c);
+	const verifyChecksPassed = verifyChecksTotal - verifyFailedChecks.length;
+	const verifyBuildGreen = verifyChecksTotal > 0 && verifyFailedChecks.length === 0;
 
-	// Contract checks: one row per merged module (or the single app check).
-	const contracts = (
+	// Contract checks (team mode): one receipt per output in
+	// output_contract_receipts, `checks` a JSON object over the required checks.
+	// A receipt is green when every required check is true; the build's contract
+	// checks are green when there is at least one receipt and all are green.
+	const receiptRows = await query(
+		`select "checks" as checksJson from output_contract_receipts where projectId = ${lit(projectId)}`,
+	);
+	const contractReceiptsTotal = receiptRows.length;
+	const contractReceiptsGreen = receiptRows.filter((r) => receiptIsGreen(String(r.checksJson ?? ''))).length;
+	const everyContractCheckGreen = contractReceiptsTotal > 0 && contractReceiptsGreen === contractReceiptsTotal;
+
+	// Repair rounds for this build (run_rounds), for the report.
+	const repair = (
 		await query(
-			`select count(*) as total, sum(case when result = 'green' then 1 else 0 end) as green ` +
-				`from contract_checks where projectId = ${lit(projectId)} and runId = ${lit(runId)}`,
+			`select count(*) as total from run_rounds ` +
+				`where runId = ${lit(runId)} and round = 'repair_attempt'`,
 		)
 	)[0];
-	const contractChecksTotal = num(contracts, 'total');
-	const contractChecksGreen = num(contracts, 'green');
+	const repairRounds = num(repair, 'total');
 
 	// Spend from the build's payer: settled + reserved, and the payer's limit.
 	let spentMicros = 0;
@@ -130,15 +218,21 @@ export async function readBuildResults(
 	return {
 		projectId,
 		runId,
+		planId,
 		phase,
 		detail,
+		previewId,
 		featuresTotal,
 		featuresPassed,
 		everyFeaturePassed: featuresTotal > 0 && featuresPassed === featuresTotal,
+		verifyChecksTotal,
+		verifyChecksPassed,
+		verifyFailedChecks,
 		verifyBuildGreen,
-		contractChecksTotal,
-		contractChecksGreen,
-		everyContractCheckGreen: contractChecksTotal > 0 && contractChecksGreen === contractChecksTotal,
+		contractReceiptsTotal,
+		contractReceiptsGreen,
+		everyContractCheckGreen,
+		repairRounds,
 		spendPayerId,
 		spentMicros,
 		limitMicros,
