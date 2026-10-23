@@ -27,6 +27,10 @@ export function projectCardFromExperience(experience: ProjectExperience): Projec
 			return { label: 'Writing the plan', tone: 'action', working: true, detail: 'Caddie is drafting a plan for you to review. Nothing is built before you approve it.', action: { label: 'Continue with Caddie', target: 'chat' } };
 		case 'review':
 			return { label: 'Plan ready', tone: 'warn', working: false, detail: 'A plan is ready. Review it before anything is built.', action: { label: 'Review plan', target: 'plan' } };
+		case 'looks':
+			return { label: 'Preparing looks', tone: 'action', working: true, detail: 'Caddie is preparing a few looks for your app. You pick one before the screens are designed.', action: { label: 'Continue with Caddie', target: 'chat' } };
+		case 'looks_review':
+			return { label: 'Choose a look', tone: 'warn', working: false, detail: 'Pick how your app should look. Caddie then designs every screen in it.', action: { label: 'Choose a look', target: 'plan' } };
 		case 'design':
 			return { label: 'Designing', tone: 'action', working: true, detail: 'Caddie is designing the screens. You review the design before anything is built.', action: { label: 'Continue with Caddie', target: 'chat' } };
 		case 'design_review':
@@ -145,12 +149,14 @@ export function workflowSteps(
 	// project status says the plan was approved.
 	if (phase === 'planning') steps.plan = { text: 'Caddie is drafting it', tone: 'neutral' };
 	else if (phase === 'review') steps.plan = { text: 'Ready to review', tone: 'needs' };
+    else if (phase === 'looks') steps.plan = { text: 'Caddie is preparing looks', tone: 'neutral' };
+    else if (phase === 'looks-review') steps.plan = { text: 'Choose a look', tone: 'needs' };
     else if (phase === 'design') steps.plan = { text: 'Caddie is designing the screens', tone: 'neutral' };
     else if (phase === 'design-review') steps.plan = { text: 'Design ready for you to review', tone: 'needs' };
 	else if (phase === 'blocked' && !pausedBuild) steps.plan = { text: 'Paused — check with Caddie', tone: 'needs' };
 	else if (phase) steps.plan = { text: 'Approved', tone: 'done' };
 	// Build
-	if (phase === 'planning' || phase === 'review' || phase === 'design' || phase === 'design-review' || stuckPlan) steps.build = { text: 'After you approve', tone: 'neutral' };
+	if (phase === 'planning' || phase === 'review' || phase === 'looks' || phase === 'looks-review' || phase === 'design' || phase === 'design-review' || stuckPlan) steps.build = { text: 'After you approve', tone: 'neutral' };
 	else if (phase === 'building') steps.build = { text: 'Caddie is building it', tone: 'neutral' };
 	else if (phase === 'blocked') steps.build = { text: 'Needs your help', tone: 'needs' };
 	else if (phase === 'ready') steps.build = { text: 'Ready to try', tone: 'done' };
@@ -179,7 +185,7 @@ export function workflowSteps(
  * once the app is ready. Unknown phase (no workflow yet) → none highlighted.
  */
 export function activeStep(phase: WorkflowPhase | null, opts?: { planApproved?: boolean }): ProjectStepId | null {
-	if (phase === 'planning' || phase === 'review' || phase === 'design' || phase === 'design-review') return 'plan';
+	if (phase === 'planning' || phase === 'review' || phase === 'looks' || phase === 'looks-review' || phase === 'design' || phase === 'design-review') return 'plan';
 	// A plan that got stuck before approval is still at Plan (unknown: Build, as before).
 	if (phase === 'blocked' && opts?.planApproved === false) return 'plan';
 	if (phase === 'building' || phase === 'blocked') return 'build';
@@ -229,6 +235,10 @@ export function journeyFromExperience(experience: ProjectExperience, opts: { per
 			return steps(['stop', 'Needs another pass'], waitBuild);
 		case 'review':
 			return steps(['now', 'Ready to review'], waitBuild);
+		case 'looks':
+			return steps(['now', 'Caddie is preparing looks'], waitBuild);
+		case 'looks_review':
+			return steps(['now', 'Choose a look'], waitBuild);
 		case 'design':
 			return steps(['now', 'Caddie is designing the screens'], waitBuild);
 		case 'design_review':

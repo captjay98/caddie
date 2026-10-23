@@ -22,7 +22,7 @@ export interface WorkflowSnapshot {
 
 export function workflowRefreshMs(snapshot: WorkflowSnapshot | undefined): number {
  const phase = snapshot?.workflow?.phase;
- return phase === 'planning' || phase === 'design' || phase === 'building' || snapshot?.importPreview?.status === 'checking' ? 2000 : 30_000;
+ return phase === 'planning' || phase === 'looks' || phase === 'design' || phase === 'building' || snapshot?.importPreview?.status === 'checking' ? 2000 : 30_000;
 }
 
 /** One actor/project cache and refresh policy for every view of the workflow. */

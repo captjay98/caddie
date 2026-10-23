@@ -896,7 +896,7 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
         </section>;
     }
 	const planEverApproved = ['approved', 'revoked', 'expired'].includes(fullWorkflow.data?.approval?.status ?? '');
-	if (buildPhase.data === 'design' || buildPhase.data === 'design-review' || (buildPhase.data === 'blocked' && !planEverApproved)) return <ProjectWorkflow projectId={props.projectId} presentation="workspace" />;
+	if (buildPhase.data === 'looks' || buildPhase.data === 'looks-review' || buildPhase.data === 'design' || buildPhase.data === 'design-review' || (buildPhase.data === 'blocked' && !planEverApproved)) return <ProjectWorkflow projectId={props.projectId} presentation="workspace" />;
 	return (
 		<DesignReview
             key={`${chrome.actorId}:${props.projectId}:${latest?.id ?? 'empty'}`}
@@ -958,7 +958,7 @@ function RunsBody(props: { projectId: string }): ReactElement {
 	const buildPhase = workflow.data?.workflow?.phase;
 	// Only when the workflow actually LOADED and is still at the plan stage: a
 	// failed or pending read is not "no build yet".
-	const beforeBuild = workflow.isSuccess && !workflow.data?.importPreview && Boolean(workflow.data?.workflow) && ['planning', 'review', 'design', 'design-review'].includes(buildPhase ?? '');
+	const beforeBuild = workflow.isSuccess && !workflow.data?.importPreview && Boolean(workflow.data?.workflow) && ['planning', 'review', 'looks', 'looks-review', 'design', 'design-review'].includes(buildPhase ?? '');
 	// "What Caddie has built" appears once there is something in it (a build
 	// or saved files), or when a link asked for it (?tab=). Before the first
 	// build it was a heading, a paragraph and two tabs around nothing.
@@ -1268,7 +1268,7 @@ function CheckBody(props: { projectId: string; openScore: boolean; focusClaimTyp
 
 	const phase = workflow.data?.workflow?.phase;
 	const hasApp = phase === 'ready' || phase === 'building' || Boolean(workflow.data?.importPreview);
-	const preBuild = workflow.isSuccess && !hasApp && (!phase || ['planning', 'review', 'design', 'design-review'].includes(phase));
+	const preBuild = workflow.isSuccess && !hasApp && (!phase || ['planning', 'review', 'looks', 'looks-review', 'design', 'design-review'].includes(phase));
 
 	return (
 		<div className="settings-stack">

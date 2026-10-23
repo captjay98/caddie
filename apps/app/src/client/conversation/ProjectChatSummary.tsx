@@ -68,6 +68,17 @@ export function ProjectChatSummary({ projectId, name }: {
 				status = 'Needs you';
 				action = 'Review plan';
 				break;
+			case 'looks':
+				headline = 'Caddie is preparing looks for your app';
+				summary = 'The plan is approved. Next you pick how the app should look.';
+				action = 'View plan';
+				break;
+			case 'looks-review':
+				headline = 'Choose how your app should look';
+				summary = 'Pick one of the looks. Caddie then designs every screen in it.';
+				status = 'Needs you';
+				action = 'Choose a look';
+				break;
 			case 'design':
 				headline = 'Caddie is designing your app';
 				summary = 'The plan is approved. You’ll review the screens and states next.';

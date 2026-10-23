@@ -32,10 +32,12 @@ import { ProjectChatSummary } from "./ProjectChatSummary.tsx";
 import { DesignOverviewPanel, designApprovalHold, useDesignOverview } from "../planning/DesignReview.tsx";
 
 /** Phases before any build started: the copied app is still the one to try. */
-const BEFORE_BUILD = new Set<WorkflowPhase>(["planning", "review", "design", "design-review"]);
+const BEFORE_BUILD = new Set<WorkflowPhase>(["planning", "review", "looks", "looks-review", "design", "design-review"]);
 const LABEL: Record<WorkflowPhase, string> = {
   planning: "Planning your app",
   review: "Your plan is ready",
+  looks: "Preparing looks for your app",
+  "looks-review": "Choose a look",
   design: "Designing your app",
   "design-review": "Your design is ready",
   building: "Building your app",

@@ -56,7 +56,7 @@ export function BuildProgress(props: {
         ) : null}
       </section>
     );
-  if (["planning", "review", "design", "design-review"].includes(data.phase))
+  if (["planning", "review", "looks", "looks-review", "design", "design-review"].includes(data.phase))
     return null;
   const t = data.timeline;
   const view = buildPresentation(data, Boolean(activity.error));

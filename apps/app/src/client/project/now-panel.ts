@@ -35,6 +35,8 @@ export interface NowPanelModel {
 const TITLES: Readonly<Record<ExperienceStage, string>> = {
 	planning: 'Caddie is writing your plan',
 	review: 'Your plan is ready to review',
+	looks: 'Caddie is preparing looks for your app',
+	looks_review: 'Choose how your app should look',
 	design: 'Caddie is designing your app',
 	design_review: 'Your design is ready to review',
 	building: 'Caddie is building your app',
@@ -46,7 +48,7 @@ const TITLES: Readonly<Record<ExperienceStage, string>> = {
 	stopped: 'Work on this project is paused',
 };
 
-const WORKING: ReadonlySet<ExperienceStage> = new Set(['planning', 'design', 'building', 'checking', 'repairing']);
+const WORKING: ReadonlySet<ExperienceStage> = new Set(['planning', 'looks', 'design', 'building', 'checking', 'repairing']);
 
 /**
  * Plan review/approval happens on the plan page; the design review card,
@@ -56,6 +58,7 @@ function routeFor(kind: ExperienceAction['kind']): NowRoute {
 	switch (kind) {
 		case 'review_plan':
 		case 'approve_plan':
+		case 'choose_look':
 			return { kind: 'tab', to: '/design-review' };
 		case 'retry':
 			return { kind: 'post', path: 'workflow/retry' };
