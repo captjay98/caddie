@@ -64,14 +64,17 @@ describe('the plan gate refuses test-mode features that are not available', () =
 		expect(featureRules(withPhoto, true)).toEqual([]);
 	});
 
-	test('emails and scheduled jobs are refused until they are built (lane 10)', () => {
-		// MUTATION PROOF: let app features cover emails and jobs and these pass.
-		expect(featureRules(withEmail, true)).toEqual(['feature.emails']);
-		expect(featureRules(withJob, true)).toEqual(['feature.jobs']);
+	test('emails and scheduled jobs come with app features (lane 10 landed)', () => {
+		// MUTATION PROOF: set emails/jobs back to false in availableFeatures and
+		// the "on" cases below start reporting feature.emails / feature.jobs again.
+		expect(featureRules(withEmail, false)).toEqual(['feature.emails']);
+		expect(featureRules(withJob, false)).toEqual(['feature.jobs']);
+		expect(featureRules(withEmail, true)).toEqual([]);
+		expect(featureRules(withJob, true)).toEqual([]);
 	});
 
 	test('the refusals are plain sentences, and nothing changes when no availability is given', () => {
-		const messages = checkArchitecture(withEmail, { kind: 'small', available: availableFeatures(true) })
+		const messages = checkArchitecture(withEmail, { kind: 'small', available: availableFeatures(false) })
 			.filter((i) => i.rule.startsWith('feature.'))
 			.map((i) => i.message);
 		expect(messages[0]).toContain("isn't available yet");

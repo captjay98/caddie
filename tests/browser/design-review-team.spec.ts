@@ -122,6 +122,7 @@ const SMALL_DESIGN = {
 		{ key: 'sign-in', heading: 'Signing in', lines: ['People sign in with a code emailed to them.'] },
 	],
 	screens: [{ plain: 'Your notes', module: 'app' }],
+	approved: true,
 };
 
 /** A big-app design overview (three modules, payments + emails, a blocking review). */
@@ -147,13 +148,39 @@ const BIG_DESIGN = {
 		security: ['Anyone could read another farm’s feed records.'],
 		advisory: ['Consider a search screen for feed.'],
 	},
+	approved: true,
 };
 
-function experience(design: unknown) {
-	return { projectId: 'proj-a', version: Date.parse(NOW), stage: 'review', plan: { id: 'pdr-1', revision: '1', approved: false }, preview: null, message: 'A plan is ready for your review.', actions: [], ...(design ? { design } : {}) };
+function experience(design: unknown, stage: string) {
+	return { projectId: 'proj-a', version: Date.parse(NOW), stage, plan: { id: 'pdr-1', revision: '1', approved: true }, preview: null, message: 'Working on your project.', actions: [], ...(design ? { design } : {}) };
 }
 
-async function stub(context: BrowserContext, design: unknown) {
+type Phase = 'review' | 'design-review' | 'building';
+
+/** A design document as Caddie writes it: prose for the person, plus the machine-readable block. */
+const DESIGN_BODY = [
+	'# FarmLog design',
+	'',
+	'## Screen inventory',
+	'',
+	'- Today · History · Add entry',
+	'',
+	'```caddie-architecture',
+	'{"version":1,"modules":[{"id":"app","plain":"FarmLog"}],"tables":[{"name":"notes"}]}',
+	'```',
+	'',
+	'## Accessibility',
+	'',
+	'Every control is reachable by keyboard.',
+].join('\n');
+
+async function stub(context: BrowserContext, design: unknown, phase: Phase = 'building') {
+	const workflow = {
+		projectId: 'proj-a', runId: 'run-a', conversationId: 'conv-a', sourceConversationId: 'conv-home',
+		brief: 'Build FarmLog.', phase, planId: 'pdr-1', previewId: null, pendingKey: null, pendingBody: null, detail: null, updatedAt: NOW,
+	};
+	const designDoc = { id: 'design-1', projectId: 'proj-a', kind: 'design', revision: 2, bodyHash: 'sha256-design-1', body: DESIGN_BODY, createdBy: 'actor-test', createdAt: NOW };
+	const snapshot = { workflow, plan: PLAN, approval: phase === 'review' ? null : { id: 'apr-1', status: 'approved' }, design: phase === 'review' ? null : designDoc, designApproval: null, importPreview: null };
 	await context.route('**/api/auth/status', (route) => json(route, 200, { authenticated: true }));
 	await context.route('**/api/onboarding', (route) => json(route, 200, { completedAt: '2026-01-01T00:00:00.000Z' }));
 	await context.route('**/api/auth/get-session', (route) => json(route, 200, { session: { userId: 'actor-test' }, user: { id: 'actor-test', name: 'Ada', email: 'ada@caddie.test' } }));
@@ -166,8 +193,8 @@ async function stub(context: BrowserContext, design: unknown) {
 	await context.route('**/api/approvals**', (route) => json(route, 200, { approval: null }));
 	await context.route('**/api/projects/**', (route) => {
 		const path = new URL(route.request().url()).pathname;
-		if (path.endsWith('/experience')) return json(route, 200, experience(design));
-		if (path.endsWith('/workflow')) return json(route, 200, { workflow: { phase: 'review', brief: 'Build FarmLog.' }, importPreview: null });
+		if (path.endsWith('/experience')) return json(route, 200, experience(design, phase === 'design-review' ? 'design_review' : phase));
+		if (path.endsWith('/workflow')) return json(route, 200, path.includes(HOME.id) ? { workflow: null, plan: null, approval: null } : snapshot);
 		if (path.endsWith('/plan-docs')) return json(route, 200, { revisions: [PLAN], latest: null });
 		if (path.endsWith('/hackathon')) return json(route, 200, { hackathon: null });
 		if (path.endsWith('/run-bindings')) return json(route, 200, { runBindings: [] });
@@ -176,8 +203,78 @@ async function stub(context: BrowserContext, design: unknown) {
 	});
 }
 
-test.describe('Design review — How your app works (plan section 7, screen 1)', () => {
-	test('a small app shows what it stores, who can see what, sign-in, and its screens', async ({ browser }) => {
+test.describe('How your app works at the design decision (plan section 7, screen 1)', () => {
+	test('the summary sits above the design, and the raw architecture block is never shown', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+		await stub(context, { ...SMALL_DESIGN, approved: false, review: { blocks: false, security: [], advisory: [] } }, 'design-review');
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/design-review?project=proj-a`);
+
+		const card = page.getByTestId('project-workflow');
+		const panel = card.getByTestId('how-app-works');
+		await expect(panel).toBeVisible();
+		await expect(panel).toHaveAttribute('data-approved', 'false');
+		await expect(panel.getByTestId('how-app-kicker')).toHaveText('Before you approve');
+		await expect(panel.getByTestId('how-app-section-saves')).toContainText('A note you wrote');
+		// The design's prose renders; its machine-readable block does not.
+		const brief = card.getByTestId('workflow-design-brief');
+		await expect(brief.getByRole('heading', { name: 'Accessibility' })).toBeVisible();
+		await expect(card).not.toContainText('caddie-architecture');
+		await expect(card).not.toContainText('"modules"');
+		// A clean safety review: approving is open.
+		await expect(card.getByTestId('workflow-approve-design')).toBeEnabled();
+		await expect(card.getByTestId('workflow-approve-hold')).toHaveCount(0);
+		await context.close();
+	});
+
+	test('an open security problem blocks approval, with the reason in plain words', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+		await stub(context, { ...BIG_DESIGN, approved: false }, 'design-review');
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/design-review?project=proj-a`);
+
+		const card = page.getByTestId('project-workflow');
+		await expect(card.getByTestId('how-app-works')).toHaveAttribute('data-app', 'big');
+		await expect(card.getByTestId('how-app-review')).toHaveAttribute('data-blocks', 'true');
+		await expect(card.getByTestId('how-app-security')).toContainText('another farm’s feed records');
+		await expect(card.getByTestId('how-app-advisory')).toContainText('search screen for feed');
+		await expect(card.getByTestId('workflow-approve-design')).toBeDisabled();
+		await expect(card.getByTestId('workflow-approve-hold')).toHaveText('Caddie has to fix the safety problems above before you can approve this design.');
+		// Asking for a change stays open.
+		await expect(card.getByRole('button', { name: 'Suggest a change' })).toBeEnabled();
+		await context.close();
+	});
+
+	test('a design the safety check has not finished cannot be approved yet', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+		await stub(context, { ...SMALL_DESIGN, approved: false }, 'design-review');
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/design-review?project=proj-a`);
+
+		const card = page.getByTestId('project-workflow');
+		await expect(card.getByTestId('how-app-works')).toBeVisible();
+		await expect(card.getByTestId('how-app-review')).toHaveCount(0);
+		await expect(card.getByTestId('workflow-approve-design')).toBeDisabled();
+		await expect(card.getByTestId('workflow-approve-hold')).toHaveText('Caddie hasn’t finished the safety check of this design yet, so it can’t be approved.');
+		await context.close();
+	});
+
+	test('a project without team mode (no summary) approves exactly as before', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+		await stub(context, null, 'design-review');
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/design-review?project=proj-a`);
+
+		const card = page.getByTestId('project-workflow');
+		await expect(card.getByTestId('workflow-design-brief')).toBeVisible();
+		await expect(card.getByTestId('how-app-works')).toHaveCount(0);
+		await expect(card.getByTestId('workflow-approve-design')).toBeEnabled();
+		await context.close();
+	});
+});
+
+test.describe('How your app works on the Plan tab, after approval (plan section 7, screen 1)', () => {
+	test('a small app shows what you approved: what it stores, who can see what, sign-in, and its screens', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 		await stub(context, SMALL_DESIGN);
 		const page = await context.newPage();
@@ -186,55 +283,40 @@ test.describe('Design review — How your app works (plan section 7, screen 1)',
 		const panel = page.getByTestId('how-app-works');
 		await expect(panel).toBeVisible();
 		await expect(panel).toHaveAttribute('data-app', 'small');
+		await expect(panel.getByTestId('how-app-kicker')).toHaveText('What you approved');
 		await expect(page.getByTestId('how-app-section-saves')).toContainText('A note you wrote');
 		await expect(page.getByTestId('how-app-section-access')).toContainText('their own records');
 		await expect(page.getByTestId('how-app-section-sign-in')).toContainText('code emailed');
 		await expect(page.getByTestId('how-app-screens')).toContainText('Your notes');
 		// A small app has no parts (modules) block.
 		await expect(page.getByTestId('how-app-modules')).toHaveCount(0);
-		if (process.env.CADDIE_SHOTS) {
-			await panel.screenshot({ path: join(process.env.CADDIE_SHOTS, 'design-review-small-desktop.png') });
-			await page.setViewportSize({ width: 390, height: 844 });
-			await panel.screenshot({ path: join(process.env.CADDIE_SHOTS, 'design-review-small-mobile.png') });
-		}
 		await context.close();
 	});
 
-	test('a big app shows its parts, grouped screens, payments and emails, and a blocking security finding', async ({ browser }) => {
+	test('a big app shows its parts, grouped screens, and payments and emails in test mode', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-		await stub(context, BIG_DESIGN);
+		await stub(context, { ...BIG_DESIGN, review: { blocks: false, security: [], advisory: [] } });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/design-review?project=proj-a`);
 
 		const panel = page.getByTestId('how-app-works');
 		await expect(panel).toHaveAttribute('data-app', 'big');
-		// Its parts (modules), side by side.
 		await expect(page.getByTestId('how-app-modules')).toContainText('Farms, people and roles');
 		await expect(page.getByTestId('how-app-modules')).toContainText('Money in and out');
-		// Payments and emails appear under test-mode features.
 		await expect(page.getByTestId('how-app-section-test-mode')).toContainText('test mode, no money moves');
 		await expect(page.getByTestId('how-app-section-test-mode')).toContainText('test inbox');
-		// The architect review blocks approval on a security issue.
-		const review = page.getByTestId('how-app-review');
-		await expect(review).toHaveAttribute('data-blocks', 'true');
-		await expect(page.getByTestId('how-app-security')).toContainText('another farm’s feed records');
-		await expect(page.getByTestId('how-app-advisory')).toContainText('search screen for feed');
-		if (process.env.CADDIE_SHOTS) {
-			await panel.screenshot({ path: join(process.env.CADDIE_SHOTS, 'design-review-big-desktop.png') });
-			await page.setViewportSize({ width: 390, height: 844 });
-			await panel.screenshot({ path: join(process.env.CADDIE_SHOTS, 'design-review-big-mobile.png') });
-		}
+		await expect(page.getByTestId('how-app-safe')).toContainText('nothing that blocks building');
+		await expect(page.getByTestId('how-app-security')).toHaveCount(0);
 		await context.close();
 	});
 
-	test('a design with a clean review shows the all-clear line, not a block', async ({ browser }) => {
+	test('during plan review a design that was never approved is not shown as approved', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-		await stub(context, { ...BIG_DESIGN, review: { blocks: false, security: [], advisory: [] } });
+		await stub(context, { ...SMALL_DESIGN, approved: false }, 'review');
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/design-review?project=proj-a`);
-		await expect(page.getByTestId('how-app-review')).toHaveAttribute('data-blocks', 'false');
-		await expect(page.getByTestId('how-app-safe')).toContainText('nothing that blocks building');
-		await expect(page.getByTestId('how-app-security')).toHaveCount(0);
+		await expect(page.getByTestId('design-review')).toBeVisible();
+		await expect(page.getByTestId('how-app-works')).toHaveCount(0);
 		await context.close();
 	});
 

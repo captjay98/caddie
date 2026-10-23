@@ -130,13 +130,19 @@ describe('designOverviewFrom (screen 1 — How your app works)', () => {
 	test('with no review yet the field is absent, never an empty panel', () => {
 		expect(designOverviewFrom(smallBlock(), null).review).toBeUndefined();
 	});
+
+	test('it says whether this exact design was approved, so the screen words it before or after', () => {
+		expect(designOverviewFrom(smallBlock(), null).approved).toBe(false);
+		expect(designOverviewFrom(smallBlock(), null, { approved: true }).approved).toBe(true);
+	});
 });
 
 describe('moduleProgressState (screen 2 — the plain state word)', () => {
 	test('each stored status maps to the word the person reads', () => {
 		expect(moduleProgressState('pending')).toBe('waiting');
 		expect(moduleProgressState('building')).toBe('building');
-		expect(moduleProgressState('passed')).toBe('joined');
+		// Passed its own checks but not merged yet: it is not in the app.
+		expect(moduleProgressState('passed')).toBe('built');
 		expect(moduleProgressState('merged')).toBe('joined');
 		expect(moduleProgressState('not-merged')).toBe('not-joined');
 		expect(moduleProgressState('stopped')).toBe('stopped');
@@ -160,6 +166,17 @@ describe('moduleBoardToProgress (screen 2 — parts side by side)', () => {
 		expect(board[1]).toEqual({ id: 'feed', plain: 'Feed stock and use', state: 'waiting' });
 	});
 
+	test('a dependency that passed but is not merged yet is still waited for', () => {
+		// Dependents start from the merged app (part Q), so a part that only
+		// passed its own checks has not unblocked anything yet.
+		const rows = [moduleRow('core', 'passed'), moduleRow('feed', 'pending', ['core'])];
+		const board = moduleBoardToProgress(rows, bigBlock());
+		expect(board).toEqual([
+			{ id: 'core', plain: 'Farms, people and roles', state: 'built' },
+			{ id: 'feed', plain: 'Feed stock and use', state: 'waiting', waitingFor: ['Farms, people and roles'] },
+		]);
+	});
+
 	test('a stopped module reads "stopped" and never blocks reading the rest', () => {
 		const rows = [moduleRow('core', 'merged'), moduleRow('feed', 'stopped', ['core'])];
 		const board = moduleBoardToProgress(rows, bigBlock());
@@ -168,17 +185,20 @@ describe('moduleBoardToProgress (screen 2 — parts side by side)', () => {
 });
 
 describe('spendStopFrom (screen 2 — the spending-limit stop)', () => {
-	test('a build stopped at its limit shows the limit message and what is saved', () => {
-		const stop = spendStopFrom(blocked(`This build ${SPEND_STOP_SENTINEL} of $5.00.`), 5_000_000);
-		expect(stop).toEqual({ message: 'This build reached its spending limit of $5.00.', saved: 'Your plan and files are saved.' });
+	test('a build stopped at its limit adds only what retrying does (the stop sentence is the blocker message)', () => {
+		const stop = spendStopFrom(blocked(`This build ${SPEND_STOP_SENTINEL} of $5.00. Your plan and files are saved.`));
+		expect(stop).toEqual({ note: 'Retrying starts the build again with a new spending limit.' });
+		// Nothing the blocker message already says is repeated.
+		expect(JSON.stringify(stop)).not.toContain(SPEND_STOP_SENTINEL);
+		expect(JSON.stringify(stop)).not.toContain('saved');
 	});
 
 	test('an ordinary stop (not the spend limit) is not a spend stop', () => {
-		expect(spendStopFrom(blocked('Stop requested.'), 5_000_000)).toBeNull();
+		expect(spendStopFrom(blocked('Stop requested.'))).toBeNull();
 	});
 
 	test('a building (not blocked) workflow is never a spend stop', () => {
 		const building: BuildWorkflow = { ...blocked(`${SPEND_STOP_SENTINEL}`), phase: 'building' };
-		expect(spendStopFrom(building, 5_000_000)).toBeNull();
+		expect(spendStopFrom(building)).toBeNull();
 	});
 });

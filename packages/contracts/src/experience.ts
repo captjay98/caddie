@@ -157,6 +157,9 @@ export const DesignOverviewSchema = v.pipe(
 		modules: v.optional(v.array(DesignModuleSchema)),
 		/** The architect review's findings. Absent before the architect has run. */
 		review: v.optional(DesignReviewFindingsSchema),
+		/** Whether the person approved this exact design revision, so the screen
+		 *  can word it "before you approve" or "what you approved". */
+		approved: v.boolean(),
 	}),
 	v.readonly(),
 );
@@ -167,12 +170,14 @@ export type DesignOverview = v.InferOutput<typeof DesignOverviewSchema>;
 /**
  * One module on the build-progress board, with its state in the plain word the
  * person reads: waiting (a dependency or a slot is not ready), building (a
- * builder is on it), joined (merged into the app), not joined (a round of
- * joining failed), or stopped (it stopped and the rest kept going).
+ * builder is on it), built (its own checks passed; it is joined into the app
+ * next), joined (merged into the app), not joined (a round of joining failed),
+ * or stopped (it stopped and the rest kept going).
  */
 export const ModuleProgressState = v.union([
 	v.literal('waiting'),
 	v.literal('building'),
+	v.literal('built'),
 	v.literal('joined'),
 	v.literal('not-joined'),
 	v.literal('stopped'),
@@ -195,16 +200,16 @@ export type ModuleProgressItem = v.InferOutput<typeof ModuleProgressItemSchema>;
 // --- spending-limit stop (team mode, plan part A / section 7) ----------------
 
 /**
- * The spending-limit stop. Present only when a build stopped at its limit: the
- * plain limit message and what is saved. The numbers come from the real payer
- * limit, never a made-up figure.
+ * The spending-limit stop. Present only when a build stopped at its limit. The
+ * stop sentence itself ("This build reached its spending limit of $5.00. Your
+ * plan and files are saved.") is already the build's blocker message, shown by
+ * every blocked view, so this carries only what that sentence leaves out: what
+ * retrying does.
  */
 export const SpendStopSchema = v.pipe(
 	v.strictObject({
-		/** "This build reached its spending limit of $5.00." */
-		message: v.string(),
-		/** "Your plan and files are saved." */
-		saved: v.string(),
+		/** "Retrying starts the build again with a new spending limit." */
+		note: v.string(),
 	}),
 	v.readonly(),
 );

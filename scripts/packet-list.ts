@@ -407,6 +407,20 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// (SVG bar/line/donut, no new library, screen-reader table) and
 			// caddie/poll.ts (usePolling, pausing while the tab is hidden).
 			'tests/kit-files.test.ts',
+			// Lane 8 (part I): the campaign runner's LIVE path, all offline —
+			// the host-guarded dev client + two-account sign-in and the
+			// end-to-end brief driver (dev-client, driver); the read-only D1
+			// results reader + SELECT-only live seam (d1-reader); the browser
+			// check's persistence/isolation judgement (browser-check); the
+			// campaign ledger (ledger); --mode team|baseline (mode); and the
+			// whole runCampaign orchestration composed over fakes (campaign).
+			'tests/brief-run-dev-client.test.ts',
+			'tests/brief-run-driver.test.ts',
+			'tests/brief-run-d1-reader.test.ts',
+			'tests/brief-run-browser-check.test.ts',
+			'tests/brief-run-ledger.test.ts',
+			'tests/brief-run-mode.test.ts',
+			'tests/brief-run-campaign.test.ts',
 			// Lead wiring for J and L: the generated payments/upload files reach
 			// apps that declare them (app features only), stay protected, the
 			// builders are told how to mount them, and the plan gate refuses
@@ -416,6 +430,14 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// architecture block + review + module board + stop into the plain
 			// shapes the Design review and build-progress screens read.
 			'tests/design-overview.test.ts',
+			// Lane 10 (parts K + N): emails from apps stored to the test inbox
+			// (never sent, the limits, bad-address refusal, cross-project
+			// isolation); the test-inbox route returning codes + emails together;
+			// and Run-now job signatures (the host signer matches the generated
+			// access check, stale/forged calls refused) with the run records.
+			'tests/app-email.test.ts',
+			'tests/test-inbox.test.ts',
+			'tests/app-job.test.ts',
 		],
 		browser: [
 			'tests/browser/brief.spec.ts',
@@ -425,6 +447,9 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// board, the spending-limit stop, and the Try-again button).
 			'tests/browser/design-review-team.spec.ts',
 			'tests/browser/build-progress-team.spec.ts',
+			// Lane 10 (screen 3): the test inbox with a code and an email marked
+			// "Not sent — test mode", and the jobs list with Run now and a run.
+			'tests/browser/screen3-team.spec.ts',
 		],
 		live: [],
 	},
