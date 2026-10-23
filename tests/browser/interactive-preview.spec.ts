@@ -67,6 +67,29 @@ test('generated app runs, saves its own storage, and reads it before its first s
 	await expect(page.frameLocator('iframe').getByRole('listitem')).toHaveCount(0);
 });
 
+// D14: with allow="geolocation" on the interactive iframe and the permission
+// granted, a generated app reads a position inside the preview; the "type a
+// place" fallback is what the recipe tells builders to keep for when it is not.
+const GEO_HTML = `<!doctype html><html><head><title>Where am I</title></head><body>
+<h1>Nearby</h1><p id="loc">locating…</p><input aria-label="type a place">
+<script>
+navigator.geolocation.getCurrentPosition(
+  function (pos) { document.querySelector('#loc').textContent = 'at ' + pos.coords.latitude.toFixed(3) + ',' + pos.coords.longitude.toFixed(3); },
+  function (err) { document.querySelector('#loc').textContent = 'denied: ' + err.message; }
+);
+</script></body></html>`;
+
+test('D14: a granted geolocation request returns a position inside the interactive preview', async ({ page, context }) => {
+	await context.grantPermissions(['geolocation']);
+	await context.setGeolocation({ latitude: 6.524, longitude: 3.379 });
+	await stubArtifactFrameDocument(page, GEO_HTML);
+	await page.goto(base);
+	// The iframe actually carries allow="geolocation" at run time.
+	await expect(page.locator('iframe[name="caddie-interactive-preview"]')).toHaveAttribute('allow', 'geolocation');
+	const frame = page.frameLocator('iframe[name="caddie-interactive-preview"]');
+	await expect(frame.locator('#loc')).toHaveText('at 6.524,3.379', { timeout: 15_000 });
+});
+
 test('opaque sandbox blocks parent cookies, parent DOM, network, nested frames and forms', async ({ page, context }) => {
 	await context.addCookies([{ name: 'caddie-secret', value: 'never-share-this', url: base }]);
 	await stubArtifactFrameDocument(page, HTML);
