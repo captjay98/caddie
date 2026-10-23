@@ -143,11 +143,16 @@ describe('part E: the generated test is never vacuous and bites on declared feat
 
 // --- lead fixes: feature scope, screen subjects, the current team ------------
 
+/** [table, kind] for each subject the generated test drives, in order. */
+function subjectsOf(meta: Record<string, unknown>): Array<[string, string]> {
+	return (meta.subjects as Array<{ table: string; kind: string }>).map((x) => [x.table, x.kind]);
+}
+
 /** The META object embedded in a generated contract test. */
 function metaOf(src: string): Record<string, unknown> {
-	const line = src.split('\n').find((l) => l.startsWith('const META = '));
+	const line = src.split('\n').find((l) => l.startsWith('const META'));
 	if (!line) throw new Error('no META line in the generated test');
-	return JSON.parse(line.slice('const META = '.length, line.lastIndexOf(' as const;'))) as Record<string, unknown>;
+	return JSON.parse(line.slice(line.indexOf('{'), line.lastIndexOf('}') + 1)) as Record<string, unknown>;
 }
 
 describe('part E: the check covers the features built so far (passed plus the current one)', () => {
@@ -156,7 +161,7 @@ describe('part E: the check covers the features built so far (passed plus the cu
 		const meta = metaOf(src);
 		expect(meta.scoped).toBe(true);
 		expect(meta.hasTeam).toBe(true); // crews.create is built, so T1 can be started
-		expect(meta.team).toBeNull(); // logs routes are a later feature
+		expect(meta.subjects).toEqual([]); // logs, tools and notes are later features
 		expect(meta.role).toBeNull(); // the boss-only route is a logs route
 		expect(meta.admin).not.toBeNull();
 		expect(meta.screens).toEqual([]);
@@ -165,9 +170,14 @@ describe('part E: the check covers the features built so far (passed plus the cu
 	test('the whole design (the final check) drives everything and is not scoped', () => {
 		const meta = metaOf(writeContractFiles(TEAM_BLOCK, 'small')['caddie/contract.test.ts']!);
 		expect(meta.scoped).toBe(false);
-		expect((meta.team as { table: string }).table).toBe('logs');
+		// EVERY team-owned record table and every person-owned table is a subject.
+		expect(subjectsOf(meta)).toEqual([['logs', 'team'], ['tools', 'team'], ['notes', 'person']]);
 		expect(meta.role).not.toBeNull();
-		expect(meta.screens).toEqual([{ id: 'logs', path: '#/logs', kind: 'team' }]);
+		// Each table screen is checked against ITS OWN table's record.
+		expect(meta.screens).toEqual([
+			{ id: 'logs', path: '#/logs', kind: 'team', table: 'logs' },
+			{ id: 'tools', path: '#/tools', kind: 'team', table: 'tools' },
+		]);
 	});
 
 	test('the route table in caddie/contract.ts stays whole, so every route is registered from feature 1', () => {
@@ -179,7 +189,13 @@ describe('part E: the check covers the features built so far (passed plus the cu
 	test('a scope with no team feature yet runs the person checks only', () => {
 		const meta = metaOf(writeContractFiles(TEAM_BLOCK, 'small', ['admin'])['caddie/contract.test.ts']!);
 		expect(meta.hasTeam).toBe(false);
-		expect(meta.person).toBeNull();
+		expect(meta.subjects).toEqual([]);
+	});
+
+	test('before the team can be started, team records wait; a personal table in scope is checked now', () => {
+		const meta = metaOf(writeContractFiles(TEAM_BLOCK, 'small', ['admin', 'notes', 'tools'])['caddie/contract.test.ts']!);
+		expect(meta.hasTeam).toBe(false);
+		expect(subjectsOf(meta)).toEqual([['notes', 'person']]);
 	});
 });
 
@@ -197,10 +213,36 @@ describe('part E: each screen is checked against the record of the table it show
 		screens: [...NOTES_BLOCK.screens, { id: 'tags', module: 'app', path: '#/tags', plain: 'Your tags', shows: ['tags'] }],
 	};
 
-	test('a screen of another table is not checked against the notes record', () => {
+	test('every person-owned table is a subject, and each screen is checked against its own table', () => {
 		const meta = metaOf(writeContractFiles(twoTables, 'small')['caddie/contract.test.ts']!);
-		expect((meta.person as { table: string }).table).toBe('notes');
-		expect(meta.screens).toEqual([{ id: 'notes', path: '#/notes', kind: 'person' }]);
+		expect(subjectsOf(meta)).toEqual([['notes', 'person'], ['tasks', 'person'], ['tags', 'person']]);
+		expect(meta.screens).toEqual([
+			{ id: 'notes', path: '#/notes', kind: 'person', table: 'notes' },
+			{ id: 'tasks', path: '#/tasks', kind: 'person', table: 'tasks' },
+			{ id: 'tags', path: '#/tags', kind: 'person', table: 'tags' },
+		]);
+	});
+
+	test('a table another one points at is saved first, and the pointer is filled with the saved id', () => {
+		const reversed: ArchitectureBlock = { ...NOTES_BLOCK, tables: [...NOTES_BLOCK.tables].reverse() };
+		const meta = metaOf(writeContractFiles(reversed, 'small')['caddie/contract.test.ts']!);
+		// tasks is declared first but points at notes, so notes is created first.
+		expect(subjectsOf(meta)).toEqual([['notes', 'person'], ['tasks', 'person']]);
+		const tasks = (meta.subjects as Array<{ table: string; refs: unknown }>).find((x) => x.table === 'tasks')!;
+		expect(tasks.refs).toEqual([{ field: 'noteId', table: 'notes' }]);
+	});
+
+	test('a change touches one text field and leaves numbers and yes/no fields valid', () => {
+		const mixed: ArchitectureBlock = {
+			...NOTES_BLOCK,
+			routes: NOTES_BLOCK.routes.map((r) =>
+				r.id === 'notes.update' ? { ...r, request: [{ name: 'count', type: 'integer', example: '3' }, { name: 'done', type: 'boolean', example: 'false' }, { name: 'body', type: 'text', example: 'Buy more feed' }] } : r,
+			) as ArchitectureBlock['routes'],
+		};
+		const meta = metaOf(writeContractFiles(mixed, 'small')['caddie/contract.test.ts']!);
+		const notes = (meta.subjects as Array<{ table: string; updateField: string; updateBody: Record<string, string> }>).find((x) => x.table === 'notes')!;
+		expect(notes.updateField).toBe('body');
+		expect(notes.updateBody).toEqual({ count: '3', done: 'false', body: 'Buy more feed (changed)' });
 	});
 });
 

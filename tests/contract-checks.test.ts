@@ -56,6 +56,12 @@ const WHY: Readonly<Record<string, string>> = {
 	'team-screen-reads-localstorage': "does not show the team's saved record",
 	'team-delete-without-team-filter': "B deleted A's record through B's own team",
 	'team-crews-built-whole-design': 'This route is not built yet',
+	// Every table is checked (not only the first), and each screen against its own table.
+	'second-table-kept-in-memory': "tasks: reading A's record after restart failed",
+	'second-table-no-owner-filter': "tasks: B can read A's record",
+	'second-screen-shows-another-table': 'The tasks screen does not show a record the server saved',
+	'team-second-table-without-team-filter': "tools: A's record leaks into B's own-team list",
+	'team-teammate-reads-personal': "notes: a teammate can read A's personal record",
 };
 
 /** Assert a fixture passes the phases it should and fails exactly the ones it must. */

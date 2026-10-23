@@ -28,6 +28,8 @@ const GENERATED = generateContractFiles(NOTES_BLOCK, { kind: 'small' }).files;
 export interface FixtureApp {
 	dir: string;
 	dbFile: string;
+	/** The files the last applied fixture wrote (removed before the next one). */
+	written?: string[];
 	cleanup(): void;
 }
 
@@ -74,6 +76,7 @@ export function applyFixture(app: FixtureApp, fixture: ContractFixture, block: A
 		'src/LogsScreen.tsx',
 		'src/App.tsx',
 		'src/server.ts',
+		...(app.written ?? []),
 	]) {
 		const full = join(app.dir, stale);
 		if (existsSync(full)) rmSync(full, { force: true });
@@ -85,6 +88,7 @@ export function applyFixture(app: FixtureApp, fixture: ContractFixture, block: A
 	const generated = generateContractFiles(block, { kind: 'small', ...(fixture.features ? { features: fixture.features } : {}) });
 	for (const [path, text] of Object.entries(generated.files)) write(app.dir, path, text);
 	for (const [path, text] of Object.entries(fixture.files)) write(app.dir, path, text);
+	app.written = Object.keys(fixture.files);
 	// Fresh database file for each fixture run.
 	for (const suffix of ['', '-wal', '-shm', '.handoff.json']) {
 		const f = app.dbFile + suffix;
