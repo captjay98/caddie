@@ -41,9 +41,10 @@ export interface DispatchEnv {
 	CADDIE_ORIGIN: string;
 	/** The apps domain, e.g. caddieapps.com. */
 	APPS_DOMAIN: string;
-	/** Service binding to Caddie's PublishedAppPlatform entrypoint (AI and sign-in codes for published apps). */
+	/** Service binding to Caddie's PublishedAppPlatform entrypoint (AI, emails and sign-in codes for published apps). */
 	CADDIE_PLATFORM?: {
 		ai(projectId: string, request: unknown): Promise<unknown>;
+		email(projectId: string, request: unknown): Promise<unknown>;
 		signInCode(projectId: string, request: unknown): Promise<unknown>;
 	};
 }
@@ -63,6 +64,11 @@ export class AppPlatform extends WorkerEntrypoint<DispatchEnv, { projectId: stri
 	async ai(request: unknown): Promise<unknown> {
 		if (!this.env.CADDIE_PLATFORM) return { ok: false, reason: 'unavailable', message: "AI isn't available for this app right now." };
 		return this.env.CADDIE_PLATFORM.ai(this.ctx.props.projectId, request);
+	}
+
+	async email(request: unknown): Promise<unknown> {
+		if (!this.env.CADDIE_PLATFORM) return { ok: false, reason: 'unavailable', message: "Emails aren't available for this app right now." };
+		return this.env.CADDIE_PLATFORM.email(this.ctx.props.projectId, request);
 	}
 
 	async signInCode(request: unknown): Promise<unknown> {

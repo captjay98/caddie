@@ -63,6 +63,7 @@ describe('dispatch Worker', () => {
 		const forwarded: unknown[][] = [];
 		env.CADDIE_PLATFORM = {
 			ai: async (projectId, request) => { forwarded.push([projectId, request]); return { ok: true, text: 'Try soup.' }; },
+			email: async (projectId, request) => { forwarded.push(['email', projectId, request]); return { ok: true, delivered: 'test-inbox' }; },
 			signInCode: async (projectId, request) => { forwarded.push(['code', projectId, request]); return { ok: true }; },
 		};
 		const made: Array<{ projectId: string }> = [];
@@ -83,11 +84,17 @@ describe('dispatch Worker', () => {
 		// Each call reaches Caddie with the route's project, whatever the app sends.
 		const request = { messages: [{ role: 'user', content: 'Dinner?' }], projectId: 'proj-2' };
 		expect(await platform.ai(request)).toEqual({ ok: true, text: 'Try soup.' });
+		expect(await platform.email({ to: 'ada@example.com', subject: 'Hi', text: 'There', projectId: 'proj-2' })).toEqual({ ok: true, delivered: 'test-inbox' });
 		expect(await platform.signInCode({ email: 'ada@example.com', code: '123456' })).toEqual({ ok: true });
-		expect(forwarded).toEqual([['proj-1', request], ['code', 'proj-1', { email: 'ada@example.com', code: '123456' }]]);
+		expect(forwarded).toEqual([
+			['proj-1', request],
+			['email', 'proj-1', { to: 'ada@example.com', subject: 'Hi', text: 'There', projectId: 'proj-2' }],
+			['code', 'proj-1', { email: 'ada@example.com', code: '123456' }],
+		]);
 		// Without the binding the app gets a plain no, not a crash.
 		delete env.CADDIE_PLATFORM;
 		expect(await platform.ai(request)).toMatchObject({ ok: false, reason: 'unavailable' });
+		expect(await platform.email({ to: 'ada@example.com', subject: 'Hi', text: 'There' })).toMatchObject({ ok: false, reason: 'unavailable' });
 		expect(await platform.signInCode({ email: 'ada@example.com', code: '123456' })).toMatchObject({ ok: false, reason: 'unavailable' });
 	});
 
@@ -128,7 +135,16 @@ describe('dispatch Worker', () => {
 	test("a live app gets its route's limits and its project/slug for the outbound Worker; Caddie's headers are stripped", async () => {
 		const { env, gets, seen } = world({ 'route:farmlog.caddieapps.com': route({ limits: { cpuMs: 30, subRequests: 20 } }) });
 		const res = await handleDispatch(
-			new Request('https://farmlog.caddieapps.com/api/notes?x=1', { headers: { 'x-caddie-actor': 'admin', 'X-Caddie-Trust': 'yes', accept: 'application/json' } }),
+			new Request('https://farmlog.caddieapps.com/api/notes?x=1', {
+				headers: {
+					'x-caddie-actor': 'admin',
+					'X-Caddie-Trust': 'yes',
+					// The Run-now forging vector (part N): an outside caller must never
+					// be able to present a job signature to a published app's route.
+					'x-caddie-job': '9999999999999.deadbeef',
+					accept: 'application/json',
+				},
+			}),
 			env,
 		);
 		expect(res.status).toBe(200);
@@ -136,6 +152,7 @@ describe('dispatch Worker', () => {
 		expect(seen[0]!.url).toBe('https://farmlog.caddieapps.com/api/notes?x=1');
 		expect(seen[0]!.headers.get('x-caddie-actor')).toBeNull();
 		expect(seen[0]!.headers.get('x-caddie-trust')).toBeNull();
+		expect(seen[0]!.headers.get('x-caddie-job')).toBeNull();
 		expect(seen[0]!.headers.get('accept')).toBe('application/json');
 	});
 
