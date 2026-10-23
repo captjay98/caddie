@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
 import type { Scope, PlanDocRevision } from "@caddie/contracts";
+import {
+  LOOKS_BLOCK_GUIDE,
+  encodeLookChoice,
+  lookThemeBlock,
+  parseLooks,
+  type Look,
+  type LooksSet,
+} from "@caddie/contracts";
 import type { D1Database } from "./auth.ts";
 import {
   assertProjectScope,
@@ -36,8 +44,22 @@ import { listArchitectureReviews } from "./architecture-review.ts";
 import { openBuildPayer, spendCapMicros } from "./build-spend.ts";
 import { registerBuildPayer } from "./spend-instrument.ts";
 
+/**
+ * The workflow lifecycle. After the plan is approved the owner first chooses a
+ * look ("looks": Caddie prepares 2-3 looks; "looks-review": the owner picks
+ * one), then the design brief is written in it ("design" / "design-review"),
+ * then the build runs.
+ */
 export type WorkflowPhase =
-  "planning" | "review" | "design" | "design-review" | "building" | "blocked" | "ready";
+  | "planning"
+  | "review"
+  | "looks"
+  | "looks-review"
+  | "design"
+  | "design-review"
+  | "building"
+  | "blocked"
+  | "ready";
 export interface BuildWorkflow {
   projectId: string;
   runId: string;
@@ -51,6 +73,10 @@ export interface BuildWorkflow {
   pendingBody: string | null;
   detail: string | null;
   updatedAt: string;
+  /** The highest 'looks' revision when the plan was approved; only newer proposals count (0044). */
+  looksBaseline?: number | null;
+  /** The highest 'design' revision when the look was chosen; only newer briefs count (0044). */
+  designBaseline?: number | null;
 }
 const now = () => new Date().toISOString();
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -341,6 +367,34 @@ export async function workflowSnapshot(db: D1Database, scope: Scope) {
       .run();
     workflow = (await readWorkflow(db, scope))!;
   }
+  // The looks proposal the owner is choosing from: during the look step only,
+  // and only one written AFTER the plan was approved (its revision number is
+  // above the baseline stamped at approval). A proposal left over from an
+  // earlier plan version never reaches the owner as if it were current.
+  const looksLatest = (await listPlanDocRevisions(db, scope, "looks"))[0] ?? null;
+  const inLookStep = workflow?.phase === "looks" || workflow?.phase === "looks-review";
+  const looks =
+    inLookStep && looksLatest && looksLatest.revision > (workflow?.looksBaseline ?? 0) ? looksLatest : null;
+  // Auto-advance looks -> looks-review once a NOT-YET-ANSWERED proposal is
+  // saved, mirroring design -> design-review below. A proposal the owner asked
+  // to replace already has a decision, so it waits for the new one.
+  if (workflow && workflow.phase === "looks" && looks) {
+    const answered = await rows(
+      db,
+      "select 1 from plan_decisions where projectId = ? and planRevisionId = ? limit 1",
+      scope.projectId,
+      looks.id,
+    );
+    if (!answered.length) {
+      await db
+        .prepare(
+          "update build_workflows set phase = ?, updatedAt = ? where projectId = ? and phase = 'looks'",
+        )
+        .bind("looks-review", now(), scope.projectId)
+        .run();
+      workflow = (await readWorkflow(db, scope))!;
+    }
+  }
   // The latest design brief (if any) and its approval — surfaced so the card
   // can render the design-review state and the coordinator can read it.
   const design = (await listPlanDocRevisions(db, scope, "design"))[0] ?? null;
@@ -349,8 +403,10 @@ export async function workflowSnapshot(db: D1Database, scope: Scope) {
   // while the phase is still 'design' means the brief is ready for review.
   // (Mirrors the planning -> review advance a new PRD triggers above.) A
   // rejected brief stays in 'design' — it already has a decision — until the
-  // re-authored NEW revision (no decision yet) supersedes it and advances.
-  if (workflow && workflow.phase === "design" && design) {
+  // re-authored NEW revision (no decision yet) supersedes it and advances. A
+  // brief written before the look was chosen (at or below the baseline stamped
+  // then) never advances: the owner's look comes first.
+  if (workflow && workflow.phase === "design" && design && design.revision > (workflow.designBaseline ?? 0)) {
     const decided = await rows(
       db,
       "select 1 from plan_decisions where projectId = ? and planRevisionId = ? limit 1",
@@ -390,7 +446,7 @@ export async function workflowSnapshot(db: D1Database, scope: Scope) {
   // it. The /experience poll keeps re-sending with the same idempotency key, so
   // a transient wedge clears itself and this stays false.
   const dispatchStalled = await planningDispatchStalled(db, workflow);
-  return { workflow, plan, approval, design, designApproval, dispatchStalled };
+  return { workflow, plan, approval, looks, design, designApproval, dispatchStalled };
 }
 
 /**
@@ -460,7 +516,7 @@ export async function decideWorkflow(
       "feedback_required",
       "Describe the change in 2000 characters or fewer.",
     );
-  // S07 judge limits. Approving the plan only starts the DESIGN step (one
+  // S07 judge limits. Approving the plan only starts the LOOKS step (one
   // model turn, no sandbox), so it is not a build start: the build starts when
   // the design is approved (decideDesign). A change request makes Caddie
   // rewrite the plan, so it counts as one Caddie message (review F02: these
@@ -499,19 +555,23 @@ export async function decideWorkflow(
       input.decision === "rejected" &&
       !decisions.length)
   ) {
-    const phase = input.decision === "approved" ? "design" : "planning";
+    const phase = input.decision === "approved" ? "looks" : "planning";
     const message =
       input.decision === "approved"
-        ? `The authenticated review controls approved plan ${plan.id}. Now DESIGN before building: delegate the designer to author ONE design brief (screen inventory; each key screen's layout; the token/component choices; the empty, loading and error state for anything that loads or saves), save it with write_plan_note kind:'design' and the same planRevision, then STOP for the authenticated design review. Do NOT build or scaffold yet — building is gated until the design brief is approved.`
+        ? looksMessage(plan.id, null, "")
         : `Revise plan ${plan.id} using the user's feedback below. Write a NEW prd revision, then wait for review; no building.\n\n${note}`;
+    // The look step offers only a proposal written after THIS approval: stamp
+    // the highest existing looks revision as the baseline.
+    const looksBaseline = (await listPlanDocRevisions(db, scope, "looks"))[0]?.revision ?? 0;
     await db
       .prepare(
-        "update build_workflows set phase = ?, pendingKey = ?, pendingBody = ?, detail = null, updatedAt = ? where projectId = ? and planId = ?",
+        "update build_workflows set phase = ?, pendingKey = ?, pendingBody = ?, detail = null, looksBaseline = ?, updatedAt = ? where projectId = ? and planId = ?",
       )
       .bind(
         phase,
         `decision:${approval.id}`,
         message,
+        looksBaseline,
         now(),
         scope.projectId,
         plan.id,
@@ -520,6 +580,105 @@ export async function decideWorkflow(
   }
   return workflowSnapshot(db, scope);
 }
+/**
+ * The coordinator message that starts (or restarts) the LOOKS step. `shown` is
+ * the proposal the owner asked to replace, so the new looks avoid repeating it.
+ */
+export function looksMessage(planId: string, shown: LooksSet | null, note: string): string {
+  const again = shown
+    ? `The owner asked for other looks for plan ${planId}. Propose 2 or 3 NEW looks, clearly different from the ones already shown (${shown.looks.map((look) => `"${look.name}"`).join(", ")}).`
+    : `The authenticated review controls approved plan ${planId}. Next, CHOOSE A LOOK before designing: propose 2 or 3 clearly different looks for this app, fitted to who uses it and where.`;
+  return (
+    `${again} Delegate the designer (or write it yourself) and save the proposal with write_plan_note kind:'looks' and the same planRevision, then STOP: the owner picks a look in the review controls. Do NOT write the design brief, scaffold or build yet.` +
+    (note ? `\n\nThe owner's words: ${note}` : "") +
+    `\n\n${LOOKS_BLOCK_GUIDE}`
+  );
+}
+
+/** The coordinator message that starts the DESIGN step in the chosen look. */
+export function designInLookMessage(planId: string, set: LooksSet, chosen: Look, note: string): string {
+  return (
+    `The owner chose the look "${chosen.name}" for plan ${planId}. Now DESIGN in that look: delegate the designer to author ONE design brief (screen inventory; each key screen's layout; the token/component choices; the empty, loading and error state for anything that loads or saves; one titled \`\`\`html-mock block per key screen and state, styled only with the theme variables), save it with write_plan_note kind:'design' and the same planRevision, then STOP for the authenticated design review. Do NOT build or scaffold yet — building is gated until the design brief is approved.` +
+    `\n\nThe brief MUST carry this look as its caddie-theme block, ${note ? "changed only where the owner's words below ask" : "exactly as written"}:\n\n${lookThemeBlock(chosen)}` +
+    `\n\nWho the app is for: ${set.audience}.` +
+    (note ? `\n\nThe owner's words about the look: ${note}` : "")
+  );
+}
+
+/**
+ * The owner's answer to the looks proposal — the gate between looks-review and
+ * design (owner-approved picker, 2026-10-23). Choosing a look sends the designer
+ * to write the brief in it; asking for other looks sends Caddie back to propose
+ * new ones. Neither builds anything or opens spending: the build still starts
+ * only when the design brief is approved (decideDesign).
+ *   choice -> design (brief in that look)
+ *   more   -> looks  (a new proposal; counts as one Caddie message for judges)
+ * A retried click, or an answer after the proposal was already answered,
+ * records and dispatches nothing.
+ */
+export async function decideLooks(
+  db: D1Database,
+  scope: Scope,
+  input: { looksId: string; choice?: string; more?: boolean; note?: string },
+  limits?: unknown,
+) {
+  await ensureWorkflow(db, scope);
+  const { workflow, plan, looks } = await workflowSnapshot(db, scope);
+  if (!plan) throw new ScopeError(409, "STALE_LOOKS", "These looks changed. Look at the latest ones.");
+  if (!looks) {
+    // The step already moved on (a retried click after the owner chose): the
+    // answered proposal is no longer offered, so nothing is recorded or sent.
+    const latest = (await listPlanDocRevisions(db, scope, "looks"))[0] ?? null;
+    if (latest && latest.id === input.looksId) return workflowSnapshot(db, scope);
+    throw new ScopeError(409, "STALE_LOOKS", "These looks changed. Look at the latest ones.");
+  }
+  if (looks.id !== input.looksId)
+    throw new ScopeError(409, "STALE_LOOKS", "These looks changed. Look at the latest ones.");
+  const wantsMore = input.more === true;
+  const choice = typeof input.choice === "string" ? input.choice.trim() : "";
+  if (wantsMore === Boolean(choice))
+    throw new ScopeError(400, "invalid_decision", "Choose one look, or ask for other looks.");
+  const note = input.note?.trim() ?? "";
+  if (note.length > 2000)
+    throw new ScopeError(400, "note_too_long", "Keep the note to 2000 characters or fewer.");
+  const parsed = parseLooks(looks.body);
+  if (!parsed.ok)
+    throw new ScopeError(409, "LOOKS_INVALID", "These looks can't be used. Ask Caddie for other looks.");
+  const chosen = choice ? parsed.set.looks.find((look) => look.id === choice) ?? null : null;
+  if (choice && !chosen)
+    throw new ScopeError(400, "invalid_look", "That look isn't one of these. Pick one of the looks shown.");
+  const answered = await rows(
+    db,
+    "select 1 from plan_decisions where projectId = ? and planRevisionId = ? limit 1",
+    scope.projectId,
+    looks.id,
+  );
+  if (workflow!.phase !== "looks-review" || answered.length) return workflowSnapshot(db, scope);
+  // Other looks means Caddie writes a new proposal: one Caddie message,
+  // refused before anything is written.
+  if (wantsMore) await admitJudgeMessage(db, scope.actorId, limits);
+  const decision = await recordPlanDecision(db, scope, {
+    planRevisionId: looks.id,
+    decision: chosen ? "approved" : "changes",
+    note: chosen ? encodeLookChoice(chosen.id, note) : note,
+  });
+  const phase = chosen ? "design" : "looks";
+  const message = chosen
+    ? designInLookMessage(plan.id, parsed.set, chosen, note)
+    : looksMessage(plan.id, parsed.set, note);
+  // The design step reviews only a brief written after the look was chosen.
+  const designBaseline = chosen
+    ? (await listPlanDocRevisions(db, scope, "design"))[0]?.revision ?? 0
+    : workflow!.designBaseline ?? null;
+  await db
+    .prepare(
+      "update build_workflows set phase = ?, pendingKey = ?, pendingBody = ?, detail = null, designBaseline = ?, updatedAt = ? where projectId = ? and phase = 'looks-review'",
+    )
+    .bind(phase, `looks:${decision.id}`, message, designBaseline, now(), scope.projectId)
+    .run();
+  return workflowSnapshot(db, scope);
+}
+
 /**
  * Approve or revise the DESIGN BRIEF — the gate between design-review and
  * building. Mirrors decideWorkflow but binds to the design revision's own

@@ -34,6 +34,8 @@ import * as v from 'valibot';
 export const ExperienceStage = v.union([
 	v.literal('planning'),
 	v.literal('review'),
+	v.literal('looks'),
+	v.literal('looks_review'),
 	v.literal('design'),
 	v.literal('design_review'),
 	v.literal('building'),
@@ -52,6 +54,7 @@ export type ExperienceStage = v.InferOutput<typeof ExperienceStage>;
 export const ExperienceActionKind = v.union([
 	v.literal('review_plan'),
 	v.literal('approve_plan'),
+	v.literal('choose_look'),
 	v.literal('review_design'),
 	v.literal('suggest_change'),
 	v.literal('stop'),

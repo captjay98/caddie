@@ -13,6 +13,7 @@ import {
   reconcileStalledBuild,
   decideWorkflow,
   decideDesign,
+  decideLooks,
   acknowledgeDispatch,
   readBuildOutput,
   readBuildBundle,
@@ -259,6 +260,27 @@ export function createBuildWorkflowRouter(
     // Server-owned dispatch (R02): deliver the pending coordinator message now,
     // from the server, so an approved build starts even if the browser closes.
     // The DO's own onStart drain owns re-delivery after a crash.
+    const deliver = deliverFor(c);
+    if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
+    return c.json(snapshot);
+  });
+  router.post("/projects/:projectId/workflow/looks-decision", async (c) => {
+    const scope = await requireProjectScope(
+      c.env.DB,
+      c.env,
+      c.req.raw.headers,
+      c.req.param("projectId"),
+    );
+    let input;
+    try {
+      input = await c.req.json();
+    } catch {
+      throw new ScopeError(400, "invalid_input", "Expected JSON.");
+    }
+    // The LOOKS gate: choose -> design (the brief is written in that look),
+    // more -> looks (new looks). Same server-owned dispatch as the other
+    // decisions, so the next step runs even if the browser closes.
+    const snapshot = await decideLooks(c.env.DB, scope, input, c.env);
     const deliver = deliverFor(c);
     if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
     return c.json(snapshot);

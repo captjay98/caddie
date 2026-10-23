@@ -35,7 +35,7 @@ const NOT_CADDIE_APP =
 /** Caddie-owned files every app carries (the protected ones), refreshed on import. */
 const RUNTIME_FILES: ReadonlyArray<[string, string]> = Object.entries(SCAFFOLD_FILES).filter(([path]) => isProtectedPath(path));
 
-const PLANNING_PHASES = new Set(['planning', 'review', 'design', 'design-review']);
+const PLANNING_PHASES = new Set(['planning', 'review', 'looks', 'looks-review', 'design', 'design-review']);
 
 function asBytes(value: unknown): Uint8Array | null {
 	if (value instanceof Uint8Array) return value;

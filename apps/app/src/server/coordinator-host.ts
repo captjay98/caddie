@@ -88,7 +88,7 @@ import { runVerifiedInstall } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { checkSentence, newTestsSentence } from "./round-detail.ts";
 import { projectStatusForActor } from "./project-experience.ts";
-import { FEATURE_BLOCK_GUIDE, parseDemoContract, parsePlanFeatures, themeSaveError, THEME_BLOCK_GUIDE } from "@caddie/contracts";
+import { FEATURE_BLOCK_GUIDE, LOOKS_BLOCK_GUIDE, looksSaveError, parseDemoContract, parsePlanFeatures, themeSaveError, THEME_BLOCK_GUIDE } from "@caddie/contracts";
 import { collectSourceSnapshot } from "./source-export.ts";
 import { recordCodeVersion } from "./code-versions.ts";
 import { codeStoreFor } from "./code-store-env.ts";
@@ -1704,6 +1704,14 @@ export async function createCoordinatorContext(
         if (themeError)
           throw new Error(`THEME_INVALID: not saved — ${themeError}. ${THEME_BLOCK_GUIDE}`);
       }
+      // A looks proposal must carry 2-3 valid, clearly different looks and the
+      // key screen to preview them on, or the owner's picker has nothing real
+      // to show. Same refusal shape as the theme and PRD checks.
+      if (input.kind === "looks") {
+        const looksError = looksSaveError(input.body);
+        if (looksError)
+          throw new Error(`LOOKS_INVALID: not saved — ${looksError}. ${LOOKS_BLOCK_GUIDE}`);
+      }
       const revision = await createPlanDocRevision(env.DB, scope, {
         kind: input.kind as "prd",
         body: input.body,
@@ -1717,9 +1725,10 @@ export async function createCoordinatorContext(
         planRevision = revision.id;
         await workflowSnapshot(env.DB, scope);
       }
-      // A saved design brief advances design -> design-review (the snapshot
-      // auto-advance picks up the new, not-yet-decided revision).
-      if (input.kind === "design") {
+      // A saved design brief advances design -> design-review, and a saved looks
+      // proposal advances looks -> looks-review (the snapshot auto-advance picks
+      // up the new, not-yet-answered revision).
+      if (input.kind === "design" || input.kind === "looks") {
         await workflowSnapshot(env.DB, scope);
       }
     },
