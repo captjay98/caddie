@@ -215,6 +215,75 @@ export function useOptionalWorkspaceChrome(): WorkspaceChromeContextValue | null
 	return useContext(WorkspaceChromeContext);
 }
 
+/** Exported ONLY for the public value type below; the context stays private. */
+export type { WorkspaceChromeContextValue };
+
+/**
+ * Test-only provider (tests/fixtures/*): mounts chrome-dependent components
+ * (Settings appearance, UsageBody, AutomationsBody) outside the real shell.
+ * It supplies inert, correctly-typed defaults for every field so a harness
+ * only overrides the few it exercises. NOT used by the app — the real
+ * WorkspaceChrome provider below owns production. Keeping it here means it
+ * cannot drift from WorkspaceChromeContextValue without a type error.
+ */
+export function TestWorkspaceChromeProvider(props: {
+	value?: Partial<WorkspaceChromeContextValue>;
+	children: ReactNode;
+}): ReactElement {
+	const base: WorkspaceChromeContextValue = {
+		actorId: 'actor-test',
+		authenticated: true,
+		projectList: [],
+		buildProjects: [],
+		selectedProject: null,
+		homeProject: null,
+		effectiveProjectId: null,
+		projectMissing: false,
+		projectsPending: false,
+		projectsPaused: false,
+		projectsError: null,
+		projectsFetching: false,
+		selectProject: () => {},
+		clearProjectParam: () => {},
+		refreshAll: () => {},
+		toggleTheme: () => {},
+		theme: 'dark',
+		palette: 'caddie',
+		setThemeChoice: () => {},
+		signOut: async () => {},
+		conversation: { kind: 'general', projectId: null, label: 'Caddie', resolving: false },
+		mobileConversation: false,
+		setMobileConversation: () => {},
+		isDesktop: true,
+		viewportMode: 'desktop',
+		convVisible: true,
+		toggleConvOverlay: () => {},
+		setConvOpen: () => {},
+		convWidth: { reset: () => {}, frac: 0.5 },
+		caddieMood: 'ready',
+		channel: {
+			drafts: [],
+			addDraft: () => null,
+			failDraft: () => {},
+			resendDraft: () => {},
+			discardDraft: () => {},
+			resolveDraft: () => {},
+			composerText: '',
+			setComposerText: () => {},
+		},
+		transport: null,
+		sendText: () => {},
+		openProject: () => {},
+		newProject: () => {},
+		goProjectTab: () => {},
+	};
+	return (
+		<WorkspaceChromeContext.Provider value={{ ...base, ...props.value }}>
+			{props.children}
+		</WorkspaceChromeContext.Provider>
+	);
+}
+
 interface WorkspaceChromeProps {
 	/** Which global destination this route is — controls aria-current + scope. */
 	nav: WorkspaceNavId;

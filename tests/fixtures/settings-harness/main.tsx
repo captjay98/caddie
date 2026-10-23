@@ -1,9 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '../../../apps/app/src/client/react-query.ts';
 import { RouterProvider, createRootRoute, createRoute, createRouter, Outlet } from '@tanstack/react-router';
 import { Settings } from '../../../apps/app/src/client/settings/Settings.tsx';
 import { Search } from '../../../apps/app/src/client/search/Search.tsx';
+import { TestWorkspaceChromeProvider } from '../../../apps/app/src/client/workspace/Chrome.tsx';
 
 // Settings now legitimately uses router context (useSearch for ?section=,
 // Link in search results — audit F11), so the harness mounts it under a
@@ -51,7 +52,9 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
 	<StrictMode>
 		<QueryClientProvider client={queryClient}>
-			<RouterProvider router={router} />
+			<TestWorkspaceChromeProvider>
+				<RouterProvider router={router} />
+			</TestWorkspaceChromeProvider>
 		</QueryClientProvider>
 	</StrictMode>,
 );

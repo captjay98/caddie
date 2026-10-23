@@ -246,7 +246,7 @@ async function startHarness(): Promise<void> {
 		'esm',
 		'--define',
 		'process.env.NODE_ENV="development"',
-	], { cwd: REPO_ROOT, stdio: 'pipe' });
+	], { cwd: HARNESS_DIR, stdio: 'pipe' });
 	if (!existsSync(join(buildDir, 'main.js'))) {
 		throw new Error('harness bundle did not produce main.js');
 	}
