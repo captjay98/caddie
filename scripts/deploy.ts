@@ -35,7 +35,7 @@
  * and no test ever touches the network.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -66,6 +66,8 @@ export interface DeployDeps {
 	readonly readFile?: (path: string) => string;
 	/** Whether a path exists; defaults to node:fs. */
 	readonly fileExists?: (path: string) => boolean;
+	/** Lists a directory's entries; defaults to node:fs readdirSync. */
+	readonly listDir?: (path: string) => string[];
 	/** The wall clock, so the evidence row is deterministic in tests. */
 	readonly now?: () => Date;
 	/** Sink for progress lines (default: console.log). */
@@ -216,6 +218,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResult {
 	const readFile = deps.readFile ?? ((path: string) => readFileSync(path, 'utf8'));
 	const fileExists = deps.fileExists ?? ((path: string) => existsSync(path));
+	const listDir = deps.listDir ?? ((path: string) => readdirSync(path));
 	const log = deps.log ?? ((line: string) => console.log(line));
 	const now = deps.now ?? (() => new Date());
 	const appDir = join(deps.repoRoot, 'apps', 'app');
@@ -345,8 +348,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	const migrationsDir = join(appDir, 'migrations');
 	if (fileExists(migrationsDir)) {
 		try {
-			const { readdirSync } = require('node:fs') as typeof import('node:fs');
-			for (const name of readdirSync(migrationsDir)) if (name.endsWith('.sql')) localMigrations.add(name);
+			for (const name of listDir(migrationsDir)) if (name.endsWith('.sql')) localMigrations.add(name);
 		} catch {
 			/* ignore */
 		}

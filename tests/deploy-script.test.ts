@@ -172,6 +172,7 @@ function makeHarness(over: HarnessOverrides = {}): Harness {
 			throw new Error(`fake readFile: no such file ${path}`);
 		},
 		fileExists: (path: string) => files[path] !== undefined || path === `${APP}/migrations`,
+		listDir: (path: string) => (path === `${APP}/migrations` ? localMigrations : []),
 		now: () => new Date('2026-10-23T00:00:00Z'),
 		log: (line: string) => logs.push(line),
 	};
@@ -391,5 +392,23 @@ describe('deploy.ts — evidence', () => {
 			expect(c.includes('live-receipts.json')).toBe(false);
 			expect(c.includes('release-evidence.md')).toBe(false);
 		}
+	});
+});
+
+describe('deploy.ts — item A: listDir dep (no real filesystem read)', () => {
+	test('the drift check reads apps/app/migrations through the injected listDir, never node:fs', () => {
+		const seen: string[] = [];
+		const h = makeHarness();
+		const base = h.deps.listDir!;
+		const deps: DeployDeps = {
+			...h.deps,
+			listDir: (path: string) => {
+				seen.push(path);
+				return base(path);
+			},
+		};
+		const result = runDeploy(DEPLOY, deps);
+		expect(result.ok).toBe(true);
+		expect(seen.some((p) => p.endsWith('apps/app/migrations'))).toBe(true);
 	});
 });
