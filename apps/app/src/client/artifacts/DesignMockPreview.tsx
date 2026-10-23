@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
-import type { DesignMock } from "@caddie/contracts";
+import type { AppTheme, DesignMock } from "@caddie/contracts";
+import { themeToCssVars } from "@caddie/contracts";
 import { Icon } from "../icons.tsx";
 
 /**
@@ -72,7 +73,7 @@ function readThemeTokens(): string {
  * BACKGROUND and --color-bright the text on it (the literal fallbacks only
  * apply if a token is missing).
  */
-function mockDocument(html: string, tokens: string): string {
+export function mockDocument(html: string, tokens: string): string {
   return (
     `<!doctype html><html><head><meta charset="utf-8">` +
     `<meta http-equiv="Content-Security-Policy" content="${CSP}"><meta name="referrer" content="no-referrer">` +
@@ -123,7 +124,7 @@ function MockStage(props: { doc: string; viewport: number; title: string; frameC
   );
 }
 
-export function DesignMockPreview(props: { mocks: DesignMock[] }): ReactElement | null {
+export function DesignMockPreview(props: { mocks: DesignMock[]; theme?: AppTheme | null }): ReactElement | null {
   const screens = props.mocks.slice(0, MAX_SCREENS);
   const [active, setActive] = useState(0);
   const [device, setDevice] = useState<Device>("phone");
@@ -133,10 +134,16 @@ export function DesignMockPreview(props: { mocks: DesignMock[] }): ReactElement 
   const current = screens[index] ?? null;
 
   const html = current?.html ?? "";
+  const theme = props.theme ?? null;
   const { doc, tooLarge } = useMemo(() => {
     if (new TextEncoder().encode(html).byteLength > MOCK_LIMIT) return { doc: "", tooLarge: true };
-    return { doc: mockDocument(html, readThemeTokens()), tooLarge: false };
-  }, [html]);
+    // When the brief carries a validated app theme, paint the mock in the
+    // APP's own theme (plain names + the --color-* aliases) instead of copying
+    // Caddie's live dashboard tokens, so every app's design looks like itself.
+    // A brief with no theme keeps today's behaviour.
+    const tokens = theme ? themeToCssVars(theme) : readThemeTokens();
+    return { doc: mockDocument(html, tokens), tooLarge: false };
+  }, [html, theme]);
 
   // The native dialog gives focus trapping, Esc-to-close and a backdrop for free.
   useEffect(() => {

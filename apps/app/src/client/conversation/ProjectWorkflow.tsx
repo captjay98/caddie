@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useFlueAgent } from "@flue/react";
 import { Markdown } from "@caddie/ui/Markdown";
 import type { PlanDocRevision, ApprovalRecord } from "@caddie/contracts";
-import { splitDesignMocks, splitArchitectureBlock } from "@caddie/contracts";
+import { splitDesignMocks, splitArchitectureBlock, parseAppTheme } from "@caddie/contracts";
 import type { BuildWorkflow, WorkflowPhase } from "../../server/build-workflow.ts";
 import { fetchJson, postJson } from "../api.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
@@ -403,9 +403,14 @@ function ProjectWorkspace({
             // The caddie-architecture block is machine-readable JSON for
             // Caddie's checks; the person reads the summary above instead.
             const { display, mocks } = splitDesignMocks(splitArchitectureBlock(state.data.design.body).display);
+            // Paint the mockups in the app's OWN approved theme when the brief
+            // carries a valid one; a themeless (older) brief falls back to the
+            // dashboard tokens inside DesignMockPreview.
+            const parsedTheme = parseAppTheme(state.data.design.body);
+            const appTheme = parsedTheme.ok ? parsedTheme.theme : null;
             return (
               <>
-                {mocks.length > 0 ? <DesignMockPreview mocks={mocks} /> : null}
+                {mocks.length > 0 ? <DesignMockPreview mocks={mocks} theme={appTheme} /> : null}
                 <div className="workflow-plan" data-testid="workflow-design-brief">
                   <Markdown text={display} />
                 </div>
