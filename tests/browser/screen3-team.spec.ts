@@ -152,6 +152,9 @@ test.describe('Screen 3 — the test inbox and the jobs list (plan section 7)', 
 		await expect(email).toContainText('Your receipt');
 		await expect(email).toContainText('bo@example.com');
 		await expect(page.getByTestId('test-inbox-email-tag')).toHaveText('Not sent — test mode');
+		// Emails read as rows, like the code rows above them: no box of their own.
+		await expect(email).toHaveCSS('border-top-left-radius', '0px');
+		await expect(email).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
 		await context.close();
 	});
 
@@ -166,6 +169,9 @@ test.describe('Screen 3 — the test inbox and the jobs list (plan section 7)', 
 		await expect(page.getByTestId('app-job').first()).toContainText('Sends everyone yesterday’s summary');
 		await expect(page.getByTestId('app-job-run').first()).toContainText('Run now');
 		await expect(page.getByTestId('app-job-run-row').first()).toContainText('Sent 4 digests.');
+		// A run names its job in plain words, never by its internal id.
+		await expect(page.getByTestId('app-job-run-row').first()).toContainText('Sends everyone yesterday’s summary');
+		await expect(jobs).not.toContainText('daily-digest');
 		await context.close();
 	});
 

@@ -90,7 +90,10 @@ export function AppJobs(props: { actorId: string; projectId: string; outputId: s
           {runs.map((r) => (
             <li key={r.id} className="app-jobs-run-row" data-testid="app-job-run-row" data-status={r.status}>
               <span className={`app-jobs-dot app-jobs-dot-${r.status}`} aria-hidden="true" />
-              <span className="app-jobs-run-job">{r.jobId}</span>
+              <span className="app-jobs-run-job">
+                {jobs.find((job) => job.id === r.jobId)?.plain ?? "A job no longer in the design"}
+                <span className="sr-only">{r.status === "done" ? " — done" : r.status === "failed" ? " — failed" : " — running"}</span>
+              </span>
               <span className="app-jobs-run-summary">{r.summary ?? (r.status === "running" ? "Running…" : "No summary.")}</span>
               <span className="app-jobs-when">{ago(r.startedAt, now)}</span>
             </li>

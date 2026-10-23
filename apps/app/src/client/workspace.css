@@ -9666,8 +9666,9 @@ mark {
 }
 
 /* Test inbox: emails (lane 10, part K). Matches the codes list above. */
-.test-inbox-emails { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
-.test-inbox-email { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--color-line-soft); border-radius: 13px; background: var(--color-raised); }
+.test-inbox-emails { list-style: none; margin: 4px 0 0; padding: 0; display: grid; }
+/* A row like the code rows above it, not a box inside the card. */
+.test-inbox-email { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--color-line-soft); }
 .test-inbox-email-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .test-inbox-email-subject { font-size: 13px; font-weight: 600; color: var(--color-bright); overflow-wrap: anywhere; }
 .test-inbox-email-to { font-size: var(--r-meta); color: var(--color-muted); overflow-wrap: anywhere; }
@@ -9694,7 +9695,7 @@ mark {
 .app-jobs-dot-done { background: var(--color-ok); }
 .app-jobs-dot-failed { background: var(--color-danger); }
 .app-jobs-dot-running { background: var(--color-warn); }
-.app-jobs-run-job { font-size: var(--r-meta); color: var(--color-muted); white-space: nowrap; }
+.app-jobs-run-job { font-size: var(--r-meta); color: var(--color-muted); overflow-wrap: anywhere; }
 .app-jobs-run-summary { font-size: 13px; color: var(--color-text); overflow-wrap: anywhere; }
 .app-jobs-when { font-size: var(--r-meta); color: var(--color-muted); white-space: nowrap; }
 @media (max-width: 480px) {
