@@ -503,3 +503,17 @@ Live for every account now: the spending limit on every build (standard $5,
 judges $2), publish safety, the Brief cards with the ready card's live view,
 the plan-approval wording, and AI on photos only where app features are on
 (nowhere yet). Everything else ships dark behind the off switches.
+
+## Production deploy (2026-10-23, bun run deploy)
+
+| Field | Value |
+| :--- | :--- |
+| URL | https://caddie.jamalibrahim.dev |
+| Version ID | `f37c2fb0-09b3-4785-9729-f18bf69287e8` |
+| Commit | `0b12a0d` |
+| Rollback ID | `e6531a20-21ee-4138-a86e-5ca6ff14469a` |
+| Gate | release-check + preflight, 13 steps OK |
+| Migrations applied | none |
+| DO tags | v1, v2, v3, v4 |
+| Smoke receipt | `lr_736a1e50b2a3bd7b` |
+| Hash match | index-DmvsmXCp.js == dist |
