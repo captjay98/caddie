@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Brief cards — old-Caddie style mock</title>
+<style>
+  /* Ported verbatim from the card grammar in the old Caddie's halo.css /
+     TheCard.tsx and the Oct-20 accepted mockups (caddie-card-review.html).
+     This is a STATIC MOCK: no app, no data — every card here is hand-written
+     from the words apps/app/src/server/brief.ts actually produces today,
+     redrawn in the old shell. Tokens match the new app's own token set
+     (packages/ui/src/tokens.css), so a real port needs no new colours. */
+  :root {
+    --bg:#090b10; --panel:#101319; --raised:#151922; --line:#242a35;
+    --text:#e6e9ef; --muted:#9ba5b6;
+    --blue:#68adff; --green:#53d69b; --amber:#f0b653; --red:#ff8c99;
+    --font:Inter,ui-sans-serif,system-ui,sans-serif;
+    --radius:13px; /* owner's Oct-20 pick; old app uses 10px — see note */
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:var(--font);
+         font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1180px; margin:0 auto; padding:40px 24px 80px; }
+  .page-head { display:flex; justify-content:space-between; align-items:baseline; gap:16px;
+               margin-bottom:6px; flex-wrap:wrap; }
+  .wordmark { font-weight:650; letter-spacing:.16em; font-size:13px; }
+  .page-head .sub { color:var(--muted); font-size:13px; }
+  .legend { color:var(--muted); font-size:12.5px; margin:0 0 26px; max-width:70ch; }
+  .legend b { color:var(--text); font-weight:600; }
+  .brief-count { color:var(--muted); font-size:12.5px; display:flex; gap:8px; align-items:center;
+                 border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:18px; }
+  .brief-count .mark { margin-left:auto; color:var(--blue); }
+  /* auto-fit two-up: a card is ~360px; two show when the pane is >=~740px,
+     one when it is narrower. No fixed percentage — the cards decide. */
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:16px; align-items:start; }
+
+  /* ── card shell ───────────────────────────────────────────── */
+  .cc { background:linear-gradient(155deg,var(--panel),color-mix(in srgb,var(--raised) 65%,var(--panel)));
+        border:1px solid var(--line); border-radius:var(--radius); padding:20px 18px;
+        box-shadow:0 3px 14px #00000022; --tone:var(--blue); }
+  .cc[data-tone="green"]{ --tone:var(--green); }
+  .cc[data-tone="amber"]{ --tone:var(--amber); }
+  .cc[data-tone="red"]  { --tone:var(--red); }
+  .cc[data-tone="grey"] { --tone:var(--muted); }
+  .cc.span2 { grid-column:1 / -1; }
+  .cc-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+  .cc-kicker { display:flex; gap:7px; align-items:center; font-size:11.5px; font-weight:600;
+               color:var(--tone); flex-wrap:wrap; }
+  .cc-kicker .ico { width:14px; height:14px; display:inline-flex; }
+  .cc-kicker .ico svg { width:14px; height:14px; stroke-width:1.9; }
+  .cc-fresh { font-weight:400; color:var(--muted); white-space:nowrap; }
+  .cc-pill { font-size:11px; font-weight:600; padding:3px 9px; border-radius:20px;
+             background:color-mix(in srgb,var(--tone) 12%,transparent); color:var(--tone); white-space:nowrap; }
+  .cc h2 { margin:13px 0 6px; font-size:21px; line-height:1.25; font-weight:650; letter-spacing:-.03em; }
+  .cc-copy { color:var(--muted); font-size:13px; line-height:1.62; margin:0; }
+
+  /* panel + icon rows (approval, fit) */
+  .cc-panel { padding:15px; margin-top:16px; border-radius:10px;
+              background:color-mix(in srgb,var(--tone) 7%,var(--panel)); }
+  .cc-panel > h3 { margin:0; font-size:13px; font-weight:600; }
+  .cc-rows { display:grid; gap:10px; margin-top:11px; }
+  .cc-row { display:flex; align-items:flex-start; gap:10px; min-width:0; }
+  .cc-row .ico { color:var(--tone); margin-top:2px; flex:none; width:15px; height:15px; display:inline-flex; }
+  .cc-row .ico svg { width:15px; height:15px; stroke-width:1.8; }
+  .cc-row strong { font-size:13px; font-weight:550; }
+  .cc-row small { display:block; font-size:12px; color:var(--muted); }
+  .cc-split { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+  .cc-split .cc-panel { margin:0; }
+  .cc-split[data-a="green"] .cc-panel:first-child { background:color-mix(in srgb,var(--green) 8%,var(--panel)); }
+  .cc-split[data-a="green"] .cc-panel:first-child h3 { color:var(--green); }
+  .cc-split[data-a="green"] .cc-panel:first-child .ico { color:var(--green); }
+  .cc-split .cc-panel:last-child { background:color-mix(in srgb,var(--amber) 8%,var(--panel)); }
+  .cc-split .cc-panel:last-child h3 { color:var(--amber); }
+  .cc-split .cc-panel:last-child .ico { color:var(--amber); }
+  @media(max-width:480px){ .cc-split { grid-template-columns:1fr; } }
+
+  .cc-note { display:flex; gap:8px; margin-top:15px; font-size:13px; line-height:1.6; }
+  .cc-note .ico { color:var(--tone); margin-top:3px; flex:none; width:15px; height:15px; }
+  .cc-note .ico svg { width:15px; height:15px; stroke-width:1.8; }
+
+  /* actions — ONE filled primary + one quiet secondary */
+  .cc-actions { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-top:18px; }
+  .cc-action { border:0; border-radius:9px; padding:9px 14px; background:var(--tone); color:#09121c;
+               font-weight:600; font-size:13px; display:inline-flex; align-items:center; gap:7px;
+               min-height:38px; cursor:pointer; font-family:inherit; }
+  .cc-action.quiet { color:var(--muted); background:transparent; font-weight:500; }
+
+  /* hairline footer */
+  .cc-bottom { display:flex; align-items:center; justify-content:space-between; gap:10px;
+               border-top:1px solid var(--line); margin-top:18px; padding-top:12px;
+               font-size:11px; color:var(--muted); flex-wrap:wrap; }
+
+  /* build rail + feed */
+  .cc-rail { display:grid; grid-template-columns:repeat(4,1fr); margin-top:17px; gap:6px; }
+  .cc-step { display:flex; flex-direction:column; gap:6px; color:var(--muted); font-size:11px; }
+  .cc-step::before { content:""; height:3px; border-radius:3px; background:var(--line); }
+  .cc-step.done::before { background:var(--green); }
+  .cc-step.active::before { background:var(--tone); }
+  .cc-step.active { color:var(--tone); font-weight:600; }
+  .cc-feed { display:grid; margin-top:10px; }
+  .cc-feed-row { display:flex; align-items:center; gap:10px; padding:9px 0;
+                 border-bottom:1px solid var(--line); font-size:13px; }
+  .cc-feed-row:last-child { border:0; padding-bottom:0; }
+  .cc-feed-row .ico { color:var(--green); flex:none; width:15px; height:15px; }
+  .cc-feed-row .ico svg { width:15px; height:15px; stroke-width:1.9; }
+  .cc-feed-row[data-active] .ico { color:var(--tone); }
+  .cc-feed-row[data-active] { font-weight:500; }
+  .cc-feed-row span:last-child { margin-left:auto; color:var(--muted); font-size:11px; }
+  .cc-pulse { width:7px; height:7px; border-radius:50%; flex:none; background:var(--tone);
+              box-shadow:0 0 0 4px color-mix(in srgb,var(--tone) 12%,transparent); }
+
+  /* repair box */
+  .cc-repair { padding:14px 15px; margin-top:16px; border-radius:9px;
+               background:color-mix(in srgb,var(--amber) 8%,var(--panel)); }
+  .cc-repair h3 { color:var(--amber); margin:0; font-size:13px; }
+  .cc-repair p { margin:9px 0 0; font-size:12.5px; color:var(--muted); }
+
+  /* preview mini-app + check chips */
+  .cc-miniapp { margin-top:16px; border:1px solid var(--line); border-radius:10px; overflow:hidden; background:var(--bg); }
+  .cc-minihead { display:flex; align-items:center; justify-content:space-between; gap:8px;
+                 padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel); font-size:11px; }
+  .cc-minihead b { font-weight:650; letter-spacing:-.02em; }
+  .cc-minibody { padding:15px; }
+  .cc-minibody h3 { font-size:15px; margin:0 0 3px; }
+  .cc-minibody .cc-copy { font-size:12.5px; }
+  .cc-minirow { padding:9px 0; display:flex; align-items:center; justify-content:space-between;
+                border-bottom:1px solid var(--line); font-size:11px; gap:10px; }
+  .cc-minirow:last-child { border:0; }
+  .cc-minichip { color:var(--green); background:color-mix(in srgb,var(--green) 9%,var(--panel));
+                 padding:2px 6px; border-radius:5px; font-size:11px; }
+  .cc-docs { display:flex; gap:6px; flex-wrap:wrap; margin-top:13px; }
+  .cc-doc { font-size:11px; border:1px solid var(--line); border-radius:6px; padding:4px 8px;
+            background:var(--panel); color:var(--muted); }
+  .cc-doc b { color:var(--tone); font-weight:500; margin-right:4px; }
+
+  /* deadline countdown */
+  .cc-countdown { display:flex; align-items:center; gap:22px; margin-top:16px; padding:17px;
+                  border-radius:10px; background:color-mix(in srgb,var(--amber) 8%,var(--panel)); }
+  .cc-days { display:flex; align-items:center; flex-direction:column; color:var(--amber);
+             min-width:58px; font-size:12px; }
+  .cc-days b { font-size:42px; font-weight:600; line-height:1.1; letter-spacing:-.06em; }
+  .cc-date { border-left:1px solid color-mix(in srgb,var(--amber) 25%,transparent);
+             padding-left:19px; min-width:0; }
+  .cc-date strong { font-size:13px; font-weight:550; }
+  .cc-date p { font-size:12px; color:var(--muted); margin:4px 0 0; }
+
+  /* Earlier records */
+  .earlier-head { grid-column:1 / -1; display:flex; align-items:center; gap:10px;
+                  margin:14px 0 2px; color:var(--muted); font-size:12.5px; }
+  .earlier-head b { color:var(--text); font-weight:600; font-size:14px; }
+  .cc-record { padding:14px 0; border-bottom:1px solid var(--line); display:flex; align-items:flex-start; gap:12px; }
+  .cc-record:last-of-type { border:0; }
+  .cc-record-mark { border-radius:50%; background:color-mix(in srgb,var(--green) 10%,var(--panel));
+                    color:var(--green); padding:7px; display:flex; flex:none; }
+  .cc-record-mark svg { width:15px; height:15px; stroke-width:1.9; }
+  .cc-record-body { flex:1; min-width:0; }
+  .cc-record h3 { font-size:14px; margin:0 0 3px; }
+  .cc-record p { font-size:12px; color:var(--muted); margin:0; }
+  .cc-record button { padding:4px 0; margin-top:5px; border:0; background:transparent;
+                      color:var(--blue); font-size:12px; font-weight:500; cursor:pointer; font-family:inherit; }
+  .cc-record time { font-size:11px; color:var(--muted); white-space:nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="page-head">
+    <span class="wordmark">CADDIE</span>
+    <span class="sub">Brief cards — redrawn in the old Caddie's style · static mock</span>
+  </div>
+  <p class="legend">
+    Every card below uses <b>today's real wording</b> from the server, redrawn in the
+    old app's card shell: a coloured kicker with freshness, a big title, a tinted inner
+    panel, a short reassurance line, <b>one</b> filled button, and a hairline footer.
+    It keeps the plain-words rules — no ids on the face, plain-English status pills,
+    one main button per card. Data the server does not send yet (the approval list,
+    the days-left number, the fit reasons, the preview checks) is shown here as the
+    mock target; the plan is to add those as typed server fields.
+  </p>
+
+  <div class="brief-count">
+    7 updates · 1 waiting on you · 6 unseen
+    <span class="mark">Mark all read</span>
+  </div>
+
+  <div class="grid">
+
+    <!-- 1. Plan approval — needs you -->
+    <article class="cc" data-tone="blue">
+      <div class="cc-head">
+        <span class="cc-kicker">
+          <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 6h16M4 12h10M4 18h7"/></svg></span>
+          Your decision <span class="cc-fresh">· 4 min ago</span>
+        </span>
+        <span class="cc-pill">Needs you</span>
+      </div>
+      <h2>Design review is waiting on you</h2>
+      <p class="cc-copy">Approving this lets the builders start on this plan. It does not deploy,
+        merge, or touch any data — those stay separate steps you approve on their own.</p>
+      <div class="cc-panel">
+        <h3>What you're approving</h3>
+        <div class="cc-rows">
+          <div class="cc-row"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg></span>
+            <div><strong>Daily records, without the paperwork</strong><small>Add feeding, treatments and observations in one place.</small></div></div>
+          <div class="cc-row"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg></span>
+            <div><strong>Keep recording when you're offline</strong><small>Your entries sync when the connection returns.</small></div></div>
+          <div class="cc-row"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg></span>
+            <div><strong>A clear weekly picture</strong><small>Turn your records into a short, useful summary.</small></div></div>
+        </div>
+      </div>
+      <div class="cc-note"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15 10 20 15 15 20M4 4v7a4 4 0 0 0 4 4h12"/></svg></span>
+        Opening this does not approve anything. Read the plan first if you want.</div>
+      <div class="cc-actions">
+        <button class="cc-action">Review the design</button>
+        <button class="cc-action quiet">Details</button>
+      </div>
+      <div class="cc-bottom"><span>FarmLog AI · Plan v2</span><span>Nothing starts until you approve.</span></div>
+    </article>
+
+    <!-- 2. Live build — in progress -->
+    <article class="cc" data-tone="blue">
+      <div class="cc-head">
+        <span class="cc-kicker">
+          <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 3l14 9-14 9z"/></svg></span>
+          Building your app <span class="cc-fresh">· 1 min ago</span>
+        </span>
+        <span class="cc-pill">In progress</span>
+      </div>
+      <h2>Your app is taking shape</h2>
+      <p class="cc-copy">Caddie is building your approved plan and running the checks.</p>
+      <div class="cc-rail">
+        <div class="cc-step done">Plan</div>
+        <div class="cc-step active">Build</div>
+        <div class="cc-step">Check</div>
+        <div class="cc-step">Preview</div>
+      </div>
+      <div class="cc-feed">
+        <div class="cc-feed-row"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg></span>Record a daily entry <span>built</span></div>
+        <div class="cc-feed-row" data-active><span class="cc-pulse"></span>Offline recording <span>building…</span></div>
+        <div class="cc-feed-row"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="9"/></svg></span>Weekly summary <span>queued</span></div>
+      </div>
+      <div class="cc-actions">
+        <button class="cc-action">View activity</button>
+      </div>
+      <div class="cc-bottom"><span>FarmLog AI</span><span>A preview appears after the checks pass.</span></div>
+    </article>
+
+    <!-- 3. Repairing -->
+    <article class="cc" data-tone="amber">
+      <div class="cc-head">
+        <span class="cc-kicker">
+          <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 7l3 3M3 21l3-1 11-11a2.8 2.8 0 0 0-4-4L2 16z"/></svg></span>
+          Checking &amp; repairing <span class="cc-fresh">· 2 min ago</span>
+        </span>
+        <span class="cc-pill">I'm on it</span>
+      </div>
+      <h2>One check needs another pass</h2>
+      <div class="cc-repair">
+        <h3>What needs fixing</h3>
+        <p>A test for saving entries is failing. Caddie is adjusting how entries are saved and will re-run the checks.</p>
+      </div>
+      <div class="cc-note"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15 10 20 15 15 20M4 4v7a4 4 0 0 0 4 4h12"/></svg></span>
+        The preview stays held while checks and repairs continue.</div>
+      <div class="cc-actions">
+        <button class="cc-action">View activity</button>
+      </div>
+      <div class="cc-bottom"><span>HerdVoice</span><span>3 checks passed · 1 repairing</span></div>
+    </article>
+
+    <!-- 4. Preview ready -->
+    <article class="cc" data-tone="green">
+      <div class="cc-head">
+        <span class="cc-kicker">
+          <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>
+          Your app is ready <span class="cc-fresh">· 12 min ago</span>
+        </span>
+        <span class="cc-pill">Ready to try</span>
+      </div>
+      <h2>Your app is ready to try</h2>
+      <p class="cc-copy">Open the checked app preview. Your plan and build stay available.</p>
+      <div class="cc-miniapp">
+        <div class="cc-minihead"><b>HerdVoice</b><span class="cc-minichip">Preview</span></div>
+        <div class="cc-minibody">
+          <h3>Today's herd log</h3>
+          <div class="cc-minirow"><span>Morning feed logged</span><span class="cc-minichip">done</span></div>
+          <div class="cc-minirow"><span>Vet visit — cow #14</span><span>2:00 pm</span></div>
+          <div class="cc-minirow"><span>Weekly summary</span><span>ready</span></div>
+        </div>
+      </div>
+      <div class="cc-docs">
+        <span class="cc-doc"><b>✓</b>6 checks passed</span>
+        <span class="cc-doc"><b>✓</b>Tested offline</span>
+        <span class="cc-doc"><b>✓</b>Version 3</span>
+      </div>
+      <div class="cc-actions">
+        <button class="cc-action">Try the app</button>
+        <button class="cc-action quiet">Ask for changes</button>
+      </div>
+      <div class="cc-bottom"><span>HerdVoice · Version 3</span><span>The share link is live.</span></div>
+    </article>
+
+    <!-- 5. Deadline countdown -->
+    <article class="cc" data-tone="amber">
+      <div class="cc-head">
+        <span class="cc-kicker">
+          <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M9 2h6"/></svg></span>
+          Coming up <span class="cc-fresh">· 30 min ago</span>
+        </span>
+        <span class="cc-pill">Watching</span>
+      </div>
+      <h2>Weekly discovery sweep is scheduled</h2>
+      <p class="cc-copy">Caddie checks for new opportunities each week and reports the result here and in the project's activity.</p>
+      <div class="cc-countdown">
+        <div class="cc-days"><b>4</b>days</div>
+        <div class="cc-date">
+          <strong>Monday, 26 October · 8:00 am</strong>
+          <p>Next automatic sweep · your time (Africa/Lagos)</p>
+        </div>
+      </div>
+      <div class="cc-actions">
+        <button class="cc-action">Open the schedule</button>
+      </div>
+      <div class="cc-bottom"><span>FarmLog AI</span><span>A refused or failed read is named, never guessed.</span></div>
+    </article>
+
+    <!-- 6. Opportunity fit -->
+    <article class="cc" data-tone="green">
+      <div class="cc-head">
+        <span class="cc-kicker">
+          <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2l2.5 6.5L21 9l-5 4.5L17.5 21 12 17l-5.5 4L8 13.5 3 9l6.5-.5z"/></svg></span>
+          An opportunity for you <span class="cc-fresh">· 1 hr ago</span>
+        </span>
+        <span class="cc-pill">Saved</span>
+      </div>
+      <h2>A good match: Nebius × NVIDIA Global AI Hackathon</h2>
+      <p class="cc-copy">Saved from Caddie's built-in sample feed. Explore ideas for it when you're ready.</p>
+      <div class="cc-split" data-a="green">
+        <div class="cc-panel"><h3>Why it fits</h3>
+          <div class="cc-rows">
+            <div class="cc-row"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg></span><div><small>Matches your interest in farm tools.</small></div></div>
+            <div class="cc-row"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg></span><div><small>An AI app fits the theme.</small></div></div>
+          </div>
+        </div>
+        <div class="cc-panel"><h3>Before you commit</h3>
+          <div class="cc-rows">
+            <div class="cc-row"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span><div><small>Check the eligibility — region may apply.</small></div></div>
+            <div class="cc-row"><span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span><div><small>This is a sample, not a confirmed live contest.</small></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="cc-actions">
+        <button class="cc-action">Review opportunity</button>
+        <button class="cc-action quiet">Save for later</button>
+      </div>
+      <div class="cc-bottom"><span>FarmLog AI</span><span>Live contest sources are not connected yet.</span></div>
+    </article>
+
+
+  <!-- Earlier -->
+  <div class="earlier-head"><b>Earlier</b> · resolved decisions</div>
+  <article class="cc" data-tone="grey" style="padding-top:6px; padding-bottom:6px;">
+    <div class="cc-record">
+      <span class="cc-record-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg></span>
+      <div class="cc-record-body"><h3>You approved the plan</h3><p>The builders started from this version.</p>
+        <button>View approved plan</button></div>
+      <time>2 days ago</time>
+    </div>
+    <div class="cc-record">
+      <span class="cc-record-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20 6 9 17l-5-5"/></svg></span>
+      <div class="cc-record-body"><h3>You chose the design</h3><p>Opening this does not change anything.</p>
+        <button>View design</button></div>
+      <time>2 days ago</time>
+    </div>
+  </article>
+
+</div>
+</body>
+</html>
