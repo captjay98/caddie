@@ -247,21 +247,34 @@ export function makeSpendInstrumentation(config: SpendInstrumentConfig): FlueIns
 				return;
 			}
 			if (event.type === 'turn') {
-				// Settle or release from the leaf turn's own usage. isError → release
-				// (the call failed; hand the worst-case estimate back); otherwise
-				// settle the call's actual cost. Fire-and-forget: the turn event is
-				// observe-only and must not throw back into the runtime.
+				// Settle or release from the leaf turn's own usage. FINDING #5
+				// (review 2026-10-23): `isError` is DIAGNOSTIC, not proof that no
+				// paid work happened — Flue's own observability guide says nested
+				// errors do not necessarily fail the work, and a turn can carry real
+				// `usage` even when `isError` is set (the model ran, then something
+				// downstream failed). So the decision is driven by whether usage is
+				// KNOWN, not by isError: settle the real cost whenever usage is
+				// reported, and release only when no usage arrived at all (the call
+				// was refused/aborted before any billable work). This keeps the
+				// liability on an issued call with real cost instead of refunding it.
+				// Fire-and-forget: the turn event is observe-only and must not throw.
 				const turnId = event.turnId;
 				requestCharsByTurn.delete(turnId);
 				routeModelByTurn.delete(turnId);
 				const resolved = safeContext(context);
 				if (!resolved) return;
 				const { db } = resolved;
-				if (event.isError) {
-					void release(db, turnId).catch(() => {});
-				} else {
-					const micros = settleMicrosFromCost(event.response.usage?.cost.total);
+				const usage = event.response?.usage;
+				const micros = usage ? settleMicrosFromCost(usage.cost.total) : 0;
+				if (micros > 0) {
+					// Real billable cost is known — settle it, whether or not the
+					// turn is flagged isError. This closes the refund hole: an
+					// errored turn that still ran the model keeps its liability.
 					void settle(db, turnId, micros).catch(() => {});
+				} else {
+					// No billable cost known (no usage, or a zero-cost aborted/
+					// refused turn) — hand the worst-case estimate back.
+					void release(db, turnId).catch(() => {});
 				}
 			}
 		},

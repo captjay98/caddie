@@ -284,6 +284,30 @@ describe('readBuildResults (step 3) against the REAL schema', () => {
 		]);
 		expect(await totalCampaignSpentMicros(sqliteSeam(sqlite))).toBe(27_000_000);
 	});
+
+	// FINDING #6 (review 2026-10-23): a settled row KEEPS its original
+	// reservedMicros estimate for audit (settle() only sets settledMicros +
+	// status). The reader must count the settled cost for settled rows and the
+	// reserved estimate only for still-open rows — never both. The fixtures
+	// above hid this by giving every settled row reserved:0.
+	test('a settled row counts its settled cost, NOT its retained estimate (per-build)', async () => {
+		insertWorkflow(sqlite, { phase: 'ready', planId: PLAN, spendPayerId: PAYER });
+		// Estimate 100_000 reserved, actual 2_000 settled; the row keeps both.
+		insertSpend(sqlite, 5_000_000, [{ settled: 2_000, reserved: 100_000, status: 'settled' }]);
+		const r = await readBuildResults(sqliteSeam(sqlite), { projectId: PROJECT, runId: RUN });
+		expect(r.spentMicros).toBe(2_000); // not 102_000
+	});
+
+	test('the campaign total counts settled cost for settled rows, estimate for open rows', async () => {
+		insertWorkflow(sqlite, { phase: 'ready', planId: PLAN, spendPayerId: PAYER });
+		insertSpend(sqlite, 30_000_000, [
+			// completed call: estimate 100_000, real 2_000 → counts 2_000
+			{ settled: 2_000, reserved: 100_000, status: 'settled' },
+			// still-open call: counts its 50_000 estimate (worst-case liability)
+			{ settled: null, reserved: 50_000, status: 'reserved' },
+		]);
+		expect(await totalCampaignSpentMicros(sqliteSeam(sqlite))).toBe(52_000); // not 152_000
+	});
 });
 
 describe('the live D1 seam is SELECT-only (step 3 safety)', () => {

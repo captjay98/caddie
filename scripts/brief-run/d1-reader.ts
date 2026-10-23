@@ -218,11 +218,12 @@ export async function readBuildResults(
 	if (spendPayerId) {
 		const spend = (
 			await query(
-				`select coalesce(sum(settledMicros),0) as settled, coalesce(sum(reservedMicros),0) as reserved ` +
+				`select coalesce(sum(case when status = 'settled' then settledMicros ` +
+					`when status = 'reserved' then reservedMicros else 0 end),0) as spent ` +
 					`from build_spend_reservations where payerId = ${lit(spendPayerId)} and status in ('reserved','settled')`,
 			)
 		)[0];
-		spentMicros = num(spend, 'settled') + num(spend, 'reserved');
+		spentMicros = num(spend, 'spent');
 		const limit = (
 			await query(`select limitMicros from build_spend_limits where payerId = ${lit(spendPayerId)} limit 1`)
 		)[0];
@@ -261,11 +262,12 @@ export async function readBuildResults(
 export async function totalCampaignSpentMicros(query: D1Query): Promise<number> {
 	const row = (
 		await query(
-			`select coalesce(sum(settledMicros),0) as settled, coalesce(sum(reservedMicros),0) as reserved ` +
+			`select coalesce(sum(case when status = 'settled' then settledMicros ` +
+				`when status = 'reserved' then reservedMicros else 0 end),0) as spent ` +
 				`from build_spend_reservations where status in ('reserved','settled')`,
 		)
 	)[0];
-	return num(row, 'settled') + num(row, 'reserved');
+	return num(row, 'spent');
 }
 
 /**

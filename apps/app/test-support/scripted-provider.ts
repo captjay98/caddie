@@ -44,6 +44,13 @@ export interface ScriptedReply {
 	/** Fixed prompt/completion token counts; cost is computed from the route rates. */
 	input: number;
 	output: number;
+	/**
+	 * Model the FINDING #5 case: the model ran and billed real tokens, then the
+	 * turn errored (a downstream/abort error after the provider response). The
+	 * reply still computes its real usage/cost, but the turn ends `isError`. The
+	 * spend instrument must SETTLE this, not refund it.
+	 */
+	errorAfterUsage?: boolean;
 }
 
 export interface ScriptedProviderOptions {
@@ -161,6 +168,16 @@ export function scriptedProvider(options: ScriptedProviderOptions): {
 				output.stopReason = reply.toolCall ? 'toolUse' : 'stop';
 
 				options.onCall?.(index, reply, usage);
+
+				if (reply.errorAfterUsage) {
+					// The model ran and billed `usage`, then the turn errored. Emit an
+					// error carrying that usage so observe() sees isError WITH cost.
+					output.stopReason = 'error';
+					output.errorMessage = 'scripted-provider: error after usage was billed (finding #5)';
+					stream.push({ type: 'error', reason: 'error', error: output });
+					stream.end();
+					return;
+				}
 
 				stream.push({ type: 'done', reason: output.stopReason, message: output });
 				stream.end();

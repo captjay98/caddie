@@ -168,6 +168,36 @@ describe('Part A — spend instrument wiring (real agents, real D1)', () => {
 		expect((await spendSnapshot(db, PAYER)).reservedMicros).toBe(0);
 	});
 
+	// FINDING #5 (review 2026-10-23): isError is diagnostic, not proof no paid
+	// work happened. A turn that billed real tokens and THEN errored must SETTLE
+	// that real cost, not refund it — otherwise repeated paid errors evade the
+	// build limit. (The release-path test above is the other case: an error with
+	// NO billable cost still releases.)
+	test('a turn that errors AFTER billing real tokens settles that cost, never refunds it', async () => {
+		await createBuildPayer(db, PAYER, 5 * MICROS_PER_UNIT);
+		const inst = registeringInstrumentation(makeSpendInstrumentation({ db }), PAYER);
+		// 0.2 Mtok in + 0.1 Mtok out = $0.15 of real billed usage, then isError.
+		booted = await bootRaw({
+			instrumentation: inst,
+			script: [{ text: 'partial', input: 200_000, output: 100_000, errorAfterUsage: true }],
+		});
+
+		const c = init(Coordinator, { id: 'conv-error-with-cost' });
+		try {
+			await c.read(await c.dispatch('go'));
+		} catch {
+			// The errored turn may surface as a failed submission; the reservation
+			// must be SETTLED at the real cost regardless.
+		}
+		const rows = (await db.prepare('select "status","settledMicros" from "build_spend_reservations"').all<{ status: string; settledMicros: number }>()).results;
+		expect(rows.length).toBe(1);
+		expect(rows[0].status).toBe('settled'); // NOT released
+		expect(rows[0].settledMicros).toBeGreaterThanOrEqual(150_000);
+		expect(rows[0].settledMicros).toBeLessThanOrEqual(150_001);
+		// The real cost is counted toward the limit, so it is not refundable.
+		expect((await spendSnapshot(db, PAYER)).settledMicros).toBeGreaterThanOrEqual(150_000);
+	});
+
 	test('kill switch: spend_enforcement=off records nothing-refused — an over-limit call passes through', async () => {
 		await createBuildPayer(db, PAYER, 1_000); // tiny limit
 		// Turn the enforcement switch off in the stored overrides.
