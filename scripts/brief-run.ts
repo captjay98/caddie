@@ -30,7 +30,6 @@
  *     team-mode architecture block (lane 2) and the coordinator wiring (lane 1).
  *     They are driven through the documented routes and classified UNVERIFIED.
  */
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -424,101 +423,205 @@ function redact(value: string | undefined): string {
 	return value ? 'present' : 'absent';
 }
 
-function sha256(data: string | Buffer): string {
-	return createHash('sha256').update(data).digest('hex');
+// ─────────────────────────────────────────────────────────────────────────────
+// Campaign orchestration (steps 1-6 composed; injectable, so it is tested with
+// fakes and NEVER runs live or starts a paid build from a test)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import type { AccountSession } from './brief-run/dev-client.ts';
+import type { Clock } from './brief-run/clock.ts';
+import { driveBrief, type ProposalReader, type CoordinatorSend } from './brief-run/driver.ts';
+import { readBuildResults, type D1Query } from './brief-run/d1-reader.ts';
+import type { BrowserCheck } from './brief-run/browser-check.ts';
+import {
+	appendRun,
+	ledgerSpentMicros,
+	type Ledger,
+	type LedgerRunRecord,
+	type LedgerStore,
+} from './brief-run/ledger.ts';
+import { isTeamMode, type RunMode } from './brief-run/mode.ts';
+
+/** The seams the campaign is driven over — every one injectable for tests. */
+export interface CampaignSeams {
+	/** The signed-in account A session (and B for the browser check). */
+	sessionA: AccountSession;
+	sessionB: AccountSession;
+	clock: Clock;
+	/** Read-only D1 query against the local dev DB. */
+	d1: D1Query;
+	/** Read the newest project_proposals row for the Home project (step 3). */
+	readProposal: ProposalReader;
+	/** Send the brief to the Home coordinator over Flue's HTTP route (step 2). */
+	coordinatorSend: CoordinatorSend;
+	/** The browser check (A persists, B cannot see). */
+	browserCheck: BrowserCheck;
+	/** The ledger store (file-backed live; in-memory in tests). */
+	ledgerStore: LedgerStore;
+	/** The dev base, for the browser check's preview URL. */
+	base: string;
+	workspaceId: string;
+	/** The signed-in account A id, used as the run's payer (step 2). */
+	payerId: string;
+	/** The coordinator model route id (coordinator.ts COORDINATOR_MODEL_ROUTE). */
+	coordinatorModelRouteId: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Live driver (gated; UNVERIFIED locally — never runs without the gate)
-// ─────────────────────────────────────────────────────────────────────────────
+export interface CampaignOptions {
+	mode: RunMode;
+	capMicros: number;
+	pollEveryMs: number;
+	/** Only drive these brief ids (the smoke run drives one). Empty = all. */
+	onlyBriefIds?: string[];
+}
 
-interface LiveStep {
-	id: string;
-	outcome: 'PASS' | 'FAIL';
-	receipt: string;
+export interface CampaignRunRow {
+	briefId: string;
+	size: BriefSize;
+	mode: RunMode;
+	capAllowed: boolean;
+	complete: CompleteVerdict;
+	result: BriefRunResult | null;
+	stopReason: string | null;
+	buildSpentMicros: number | null;
 }
 
 /**
- * A tiny HTTP cookie jar + fetch for driving the real API as a signed-in
- * account. The local sign-in path mirrors the fixture harness's driveOAuth
- * (POST /api/auth/sign-in/social → follow the stub provider redirect). On a
- * real `bun run dev` the provider is whatever .dev.vars configures; this is
- * classified UNVERIFIED until run live.
+ * Run the campaign over the injected seams. For each brief:
+ *   1. check the D5 cap against the ledger's spend-so-far PLUS this build's
+ *      limit — refuse (and record) a build that would not fit;
+ *   2. drive the brief to a terminal build outcome (driveBrief, step 2);
+ *   3. read the build's results from D1 (step 3);
+ *   4. if the build is ready, run the browser check (step 4);
+ *   5. judge "complete" and append the run to the ledger (step 5).
+ *
+ * The cap is enforced from the LEDGER's own recorded spend, so a test proves it
+ * across runs without any D1. NO build is ever started from a test: the drive
+ * and D1 seams are fakes there.
  */
-class Jar {
-	private cookies = new Map<string, string>();
-	header(): string {
-		return [...this.cookies.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
-	}
-	absorb(res: Response): void {
-		const set = res.headers.get('set-cookie');
-		if (!set) return;
-		for (const part of set.split(/,(?=[^ ;]+=)/)) {
-			const [pair] = part.split(';');
-			const eq = pair.indexOf('=');
-			if (eq > 0) this.cookies.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim());
+export async function runCampaign(
+	briefs: Brief[],
+	seams: CampaignSeams,
+	opts: CampaignOptions,
+): Promise<{ ledger: Ledger; rows: CampaignRunRow[] }> {
+	const rows: CampaignRunRow[] = [];
+	let ledger: Ledger | null = seams.ledgerStore.read();
+	const only = new Set(opts.onlyBriefIds ?? []);
+
+	for (const brief of briefs) {
+		if (only.size > 0 && !only.has(brief.id)) continue;
+		const size = brief.size;
+		const buildLimitMicros = size === 'big' ? BIG_BUILD_LIMIT_MICROS : SMALL_BUILD_LIMIT_MICROS;
+		const spentBefore = ledger ? ledgerSpentMicros(ledger) : 0;
+
+		// 1. Cap check against the ledger's own spend (D5). Refuse and record.
+		let capAllowed = true;
+		let capReason = 'allowed';
+		try {
+			const d = await reserveAgainstCap(
+				{ totalSpentMicros: async () => spentBefore },
+				{ capMicros: opts.capMicros, buildLimitMicros },
+			);
+			capReason = `allowed; ${(d.remainingMicros / USD).toFixed(2)} remaining`;
+		} catch (error) {
+			capAllowed = false;
+			capReason = error instanceof Error ? error.message : String(error);
 		}
+
+		if (!capAllowed) {
+			const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore, capAllowed, capReason, result: null, stopReason: 'cap-refused', complete: { complete: false, reason: capReason }, buildSpentMicros: null });
+			ledger = appendRun(seams.ledgerStore, opts.capMicros, record);
+			rows.push({ briefId: brief.id, size, mode: opts.mode, capAllowed, complete: record.complete ? { complete: true, reason: record.completeReason } : { complete: false, reason: record.completeReason }, result: null, stopReason: 'cap-refused', buildSpentMicros: null });
+			continue;
+		}
+
+		// 2. Drive the brief to a terminal outcome through the real start flow.
+		const drive = await driveBrief(
+			seams.sessionA,
+			seams.clock,
+			{
+				prompt: brief.prompt,
+				briefId: brief.id,
+				teamMode: isTeamMode(opts.mode),
+				buildWaitMs: size === 'big' ? BIG_BUILD_WAIT_MS : SMALL_BUILD_WAIT_MS,
+				pollEveryMs: opts.pollEveryMs,
+				coordinatorModelRouteId: seams.coordinatorModelRouteId,
+				payerId: seams.payerId,
+				proposalWaitMs: 30 * 60 * 1000,
+				planWaitMs: 30 * 60 * 1000,
+				designWaitMs: 30 * 60 * 1000,
+			},
+			{ readProposal: seams.readProposal, coordinatorSend: seams.coordinatorSend },
+		);
+
+		// 3. Read the results from D1.
+		const d1 = drive.runId ? await readBuildResults(seams.d1, { projectId: drive.projectId, runId: drive.runId }) : null;
+
+		// 4. Browser check, only on a ready build with a preview.
+		let browserPassed = false;
+		if (drive.outcome === 'ready' && drive.previewId) {
+			const check = await seams.browserCheck({
+				base: seams.base,
+				previewUrl: `${seams.base}/api/projects/${drive.projectId}/workflow/preview/${drive.previewId}`,
+				cookieA: seams.sessionA.jar.header(),
+				cookieB: seams.sessionB.jar.header(),
+				recordMarker: `campaign-${brief.id}-${Date.now()}`,
+				timeoutMs: 2 * 60 * 1000,
+			});
+			browserPassed = check.passed;
+		}
+
+		// 5. Judge "complete" from the real gates.
+		const result: BriefRunResult = {
+			briefId: brief.id,
+			everyFeaturePassed: d1?.everyFeaturePassed ?? false,
+			verifyBuildGreen: d1?.verifyBuildGreen ?? false,
+			everyContractCheckGreen: d1?.everyContractCheckGreen ?? false,
+			browserCheckPassed: browserPassed,
+		};
+		const complete = evaluateComplete(result);
+		const stopReason = d1 ? `${d1.phase}${d1.detail ? `: ${d1.detail}` : ''}` : drive.outcome;
+		const buildSpentMicros = d1?.spentMicros ?? null;
+
+		const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore, capAllowed, capReason, result, stopReason, complete, buildSpentMicros });
+		ledger = appendRun(seams.ledgerStore, opts.capMicros, record);
+		rows.push({ briefId: brief.id, size, mode: opts.mode, capAllowed, complete, result, stopReason, buildSpentMicros });
 	}
+
+	return { ledger: ledger ?? { campaign: 'team-mode-monday', cap_micros: opts.capMicros, runs: [] }, rows };
 }
 
-async function apiFetch(base: string, jar: Jar, path: string, init?: RequestInit): Promise<Response> {
-	const headers = new Headers(init?.headers);
-	const cookie = jar.header();
-	if (cookie) headers.set('cookie', cookie);
-	const res = await fetch(`${base}${path}`, { ...init, headers, redirect: 'manual' });
-	jar.absorb(res);
-	return res;
-}
-
-/**
- * Drive ONE brief live, end to end. Returns the per-brief result and the step
- * receipts. This is only reached after the gate opens, so it is never exercised
- * offline. Each unverifiable step is recorded honestly.
- */
-async function runBriefLive(
-	base: string,
-	env: Record<string, string>,
-	brief: Brief,
-	teamMode: boolean,
-): Promise<{ result: BriefRunResult; steps: LiveStep[] }> {
-	const steps: LiveStep[] = [];
-	const push = (id: string, ok: boolean, receipt: string) =>
-		steps.push({ id, outcome: ok ? 'PASS' : 'FAIL', receipt });
-
-	// This function intentionally FAILS CLOSED: the team-mode design-approval
-	// and proposal-accept request bodies depend on lanes 1 and 2, which the
-	// campaign runner integrates with but does not own. Rather than fabricate a
-	// green run, every step is attempted against the documented routes and any
-	// gap is recorded as FAIL with an explicit UNVERIFIED receipt. The owner
-	// wires the remaining request bodies when foundations + the architecture
-	// block land; until then a live run reports the true state.
-	const jarA = new Jar();
-
-	// 1. Create a project from the brief (POST /api/projects needs a workspace).
-	//    The exact workspace bootstrap for a fresh test account is owned by
-	//    lane 1; recorded UNVERIFIED.
-	push(
-		'create-project',
-		false,
-		`UNVERIFIED: POST /api/projects requires a workspaceId; the fresh-account workspace bootstrap is owned by lane 1 and not driven here. Brief "${brief.id}" prompt sha256 ${sha256(brief.prompt).slice(0, 16)}…`,
-	);
-	void jarA;
-	void apiFetch;
-	void teamMode;
-	void env;
-
-	const result: BriefRunResult = {
-		briefId: brief.id,
-		everyFeaturePassed: false,
-		verifyBuildGreen: false,
-		everyContractCheckGreen: false,
-		browserCheckPassed: false,
+function ledgerRecord(args: {
+	brief: Brief;
+	opts: CampaignOptions;
+	buildLimitMicros: number;
+	spentBefore: number;
+	capAllowed: boolean;
+	capReason: string;
+	result: BriefRunResult | null;
+	stopReason: string | null;
+	complete: CompleteVerdict;
+	buildSpentMicros: number | null;
+}): LedgerRunRecord {
+	return {
+		at: new Date().toISOString(),
+		briefId: args.brief.id,
+		size: args.brief.size,
+		mode: args.opts.mode,
+		buildLimitMicros: args.buildLimitMicros,
+		capMicros: args.opts.capMicros,
+		spentBeforeMicros: args.spentBefore,
+		capAllowed: args.capAllowed,
+		capReason: args.capReason,
+		buildSpentMicros: args.buildSpentMicros,
+		complete: args.complete.complete,
+		completeReason: args.complete.reason,
+		stopReason: args.stopReason,
 	};
-	return { result, steps };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// main
+// main — wires the REAL seams behind the gate. Never reached from a test.
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<number> {
@@ -538,88 +641,86 @@ async function main(): Promise<number> {
 		return 1;
 	}
 
-	const base = gated.env.CADDIE_DEV_BASE_URL;
-	console.error(
-		`brief-run: gate open — base ${base}, ` +
-			`test accounts A/B/C present, ` +
-			`model key ${redact(gated.env.NEBIUS_API_KEY)}. No secret values are printed.`,
-	);
-
+	// Resolve the run mode (step 6) and the cap (D5).
+	const { resolveRunMode } = await import('./brief-run/mode.ts');
+	const mode = resolveRunMode({ argv: process.argv.slice(2), teamModeEnv: process.env.TEAM_MODE });
 	const capMicros = process.env.CADDIE_CAMPAIGN_CAP_MICROS
 		? Number(process.env.CADDIE_CAMPAIGN_CAP_MICROS)
 		: DEFAULT_CAMPAIGN_CAP_MICROS;
 
-	// The live spend reader sums build_spend_reservations against
-	// build_spend_limits (plan section 4). Those tables land with foundations;
-	// until then the reader reports UNVERIFIED and the runner refuses to spend.
-	const spendReader: SpendReader = {
-		async totalSpentMicros() {
-			throw new Error(
-				'UNVERIFIED: build_spend_reservations/build_spend_limits are not yet present locally (foundations lane). Refusing to start any paid build.',
-			);
-		},
+	const base = gated.env.CADDIE_DEV_BASE_URL;
+	console.error(
+		`brief-run: gate open — base ${base}, mode ${mode}, ` +
+			`test accounts A/B/C present, model key ${redact(gated.env.NEBIUS_API_KEY)}. No secret values are printed.`,
+	);
+
+	// Build the REAL seams. These touch the network / wrangler / Chromium and
+	// are only ever constructed here, behind the gate.
+	const { DevClient } = await import('./brief-run/dev-client.ts');
+	const { systemClock } = await import('./brief-run/clock.ts');
+	const { wranglerD1Query } = await import('./brief-run/d1-live.ts');
+	const { playwrightBrowserCheck } = await import('./brief-run/browser-check.ts');
+	const { fileLedgerStore } = await import('./brief-run/ledger.ts');
+
+	const client = new DevClient(base, (input, init) => fetch(input, init));
+	const sessionA = await client.signIn({ label: 'A', sub: 'campaign-a', email: gated.env.TEST_ACCOUNT_A_EMAIL, name: 'Campaign A' });
+	const sessionB = await client.signIn({ label: 'B', sub: 'campaign-b', email: gated.env.TEST_ACCOUNT_B_EMAIL, name: 'Campaign B' });
+
+	// The workspace the fresh account lands in. The home-project route returns
+	// it; a missing workspace is a live-only gap and surfaces as a thrown error.
+	const home = (await sessionA.json<{ project?: { id?: string; workspaceId?: string } }>(`/api/home-project`).catch(() => ({}))) as { project?: { id?: string; workspaceId?: string } };
+	const workspaceId = home.project?.workspaceId ?? '';
+
+	// Step 2/3 seams. The payer is account A's own id; the coordinator model
+	// route mirrors coordinator.ts COORDINATOR_MODEL_ROUTE. readProposal reads
+	// the server-of-record (project_proposals) over the same read-only D1 seam;
+	// coordinatorSend POSTs the browser's body to the Flue coordinator route.
+	const { readNewestProposal } = await import('./brief-run/d1-reader.ts');
+	const d1 = wranglerD1Query(REPO);
+	const session = (await sessionA.json<{ user?: { id?: string } }>(`/api/auth/get-session`).catch(() => ({}) as { user?: { id?: string } }));
+	const payerId = session.user?.id ?? gated.env.TEST_ACCOUNT_A_EMAIL;
+	const readProposal: ProposalReader = (opts) => readNewestProposal(d1, opts);
+	const coordinatorSend: CoordinatorSend = async ({ conversationId, idempotencyKey, body }) => {
+		const res = await sessionA.fetch(`/agents/coordinator/${encodeURIComponent(conversationId)}`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ idempotencyKey, kind: 'user', body }),
+		});
+		if (!res.ok) throw new Error(`coordinator send → HTTP ${res.status}`);
 	};
 
 	const briefs = loadBriefs(BRIEFS_DIR);
 	console.error(`brief-run: ${briefs.length} briefs loaded (${briefs.filter((b) => b.size === 'big').length} big).`);
 
-	const results: Array<{ brief: Brief; teamMode: boolean; result: BriefRunResult; complete: CompleteVerdict; steps: LiveStep[] }> = [];
-
-	for (const brief of briefs) {
-		const limit =
-			brief.size === 'big' ? BIG_BUILD_LIMIT_MICROS : SMALL_BUILD_LIMIT_MICROS;
-		const modes = brief.teamMode === 'both' ? [false, true] : [brief.teamMode === 'on'];
-		for (const teamMode of modes) {
-			try {
-				await reserveAgainstCap(spendReader, { capMicros, buildLimitMicros: limit });
-			} catch (error) {
-				console.error(
-					`brief-run: ${brief.id} (team mode ${teamMode}) — cap/reader refused: ${
-						error instanceof Error ? error.message : String(error)
-					}`,
-				);
-				continue;
-			}
-			const { result, steps } = await runBriefLive(base, gated.env, brief, teamMode);
-			const complete = evaluateComplete(result);
-			results.push({ brief, teamMode, result, complete, steps });
-		}
-	}
-
-	// Output: one JSON record per run, plus a summary table.
-	console.error('\n=== brief-run results (JSON per run) ===');
-	for (const r of results) {
-		console.error(
-			JSON.stringify(
-				{
-					brief: r.brief.id,
-					size: r.brief.size,
-					teamMode: r.teamMode,
-					complete: r.complete.complete,
-					reason: r.complete.reason,
-					result: r.result,
-					steps: r.steps,
-				},
-				null,
-				2,
-			),
-		);
-	}
+	const { ledger, rows } = await runCampaign(
+		briefs,
+		{
+			sessionA,
+			sessionB,
+			clock: systemClock,
+			d1,
+			readProposal,
+			coordinatorSend,
+			browserCheck: playwrightBrowserCheck,
+			ledgerStore: fileLedgerStore(join(BRIEFS_DIR, 'runs', `campaign-${mode}.json`)),
+			base,
+			workspaceId,
+			payerId,
+			coordinatorModelRouteId: 'nemotron-3.5-super-vl',
+		},
+		{ mode, capMicros, pollEveryMs: 30_000, onlyBriefIds: process.env.CADDIE_ONLY_BRIEF ? [process.env.CADDIE_ONLY_BRIEF] : [] },
+	);
 
 	console.error('\n=== summary (judged by section 10) ===');
-	console.error('brief                         size    team  complete');
-	for (const r of results) {
+	console.error('brief                         size    mode      complete  stop');
+	for (const r of rows) {
 		console.error(
-			`${r.brief.id.padEnd(28)}  ${r.brief.size.padEnd(6)}  ${String(r.teamMode).padEnd(5)}  ${r.complete.complete ? 'YES' : 'no'}`,
+			`${r.briefId.padEnd(28)}  ${r.size.padEnd(6)}  ${r.mode.padEnd(8)}  ${r.complete.complete ? 'YES' : 'no '}      ${r.stopReason ?? ''}`,
 		);
 	}
+	console.error(`\nledger: ${ledger.runs.length} run(s) recorded; ${(ledgerSpentMicros(ledger) / USD).toFixed(2)} spent of ${(capMicros / USD).toFixed(2)} cap.`);
 
-	const anyComplete = results.some((r) => r.complete.complete);
-	console.error(
-		anyComplete
-			? 'brief-run: at least one brief completed — see the JSON records for receipts.'
-			: 'brief-run: NO brief completed. This is the honest state until foundations + the architecture block land; see the UNVERIFIED step receipts.',
-	);
+	const anyComplete = rows.some((r) => r.complete.complete);
 	// Exit nonzero while nothing is complete — never report a fabricated pass.
 	return anyComplete ? 0 : 1;
 }

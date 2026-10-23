@@ -407,6 +407,20 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// (SVG bar/line/donut, no new library, screen-reader table) and
 			// caddie/poll.ts (usePolling, pausing while the tab is hidden).
 			'tests/kit-files.test.ts',
+			// Lane 8 (part I): the campaign runner's LIVE path, all offline —
+			// the host-guarded dev client + two-account sign-in and the
+			// end-to-end brief driver (dev-client, driver); the read-only D1
+			// results reader + SELECT-only live seam (d1-reader); the browser
+			// check's persistence/isolation judgement (browser-check); the
+			// campaign ledger (ledger); --mode team|baseline (mode); and the
+			// whole runCampaign orchestration composed over fakes (campaign).
+			'tests/brief-run-dev-client.test.ts',
+			'tests/brief-run-driver.test.ts',
+			'tests/brief-run-d1-reader.test.ts',
+			'tests/brief-run-browser-check.test.ts',
+			'tests/brief-run-ledger.test.ts',
+			'tests/brief-run-mode.test.ts',
+			'tests/brief-run-campaign.test.ts',
 			// Lead wiring for J and L: the generated payments/upload files reach
 			// apps that declare them (app features only), stay protected, the
 			// builders are told how to mount them, and the plan gate refuses

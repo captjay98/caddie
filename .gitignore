@@ -23,5 +23,7 @@ playwright-report/
 *.log
 .wrangler-backup-*.tar.gz
 
+# lane 8: the campaign ledger (tests/briefs/runs/, cleared between campaigns)
+tests/briefs/runs/
 # per-run deploy step logs (scripts/deploy.ts, item H)
 .deploy-logs/
