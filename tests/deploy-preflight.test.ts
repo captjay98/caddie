@@ -234,6 +234,16 @@ describe('S10 preflight: the production values', () => {
 		expect(warns(findings).join(' ')).toContain('CADDIE_LIVE_AUTHORIZED');
 	});
 
+	test('a set spending cap (SPEND_LIMIT_CAP_USD) is a known key that warns, never fails', async () => {
+		const values = goodValues();
+		values.set('SPEND_LIMIT_CAP_USD', '0.75');
+		const findings = await check(values);
+		expect(fails(findings)).toEqual([]);
+		const warned = warns(findings).join(' ');
+		expect(warned).toContain('capped at $0.75');
+		expect(warned).not.toContain('a typo?');
+	});
+
 	test('BETTER_AUTH_URL must be the bare https production origin', async () => {
 		for (const [url, expected] of [
 			['http://caddie.example.com', 'https:// origin'],

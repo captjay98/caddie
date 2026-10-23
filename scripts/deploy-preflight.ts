@@ -84,6 +84,7 @@ export const OPTIONAL_KEYS = [
 	'WEB_RISK_API_KEY',
 	'GITHUB_APP_SLUG',
 	'GITHUB_WEBHOOK_SECRET',
+	'SPEND_LIMIT_CAP_USD',
 ] as const;
 
 /** Test-only switches: in production they would stub sign-in or point Caddie at a fake service. */
@@ -362,6 +363,9 @@ export async function checkProductionValues(values: ReadonlyMap<string, string>,
 	const known = new Set([...knownKeys(), ...FORBIDDEN_KEYS, ...Object.keys(DISCOURAGED_KEYS)]);
 	const unknown = [...values.keys()].filter((key) => !known.has(key));
 	if (unknown.length > 0) add('WARN', `keys Caddie does not read (a typo?): ${unknown.join(', ')}`);
+	if (has('SPEND_LIMIT_CAP_USD')) {
+		add('WARN', `SPEND_LIMIT_CAP_USD is set: every new build's spending limit is capped at $${value('SPEND_LIMIT_CAP_USD')} (it can only lower limits); leave it out unless that is meant`);
+	}
 
 	// Sign-in.
 	if (has('BETTER_AUTH_URL')) {
