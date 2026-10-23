@@ -467,6 +467,11 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// Lane 10 (screen 3): the test inbox with a code and an email marked
 			// "Not sent — test mode", and the jobs list with Run now and a run.
 			'tests/browser/screen3-team.spec.ts',
+			// Lane 8d (part I, item 3): the campaign's browser check driven for
+			// real — the standalone preview page embeds the app, the two app
+			// users sign in through the frame, A's record persists on a FRAME-only
+			// reload, B is isolated, and a broken form fails with a diagnostic.
+			'tests/browser/brief-run-browser-check.spec.ts',
 		],
 		live: [],
 	},

@@ -292,11 +292,21 @@ async function openPreviewUser(
 		async createRecord(target: RecordTarget, marker: string): Promise<CreateOutcome> {
 			const f = await waitForFrame();
 			await f.evaluate((hash) => {
-				(globalThis as unknown as { location: { hash: string } }).location.hash = hash;
+				const loc = (globalThis as unknown as { location: { hash: string } }).location;
+				loc.hash = hash;
+				// Fire hashchange even when the value is unchanged, so a hash-routed
+				// app re-renders the screen either way.
+				(globalThis as unknown as { dispatchEvent: (e: Event) => void }).dispatchEvent(new Event('hashchange'));
 			}, target.screen.path);
 
-			// Read the first non-sign-in form's fields (pure plan decides values).
-			const fields = await readFormFields(f);
+			// The screen renders asynchronously (it may fetch its list first), so
+			// poll for a non-sign-in form with a text field, bounded by the deadline.
+			let fields: Awaited<ReturnType<typeof readFormFields>> = null;
+			const formDeadline = Date.now() + Math.min(20_000, remaining());
+			while (fields === null && Date.now() < formDeadline) {
+				fields = await readFormFields(f);
+				if (fields === null) await page.waitForTimeout(200);
+			}
 			if (fields === null) {
 				return { saved: false, reason: `no create form with a text field was found on screen ${target.screen.path}` };
 			}
@@ -443,9 +453,27 @@ async function diagnosticApiCreate(
 	if (!result.ok) {
 		return `also failed (${'error' in result && result.error ? result.error : `HTTP ${result.status}`}) — the app's server did not accept the record`;
 	}
-	// The API saved it; re-check whether it now shows on the screen.
+	// The API saved it. Re-render the screen (re-fetch its list) and poll: if the
+	// record now shows, the create FORM was the fault; if it still never shows,
+	// the SCREEN does not render saved records.
 	const shows = await frame
-		.evaluate((text) => (globalThis as unknown as { document: Document }).document.body.innerText.includes(text), marker)
+		.evaluate(
+			async ({ hash, text }) => {
+				const g = globalThis as unknown as {
+					location: { hash: string };
+					dispatchEvent: (e: Event) => void;
+					document: Document;
+				};
+				g.location.hash = hash;
+				g.dispatchEvent(new Event('hashchange'));
+				for (let i = 0; i < 30; i++) {
+					if (g.document.body.innerText.includes(text)) return true;
+					await new Promise((resolve) => setTimeout(resolve, 200));
+				}
+				return false;
+			},
+			{ hash: target.screen.path, text: marker },
+		)
 		.catch(() => false);
 	return shows
 		? `saved through the API and the record then showed, so the create FORM is the fault, not the data layer`
