@@ -90,10 +90,14 @@ function toRow(raw: Record<string, unknown>): ModuleRow {
 
 // --- the module board --------------------------------------------------------
 
-/** Every module row of a build, in the order they were seeded. */
+/**
+ * Every module row of a build, in the order they were seeded. One seed shares
+ * one createdAt stamp and the ids are random, so the insertion order (rowid)
+ * is what keeps the design's module order.
+ */
 export async function listModules(db: D1Database, projectId: string, buildSeq: number): Promise<ModuleRow[]> {
 	const res = await db
-		.prepare('select * from "build_modules" where "projectId" = ? and "buildSeq" = ? order by "createdAt", "id"')
+		.prepare('select * from "build_modules" where "projectId" = ? and "buildSeq" = ? order by "createdAt", "rowid"')
 		.bind(projectId, buildSeq)
 		.all<Record<string, unknown>>();
 	return (res.results ?? []).map(toRow);

@@ -29,6 +29,8 @@ import {
   type WorkerLoaderLike,
 } from "../preview-runtime.ts";
 import { rollbackToFeature } from "../build-features.ts";
+import { retryPart } from "../module-join.ts";
+import type { DispatchModuleBuilder } from "../modules.ts";
 import { tryAgainFromSavePoint } from "../build-steps.ts";
 import {
   dispatchPendingWorkflow,
@@ -58,6 +60,12 @@ export function createBuildWorkflowRouter(
   selfFetch?: () => {
     fetch(request: Request, env?: unknown, executionCtx?: unknown): Promise<Response> | Response;
   },
+  /**
+   * Big apps: start a part's builder for a build's conversation (Flue
+   * dispatch to ModuleBuilder), passed by app.ts so this module never imports
+   * the agents. Absent in unit tests: Try again on a part then answers 503.
+   */
+  partDispatch?: (conversationId: string) => DispatchModuleBuilder,
 ) {
   const router = new Hono<{ Bindings: AuthEnv }>();
 
@@ -288,6 +296,14 @@ export function createBuildWorkflowRouter(
     const deliver = deliverFor(c);
     if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
     return c.json(snapshot);
+  });
+  // Big apps: Try again on one part that stopped or couldn't be joined
+  // (owner only, idempotent on key). The part's builder starts again from the
+  // newest joined save point; the build is building again until it settles.
+  router.post("/projects/:projectId/workflow/parts/:moduleId/retry", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    const input = await c.req.json<{ key?: unknown }>().catch(() => ({ key: undefined }));
+    return c.json(await retryPart(c.env.DB, scope, { moduleId: c.req.param("moduleId"), key: input.key }, { dispatchFor: partDispatch ?? null }));
   });
   // Project proposals (Home chat card): Caddie proposes, the USER creates.
   // GET reads the card state; accept creates the project + planning intake

@@ -53,6 +53,8 @@ import { rollbackToFeature } from "../apps/app/src/server/build-features.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, ROLE_TOOL_POLICY } from "../apps/app/src/agents/permissions.ts";
 import { resolveCoordinatorContext, resolveModuleBuilderContext } from "../apps/app/src/server/coordinator-host.ts";
 import { getModule, seedModules, takeSlot } from "../apps/app/src/server/module-slots.ts";
+import { ContreeClient } from "../apps/app/src/server/adapters/contree.ts";
+import { retryPart } from "../apps/app/src/server/module-join.ts";
 import { listAppSecrets, setAppSecret } from "../apps/app/src/server/app-secrets.ts";
 import { parseKeyring } from "../apps/app/src/server/secret-box.ts";
 import { makeRequestAppKey } from "../apps/app/src/agents/tools.ts";
@@ -139,6 +141,8 @@ async function world() {
     "0040_team_mode.sql",
     // Part P: the module rows and slots the module-builder tests seed.
     "0042_module_builders.sql",
+    // Part Q: the integration lock a part's join takes.
+    "0043_integration_lock.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -2191,6 +2195,536 @@ describe("host-driven feature loop", () => {
       // The fresh session starts from the save point's image, not the later work.
       const started = stub.requests.slice(before).find((r) => r.method === "POST" && r.path === "/v1/instances");
       expect((started?.body as { image?: string })?.image).toBe(savePoint);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  // --- Big apps (plan part P steps 1-2) -------------------------------------
+  // A team-mode build with big apps on whose approved design is the 9-module
+  // farm fixture. The plan lists one core feature, one structures feature and
+  // one money feature. The REAL coordinator host runs against the sandbox
+  // stub; the module dispatcher is a fake that records what would be sent.
+  const FARM_BLOCK = readFileSync(new URL("./fixtures/architecture/farm-block.json", import.meta.url), "utf8");
+  const BIG_PRD = FEATURE_PRD.replace(
+    /```caddie-features[\s\S]*?```/,
+    [
+      "```caddie-features",
+      JSON.stringify([
+        { id: "farm-registry", title: "Register your farms", doneWhen: ["A saved farm is listed"] },
+        { id: "structures", title: "Add barns and pens", doneWhen: ["A saved barn is listed"] },
+        { id: "sales", title: "Record a sale", doneWhen: ["A saved sale is listed"] },
+      ]),
+      "```",
+    ].join("\n"),
+  );
+  async function bigBuild(w: Awaited<ReturnType<typeof world>>, opts: { bigApps?: boolean } = {}) {
+    const item = await featureBuild(w, BIG_PRD);
+    w.sqlite
+      .prepare('update plan_doc_revisions set body = ? where id = ?')
+      .run(`# Farm design\n\n\`\`\`caddie-architecture\n${FARM_BLOCK}\n\`\`\``, item.design.id);
+    w.sqlite
+      .prepare('update build_workflows set "teamMode" = 1, "bigApps" = ?, "approvedDesignRevisionId" = ? where projectId = ?')
+      .run(opts.bigApps === false ? 0 : 1, item.design.id, item.scope.projectId);
+    return item;
+  }
+  function bigStub() {
+    const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+    stub.seedImage("tag:feature:1");
+    stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+    stub.setBehavior("bun test caddie/contract.test.ts", { stdout: "3 pass\n0 fail" });
+    return stub;
+  }
+  /** The browser bundle the preview reads (dist/main.js + main.css). */
+  const builtFiles = (root: string) => ({ stdout: "built", writes: { [`${root}/dist/main.js`]: "1", [`${root}/dist/main.css`]: "a{}" } });
+
+  test("a big build: the coordinator builds only the foundation's features, then starts the parts whose dependencies are joined", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const item = await bigBuild(w);
+      const dispatched: Array<{ moduleId: string; buildSeq: number; features: readonly string[]; instanceId: string }> = [];
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, {
+        dispatchModuleBuilder: (input) => {
+          dispatched.push(input);
+        },
+      });
+      // MUTATION: drop the foundation scope (featureInScope) and the
+      // coordinator is handed all three features (total 3, structures next).
+      const first = (await host.buildNextFeature()) as { feature: { id: string }; total: number };
+      expect(first).toMatchObject({ feature: { id: "farm-registry" }, total: 1 });
+
+      const passed = (await host.finishFeature("farm-registry", "big-1")) as { passed: boolean; partsStarted?: boolean; next: string };
+      expect(passed).toMatchObject({ passed: true, partsStarted: true });
+      expect(passed.next).toContain("end your turn now");
+
+      // Core's dependents start, up to the 4 builder slots, in the design's
+      // order; a dependent with no planned feature is joined at once instead.
+      // structures and money have features; tasks, notifications and
+      // subscriptions have none, so they never take a builder.
+      expect(dispatched.map((d) => [d.moduleId, [...d.features]])).toEqual([
+        ["structures", ["structures"]],
+        ["money", ["sales"]],
+      ]);
+      expect(dispatched[0]?.instanceId).toBe(`${item.scope.projectId}:${dispatched[0]?.buildSeq}:structures`);
+      const status = (moduleId: string) =>
+        (w.sqlite.query('select "status" from build_modules where "projectId" = ? and "moduleId" = ?').get(item.scope.projectId, moduleId) as { status: string }).status;
+      expect(status("core")).toBe("merged");
+      expect(status("tasks")).toBe("merged");
+      // events waits on structures, but no planned feature belongs to it, so
+      // there is nothing to wait for: it is joined at once too.
+      expect(status("events")).toBe("merged");
+      expect(status("structures")).toBe("building");
+      expect(status("money")).toBe("building");
+
+      // While the parts build the coordinator has nothing to do: the progress
+      // says so (its finish hook then settles instead of nudging), and the next
+      // feature call answers "waiting", never "every feature passed".
+      expect(await host.featureProgress()).toMatchObject({ current: null, waitingOnParts: true });
+      expect(await host.buildNextFeature()).toMatchObject({ done: false, waiting: true });
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("building");
+      // Asking again starts nothing twice.
+      expect(dispatched.length).toBe(2);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("a big build with no way to start the part builders says so plainly", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const item = await bigBuild(w);
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      await host.buildNextFeature();
+      await rejectsCode(host.finishFeature("farm-registry", "big-2"), "PARTS_UNAVAILABLE");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("a team-mode build's verify_build publishes the app, though its contract checks run after the bundle is built", async () => {
+    // Every check run commits a new sandbox image, and in team mode the
+    // contract phases run after the browser bundle. The "files changed after
+    // the build" guard must compare with the image the checks ENDED on, not
+    // the bundle's. MUTATION: compare with the bundle's image again and every
+    // team-mode verify fails with STALE_BUILD.
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const item = await bigBuild(w, { bigApps: false });
+      const root = `/workspace/${item.scope.projectId}`;
+      stub.setBehavior("bun run build", builtFiles(root));
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      for (const [n, featureId] of ["farm-registry", "structures", "sales"].entries()) {
+        await host.buildNextFeature();
+        stub.setBehavior("bun run test", { stdout: `${n + 1} pass\n0 fail` });
+        expect(((await host.finishFeature(featureId, `small-${n}`)) as { passed: boolean }).passed).toBe(true);
+      }
+      const verified = (await host.verifyBuild("small-verify")) as { passed: boolean };
+      expect(verified.passed).toBe(true);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("ready");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("with big apps off the same design is built by one builder, exactly as before", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const item = await bigBuild(w, { bigApps: false });
+      const dispatched: string[] = [];
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, {
+        dispatchModuleBuilder: (input) => {
+          dispatched.push(input.moduleId);
+        },
+      });
+      expect(await host.buildNextFeature()).toMatchObject({ feature: { id: "farm-registry" }, total: 3 });
+      const passed = (await host.finishFeature("farm-registry", "small-1")) as { passed: boolean; partsStarted?: boolean; next: string };
+      expect(passed.passed).toBe(true);
+      expect(passed.partsStarted).toBeUndefined();
+      expect(passed.next).toContain("Add barns and pens");
+      expect(dispatched).toEqual([]);
+      expect(w.count("build_modules")).toBe(0);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  // --- Big apps, joining a part (plan part P step 3) ------------------------
+  // The coordinator builds the foundation on the REAL host; the structures
+  // part's builder then runs on the REAL module host, and finish_module joins
+  // it into the app through the sandbox stub (sessions, commits, inspect).
+  async function partReady(w: Awaited<ReturnType<typeof world>>, stub: SandboxStub) {
+    const item = await bigBuild(w);
+    const root = `/workspace/${item.scope.projectId}`;
+    const started: Array<{ moduleId: string; buildSeq: number }> = [];
+    const notified: Array<{ key: string; message: string }> = [];
+    const deps = {
+      dispatchModuleBuilder: (input: { moduleId: string; buildSeq: number }) => void started.push(input),
+      notifyCoordinator: (input: { key: string; message: string }) => void notified.push(input),
+    };
+    const coordinator = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, deps);
+    await coordinator.buildNextFeature();
+    await coordinator.driver.writeFile({ sessionId: coordinator.sessionId, path: `${root}/src/server/core/farms.ts`, content: "export const farms = 'core';" });
+    expect(((await coordinator.finishFeature("farm-registry", "core-1")) as { partsStarted?: boolean }).partsStarted).toBe(true);
+    const buildSeq = started[0]!.buildSeq;
+    const part = await resolveModuleBuilderContext(env(w, stub), { conversationId: item.workflow.conversationId, moduleId: "structures", buildSeq, features: ["structures"] }, deps);
+    expect(await part.buildNextFeature()).toMatchObject({ feature: { id: "structures" } });
+    await part.driver.writeFile({ sessionId: part.sessionId, path: `${root}/src/server/structures/barns.ts`, content: "export const barns = 'structures';" });
+    const finished = (await part.finishFeature("structures", "structures-1")) as { passed: boolean; next: string };
+    expect(finished.passed).toBe(true);
+    expect(finished.next).toContain("Call finish_module");
+    const status = (moduleId: string) =>
+      (w.sqlite.query('select "status" from build_modules where "projectId" = ? and "moduleId" = ?').get(item.scope.projectId, moduleId) as { status: string }).status;
+    const inspect = new ContreeClient({ baseUrl: stub.url, apiToken: "local-feature-token", platformProjectId: "local-project" });
+    const read = async (image: string, path: string) => {
+      const bytes = await inspect.inspectDownload(image, `${root}/${path}`);
+      return bytes === null ? null : new TextDecoder().decode(bytes);
+    };
+    return { item, root, part, buildSeq, started, notified, status, read };
+  }
+
+  test("a big build: finish_module joins a finished part into a copy of the newest save point and makes that the app", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      const foundation = (await getModule(w.db, p.item.scope.projectId, p.buildSeq, "core"))!.checkpointRef!;
+      const spawnsBefore = stub.requests.length;
+      const joined = (await p.part.finishModuleBuild!("join-1")) as { joined: boolean; next: string };
+      expect(joined).toMatchObject({ joined: true });
+      expect(joined.next).toContain("end your turn now");
+      expect(p.status("structures")).toBe("merged");
+
+      // The join copy was started from the foundation's save point...
+      const spawned = stub.requests.slice(spawnsBefore).filter((r) => r.method === "POST" && r.path === "/v1/instances");
+      expect((spawned[0]?.body as { image?: string })?.image).toBe(foundation);
+      // ...and its commit, now the newest save point, holds the core AND the part.
+      // MUTATION: start the join copy from the base image instead, and the
+      // core's file is missing from the app.
+      const newest = (await getModule(w.db, p.item.scope.projectId, p.buildSeq, "core"))!.checkpointRef!;
+      expect(newest).not.toBe(foundation);
+      expect(await p.read(newest, "src/server/core/farms.ts")).toBe("export const farms = 'core';");
+      expect(await p.read(newest, "src/server/structures/barns.ts")).toBe("export const barns = 'structures';");
+      // The build's own working copy now opens from it (verify_build and the preview use it).
+      const override = w.sqlite.query('select "image","reason" from build_sandbox_sessions where "projectId" = ?').get(p.item.scope.projectId) as { image: string; reason: string };
+      expect(override.image).toBe(newest);
+      // The name lists every joined part in the design's order, including the
+      // parts with no planned features (joined as they stood at the start).
+      expect(override.reason).toBe("joined:core + structures + events + feed + tasks + insights + notifications + subscriptions merged");
+      // money is still building, so Caddie is not told anything yet.
+      expect(p.notified).toEqual([]);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("a join whose app server doesn't start on Cloudflare's runtime is red, with that reason for the part's builder", async () => {
+    // Part Q: the join checks include "the server starting". The Worker
+    // Loader is faked: the app's GET /api/health answers 500.
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      stub.setBehavior("bun run build", { stdout: "built", writes: { [`${p.root}/dist/main.js`]: "1", [`${p.root}/dist/server.js`]: "export default {}" } });
+      let loads = 0;
+      const LOADER = {
+        get: () => {
+          loads += 1;
+          return { getEntrypoint: () => ({ fetch: async () => new Response("boom: env.DB is undefined", { status: 500 }) }) };
+        },
+      };
+      const part = await resolveModuleBuilderContext({ ...env(w, stub), LOADER } as never, { conversationId: p.item.workflow.conversationId, moduleId: "structures", buildSeq: p.buildSeq, features: ["structures"] }, {
+        dispatchModuleBuilder: () => {},
+      });
+      const out = (await part.finishModuleBuild!("join-start")) as { joined: boolean; failures: Array<{ check: string; output: string }> };
+      // MUTATION: skip the server-start check in a join, and this part joins
+      // an app whose server can't start.
+      expect(out.joined).toBe(false);
+      expect(loads).toBe(1);
+      expect(out.failures).toEqual([{ check: "server-starts", output: expect.stringContaining("GET /api/health answered 500") }]);
+      expect(p.status("structures")).toBe("building");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("a red join goes back to the part's builder and never counts toward any repair limit", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      const roundsBefore = w.count("run_rounds");
+      stub.setBehavior("bun run test", { exitCode: 1, stderr: "1 fail: the barns list is empty" });
+      const out = (await p.part.finishModuleBuild!("join-red")) as { joined: boolean; triesLeft: number; failures: Array<{ check: string; output: string }>; next: string };
+      expect(out).toMatchObject({ joined: false, triesLeft: 1 });
+      expect(out.failures[0]).toMatchObject({ check: "behavior-tests" });
+      expect(out.failures[0]!.output).toContain("the barns list is empty");
+      expect(out.next).toContain("call finish_module again");
+      expect(p.status("structures")).toBe("building");
+      // MUTATION: drop the join-mode return in the check runner, and the join's
+      // failure is recorded as a repair round that could pause the build.
+      expect(w.count("run_rounds")).toBe(roundsBefore);
+      expect((await readWorkflow(w.db, p.item.scope))?.phase).toBe("building");
+      // Nothing changed in the app: the newest save point and the build's copy stay put.
+      expect(w.count("build_sandbox_sessions", "reason like 'joined:%'")).toBe(0);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  // --- Big apps, the end of the build (plan part P step 3, Q "verify_build") --
+  /** Run one part's builder on the REAL module host: its features, then finish_module. */
+  async function buildPart(
+    w: Awaited<ReturnType<typeof world>>,
+    stub: SandboxStub,
+    p: Awaited<ReturnType<typeof partReady>>,
+    moduleId: string,
+    featureId: string,
+  ) {
+    const host = await resolveModuleBuilderContext(env(w, stub), { conversationId: p.item.workflow.conversationId, moduleId, buildSeq: p.buildSeq, features: [featureId] }, {
+      dispatchModuleBuilder: () => {},
+      notifyCoordinator: (input: { key: string; message: string }) => void p.notified.push(input),
+    });
+    await host.buildNextFeature();
+    await host.driver.writeFile({ sessionId: host.sessionId, path: `${p.root}/src/server/${moduleId}/${featureId}.ts`, content: `export const ${featureId.replace(/-/g, "_")} = 1;` });
+    expect(((await host.finishFeature(featureId, `${moduleId}-1`)) as { passed: boolean }).passed).toBe(true);
+    return host;
+  }
+
+  test("S3 end to end: two parts build at the same time on their own copies, both join under the lock, and the app is verified", async () => {
+    // The production path through the REAL coordinator and module hosts; the
+    // "builders" are scripted (each writes its part's file in its own copy),
+    // and the sandbox is the local stub. LOCAL VERIFIED, SIMULATED builders.
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const item = await bigBuild(w);
+      const root = `/workspace/${item.scope.projectId}`;
+      stub.setBehavior("bun run build", builtFiles(root));
+      const started: Array<{ moduleId: string; buildSeq: number }> = [];
+      const notified: Array<{ key: string; message: string }> = [];
+      const deps = {
+        dispatchModuleBuilder: (input: { moduleId: string; buildSeq: number }) => void started.push(input),
+        notifyCoordinator: (input: { key: string; message: string }) => void notified.push(input),
+      };
+      const coordinator = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, deps);
+      await coordinator.buildNextFeature();
+      await coordinator.driver.writeFile({ sessionId: coordinator.sessionId, path: `${root}/src/server/core/farms.ts`, content: "core" });
+      await coordinator.finishFeature("farm-registry", "core-1");
+      expect(started.map((s) => s.moduleId)).toEqual(["structures", "money"]);
+      const buildSeq = started[0]!.buildSeq;
+
+      const spans: Record<string, { from: number; to: number }> = {};
+      const runPart = async (moduleId: string, featureId: string) => {
+        const host = await resolveModuleBuilderContext(env(w, stub), { conversationId: item.workflow.conversationId, moduleId, buildSeq, features: [featureId] }, deps);
+        const from = Date.now();
+        await host.buildNextFeature();
+        await host.driver.writeFile({ sessionId: host.sessionId, path: `${root}/src/server/${moduleId}/${featureId}.ts`, content: moduleId });
+        expect(((await host.finishFeature(featureId, `${moduleId}-1`)) as { passed: boolean }).passed).toBe(true);
+        const joined = (await host.finishModuleBuild!(`join-${moduleId}`)) as { joined: boolean; queued?: boolean };
+        spans[moduleId] = { from, to: Date.now() };
+        return joined;
+      };
+      const outcomes = await Promise.all([runPart("structures", "structures"), runPart("money", "sales")]);
+      // The two parts really worked at the same time (each started before the other finished).
+      expect(spans.structures!.from).toBeLessThan(spans.money!.to);
+      expect(spans.money!.from).toBeLessThan(spans.structures!.to);
+      // Each joined, or waited and was joined by the holder of the lock.
+      expect(outcomes.every((o) => o.joined || o.queued)).toBe(true);
+      const status = (moduleId: string) =>
+        (w.sqlite.query('select "status" from build_modules where "projectId" = ? and "moduleId" = ?').get(item.scope.projectId, moduleId) as { status: string }).status;
+      expect([status("structures"), status("money")]).toEqual(["merged", "merged"]);
+      expect(notified.length).toBe(1);
+
+      // The newest save point holds the core and both parts.
+      const newest = (await getModule(w.db, item.scope.projectId, buildSeq, "core"))!.checkpointRef!;
+      const inspect = new ContreeClient({ baseUrl: stub.url, apiToken: "local-feature-token", platformProjectId: "local-project" });
+      const read = async (path: string) => {
+        const bytes = await inspect.inspectDownload(newest, `${root}/${path}`);
+        return bytes === null ? null : new TextDecoder().decode(bytes);
+      };
+      expect(await read("src/server/core/farms.ts")).toBe("core");
+      expect(await read("src/server/structures/structures.ts")).toBe("structures");
+      expect(await read("src/server/money/sales.ts")).toBe("money");
+
+      // Caddie checks the joined app and it is ready.
+      const verifier = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, deps);
+      expect(await verifier.buildNextFeature()).toMatchObject({ done: true });
+      expect(((await verifier.verifyBuild("s3-verify")) as { passed: boolean }).passed).toBe(true);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("ready");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("Retry after a big build stops keeps its parts: joined ones stay joined, interrupted ones are woken under the new limit", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      stub.setBehavior("bun run build", builtFiles(p.root));
+      expect(await p.part.finishModuleBuild!("join-structures")).toMatchObject({ joined: true });
+      // The build stops (e.g. its spending limit) while money is still building.
+      await setWorkflowBlocker(w.db, p.item.scope, "This build reached its spending limit.");
+      const oldPayer = (w.sqlite.query('select "spendPayerId" from build_workflows where projectId = ?').get(p.item.scope.projectId) as { spendPayerId: string }).spendPayerId;
+      const boardRows = w.count("build_modules", `projectId='${p.item.scope.projectId}'`);
+      await retryWorkflow(w.db, p.item.scope, "retry-big-build-1");
+      const newPayer = (w.sqlite.query('select "spendPayerId" from build_workflows where projectId = ?').get(p.item.scope.projectId) as { spendPayerId: string }).spendPayerId;
+      expect(newPayer).not.toBe(oldPayer);
+      // The same parts carry on under the new payer (and so the new limit).
+      // MUTATION: leave the parts on the old payer, and the coordinator starts
+      // a fresh set of parts from the core, losing structures from the app.
+      expect(w.count("build_modules", `projectId='${p.item.scope.projectId}' and "payerId"='${newPayer}'`)).toBe(boardRows);
+
+      const woken: Array<{ moduleId: string; idempotencyKey?: string; message: string }> = [];
+      const coordinator = await resolveCoordinatorContext(env(w, stub), p.item.workflow.conversationId, {
+        dispatchModuleBuilder: (input: { moduleId: string; idempotencyKey?: string; message: string }) => void woken.push(input),
+      });
+      expect(await coordinator.buildNextFeature()).toMatchObject({ done: false, waiting: true });
+      expect(w.count("build_modules", `projectId='${p.item.scope.projectId}'`)).toBe(boardRows);
+      expect(p.status("structures")).toBe("merged");
+      // money's builder was interrupted: it is woken once per Retry (keyed),
+      // however often the coordinator asks. MUTATION: no wake, and money never moves.
+      await coordinator.buildNextFeature();
+      expect(woken.map((d) => [d.moduleId, d.idempotencyKey])).toEqual([
+        ["money", "wake:retry-big-build-1:money"],
+        ["money", "wake:retry-big-build-1:money"],
+      ]);
+      expect(woken[0]!.message).toContain("started again");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("a big build waits for its parts: verify_build publishes nothing while a part is still building", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      const coordinator = await resolveCoordinatorContext(env(w, stub), p.item.workflow.conversationId, { dispatchModuleBuilder: () => {} });
+      const spawns = stub.spawnRequestCount();
+      // MUTATION: drop the "parts still building" refusal and verify runs (and
+      // publishes) an app two of whose parts are not in it yet.
+      const early = (await coordinator.verifyBuild("big-early")) as { passed: boolean; waiting?: boolean; next: string };
+      expect(early).toMatchObject({ passed: false, waiting: true });
+      expect(early.next).toContain("end your turn now");
+      expect(stub.spawnRequestCount()).toBe(spawns);
+      expect((await readWorkflow(w.db, p.item.scope))?.phase).toBe("building");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("when every part is joined, Caddie is told, and verify_build checks the joined app and makes it ready", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      stub.setBehavior("bun run build", builtFiles(p.root));
+      expect(await p.part.finishModuleBuild!("join-structures")).toMatchObject({ joined: true });
+      const money = await buildPart(w, stub, p, "money", "sales");
+      expect(await money.finishModuleBuild!("join-money")).toMatchObject({ joined: true });
+      expect(p.notified.length).toBe(1);
+      expect(p.notified[0]!.message).toContain("Every part is joined into the app");
+
+      const newest = (await getModule(w.db, p.item.scope.projectId, p.buildSeq, "core"))!.checkpointRef!;
+      const coordinator = await resolveCoordinatorContext(env(w, stub), p.item.workflow.conversationId, { dispatchModuleBuilder: () => {} });
+      expect(await coordinator.buildNextFeature()).toMatchObject({ done: true });
+      const before = stub.requests.length;
+      const verified = (await coordinator.verifyBuild("big-verify")) as { passed: boolean };
+      expect(verified.passed).toBe(true);
+      // verify_build ran on the joined app: its session started from the newest save point.
+      const spawned = stub.requests.slice(before).filter((r) => r.method === "POST" && r.path === "/v1/instances");
+      expect((spawned[0]?.body as { image?: string })?.image).toBe(newest);
+      const workflow = await readWorkflow(w.db, p.item.scope);
+      expect(workflow?.phase).toBe("ready");
+      expect(workflow?.detail).toBeNull();
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("parts that could not be joined or stopped are left out: the app ends ready but partly built, saying which", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      stub.setBehavior("bun run build", builtFiles(p.root));
+      stub.setBehavior("bun run test", { exitCode: 1, stderr: "1 fail: the barns list is empty" });
+      await p.part.finishModuleBuild!("join-1");
+      expect(await p.part.finishModuleBuild!("join-2")).toMatchObject({ joined: false, final: true });
+      stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+      expect(p.notified).toEqual([]); // money is still building
+      // money's builder starts its feature, then reports a blocker: the part
+      // stops with its feature unfinished, and with that every part is settled.
+      // MUTATION: don't continue the big build after a part stops, and Caddie
+      // is never told (the build sits silent until the stall watchdog).
+      const money = await resolveModuleBuilderContext(env(w, stub), { conversationId: p.item.workflow.conversationId, moduleId: "money", buildSeq: p.buildSeq, features: ["sales"] }, {
+        dispatchModuleBuilder: () => {},
+        notifyCoordinator: (input: { key: string; message: string }) => void p.notified.push(input),
+      });
+      await money.buildNextFeature();
+      await money.blockBuild("The payment provider's test keys are missing.");
+      expect(p.status("money")).toBe("stopped");
+      expect(p.notified.length).toBe(1);
+      expect(p.notified[0]!.message).toContain("structures (could not be joined)");
+      expect(p.notified[0]!.message).toContain("money (stopped)");
+
+      const coordinator = await resolveCoordinatorContext(env(w, stub), p.item.workflow.conversationId, { dispatchModuleBuilder: () => {} });
+      const next = (await coordinator.buildNextFeature()) as { done: boolean; next: string };
+      expect(next.done).toBe(true);
+      expect(next.next).toContain("verify_build");
+      // MUTATION: count the missing parts' features in the verify gate, and the
+      // build can never finish ("Not every feature is built yet": sales).
+      const verified = (await coordinator.verifyBuild("big-verify")) as { passed: boolean; next: string };
+      expect(verified.passed).toBe(true);
+      expect(verified.next).toContain("Try again");
+      const workflow = await readWorkflow(w.db, p.item.scope);
+      expect(workflow?.phase).toBe("ready");
+      const plain = (id: string) => JSON.parse(FARM_BLOCK).modules.find((m: { id: string }) => m.id === id).plain as string;
+      expect(workflow?.detail).toBe(
+        `Your app is ready without 2 parts: ${plain("structures")} (it couldn't be joined into the app), ${plain("money")} (it stopped). Press Try again on a part to build it again.`,
+      );
+      // The contract check the published app passed covers the features in it,
+      // never the whole design. MUTATION: verify with the whole design's
+      // contract, and it asks for the billing profiles table no built part made.
+      const outputImage = (w.sqlite.query("select image from workflow_outputs where id = ?").get(workflow!.previewId) as { image: string }).image;
+      const contractTest = await p.read(outputImage, "caddie/contract.test.ts");
+      expect(contractTest).toContain('"scoped":true');
+      expect(contractTest).not.toContain("billing_profiles");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("Try again on one missing part re-opens the build and starts only that part; a replay, a joined part and a stopped build are refused", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      stub.setBehavior("bun run build", builtFiles(p.root));
+      expect(await p.part.finishModuleBuild!("join-structures")).toMatchObject({ joined: true });
+      const money = await resolveModuleBuilderContext(env(w, stub), { conversationId: p.item.workflow.conversationId, moduleId: "money", buildSeq: p.buildSeq, features: ["sales"] }, {
+        dispatchModuleBuilder: () => {},
+        notifyCoordinator: (input: { key: string; message: string }) => void p.notified.push(input),
+      });
+      await money.buildNextFeature();
+      await money.blockBuild("The payment provider's test keys are missing.");
+      const coordinator = await resolveCoordinatorContext(env(w, stub), p.item.workflow.conversationId, { dispatchModuleBuilder: () => {} });
+      expect(((await coordinator.verifyBuild("partly-1")) as { passed: boolean }).passed).toBe(true);
+      expect((await readWorkflow(w.db, p.item.scope))?.phase).toBe("ready");
+
+      const dispatched: Array<{ moduleId: string; instanceId: string }> = [];
+      const dispatchFor = (conversationId: string) => {
+        expect(conversationId).toBe(p.item.workflow.conversationId);
+        return (input: { moduleId: string; instanceId: string }) => void dispatched.push(input);
+      };
+      // A joined part has nothing to try again.
+      await rejectsCode(retryPart(w.db, p.item.scope, { moduleId: "structures", key: "try-structures-1" }, { dispatchFor }), "PART_NOT_STOPPED");
+      // MUTATION: skip re-opening the build, and the coordinator is never asked
+      // to check the app again once money joins (the build stays "ready").
+      await retryPart(w.db, p.item.scope, { moduleId: "money", key: "try-money-1" }, { dispatchFor });
+      const workflow = await readWorkflow(w.db, p.item.scope);
+      expect(workflow?.phase).toBe("building");
+      expect(workflow?.detail).toBeNull();
+      expect(p.status("money")).toBe("building");
+      expect(dispatched.map((d) => [d.moduleId, d.instanceId])).toEqual([["money", `${p.item.scope.projectId}:${p.buildSeq}:money`]]);
+      // The same press again changes nothing.
+      await retryPart(w.db, p.item.scope, { moduleId: "money", key: "try-money-1" }, { dispatchFor });
+      expect(dispatched.length).toBe(1);
+      // While the whole build is stopped, a part can't be tried on its own.
+      await setWorkflowBlocker(w.db, p.item.scope, "Stopped.");
+      await rejectsCode(retryPart(w.db, p.item.scope, { moduleId: "money", key: "try-money-2" }, { dispatchFor }), "BUILD_NOT_SETTLED");
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 });

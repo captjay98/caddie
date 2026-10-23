@@ -192,6 +192,11 @@ export const ModuleProgressItemSchema = v.pipe(
 		state: ModuleProgressState,
 		/** The modules this one waits for, for the "waiting for Farms" line. */
 		waitingFor: v.optional(v.array(v.string())),
+		/**
+		 * The person who started the build may press Try again on this part
+		 * (it stopped or could not be joined). Absent otherwise.
+		 */
+		canRetry: v.optional(v.boolean()),
 	}),
 	v.readonly(),
 );

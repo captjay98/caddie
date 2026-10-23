@@ -14,6 +14,7 @@ import { InteractivePreview } from "../artifacts/InteractivePreview.tsx";
 import { DesignMockPreview } from "../artifacts/DesignMockPreview.tsx";
 import { ReplyText } from "./ReplyText.tsx";
 import { BuildProgress } from "../project/BuildProgress.tsx";
+import { ModuleProgress } from "../project/ModuleProgress.tsx";
 import { PlanFeatureList, SavedFeatures } from "../project/FeatureChecklist.tsx";
 import { AndroidDownload } from "../project/AndroidDownload.tsx";
 import { AppKeys } from "../project/AppKeys.tsx";
@@ -524,6 +525,10 @@ function ProjectWorkspace({
           <p className="state-detail" data-testid="workflow-ready-detail" data-app-preview="">
             {workflow.detail ?? "Build checks passed. Try the app below and tell Caddie what you’d like to change."}
           </p>
+          {/* A big app finished without some parts: the board lists them, each with Try again. */}
+          <div data-testid="ready-parts">
+            <ModuleProgress projectId={projectId} missingOnly />
+          </div>
           <InteractivePreview
             actorId={chrome.actorId}
             projectId={projectId}

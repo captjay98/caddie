@@ -208,6 +208,56 @@ test.describe('Build progress — small and big apps (plan section 7, screen 2)'
 		await context.close();
 	});
 
+	test('a part that could not be joined offers Try again; pressing it starts that part again', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		const partly = [
+			{ id: 'core', plain: 'Farms, people and roles', state: 'joined' },
+			{ id: 'feed', plain: 'Feed stock and use', state: 'not-joined', canRetry: true },
+			{ id: 'tasks', plain: 'Tasks', state: 'joined' },
+		];
+		let pressed: { path: string; body: { key?: string } } | null = null;
+		await stub(context, {
+			experience: { projectId: 'proj-a', version: Date.parse(NOW), stage: 'ready', plan: { id: 'p1', revision: '1', approved: true }, preview: null, message: 'Your app is ready without one part.', actions: [], modules: partly },
+			activityPhase: 'ready',
+		});
+		// After the press, the board reads the part as building again.
+		await context.route('**/api/projects/proj-a/workflow', (route) =>
+			json(route, 200, {
+				workflow: { projectId: 'proj-a', phase: pressed ? 'building' : 'ready', planId: 'p1', previewId: pressed ? null : 'out-1', detail: pressed ? null : 'Your app is ready without one part: Feed stock and use (it couldn\'t be joined into the app). Press Try again on that part to build it again.', brief: 'Build FarmLog.' },
+				plan: { id: 'p1', revision: 1 },
+				approval: { status: 'approved' },
+				importPreview: null,
+			}),
+		);
+		await context.route('**/api/projects/proj-a/workflow/parts/feed/retry', (route) => {
+			pressed = { path: new URL(route.request().url()).pathname, body: route.request().postDataJSON() as { key?: string } };
+			return json(route, 200, {});
+		});
+		await context.route('**/api/projects/proj-a/experience', (route) =>
+			json(route, 200, {
+				projectId: 'proj-a', version: Date.parse(NOW), stage: pressed ? 'building' : 'ready', plan: { id: 'p1', revision: '1', approved: true }, preview: null,
+				message: 'Caddie is building your app.', actions: [],
+				modules: pressed ? partly.map((m) => (m.id === 'feed' ? { id: 'feed', plain: m.plain, state: 'building' } : m)) : partly,
+			}),
+		);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/runs?project=proj-a`);
+		await expect(page.getByTestId('workflow-ready-detail')).toContainText('ready without one part: Feed stock and use');
+		const parts = page.getByTestId('ready-parts');
+		await expect(parts.getByTestId('module-state-feed')).toHaveText('Couldn’t be joined — the rest of your app still works');
+		// Only the part that couldn't be joined has the button.
+		await expect(parts.getByTestId('module-retry-core')).toHaveCount(0);
+		const retry = parts.getByRole('button', { name: 'Try Feed stock and use again' });
+		await expect(retry).toBeVisible();
+		await retry.click();
+		await expect.poll(() => pressed?.path).toBe('/api/projects/proj-a/workflow/parts/feed/retry');
+		expect(pressed!.body.key).toMatch(/^part-retry:feed:/);
+		await expect(page.locator('[data-testid="module-state-feed"]:visible').first()).toHaveText('Building now');
+		await expect(page.getByTestId('module-retry-feed')).toHaveCount(0);
+		if (process.env.CADDIE_SHOTS) await page.screenshot({ path: join(process.env.CADDIE_SHOTS, 'build-part-retry-mobile.png'), fullPage: true });
+		await context.close();
+	});
+
 	test('the spending-limit stop says it once, and adds what retrying does', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
 		const sentence = 'This build reached its spending limit of $5.00. Your plan and files are saved.';

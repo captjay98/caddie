@@ -371,6 +371,15 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// harmlessness, module feature scope, a stopped module not stopping
 			// the rest, and the build's shared spend limit (resolveTurnPayer).
 			'tests/module-builder.test.ts',
+			// Big apps, the foundation step (part P steps 1-2): feature to module,
+			// seeding and starting the parts, the settled outcome, and the agent
+			// wiring (the coordinator settles while parts build; the real
+			// ModuleBuilder dispatcher).
+			'tests/big-build.test.ts',
+			// Big apps, joining a finished part (part P step 3 / Q): green, red
+			// with a try left, red twice, newest save point, queued + drained,
+			// settled notify, replays.
+			'tests/module-join.test.ts',
 			// S3 spike: two ModuleBuilders build one feature each on their own
 			// copies at the same time (overlap proven), each with its own save
 			// point and one onModuleFinished hook call. Local, scripted, no cost.

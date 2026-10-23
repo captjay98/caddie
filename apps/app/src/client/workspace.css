@@ -9615,6 +9615,18 @@ mark {
 	font-size: var(--r-meta);
 	color: var(--color-muted);
 }
+/* Try again on a part that stopped or couldn't be joined: a quiet row action. */
+.module-progress-retry {
+	margin-left: auto;
+	flex: none;
+	align-self: center;
+	font-size: var(--r-meta);
+	min-height: 44px;
+}
+.module-progress-error {
+	font-size: var(--r-meta);
+	color: var(--color-warn);
+}
 .module-progress-spinner {
 	width: 12px;
 	height: 12px;

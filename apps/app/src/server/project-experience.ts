@@ -38,6 +38,7 @@ import { buildActivity } from './build-activity.ts';
 import { summariseArchitecture } from './architecture-summary.ts';
 import { architectureBlockHash, listArchitectureReviews, reviewVerdict } from './architecture-review.ts';
 import { listModules, type ModuleRow, type ModuleStatus } from './module-slots.ts';
+import { lookupRunByConversation } from './runs.ts';
 
 /** The sentinel stopWorkflow writes into detail; distinguishes stop from repair/infra block. */
 export const STOP_SENTINEL = 'Stop requested.';
@@ -122,7 +123,11 @@ export function moduleProgressState(status: ModuleStatus): ModuleProgressState {
  * only passed its own checks still holds it), so the screen can say "Money:
  * waiting for Farms". Pure.
  */
-export function moduleBoardToProgress(rows: readonly ModuleRow[], block: ArchitectureBlock | null): ModuleProgressItem[] {
+export function moduleBoardToProgress(
+	rows: readonly ModuleRow[],
+	block: ArchitectureBlock | null,
+	opts: { canRetry?: boolean } = {},
+): ModuleProgressItem[] {
 	const plainOf = new Map((block?.modules ?? []).map((m) => [m.id, m.plain] as const));
 	const merged = new Set(rows.filter((r) => r.status === 'merged').map((r) => r.moduleId));
 	return rows.map((row) => {
@@ -136,6 +141,7 @@ export function moduleBoardToProgress(rows: readonly ModuleRow[], block: Archite
 			const waitingFor = row.dependsOn.filter((dep) => !merged.has(dep)).map((dep) => plainOf.get(dep) ?? dep);
 			if (waitingFor.length > 0) return { ...item, waitingFor };
 		}
+		if (opts.canRetry && (state === 'not-joined' || state === 'stopped')) return { ...item, canRetry: true };
 		return item;
 	});
 }
@@ -337,7 +343,13 @@ export async function projectExperience(db: D1Database, scope: Scope): Promise<P
 	// read-only: computed only when the real source exists, absent otherwise,
 	// so a non-team-mode project's projection is byte-identical to before.
 	const design_overview = await designOverviewFor(db, scope, design, designApproval?.status === 'approved');
-	const modules = await moduleProgressFor(db, scope, design);
+	// Big apps: Try again on a part is the build owner's, while the build is
+	// ready or building (a stopped build is retried as a whole first).
+	const partRetryAllowed =
+		(workflow?.phase === 'ready' || workflow?.phase === 'building') &&
+		workflow !== null &&
+		(await lookupRunByConversation(db, workflow.conversationId))?.createdBy === scope.actorId;
+	const modules = await moduleProgressFor(db, scope, design, { canRetry: partRetryAllowed });
 	const spendStop = spendStopFrom(workflow);
 
 	return {
@@ -390,7 +402,12 @@ async function reviewFindingsFor(db: D1Database, scope: Scope, body: string): Pr
  * small app (one module or no block) — the screen then shows the small-app
  * server/screens parts. Reads the most recent build's modules.
  */
-async function moduleProgressFor(db: D1Database, scope: Scope, design: DesignDoc): Promise<ModuleProgressItem[] | null> {
+async function moduleProgressFor(
+	db: D1Database,
+	scope: Scope,
+	design: DesignDoc,
+	opts: { canRetry?: boolean } = {},
+): Promise<ModuleProgressItem[] | null> {
 	const block = design?.body ? parseArchitectureBlock(design.body) : null;
 	const parsedBlock = block?.ok ? block.block : null;
 	// A small app (0-1 modules) has no board.
@@ -399,7 +416,7 @@ async function moduleProgressFor(db: D1Database, scope: Scope, design: DesignDoc
 	if (buildSeq === null) return null;
 	const rows = await listModules(db, scope.projectId, buildSeq);
 	if (rows.length === 0) return null;
-	return moduleBoardToProgress(rows, parsedBlock);
+	return moduleBoardToProgress(rows, parsedBlock, opts);
 }
 
 /** The newest buildSeq that has module rows for this project, or null when none. */
