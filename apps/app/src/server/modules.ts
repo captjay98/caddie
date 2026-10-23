@@ -65,6 +65,7 @@ export const noopOnModuleFinished: OnModuleFinished = () => {};
 export type DispatchModuleBuilder = (input: {
 	instanceId: string;
 	moduleId: string;
+	buildSeq: number;
 	features: readonly string[];
 	message: string;
 }) => Promise<void> | void;
@@ -149,6 +150,7 @@ export async function startReadyModules(
 		await input.dispatch({
 			instanceId,
 			moduleId: next.moduleId,
+			buildSeq: input.buildSeq,
 			features: input.features(next.moduleId),
 			message: moduleBuilderMessage(next.moduleId),
 		});
