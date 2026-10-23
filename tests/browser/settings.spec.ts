@@ -369,6 +369,22 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 		expect(await page.getByTestId('integrations-health').getByRole('button').count()).toBe(0);
 	});
 
+	test('mobile settings is a grouped list with explicit back navigation and touch-sized controls', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 });
+		await page.goto(`${BASE}/settings`);
+		await expect(page.getByTestId('settings-tabs')).toBeVisible();
+		await expect(page.getByTestId('profile-editor')).toBeHidden();
+		await page.getByTestId('settings-tab-profile').click();
+		await expect(page.getByTestId('settings-tabs')).toBeHidden();
+		await expect(page.getByTestId('profile-editor')).toBeVisible();
+		await expect(page.getByTestId('settings-back')).toBeVisible();
+		const input = page.getByTestId('profile-editor').locator('input.input').first();
+		expect((await input.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+		await page.getByTestId('settings-back').click();
+		await expect(page.getByTestId('settings-tabs')).toBeVisible();
+		await expect(page.getByTestId('profile-editor')).toBeHidden();
+	});
+
 	test('interests: the shared picker and skills save together, without touching the profile fields', async ({ page }) => {
 		await page.goto(`${BASE}/?tab=interests`);
 		await expect(page.getByTestId('settings-title')).toHaveText('Interests');

@@ -259,9 +259,41 @@ test.describe('Check page (U07)', () => {
 		});
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/evidence?project=proj-p`);
+		// Readiness, judging and the proof live in one fold since the focused
+		// workspace (5f3574a); its line names it for a personal project.
+		const fold = page.getByTestId('project-entry-checks');
+		await expect(fold.locator('summary')).toHaveText('Project evidence');
+		await fold.locator('summary').click();
 		await expect(page.getByTestId('check-no-judges')).toContainText('No judges here');
 		await expect(page.locator('section[aria-label="Score it yourself"]')).toHaveCount(0);
 		await expect(page.getByTestId('check-ready-count')).toBeVisible();
+		await context.close();
+	});
+
+	test('a hackathon project started from a proposal (no contest link) is NOT called personal', async ({ browser }) => {
+		// Farmhand (owner 2026-10-23): started from a Nebius x NVIDIA proposal, so
+		// it has no contest link, but the hackathon lookup knows the event. The
+		// page said "This is a personal project" because it only read the link.
+		const context = await browser.newContext();
+		const FROM_PROPOSAL = project('proj-h', 'Farmhand');
+		await stubAccount(context, {
+			project: FROM_PROPOSAL,
+			packages: [{ id: 'pkg-1', title: 'Farmhand' }],
+			detail: { ...PACKAGE_DETAIL, package: { ...PACKAGE_DETAIL.package, projectId: 'proj-h', title: 'Farmhand' } },
+		});
+		await context.route('**/api/projects/proj-h/hackathon', (route) =>
+			json(route, 200, {
+				hackathon: { title: 'Nebius x NVIDIA Global AI Hackathon', url: null, deadline: '2026-10-30', daysLeft: 7, ended: false, eligibility: 'eligible' },
+			}),
+		);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/evidence?project=proj-h`);
+		const fold = page.getByTestId('project-entry-checks');
+		await expect(fold.locator('summary')).toHaveText('Submission readiness, rules & judging');
+		await fold.locator('summary').click();
+		await expect(page.getByTestId('check-judges')).toBeVisible();
+		await expect(page.getByTestId('check-no-judges')).toHaveCount(0);
+		await expect(page.getByText('This is a personal project')).toHaveCount(0);
 		await context.close();
 	});
 
@@ -273,8 +305,10 @@ test.describe('Check page (U07)', () => {
 		);
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/evidence?project=proj-a`);
-		// The drawer renders directly on the page (no fold-in-a-fold): its own
-		// header names it, and with nothing read it shows ONE honest intro.
+		// The drawer sits in the readiness fold (5f3574a) without a second fold
+		// of its own: its header names it, and with nothing read it shows ONE
+		// honest intro.
+		await page.getByTestId('project-entry-checks').locator('summary').click();
 		const drawer = page.getByTestId('evidence-drawer');
 		await expect(drawer).toBeVisible();
 		await expect(drawer).toContainText('What Caddie saw');

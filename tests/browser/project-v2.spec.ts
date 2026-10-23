@@ -223,10 +223,11 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await stubAccount(phone, { workflowPhase: 'planning' });
 		const mobile = await phone.newPage();
 		await mobile.goto(`${BASE}/app/project?project=proj-a`);
-		// On phones the focused head keeps all four steps reachable as a slim,
-		// horizontally-scrollable strip (the focused workspace replaced the old
-		// "Step 1 of 4 · Plan" compact line with the strip itself). The step the
-		// work is on is still the marked active one.
+		// On phones the focused head keeps all four steps reachable as a 2×2
+		// grid (two columns, two rows) — no horizontal scroll, every step
+		// visible (the old 4-across row ran off-screen). The step the work is
+		// on is still the marked active one; the compact one-line view stays
+		// hidden (asserted on desktop above).
 		await expect(mobile.getByTestId('project-tabs')).toBeVisible();
 		await expect(mobile.locator('.project-step')).toHaveCount(4);
 		await expect(mobile.getByTestId('project-tab-plan')).toHaveAttribute('data-active', 'true');
@@ -659,7 +660,7 @@ test.describe('the Plan tab follows the build (plan 5.3)', () => {
 	// what approving means sat in a fold of boxes.
 	const PLAN = { id: 'pdr-follow', projectId: 'proj-a', kind: 'prd', revision: 1, body: '# FarmLog AI\n\n- Log daily feed', bodyHash: 'sha256-follow', createdAt: NOW };
 	const APPROVED = { resourceId: 'pdr-follow', revisionHash: 'sha256-follow', status: 'approved', expiresAt: '2027-01-01T00:00:00Z' };
-	const MEANING = 'Approving lets Caddie build exactly this plan in a private workspace; putting it online or changing real data always asks you first.';
+	const MEANING = 'Caddie builds exactly this plan, privately. It asks you before publishing or changing real data.';
 
 	test('before a decision: as wide as the other tabs, one plain sentence on approving, the plan open to read', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });

@@ -381,7 +381,45 @@ export async function workflowSnapshot(db: D1Database, scope: Scope) {
         designIntent(scope.projectId, design),
       )
     : null;
-  return { workflow, plan, approval, design, designApproval };
+  // Dispatch health (2026-10-23 identity/bootstrap failure): a planning phase
+  // whose parked coordinator handoff is stuck lets the UI show an actionable
+  // error instead of "Caddie is turning your request into a plan" forever. It
+  // is a FAILURE signal, not a progress one: only a pending dispatch whose
+  // operation reads reconciliation-required / failed / cancelled past the
+  // redelivery lease counts, so a handoff that is simply in flight never trips
+  // it. The /experience poll keeps re-sending with the same idempotency key, so
+  // a transient wedge clears itself and this stays false.
+  const dispatchStalled = await planningDispatchStalled(db, workflow);
+  return { workflow, plan, approval, design, designApproval, dispatchStalled };
+}
+
+/**
+ * True when a planning-phase workflow has a parked coordinator handoff that is
+ * no longer merely in flight — its external_operations row is
+ * reconciliation-required / failed / cancel* and older than the redelivery
+ * lease, i.e. re-delivery has been tried and is not converging. Used purely to
+ * drive the UI's failure state; recovery itself still runs on every poll.
+ *
+ * The lease is duplicated as a local const (not imported) because
+ * workflow-dispatch.ts — where REDELIVERY_AFTER_MS lives — imports FROM this
+ * module; importing it back would form a cycle. Keep the two values in step.
+ */
+const DISPATCH_REDELIVERY_LEASE_MS = 2 * 60_000;
+
+async function planningDispatchStalled(db: D1Database, workflow: BuildWorkflow | null): Promise<boolean> {
+  if (!workflow || workflow.phase !== "planning" || !workflow.pendingKey) return false;
+  const rowsFound = await rows(
+    db,
+    'select "status", "updatedAt" from "external_operations" where "operationKey" = ? limit 1',
+    workflow.pendingKey,
+  );
+  const op = rowsFound[0] as { status?: string; updatedAt?: string } | undefined;
+  if (!op) return false;
+  const stalledStatuses = ["reconciliation-required", "failed", "cancel-requested", "cancelled"];
+  if (!stalledStatuses.includes(String(op.status))) return false;
+  // Give at least one redelivery lease before calling it stalled, so a normal
+  // in-flight retry does not flash an error at the user.
+  return Date.parse(String(op.updatedAt)) < Date.now() - DISPATCH_REDELIVERY_LEASE_MS;
 }
 /** Whether this actor already recorded `decision` on this plan or design revision (a re-click). */
 async function decidedBefore(db: D1Database, scope: Scope, revisionId: string, decision: "approved" | "changes") {

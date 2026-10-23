@@ -13,6 +13,11 @@ export interface WorkflowSnapshot {
  previewHasServer?: boolean;
  previewKind?: 'web' | 'flutter';
  importPreview?: ImportPreviewView | null;
+ /** True when a planning handoff to the coordinator has failed to converge
+  * (reconciliation-required past the redelivery lease) — the UI shows an
+  * actionable retry instead of the endless "turning your request into a plan"
+  * placeholder. Server: workflowSnapshot/planningDispatchStalled. */
+ dispatchStalled?: boolean;
 }
 
 export function workflowRefreshMs(snapshot: WorkflowSnapshot | undefined): number {

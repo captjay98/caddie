@@ -50,6 +50,31 @@ import { lookupRunByConversation } from './runs.ts';
 
 const DISPATCH_PROVIDER = 'coordinator-dispatch';
 
+/**
+ * PartyServer's `x-partykit-room` header, carrying the coordinator DO name on
+ * every server-originated coordinator request.
+ *
+ * WHY (2026-10-23 identity/bootstrap failure, proj_506d61…): a coordinator DO
+ * whose stale on-disk ALARM record predates Flue 2.2.2's `__ps_name`
+ * persistence wakes in its alarm handler with `ctx.id.name` undefined and no
+ * `__ps_name` fallback, so the SDK's `.name` getter throws and the DO wedges —
+ * every later conversation read/delivery across the DO boundary then fails and
+ * the parked planning intake never runs (planId stays null, the UI sits on the
+ * plan placeholder). The SDK's own remedy is to "initialize the DO from a
+ * fetch/RPC entry point first so PartyServer can persist the fallback name."
+ *
+ * The browser's Flue client already sends this header via the PartySocket
+ * path; our SERVER self-fetch (workerSelfDeliver/Abort) did not. Adding it
+ * gives the DO its name on the fetch path even if `ctx.id.name` is momentarily
+ * unavailable (SDK index.js:1393 reads it into `#_name`), so `#ensureInitialized`
+ * completes and COMMITS `__ps_name` — the fallback a later cold alarm recovers
+ * from. It is defence-in-depth, not a replacement for name-based addressing:
+ * the route still resolves via `getServerByName`/`idFromName`.
+ */
+function coordinatorRoomHeader(conversationId: string): Record<string, string> {
+	return { 'x-partykit-room': conversationId };
+}
+
 /** How long an unconfirmed delivery is left alone before it is sent again. */
 export const REDELIVERY_AFTER_MS = 2 * 60_000;
 
@@ -233,7 +258,7 @@ export function workerSelfDeliver(
 ): CoordinatorDeliver {
 	return async ({ conversationId, body, idempotencyKey }) => {
 		const url = new URL(`/agents/coordinator/${encodeURIComponent(conversationId)}`, origin);
-		const headers: Record<string, string> = { 'content-type': 'application/json' };
+		const headers: Record<string, string> = { 'content-type': 'application/json', ...coordinatorRoomHeader(conversationId) };
 		if (cookieHeader) headers['cookie'] = cookieHeader;
 		// S07: mark the delivery as server-originated. The guard admits it
 		// without counting it against the judge's message quota; without this
@@ -278,7 +303,7 @@ export function workerSelfAbort(
 ): CoordinatorAbort {
 	return async (conversationId) => {
 		const url = new URL(`/agents/coordinator/${encodeURIComponent(conversationId)}/abort`, origin);
-		const headers: Record<string, string> = {};
+		const headers: Record<string, string> = { ...coordinatorRoomHeader(conversationId) };
 		if (cookieHeader) headers['cookie'] = cookieHeader;
 		const response = await app.fetch(new Request(url.href, { method: 'POST', headers }), env, executionCtx);
 		return response.ok;

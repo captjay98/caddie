@@ -626,26 +626,14 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await page.goto(`${BASE}/app/`);
 		await page.getByTestId('account-menu').click();
 		await expect(page.getByTestId('account-menu-pop')).toBeVisible();
-		await expect(page.getByTestId('account-profile')).toBeVisible();
-		await expect(page.getByTestId('account-usage')).toBeVisible();
-		// Register BEFORE the click so the usage fetch (fired on mount) is stubbed.
-		await context.route('**/api/usage', (route) =>
-			json(route, 200, {
-				payer: { payerId: 'actor-test', limitMinorUnits: 100000, currency: 'USD' },
-				totals: { reservedMinorUnits: 0, settledMinorUnits: 2500, reservations: 1 },
-			}),
-		);
-		await page.getByTestId('account-usage').click();
-		// v2 (U08): the account menu routes to Settings › Spending.
-		await expect(page).toHaveURL(/\/app\/settings\?tab=spending$/);
-		// Usage reads the real budget read model (audit F11/S40): the payer
-		// limit plus reserved/settled totals — no fabricated numbers.
-		await expect(page.getByTestId('usage-panel')).toBeVisible();
-		// Amounts are minor units (cents): 100000 → $1,000.00, 2500 → $25.00 —
-		// never the raw number shown as dollars.
-		await expect(page.getByTestId('usage-limit')).toHaveText('$1,000.00');
-		await expect(page.getByTestId('usage-settled')).toContainText('$25.00');
-		await expect(page.getByTestId('usage-settled')).not.toContainText('2,500');
+		// The account menu was reduced to identity + Settings + Sign out
+		// (docs/evidence/2026-10-23-settings-navigation-refinement.md): profile,
+		// memory, connections and usage all live inside Settings now.
+		await expect(page.getByTestId('account-menu-name')).toBeVisible();
+		await expect(page.getByTestId('account-settings')).toBeVisible();
+		await expect(page.getByTestId('sign-out')).toBeVisible();
+		await page.getByTestId('account-settings').click();
+		await expect(page).toHaveURL(/\/app\/settings(\?|$)/);
 		await context.close();
 	});
 });

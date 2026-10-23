@@ -76,6 +76,7 @@ const TIME_ZONES: readonly string[] = (() => {
 export function Settings(): ReactElement {
 	const search = useSearch({ strict: false }) as { tab?: string; section?: string };
 	const section = sectionFor(search.tab);
+	const navigate = useNavigate();
 	const actor = useSessionActor(true);
 	const profile = useQuery({
 		queryKey: ['profile', actor.data ?? 'pending'],
@@ -112,9 +113,11 @@ export function Settings(): ReactElement {
 		<div className="shell-loading shell-page" data-testid="settings-screen">
 			<SectionFocus section={search.section} />
 			<div className="page-col">
-				<div className="settings-layout">
+				<div className="settings-layout settings-account-layout" data-detail={Boolean(search.tab || search.section)}>
+					<header className="settings-mobile-index"><p className="page-lede">Make Caddie work for you.</p></header>
 					<SettingsRail active={section.id} />
 					<div className="settings-content" data-section={section.id}>
+						<button type="button" className="settings-back" data-testid="settings-back" onClick={() => void navigate({ to: '/settings', search: {} })}>← Back to Settings</button>
 						<header className="settings-head">
 							<p className="kicker" data-tone="action">Settings</p>
 							<h1 className="page-title" data-testid="settings-title">{section.label}</h1>
@@ -135,7 +138,7 @@ export function Settings(): ReactElement {
 	);
 }
 
-/** The grouped section rail: a left column on desktop, one scrolling row on mobile. */
+/** The grouped section rail: a left column on desktop, a grouped section list on mobile. */
 function SettingsRail({ active }: { active: SettingsTab }): ReactElement {
 	const navigate = useNavigate();
 	return (
@@ -152,7 +155,7 @@ function SettingsRail({ active }: { active: SettingsTab }): ReactElement {
 							aria-current={active === s.id ? 'page' : undefined}
 							onClick={() => void navigate({ to: '/settings', search: { tab: s.id } })}
 						>
-							{s.label}
+							{s.label}<span className="settings-section-chevron" aria-hidden="true">›</span>
 						</button>
 					))}
 				</div>

@@ -122,8 +122,8 @@ export function JudgeScorecard(props: { projectId: string; apiBase?: string }): 
 					extractionVersion: 'unavailable',
 				},
 			);
-			setAssessment(assessmentPayload.assessment);
-			setScorecards(scorecardsPayload.scorecards);
+			setAssessment(assessmentPayload.assessment ?? []);
+			setScorecards(scorecardsPayload.scorecards ?? []);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
 		} finally {

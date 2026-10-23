@@ -138,3 +138,79 @@ documented maintenance tax.
   schemas have no `.parse` methods — use standalone `v.parse(schema, value)`;
   `v.isoTimestamp()` accepts millisecond-precision UTC, `v.isoDateTime()`
   does not.
+
+## DO identity / bootstrap: the stale-alarm wedge (2026-10-23)
+
+**Symptom.** A project's workflow sat in `planning` with `planId = null`; the
+UI showed "Caddie is turning your request into a plan" indefinitely. The local
+server logged, on every `/experience` poll (~every 3 s):
+
+```
+[flue] agent "Coordinator" instance "conv_…" conversation read failed across the DO boundary
+  caused by: Attempting to read .name on FlueCoordinatorAgent, but this.ctx.id.name
+  is not set and no __ps_name fallback record is available. … If this happens in an
+  alarm handler firing on a stale alarm record, initialize the DO from a fetch/RPC
+  entry point first so PartyServer can persist the fallback name.
+```
+
+**Root cause (traced, not guessed).** The coordinator DO is a PartyServer/Flue
+`Server`. Its name resolves from `ctx.id.name` (populated when addressed via
+`idFromName`/`getByName`) or, as a fallback, a `__ps_name` storage record that
+`#ensureInitialized()` writes the first time the DO starts with a name present.
+An **alarm** has no request and no header; on current workerd it still sees
+`ctx.id.name`, but an alarm record written by an **older workerd that did not
+persist `name` into the alarm record** fires with `ctx.id.name` undefined. If
+`__ps_name` was never committed (the DO never completed a named init), the SDK's
+`.name` getter throws inside the alarm handler. The DO is then wedged:
+`getServerByName` → `retryDurableObjectOperation` → `.name` keeps throwing, so
+every conversation read AND every delivery across the DO boundary fails. The
+parked planning intake (`build_workflows.pendingKey`) never runs; the
+`/experience` recovery poll re-delivers every lease but hits the same wedge.
+
+**Why caddie cannot reach the DO directly.** Only `PREVIEW_DB` is bound as a DO
+namespace (`wrangler.jsonc`). `FlueCoordinatorAgent` is declared in migrations
+but has no env binding — the only path to it is the HTTP route
+`/agents/coordinator/:conversationId` (Flue's `createAgentRouter`). So the fix
+and any recovery must go through that route.
+
+**Fix (defence-in-depth, name-based addressing preserved).** The browser's Flue
+client sends PartyServer's `x-partykit-room` header via its PartySocket; our
+SERVER self-fetch (`workerSelfDeliver` / `workerSelfAbort` in
+`server/workflow-dispatch.ts`) did not. We now send it
+(`coordinatorRoomHeader`). The DO can then resolve its name on the fetch path
+even when `ctx.id.name` is momentarily unavailable (SDK reads the header into
+`#_name`), so `#ensureInitialized()` completes and COMMITS `__ps_name` — the
+fallback a later cold alarm recovers from. The route still resolves via
+`getServerByName`/`idFromName`; the header is belt-and-braces.
+
+**UI surfaces the failure.** `workflowSnapshot` now returns `dispatchStalled`
+(`build-workflow.ts/planningDispatchStalled`): true only when a `planning`
+phase's parked handoff is `reconciliation-required`/failed/cancel* AND older
+than one redelivery lease (so an in-flight retry never flashes an error). The
+plan view (`ProjectWorkflow.tsx`) then shows an actionable Retry — which
+re-polls and re-runs server recovery with the SAME idempotency key, so a retry
+can never start a second plan or charge — instead of the endless placeholder.
+
+**Recovery of a wedged DO (data-preserving).** Restart the worker process to
+drop the in-memory wedged instance; the next named fetch runs `setName()` in
+`blockConcurrencyWhile` and commits `__ps_name` BEFORE the stale alarm handler
+runs, so the alarm then recovers its name and the DO drains the parked intake.
+This is the SDK's own documented remedy ("initialize the DO from a fetch/RPC
+entry point first"), NOT a state wipe: the project, run, conversation and the
+parked `pendingKey` are untouched, and the idempotency key means no duplicate
+submission or charge. In production (no process restart), the committed
+`__ps_name` from a normal named fetch prevents the wedge from forming.
+
+**Evidence classification.**
+- LOCAL VERIFIED: the single stuck project recovered on this dev instance after
+  the restart (`phase: planning→review`, `planId` became a real `pdr_…`,
+  `pendingKey` cleared, zero identity errors after). Regression tests
+  (`workflow-dispatch.test.ts` x-partykit-room on self-deliver/abort;
+  `build-workflow.test.ts` dispatchStalled true-after-lease / false-in-flight /
+  false-no-op) pass under `bun test`.
+- NOT live-verified here: the production coordinator DO was not exercised (no
+  deploy was part of this fix). The production argument is by construction (the
+  header makes every server fetch persist `__ps_name`), not by a live receipt.
+- Migrations 0040–0043 were applied to the LOCAL D1 only
+  (`wrangler d1 migrations apply caddie --local`), preserving existing data; the
+  running instance had been at 0039.

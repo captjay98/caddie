@@ -150,33 +150,33 @@ export function ProjectTabs(props: {
 
 	return (
 		<header className="project-head focused-project-head" data-testid="project-header">
-			<Link to="/projects" search={{}} className="project-back"><Icon name="arrowLeft" title="" /> Projects</Link>
+			{/* One title row (owner 2026-10-23): back arrow, name, Settings. The
+			    arrow sits beside the name instead of taking a row of its own, and
+			    everything below starts at the same left edge as the page. */}
 			<div className="project-head-title">
-				<span className="project-head-text">
-					<Link
-						to="/project"
-						className="project-head-name"
-						data-testid="project-head-name"
-						search={(prev: Record<string, unknown>) => ({ ...prev })}
-					>
-						{project.name}
-					</Link>
-					<span className="project-head-for" data-testid="project-head-for" title={project.description ?? undefined}>
-						{idea ?? (project.contestUrl ? 'For the linked hackathon' : 'A personal project')}
-					</span>
-				</span>
-				<span className="project-head-side">
-					<Link
-						to="/project/settings"
-						className="btn-ghost project-head-settings"
-						data-testid="project-settings-gear"
-						search={(prev: Record<string, unknown>) => ({ ...prev })}
-					>
-						<Icon name="settings" title="" />
-						<span>Settings</span>
-					</Link>
-				</span>
+				<Link to="/projects" search={{}} className="project-back" aria-label="Back to Projects"><Icon name="arrowLeft" title="" /></Link>
+				<Link
+					to="/project"
+					className="project-head-name"
+					data-testid="project-head-name"
+					search={(prev: Record<string, unknown>) => ({ ...prev })}
+				>
+					{project.name}
+				</Link>
+				<Link
+					to="/project/settings"
+					className="btn-ghost project-head-settings"
+					data-testid="project-settings-gear"
+					aria-label="Project settings"
+					search={(prev: Record<string, unknown>) => ({ ...prev })}
+				>
+					<Icon name="settings" title="" />
+					<span>Settings</span>
+				</Link>
 			</div>
+			<p className="project-head-for" data-testid="project-head-for" title={project.description ?? undefined}>
+				{idea ?? (project.contestUrl ? 'For the linked hackathon' : 'A personal project')}
+			</p>
 			{chips.length || showRoutineDeadline ? (
 				<div className="project-head-chips" data-testid="project-head-chips">
 					{chips.map((chip) =>

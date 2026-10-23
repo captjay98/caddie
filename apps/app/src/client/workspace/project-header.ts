@@ -14,10 +14,12 @@ export interface HeaderChip {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** "Oct 30" from an ISO date, without timezone drift. */
+/** "Oct 30" from an ISO date or timestamp, without timezone drift. */
 function shortDate(iso: string): string {
-	const [, m, d] = iso.split('-').map(Number);
-	return m && d ? `${MONTHS[m - 1]} ${d}` : iso;
+	const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+	const m = match ? Number(match[2]) : 0;
+	const d = match ? Number(match[3]) : 0;
+	return m >= 1 && m <= 12 && d ? `${MONTHS[m - 1]} ${d}` : iso;
 }
 
 export function deadlineText(hackathon: Pick<ProjectHackathonView, 'deadline' | 'daysLeft' | 'ended'>): string | null {

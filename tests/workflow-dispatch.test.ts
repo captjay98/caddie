@@ -399,10 +399,10 @@ describe("workerSelfDeliver — the real self-fetch boundary", () => {
   // undefined, the delivery 500'd and every accepted proposal / approval sat in
   // reconciliation-required with the UI stuck on "turning your request into a plan".
   test("forwards THIS request's Worker env + execution context to the coordinator self-request", async () => {
-    const seen: { url: string; env: unknown; ctx: unknown; body: string; cookie: string | null }[] = [];
+    const seen: { url: string; env: unknown; ctx: unknown; body: string; cookie: string | null; room: string | null }[] = [];
     const app = {
       async fetch(request: Request, env?: unknown, ctx?: unknown) {
-        seen.push({ url: request.url, env, ctx, body: await request.text(), cookie: request.headers.get("cookie") });
+        seen.push({ url: request.url, env, ctx, body: await request.text(), cookie: request.headers.get("cookie"), room: request.headers.get("x-partykit-room") });
         return new Response("{}", { status: env ? 200 : 500 });
       },
     };
@@ -416,6 +416,14 @@ describe("workerSelfDeliver — the real self-fetch boundary", () => {
     expect(seen[0]!.ctx).toBe(ctx);
     expect(seen[0]!.url).toBe("http://localhost:5176/agents/coordinator/conv_1");
     expect(seen[0]!.cookie).toBe("session=abc");
+    // Regression (2026-10-23 identity/bootstrap failure, proj_506d61…): the
+    // server self-fetch now carries PartyServer's x-partykit-room header so the
+    // coordinator DO can resolve its name on the fetch path and commit the
+    // __ps_name fallback. Without it, a DO whose stale alarm record predates
+    // Flue 2.2.2's name persistence wedged (ctx.id.name undefined + no __ps_name),
+    // and every delivery/read across the DO boundary failed — the planning
+    // intake never ran and the UI sat on "turning your request into a plan".
+    expect(seen[0]!.room).toBe("conv_1");
     // The FLAT shape @flue/sdk send() posts (message fields + idempotencyKey
     // siblings). The nested { message: {...} } shape this test once pinned was
     // the second cause of the stuck "Planning your app" card.
@@ -428,17 +436,17 @@ describe("one Stop for every Stop button: the workflow, then the running turn (p
   // chat's "Stop build" also aborted the running turn from the browser. The
   // server now does both for every caller.
   test("workerSelfAbort makes the browser's own abort request, with this request's cookie and bindings", async () => {
-    const seen: { url: string; method: string; env: unknown; cookie: string | null; body: string }[] = [];
+    const seen: { url: string; method: string; env: unknown; cookie: string | null; body: string; room: string | null }[] = [];
     const app = {
       async fetch(request: Request, env?: unknown) {
-        seen.push({ url: request.url, method: request.method, env, cookie: request.headers.get("cookie"), body: await request.text() });
+        seen.push({ url: request.url, method: request.method, env, cookie: request.headers.get("cookie"), body: await request.text(), room: request.headers.get("x-partykit-room") });
         return new Response("{}", { status: 200 });
       },
     };
     const env = { DB: {} };
     const abort = workerSelfAbort(app, "http://localhost:5176", "session=abc", env);
     expect(await abort("conv_1")).toBe(true);
-    expect(seen).toEqual([{ url: "http://localhost:5176/agents/coordinator/conv_1/abort", method: "POST", env, cookie: "session=abc", body: "" }]);
+    expect(seen).toEqual([{ url: "http://localhost:5176/agents/coordinator/conv_1/abort", method: "POST", env, cookie: "session=abc", body: "", room: "conv_1" }]);
   });
 
   test("stopBuild marks the build stopped before it stops the build's turn, and a failed abort keeps the stop", async () => {

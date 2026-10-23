@@ -31,7 +31,7 @@ describe('step wording', () => {
 	});
 	test('a personal project says when Check happens without mentioning submission', () => {
 		const steps = workflowSteps('review', { personal: true });
-		expect(steps.plan).toEqual({ text: 'Ready for you to review', tone: 'needs' });
+		expect(steps.plan).toEqual({ text: 'Ready to review', tone: 'needs' });
 		expect(steps.check).toEqual({ text: 'After it’s built', tone: 'neutral' });
 		expect(steps.submission).toEqual({ text: 'Optional', tone: 'neutral' });
 	});

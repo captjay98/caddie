@@ -47,7 +47,7 @@ function secondaryLabel(design: ReturnType<typeof cardDesign>): string | null {
 		case 'build': return 'Stop build';
 		case 'repair': return 'See what happened';
 		case 'preview': return 'Ask for changes';
-		case 'deadline': return 'View deadline source';
+		case 'deadline': return 'Deadline source';
 		case 'opportunity': return 'Save for later';
 		default: return null;
 	}
@@ -652,6 +652,8 @@ export function AccountBriefV2(props: {
 	cards: readonly DecisionCardType[];
 	projects: ReadonlyArray<{ id: string; name: string; kind?: string }>;
 	asOf?: string;
+	/** The enclosing Brief page owns the unified header. */
+	hideHeader?: boolean;
 	feedPending?: boolean;
 	feedError?: unknown;
 	hasBuildProjects: boolean;
@@ -743,7 +745,7 @@ export function AccountBriefV2(props: {
 
 	return (
 		<div data-testid="account-brief-lane">
-			<div className="brief-v2-head" data-testid="brief-head">
+			{!props.hideHeader ? <div className="brief-v2-head" data-testid="brief-head">
 				<span className="brief-head-count" data-testid="brief-count">
 					{cards.length} update{cards.length === 1 ? '' : 's'}
 					{waitingCount > 0 ? <span className="brief-head-waiting"> · {waitingCount} waiting on you</span> : null}
@@ -760,7 +762,7 @@ export function AccountBriefV2(props: {
 						</button>
 					) : null}
 				</span>
-			</div>
+			</div> : null}
 			<div className="brief-v2">
 				{bigCards.map((card) => (
 					<DecisionCardView

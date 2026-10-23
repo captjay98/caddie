@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
 import { formatTimeAgo } from '@caddie/ui/time';
 import { authorityLabel, authorityRank, isSourceAuthority } from '../../server/evidence/authority.ts';
-import { StatePanel } from '../states.tsx';
+import { StatePanel, failureKind } from '../states.tsx';
+import { readableFailure } from '../api.ts';
 import { CopyableId } from '../copyable.tsx';
 
 /**
@@ -106,12 +107,11 @@ function SectionStates(props: {
 	if (props.error) {
 		return (
 			<StatePanel
-				flat
-				kind="error"
-				title="This section failed to load"
-				detail={props.error instanceof Error ? props.error.message : undefined}
+				compact
+				kind={failureKind(props.error)}
+				title="This part didn’t load."
+				detail={readableFailure(props.error)}
 				onRetry={props.onRetry}
-				retryLabel="Retry this section"
 			/>
 		);
 	}
@@ -172,36 +172,49 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 		<section className="evidence-panel settings-stack" aria-label="Evidence inspector" data-testid="evidence-drawer">
 			<div className="r-section-head">
 				<div>
-					<p className="kicker" data-tone="action">
-						PROVE
-					</p>
 					<h2 className="ev-title">What Caddie saw</h2>
-					<p className="page-lede">
-						Everything Caddie claims about this hackathon or your project, it saw somewhere — and it
-						kept a copy. Each line below links back to exactly what it read, so nothing here is a guess.
-						If a page refused to load, you'll see that too, with the reason.
-					</p>
+					<p className="page-lede">Every fact Caddie uses comes from a page it read, and links back to it.</p>
 				</div>
 				<span className="count">
 					{sourceList.length} pages read · {activeClaims.length} things found · {conflicts.length} still unsettled
 				</span>
 			</div>
 
-			{nothingAtAll ? (
+			{/* One outage, one line: when all three reads fail it is the
+			    connection, not three separate problems (owner 2026-10-23). */}
+			{sources.error && claims.error && surveys.error ? (
+				<StatePanel
+					compact
+					kind={failureKind(sources.error)}
+					title="Couldn’t load what Caddie read."
+					detail={readableFailure(sources.error)}
+					onRetry={() => {
+						retry('sources');
+						retry('claims');
+						retry('surveys');
+					}}
+				/>
+			) : nothingAtAll ? (
 				<StatePanel
 					flat
 					kind="empty"
 					title="Nothing yet — Caddie hasn't read anything for this project"
-					detail="As soon as Caddie reads a hackathon's rules page, your repo, or any page it builds on, it shows up here: the facts it found, the pages it read, and whether each page opened cleanly — each with a link back to the exact source, so nothing is a guess."
+					detail="When Caddie reads the rules page or your repo, the facts it found and the pages it read appear here, each linked to its source."
 				/>
 			) : (
 				<>
+				{/* A section shows only when it has something (or is loading or
+				    failed): an empty "Still unsettled" heading over nothing is
+				    noise, and the count line above already says 0. */}
+				{surveys.isPending || surveys.error || conflicts.length > 0 || winners.length > 0 ? (
 				<section className="evidence-section" data-testid="evidence-conflicts-section">
 					<h3 className="ev-head">Still unsettled</h3>
-					<p className="state-detail">
-						Two sources Caddie trusts equally said different things. It keeps both instead of quietly
-						picking one — resolve it in the chat when it matters.
-					</p>
+					{conflicts.length > 0 ? (
+						<p className="state-detail">
+							Two sources Caddie trusts equally said different things. It keeps both instead of quietly
+							picking one — resolve it in the chat when it matters.
+						</p>
+					) : null}
 					<SectionStates
 					pending={surveys.isPending}
 					empty={conflicts.length === 0 && winners.length === 0}
@@ -246,7 +259,9 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 					</>
 				</SectionStates>
 			</section>
+				) : null}
 
+				{claims.isPending || claims.error || claimList.length > 0 ? (
 			<section className="evidence-section" data-testid="evidence-claims-section">
 				<h3 className="ev-head">What Caddie found</h3>
 				<SectionStates
@@ -282,9 +297,11 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 					</>
 				</SectionStates>
 			</section>
+				) : null}
 
+				{sources.isPending || sources.error || sourceList.length > 0 ? (
 			<section className="evidence-section" data-testid="evidence-sources-section">
-				<h3 className="ev-head">Pages Caddie read — and whether they still open</h3>
+				<h3 className="ev-head">Pages Caddie read</h3>
 				<SectionStates
 					pending={sources.isPending}
 					empty={sourceList.length === 0}
@@ -322,6 +339,7 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 					</div>
 					</SectionStates>
 			</section>
+				) : null}
 				</>
 			)}
 		</section>

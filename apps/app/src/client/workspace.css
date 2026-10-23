@@ -169,6 +169,12 @@ a {
 /* A link drawn as a button reads as a button: no underline. */
 a.btn-key,
 a.btn-ghost {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4em;
+	text-align: center;
+	vertical-align: middle;
 	text-decoration: none;
 }
 
@@ -1296,6 +1302,18 @@ a.btn-ghost.topbar-nav-link {
 	line-height: 1.5;
 }
 
+/* Dispatch-failure state (planning handoff did not converge): readable on
+   every theme via caddie's own tokens, never a fixed palette. */
+.state-detail--error {
+	color: var(--color-text);
+	border: 1px solid var(--color-danger);
+	border-radius: 10px;
+	padding: 0.7rem 0.85rem;
+	background: color-mix(in srgb, var(--color-danger) 8%, transparent);
+}
+.state-detail--error p { margin: 0 0 0.6rem; }
+.state-detail--error .btn-ghost { margin-top: 0; }
+
 .state-panel .btn-ghost {
 	margin-top: 0.7rem;
 }
@@ -1687,6 +1705,11 @@ a.btn-ghost.topbar-nav-link {
 	flex-wrap: wrap;
 	align-items: center;
 	gap: 0.5rem;
+}
+
+@media (max-width: 600px) {
+	.decision-card[data-design='deadline'] .actions { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); align-items: stretch; gap: 8px; }
+	.decision-card[data-design='deadline'] .actions > button { min-width: 0; width: 100%; min-height: 48px; padding: 10px 8px; font-size: 13px; line-height: 1.3; white-space: normal; }
 }
 
 /* Long action labels must wrap inside the card — a nowrap link forces the
@@ -2473,7 +2496,7 @@ a.btn-ghost.topbar-nav-link {
 	color: var(--color-ok);
 	border-color: color-mix(in srgb, var(--color-ok) 30%, transparent);
 }
-.hk-chip-elig[data-eligibility='ineligible'] {
+.hk-chip-elig[data-eligibility='ineligible'], .hk-chip-elig[data-eligibility='closed'] {
 	background: color-mix(in srgb, var(--color-danger) 12%, transparent);
 	color: var(--color-danger);
 	border-color: color-mix(in srgb, var(--color-danger) 28%, transparent);
@@ -3842,6 +3865,29 @@ a.btn-ghost.topbar-nav-link {
 	display: grid;
 	gap: 0.8rem;
 	padding: 1.2rem;
+}
+
+.plan-change-dialog {
+	width: min(560px, 100%);
+	max-height: calc(100dvh - 2rem - var(--safe-top) - var(--safe-bottom));
+	overflow-y: auto;
+	padding: 24px;
+	gap: 0;
+	border-radius: 18px;
+}
+.plan-change-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+.plan-change-heading h3 { margin: 0; font-size: 20px; line-height: 1.3; font-weight: 650; letter-spacing: -.02em; }
+.plan-change-close { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 12px; background: transparent; color: var(--color-muted); font: inherit; font-size: 26px; cursor: pointer; }
+.plan-change-close:hover { background: var(--color-panel); color: var(--color-bright); }
+.plan-change-field { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-width: 0; margin: 22px 0 0; font-weight: 550; }
+.plan-change-field textarea.input { display: block; width: 100%; min-width: 0; min-height: 180px; max-height: 45dvh; padding: 14px; border-radius: 13px; font-family: var(--font-ui); font-size: 16px; line-height: 1.5; font-weight: 400; resize: vertical; }
+.plan-change-actions { justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.plan-change-dialog .plan-change-actions > button { min-height: 48px; padding-inline: 20px; }
+@media (max-width: 560px) {
+	.plan-change-dialog { padding: 18px; }
+	.plan-change-field { margin-top: 18px; }
+	.plan-change-actions { display: grid; grid-template-columns: 1fr 1fr; }
+	.plan-change-actions > button { width: 100%; }
 }
 
 .state-chip {
@@ -5420,6 +5466,40 @@ a.btn-ghost.topbar-nav-link {
 	align-items: center;
 }
 
+/* Date-first personal greeting; feed controls belong with the cards. */
+.home-head--unified { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 18px; padding: 0; margin-bottom: 26px; border: 0; }
+.home-head-calendar { display: flex; flex-direction: column; align-items: center; justify-content: center; align-self: stretch; padding-right: 12px; min-height: 100px; border-right: 1px solid var(--color-line); color: var(--color-muted); font-size: 11px; }
+.home-head-calendar strong { font-size: 34px; line-height: 1.2; font-weight: 600; color: var(--color-bright); }
+.home-head-leading { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.home-head-leading > div { min-width: 0; }
+.home-head--unified .home-head-title { display: block; font-size: 21px; line-height: 1.3; margin: 0; overflow-wrap: anywhere; }
+.home-head-greeting { color: var(--color-muted); font-size: 13px; margin: 0 0 3px; }
+.home-head-context { color: var(--color-muted); font-size: 13px; line-height: 1.5; margin: 10px 0 0; }
+.brief-feed-toolbar { width: 100%; max-width: 640px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 2px 10px; }
+.home-head-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 10px; min-width: 0; color: var(--color-muted); font-size: 12px; }
+.home-head-updates { display: inline-flex; align-items: center; gap: 7px; }
+.home-head-new-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--color-action); flex: none; }
+.brief-feed-toolbar .brief-head-asof { font-size: 11px; }
+.brief-feed-toolbar .brief-head-markread { flex: none; min-height: 44px; padding: 8px 0; font-size: 12px; color: var(--color-muted); white-space: nowrap; }
+.brief-feed-toolbar .brief-head-markread:hover:enabled { color: var(--color-action); }
+.brief-feed-toolbar .brief-head-markread:disabled { cursor: default; opacity: .65; }
+.home-head--unified .mascot[data-state='needs'] .m-all { animation-duration: 4s; }
+.home-head--unified .mascot[data-state='working'] .m-all { animation-duration: 2.4s; }
+.home-head--unified .mascot[data-state='working'] .m-flag { animation-duration: 1.5s; }
+.home-head--unified .mascot[data-state='done'] .m-all { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+	.home-head--unified .mascot * { animation: none !important; transition: none !important; }
+}
+@media (max-width: 560px) {
+	.home-head.home-head--unified { grid-template-columns: 53px minmax(0, 1fr); gap: 14px; padding: 0; margin-bottom: 22px; }
+	.home-head-calendar { padding-right: 10px; min-height: 110px; }
+	.home-head--unified .home-head-title { font-size: 19px; }
+	.home-head-leading { gap: 8px; flex-wrap: wrap; }
+	.home-head--unified .home-head-mascot .mascot { width: 36px !important; height: 36px !important; }
+	.brief-feed-toolbar { padding-bottom: 8px; gap: 8px; }
+	.brief-feed-toolbar .home-head-meta { flex-direction: column; align-items: flex-start; gap: 1px; }
+}
+
 /* Mobile: the mascot and status disc shrink, the title scales down, and the
    long caught-up sub-line wraps instead of being clipped. Tested at 360px. */
 @media (max-width: 560px) {
@@ -6800,7 +6880,11 @@ body.conv-resizing * {
 .project-row-actions { flex-wrap: wrap; }
 .project-row-actions a { text-decoration: none; }
 .project-row-actions .btn-key, .project-row-actions .btn-ghost { min-height: 44px; }
-.plan-review-details > summary { cursor: pointer; }
+.plan-review-details { border:0; background:none; border-radius:0; box-shadow:none; padding:0; }
+.plan-review-details > summary { cursor: pointer; list-style:none; font-size:13.5px; font-weight:600; color:var(--color-bright); padding:4px 0; margin-bottom:6px; }
+.plan-review-details > summary::-webkit-details-marker { display:none; }
+.plan-review-details > summary::before { content:"⌄ "; color:var(--color-muted); }
+.plan-review-details[open] > summary::before { content:"⌃ "; color:var(--color-muted); }
 .plan-body .md-body { font-size: 15px; }
 .plan-body .md-body table { display: block; overflow-x: auto; max-width: 100%; }
 
@@ -8516,9 +8600,13 @@ mark {
    stays in the title tooltip — never the whole intake brief on the face), one
    plain detail line, then "Updated N ago" and a single action. */
 .project-card {
-	gap: 0.45rem;
+	gap: 0.6rem;
 }
+/* Card B (owner 2026-10-23): title row = letter tile + name, with the state
+   pill. The name/pill share a column that can shrink beside the tile. */
 .project-card-head {
+	flex: 1;
+	min-width: 0;
 	display: flex;
 	align-items: flex-start;
 	justify-content: space-between;
@@ -8538,6 +8626,8 @@ mark {
 	background: currentColor;
 	animation: pulse 1.2s ease-in-out infinite;
 }
+/* Purpose sits FULL WIDTH beneath the title row — no longer squeezed into a
+   narrow column beside the icon. */
 .project-card-purpose {
 	margin: 0;
 	font-size: 14px;
@@ -8553,19 +8643,33 @@ mark {
 	font-size: 13px;
 	color: var(--color-muted);
 }
+/* Status footer: a top-bordered, slightly-elevated strip — hackathon/deadline
+   (or "Updated N ago") on the left, the one primary action on the right. */
 .project-card-foot {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
 	gap: 0.75rem;
-	margin-top: 0.35rem;
+	margin: 0.15rem -1.1rem -1.1rem;
+	padding: 0.75rem 1.1rem;
+	border-top: 1px solid var(--color-line-soft);
+	border-radius: 0 0 10px 10px;
+	background: var(--color-raised);
+}
+.project-card-foot-meta {
+	min-width: 0;
+	display: grid;
+	gap: 0.2rem;
 }
 .project-card-updated {
-	font-size: 12px;
+	font-size: 11px;
 	color: var(--color-muted);
+	opacity: 0.85;
 }
-/* Variants B + C (plan 5.7): the app's letter tile beside the name, the
-   hackathon and its deadline, and the four steps with done / now / stopped. */
+.project-card-foot .btn-key {
+	flex: none;
+}
+/* Title row: the app's letter tile beside the name + pill column. */
 .project-card-main {
 	display: flex;
 	align-items: flex-start;
@@ -8583,12 +8687,6 @@ mark {
 	font-weight: 700;
 	letter-spacing: 0;
 }
-.project-card-body {
-	flex: 1;
-	min-width: 0;
-	display: grid;
-	gap: 0.3rem;
-}
 .project-card-contest {
 	display: flex;
 	align-items: center;
@@ -8597,10 +8695,17 @@ mark {
 	margin: 0;
 	font-size: 12.5px;
 	color: var(--color-muted);
+	min-width: 0;
+	overflow-wrap: anywhere;
 }
 .project-card-due {
 	color: var(--color-warn);
 	white-space: nowrap;
+	background: color-mix(in srgb, var(--color-warn) 14%, transparent);
+	border-radius: 999px;
+	padding: 1px 8px;
+	font-size: 11.5px;
+	font-weight: 600;
 }
 .project-journey {
 	list-style: none;
@@ -9292,11 +9397,22 @@ mark {
 .discovery-panel .disc-event-summary { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 
 /* Owner-approved hybrid: compact browsing cards, reading header, detail tabs. */
-.discovery-panel .disc-list { align-items:start; gap:12px; }
+.discovery-panel .disc-list { align-items:stretch; grid-auto-rows:1fr; gap:12px; }
 .discovery-panel .disc-row { padding:12px 14px; cursor:pointer; }
 .discovery-panel .disc-row-main { display:block; }
 .discovery-panel .disc-event-host { margin:0 0 5px; font-size:.7rem; }
-.discovery-panel .disc-row-title { font-size:1rem; line-height:1.35; font-weight:600; }
+.discovery-panel .disc-row-title {
+	font-size:1rem;
+	line-height:1.35;
+	font-weight:600;
+	/* Keep short and long titles in the same two-line slot. */
+	display:-webkit-box;
+	-webkit-box-orient:vertical;
+	-webkit-line-clamp:2;
+	line-clamp:2;
+	height:2.7em;
+	overflow:hidden;
+}
 .discovery-panel .disc-facts { display:flex; flex-wrap:wrap; gap:6px 14px; border:0; margin:7px 0 0; padding:0; }
 .discovery-panel .disc-fact { flex-direction:row; align-items:baseline; gap:5px; }
 .discovery-panel .disc-fact-label { font-family:inherit; text-transform:none; letter-spacing:0; font-size:.78rem; }
@@ -9410,42 +9526,72 @@ mark {
 /* Focused project workspace — approved 2026-10-22. One work surface;
    compact contextual updates use the same state without embedding it twice. */
 .project-card { border-radius:13px; padding:18px; gap:12px; }
-.project-card-main { gap:12px; }
-.project-card-head { align-items:flex-start; gap:10px; }
+.project-card-main { gap:12px; align-items:center; }
+.project-card-head { align-items:center; gap:10px; }
 .project-card-head .row-title { font-size:17px; line-height:1.35; overflow-wrap:anywhere; min-height:44px; display:flex; align-items:center; }
-.project-card-tile { width:36px; height:36px; border-radius:11px; margin-top:4px; }
+.project-card-tile { width:36px; height:36px; border-radius:11px; }
 .project-card .project-card-pill { border:0; background:none; box-shadow:none; padding:4px 0; border-radius:0; white-space:normal; justify-content:flex-end; font-size:12px; line-height:1.4; max-width:48%; text-align:right; }
-.project-card-purpose { font-size:14px; line-height:1.55; margin:4px 0 0; -webkit-line-clamp:2; }
-.project-card-contest { font-size:12px; line-height:1.4; margin:4px 0; }
+.project-card-purpose { font-size:14px; line-height:1.55; margin:0; -webkit-line-clamp:2; }
+.project-card-contest { font-size:12px; line-height:1.4; margin:0; }
 .project-card-detail { font-size:13px; line-height:1.5; color:var(--color-muted); margin:0; }
-.project-card-foot { border-top:0; padding-top:0; gap:12px; }
-.project-card-foot .btn-key { min-height:44px; font-size:13px; padding:9px 14px; }
-.project-back { display:inline-flex; align-items:center; gap:6px; color:var(--color-muted); min-height:44px; text-decoration:none; font-size:13px; align-self:start; }
+.project-card-foot { margin:2px -18px -18px; padding:12px 18px; border-top:1px solid var(--color-line-soft); border-radius:0 0 13px 13px; background:var(--color-raised); gap:12px; }
+.project-card-foot .btn-key { min-height:38px; font-size:13px; padding:7px 14px; background:transparent; color:var(--color-action); border:1px solid color-mix(in srgb, var(--color-action) 45%, var(--color-line)); box-shadow:none; }
+.project-card-foot .btn-key:hover { background:color-mix(in srgb, var(--color-action) 10%, transparent); border-color:var(--color-action); }
+.project-back { flex:none; display:inline-grid; place-items:center; width:32px; height:32px; margin-left:-7px; color:var(--color-muted); text-decoration:none; border-radius:9px; }
+.project-back:hover { background:var(--color-raised); color:var(--color-bright); }
 .focused-project-page { gap:22px; }
-.focused-project-head { padding:0; border:0; background:none; gap:12px; }
-.focused-project-head .project-head-name { font-size:24px; line-height:1.25; letter-spacing:-.025em; }
-.focused-project-head .project-head-for { line-height:1.5; font-size:14px; margin-top:6px; }
-.focused-project-head .project-head-settings { min-width:44px; min-height:44px; }
-.focused-project-head .project-head-chips { gap:8px 14px; }
+.focused-project-head { padding:0; border:0; background:none; gap:10px; }
+/* One title row: [<-] Name ........ [Settings]. The arrow's glyph is pulled
+   back so it lines up with the text below it (same left edge top to bottom). */
+.focused-project-head .project-head-title { display:flex; align-items:center; gap:6px; flex-wrap:nowrap; }
+.focused-project-head .project-head-name { flex:1; min-width:0; font-size:24px; line-height:1.25; letter-spacing:-.025em; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+/* Two lines at most, clipped. (A one-line clamp with overflow:visible drew
+   the rest of a long idea OVER the meta row below it.) */
+.focused-project-head .project-head-for { margin:0; max-width:none; font-size:14px; line-height:1.5; white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.focused-project-head .project-head-settings { flex:none; display:inline-flex; align-items:center; justify-content:center; gap:6px; min-width:44px; min-height:44px; padding:0 14px; }
+.focused-project-head .project-head-chips { gap:4px 14px; margin:0; }
 .focused-project-head .project-chip { border:0; padding:0; border-radius:0; background:none; font-size:12px; line-height:1.5; }
 .focused-project-head .project-steps-compact { display:none; }
 .focused-project-head .project-steps { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; overflow:visible; padding:0; border-bottom:1px solid var(--color-line); }
-.focused-project-head .project-step { border:0; border-radius:0; min-width:0; min-height:48px; padding:10px 4px; background:none; box-shadow:none; display:flex; justify-content:center; align-items:center; position:relative; }
-.focused-project-head .project-step.current { color:var(--color-action); background:none; }
-.focused-project-head .project-step.current::after { content:''; height:2px; position:absolute; inset-inline:10px; bottom:-1px; background:var(--color-action); }
-.focused-project-head .step-top { justify-content:center; font-size:13px; gap:6px; }
+/* Carded step rail (owner 2026-10-23 "full carded frame"): the detail tabs
+   wore a flat underline-tab override that read as unpolished. Restore the
+   base carded chips with a clear now/done/next treatment and the per-step
+   status line (which the flat version hid). */
+.focused-project-head .project-steps { grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; border-bottom:0; padding:0; }
+.focused-project-head .project-step { border:1px solid var(--color-line-soft); border-radius:10px; min-width:0; padding:9px 11px; background:var(--color-panel); box-shadow:none; display:grid; gap:2px; justify-content:stretch; position:relative; }
+.focused-project-head .project-step.current { color:var(--color-bright); border-color:color-mix(in srgb, var(--color-action) 55%, transparent); background:color-mix(in srgb, var(--color-action) 10%, transparent); }
+.focused-project-head .project-step.current::after { content:none; }
+.focused-project-head .step-top { justify-content:flex-start; font-size:13.5px; gap:7px; }
 .focused-project-head .step-num { width:18px; height:18px; min-width:18px; font-size:11px; }
-.focused-project-head .step-state { display:none; }
-/* Option B overview summary (owner 2026-10-23): one plain line above the step
-   content, themed, with a live dot while Caddie is working. */
-.project-overview-summary { display:flex; align-items:baseline; gap:8px; margin:12px 0 4px; font-size:14px; line-height:1.55; color:var(--color-muted); }
+.focused-project-head .step-state { display:block; font-size:11px; line-height:1.35; }
+/* Option B overview summary (owner 2026-10-23): a plain-language "where it
+   stands" line above the step content. Promoted from a loose muted paragraph
+   to a bordered status strip with a live dot while Caddie is working. */
+.project-overview-summary { display:flex; align-items:center; gap:10px; margin:0; padding:11px 13px; border:1px solid var(--color-line); border-radius:10px; background:var(--color-panel); font-size:13.5px; line-height:1.5; color:var(--color-muted); }
 .project-overview-summary b { color:var(--color-bright); font-weight:650; }
 .project-overview-summary[data-tone='warn'] b { color:var(--color-warn); }
 .project-overview-summary[data-tone='danger'] b { color:var(--color-danger); }
 .project-overview-summary[data-tone='ok'] b { color:var(--color-ok); }
 .project-overview-live { width:8px; height:8px; min-width:8px; border-radius:50%; background:var(--color-action); align-self:center; animation:pulse-dot 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .project-overview-live { animation:none; } }
+/* The content card frames step bodies that have no card of their own — the
+   de-chromed .project-workflow (Build/Check/home) and the bare empty states.
+   Scoped POSITIVELY so an already-carded body (the Plan tab's design-review
+   card stack, a .card-surface) is never double-boxed or shrunk below the
+   column width (project-v2 asserts the Plan panel equals the column). */
 .focused-project-content { min-width:0; }
+.focused-project-content:has(> .project-workflow),
+.focused-project-content:has(> .focused-project-empty),
+.focused-project-content[data-testid='project-app-checks']:has(> section) {
+	border:1px solid var(--color-line); border-radius:12px; background:var(--color-panel); padding:16px;
+}
+/* Anti-nesting (owner 2026-10-23): PlanReview already cards its own sections,
+   so the outer content wrapper must NOT card too — two padded boxes doing one
+   job steals ~26px of width on a phone. Flatten the wrapper whenever a plan
+   review is inside it (directly, or inside the workspace's .project-workflow). */
+.focused-project-content:has(.plan-review) {
+	border:0; background:none; border-radius:0; padding:0;
+}
 .focused-project-content > .project-workflow,
 .focused-project-content .build-progress,
 .focused-project-content .settings-panel,
@@ -9464,15 +9610,66 @@ mark {
 .focused-project-content .build-stage-detail,.focused-project-content .build-stage-dur { display:none; }
 .focused-project-content .build-feature-list,.focused-project-content .build-features { border:0; padding:0; background:none; box-shadow:none; }
 .focused-project-content .workflow-heading > .btn-ghost { display:none; }
-.project-supporting { display:grid; gap:0; margin-top:20px; border-top:1px solid var(--color-line); min-width:0; }
-.project-supporting > details,.project-secondary { border:0; border-bottom:1px solid var(--color-line); border-radius:0; background:none; padding:0; min-width:0; }
-.project-supporting > details > summary,.project-secondary > summary { display:list-item; min-height:48px; padding:14px 0; font-size:13px; color:var(--color-muted); cursor:pointer; }
+
+/* Submit (v2): the content wrapper carries the ONE card frame (same as the
+   Build/Check wrappers above), and the submission panel it holds is flattened
+   so the two boxes never double-card — mirrors the plan-review anti-nesting
+   rule the owner set on 2026-10-23. */
+.focused-project-content[data-testid='project-submission'] {
+	border:1px solid var(--color-line); border-radius:12px; background:var(--color-panel); padding:16px;
+}
+.focused-project-content > .submission-panel { border:0; background:transparent; border-radius:0; padding:0; box-shadow:none; }
+
+/* Prominent deadline: a single glanceable line above the hand-in list. */
+.submission-deadline {
+	display:flex; align-items:center; gap:0.45rem; margin:0 0 0.2rem;
+	font-size:14px; font-weight:600; color:var(--color-bright);
+}
+.submission-deadline svg { color:var(--color-action); flex:0 0 auto; }
+
+/* Hand-in checklist: the glanceable ✓/○ summary of what is left before the
+   person hands in. Caddie-token card that matches the Plan tab's sections. */
+.submission-handin {
+	border:1px solid var(--color-line); border-radius:12px;
+	background:var(--color-raised); padding:14px 16px; display:grid; gap:0.5rem;
+}
+.submission-handin-head { margin:0; font-size:13px; font-weight:600; color:var(--color-bright); }
+.submission-handin-list { list-style:none; margin:0; padding:0; display:grid; gap:0.4rem; }
+.submission-handin-item { display:flex; align-items:flex-start; gap:0.6rem; }
+.submission-handin-mark { flex:0 0 auto; width:20px; height:20px; display:inline-flex; align-items:center; justify-content:center; color:var(--color-ok); }
+.submission-handin-item[data-done='false'] .submission-handin-mark { color:var(--color-muted); }
+.submission-handin-todo { width:13px; height:13px; border-radius:50%; border:1.5px solid color-mix(in srgb, var(--color-muted) 55%, transparent); }
+.submission-handin-body { display:grid; gap:1px; min-width:0; }
+.submission-handin-label { font-size:13px; color:var(--color-text); }
+.submission-handin-item[data-done='true'] .submission-handin-label { color:var(--color-bright); }
+.submission-handin-hint { font-size:12px; color:var(--color-muted); line-height:1.45; }
+
+/* Build/Check in-frame polish: the status dot + a plain "Step N of 4" line sit
+   with the de-chromed workflow body so the frame reads like the Plan tab. */
+.focused-project-content .build-head { gap:0.3rem; }
+.focused-project-content .build-head-dot { align-self:center; }
+.focused-project-content .build-summary { font-size:14px; color:var(--color-text); }
+.focused-project-content .workflow-step-line {
+	display:flex; align-items:center; gap:0.5rem; margin:0 0 0.2rem;
+	font-size:12.5px; font-weight:600; letter-spacing:0.02em; color:var(--color-muted);
+}
+.focused-project-content .workflow-step-line .workflow-step-dot {
+	width:8px; height:8px; border-radius:50%; background:var(--color-action); flex:0 0 auto;
+}
+@media (prefers-reduced-motion: no-preference) {
+	.focused-project-content [data-phase='building'] .workflow-step-dot { animation:pulse-dot 1.6s ease-in-out infinite; }
+}
+/* Per-feature state chips (done/building/pending) already render inside the
+   feature list; keep them legible against the flattened frame. */
+.focused-project-content .build-feature[data-status='pending'] { opacity:0.72; }
+.project-supporting { display:grid; gap:12px; margin-top:4px; min-width:0; }
+.project-supporting > details,.project-secondary { border:1px solid var(--color-line); border-bottom:1px solid var(--color-line); border-radius:12px; background:var(--color-panel); padding:0 14px; min-width:0; }
+.project-supporting > details > summary,.project-secondary > summary { display:list-item; min-height:48px; padding:14px 0; font-size:13px; color:var(--color-text); cursor:pointer; }
 .project-supporting > details[open],.project-secondary[open] { padding-bottom:16px; }
-.project-supporting .card-surface,.project-secondary .settings-panel { border:0; background:none; border-radius:0; box-shadow:none; padding:14px 0; }
-.project-resource-links { display:flex; flex-wrap:wrap; gap:8px 18px; padding:8px 0; }
-.project-resource-links a { display:inline-flex; align-items:center; min-height:44px; color:var(--color-muted); font-size:12px; }
-.project-history-list { list-style:none; padding:0; margin:0; display:grid; gap:14px; }
-.project-history-list li { padding:12px 0; border-bottom:1px solid var(--color-line); }
+.project-supporting .card-surface,.project-secondary .settings-panel { border:0; background:none; border-radius:0; box-shadow:none; padding:0 0 14px; }
+.project-resource-links { display:flex; flex-wrap:wrap; gap:8px; padding:0; margin-top:4px; }
+.project-resource-links a { display:inline-flex; align-items:center; min-height:40px; padding:0 14px; border:1px solid var(--color-line); border-radius:999px; color:var(--color-action); font-size:12.5px; text-decoration:none; }
+.project-resource-links a:hover { background:var(--color-raised); border-color:var(--color-line-soft); }
 .project-chat-summary { padding:14px; border-radius:13px; }
 .project-chat-summary h3 { font-size:17px; line-height:1.35; margin:0; }
 .project-chat-summary .state-detail { font-size:13px; line-height:1.5; }
@@ -9489,22 +9686,31 @@ mark {
  .project-card { padding:16px; }
  .project-card-head { flex-wrap:wrap; gap:0 10px; }
  .project-card .project-card-pill { max-width:100%; text-align:left; justify-content:flex-start; }
- .project-card-foot { flex-wrap:wrap; }
- .focused-project-head .project-head-name { font-size:22px; }
+ .project-card-foot { flex-direction:column; align-items:stretch; gap:10px; margin:2px -16px -16px; padding:12px 16px; }
+ .project-card-foot .btn-key { width:100%; }
+ .project-card-foot .row-actions, .project-card-foot .project-row-actions { width:100%; }
+ .project-card-foot .row-actions .btn-key { width:100%; }
+ .focused-project-head .project-head-name { font-size:21px; }
+ .focused-project-head .project-head-settings { width:44px; padding:0; gap:0; }
  .focused-project-head .project-head-settings span { display:none; }
- .focused-project-head .project-steps { margin-inline:0; width:100%; }
- .focused-project-head .step-top { font-size:12px; gap:5px; }
- .focused-project-head .step-num { width:16px; height:16px; min-width:16px; }
+ /* Carded rail (owner 2026-10-23, Header A): phones show all four steps as a
+    2×2 grid (two columns, two rows) so none run off-screen — the old 4-across
+    row overflowed horizontally. No scroll, no clipping; every step visible.
+    margin:0 cancels the old scroll row's `margin:0 -1rem` bleed, so the grid
+    keeps the same side padding as everything else on the page. */
+ .focused-project-head .project-steps-compact { display:none; }
+ .focused-project-head .project-steps { display:grid; grid-auto-flow:row; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; overflow:visible; padding:0; margin:0; }
+ .focused-project-head .project-step { min-width:0; scroll-snap-align:none; padding:9px 11px; }
+ .focused-project-content { padding:12px; }
+ /* Anti-nesting (owner 2026-10-23): phones trim the supporting <details> card
+    side padding to ~12px so the one card level does not steal content width. */
+ .project-supporting > details,.project-secondary { padding:0 12px; }
  .focused-project-page { gap:18px; }
  .focused-project-content .workflow-heading h3 { font-size:19px; }
  .focused-project-content .row-actions { flex-wrap:wrap; }
  .project-chat-summary .card-context { overflow-wrap:anywhere; }
 }
 .focused-project-content .project-workflow > .compact-card-panel { border:0; border-radius:0; background:none; padding:0; box-shadow:none; }
-.focused-project-head .project-head-title { flex-wrap:nowrap; }
-.focused-project-head .project-head-text { flex:1; }
-.focused-project-head .project-head-name { overflow-wrap:anywhere; }
-.focused-project-head .project-head-for { white-space:normal; overflow:visible; }
 
 /* --- Team mode: "How your app works" (plan part B / section 7, screen 1) ----
    The plain-words view of the approved architecture on the Design review
@@ -9765,4 +9971,376 @@ mark {
   .app-jobs-run-row { grid-template-columns: auto minmax(0, 1fr); }
   .app-jobs-run-summary { grid-column: 1 / -1; }
   .app-jobs-when { grid-column: 1 / -1; }
+}
+
+/* PlanReview — the one shared, scannable plan presentation used by both
+   /design-review and the /project review phase. Decision first, then what
+   Caddie will build, then collapsible reference detail. Caddie tokens only. */
+/* The developer revision-hash escape hatch: quiet and secondary, not a raw
+   prominent "kicker" line floating in the plan prose (owner 2026-10-23). */
+.plan-devhash { margin-top: 10px; }
+.plan-devhash > summary {
+	list-style: none;
+	cursor: pointer;
+	font-size: 11px;
+	color: var(--color-muted);
+	opacity: 0.75;
+	padding: 4px 0;
+}
+.plan-devhash > summary::-webkit-details-marker { display: none; }
+.plan-devhash > summary::before { content: "⌄ "; }
+.plan-devhash[open] > summary::before { content: "⌃ "; }
+.plan-review {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	min-width: 0;
+}
+.plan-review-decision {
+	display: flex;
+	flex-direction: column;
+	gap: 0.6rem;
+}
+.plan-review-title {
+	margin: 0;
+	font-size: 15px;
+	font-weight: 600;
+	color: var(--color-bright);
+}
+.plan-review-version {
+	color: var(--color-muted);
+	font-weight: 500;
+}
+.plan-review-section {
+	border: 1px solid var(--color-line);
+	border-radius: 10px;
+	background: var(--color-panel);
+	padding: 0.7rem 0.85rem;
+}
+.plan-review-section > summary {
+	cursor: pointer;
+	list-style: none;
+}
+.plan-review-section > summary::-webkit-details-marker {
+	display: none;
+}
+.plan-review-section-head {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-weight: 600;
+	color: var(--color-bright);
+}
+.plan-review-section-head::after {
+	content: "›";
+	margin-left: auto;
+	color: var(--color-muted);
+	transition: transform 0.15s ease;
+}
+.plan-review-section[open] > .plan-review-section-head::after {
+	transform: rotate(90deg);
+}
+.plan-review-section-body {
+	margin-top: 0.55rem;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.plan-review-section-body .md-body {
+	font-size: 14.5px;
+	line-height: 1.6;
+}
+.plan-review-section-body .md-body table {
+	display: block;
+	overflow-x: auto;
+	max-width: 100%;
+}
+.plan-review-intro {
+	border-color: var(--color-line-soft);
+}
+
+/* PROMOTED: the feature list, accent-bordered, above the reference set. */
+.plan-review-build {
+	position: relative;
+	border: 1.5px solid color-mix(in srgb, var(--color-action) 55%, var(--color-line));
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--color-action) 6%, var(--color-panel));
+	padding: 0.85rem 0.9rem;
+}
+.plan-review-build-count {
+	position: absolute;
+	top: 0.7rem;
+	right: 0.75rem;
+	font-size: var(--r-meta, 12px);
+	font-weight: 600;
+	color: var(--color-action-deep, var(--color-action));
+	background: color-mix(in srgb, var(--color-action) 16%, transparent);
+	border: 1px solid color-mix(in srgb, var(--color-action) 40%, transparent);
+	border-radius: 999px;
+	padding: 0.15rem 0.6rem;
+	white-space: nowrap;
+}
+/* The checklist inside the promoted card keeps its own "What Caddie will
+   build · N" head; it gets the accent treatment and clears the count pill. */
+.plan-review-build .plan-features {
+	margin-top: 0;
+}
+.plan-review-build .plan-features-head {
+	color: var(--color-bright);
+	font-size: 14px;
+	padding-right: 5.5rem;
+}
+
+.plan-review-reference {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+.plan-review-reference-head {
+	margin: 0.25rem 0 0;
+	font-size: var(--r-meta, 12px);
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--color-muted);
+}
+
+@media (max-width: 560px) {
+	.plan-review-build-head {
+		flex-wrap: wrap;
+	}
+	/* Anti-nesting (owner 2026-10-23): phones trim the section/<details> side
+	   padding so content is not boxed-in twice over. ~11px, not more. */
+	.plan-review-section {
+		padding: 0.6rem 0.7rem;
+	}
+	.plan-review-build {
+		padding: 0.7rem 0.7rem;
+	}
+}
+
+/* Account navigation: one entry to Settings; mobile Settings is a list/detail flow. */
+.account-menu-pop { width: min(260px, calc(100vw - 32px)); border-radius: 13px; }
+.account-menu-pop [role='menuitem'] { min-height: 44px; border-radius: 9px; }
+.account-menu-email { overflow-wrap: anywhere; }
+.settings-mobile-index, .settings-back, .settings-section-chevron { display: none; }
+.settings-account-layout .settings-rail .settings-tab { min-height: 44px; height: auto; border-radius: 10px; }
+.settings-account-layout .settings-rail .settings-tab[aria-current='page'] { background: color-mix(in srgb, var(--color-bright) 6%, transparent); }
+.settings-account-layout .input,
+.settings-account-layout select,
+.settings-account-layout textarea { min-height: 48px; font-size: 16px; border-radius: 13px; }
+.settings-account-layout .btn-key { min-height: 48px; padding: 10px 18px; border-radius: 13px; }
+.settings-account-layout .segment-option { min-height: 48px; border-radius: 13px; }
+.settings-account-layout .settings-save { align-items: center; }
+@media (max-width: 720px) {
+	.settings-account-layout .settings-mobile-index { display: grid; gap: 6px; }
+	.settings-account-layout .settings-mobile-index > * { margin: 0; }
+	.settings-account-layout .settings-rail { display: grid; gap: 24px; margin: 0; padding: 0; overflow: visible; border: 0; }
+	.settings-account-layout .settings-rail-group { display: grid; gap: 2px; }
+	.settings-account-layout .settings-rail-label { display: block; margin: 0 0 6px 12px; }
+	.settings-account-layout .settings-rail .settings-tab { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 12px; border-radius: 10px; color: var(--color-bright); }
+	.settings-account-layout .settings-rail .settings-tab[aria-current='page'] { background: transparent; font-weight: 500; }
+	.settings-account-layout .settings-section-chevron { display: inline; color: var(--color-muted); font-size: 20px; }
+	.settings-account-layout[data-detail='false'] > .settings-content { display: none; }
+	.settings-account-layout[data-detail='true'] > .settings-rail,
+	.settings-account-layout[data-detail='true'] > .settings-mobile-index { display: none; }
+	.settings-account-layout .settings-back { display: inline-flex; align-items: center; justify-self: start; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--color-action); font: inherit; font-size: 13px; }
+}
+
+/* ==========================================================================
+   Project page polish (owner 2026-10-23). Last in the file on purpose: these
+   rules settle the look the earlier layers disagreed on.
+   ========================================================================== */
+
+/* ONE disclosure style for every fold on the project pages (What you're
+   making, Earlier versions, Project brief, To-dos, Earlier decisions, build
+   history, Check's readiness fold, and the plan's own sections): a full-width
+   card row, title left, chevron right, content inside with no second card.
+   (They were a mix of native triangles, a caret before the text and a
+   chevron after it.) */
+:is(.fold, .project-supporting > details, .project-secondary) {
+	border: 1px solid var(--color-line);
+	border-radius: 12px;
+	background: var(--color-panel);
+	box-shadow: none;
+	padding: 0 14px;
+	min-width: 0;
+}
+:is(.fold, .project-supporting > details, .project-secondary)[open] { padding-bottom: 14px; }
+:is(.fold, .project-supporting > details, .project-secondary) > summary {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 48px;
+	padding: 12px 0;
+	list-style: none;
+	cursor: pointer;
+	font-size: 14px;
+	font-weight: 600;
+	line-height: 1.35;
+	color: var(--color-bright);
+}
+:is(.fold, .project-supporting > details, .project-secondary) > summary::-webkit-details-marker { display: none; }
+:is(.fold, .project-supporting > details, .project-secondary) > summary::before { content: none; }
+:is(.fold, .project-supporting > details, .project-secondary) > summary::after,
+.plan-review-section-head::after {
+	content: "›";
+	margin-left: auto;
+	padding-left: 8px;
+	font-size: 20px;
+	font-weight: 400;
+	line-height: 1;
+	color: var(--color-muted);
+	transition: transform 0.15s ease;
+}
+:is(.fold, .project-supporting > details, .project-secondary)[open] > summary::after { transform: rotate(90deg); }
+:is(.fold, .project-supporting > details, .project-secondary) > summary:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; border-radius: 6px; }
+.fold-title { margin: 0; font: inherit; color: inherit; letter-spacing: 0; }
+.fold-count {
+	display: inline-grid;
+	place-items: center;
+	min-width: 22px;
+	height: 22px;
+	padding: 0 7px;
+	border-radius: 999px;
+	background: var(--color-raised);
+	color: var(--color-muted);
+	font-size: 12px;
+	font-weight: 600;
+}
+/* Sections inside a fold are separated by a hairline, not boxed again. */
+.project-secondary > section + section,
+.project-secondary > section + .evidence-panel { border-top: 1px solid var(--color-line-soft); padding-top: 14px; }
+
+/* The plan's own sections use the same row geometry as the folds. */
+.plan-review-section { border-radius: 12px; padding: 0 14px; }
+.plan-review-section[open] { padding-bottom: 14px; }
+.plan-review-section > .plan-review-section-head { min-height: 48px; padding: 12px 0; font-size: 14px; line-height: 1.35; }
+.plan-review-section-body { margin-top: 0; }
+.plan-review-lead { font-size: 14.5px; line-height: 1.6; color: var(--color-text); }
+.plan-review-lead .md-body > :first-child { margin-top: 0; }
+.plan-review-lead .md-body > :last-child { margin-bottom: 0; }
+.plan-review-lead :is(h1, h2) { margin: 0 0 4px; font-size: 17px; line-height: 1.35; letter-spacing: -0.01em; color: var(--color-bright); }
+.plan-review-reference-head { margin: 6px 0 0; }
+
+/* Before a decision the plan IS the page: its "What you're making" toggle is
+   hidden (the bar above names the version). Approved, it is a fold row. */
+.plan-review-details:not(.fold) > summary { display: none; }
+.plan-review-details.fold > .plan-body { margin-top: 2px; }
+
+/* Rows inside a fold: flat, separated by hairlines; a row that opens
+   something is one tappable line with a chevron. */
+.fold-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.fold-list > li + li { border-top: 1px solid var(--color-line-soft); }
+.fold-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 10px 0; }
+.fold-row-link { border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; border-radius: 8px; }
+.fold-row-link:hover .fold-row-title { color: var(--color-action); }
+.fold-row-link:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; }
+.fold-row-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.fold-row-title { font-size: 14px; font-weight: 600; color: var(--color-bright); overflow-wrap: anywhere; }
+.fold-row-meta { font-size: 12.5px; line-height: 1.45; color: var(--color-muted); overflow-wrap: anywhere; }
+.fold-row-chevron { flex: none; font-size: 20px; line-height: 1; color: var(--color-muted); }
+.fold-row-action { flex: none; min-height: 36px; padding: 0 14px; }
+
+/* The plan decision: "Plan version N" with the ask (or the outcome) on the
+   same line, one sentence, then the buttons. */
+.plan-decision-head { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; flex-wrap: wrap; }
+.plan-decision-head .ev-title { margin: 0; }
+.plan-decision-ask { margin: 0; white-space: nowrap; }
+.plan-decision .page-lede { margin: 6px 0 0; max-width: 62ch; }
+.plan-decision .row-actions { margin-top: 14px; }
+.plan-viewing { border: 1px solid var(--color-line); border-radius: 12px; background: var(--color-raised); padding: 14px; }
+
+/* Compact state line (StatePanel compact): a failed SECTION is one line and a
+   small retry, not a mascot panel per section. */
+.state-inline {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px 14px;
+	padding: 10px 12px;
+	border-radius: 10px;
+	border: 1px solid color-mix(in srgb, var(--color-warn) 30%, var(--color-line));
+	background: color-mix(in srgb, var(--color-warn) 8%, transparent);
+	color: var(--color-text);
+}
+.state-inline:is([data-state='loading'], [data-state='empty']) { border-color: var(--color-line-soft); background: none; }
+.state-inline-text { flex: 1 1 220px; margin: 0; font-size: 13px; line-height: 1.45; }
+.state-inline-text b { font-weight: 600; color: var(--color-bright); }
+.state-inline-retry { flex: none; min-height: 36px; padding: 0 14px; }
+
+/* Build: Builds | Files as a two-way switch, not a second row of tabs. */
+.build-view-switch {
+	display: inline-flex;
+	gap: 2px;
+	padding: 3px;
+	margin: 0 0 12px;
+	max-width: 100%;
+	border: 1px solid var(--color-line);
+	border-radius: 11px;
+	background: var(--color-raised);
+}
+.build-view-switch > button {
+	min-height: 36px;
+	padding: 0 14px;
+	border: 0;
+	border-radius: 8px;
+	background: none;
+	color: var(--color-muted);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+}
+.build-view-switch > button[aria-selected='true'] { background: var(--color-panel); color: var(--color-bright); box-shadow: 0 1px 2px rgb(0 0 0 / 0.18); }
+.build-view-switch > button:focus-visible { outline: 2px solid var(--color-action); outline-offset: 1px; }
+.run-inspector-head { justify-content: flex-end; }
+
+/* To-dos inside its fold: short helper, the list, one add button. */
+.tasks-embedded .page-lede { margin: 0 0 8px; font-size: 13px; }
+.tasks-embedded-foot { margin-top: 10px; }
+
+@media (prefers-reduced-motion: reduce) {
+	:is(.fold, .project-supporting > details, .project-secondary) > summary::after,
+	.plan-review-section-head::after { transition: none; }
+}
+
+@media (max-width: 760px) {
+	:is(.fold, .project-supporting > details, .project-secondary) { padding: 0 12px; }
+	.plan-review-section { padding: 0 12px; }
+	.build-view-switch { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+
+	/* APP-WIDE (owner 2026-10-23): on a phone, a row of exactly two buttons
+	   shares the width 50/50 — never left/right-aligned and never folded
+	   onto two lines. A row with one button or three is left alone. */
+	:is(.row-actions, .actions, .guided-step-actions, .proposal-actions, .submission-actions, .start-card-actions, .route-error-actions, .project-row-actions, .plan-change-actions, .onboarding-step-actions, .memory-offer-actions, .draft-actions, .disc-actions, .hk-feature-actions):has(> :is(button, a):first-child + :is(button, a):last-child) {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px;
+		justify-content: stretch;
+		align-items: stretch;
+	}
+	:is(.row-actions, .actions, .guided-step-actions, .proposal-actions, .submission-actions, .start-card-actions, .route-error-actions, .project-row-actions, .plan-change-actions, .onboarding-step-actions, .memory-offer-actions, .draft-actions, .disc-actions, .hk-feature-actions):has(> :is(button, a):first-child + :is(button, a):last-child) > * {
+		width: 100%;
+		min-width: 0;
+		justify-content: center;
+		text-align: center;
+		white-space: normal;
+		margin: 0;
+	}
+}
+
+.cdp-deadline-source { display: block; margin-top: 4px; font-size: 12px; color: var(--color-muted); overflow-wrap: anywhere; }
+
+/* Featured opportunity follows the Brief card's header/body/facts/action rhythm. */
+.hk-feature.caddie-card { padding-inline: 18px; gap: 14px; text-align: left; }
+.hk-feature.caddie-card .hk-feature-head { display: block; }
+.hk-feature.caddie-card .hk-feature-title { font-size: 18px; line-height: 1.4; }
+.hk-feature.caddie-card .hk-feature-sub { margin-top: 6px; }
+.hk-feature.caddie-card .hk-stats { margin-top: 0; padding-top: 14px; gap: 14px; }
+.hk-feature.caddie-card .hk-fit-reason { margin: 0; }
+.hk-feature.caddie-card .hk-feature-actions { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin: 0; padding-top: 14px; border-top: 1px solid var(--color-line-soft); }
+.hk-feature.caddie-card .hk-elig-summary { align-self: center; max-width: 100%; }
+.hk-feature.caddie-card .hk-open { justify-content: center; max-width: 100%; min-height: 48px; }
+@container hk-card (max-width: 30rem) {
+ .hk-feature.caddie-card .hk-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

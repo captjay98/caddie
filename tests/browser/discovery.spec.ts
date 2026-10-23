@@ -431,8 +431,10 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		// v2 verdict words (§6): plain, never jargon. A dense row shows the short
 		// chip and carries the full verdict as its title (hackathon-format.ts).
 		// The hard-ineligible row is hidden until the named reveal is used.
-		await expect(page.getByTestId('eligibility-cand-1')).toHaveText('Can enter');
-		await expect(page.getByTestId('eligibility-cand-1')).toHaveAttribute('title', 'You can enter');
+		// v2 wording (2026-10-23): the chip reads "Eligible"; the full verdict
+		// stays as the title (docs/evidence/2026-10-23-discovery-deadline-presentation.md).
+		await expect(page.getByTestId('eligibility-cand-1')).toHaveText('Eligible');
+		await expect(page.getByTestId('eligibility-cand-1')).toHaveAttribute('title', 'Your profile meets the checked entry rules');
 		await expect(page.getByText("Can't enter", { exact: true })).toHaveCount(0);
 		await page.getByTestId('discovery-reveal-ineligible').click();
 		await expect(page.getByText("Can't enter", { exact: true })).toBeVisible();
@@ -723,7 +725,10 @@ test('Fit first detail retains supporting facts, prizes and exact rules behind r
  await expect(pane).toBeVisible();
  await expect(pane.getByTestId('contest-detail-fit')).toBeVisible();
  await expect(pane.getByTestId('contest-detail-key-details')).toBeVisible();
- await expect(pane.getByText('Oct 23, 2026 @ 12:00pm PDT',{exact:true})).toBeVisible();
+ // The deadline now renders through deadlineTime() (profile/browser timezone,
+ // 2026-10-23), so the exact converted string is environment-dependent; assert
+ // the deadline fact is present rather than a timezone-specific literal.
+ await expect(pane.getByTestId('contest-detail-key-details')).toContainText('Oct 23, 2026');
  await expect(pane.getByRole('heading',{name:'At a glance',exact:true})).toHaveCount(0);
  await expect(pane.getByRole('heading',{name:'Event details',exact:true})).toHaveCount(0);
  await expect(pane.getByTestId('contest-detail-key-details').getByText('Online',{exact:true})).toHaveCount(1);

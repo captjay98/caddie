@@ -359,7 +359,7 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 		await expect(page.getByTestId('brief-deadline-row')).toContainText('Weekly discovery sweep');
 
 		// Opening the brief marks NOTHING read — no read POSTs, badges stay.
-		await expect(page.getByTestId('brief-count')).toContainText('3 unseen');
+		await expect(page.getByTestId('brief-count')).toContainText('3 new updates');
 		expect(reads).toHaveLength(0);
 		await context.close();
 	});
@@ -397,8 +397,12 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 		// unseen count drops to zero. Read state is separate from resolution —
 		// no approval/schedule POSTs happen (the stub records none).
 		await expect(page.getByTestId('nav-brief-badge')).toHaveCount(0);
-		await expect(page.getByTestId('brief-count')).toContainText('2 updates');
+		await expect(page.getByTestId('brief-count')).toHaveText('All updates read');
 		await expect(page.getByTestId('brief-count')).not.toContainText('unseen');
+		await expect(page.getByTestId('brief-head')).toHaveCount(1);
+		await expect(page.getByTestId('brief-head').getByTestId('brief-mark-all-read')).toHaveCount(0);
+		await expect(page.getByTestId('brief-lane-panel').getByTestId('brief-feed-toolbar')).toBeVisible();
+		await expect(page.getByTestId('brief-mascot').locator('svg')).toHaveAttribute('data-mood', 'needs');
 		await context.close();
 	});
 

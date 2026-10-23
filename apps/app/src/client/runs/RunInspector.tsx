@@ -133,29 +133,31 @@ export function RunInspector(props: {
 	return (
 		<div data-testid="run-inspector">
 			<section className="inspector-section" aria-label="Builds">
-				<div className="section-head">
-					<h3>Past builds</h3>
-					<StaleChip stale={props.runs.isFetching && !props.runs.isPending} />
-					{props.onAskChange ? (
-						<button type="button" className="btn-ghost" data-testid="change-request-open" onClick={props.onAskChange}>
-							Ask for a change
-						</button>
-					) : null}
-				</div>
+				{/* The fold around this list already names it ("What Caddie has
+				    built"), so no second heading; asking for a change only makes
+				    sense once there is a build to change (owner 2026-10-23). */}
+				{props.runs.items.length > 0 ? (
+					<div className="section-head run-inspector-head">
+						<StaleChip stale={props.runs.isFetching && !props.runs.isPending} />
+						{props.onAskChange ? (
+							<button type="button" className="btn-ghost" data-testid="change-request-open" onClick={props.onAskChange}>
+								Ask for a change
+							</button>
+						) : null}
+					</div>
+				) : null}
 				{props.runs.isPending ? (
 					<PageSkeleton page="build" label="Reading your builds…" />
 				) : props.runs.error ? (
 					<StatePanel
+						compact
 						kind={kindOf(props.runs.error)}
+						title="Couldn’t load your builds."
 						detail={props.runs.error instanceof Error ? props.runs.error.message : undefined}
 						onRetry={props.runs.retry}
 					/>
 				) : props.runs.items.length === 0 ? (
-					<StatePanel
-						kind="empty"
-						title="No builds yet"
-						detail="Approve a plan and Caddie builds; every build is recorded here as it happens."
-					/>
+					<p className="state-detail" data-testid="state-empty">No builds yet. Each build is recorded here as it happens.</p>
 				) : (
 					<div className="row-list">
 						{props.runs.items.map((run) => (

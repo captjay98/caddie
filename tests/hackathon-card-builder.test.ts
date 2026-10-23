@@ -154,8 +154,8 @@ describe('buildHackathonResultsCard', () => {
 describe('HackathonResultsCard render (server-side, the real component)', () => {
 	const html = renderToStaticMarkup(createElement(HackathonResultsCard, { card: buildHackathonResultsCard(result) }));
 
-	test('eligible card: "You can enter" chip and the quoted rule linked to the official page', () => {
-		expect(html).toContain('You can enter');
+	test('eligible card: profile eligibility wording and the quoted rule linked to the official page', () => {
+		expect(html).toContain('Eligible');
 		expect(html).toContain('href="https://amazonappdev2026.devpost.com/rules"');
 		expect(html).toContain('Brazil, Quebec, Russia');
 	});
@@ -174,9 +174,10 @@ describe('HackathonResultsCard render (server-side, the real component)', () => 
 		expect(html).not.toMatch(/\$1(,200|\.2k)/);
 	});
 
-	test('backup card: "Open status unverified" chip; top-pick ribbon on the first card only', () => {
+	test('backup card: "Open status unverified" chip; one top-pick label on the featured card', () => {
 		expect(html).toContain('data-testid="hk-unverified-chip"');
-		expect(html.match(/data-testid="hk-toppick-ribbon"/g)?.length).toBe(1);
+		expect(html).not.toContain('data-testid="hk-toppick-ribbon"');
+		expect(html.match(/Top pick/g)?.length).toBe(1);
 	});
 
 	test('no scraped page chrome reaches the card', () => {

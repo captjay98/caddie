@@ -110,7 +110,7 @@ describe('display formatting shared by the chat card and Discover', () => {
 		expect(compactPrize(null)).toBeNull();
 	});
 	test('row facts: prize · entered · deadline, omitting what is unknown', () => {
-		expect(rowFacts(base)).toEqual(['$138k', '54.7k entered', 'ends Oct 23']);
+		expect(rowFacts({ ...base, deadline: '2099-10-23', endsAt: '2099-10-23' })).toEqual(['$138k', '54.7k entered', 'ends Oct 23']);
 		expect(rowFacts({ ...base, prize: null, participants: null, deadline: null, endsAt: null })).toEqual([]);
 	});
 	test('platform names', () => {
@@ -119,7 +119,7 @@ describe('display formatting shared by the chat card and Discover', () => {
 		expect(platformName('example.org')).toBe('example.org');
 	});
 	test('eligibility wording never softens the verdict', () => {
-		expect(eligibilityView({ ...base, eligibility: 'eligible', eligibilityNote: 'You can enter', eligibilityQuote: 'q' })).toMatchObject({ state: 'eligible', short: 'Can enter', why: 'Why you can enter' });
+		expect(eligibilityView({ ...base, eligibility: 'eligible', eligibilityNote: 'You can enter', eligibilityQuote: 'q' })).toMatchObject({ state: 'eligible', short: 'Eligible', label: 'Your profile meets the checked entry rules', why: 'Why you can enter' });
 		expect(eligibilityView({ ...base, eligibilityNeedsConfirm: true, eligibilityNote: "Open to NG · confirm you're 13+" })).toMatchObject({ state: 'confirm', short: 'Confirm 13+' });
 		expect(eligibilityView(base)).toMatchObject({ state: 'unknown', short: 'Not checked', why: null });
 		expect(eligibilityView({ ...base, eligibility: 'ineligible', eligibilityNote: 'Only open to US' })).toMatchObject({ state: 'ineligible', label: 'Only open to US', short: "Can't enter" });

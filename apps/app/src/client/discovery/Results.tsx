@@ -339,14 +339,14 @@ export function DiscoveryResults(props: {
 					<div className="disc-filterline">
 						<span className="disc-country-chip" data-testid="discovery-country">
 							{profileCountry ? `${countryFlag(profileCountry)} ${countryName(profileCountry)}` : 'Set your country for entry checks'}
-							{onlineOnly ? ' · Online' : ''}{canEnterOnly ? ' · Can enter' : ''}
+							{onlineOnly ? ' · Online' : ''}{canEnterOnly ? ' · Eligible' : ''}
 						</span>
 						<button type="button" className="btn-ghost disc-filter-toggle" data-testid="discovery-filter-toggle" aria-expanded={filtersOpen} aria-controls="discover-filters" onClick={() => setFiltersOpen(value => !value)}>
 							<Icon name="settings" title="" /> Filters{canEnterOnly || onlineOnly ? ` · ${Number(canEnterOnly) + Number(onlineOnly)}` : ''}
 						</button>
 					</div>
 					<div id="discover-filters" className="disc-filter-chips" data-testid="discovery-filters" hidden={!filtersOpen}>
-						<label className="disc-filter-option"><input type="checkbox" className="disc-filter" data-testid="discovery-filter-canenter" checked={canEnterOnly} onChange={event => setCanEnterOnly(event.target.checked)} />Can enter only</label>
+						<label className="disc-filter-option"><input type="checkbox" className="disc-filter" data-testid="discovery-filter-canenter" checked={canEnterOnly} onChange={event => setCanEnterOnly(event.target.checked)} />Eligible only</label>
 						<label className="disc-filter-option"><input type="checkbox" className="disc-filter" data-testid="discovery-filter-online" checked={onlineOnly} onChange={event => setOnlineOnly(event.target.checked)} />Online only</label>
 						<p className="disc-filter-help">{profileCountry ? `Entry checks use your profile country: ${countryName(profileCountry)}. Each event shows its own verdict.` : 'Country-based eligibility stays unknown until you set your profile country.'}</p>
 						<button type="button" className="btn-key disc-filters-apply" onClick={() => setFiltersOpen(false)}>Show opportunities</button>
@@ -499,7 +499,7 @@ export function DiscoveryResults(props: {
                             entryQuote={detailRow?.eligibilityQuote}
                             rulesUrl={detailRow?.rulesUrl}
                             entryEvidence={detailRow ? <RuleQuote candidate={detailRow} view={eligibilityView(detailRow)} /> : null}
-							deadline={detailRow ? deadline(detailRow) : null}
+							deadline={detailRow ? detailRow.deadline ?? detailRow.endsAt : null}
 							autoCheckOnOpen
 							saved={detailRow ? isSaved(detailRow) : false}
 							busy={busy}

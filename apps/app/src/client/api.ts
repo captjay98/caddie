@@ -38,6 +38,28 @@ function bodyText(body: unknown): string {
 	return 'The request did not succeed.';
 }
 
+/**
+ * What a network-level failure means, in plain words. The device's own
+ * network state decides it: offline -> reconnect; online -> the server did
+ * not answer (it was NOT the person's connection).
+ */
+export function connectionFailureWords(): string {
+	return typeof navigator !== 'undefined' && navigator.onLine === false
+		? 'Your device is offline. Reconnect, then try again.'
+		: 'Caddie’s server didn’t answer. Try again in a moment.';
+}
+
+/**
+ * A caught error as a sentence for the screen. The browser's own wording for
+ * a request that never completed ("Failed to fetch", "Load failed",
+ * "NetworkError when attempting to fetch resource.") is replaced with
+ * connectionFailureWords(); anything else keeps its message.
+ */
+export function readableFailure(cause: unknown): string {
+	if (cause instanceof TypeError && /fetch|network|load failed/i.test(cause.message)) return connectionFailureWords();
+	return cause instanceof Error ? cause.message : String(cause);
+}
+
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 	let response: Response;
 	try {
@@ -46,8 +68,9 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
 			headers: { accept: 'application/json', ...(init?.headers ?? {}) },
 		});
 	} catch {
-		// fetch only rejects on network-level failure (offline, aborted origin)
-		throw new ApiError('offline', undefined, undefined, 'You appear to be offline.');
+		// fetch only rejects on network-level failure: the device is offline,
+		// OR it is online and Caddie's server did not answer (down/restarting).
+		throw new ApiError('offline', undefined, undefined, connectionFailureWords());
 	}
 	if (!response.ok) {
 		let body: unknown = null;

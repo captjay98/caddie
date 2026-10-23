@@ -60,7 +60,6 @@ import { useCoordinatorTransport, type CoordinatorTransport } from '../coordinat
 import { briefActionRoute } from '../brief/navigate.ts';
 import { ConvResizeHandle, useConvWidth } from './ConvResize.tsx';
 import { AskBar } from './AskBar.tsx';
-import { ThemePicker } from './ThemePicker.tsx';
 import { QuickSearch, useQuickSearchHotkey } from '../search/QuickSearch.tsx';
 import { Mascot, type MascotMood } from '@caddie/ui/Mascot';
 import { WORDS } from '../copy.ts';
@@ -779,18 +778,18 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 											<AccountMenu accountOpen={accountOpen} setAccountOpen={setAccountOpen} displayName={displayName.data ?? null} />
 										</>
 									) : null}
-									{chatFull ? (
+									{chatFull && isDesktop ? (
 										<button
 											type="button"
 											className="conv-head-btn"
 											data-testid="conv-exit-full"
-											aria-label="Back to the page"
-											title="Back to the page"
+											aria-label="Return to split view"
+											title="Return to split view"
 											onClick={() => {
 												void navigate({ to: '.', search: (prev: Record<string, unknown>) => ({ ...prev, pane: undefined }) });
 											}}
 										>
-											<Icon name="collapse" title="Back to the page" />
+											<Icon name="collapse" title="Return to split view" />
 										</button>
 									) : null}
 									{viewportMode === 'desktop' && convOpen && !chatFull ? (
@@ -1110,7 +1109,7 @@ function AccountMenu(props: {
 	setAccountOpen: (open: boolean) => void;
 	displayName: string | null;
 }): ReactElement {
-	const { signOut, theme, palette, setThemeChoice } = useWorkspaceChrome();
+	const { signOut } = useWorkspaceChrome();
 	const email = useSessionEmail().data ?? null;
 	// The name the user gave Caddie in the welcome (v2 §4) is used everywhere
 	// the account name appears; the session name is the fallback.
@@ -1150,26 +1149,9 @@ function AccountMenu(props: {
 						<span className="account-menu-name" data-testid="account-menu-name">{shownName ?? 'Your account'}</span>
 						{email ? <span className="account-menu-email">{email}</span> : null}
 					</div>
-					<Link to="/search" search={keepSearch} role="menuitem" data-testid="account-search" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="search" title="Search" /> Search
+					<Link to="/settings" search={{} as Record<string, unknown>} role="menuitem" data-testid="account-settings" onClick={() => props.setAccountOpen(false)}>
+						<Icon name="settings" title="" /> Settings
 					</Link>
-					<Link to="/settings" search={{ tab: 'profile' } as Record<string, unknown>} role="menuitem" data-testid="account-profile" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="user" title="Profile" /> Profile &amp; interests
-					</Link>
-					<Link to="/settings" search={{ tab: 'knows' } as Record<string, unknown>} role="menuitem" data-testid="account-memory" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="memory" title="What Caddie knows" /> What Caddie knows
-					</Link>
-					<Link to="/settings" search={{ tab: 'accounts' } as Record<string, unknown>} role="menuitem" data-testid="account-connections" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="link" title="Connected accounts" /> Connected accounts
-					</Link>
-					<Link to="/settings" search={{ tab: 'routines' } as Record<string, unknown>} role="menuitem" data-testid="account-automations" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="calendar" title="Routines" /> Routines
-					</Link>
-					<Link to="/settings" search={{ tab: 'spending' } as Record<string, unknown>} role="menuitem" data-testid="account-usage" onClick={() => props.setAccountOpen(false)}>
-						<Icon name="box" title="Spending" /> Spending
-					</Link>
-					<div className="account-menu-sep" role="separator" />
-					<ThemePicker variant="menu" palette={palette} mode={theme} onChange={setThemeChoice} />
 					<div className="account-menu-sep" role="separator" />
 					<button type="button" role="menuitem" data-testid="sign-out" onClick={() => void signOut()}>
 						<Icon name="arrowLeft" title="Sign out" /> Sign out

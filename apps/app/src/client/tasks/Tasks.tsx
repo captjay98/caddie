@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { fetchJson } from '../api.ts';
-import { TeachingEmpty } from '../states.tsx';
+import { StatePanel, TeachingEmpty } from '../states.tsx';
 
 /**
  * Tasks — project-scoped human task list over the REAL P12 routes
@@ -135,8 +135,9 @@ export function Tasks(props: {
 	const inner = (
 		<>
 			<p className="page-lede" data-testid="tasks-lede">
-				Jobs a person still does outside Caddie — record the demo video, try the app on your phone,
-				sign up for the contest. Yours to tick off; Caddie's specialists can add their own here too.
+				{props.embedded
+					? 'Jobs you still do yourself, like recording the demo video.'
+					: "Jobs a person still does outside Caddie — record the demo video, try the app on your phone, sign up for the contest. Yours to tick off; Caddie's specialists can add their own here too."}
 			</p>
 			{props.embedded && !addOpen ? null : (
 			<form className="task-create" onSubmit={create} data-testid="task-create">
@@ -168,17 +169,16 @@ export function Tasks(props: {
 				</div>
 			) : null}
 			{tasks.length === 0 ? (
-				<TeachingEmpty
-					testid="tasks-empty"
-					icon="sparkCheck"
-					title="No to-dos yet"
-					detail="Jobs a person still does outside Caddie — record the demo video, try the app on your phone, register for the contest. Yours to tick off; Caddie's specialists can add their own here too."
-					action={
-						props.embedded
-							? { label: 'Add the first to-do', onClick: () => setAddOpen(true), testid: 'tasks-empty-add' }
-							: undefined
-					}
-				/>
+				props.embedded ? (
+					<p className="state-detail" data-testid="tasks-empty">No to-dos yet.</p>
+				) : (
+					<TeachingEmpty
+						testid="tasks-empty"
+						icon="sparkCheck"
+						title="No to-dos yet"
+						detail="Add one above, or a specialist can suggest some."
+					/>
+				)
 			) : (
 				<div data-testid="tasks-list">
 					{tasks.map((task) => (
@@ -246,8 +246,14 @@ export function Tasks(props: {
 		}
 		if (state.kind === 'error') {
 			return (
-				<div data-testid="tasks-panel" role="alert" className="state-detail">
-					The to-do list could not be loaded: {state.message}
+				<div data-testid="tasks-panel">
+					<StatePanel
+						compact
+						kind="error"
+						title="Couldn’t load the to-dos."
+						detail={state.message}
+						onRetry={props.projectId ? () => void load(props.projectId!) : undefined}
+					/>
 				</div>
 			);
 		}
@@ -260,13 +266,15 @@ export function Tasks(props: {
 		}
 		return (
 			<div data-testid="tasks-panel" className="tasks-embedded">
-				<div className="r-section-head">
-					<h3 className="state-title">To-dos</h3>
+				{/* The fold's own line already says "To-dos": no second heading
+				    inside it (owner 2026-10-23). The add button sits after the
+				    list, once — the empty state no longer repeats it. */}
+				{inner}
+				<div className="tasks-embedded-foot">
 					<button type="button" className="btn-ghost" data-testid="add-task-open" onClick={() => setAddOpen((value) => !value)}>
-						{addOpen ? 'Close' : 'Add a to-do'}
+						{addOpen ? 'Done adding' : 'Add a to-do'}
 					</button>
 				</div>
-				{inner}
 			</div>
 		);
 	}

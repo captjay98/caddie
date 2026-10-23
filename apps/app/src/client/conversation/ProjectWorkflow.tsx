@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useFlueAgent } from "@flue/react";
 import { Markdown } from "@caddie/ui/Markdown";
 import type { PlanDocRevision, ApprovalRecord } from "@caddie/contracts";
-import { splitFeatureBlock, splitDesignMocks, splitArchitectureBlock } from "@caddie/contracts";
+import { splitDesignMocks, splitArchitectureBlock } from "@caddie/contracts";
 import type { BuildWorkflow, WorkflowPhase } from "../../server/build-workflow.ts";
 import { fetchJson, postJson } from "../api.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
@@ -15,7 +15,8 @@ import { DesignMockPreview } from "../artifacts/DesignMockPreview.tsx";
 import { ReplyText } from "./ReplyText.tsx";
 import { BuildProgress } from "../project/BuildProgress.tsx";
 import { ModuleProgress } from "../project/ModuleProgress.tsx";
-import { PlanFeatureList, SavedFeatures } from "../project/FeatureChecklist.tsx";
+import { SavedFeatures } from "../project/FeatureChecklist.tsx";
+import { PlanReview } from "../planning/PlanReview.tsx";
 import { AndroidDownload } from "../project/AndroidDownload.tsx";
 import { AppKeys } from "../project/AppKeys.tsx";
 import { PublishApp } from "../project/PublishApp.tsx";
@@ -270,85 +271,120 @@ function ProjectWorkspace({
         }}>Stop build</button>
       ) : null}
       {workflow.phase === "planning" ? (
-        <p className="state-detail">
-          Caddie is turning your request into a plan. You’ll review it before
-          building starts.
-        </p>
-      ) : null}
-      {workflow.phase === "review" && plan ? (
-        <>
-          <div className="compact-card-panel"><p className="compact-card-panel-title">What you’re approving</p><div className="workflow-plan">
-            <Markdown text={splitFeatureBlock(plan.body).display} />
-            <PlanFeatureList body={plan.body} />
-          </div></div>
-          {/* Reassurance STRIP: the safety facts the host actually enforces
-              (sandbox build; deploy/spend gated behind a separate approval),
-              as glanceable chips instead of a grey paragraph the user must
-              read to feel safe. */}
-          <div className="workflow-assurance" data-testid="workflow-assurance">
-            <span className="workflow-chip workflow-chip-ok">
-              <Icon name="shield" title="" /> Runs in a sandbox
-            </span>
-            <span className="workflow-chip">No deploy</span>
-            <span className="workflow-chip">No spending</span>
-            <span className="workflow-assurance-note">— those need separate permission</span>
-          </div>
-          <div className="row-actions">
+        state.data?.dispatchStalled ? (
+          <div className="state-detail state-detail--error" data-testid="dispatch-stalled">
+            <p>
+              Caddie couldn’t pick up your request to turn it into a plan. Nothing
+              was charged and nothing was lost — your request is saved. Retry and
+              Caddie will try again.
+            </p>
             <button
-              className="btn-key"
-              disabled={busy}
-              onClick={() => void decide("approved")}
-            >
-              {busy ? "Saving…" : "Approve plan"}
-            </button>
-            <button
+              type="button"
               className="btn-ghost"
               disabled={busy}
-              onClick={() => setChanges(!changes)}
-            >
-              Suggest a change
-            </button>
-          </div>
-          {/* Repo connection is OPTIONAL housekeeping, not a warning about
-              approving: one quiet footnote BELOW the actions, never a
-              caution-coloured paragraph above the primary button. */}
-          {!repoQuery.isPending && !linkedRepo ? (
-            <p className="state-detail workflow-repo-nudge" data-testid="workflow-repo-nudge">
-              <Icon name="github" title="" /> Your code lives only in the sandbox for now.{" "}
-              <button
-                type="button"
-                className="r-link"
-                data-testid="workflow-connect-repo"
-                onClick={() => chrome.goProjectTab("/project/settings", { project: projectId })}
-              >
-                Connect a GitHub repo
-              </button>{" "}
-              to save it — now or after the build.
-            </p>
-          ) : null}
-          {changes ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void decide("rejected");
+              onClick={async () => {
+                setBusy(true);
+                setError(null);
+                try {
+                  // Re-poll the workflow route, which re-runs the server-side
+                  // recovery (recoverStalledDispatch) with the SAME idempotency
+                  // key — so a retry can never start a second plan or charge.
+                  await state.refetch();
+                } catch (cause) {
+                  setError(cause instanceof Error ? cause.message : "The retry request failed.");
+                } finally {
+                  setBusy(false);
+                }
               }}
             >
-              <label htmlFor={`change-${projectId}`} className="state-detail">
-                What should change?
-              </label>
-              <textarea
-                id={`change-${projectId}`}
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                maxLength={2000}
-                rows={3}
-              />
-              <button className="btn-key" disabled={busy || !note.trim()}>
-                {busy ? "Saving…" : "Send feedback"}
-              </button>
-            </form>
-          ) : null}
-        </>
+              {busy ? "Retrying…" : "Retry"}
+            </button>
+          </div>
+        ) : (
+          <p className="state-detail">
+            Caddie is turning your request into a plan. You’ll review it before
+            building starts.
+          </p>
+        )
+      ) : null}
+      {workflow.phase === "review" && plan ? (
+        <PlanReview
+          body={plan.body}
+          title={name}
+          projectName={name ?? chrome.selectedProject?.name}
+          version={plan.revision}
+          decision={
+            <>
+              {/* Reassurance STRIP: the safety facts the host actually enforces
+                  (sandbox build; deploy/spend gated behind a separate approval),
+                  as glanceable chips instead of a grey paragraph the user must
+                  read to feel safe. */}
+              <div className="workflow-assurance" data-testid="workflow-assurance">
+                <span className="workflow-chip workflow-chip-ok">
+                  <Icon name="shield" title="" /> Runs in a sandbox
+                </span>
+                <span className="workflow-chip">No deploy</span>
+                <span className="workflow-chip">No spending</span>
+                <span className="workflow-assurance-note">— those need separate permission</span>
+              </div>
+              <div className="row-actions">
+                <button
+                  className="btn-key"
+                  disabled={busy}
+                  onClick={() => void decide("approved")}
+                >
+                  {busy ? "Saving…" : "Approve plan"}
+                </button>
+                <button
+                  className="btn-ghost"
+                  disabled={busy}
+                  onClick={() => setChanges(!changes)}
+                >
+                  Suggest a change
+                </button>
+              </div>
+              {/* Repo connection is OPTIONAL housekeeping, not a warning about
+                  approving: one quiet footnote BELOW the actions, never a
+                  caution-coloured paragraph above the primary button. */}
+              {!repoQuery.isPending && !linkedRepo ? (
+                <p className="state-detail workflow-repo-nudge" data-testid="workflow-repo-nudge">
+                  <Icon name="github" title="" /> Your code lives only in the sandbox for now.{" "}
+                  <button
+                    type="button"
+                    className="r-link"
+                    data-testid="workflow-connect-repo"
+                    onClick={() => chrome.goProjectTab("/project/settings", { project: projectId })}
+                  >
+                    Connect a GitHub repo
+                  </button>{" "}
+                  to save it — now or after the build.
+                </p>
+              ) : null}
+              {changes ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void decide("rejected");
+                  }}
+                >
+                  <label htmlFor={`change-${projectId}`} className="state-detail">
+                    What should change?
+                  </label>
+                  <textarea
+                    id={`change-${projectId}`}
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    maxLength={2000}
+                    rows={3}
+                  />
+                  <button className="btn-key" disabled={busy || !note.trim()}>
+                    {busy ? "Saving…" : "Send feedback"}
+                  </button>
+                </form>
+              ) : null}
+            </>
+          }
+        />
       ) : null}
       {workflow.phase === "design" ? (
         <p className="state-detail">
@@ -432,6 +468,10 @@ function ProjectWorkspace({
       ) : null}
       {workflow.phase === "building" ? (
         <>
+          <p className="workflow-step-line" data-testid="workflow-step-line">
+            <span className="workflow-step-dot" aria-hidden="true" />
+            Step 2 of 4 · {repairing ? "Fixing a check that failed" : "Building your app"}
+          </p>
           <p className="state-detail">
             Caddie is implementing the approved plan and running the checks.
             Here’s what’s happening — the preview opens here when they pass.

@@ -49,6 +49,7 @@ import {
   MAX_PREVIEW_PAGE_BYTES,
 } from "../apps/app/src/server/build-workflow.ts";
 import { PREVIEW_LIMIT, STORAGE_LIMIT, previewDocument, previewSeed } from "../apps/app/src/shared/preview-frame.ts";
+import { prepareOperation, markDispatched, markReconciliationRequired } from "../apps/app/src/server/operations.ts";
 import { androidDownloadView, createAndroidAppRouter } from "../apps/app/src/server/android-app.ts";
 import { buildActivity } from "../apps/app/src/server/build-activity.ts";
 import { rollbackToFeature } from "../apps/app/src/server/build-features.ts";
@@ -426,6 +427,75 @@ describe("durable chat intake", () => {
       expect(w.count("run_bindings", `projectId = '${item.project.id}'`)).toBe(
         1,
       );
+    } finally {
+      w.sqlite.close();
+    }
+  });
+});
+
+// Regression (2026-10-23 identity/bootstrap failure, proj_506d61…): a coordinator
+// DO whose stale alarm record predated Flue 2.2.2's __ps_name persistence wedged
+// (ctx.id.name undefined + no fallback), so its parked planning handoff never ran
+// and the UI sat on "turning your request into a plan" forever. workflowSnapshot
+// now exposes dispatchStalled so the UI can show an actionable retry — but ONLY
+// once re-delivery has demonstrably failed to converge (not while it is in flight).
+describe("dispatchStalled: a planning handoff that will not converge is surfaced", () => {
+  const LEASE_MS = 2 * 60_000;
+
+  test("a reconciliation-required handoff older than the redelivery lease reads dispatchStalled", async () => {
+    const w = await world();
+    try {
+      const started = await w.start(); // planning, with a parked pendingKey
+      const key = started.workflow.pendingKey!;
+      await prepareOperation(w.db, {
+        projectId: started.scope.projectId,
+        runId: started.workflow.runId,
+        provider: "coordinator-dispatch",
+        operationKey: key,
+      });
+      await markDispatched(w.db, key, `delivered:${key}`);
+      await markReconciliationRequired(w.db, key);
+      // Backdate the operation past one lease so it counts as not converging,
+      // not merely in flight.
+      w.sqlite
+        .query('update external_operations set "updatedAt" = ? where "operationKey" = ?')
+        .run(new Date(Date.now() - LEASE_MS - 1_000).toISOString(), key);
+
+      const snapshot = await workflowSnapshot(w.db, started.scope);
+      expect(snapshot.workflow?.phase).toBe("planning");
+      expect(snapshot.dispatchStalled).toBe(true);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a fresh (in-flight) handoff within the lease is NOT stalled — no false error flashes", async () => {
+    const w = await world();
+    try {
+      const started = await w.start();
+      const key = started.workflow.pendingKey!;
+      await prepareOperation(w.db, {
+        projectId: started.scope.projectId,
+        runId: started.workflow.runId,
+        provider: "coordinator-dispatch",
+        operationKey: key,
+      });
+      await markDispatched(w.db, key, `delivered:${key}`);
+      await markReconciliationRequired(w.db, key); // just now, within the lease
+      const snapshot = await workflowSnapshot(w.db, started.scope);
+      expect(snapshot.dispatchStalled).toBe(false);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("no operation row at all (handoff not yet attempted) is NOT stalled", async () => {
+    const w = await world();
+    try {
+      const started = await w.start();
+      const snapshot = await workflowSnapshot(w.db, started.scope);
+      expect(snapshot.workflow?.pendingKey).toBeTruthy();
+      expect(snapshot.dispatchStalled).toBe(false);
     } finally {
       w.sqlite.close();
     }

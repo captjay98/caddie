@@ -3,10 +3,12 @@ import type { ReactElement } from 'react';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { SignInScreen } from '../sign-in.tsx';
 import { Mascot } from '@caddie/ui/Mascot';
-import { Icon } from '../icons.tsx';
+import { formatTimeAgo } from '@caddie/ui/time';
+import { StaleChip } from '../states.tsx';
+import { briefHeaderState } from './brief-header.ts';
 import { AccountBriefV2 } from '../brief/DecisionCard.tsx';
 import { useDecisionCardAction } from '../brief/actions.ts';
-import { useAccountBrief, useMarkBriefRead } from '../queries.ts';
+import { useAccountBrief, useMarkBriefRead, useSessionDisplayName } from '../queries.ts';
 import { useWorkspaceChrome } from './Chrome.tsx';
 
 /**
@@ -39,6 +41,7 @@ function BriefBody(): ReactElement {
 	const brief = useAccountBrief(actor, false);
 	const markRead = useMarkBriefRead(actor);
 	const onCardAction = useDecisionCardAction();
+	const displayName = useSessionDisplayName();
 
 	if (!chrome.authenticated) return <SignInScreen />;
 
@@ -56,63 +59,51 @@ function BriefBody(): ReactElement {
 	}
 
 	const isNewUser = chrome.buildProjects.length === 0;
-	const openCards = (brief.data?.cards ?? []).filter((card) => card.status === 'needs-you' || card.status === 'blocked' || card.kind === 'change');
-	const needsYou = openCards.length;
-	const today = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date());
-	// Honest background line: counts drawn only from real brief data — the
-	// projects Caddie is tracking and the deadline cards it is watching. Never
-	// an invented number; a zero count simply drops its clause.
-	const watching = chrome.buildProjects.length;
-	const deadlines = (brief.data?.cards ?? []).filter((card) => card.kind === 'deadline').length;
-	const watchBits: string[] = [];
-	if (watching > 0) watchBits.push(`${watching} project${watching === 1 ? '' : 's'}`);
-	if (deadlines > 0) watchBits.push(`${deadlines} deadline${deadlines === 1 ? '' : 's'}`);
-	const backgroundLine =
-		watchBits.length > 0
-			? `I've got the watch on ${watchBits.join(' and ')} — I'll surface anything the moment it matters.`
-			: "I'll surface anything the moment it matters: a deadline, a rule change, a hackathon that fits you.";
+	const cards = brief.data?.cards ?? [];
+	const unseenCount = cards.filter(card => !card.seen).length;
+	const header = briefHeaderState({ cards, pending: brief.isPending, error: Boolean(brief.error), transportMood: chrome.caddieMood });
+	const now = new Date();
+	const datePart = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(undefined, options).format(now);
+	const name = displayName.data?.trim().split(/\s+/)[0];
+	const nextCard = cards.find(card => card.status !== 'handled');
+	const nextProject = brief.data?.projects.find(project => project.id === nextCard?.projectId);
+	const context = nextCard?.kind === 'deadline' && !nextCard.schedule && nextProject
+		? `${nextProject.name}’s deadline is coming up. Let’s leave time to tell its story.`
+		: nextCard?.headline;
 
 	return (
 		<div className="home-brief" data-testid="brief-screen">
-			{needsYou > 0 ? (
-				<header className="home-head" data-state="active">
-					<span className="home-head-disc" aria-hidden="true">
-						<Icon name="alert" title="Needs you" />
-					</span>
-					<div className="home-head-main">
-						<h1 className="home-head-title">
-							{`${needsYou} thing${needsYou === 1 ? '' : 's'} could use you`}
-							<span className="home-head-count">{needsYou}</span>
-						</h1>
-						<p className="home-head-sub">
-							<span className="home-head-date">{today}</span>
-							<span className="home-head-dot" aria-hidden="true"> · </span>
-							acting on a card is what decides it
-						</p>
+			<header className="home-head home-head--unified" data-state={header.state} data-testid="brief-head">
+				<time className="home-head-calendar" dateTime={`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`} aria-label={datePart({ weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}>
+					<span>{datePart({ weekday: 'long' })}</span>
+					<strong>{datePart({ day: 'numeric' })}</strong>
+					<span>{datePart({ month: 'long' })}</span>
+				</time>
+				<div className="home-head-main">
+					<div className="home-head-leading">
+						<span className="home-head-mascot" data-testid="brief-mascot" aria-hidden="true"><Mascot mood={header.mood} size={46} live /></span>
+						<div><p className="home-head-greeting">Your brief{name ? `, ${name}` : ''}</p><h1 className="home-head-title">{header.title}</h1></div>
 					</div>
-				</header>
-			) : (
-				<header className="home-head home-head--calm" data-state="calm">
-					<span className="home-head-mascot" aria-hidden="true">
-						<Mascot mood="done" size={52} />
-					</span>
-					<div className="home-head-main">
-						<h1 className="home-head-title">Nothing needs you — I&rsquo;ve got the watch.</h1>
-						<p className="home-head-sub">
-							<span className="home-head-date">{today}</span>
-							<span className="home-head-dot" aria-hidden="true"> · </span>
-							{backgroundLine}
-						</p>
-					</div>
-				</header>
-			)}
+					{context && !brief.error && !brief.isPending ? <p className="home-head-context">{context}</p> : null}
+				</div>
+			</header>
 
 			<section className="home-panel" data-testid="brief-lane-panel">
+				{brief.data ? <div className="brief-feed-toolbar" data-testid="brief-feed-toolbar">
+					<div className="home-head-meta">
+						<span className="home-head-updates" data-testid="brief-count">{unseenCount > 0 ? <><span className="home-head-new-dot" aria-hidden="true" />{unseenCount} new update{unseenCount === 1 ? '' : 's'}</> : 'All updates read'}</span>
+						{brief.data.asOf ? <span className="brief-head-asof" data-testid="brief-asof">Updated {formatTimeAgo(brief.data.asOf)}</span> : null}
+						<StaleChip stale={brief.isFetching} />
+					</div>
+					<button type="button" className="brief-head-markread" data-testid="brief-mark-all-read" onClick={markAllRead} disabled={unseenCount === 0 || markRead.isPending}>{markRead.isPending ? 'Marking read…' : unseenCount > 0 ? 'Mark all read' : 'All read'}</button>
+				</div> : null}
+				{markRead.error ? <p className="state-detail" role="alert">Couldn’t mark these updates read. Try again.</p> : null}
 				<AccountBriefV2
 					state={{ kind: 'empty', stale: chrome.projectsFetching || brief.isFetching, retry: chrome.refreshAll }}
 					cards={brief.data?.cards ?? []}
 					projects={brief.data?.projects ?? []}
 					asOf={brief.data?.asOf}
+					hideHeader
 					feedPending={brief.isPending}
 					feedError={brief.error}
 					hasBuildProjects={!isNewUser}

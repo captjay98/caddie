@@ -759,6 +759,7 @@ export function Channel(props: {
 				candidateId={detailCandidate.id}
 				onClose={() => setDetailCandidate(null)}
 				metaParts={metaParts(detailCandidate)}
+				deadline={detailCandidate.deadline ?? detailCandidate.endsAt}
 				autoCheckOnOpen
 				checking={checkingDetail}
 				onCheck={() => void checkDetailEligibility(detailCandidate.id)}

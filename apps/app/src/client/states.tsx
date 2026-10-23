@@ -36,6 +36,21 @@ export function failureKind(error: unknown): StateKind {
 	return 'error';
 }
 
+/**
+ * The browser knows whether the DEVICE has a network. A request can still
+ * fail while it does (Caddie's server is down or restarting), and calling
+ * that "you appear to be offline" told people with working Wi-Fi to check
+ * their connection (owner 2026-10-23).
+ */
+function deviceOffline(): boolean {
+	return typeof navigator !== 'undefined' && navigator.onLine === false;
+}
+
+function stateCopy(kind: StateKind): { kicker: string; title: string } {
+	if (kind !== 'offline') return COPY[kind];
+	return deviceOffline() ? COPY.offline : { kicker: 'NO ANSWER', title: 'Can’t reach Caddie right now' };
+}
+
 /** The character mood for a state kind (§3.8) — real state only. */
 function stateMood(kind: StateKind): 'thinking' | 'stuck' | undefined {
 	if (kind === 'loading') return 'thinking';
@@ -56,11 +71,38 @@ export function StatePanel(props: {
 	/** false where the conversation cannot be reached either (the app opened
 	    with no connection): "Ask Caddie what happened" would be a dead end. */
 	askCaddie?: boolean;
+	/** One line + a small retry, for a SECTION inside a page that still has
+	    other content (owner 2026-10-23): one outage used to stack a mascot,
+	    a kicker, two sentences and two buttons into every section at once.
+	    Page-level failures keep the full panel. */
+	compact?: boolean;
 }): ReactElement {
 	const { kind } = props;
-	const copy = COPY[kind];
+	const copy = stateCopy(kind);
 	const retryable = Boolean(props.onRetry) && kind !== 'loading' && kind !== 'empty';
 	const mood = stateMood(kind);
+	if (props.compact) {
+		const failed = kind === 'error' || kind === 'offline';
+		return (
+			<div
+				className="state-inline"
+				data-state={kind}
+				data-testid={`state-${kind}`}
+				role={failed ? 'alert' : undefined}
+				aria-busy={kind === 'loading' ? true : undefined}
+			>
+				<p className="state-inline-text">
+					<b>{props.title ?? copy.title}</b>
+					{props.detail && props.detail !== props.title ? <span> {props.detail}</span> : null}
+				</p>
+				{retryable ? (
+					<button type="button" className="btn-ghost state-inline-retry" data-testid={`state-retry-${kind}`} onClick={props.onRetry}>
+						{props.retryLabel ?? 'Try again'}
+					</button>
+				) : null}
+			</div>
+		);
+	}
 	return (
 		<section
 			className={props.flat ? 'state-panel state-panel-flat' : 'state-panel card-surface'}

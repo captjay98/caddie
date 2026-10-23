@@ -144,7 +144,7 @@ export function workflowSteps(
 	// build that paused after approval), so it claims "Approved" only when the
 	// project status says the plan was approved.
 	if (phase === 'planning') steps.plan = { text: 'Caddie is drafting it', tone: 'neutral' };
-	else if (phase === 'review') steps.plan = { text: 'Ready for you to review', tone: 'needs' };
+	else if (phase === 'review') steps.plan = { text: 'Ready to review', tone: 'needs' };
     else if (phase === 'design') steps.plan = { text: 'Caddie is designing the screens', tone: 'neutral' };
     else if (phase === 'design-review') steps.plan = { text: 'Design ready for you to review', tone: 'needs' };
 	else if (phase === 'blocked' && !pausedBuild) steps.plan = { text: 'Paused — check with Caddie', tone: 'needs' };
@@ -228,7 +228,7 @@ export function journeyFromExperience(experience: ProjectExperience, opts: { per
 		case 'planning_blocked':
 			return steps(['stop', 'Needs another pass'], waitBuild);
 		case 'review':
-			return steps(['now', 'Ready for you to review'], waitBuild);
+			return steps(['now', 'Ready to review'], waitBuild);
 		case 'design':
 			return steps(['now', 'Caddie is designing the screens'], waitBuild);
 		case 'design_review':

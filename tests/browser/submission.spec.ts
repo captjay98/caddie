@@ -466,8 +466,8 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 
 		// Create with the reuse disclosure flagged; the real REST shape is
 		// POST /api/projects/:projectId/submission/packages { reuseRequired }.
-		await page.getByText('this contest requires a reuse disclosure').click();
-		await page.getByRole('button', { name: 'Start the package' }).click();
+		await page.getByText('The rules ask me to say what I reused (work made before the contest)').click();
+		await page.getByRole('button', { name: 'Start the checklist' }).click();
 		expect(state.created).not.toBeNull();
 		expect(new URL(state.created!.url).pathname).toBe('/api/projects/proj-a/submission/packages');
 		expect(state.created!.body).toEqual({ reuseRequired: true });

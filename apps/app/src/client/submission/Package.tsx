@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
+import { Icon } from '../icons.tsx';
+import { readableFailure } from '../api.ts';
 
 /**
  * P13 submission package (slice 3) — preparation/export UI over the REAL P13
@@ -110,7 +112,7 @@ const READINESS_LABEL: Record<ReadinessRecord['status'], string> = {
 	ready: 'PREPARED (not submitted)',
 };
 
-export function SubmissionPackage(props: { projectId: string; apiBase?: string }): ReactElement {
+export function SubmissionPackage(props: { projectId: string; apiBase?: string; deadline?: string | null }): ReactElement {
 	const { projectId, apiBase = '' } = props;
 	const [detail, setDetail] = useState<PackageDetail | null>(null);
 	const [reuseRequired, setReuseRequired] = useState(false);
@@ -149,7 +151,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 		try {
 			setDetail(await fetchJson<PackageDetail>(`${base}/packages/${encodeURIComponent(packageId)}`));
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(readableFailure(cause));
 		} finally {
 			setBusy(false);
 		}
@@ -166,7 +168,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 				setDetail(null);
 			}
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(readableFailure(cause));
 		} finally {
 			setBusy(false);
 		}
@@ -183,7 +185,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 			});
 			await loadPackage(created.package.id);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(readableFailure(cause));
 			setBusy(false);
 		}
 	}
@@ -195,7 +197,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 			await fetchJson(`${base}/packages/${encodeURIComponent(detail!.package.id)}`, init);
 			await loadPackage(detail!.package.id);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(readableFailure(cause));
 			setBusy(false);
 		}
 	}
@@ -211,7 +213,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 			await fetchJson(`${base}/packages/${encodeURIComponent(detail!.package.id)}/checklist`, { method: 'POST' });
 			await loadPackage(detail!.package.id);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(readableFailure(cause));
 			setBusy(false);
 		}
 	}
@@ -223,7 +225,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 			await fetchJson(`${base}/packages/${encodeURIComponent(detail!.package.id)}/exports`, { method: 'POST' });
 			await loadPackage(detail!.package.id);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(readableFailure(cause));
 			setBusy(false);
 		}
 	}
@@ -247,7 +249,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 			setConfirmationNote('');
 			await loadPackage(detail!.package.id);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(readableFailure(cause));
 		} finally {
 			setBusy(false);
 		}
@@ -262,7 +264,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 			if (!latest) throw new Error('nothing exported yet');
 			await navigator.clipboard.writeText(latest.packageJson);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setError(readableFailure(cause));
 		} finally {
 			setBusy(false);
 		}
@@ -275,17 +277,32 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 
 	const record = detail?.package ?? null;
 
+	// Hand-in checklist (v2 Submit look): a glanceable ✓/○ list built ONLY from
+	// data already loaded — never a guess. "Prepared" is the package's own
+	// readiness verdict; "recorded" is a real confirmation on file.
+	const checklistReady = detail !== null && detail.checklist.length > 0 && detail.checklist.every((item) => item.status === 'verified');
+	const handIn: { id: string; label: string; done: boolean; hint?: string }[] = detail
+		? [
+				{ id: 'package', label: 'Hand-in checklist started', done: true },
+				...(detail.package.reuseRequired
+					? [{ id: 'reuse', label: 'Reuse disclosure confirmed', done: detail.package.reuseState === 'confirmed', hint: detail.package.reuseState === 'confirmed' ? undefined : 'You confirm this — a person, not Caddie.' }]
+					: []),
+				{ id: 'checks', label: checklistReady ? 'Every rule on record is met' : 'Rules on record are met', done: checklistReady, hint: checklistReady ? undefined : 'Some lines still need their proof.' },
+				{ id: 'export', label: 'Snapshot exported', done: detail.exports.length > 0, hint: detail.exports.length > 0 ? undefined : 'Export a snapshot before you record the hand-in.' },
+				{ id: 'video', label: 'Demo video link added', done: videoLink.trim().length > 0, hint: videoLink.trim().length > 0 ? undefined : 'Kept on this device — pasted into the portal by you.' },
+				{ id: 'submit', label: 'Recorded as submitted by you', done: detail.confirmations.length > 0, hint: detail.confirmations.length > 0 ? undefined : 'You submit on the contest site; this only records that you did.' },
+			]
+		: [];
+	const handInDone = handIn.filter((item) => item.done).length;
+
 	return (
 		<section aria-label="Submission package" className="submission-panel" data-testid="submission-package">
 			<div className="r-section-head">
 				<div>
-					<p className="kicker" data-tone="action">
-						SHIP
-					</p>
 					<h2 className="ev-title">Submit</h2>
 					<p className="page-lede">
-						Get everything ready to hand in. Caddie checks the package against the contest's rules —
-						you do the actual submitting on the contest site. This tool never submits anywhere.
+						Caddie lists what the contest asks you to hand in and checks each item against the rules it
+						read. You submit on the contest site yourself — Caddie never submits for you.
 					</p>
 				</div>
 				<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
@@ -293,9 +310,36 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 				</button>
 			</div>
 
+			{props.deadline ? (
+				<p className="submission-deadline" data-testid="submission-deadline">
+					<Icon name="clock" title="" /> <span>{props.deadline}</span>
+				</p>
+			) : null}
+
+			{handIn.length > 0 ? (
+				<div className="submission-handin" data-testid="submission-handin">
+					<h3 className="submission-handin-head">
+						Hand-in checklist · {handInDone} of {handIn.length} done
+					</h3>
+					<ul className="submission-handin-list">
+						{handIn.map((item) => (
+							<li key={item.id} className="submission-handin-item" data-done={item.done ? 'true' : 'false'} data-testid={`handin-${item.id}`}>
+								<span className="submission-handin-mark" aria-hidden="true">
+									{item.done ? <Icon name="check" title="" /> : <span className="submission-handin-todo" />}
+								</span>
+								<span className="submission-handin-body">
+									<span className="submission-handin-label">{item.label}</span>
+									{item.hint ? <span className="submission-handin-hint">{item.hint}</span> : null}
+								</span>
+							</li>
+						))}
+					</ul>
+				</div>
+			) : null}
+
 			{error ? (
 				<div role="alert" className="sign-in-error disc-error" data-testid="submission-error">
-					<b>The package could not be read.</b>
+					<b>Couldn’t load your hand-in list.</b>
 					<span> {error}</span>
 				</div>
 			) : null}
@@ -304,9 +348,8 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 				<div className="submission-empty">
 					<h3 className="state-title">Start the hand-in checklist</h3>
 					<p className="state-detail">
-						The checklist lists exactly what the contest rules require, each line with its proof. It is
-						built only from rules Caddie has actually read — with none on record it stays empty, and
-						nothing (video, repo, licence) is assumed for you.
+						One line for each thing the rules ask for — a demo video, a code link, a licence — with the
+						rule that asks for it. Caddie only uses rules it has read; nothing is assumed.
 					</p>
 					<label className="stack-toggle">
 						<input
@@ -315,12 +358,12 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string }
 							checked={reuseRequired}
 							onChange={(event) => setReuseRequired(event.target.checked)}
 						/>{' '}
-						this contest requires a reuse disclosure
+						The rules ask me to say what I reused (work made before the contest)
 					</label>
-					<p className="state-detail">If it's ticked, Caddie asks you — a person — to confirm the disclosure before anything can be exported.</p>
+					<p className="state-detail">If you tick this, you confirm that statement yourself before the checklist can be exported.</p>
 					<div>
 						<button type="button" className="btn-key" onClick={() => void createPackage()} disabled={busy}>
-							{busy ? 'Starting…' : 'Start the package'}
+							{busy ? 'Starting…' : 'Start the checklist'}
 						</button>
 					</div>
 				</div>

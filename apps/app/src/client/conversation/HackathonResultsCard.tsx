@@ -1,7 +1,7 @@
+import { CardHeader } from '../brief/CardFrame.tsx';
 import type { ReactElement } from 'react';
 import { createContext, useContext } from 'react';
 import type { HackathonResultsCard, HackathonCandidate } from '@caddie/contracts';
-import { CardHeader } from '../brief/CardFrame.tsx';
 import { Icon } from '../icons.tsx';
 import { countryName } from '../country.ts';
 import {
@@ -54,6 +54,7 @@ const VISIBLE_ROWS = 4;
 
 const ELIGIBILITY_ICON: Readonly<Record<EligibilityView['state'], 'check' | 'x' | 'info' | 'shield'>> = {
 	eligible: 'check',
+	closed: 'x',
 	ineligible: 'x',
 	confirm: 'info',
 	unknown: 'shield',
@@ -152,15 +153,7 @@ function FeaturedCard({ candidate }: { candidate: HackathonCandidate }): ReactEl
 			data-top-pick={candidate.topPick ? 'true' : undefined}
 		>
             <CardHeader design="opportunity" status={candidate.topPick ? 'Top pick' : 'Worth a look'} />
-			{candidate.topPick ? (
-				<div className="hk-toppick-ribbon" data-testid="hk-toppick-ribbon">
-					<Icon name="sparkCheck" title="" /> Top pick for you
-				</div>
-			) : null}
-			{/* Two-column header: identity (title + sub) grows on the left; the
-			    verdict and the primary action anchor top-right so the card uses
-			    its full width. On a narrow card this stacks to a column (see the
-			    @container rule) with the action dropping to a full-width footer. */}
+			{/* Match Brief: shared header, readable content, facts, then actions. */}
 			<div className="hk-feature-head">
 				<div className="hk-feature-ident">
 					<h4 className="hk-feature-title">
@@ -180,17 +173,7 @@ function FeaturedCard({ candidate }: { candidate: HackathonCandidate }): ReactEl
 					</h4>
 					{subtitle.length > 0 ? <p className="hk-feature-sub">{subtitle.join(' · ')}</p> : null}
 				</div>
-				<div className="hk-feature-actions">
-					<EligibilityDisclosure candidate={candidate} view={view} />
-					{candidate.openStatusUnverified ? (
-						<span className="hk-chip hk-chip-unverified" data-testid="hk-unverified-chip">
-							<Icon name="alert" title="" /> Open status unverified
-						</span>
-					) : null}
-					<a className="hk-open" href={candidate.url} target="_blank" rel="noreferrer">
-						Open on {site ?? 'the event page'} <Icon name="link" title="" />
-					</a>
-				</div>
+
 			</div>
 			{stats.length > 0 ? (
 				<dl className="hk-stats" data-testid="hk-meta">
@@ -207,6 +190,17 @@ function FeaturedCard({ candidate }: { candidate: HackathonCandidate }): ReactEl
 					{reason}
 				</p>
 			) : null}
+				<div className="hk-feature-actions">
+					<EligibilityDisclosure candidate={candidate} view={{ ...view, label: view.short }} />
+					{candidate.openStatusUnverified ? (
+						<span className="hk-chip hk-chip-unverified" data-testid="hk-unverified-chip">
+							<Icon name="alert" title="" /> Open status unverified
+						</span>
+					) : null}
+					<a className="hk-open btn-key" href={candidate.url} target="_blank" rel="noreferrer">
+						Open on {site ?? 'the event page'} <Icon name="link" title="" />
+					</a>
+				</div>
 		</article>
 	);
 }

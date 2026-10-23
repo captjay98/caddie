@@ -3,6 +3,8 @@ import type { ReactElement, ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Icon } from '../icons.tsx';
 import { StatePanel } from '../states.tsx';
+import { deadlineTime } from './deadline-time.ts';
+import { useSessionActor, useProfile } from '../queries.ts';
 import { mergeDetailFacts } from './detail-facts.ts';
 import type { MetaPart } from '../conversation/hackathon-format.ts';
 
@@ -99,6 +101,8 @@ export function ContestDetailPane(props: {
     const tabId = useId();
     useEffect(() => { setTab('overview'); }, [candidateId]);
     const tabs = [{id:'overview', label:'Overview'}, {id:'build', label:'Build'}, {id:'entry', label:'Entry rules'}, {id:'prizes', label:'Prizes'}] as const;
+	const actor = useSessionActor(true);
+	const profile = useProfile({ actorId: actor.data ?? null });
 	const base = `${apiBase}/api/projects/${encodeURIComponent(projectId)}/discovery`;
 
 	const detail = useQuery({
@@ -156,6 +160,8 @@ export function ContestDetailPane(props: {
 
 	const digest = data?.digest ?? digestQuery.data?.digest ?? null;
 	const keyDetails = mergeDetailFacts(props.metaParts ?? [], props.deadline, digest?.bullets ?? []);
+	const deadlineFact = keyDetails.facts.find(fact => fact.key === 'deadline');
+	const deadlineView = deadlineTime(deadlineFact?.value, profile.data?.profile?.timezone ?? undefined);
 	const digestLoading = Boolean(data?.digestPending) && !digest && (readingRules || digestQuery.isPending);
 	const digestGap = data?.digestPending
 		? digestQuery.error
@@ -188,7 +194,7 @@ export function ContestDetailPane(props: {
                 <header className="cdp-head">
                     <div className="cdp-topbar">
                         <button ref={closeRef} type="button" className="btn-ghost cdp-close" onClick={onClose} data-testid="contest-detail-close" aria-label="Close detail"><Icon name="arrowLeft" title="" /> Back</button>
-                        {data ? <span className="cdp-header-verdict" data-verdict={data.eligibility.verdict}>{data.eligibility.verdict === 'eligible' ? 'Can enter' : data.eligibility.verdict === 'ineligible' ? "Can't enter" : 'Entry unconfirmed'}</span> : null}
+                        {data ? <span className="cdp-header-verdict" data-verdict={deadlineView.closed ? 'ineligible' : data.eligibility.verdict}>{deadlineView.closed ? 'Closed' : data.eligibility.verdict === 'eligible' ? 'Eligible' : data.eligibility.verdict === 'ineligible' ? "Can't enter" : 'Entry unconfirmed'}</span> : null}
                     </div>
                     <div className="cdp-head-main">
                         <h2 className="cdp-title">{detail.isPending ? 'Loading…' : data?.candidate.title ?? 'Hackathon'}</h2>
@@ -255,7 +261,7 @@ export function ContestDetailPane(props: {
 								</p>
 							)}
 
-                            {keyDetails.facts.length || keyDetails.notes.length ? <section className="cdp-key-details" data-testid="contest-detail-key-details"><h3>Key details</h3><dl>{keyDetails.facts.map(fact => <div key={fact.key}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>{keyDetails.notes.map((note,index) => <p key={index} className="cdp-key-note">{note}</p>)}</section> : null}
+                            {keyDetails.facts.length || keyDetails.notes.length ? <section className="cdp-key-details" data-testid="contest-detail-key-details"><h3>Key details</h3><dl>{keyDetails.facts.map(fact => <div key={fact.key}><dt>{fact.label}</dt><dd>{fact.key === 'deadline' && deadlineView.local ? <><strong data-testid="contest-deadline-local">{deadlineView.local} · Your time</strong><small className="cdp-deadline-source">As listed: {fact.value}</small>{deadlineView.closed ? <small>Submissions closed</small> : deadlineView.today ? <small>Closes today</small> : null}</> : <>{fact.value}{fact.key === 'deadline' ? <small className="cdp-deadline-source">Exact closing time and time zone not confirmed.</small> : null}</>}</dd></div>)}</dl>{keyDetails.notes.map((note,index) => <p key={index} className="cdp-key-note">{note}</p>)}</section> : null}
 							{sourceSummary && !composedSource ? <details className="cdp-summary-more" data-testid="contest-detail-source-summary"><summary>From the event listing</summary><p>{sourceSummary}</p></details> : null}
                             {props.overviewEvidence}
                             {digest ? <DigestSections digest={digest} section="overview" /> : null}

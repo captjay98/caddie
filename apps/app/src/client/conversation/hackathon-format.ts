@@ -1,3 +1,4 @@
+import { deadlineTime } from '../discovery/deadline-time.ts';
 import type { HackathonCandidate } from '@caddie/contracts';
 
 /**
@@ -53,7 +54,7 @@ export function compactPrize(prize: string | null): string | null {
 }
 
 function shortDate(iso: string): string {
-	const date = new Date(`${iso}T00:00:00Z`);
+	const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? `${iso}T00:00:00Z` : iso);
 	if (Number.isNaN(date.getTime())) return iso;
 	return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(date);
 }
@@ -70,7 +71,7 @@ export function dateRange(candidate: HackathonCandidate): string | null {
 /** The submission deadline ("Oct 23"), or null when no end date is known. */
 export function deadline(candidate: HackathonCandidate): string | null {
 	const end = candidate.deadline ?? candidate.endsAt;
-	return end ? shortDate(end) : null;
+	return end ? deadlineTime(end).closed ? 'Closed' : deadlineTime(end).today ? 'Today' : shortDate(end) : null;
 }
 
 export const FORMAT_LABEL: Readonly<Record<NonNullable<HackathonCandidate['format']>, string>> = {
@@ -124,7 +125,7 @@ export function metaParts(candidate: HackathonCandidate): MetaPart[] {
 	return parts;
 }
 
-export type EligibilityState = 'eligible' | 'ineligible' | 'confirm' | 'unknown';
+export type EligibilityState = 'eligible' | 'ineligible' | 'confirm' | 'unknown' | 'closed';
 
 export interface EligibilityView {
 	readonly state: EligibilityState;
@@ -143,10 +144,11 @@ export interface EligibilityView {
  * means no rules page has been read for this event yet.
  */
 export function eligibilityView(candidate: HackathonCandidate): EligibilityView {
+	if (deadlineTime(candidate.deadline ?? candidate.endsAt).closed) return { state: 'closed', label: 'The submission deadline has passed', short: 'Closed', why: null };
 	const note = candidate.eligibilityNote?.trim() ?? '';
 	const hasQuote = Boolean(candidate.eligibilityQuote?.trim());
 	if (candidate.eligibility === 'eligible') {
-		return { state: 'eligible', label: note || 'You can enter', short: 'Can enter', why: hasQuote ? 'Why you can enter' : null };
+		return { state: 'eligible', label: note && note !== 'You can enter' ? note : 'Your profile meets the checked entry rules', short: 'Eligible', why: hasQuote ? 'Why you can enter' : null };
 	}
 	if (candidate.eligibility === 'ineligible') {
 		return { state: 'ineligible', label: note || "Can't enter", short: "Can't enter", why: hasQuote ? "Why you can't enter" : null };
