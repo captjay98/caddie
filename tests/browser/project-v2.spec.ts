@@ -166,7 +166,7 @@ async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; p
 	await context.route('**/api/projects/**', (route) => {
 		const path = new URL(route.request().url()).pathname;
 		if (path.endsWith('/workflow/decision')) return json(route, 200, { workflow: null, approval: { id: 'apr-1', status: route.request().postDataJSON().decision } });
-        if (path.endsWith('/workflow')) return json(route, 200, { workflow: opts.workflowPhase ? { phase: opts.workflowPhase, brief: 'Build FarmLog AI.' } : null, importPreview: opts.importPreview ?? null });
+        if (path.endsWith('/workflow')) return json(route, 200, { workflow: opts.workflowPhase ? { phase: opts.workflowPhase, brief: 'Build FarmLog AI.' } : null, approval: opts.approval ?? null, plan: null, design: null, designApproval: null, importPreview: opts.importPreview ?? null });
 		if (path.endsWith('/brief')) return json(route, 200, { cards: opts.brief ?? [] });
 		if (path.endsWith('/experience') && opts.experience) return json(route, 200, opts.experience);
 		if (path.endsWith('/hackathon')) return json(route, 200, { hackathon: opts.hackathon ?? null });

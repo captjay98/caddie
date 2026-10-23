@@ -338,13 +338,17 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await page.goto(`${BASE}/app/project?project=proj-a`);
 
 		await expect(page.getByTestId('project-tabs')).toBeVisible();
-		// v2: Overview orients above the four steps (Plan/Build/Check/Share);
-		// no step is current on Overview.
-		await expect(page.locator('.project-step.current')).toHaveCount(0);
+		// v2 focused workspace: the home lands on the step the work is on. With
+		// no plan yet that is Plan, so exactly ONE step is the current (viewed)
+		// step — the Overview tab no longer exists.
+		await expect(page.locator('.project-step.current')).toHaveCount(1);
+		await expect(page.getByTestId('project-tab-plan')).toHaveClass(/\bcurrent\b/);
 		await page.getByTestId('project-tab-build').click();
 		await expect(page).toHaveURL(/\/app\/runs\?project=proj-a$/); // the binding is preserved
 		await expect(page.getByTestId('project-tab-build')).toHaveAttribute('aria-current', 'page');
-		// v2 Build: past builds as sentences; details fold; Files is a tab.
+		// v2 Build: past builds as sentences live under "Build history & files";
+		// open that section to reach them (its details fold; Files is a tab).
+		await page.getByTestId('project-build-resources').locator('summary').first().click();
 		await expect(page.getByTestId('run-row')).toHaveCount(1);
 		await expect(page.getByTestId('run-row')).toContainText('react-hono');
 		await page.getByTestId('run-detail-toggle').click();
@@ -574,7 +578,10 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		expect(await assertNoOverflow()).toEqual({ scrollWidth: width, clientWidth: width });
 
 			// Build surface with real rows (desktop tab strip / mobile bottom nav).
-			await page.goto(`${BASE}/app/runs?project=proj-a`);
+			// The past-build rows live under the "Build history & files" section,
+			// open when the Build view carries its ?tab=; land there directly so a
+			// real row is on screen while measuring overflow.
+			await page.goto(`${BASE}/app/runs?project=proj-a&tab=activity`);
 			await expect(page.getByTestId('run-row')).toBeVisible();
 			expect(await assertNoOverflow()).toEqual({ scrollWidth: width, clientWidth: width });
 			await context.close();
