@@ -416,6 +416,14 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// (SVG bar/line/donut, no new library, screen-reader table) and
 			// caddie/poll.ts (usePolling, pausing while the tab is hidden).
 			'tests/kit-files.test.ts',
+			// Lane 1 (part O recipes + D13/D14): the seven recipe blocks reach
+			// the builder, Search is FTS5+MATCH (proven in the real starter),
+			// one pinned Leaflet release in the lock; D13 opens the preview CSP
+			// img-src to the one OpenStreetMap tile host; D14 adds
+			// allow="geolocation" to the interactive preview iframe.
+			'tests/recipes.test.ts',
+			'tests/preview-map-location.test.ts',
+			'tests/preview-location.test.ts',
 			// Lane 8 (part I): the campaign runner's LIVE path, all offline —
 			// the host-guarded dev client + two-account sign-in and the
 			// end-to-end brief driver (dev-client, driver); the read-only D1
