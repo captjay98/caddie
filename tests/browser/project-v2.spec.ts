@@ -609,6 +609,8 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await expect(now).toHaveAttribute('data-stage', 'blocked');
 		await expect(now).toContainText('Caddie stopped making progress on the build for 12 minutes');
 		await expect(now.getByRole('button', { name: 'Retry build' })).toBeVisible();
+		// Past builds and their record ids live under "Build history & files".
+		await page.getByTestId('project-build-resources').locator('summary').first().click();
 		await page.getByTestId('run-detail-toggle').click();
 		const details = page.getByTestId('run-details');
 		await expect(details).toContainText('Built with');
@@ -643,6 +645,9 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		);
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/runs?project=proj-a`);
+
+		// Build history & files live under their own section on the Build view.
+		await page.getByTestId('project-build-resources').locator('summary').first().click();
 
 		// Past builds are sentences, not "run 14" tokens.
 		await expect(page.getByTestId('run-row')).toContainText('A build ran');
