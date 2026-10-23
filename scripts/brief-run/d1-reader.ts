@@ -52,8 +52,22 @@
 /** A read-only query seam: run a SELECT, get rows back as plain objects. */
 export type D1Query = (sql: string, params?: unknown[]) => Promise<Array<Record<string, unknown>>>;
 
-/** One quoted string literal for the few values we must inline (ids only). */
-function lit(value: string): string {
+/**
+ * One quoted SQLite string literal for the few values we must inline (ids
+ * only) into a statement handed to `wrangler d1 execute --local --command`.
+ *
+ * SQLite string literals escape a single quote by DOUBLING it (`''`); a
+ * backslash is NOT special inside a SQLite string literal (unlike MySQL/C), so
+ * it is passed through verbatim and must NOT be doubled — doubling it would
+ * corrupt the value. A NUL byte cannot survive: the SQL is passed to wrangler
+ * as one process argument (a C string, NUL-terminated) and SQLite itself
+ * truncates a C string at the first NUL, so a value containing NUL would be
+ * silently cut. We refuse it rather than inline a truncated value.
+ */
+export function lit(value: string): string {
+	if (value.includes('\u0000')) {
+		throw new Error('d1 lit(): a NUL byte cannot be inlined into a SQL literal (it would be silently truncated)');
+	}
 	return `'${value.replace(/'/g, "''")}'`;
 }
 

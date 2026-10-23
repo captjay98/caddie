@@ -5,6 +5,7 @@ import {
 	readBuildResults,
 	totalCampaignSpentMicros,
 	REQUIRED_CONTRACT_CHECKS,
+	lit,
 	type D1Query,
 } from '../scripts/brief-run/d1-reader.ts';
 import { assertSelectOnly } from '../scripts/brief-run/d1-live.ts';
@@ -301,5 +302,45 @@ describe('the live D1 seam is SELECT-only (step 3 safety)', () => {
 		]) {
 			expect(() => assertSelectOnly(bad)).toThrow();
 		}
+	});
+});
+
+describe('the lit() SQL-literal escaper (step 3 / item 6 safety)', () => {
+	/** Run `select <literal> as v` through real SQLite and read the value back. */
+	function roundTrip(value: string): unknown {
+		const sqlite = new Database(':memory:');
+		const row = sqlite.prepare(`select ${lit(value)} as v`).get() as { v: unknown };
+		return row.v;
+	}
+
+	test('a single quote is doubled, so the literal round-trips exactly', () => {
+		expect(lit("O'Brien")).toBe("'O''Brien'");
+		expect(roundTrip("O'Brien")).toBe("O'Brien");
+		expect(roundTrip("it's a 'quoted' value")).toBe("it's a 'quoted' value");
+		// A trailing quote and a lone quote both survive.
+		expect(roundTrip("ends with '")).toBe("ends with '");
+		expect(roundTrip("'")).toBe("'");
+	});
+
+	test('a backslash is NOT special in SQLite and is passed through verbatim', () => {
+		// Doubling a backslash (MySQL/C habit) would corrupt the value; SQLite
+		// treats it literally, so lit() must not touch it.
+		expect(lit('C:\\path\\to')).toBe("'C:\\path\\to'");
+		expect(roundTrip('C:\\path\\to')).toBe('C:\\path\\to');
+		expect(roundTrip("a\\'b")).toBe("a\\'b");
+		expect(roundTrip('\\')).toBe('\\');
+	});
+
+	test('a NUL byte is refused rather than silently truncated', () => {
+		// The SQL is handed to wrangler as a NUL-terminated process arg, and
+		// SQLite truncates a C string at NUL — so inlining a NUL would silently
+		// cut the value. lit() refuses instead.
+		expect(() => lit('before\u0000after')).toThrow(/NUL/);
+		expect(() => lit('\u0000')).toThrow(/NUL/);
+	});
+
+	test('an ordinary id is quoted without alteration', () => {
+		expect(lit('proj-1')).toBe("'proj-1'");
+		expect(roundTrip('run_abc-123')).toBe('run_abc-123');
 	});
 });
