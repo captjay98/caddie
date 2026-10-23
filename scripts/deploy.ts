@@ -151,7 +151,13 @@ export function parseVersionId(output: string): string | null {
 
 /** Parse the newest (top) version id out of `wrangler deployments list` output. */
 export function parseLatestDeploymentId(output: string): string | null {
-	const match = /(?:Version ID|Deployment ID):\s*([0-9a-f-]{36})/i.exec(output);
+	// wrangler 4.12x prints the active version as `Version(s):  (100%) <uuid>`
+	// under each deployment block, newest first; older wrangler used a bare
+	// `Version ID:` / `Deployment ID:` label. Take the first UUID either shape
+	// yields — that is the newest (top) deployment, i.e. the rollback handle.
+	const match =
+		/Version\(s\):\s*(?:\(\d+%\)\s*)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(output) ??
+		/(?:Version ID|Deployment ID):\s*([0-9a-f-]{36})/i.exec(output);
 	return match ? match[1]! : null;
 }
 

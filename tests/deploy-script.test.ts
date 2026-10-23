@@ -75,7 +75,17 @@ const DRY_RUN_OK = [
 ].join('\n');
 
 const MIGRATIONS_LIST_NONE = 'Migrations to be applied:\n(none)\n';
-const DEPLOYMENTS_LIST = `Deployment ID: ignored\nVersion ID: ${ROLLBACK_ID}\nCreated: now\n`;
+const DEPLOYMENTS_LIST = [
+	'Created:     2026-10-20T11:53:24.217Z',
+	'Author:      captjay98@gmail.com',
+	'Source:      Unknown (deployment)',
+	`Version(s):  (100%) ${ROLLBACK_ID}`,
+	'                 Created:  2026-10-20T11:53:21.499Z',
+	'                     Tag:  -',
+	'',
+	'Created:     2026-10-20T10:33:08.546Z',
+	'Version(s):  (100%) bbbbbbbb-2222-4333-8444-555555555555',
+].join('\n');
 const DEPLOY_OUTPUT = `Total Upload: 1 KiB\nDeployed caddie-app\nCurrent Version ID: ${NEW_VERSION_ID}\n`;
 const SWITCHES_OUTPUT = `key               value\nteam_mode         off\nbig_apps          off\napp_features      off\nspend_enforcement on\npublish_safety    on\n`;
 
