@@ -2232,6 +2232,8 @@ describe("host-driven feature loop", () => {
     stub.setBehavior("bun test caddie/contract.test.ts", { stdout: "3 pass\n0 fail" });
     return stub;
   }
+  /** The browser bundle the preview reads (dist/main.js + main.css). */
+  const builtFiles = (root: string) => ({ stdout: "built", writes: { [`${root}/dist/main.js`]: "1", [`${root}/dist/main.css`]: "a{}" } });
 
   test("a big build: the coordinator builds only the foundation's features, then starts the parts whose dependencies are joined", async () => {
     const w = await world();
@@ -2293,6 +2295,31 @@ describe("host-driven feature loop", () => {
       const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
       await host.buildNextFeature();
       await rejectsCode(host.finishFeature("farm-registry", "big-2"), "PARTS_UNAVAILABLE");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("a team-mode build's verify_build publishes the app, though its contract checks run after the bundle is built", async () => {
+    // Every check run commits a new sandbox image, and in team mode the
+    // contract phases run after the browser bundle. The "files changed after
+    // the build" guard must compare with the image the checks ENDED on, not
+    // the bundle's. MUTATION: compare with the bundle's image again and every
+    // team-mode verify fails with STALE_BUILD.
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const item = await bigBuild(w, { bigApps: false });
+      const root = `/workspace/${item.scope.projectId}`;
+      stub.setBehavior("bun run build", builtFiles(root));
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      for (const [n, featureId] of ["farm-registry", "structures", "sales"].entries()) {
+        await host.buildNextFeature();
+        stub.setBehavior("bun run test", { stdout: `${n + 1} pass\n0 fail` });
+        expect(((await host.finishFeature(featureId, `small-${n}`)) as { passed: boolean }).passed).toBe(true);
+      }
+      const verified = (await host.verifyBuild("small-verify")) as { passed: boolean };
+      expect(verified.passed).toBe(true);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("ready");
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 
@@ -2406,6 +2433,123 @@ describe("host-driven feature loop", () => {
       expect((await readWorkflow(w.db, p.item.scope))?.phase).toBe("building");
       // Nothing changed in the app: the newest save point and the build's copy stay put.
       expect(w.count("build_sandbox_sessions", "reason like 'joined:%'")).toBe(0);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  // --- Big apps, the end of the build (plan part P step 3, Q "verify_build") --
+  /** Run one part's builder on the REAL module host: its features, then finish_module. */
+  async function buildPart(
+    w: Awaited<ReturnType<typeof world>>,
+    stub: SandboxStub,
+    p: Awaited<ReturnType<typeof partReady>>,
+    moduleId: string,
+    featureId: string,
+  ) {
+    const host = await resolveModuleBuilderContext(env(w, stub), { conversationId: p.item.workflow.conversationId, moduleId, buildSeq: p.buildSeq, features: [featureId] }, {
+      dispatchModuleBuilder: () => {},
+      notifyCoordinator: (input: { key: string; message: string }) => void p.notified.push(input),
+    });
+    await host.buildNextFeature();
+    await host.driver.writeFile({ sessionId: host.sessionId, path: `${p.root}/src/server/${moduleId}/${featureId}.ts`, content: `export const ${featureId.replace(/-/g, "_")} = 1;` });
+    expect(((await host.finishFeature(featureId, `${moduleId}-1`)) as { passed: boolean }).passed).toBe(true);
+    return host;
+  }
+
+  test("a big build waits for its parts: verify_build publishes nothing while a part is still building", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      const coordinator = await resolveCoordinatorContext(env(w, stub), p.item.workflow.conversationId, { dispatchModuleBuilder: () => {} });
+      const spawns = stub.spawnRequestCount();
+      // MUTATION: drop the "parts still building" refusal and verify runs (and
+      // publishes) an app two of whose parts are not in it yet.
+      const early = (await coordinator.verifyBuild("big-early")) as { passed: boolean; waiting?: boolean; next: string };
+      expect(early).toMatchObject({ passed: false, waiting: true });
+      expect(early.next).toContain("end your turn now");
+      expect(stub.spawnRequestCount()).toBe(spawns);
+      expect((await readWorkflow(w.db, p.item.scope))?.phase).toBe("building");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("when every part is joined, Caddie is told, and verify_build checks the joined app and makes it ready", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      stub.setBehavior("bun run build", builtFiles(p.root));
+      expect(await p.part.finishModuleBuild!("join-structures")).toMatchObject({ joined: true });
+      const money = await buildPart(w, stub, p, "money", "sales");
+      expect(await money.finishModuleBuild!("join-money")).toMatchObject({ joined: true });
+      expect(p.notified.length).toBe(1);
+      expect(p.notified[0]!.message).toContain("Every part is joined into the app");
+
+      const newest = (await getModule(w.db, p.item.scope.projectId, p.buildSeq, "core"))!.checkpointRef!;
+      const coordinator = await resolveCoordinatorContext(env(w, stub), p.item.workflow.conversationId, { dispatchModuleBuilder: () => {} });
+      expect(await coordinator.buildNextFeature()).toMatchObject({ done: true });
+      const before = stub.requests.length;
+      const verified = (await coordinator.verifyBuild("big-verify")) as { passed: boolean };
+      expect(verified.passed).toBe(true);
+      // verify_build ran on the joined app: its session started from the newest save point.
+      const spawned = stub.requests.slice(before).filter((r) => r.method === "POST" && r.path === "/v1/instances");
+      expect((spawned[0]?.body as { image?: string })?.image).toBe(newest);
+      const workflow = await readWorkflow(w.db, p.item.scope);
+      expect(workflow?.phase).toBe("ready");
+      expect(workflow?.detail).toBeNull();
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("parts that could not be joined or stopped are left out: the app ends ready but partly built, saying which", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      stub.setBehavior("bun run build", builtFiles(p.root));
+      stub.setBehavior("bun run test", { exitCode: 1, stderr: "1 fail: the barns list is empty" });
+      await p.part.finishModuleBuild!("join-1");
+      expect(await p.part.finishModuleBuild!("join-2")).toMatchObject({ joined: false, final: true });
+      stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+      expect(p.notified).toEqual([]); // money is still building
+      // money's builder starts its feature, then reports a blocker: the part
+      // stops with its feature unfinished, and with that every part is settled.
+      // MUTATION: don't continue the big build after a part stops, and Caddie
+      // is never told (the build sits silent until the stall watchdog).
+      const money = await resolveModuleBuilderContext(env(w, stub), { conversationId: p.item.workflow.conversationId, moduleId: "money", buildSeq: p.buildSeq, features: ["sales"] }, {
+        dispatchModuleBuilder: () => {},
+        notifyCoordinator: (input: { key: string; message: string }) => void p.notified.push(input),
+      });
+      await money.buildNextFeature();
+      await money.blockBuild("The payment provider's test keys are missing.");
+      expect(p.status("money")).toBe("stopped");
+      expect(p.notified.length).toBe(1);
+      expect(p.notified[0]!.message).toContain("structures (could not be joined)");
+      expect(p.notified[0]!.message).toContain("money (stopped)");
+
+      const coordinator = await resolveCoordinatorContext(env(w, stub), p.item.workflow.conversationId, { dispatchModuleBuilder: () => {} });
+      const next = (await coordinator.buildNextFeature()) as { done: boolean; next: string };
+      expect(next.done).toBe(true);
+      expect(next.next).toContain("verify_build");
+      // MUTATION: count the missing parts' features in the verify gate, and the
+      // build can never finish ("Not every feature is built yet": sales).
+      const verified = (await coordinator.verifyBuild("big-verify")) as { passed: boolean; next: string };
+      expect(verified.passed).toBe(true);
+      expect(verified.next).toContain("Try again");
+      const workflow = await readWorkflow(w.db, p.item.scope);
+      expect(workflow?.phase).toBe("ready");
+      const plain = (id: string) => JSON.parse(FARM_BLOCK).modules.find((m: { id: string }) => m.id === id).plain as string;
+      expect(workflow?.detail).toBe(
+        `Your app is ready without 2 parts: ${plain("structures")} (it couldn't be joined into the app), ${plain("money")} (it stopped). Press Try again on a part to build it again.`,
+      );
+      // The contract check the published app passed covers the features in it,
+      // never the whole design. MUTATION: verify with the whole design's
+      // contract, and it asks for the billing profiles table no built part made.
+      const outputImage = (w.sqlite.query("select image from workflow_outputs where id = ?").get(workflow!.previewId) as { image: string }).image;
+      const contractTest = await p.read(outputImage, "caddie/contract.test.ts");
+      expect(contractTest).toContain('"scoped":true');
+      expect(contractTest).not.toContain("billing_profiles");
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 });

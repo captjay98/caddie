@@ -129,6 +129,21 @@ export async function startAfterFoundation(
 export type MissingReason = 'stopped' | 'not-merged' | 'waits-on-missing';
 
 /**
+ * The ready card's line for an app finished without some of its parts (plan
+ * part P step 3: "partly built, with a plain list of what's missing and the
+ * Try-again button for that module"). Plain part names from the design.
+ */
+export function partlyBuiltDetail(block: ArchitectureBlock, missing: ReadonlyArray<{ moduleId: string; reason: MissingReason }>): string {
+	const plain = (id: string) => block.modules.find((m) => m.id === id)?.plain ?? id;
+	const why = (reason: MissingReason) =>
+		reason === 'not-merged' ? "it couldn't be joined into the app" : reason === 'stopped' ? 'it stopped' : 'it needs a part that is missing';
+	const list = missing.map((m) => `${plain(m.moduleId)} (${why(m.reason)})`).join(', ');
+	return missing.length === 1
+		? `Your app is ready without one part: ${list}. Press Try again on that part to build it again.`
+		: `Your app is ready without ${missing.length} parts: ${list}. Press Try again on a part to build it again.`;
+}
+
+/**
  * Where the big build stands. `done` when no module can make progress any
  * more: each is joined, stopped or not joined — or waits (directly or through
  * another module) on one that is stopped or not joined, so it can never start.

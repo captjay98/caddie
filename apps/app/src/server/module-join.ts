@@ -155,6 +155,33 @@ export async function pointBuildSessionAt(
 }
 
 /**
+ * After a part settles (joined, not joined, or stopped), keep the big build
+ * moving: a finished part's builder slot is freed, every part that can start
+ * now starts from the newest joined save point, and once nothing can make
+ * progress any more the coordinator is told, keyed, so a second caller that
+ * also sees the build settled sends the same one turn. Called after every
+ * join and after a part stops — a stopped part's slot must go to the next
+ * part, or a part waiting for a slot would never start.
+ */
+export async function continueBigBuild(
+	db: D1Database,
+	scope: Scope,
+	input: { runId: string; buildSeq: number; block: ArchitectureBlock },
+	ports: Pick<JoinPorts, 'dispatch' | 'features' | 'notifyCoordinator'>,
+): Promise<{ settled: boolean }> {
+	const projectId = scope.projectId;
+	for (const m of await listModules(db, projectId, input.buildSeq))
+		if (m.status === 'merged' || m.status === 'not-merged' || m.status === 'stopped') await releaseSlot(db, projectId, input.buildSeq, m.moduleId);
+	const newest = (await getModule(db, projectId, input.buildSeq, foundationModuleOf(input.block)))?.checkpointRef;
+	if (newest)
+		await startReadyModules(db, scope, { runId: input.runId, buildSeq: input.buildSeq, latestMergedSave: newest, dispatch: ports.dispatch, features: (m) => ports.features(m) });
+	const outcome = await bigBuildOutcome(db, projectId, input.buildSeq);
+	if (outcome.done)
+		await ports.notifyCoordinator?.({ key: `parts-settled:${input.runId}:${input.buildSeq}`, message: partsSettledMessage(outcome.missing) });
+	return { settled: outcome.done };
+}
+
+/**
  * Join one finished part into the app (see the file header). `moduleRef` is a
  * fresh commit of the part's own copy, taken when its builder called
  * finish_module. Never throws for a red join: that is a result.
@@ -265,19 +292,7 @@ export async function joinFinishedModule(
 			await releaseSlot(db, projectId, buildSeq, part);
 		}
 	}
-	// A joined part's builder is done: its slot goes to the next part.
-	for (const m of await listModules(db, projectId, buildSeq)) if (m.status === 'merged') await releaseSlot(db, projectId, buildSeq, m.moduleId);
-
-	// Start every part whose dependencies are now joined, from the newest save point.
-	const newest = (await getModule(db, projectId, buildSeq, foundation))?.checkpointRef ?? newestAtStart;
-	await startReadyModules(db, scope, { runId, buildSeq, latestMergedSave: newest, dispatch: ports.dispatch, features: (m) => ports.features(m) });
-
-	// Settled: the coordinator checks the whole app. A queued call leaves this
-	// to the holder, which sees the board after its drain.
-	if (!result.queued) {
-		const outcome = await bigBuildOutcome(db, projectId, buildSeq);
-		if (outcome.done) await ports.notifyCoordinator?.({ key: `parts-settled:${runId}:${buildSeq}`, message: partsSettledMessage(outcome.missing) });
-	}
+	await continueBigBuild(db, scope, { runId, buildSeq, block }, ports);
 
 	if (result.queued) return { joined: false, queued: true, next: QUEUED_NEXT };
 	if (result.merged) return { joined: true, savePoint: result.savePoint ?? '', next: JOINED_NEXT };

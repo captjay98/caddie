@@ -5,10 +5,11 @@ import { projectScopeForUser } from '../apps/app/src/server/scope.ts';
 import type { ArchitectureBlock, Scope } from '@caddie/contracts';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import type { SnapshotReadPort } from '../apps/app/src/server/part-manifests.ts';
-import { getModule, moduleInstanceId } from '../apps/app/src/server/module-slots.ts';
+import { getModule, moduleInstanceId, setModuleStatus } from '../apps/app/src/server/module-slots.ts';
+import { stopModule } from '../apps/app/src/server/modules.ts';
 import { acquireIntegrationLock, releaseIntegrationLock, type CheckFailure } from '../apps/app/src/server/integration.ts';
 import { startAfterFoundation } from '../apps/app/src/server/big-build.ts';
-import { joinFinishedModule, MAX_JOIN_TRIES, type JoinCopy, type JoinPorts } from '../apps/app/src/server/module-join.ts';
+import { continueBigBuild, joinFinishedModule, MAX_JOIN_TRIES, type JoinCopy, type JoinPorts } from '../apps/app/src/server/module-join.ts';
 
 /**
  * Big apps (plan part P step 3, part Q): a part whose builder has finished is
@@ -365,5 +366,61 @@ describe('one holder joins several waiting parts in a row', () => {
 		expect(await status(db, scope, 'beta')).toBe('building');
 		expect(h.dispatched.map((d) => d.moduleId)).toEqual(['beta']);
 		expect(h.pointed.map((p) => p.name)).toEqual(['core + alpha merged', 'core + alpha + gamma merged']);
+	});
+});
+
+describe('when a part stops (its tries are spent, or its builder reported a blocker)', () => {
+	/** core plus five parts that each need only core: one more than the 4 builder slots. */
+	function fiveParts(): ArchitectureBlock {
+		const ids = ['p1', 'p2', 'p3', 'p4', 'p5'];
+		return {
+			modules: [{ id: 'core', plain: 'Farms', dependsOn: [] }, ...ids.map((id) => ({ id, plain: id.toUpperCase(), dependsOn: ['core'] }))],
+			routes: [route('farms.create', 'core', 'farms'), ...ids.map((id) => route(`${id}.create`, id, `${id}-f`))],
+		} as unknown as ArchitectureBlock;
+	}
+	async function seedFive() {
+		const { sqlite, db } = migratedDatabase();
+		addUser(sqlite, 'alice', 'alice@example.com');
+		const ws = await createWorkspace(db, 'alice', { name: 'W' });
+		const project = await createProject(db, { workspaceId: ws.id, actorId: 'alice' } as never, { workspaceId: ws.id, name: 'Farm' });
+		const scope = await projectScopeForUser(db, 'alice', project.id);
+		const now = new Date().toISOString();
+		await db.prepare('insert into "build_spend_limits" ("payerId","limitMicros","createdAt","updatedAt") values (?,?,?,?)').bind('pay-1', 40_000_000, now, now).run();
+		const started: string[] = [];
+		await startAfterFoundation(db, scope, {
+			runId: RUN,
+			block: fiveParts(),
+			featureIds: ['farms', 'p1-f', 'p2-f', 'p3-f', 'p4-f', 'p5-f'],
+			payerId: 'pay-1',
+			foundationRef: 'img-core',
+			dispatch: (d) => void started.push(d.moduleId),
+		});
+		const dispatched: string[] = [];
+		const notified: Array<{ key: string; message: string }> = [];
+		const ports = {
+			dispatch: (d: { moduleId: string }) => void dispatched.push(d.moduleId),
+			features: (m: string) => [`${m}-f`],
+			notifyCoordinator: (n: { key: string; message: string }) => void notified.push(n),
+		};
+		return { db, scope, started, dispatched, notified, ports };
+	}
+
+	test('its slot goes to the next part that was waiting for one', async () => {
+		const s = await seedFive();
+		expect(s.started).toEqual(['p1', 'p2', 'p3', 'p4']); // p5 waits for a slot
+		await stopModule(s.db, s.scope, { buildSeq: 0, moduleId: 'p1' });
+		// MUTATION: skip starting ready parts after a stop, and p5 waits forever.
+		expect(await continueBigBuild(s.db, s.scope, { runId: RUN, buildSeq: 0, block: fiveParts() }, s.ports)).toEqual({ settled: false });
+		expect(s.dispatched).toEqual(['p5']);
+		expect(await status(s.db, s.scope, 'p5')).toBe('building');
+		expect(s.notified).toEqual([]);
+	});
+
+	test('the last part to settle by stopping tells Caddie, naming what is missing', async () => {
+		const s = await seedFive();
+		for (const id of ['p2', 'p3', 'p4', 'p5']) await setModuleStatus(s.db, s.scope.projectId, 0, id, 'merged', { checkpointRef: 'img-core' });
+		await stopModule(s.db, s.scope, { buildSeq: 0, moduleId: 'p1' });
+		expect(await continueBigBuild(s.db, s.scope, { runId: RUN, buildSeq: 0, block: fiveParts() }, s.ports)).toEqual({ settled: true });
+		expect(s.notified).toEqual([{ key: `parts-settled:${RUN}:0`, message: expect.stringContaining('p1 (stopped)') }]);
 	});
 });
