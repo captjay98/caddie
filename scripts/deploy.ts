@@ -463,11 +463,14 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	if (deploy.exitCode !== 0) {
 		return stop({ name: 'deploy', ok: false, command: deployArgv, detail: `exit ${deploy.exitCode} — deploy failed` });
 	}
+	// Item E: a missing Version ID after a successful deploy is a WARNING, not a
+	// stop — the code is already live, so smoke and the switch report must still
+	// run. The evidence records '(unparsed)' for the version.
 	versionId = parseVersionId(deploy.stdout) ?? undefined;
 	if (!versionId) {
-		return stop({ name: 'deploy', ok: false, command: deployArgv, detail: 'deploy succeeded but no Version ID in output' });
+		log('    WARN: deploy succeeded but no Version ID in the output — continuing with smoke and switch report; evidence version will read (unparsed)');
 	}
-	record({ name: 'deploy', ok: true, command: deployArgv, detail: `Version ID ${versionId}` });
+	record({ name: 'deploy', ok: true, command: deployArgv, detail: versionId ? `Version ID ${versionId}` : 'deployed; Version ID unparsed (see WARN)' });
 
 	// --- Step 9: hosted smoke, then live hash == dist hash -------------------
 	const host = productionHost(authored);

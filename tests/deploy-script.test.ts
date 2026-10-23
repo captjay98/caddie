@@ -89,6 +89,8 @@ interface HarnessOverrides {
 	readonly hasJudgeCode?: boolean;
 	/** Local migration filenames present under apps/app/migrations. */
 	readonly localMigrations?: string[];
+	/** Override ONLY the real `wrangler deploy` output (not the dry-run). */
+	readonly deployOutput?: string;
 }
 
 interface Harness {
@@ -157,7 +159,7 @@ function makeHarness(over: HarnessOverrides = {}): Harness {
 		else if (joined.includes('d1 migrations list')) base = ok(MIGRATIONS_LIST_NONE);
 		else if (joined.includes('deployments list')) base = ok(DEPLOYMENTS_LIST);
 		else if (joined.includes('d1 migrations apply')) base = ok('Migrations applied\n');
-		else if (joined.includes('wrangler deploy')) base = ok(DEPLOY_OUTPUT);
+		else if (joined.includes('wrangler deploy')) base = ok(over.deployOutput ?? DEPLOY_OUTPUT);
 		else if (joined.includes('test:live')) base = ok('P17 live 5/5 PASS\n');
 		else if (joined.startsWith('curl')) base = ok(`<script src="/assets/${LIVE_JS}"></script>`);
 		else if (joined.includes('d1 execute')) base = ok(SWITCHES_OUTPUT);
@@ -462,5 +464,17 @@ describe('deploy.ts — item D: rollback handle must be parseable before a write
 		expect(result.ok).toBe(true);
 		expect(result.wroteRemote).toBe(false);
 		expect(h.logs.some((l) => l.includes('WARN') && l.includes('deployments list'))).toBe(true);
+	});
+});
+
+describe('deploy.ts — item E: unparsed Version ID warns, does not stop', () => {
+	test('a deploy with no Version ID in its output still runs smoke and the switch report', () => {
+		const h = makeHarness({ deployOutput: 'Total Upload: 1 KiB\nDeployed caddie-app\n' });
+		const result = runDeploy(DEPLOY, h.deps);
+		expect(result.ok).toBe(true);
+		expect(result.versionId).toBeUndefined();
+		expect(joinAll(h.commands).some((c) => c.includes('test:live'))).toBe(true);
+		expect(joinAll(h.commands).some((c) => c.includes('platform_switches'))).toBe(true);
+		expect(h.logs.some((l) => l.includes('WARN') && l.includes('Version ID'))).toBe(true);
 	});
 });
