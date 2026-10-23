@@ -202,6 +202,34 @@ describe('joining a finished part into the app (part P step 3)', () => {
 		expect(h.notified).toEqual([]); // tasks and money are still building
 	});
 
+	test('a join bases its copy on the current foundation so a sibling that merged first is not lost (finding #1)', async () => {
+		// The review's race: a part reads the foundation ref at the top of its
+		// join, but a sibling merges before the part opens its copy, advancing the
+		// foundation. The fix re-reads the foundation when the copy is opened
+		// (inside the integration lock) rather than trusting the ref read at the
+		// top. Here the foundation already carries a sibling's (feed's) merged
+		// files; a joining Tasks must base on it and keep feed's files.
+		const { db, scope, store } = await seed();
+		const postFeed = store.add(new Map([...store.files('img-core'), ['src/server/feed/feed.ts', 'feed v1']]));
+		await setModuleStatus(db, scope.projectId, 0, 'core', 'merged', { checkpointRef: postFeed });
+		// feed is recorded merged so the drain does not try to re-merge it.
+		await setModuleStatus(db, scope.projectId, 0, 'feed', 'merged', { checkpointRef: postFeed });
+
+		const tasksRef = finishedPart(store, 'img-core', 'tasks', 'v1');
+		const h = harness(store);
+		const out = await joinFinishedModule(db, scope, { runId: RUN, buildSeq: 0, moduleId: 'tasks', moduleRef: tasksRef, block: block(), attempt: 'tasks-1' }, h.ports);
+		expect(out).toMatchObject({ joined: true });
+
+		// Tasks opened its copy from the CURRENT foundation (postFeed), not img-core.
+		expect(h.opened[0]!.image).toBe(postFeed);
+		// The final merged image carries BOTH feed's and tasks' files.
+		const core = await getModule(db, scope.projectId, 0, 'core');
+		const finalFiles = store.files(core!.checkpointRef!);
+		expect(finalFiles.get('src/server/feed/feed.ts'), 'the sibling feed files must survive tasks joining').toBe('feed v1');
+		expect(finalFiles.get('src/server/tasks/tasks.ts')).toBe('tasks v1');
+		expect(await status(db, scope, 'tasks')).toBe('merged');
+	});
+
 	test('red: nothing changes in the app; the part goes back to its builder with the failures and one try left', async () => {
 		const { db, scope, store } = await seed();
 		const h = harness(store, [red('1 fail: the feed total is wrong')]);

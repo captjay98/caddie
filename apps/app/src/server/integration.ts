@@ -216,7 +216,7 @@ export interface MergeDeps {
 	 * stands). Optional: when absent, a stray is reported purely from the
 	 * module snapshot's out-of-folder files (every one counts as a stray).
 	 */
-	readonly readIntegrationSnapshot?: () => SnapshotReadPort & { image: string };
+	readonly readIntegrationSnapshot?: () => (SnapshotReadPort & { image: string }) | Promise<SnapshotReadPort & { image: string }>;
 	/**
 	 * Read one file's raw bytes from the module snapshot, base64, for the write.
 	 * (`part-snapshot.ts` reads bytes through the same inspect image.)
@@ -387,7 +387,7 @@ async function mergeOneModule(
 			const modulePort = deps.readModuleSnapshot(ref);
 			const moduleManifest = await buildManifest(modulePort);
 			if (id === moduleId) {
-				const integrationManifest = deps.readIntegrationSnapshot ? await buildManifest(deps.readIntegrationSnapshot()) : null;
+				const integrationManifest = deps.readIntegrationSnapshot ? await buildManifest(await deps.readIntegrationSnapshot()) : null;
 				strayFiles = await strayChanges(block, moduleId, moduleManifest, integrationManifest);
 			}
 			const modAreas = id === moduleId ? areas : moduleAreas(block, id);

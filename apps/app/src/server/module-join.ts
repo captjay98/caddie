@@ -226,8 +226,24 @@ export async function joinFinishedModule(
 	let copy: JoinCopy | null = null;
 	let copyImage = newestAtStart;
 	let opens = 0;
-	const useCopy = async (): Promise<JoinCopy> =>
-		(copy ??= await ports.openCopy(copyImage, `join:${runId}:${buildSeq}:${moduleId}:${keyPart(input.attempt)}:${opens++}`));
+	// FINDING #1 (review 2026-10-23): `newestAtStart` was read BEFORE the
+	// integration lock (acquired inside the merge), so a sibling part that
+	// merged in between advanced the foundation and this copy would open from a
+	// STALE image, losing the sibling's files. Every integration access below
+	// happens INSIDE the lock, so on the FIRST such access rebase copyImage to
+	// the foundation's CURRENT checkpointRef. Only once — a later access after a
+	// restore must use the restored ref, not jump forward again.
+	let foundationRebased = false;
+	const ensureFoundationBase = async (): Promise<void> => {
+		if (foundationRebased) return;
+		foundationRebased = true;
+		const current = (await getModule(db, projectId, buildSeq, foundation))?.checkpointRef;
+		if (current) copyImage = current;
+	};
+	const useCopy = async (): Promise<JoinCopy> => {
+		await ensureFoundationBase();
+		return (copy ??= await ports.openCopy(copyImage, `join:${runId}:${buildSeq}:${moduleId}:${keyPart(input.attempt)}:${opens++}`));
+	};
 
 	// Which part a check run is for: the merge reads the merging part's
 	// snapshot just before it writes and checks (one round each, since
@@ -248,14 +264,20 @@ export async function joinFinishedModule(
 			lastRead = ref;
 			return ports.readSnapshot(ref);
 		},
-		readIntegrationSnapshot: () => ports.readSnapshot(copyImage),
+		readIntegrationSnapshot: async () => {
+			await ensureFoundationBase();
+			return ports.readSnapshot(copyImage);
+		},
 		readModuleFile: (ref, path) => ports.readFile(ref, path),
 		writeIntegration: async (files) => {
 			await (await useCopy()).write(files);
 		},
 		// The copy as it stands before a part's writes is always `copyImage`:
 		// opened from it, or committed as it by the last green save point.
-		snapshotIntegration: async () => copyImage,
+		snapshotIntegration: async () => {
+			await ensureFoundationBase();
+			return copyImage;
+		},
 		restoreIntegration: async (ref) => {
 			copy = null;
 			copyImage = ref;
