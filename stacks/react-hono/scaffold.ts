@@ -1,4 +1,4 @@
-import { recipe } from "./recipe.ts";
+import { recipe, LEAFLET_VERSION } from "./recipe.ts";
 import { SCAFFOLD_LOCKFILE } from "./scaffold-lock.ts";
 import { SERVER_FILES } from "./server-files.ts";
 import { AUTH_FILES } from "./auth-files.ts";
@@ -66,6 +66,10 @@ export const SCAFFOLD_PACKAGE = {
 		hono: "4.12.32",
 		// Sign-in for the app's users (caddie/auth.ts, stacks/react-hono/auth-files.ts).
 		"better-auth": "1.7.10",
+		// Maps (part O): ONE pinned Leaflet release, so the Maps recipe's
+		// `import "leaflet"` resolves from the frozen lock (recipe.ts pins the
+		// exact version and integrity).
+		leaflet: LEAFLET_VERSION,
 	},
 	devDependencies: {
 		"@happy-dom/global-registrator": "21.0.3",
