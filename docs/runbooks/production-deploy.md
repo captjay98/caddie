@@ -71,10 +71,17 @@ bun run deploy --yes    # the owner's authorization: also runs the remote writes
 ```
 
 `bun run deploy` runs the eight steps in the one correct order, stops at the
-first failure, parses the Version ID (the rollback handle), prints the evidence
-row for you to commit, and on a failed smoke prints the exact rollback command.
-It never issues `wrangler secret put`, `deploy --env` or `migrations … --local`,
-and it never writes `docs/live-receipts.json`.
+first failure, reads the live version id (the rollback handle) before any write
+and refuses to deploy without it, parses the new Version ID, and on a passing
+smoke **appends an evidence section to `docs/release-evidence.md`** — a small
+table of URL, version id, commit, rollback id, gate counts, migrations applied,
+DO tags, the smoke receipt id (the newest P17 entry in `docs/live-receipts.json`)
+and the hash match — then prints the `git add … && git commit` line for you to
+run. On a failed smoke it prints the exact rollback command. It saves every
+step's stdout and stderr under `.deploy-logs/<UTC stamp>/` (gitignored) and
+prints the log path when a step fails. It never issues `wrangler secret put`,
+`deploy --env` or `migrations … --local`, and it never writes
+`docs/live-receipts.json` (the smoke run owns that file).
 
 Two flags beyond `--yes`:
 
@@ -112,8 +119,15 @@ The eight steps `bun run deploy` automates, if you need to run them by hand. On
    - sign in as yourself;
    - if judge access is on, start a judge account in a private window.
 8. **Record** (in `apps/app`): `bunx wrangler deployments list` shows the
-   version id. Add the URL, version id, commit and smoke result to
-   `docs/release-evidence.md`.
+   version id. `bun run deploy` appends the evidence section to
+   `docs/release-evidence.md` for you (URL, version id, commit, rollback id,
+   gate counts, migrations applied, DO tags, smoke receipt id, hash match) and
+   prints the `git add docs/release-evidence.md docs/live-receipts.json &&
+   git commit` line to run. Running the steps by hand instead, add the URL,
+   version id, commit and smoke result to `docs/release-evidence.md` yourself.
+   Either way, each step's stdout and stderr is saved under
+   `.deploy-logs/<UTC stamp>/` (gitignored); the path of a failing step's log
+   is printed.
 
 ## Changing settings without a rebuild
 
