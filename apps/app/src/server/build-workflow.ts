@@ -23,6 +23,7 @@ import {
 import { recordPlanDecision } from "./planning.ts";
 import { createD1ContentStore, D1_MAX_VALUE_BYTES } from "./artifacts.ts";
 import { getLarge, putLarge } from "./large-content.ts";
+import { PREVIEW_LIMIT } from "../shared/preview-frame.ts";
 import { findModelRouteForRole } from "../agents/providers.ts";
 import { FEATURE_DELEGATION_RULE } from "../agents/delegation.ts";
 import { stampProjectModes, type SwitchEnv } from "./platform-switches.ts";
@@ -827,28 +828,57 @@ export interface BuildManifest {
   v: 1;
   server: { sha256: string; bytes: number } | null;
   migrations: { name: string; sha256: string }[];
+  /** A big app's preview page over one D1 value, kept in the large-file store (part R). */
+  page?: { sha256: string; bytes: number };
   client?: { js: { sha256: string; bytes: number }; css: { sha256: string; bytes: number } };
   /** Android apps: the browser preview page in the large-file store (large-content.ts). */
   flutterWeb?: { sha256: string; bytes: number };
   android?: { sha256: string; bytes: number; apiBase: string };
 }
 
-// A build file is stored as one D1 BLOB, capped at 2 MB in production
-// (D1_MAX_VALUE_BYTES). These per-file ceilings match that real limit, so an
-// over-size file is refused at check time with a specific message rather than
-// failing the content-store write later.
-const MAX_SERVER_BUNDLE_BYTES = D1_MAX_VALUE_BYTES;
+// One D1 value holds at most 2 MB (D1_MAX_VALUE_BYTES). A bigger build file
+// (a big app's preview page, client script or server, plan part R) is kept in
+// the large-file store in parts instead; both stores are keyed by the bytes'
+// sha256, so a reader finds a file in whichever holds it. These are the most a
+// saved app keeps; a bigger file is refused at check time in plain words.
+const MB = 1024 * 1024;
+const MAX_SERVER_BUNDLE_BYTES = 10 * MB;
 const MAX_MIGRATION_BYTES = 256 * 1024;
-const MAX_CLIENT_FILE_BYTES = D1_MAX_VALUE_BYTES;
+/**
+ * The most an app's preview page can be: 4.3 MB. The preview frame opens a
+ * document of at most PREVIEW_LIMIT (5 MB), and the document is the page plus
+ * the frame's own bridge script and the saved data (at most 100 KB, which can
+ * grow to about 600 KB once escaped into the document), so the page leaves
+ * about 700 KB for those.
+ */
+export const MAX_PREVIEW_PAGE_BYTES = Math.floor(4.3 * MB);
+/** A preview inlines the client files, so each holds at most what a preview page can. */
+const MAX_CLIENT_FILE_BYTES = MAX_PREVIEW_PAGE_BYTES;
+/** A size in MB for a person, rounded up so a file just over a limit never reads as the limit. */
+const megabytes = (bytes: number): string => (Math.ceil((bytes / MB) * 10) / 10).toFixed(1);
 
-async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Promise<string> {
+/** What an output row points at when its page is kept in parts (the manifest names the real page). */
+const LARGE_PAGE_STAND_IN = "<!doctype html><html><body>This preview is kept in parts; Caddie serves it whole.</body></html>";
+
+/** Keep bytes as one content value when they fit, else in parts in the large-file store. Returns the sha256. */
+async function putContent(db: D1Database, bytes: Uint8Array): Promise<string> {
+  if (bytes.byteLength <= D1_MAX_VALUE_BYTES) return (await createD1ContentStore(db).put(bytes)).contentHash;
+  return (await putLarge(db, bytes)).sha256;
+}
+
+/** Read build content back from whichever store holds it. */
+async function getContent(db: D1Database, sha256: string): Promise<Uint8Array | null> {
+  return (await createD1ContentStore(db).get(sha256)) ?? (await getLarge(db, sha256));
+}
+
+async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput, page?: { sha256: string; bytes: number }): Promise<string> {
   const store = createD1ContentStore(db);
   let server: BuildManifest["server"] = null;
   if (bundle.server !== null) {
     const bytes = new TextEncoder().encode(bundle.server);
     if (bytes.length > MAX_SERVER_BUNDLE_BYTES)
-      throw new ScopeError(422, "SERVER_TOO_LARGE", "The app's server is larger than 2 MB, which is the most a saved app can hold in one file.");
-    server = { sha256: (await store.put(bytes)).contentHash, bytes: bytes.length };
+      throw new ScopeError(422, "SERVER_TOO_LARGE", `The app's server is larger than ${MAX_SERVER_BUNDLE_BYTES / MB} MB, which is the most Caddie keeps for an app's server.`);
+    server = { sha256: await putContent(db, bytes), bytes: bytes.length };
   }
   const migrations: BuildManifest["migrations"] = [];
   for (const file of [...bundle.migrations].sort((a, b) => (a.name < b.name ? -1 : 1))) {
@@ -864,8 +894,8 @@ async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Pr
     const part = async (text: string, label: string) => {
       const bytes = new TextEncoder().encode(text);
       if (bytes.length > MAX_CLIENT_FILE_BYTES)
-        throw new ScopeError(422, "CLIENT_TOO_LARGE", `The app's ${label} is larger than 2 MB, which is the most a saved app can hold in one file.`);
-      return { sha256: (await store.put(bytes)).contentHash, bytes: bytes.length };
+        throw new ScopeError(422, "CLIENT_TOO_LARGE", `The app's ${label} is larger than ${megabytes(MAX_CLIENT_FILE_BYTES)} MB, which is the most a preview can hold.`);
+      return { sha256: await putContent(db, bytes), bytes: bytes.length };
     };
     client = { js: await part(bundle.client.js, "script"), css: await part(bundle.client.css, "styles") };
   }
@@ -880,7 +910,7 @@ async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput): Pr
     const head = await rows(db, 'select "bytes" from "large_content" where "sha256" = ?', android.sha256);
     if (!bundle.flutterWeb || !androidApiBase(android.apiBase, 'check') || !head[0] || Number(head[0].bytes) !== android.bytes) throw new ScopeError(422, 'INVALID_APK', 'The Android package has not been stored for this build.');
   }
-  const manifest: BuildManifest = { v: 1, server, migrations, ...(android ? { android } : {}), ...(client ? { client } : {}), ...(flutterWeb ? { flutterWeb } : {}) };
+  const manifest: BuildManifest = { v: 1, server, migrations, ...(android ? { android } : {}), ...(client ? { client } : {}), ...(flutterWeb ? { flutterWeb } : {}), ...(page ? { page } : {}) };
   return (await store.put(new TextEncoder().encode(JSON.stringify(manifest)))).contentHash;
 }
 
@@ -965,19 +995,27 @@ async function prepareOutput(
     throw new ScopeError(
       422,
       "INVALID_PREVIEW",
-      "A complete HTML preview of at most 2 MB is required.",
+      `A complete HTML preview of at most ${megabytes(MAX_PREVIEW_PAGE_BYTES)} MB is required.`,
     );
-  // The page carries the whole app (its code and styles inlined), so its
-  // limit is storage's own, not a smaller guess: a finished build with
-  // sql.js once got no preview at 500 KB (live finding, 2026-10-20).
-  if (bytes.length > D1_MAX_VALUE_BYTES)
+  // The page carries the whole app (its code and styles inlined). It may be
+  // as big as the preview frame opens (MAX_PREVIEW_PAGE_BYTES): over one D1
+  // value it is kept in parts (part R). A finished build with sql.js once got
+  // no preview at 500 KB, and a big app's page is over 2 MB.
+  if (bytes.length > MAX_PREVIEW_PAGE_BYTES)
     throw new ScopeError(
       422,
       "INVALID_PREVIEW",
-      `This app's preview page is ${(bytes.length / 1_000_000).toFixed(1)} MB, and a preview can be at most ${D1_MAX_VALUE_BYTES / 1_000_000} MB. Make the app's code smaller (load big files only when needed) and check again.`,
+      `This app's preview page is ${megabytes(bytes.length)} MB, and a preview can be at most ${megabytes(MAX_PREVIEW_PAGE_BYTES)} MB. Make the app's code smaller (load big files only when needed) and check again.`,
     );
-  const content = await createD1ContentStore(db).put(bytes);
-  const manifestSha256 = input.bundle ? await storeBundleManifest(db, input.bundle) : null;
+  const large = bytes.length > D1_MAX_VALUE_BYTES;
+  // A page over one D1 value is kept in parts in the large-file store (part
+  // R). The output row must point at ordinary content (its foreign key), so
+  // it points at a small stand-in and the manifest names the real page — the
+  // way an Android app's browser page is kept.
+  const page = large ? await putLarge(db, bytes) : null;
+  const content = { contentHash: (await createD1ContentStore(db).put(large ? new TextEncoder().encode(LARGE_PAGE_STAND_IN) : bytes)).contentHash };
+  const manifestSha256 =
+    input.bundle || page ? await storeBundleManifest(db, input.bundle ?? { server: null, migrations: [] }, page ? { sha256: page.sha256, bytes: page.bytes } : undefined) : null;
   const id = `out_${hash(`${projectId}:${planId}:${input.image}:${content.contentHash}${manifestSha256 ? `:${manifestSha256}` : ""}`).slice(0, 32)}`;
   return { id, contentHash: content.contentHash, manifestSha256 };
 }
@@ -1020,9 +1058,8 @@ export async function readBuildBundle(
   if (!found[0]) throw new ScopeError(404, "preview_not_found", "No such preview in this project.");
   const manifestHash = found[0].manifestSha256;
   if (manifestHash === null || manifestHash === undefined) return null;
-  const store = createD1ContentStore(db);
   const text = async (sha: string) => {
-    const bytes = await store.get(sha);
+    const bytes = await getContent(db, sha);
     if (!bytes) throw new ScopeError(404, "preview_missing", "Part of this build is no longer available.");
     return new TextDecoder().decode(bytes);
   };
@@ -1084,9 +1121,8 @@ export async function readPublishBundle(db: D1Database, scope: Scope, id: string
   const rebuild = () =>
     new ScopeError(409, "REBUILD_TO_PUBLISH", "This version was checked before publishing was possible. Run the checks again, then publish.");
   if (manifestHash === null || manifestHash === undefined) throw rebuild();
-  const store = createD1ContentStore(db);
   const text = async (sha: string) => {
-    const bytes = await store.get(sha);
+    const bytes = await getContent(db, sha);
     if (!bytes) throw new ScopeError(404, "preview_missing", "Part of this build is no longer available.");
     return new TextDecoder().decode(bytes);
   };
@@ -1134,8 +1170,14 @@ export async function readBuildOutput(
       if (!page) throw new ScopeError(404, "preview_missing", "Preview content is unavailable.");
       return page;
     }
+    // A big app's page kept in parts (part R): the row holds a stand-in.
+    if (manifest?.page) {
+      const page = await getLarge(db, manifest.page.sha256);
+      if (!page) throw new ScopeError(404, "preview_missing", "Preview content is unavailable.");
+      return page;
+    }
   }
-  const bytes = await store.get(String(found[0].sha256));
+  const bytes = await getContent(db, String(found[0].sha256));
   if (!bytes)
     throw new ScopeError(
       404,

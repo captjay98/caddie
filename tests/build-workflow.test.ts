@@ -46,7 +46,9 @@ import {
   reconcileStalledBuild,
   sweepStalledBuilds,
   BUILD_STALL_MS,
+  MAX_PREVIEW_PAGE_BYTES,
 } from "../apps/app/src/server/build-workflow.ts";
+import { PREVIEW_LIMIT, STORAGE_LIMIT, previewDocument, previewSeed } from "../apps/app/src/shared/preview-frame.ts";
 import { androidDownloadView, createAndroidAppRouter } from "../apps/app/src/server/android-app.ts";
 import { buildActivity } from "../apps/app/src/server/build-activity.ts";
 import { rollbackToFeature } from "../apps/app/src/server/build-features.ts";
@@ -912,13 +914,25 @@ describe("approved output and preview identity", () => {
     }
   });
 
-  test("a preview page up to 2 MB is kept and served; a bigger one is refused in plain words with its size (live finding, 2026-10-20)", async () => {
+  test("a page at the cap still opens: with the frame's own script and the most saved data, the frame document fits in 5 MB (part R)", () => {
+    // The worst saved data: 100 KB of "<", which the document escapes six-fold.
+    const seed = previewSeed({ k: "<".repeat(STORAGE_LIMIT - 1) })!;
+    expect(seed).not.toBeNull();
+    const page = `<!doctype html><html><body>${"z".repeat(MAX_PREVIEW_PAGE_BYTES - 60)}</body></html>`;
+    expect(new TextEncoder().encode(page).length).toBeLessThanOrEqual(MAX_PREVIEW_PAGE_BYTES);
+    const frameDocument = previewDocument(page, "abcdefgh12345678", seed, true, "web");
+    // MUTATION: a cap of the frame's full 5 MB, and this document is too big to open.
+    expect(new TextEncoder().encode(frameDocument).length).toBeLessThanOrEqual(PREVIEW_LIMIT);
+  });
+
+  test("a preview page up to 4.3 MB is kept and served whole (over 2 MB in parts, part R); a bigger one is refused in plain words with its size", async () => {
     const w = await world();
     try {
       const item = await approved(w);
-      // Over the real 2,000,000-byte limit: refused, saying how big it is.
+      // Over what the preview frame can open (5 MB, less room for the frame's
+      // own script and saved data): refused, saying how big it is.
       const error = await storeBuildOutput(w.db, item.scope, {
-        html: `<html>${"x".repeat(2_100_000)}</html>`,
+        html: `<html>${"x".repeat(5_600_000)}</html>`,
         image: "sha256:huge-preview",
         planId: item.plan.id,
         runId: item.workflow.runId,
@@ -926,20 +940,42 @@ describe("approved output and preview identity", () => {
       expect(error).toBeInstanceOf(ScopeError);
       expect((error as ScopeError).code).toBe("INVALID_PREVIEW");
       expect((error as ScopeError).message).toBe(
-        "This app's preview page is 2.1 MB, and a preview can be at most 2 MB. Make the app's code smaller (load big files only when needed) and check again.",
+        "This app's preview page is 5.4 MB, and a preview can be at most 4.3 MB. Make the app's code smaller (load big files only when needed) and check again.",
       );
 
-      // FarmLog AI (with sql.js): the preview page carries the whole app, and
-      // it passed the old 500 KB cap, so a finished build got no preview.
+      // A big app's page (4.4 MB): over one D1 value, so it is kept in parts
+      // (the large-file store) and served back byte for byte.
+      const bigPage = `<!doctype html><html><body><script>${"y".repeat(4_400_000)}</script></body></html>`;
+      const big = await storeBuildOutput(w.db, item.scope, {
+        html: bigPage,
+        image: "sha256:big-app-preview",
+        planId: item.plan.id,
+        runId: item.workflow.runId,
+      });
+      const served = await readBuildOutput(w.db, item.scope, big.outputId);
+      expect(served.length).toBe(new TextEncoder().encode(bigPage).length);
+      expect(new TextDecoder().decode(served)).toBe(bigPage);
+      expect(w.count("large_content")).toBe(1);
+      // MUTATION: store it in one value again, and production D1 refuses the write.
+      expect(w.count("artifact_content", "size > 2000000")).toBe(0);
+    } finally { w.sqlite.close(); }
+
+    // FarmLog AI (with sql.js): the preview page carries the whole app, and
+    // it passed the old 500 KB cap, so a finished build got no preview. Under
+    // 2 MB it stays one ordinary value, as before.
+    const w2 = await world();
+    try {
+      const item = await approved(w2);
       const page = `<!doctype html><html><body><script>${"x".repeat(1_200_000)}</script></body></html>`;
-      const output = await storeBuildOutput(w.db, item.scope, {
+      const output = await storeBuildOutput(w2.db, item.scope, {
         html: page,
         image: "sha256:large-preview",
         planId: item.plan.id,
         runId: item.workflow.runId,
       });
-      expect(new TextDecoder().decode(await readBuildOutput(w.db, item.scope, output.outputId))).toBe(page);
-    } finally { w.sqlite.close(); }
+      expect(new TextDecoder().decode(await readBuildOutput(w2.db, item.scope, output.outputId))).toBe(page);
+      expect(w2.count("large_content")).toBe(0);
+    } finally { w2.sqlite.close(); }
   });
 
   test("an Android app's preview page (bigger than one D1 value) is kept whole and served instead of the stand-in", async () => {
@@ -1007,41 +1043,54 @@ describe("approved output and preview identity", () => {
     } finally { w.sqlite.close(); }
   });
 
-  test("a server bundle over 2 MB is refused at check time (production D1 would reject the write)", async () => {
+  test("a server bundle or client file over 2 MB is kept in parts and read back whole (part R); over its cap it is refused at check time", async () => {
     const w = await world();
     try {
       const item = await approved(w);
-      // 2.5 MB: under the OLD 3 MB ceiling (was silently accepted, then failed
-      // in production), over D1's real 2,000,000-byte value limit.
-      const bigServer = "export default {};\n" + "a".repeat(2_500_000);
+      // Over the caps: a server over 10 MB, a script over 4.5 MB (what a preview page holds).
       await rejectsCode(
         storeBuildOutput(w.db, item.scope, {
-          html: "<!doctype html><html><body>big</body></html>",
-          image: "sha256:big-image",
+          html: "<!doctype html><html><body>huge</body></html>",
+          image: "sha256:huge-image",
           planId: item.plan.id,
           runId: item.workflow.runId,
-          bundle: { server: bigServer, migrations: [] },
+          bundle: { server: "export default {};\n" + "a".repeat(10_600_000), migrations: [] },
         }),
         "SERVER_TOO_LARGE",
       );
-      expect(w.count("workflow_outputs")).toBe(0);
-      // Only the small HTML preview was stored before the oversized bundle was
-      // rejected; the 2.5 MB bundle itself never reached artifact_content.
-      expect(w.count("artifact_content")).toBe(1);
-      expect(w.count("artifact_content", "size > 2000000")).toBe(0);
-
-      // A client file of the same size is refused the same way.
       await rejectsCode(
         storeBuildOutput(w.db, item.scope, {
-          html: "<!doctype html><html><body>big</body></html>",
-          image: "sha256:big-image-2",
+          html: "<!doctype html><html><body>huge</body></html>",
+          image: "sha256:huge-image-2",
           planId: item.plan.id,
           runId: item.workflow.runId,
-          bundle: { server: null, migrations: [], client: { js: "x".repeat(2_500_000), css: "" } },
+          bundle: { server: null, migrations: [], client: { js: "x".repeat(5_600_000), css: "" } },
         }),
         "CLIENT_TOO_LARGE",
       );
       expect(w.count("workflow_outputs")).toBe(0);
+
+      // 2.5 MB: over D1's real 2,000,000-byte value limit, so it goes to the
+      // large-file store in parts instead of one value production would refuse.
+      const bigServer = "export default {};\n" + "a".repeat(2_500_000);
+      const bigScript = "x".repeat(2_500_000);
+      const output = await storeBuildOutput(w.db, item.scope, {
+        html: "<!doctype html><html><body>big</body></html>",
+        image: "sha256:big-image",
+        planId: item.plan.id,
+        runId: item.workflow.runId,
+        bundle: { server: bigServer, migrations: [], client: { js: bigScript, css: "body{}" } },
+      });
+      // The preview relay (/app) and publishing read it back byte for byte.
+      expect((await readBuildBundle(w.db, item.scope, output.outputId))?.server).toBe(bigServer);
+      const publication = await readPublishBundle(w.db, item.scope, output.outputId);
+      expect(publication.server).toBe(bigServer);
+      expect(publication.js).toBe(bigScript);
+      expect(publication.css).toBe("body{}");
+      expect(w.count("large_content")).toBe(2);
+      // MUTATION: keep either in one value again, and production D1 refuses the write.
+      expect(w.count("artifact_content", "size > 2000000")).toBe(0);
+      expect(w.count("workflow_outputs")).toBe(1);
     } finally {
       w.sqlite.close();
     }
@@ -1097,7 +1146,7 @@ describe("approved output and preview identity", () => {
       await rejectsCode(
         storeBuildOutput(w.db, item.scope, {
           ...payload,
-          html: `<html>${"x".repeat(2_000_001)}</html>`,
+          html: `<html>${"x".repeat(5 * 1024 * 1024 + 1)}</html>`,
         }),
         "INVALID_PREVIEW",
       );
