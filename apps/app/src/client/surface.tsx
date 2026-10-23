@@ -17,7 +17,7 @@ import { EvidenceDrawer } from './evidence/Drawer.tsx';
 import { ArtifactViewer, type ViewerRevision } from './artifacts/Viewer.tsx';
 import { briefActionRoute } from './brief/navigate.ts';
 import { workflowQueryOptions } from './workflow-query.ts';
-import { DesignReview } from './planning/DesignReview.tsx';
+import { DesignReview, HowYourAppWorks } from './planning/DesignReview.tsx';
 import { RepositoryPicker, type SelectedRepository } from './repositories/RepositoryPicker.tsx';
 import { RunInspector } from './runs/RunInspector.tsx';
 import { Search } from './search/Search.tsx';
@@ -881,6 +881,7 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
             onDecisionSaved={() => { void approval.refetch(); chrome.refreshAll(); }}
             onContinue={() => chrome.openProject(props.projectId, true)}
             buildPhase={buildPhase.data ?? null}
+            howItWorks={<HowYourAppWorks projectId={props.projectId} />}
 			projectId={props.projectId}
 			planRevisions={revisions}
 			isPending={planDocs.isPending}
