@@ -28,6 +28,7 @@ import {
 	type ArchitectureTable,
 } from '@caddie/contracts';
 import { MAX_PLAN_FEATURES } from '@caddie/contracts';
+import { parseAppTheme, themeToCssVars, type AppTheme } from '@caddie/contracts';
 import { APP_SECRET_NAME } from './app-secrets.ts';
 import {
 	architectureBlockHash,
@@ -518,4 +519,43 @@ export async function getApprovedBlock(
 	if (!revision) return null;
 	const parsed = parseArchitectureBlock(revision.body);
 	return parsed.ok ? parsed.block : null;
+}
+
+/**
+ * The APPROVED design's theme (its caddie-theme block), or null when no design
+ * is approved yet or the approved revision carries no valid theme. Works in
+ * team and non-team mode: `approvedDesignRevisionId` is stamped on any design
+ * approval. The host writes this into the app's `caddie/theme.css` so every app
+ * is painted in the look the user approved. Shares the exact reader shape with
+ * getApprovedBlock.
+ */
+export async function getApprovedTheme(
+	db: {
+		prepare: (sql: string) => {
+			bind: (...args: unknown[]) => { all: <T = Record<string, unknown>>() => Promise<{ results?: T[] }> };
+		};
+	},
+	projectId: string,
+): Promise<AppTheme | null> {
+	const workflow = (
+		await db.prepare('select "approvedDesignRevisionId" from "build_workflows" where "projectId" = ?').bind(projectId).all<{
+			approvedDesignRevisionId: string | null;
+		}>()
+	).results?.[0];
+	const revisionId = workflow?.approvedDesignRevisionId;
+	if (!revisionId) return null;
+	const revision = (
+		await db.prepare('select "body" from "plan_doc_revisions" where "id" = ?').bind(revisionId).all<{ body: string }>()
+	).results?.[0];
+	if (!revision) return null;
+	const parsed = parseAppTheme(revision.body);
+	return parsed.ok ? parsed.theme : null;
+}
+
+/** The body of the app's `caddie/theme.css` for an approved theme (a `:root{}` rule). */
+export function themeCssFor(theme: AppTheme): string {
+	return `/* Caddie wrote your app's look here from the approved design "${theme.name}". Do not edit. */\n:root {\n${themeToCssVars(theme)
+		.split('\n')
+		.map((line) => `  ${line}`)
+		.join('\n')}\n}\n`;
 }

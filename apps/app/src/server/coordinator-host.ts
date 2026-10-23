@@ -53,7 +53,7 @@ import {
   ensurePartForRole,
 } from "./build-steps.ts";
 import { areaFor, SMALL_APP_MODULE, type AreaRole } from "./part-manifests.ts";
-import { getApprovedBlock } from "./architecture-gate.ts";
+import { getApprovedBlock, getApprovedTheme, themeCssFor } from "./architecture-gate.ts";
 import { appFeatureFiles } from "./app-feature-files.ts";
 import {
   recordArchitectureReview,
@@ -684,6 +684,24 @@ export async function createCoordinatorContext(
   // uses — a green fixture journey and a real chat build now run the same setup.
   let scaffoldReady: Promise<void> | null = null;
   const scaffoldFiles = stack === "flutter" ? FLUTTER_SCAFFOLD_FILES : SCAFFOLD_FILES;
+  /**
+   * Write the app's caddie/theme.css from the APPROVED design's theme, so every
+   * app is painted in the look the user approved rather than the scaffold's
+   * neutral default. caddie/ is protected, so the builder uses these variables
+   * but cannot edit the file. Called at scaffold time AND before each check run,
+   * so a newer approved design (a re-reviewed theme) reaches an existing
+   * project. react-hono only; Flutter's mapping is deferred (see the evidence
+   * doc). A no-op when no theme is approved — the default theme.css stays.
+   */
+  const writeApprovedThemeCss = async (): Promise<void> => {
+    if (stack === "flutter") return;
+    const theme = await getApprovedTheme(env.DB, scope.projectId).catch(() => null);
+    if (!theme) return;
+    const { driver, id } = await ensureSession();
+    await driver.uploadFiles(id, [
+      { path: `${root}/caddie/theme.css`, contentBase64: bytesToBase64(new TextEncoder().encode(themeCssFor(theme))) },
+    ]);
+  };
   const scaffold = () =>
     (scaffoldReady ??= (async () => {
       const { driver, id } = await ensureSession();
@@ -696,6 +714,8 @@ export async function createCoordinatorContext(
           contentBase64: bytesToBase64(new TextEncoder().encode(text)),
         })),
       );
+      // Paint the fresh app in the approved look (overwrites the neutral default).
+      await writeApprovedThemeCss();
       await recordBuildActivity(env.DB, {
         projectId: scope.projectId, runId, kind: "setup",
         subject: `${stack} scaffold (${Object.keys(scaffoldFiles).length} files)`,
@@ -848,6 +868,11 @@ export async function createCoordinatorContext(
     const { workflow, plan } = await requireBuildApproval(env.DB, scope, approvalScope);
     // The join copy starts from a joined save point, which already has the scaffold.
     if (mode !== "join") await scaffold();
+    // Re-paint the app in the approved look before every (non-join) check run:
+    // scaffold() is memoized, so this is how a newer approved design (a
+    // re-reviewed theme) reaches an existing project. A no-op with no approved
+    // theme. caddie/theme.css is protected, so this never fights a builder edit.
+    if (mode !== "join") await writeApprovedThemeCss().catch(() => {});
     // Team mode (part E): write the generated contract files from the approved
     // design BEFORE every check run, so the contract test matches the design.
     // During the build it covers the passed features plus the current one; the

@@ -198,7 +198,31 @@ const BASE_FILES: Readonly<Record<string, string>> = {
 		'createRoot(document.getElementById("root")!).render(<App />);',
 		"",
 	].join("\n"),
-	"src/styles.css": "body{margin:0;font-family:system-ui,sans-serif}\n",
+	"src/styles.css": '@import "../caddie/theme.css";\nbody{margin:0;font-family:var(--font-body,system-ui,sans-serif);background:var(--bg,#fff);color:var(--text,#111)}\n',
+	// The app's look, written by Caddie from the approved design's caddie-theme
+	// block (host: writeApprovedThemeCss). This default is a neutral light theme
+	// so the import always resolves — for an older app with no approved theme,
+	// and before the host overwrites it with the approved one. Protected
+	// (caddie/): the builder USES these variables but never edits this file.
+	"caddie/theme.css": [
+		"/* Caddie writes your app's look here from the approved design. Do not edit. */",
+		":root {",
+		"  --bg: #ffffff;",
+		"  --surface: #f7f7f8;",
+		"  --text: #16181d;",
+		"  --muted: #5b616e;",
+		"  --primary: #2b5fd9;",
+		"  --on-primary: #ffffff;",
+		"  --border: #e2e4ea;",
+		"  --ok: #1f7a3a;",
+		"  --warn: #8a4300;",
+		"  --danger: #b00020;",
+		"  --radius: 10px;",
+		"  --font-heading: system-ui, -apple-system, 'Segoe UI', sans-serif;",
+		"  --font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;",
+		"}",
+		"",
+	].join("\n"),
 	// Files the browser code needs at run time travel inside dist/main.js (plan 1.6).
 	"caddie/embed.ts": [
 		"// Caddie runtime file — do not edit. Caddie keeps only dist/main.js and",
