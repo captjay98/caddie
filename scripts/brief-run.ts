@@ -430,7 +430,7 @@ function redact(value: string | undefined): string {
 
 import type { AccountSession } from './brief-run/dev-client.ts';
 import type { Clock } from './brief-run/clock.ts';
-import { driveBrief } from './brief-run/driver.ts';
+import { driveBrief, type ProposalReader, type CoordinatorSend } from './brief-run/driver.ts';
 import { readBuildResults, type D1Query } from './brief-run/d1-reader.ts';
 import type { BrowserCheck } from './brief-run/browser-check.ts';
 import {
@@ -450,6 +450,10 @@ export interface CampaignSeams {
 	clock: Clock;
 	/** Read-only D1 query against the local dev DB. */
 	d1: D1Query;
+	/** Read the newest project_proposals row for the Home project (step 3). */
+	readProposal: ProposalReader;
+	/** Send the brief to the Home coordinator over Flue's HTTP route (step 2). */
+	coordinatorSend: CoordinatorSend;
 	/** The browser check (A persists, B cannot see). */
 	browserCheck: BrowserCheck;
 	/** The ledger store (file-backed live; in-memory in tests). */
@@ -457,6 +461,10 @@ export interface CampaignSeams {
 	/** The dev base, for the browser check's preview URL. */
 	base: string;
 	workspaceId: string;
+	/** The signed-in account A id, used as the run's payer (step 2). */
+	payerId: string;
+	/** The coordinator model route id (coordinator.ts COORDINATOR_MODEL_ROUTE). */
+	coordinatorModelRouteId: string;
 }
 
 export interface CampaignOptions {
@@ -527,15 +535,24 @@ export async function runCampaign(
 			continue;
 		}
 
-		// 2. Drive the brief to a terminal outcome.
-		const drive = await driveBrief(seams.sessionA, seams.clock, {
-			prompt: brief.prompt,
-			briefId: brief.id,
-			teamMode: isTeamMode(opts.mode),
-			buildWaitMs: size === 'big' ? BIG_BUILD_WAIT_MS : SMALL_BUILD_WAIT_MS,
-			pollEveryMs: opts.pollEveryMs,
-			workspaceId: seams.workspaceId,
-		});
+		// 2. Drive the brief to a terminal outcome through the real start flow.
+		const drive = await driveBrief(
+			seams.sessionA,
+			seams.clock,
+			{
+				prompt: brief.prompt,
+				briefId: brief.id,
+				teamMode: isTeamMode(opts.mode),
+				buildWaitMs: size === 'big' ? BIG_BUILD_WAIT_MS : SMALL_BUILD_WAIT_MS,
+				pollEveryMs: opts.pollEveryMs,
+				coordinatorModelRouteId: seams.coordinatorModelRouteId,
+				payerId: seams.payerId,
+				proposalWaitMs: 30 * 60 * 1000,
+				planWaitMs: 30 * 60 * 1000,
+				designWaitMs: 30 * 60 * 1000,
+			},
+			{ readProposal: seams.readProposal, coordinatorSend: seams.coordinatorSend },
+		);
 
 		// 3. Read the results from D1.
 		const d1 = drive.runId ? await readBuildResults(seams.d1, { projectId: drive.projectId, runId: drive.runId }) : null;
@@ -651,8 +668,26 @@ async function main(): Promise<number> {
 
 	// The workspace the fresh account lands in. The home-project route returns
 	// it; a missing workspace is a live-only gap and surfaces as a thrown error.
-	const home = (await sessionA.json<{ project?: { workspaceId?: string } }>(`/api/home-project`).catch(() => ({}))) as { project?: { workspaceId?: string } };
+	const home = (await sessionA.json<{ project?: { id?: string; workspaceId?: string } }>(`/api/home-project`).catch(() => ({}))) as { project?: { id?: string; workspaceId?: string } };
 	const workspaceId = home.project?.workspaceId ?? '';
+
+	// Step 2/3 seams. The payer is account A's own id; the coordinator model
+	// route mirrors coordinator.ts COORDINATOR_MODEL_ROUTE. readProposal reads
+	// the server-of-record (project_proposals) over the same read-only D1 seam;
+	// coordinatorSend POSTs the browser's body to the Flue coordinator route.
+	const { readNewestProposal } = await import('./brief-run/d1-reader.ts');
+	const d1 = wranglerD1Query(REPO);
+	const session = (await sessionA.json<{ user?: { id?: string } }>(`/api/auth/get-session`).catch(() => ({}) as { user?: { id?: string } }));
+	const payerId = session.user?.id ?? gated.env.TEST_ACCOUNT_A_EMAIL;
+	const readProposal: ProposalReader = (opts) => readNewestProposal(d1, opts);
+	const coordinatorSend: CoordinatorSend = async ({ conversationId, idempotencyKey, body }) => {
+		const res = await sessionA.fetch(`/agents/coordinator/${encodeURIComponent(conversationId)}`, {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ idempotencyKey, kind: 'user', body }),
+		});
+		if (!res.ok) throw new Error(`coordinator send → HTTP ${res.status}`);
+	};
 
 	const briefs = loadBriefs(BRIEFS_DIR);
 	console.error(`brief-run: ${briefs.length} briefs loaded (${briefs.filter((b) => b.size === 'big').length} big).`);
@@ -663,11 +698,15 @@ async function main(): Promise<number> {
 			sessionA,
 			sessionB,
 			clock: systemClock,
-			d1: wranglerD1Query(REPO),
+			d1,
+			readProposal,
+			coordinatorSend,
 			browserCheck: playwrightBrowserCheck,
 			ledgerStore: fileLedgerStore(join(BRIEFS_DIR, 'runs', `campaign-${mode}.json`)),
 			base,
 			workspaceId,
+			payerId,
+			coordinatorModelRouteId: 'nemotron-3.5-super-vl',
 		},
 		{ mode, capMicros, pollEveryMs: 30_000, onlyBriefIds: process.env.CADDIE_ONLY_BRIEF ? [process.env.CADDIE_ONLY_BRIEF] : [] },
 	);

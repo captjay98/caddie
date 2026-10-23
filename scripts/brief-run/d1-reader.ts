@@ -267,3 +267,29 @@ export async function totalCampaignSpentMicros(query: D1Query): Promise<number> 
 	)[0];
 	return num(row, 'settled') + num(row, 'reserved');
 }
+
+/**
+ * Read the NEWEST project_proposals row for a Home project created at/after
+ * `sinceIso` (lane 8, step 3). There is no list-proposals route, so the driver
+ * reads the server-of-record directly: the row the accept route authorises
+ * against. Returns the newest matching row, or null while none exists yet.
+ * Built over the same read-only D1 seam as the results reader.
+ */
+export async function readNewestProposal(
+	query: D1Query,
+	opts: { homeProjectId: string; sinceIso: string },
+): Promise<{ id: string; status: 'proposed' | 'accepted' | 'dismissed'; createdAt: string } | null> {
+	const row = (
+		await query(
+			`select "id", "status", "createdAt" from project_proposals ` +
+				`where "homeProjectId" = ${lit(opts.homeProjectId)} and "createdAt" >= ${lit(opts.sinceIso)} ` +
+				`order by "createdAt" desc limit 1`,
+		)
+	)[0];
+	if (!row) return null;
+	return {
+		id: String(row.id),
+		status: String(row.status) as 'proposed' | 'accepted' | 'dismissed',
+		createdAt: String(row.createdAt),
+	};
+}

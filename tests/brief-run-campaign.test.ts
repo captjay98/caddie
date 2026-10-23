@@ -4,6 +4,7 @@ import { AccountSession, CookieJar, type AccountProfile } from '../scripts/brief
 import { FakeClock } from '../scripts/brief-run/clock.ts';
 import { memoryLedgerStore } from '../scripts/brief-run/ledger.ts';
 import type { D1Query } from '../scripts/brief-run/d1-reader.ts';
+import type { ProposalReader, CoordinatorSend } from '../scripts/brief-run/driver.ts';
 import type { BrowserCheck } from '../scripts/brief-run/browser-check.ts';
 
 /**
@@ -34,20 +35,35 @@ function brief(id: string, size: Brief['size'] = 'small'): Brief {
 	};
 }
 
-/** A session whose /workflow always ends ready with a preview, and a given runId. */
+/**
+ * A session whose start flow ends ready with a preview: /home-project returns
+ * the Home project, /runs returns a conversation, /proposals/accept returns a
+ * new project, and /workflow walks review → design-review → ready.
+ */
 function readySession(profile: AccountProfile, runId = 'run_1'): AccountSession {
 	let poll = 0;
 	return new AccountSession(profile, 'http://127.0.0.1:5173', new CookieJar(), async (path, init) => {
-		if (path === '/api/projects') return Response.json({ project: { id: 'proj_1' } });
+		const method = init?.method ?? 'GET';
+		if (path === '/api/home-project') return Response.json({ project: { id: 'home_1', workspaceId: 'ws_1' } });
+		if (path.endsWith('/runs') && method === 'POST') return Response.json({ run: { conversationId: 'conv_1', runId } });
+		if (path.includes('/agents/coordinator/')) return Response.json({ ok: true });
+		if (path.includes('/proposals/') && path.endsWith('/accept')) return Response.json({ project: { id: 'proj_1' } });
 		if (path.endsWith('/workflow')) {
 			const phase = poll++ === 0 ? 'review' : poll === 2 ? 'design-review' : 'ready';
 			return Response.json({
 				workflow: { projectId: 'proj_1', runId, phase, planId: 'plan_1', previewId: phase === 'ready' ? 'out_1' : null, detail: null },
+				plan: { id: 'plan_1' },
+				design: { id: 'design_1' },
 			});
 		}
 		return Response.json({ ok: true });
 	});
 }
+
+/** A proposal reader that always has a fresh proposal (step 3). */
+const proposalReady: ProposalReader = async () => ({ id: 'prop_1', status: 'proposed', createdAt: '2026-10-22T12:00:00.000Z' });
+/** A coordinator send that records nothing (step 2). */
+const sendNoop: CoordinatorSend = async () => {};
 
 /** A D1 seam answering a fully-green team-mode build for `micros` spend. */
 function greenD1(micros: number): D1Query {
@@ -79,10 +95,14 @@ function seams(over: Partial<CampaignSeams> = {}): CampaignSeams {
 		sessionB: readySession(B),
 		clock: new FakeClock(0),
 		d1: greenD1(3 * USD),
+		readProposal: proposalReady,
+		coordinatorSend: sendNoop,
 		browserCheck: passBrowser,
 		ledgerStore: memoryLedgerStore(),
 		base: 'http://127.0.0.1:5173',
 		workspaceId: 'ws_1',
+		payerId: 'owner',
+		coordinatorModelRouteId: 'nemotron-3.5-super-vl',
 		...over,
 	};
 }
