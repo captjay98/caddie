@@ -185,6 +185,20 @@ test('a copied app keeps its full preview in the project workspace', async ({ pa
 	await expect(page.getByTestId('channel').locator('iframe')).toHaveCount(0);
 });
 
+test('the Overview leads with a plain-language summary and one tap into each of the four steps (owner 2026-10-23)', async ({ page, context }) => {
+	await fixture(context, 'building');
+	await page.goto('/app/project?project=proj-focused');
+	// A short plain-language summary of where the project stands.
+	const summary = page.getByTestId('project-overview-summary');
+	await expect(summary).toBeVisible();
+	await expect(summary).toContainText('Building');
+	await expect(summary).toContainText('Caddie is building your app');
+	// One tap into each of the four steps (the step bar).
+	for (const testid of ['project-tab-plan', 'project-tab-build', 'project-tab-evidence', 'project-tab-submission']) {
+		await expect(page.getByTestId(testid)).toBeVisible();
+	}
+});
+
 test('a blocked plan in chat opens Plan with its explicit Continue control', async ({ page, context }) => {
 	const writes = await fixture(context, 'blocked');
 	await page.goto('/app/project?project=proj-focused&pane=channel');

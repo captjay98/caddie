@@ -777,8 +777,19 @@ function FocusedProjectHome({ projectId }: { projectId: string }): ReactElement 
 	const step = stage === 'planning_blocked' || (stage === 'stopped' && planNotApproved) ? 'plan' : stage === 'ready' || stage === 'repairing' || stage === 'checking' ? 'check'
 		: stage === 'building' || stage === 'blocked' || stage === 'stopped' ? 'build'
 		: phase === 'building' || phase === 'blocked' ? 'build' : phase === 'ready' ? 'check' : 'plan';
+	// Option B Overview (owner 2026-10-23): a short plain-language summary of
+	// where the project stands, above the four steps (the tappable step bar
+	// below). From the shared ProjectExperience — the same truth as the Projects
+	// card and the Now panel — so every surface tells one story.
+	const overview = parsed?.success && parsed.output.version > 0 ? projectCardFromExperience(parsed.output) : null;
 	return <>
 		<ProjectTabs current={step} />
+		{overview ? (
+			<p className="project-overview-summary" data-testid="project-overview-summary" data-tone={overview.tone}>
+				{overview.working ? <span className="project-overview-live" aria-hidden="true" /> : null}
+				<b>{overview.label}.</b> {overview.detail}
+			</p>
+		) : null}
 		<div className="focused-project-content" data-testid="focused-project-home" data-step={step}>
 			{workflow.data?.workflow || workflow.data?.importPreview ? <ProjectWorkflow projectId={projectId} presentation="workspace" />
 				: <section className="focused-project-empty"><h2>What would you like to build?</h2><p className="page-lede">Tell Caddie what this project should do. Your plan appears here before anything is built.</p><button type="button" className="btn-key" onClick={() => chrome.openProject(projectId, true)}>Continue with Caddie</button></section>}
