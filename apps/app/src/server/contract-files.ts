@@ -1106,10 +1106,18 @@ if (PHASE === "privacy-screen") {
       }
       if (s.updatePath && s.updateField) {
         const before = await readAs(env, aCookie, s, h, id);
-        const upd = await req(path(s.updatePath, t, id), { method: s.updateMethod!, headers: jsonHeaders(bHeaders), body: JSON.stringify(bodyFor(s, s.updateBody, h)) }, env);
-        // Refused outright (403/404), or a no-op — but A's record must be UNCHANGED.
+        // FINDING #2 (review 2026-10-23): B must send a DISTINCT adversarial
+        // value. Re-sending A's own value made an unscoped UPDATE look like a
+        // no-op (same value in, same value out), so a real authorization defect
+        // passed the privacy check. With a value that differs from A's, an
+        // unscoped write visibly changes the field and is caught.
+        const adversarial = { ...bodyFor(s, s.updateBody, h), [s.updateField]: "B-UNAUTHORIZED-" + String(id) };
+        const upd = await req(path(s.updatePath, t, id), { method: s.updateMethod!, headers: jsonHeaders(bHeaders), body: JSON.stringify(adversarial) }, env);
+        // Refused outright (403/404), or a no-op — but A's record must be
+        // UNCHANGED, and must NEVER carry B's adversarial value.
         if (before) {
           const after = await readAs(env, aCookie, s, h, id);
+          expect(String(after?.[s.updateField]), s.table + ": B changed A's record to B's own value — the write is not owner/team-scoped").not.toBe("B-UNAUTHORIZED-" + String(id));
           expect(String(after?.[s.updateField]), s.table + ": B changed A's record — the write is not owner/team-scoped").toBe(String(before[s.updateField]));
         } else {
           expect([403, 404], s.table + ": B could change A's record").toContain(upd.status);
@@ -1193,8 +1201,12 @@ ${
         }
         if (s.updatePath && s.updateField) {
           const before = await readAs(env, aCookie, s, h, id);
-          await req(path(s.updatePath, t2Id, id), { method: s.updateMethod!, headers: jsonHeaders(bHeaders), body: JSON.stringify(bodyFor(s, s.updateBody, h)) }, env);
+          // FINDING #2: a DISTINCT adversarial value, so an unscoped write
+          // through B's own team visibly changes A's record and is caught.
+          const adversarial = { ...bodyFor(s, s.updateBody, h), [s.updateField]: "B-TEAM-UNAUTHORIZED-" + String(id) };
+          await req(path(s.updatePath, t2Id, id), { method: s.updateMethod!, headers: jsonHeaders(bHeaders), body: JSON.stringify(adversarial) }, env);
           const after = await readAs(env, aCookie, s, h, id);
+          expect(String(after?.[s.updateField]), s.table + ": B changed A's record to B's own value through B's own team — the route does not filter by team").not.toBe("B-TEAM-UNAUTHORIZED-" + String(id));
           expect(String(after?.[s.updateField]), s.table + ": B changed A's record through B's own team — the route does not filter by team").toBe(String(before?.[s.updateField]));
         }
         if (s.deletePath) {

@@ -246,6 +246,17 @@ const NO_OWNER_FILTER_SERVER = CORRECT_SERVER
 		'const row = await c.env.DB.prepare("select id, body from notes where id = ?").bind(Number(c.req.param("id"))).first<{ id: number; body: string }>();\n    if (!row) return c.json({ error: "Not found." }, 404);\n    return c.json(row);',
 	);
 
+/**
+ * FINDING #2 (review 2026-10-23): read/list/delete stay owner-scoped, but ONLY
+ * the notes UPDATE drops `and ownerId = ?`. read passes; the privacy check must
+ * catch it via the UPDATE step — which it does only now that B sends a DISTINCT
+ * adversarial value (re-sending A's value made this look like a no-op).
+ */
+const UNSCOPED_UPDATE_SERVER = CORRECT_SERVER.replace(
+	'await c.env.DB.prepare("update notes set body = ? where id = ? and ownerId = ?").bind(body, Number(c.req.param("id")), user.id).run();',
+	'await c.env.DB.prepare("update notes set body = ? where id = ?").bind(body, Number(c.req.param("id"))).run();',
+);
+
 /** A screen that reads localStorage instead of the server. Fails the static check. */
 const LOCALSTORAGE_SCREEN = [
 	'import { useEffect, useState } from "react";',
@@ -662,6 +673,7 @@ export const CONTRACT_FIXTURES: readonly ContractFixture[] = [
 	{ id: 'kept-in-memory', plain: 'Keeps notes in memory, so they vanish after a restart.', mustFail: ['read'], files: personFiles(IN_MEMORY_SERVER) },
 	{ id: 'dummy-row-serves-memory', plain: 'Inserts a dummy row but serves from memory; the read after restart fails.', mustFail: ['read'], files: personFiles(DUMMY_ROW_SERVER) },
 	{ id: 'no-owner-filter', plain: 'No owner filter, so a second person can see the first person\'s notes.', mustFail: ['privacy-screen'], files: personFiles(NO_OWNER_FILTER_SERVER) },
+	{ id: 'unscoped-update-only', plain: 'Read/list/delete are owner-scoped, but the UPDATE drops the owner filter, so a second person can overwrite the first person\'s note.', mustFail: ['privacy-screen'], files: personFiles(UNSCOPED_UPDATE_SERVER) },
 	{ id: 'update-not-saved', plain: 'An update that is dropped, so a change does not survive a restart.', mustFail: ['privacy-screen'], files: personFiles(UPDATE_NOT_SAVED_SERVER) },
 	{ id: 'screen-reads-localstorage', plain: 'A screen reads localStorage instead of the server; the static check and the screen check catch it.', mustFail: ['privacy-screen'], files: personFiles(CORRECT_SERVER, LOCALSTORAGE_SCREEN) },
 	// Every person-owned table is checked, not only the first one.

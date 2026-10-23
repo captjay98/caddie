@@ -53,6 +53,7 @@ const WHY: Readonly<Record<string, string>> = {
 	'kept-in-memory': "reading A's record after restart failed",
 	'dummy-row-serves-memory': "reading A's record after restart failed",
 	'no-owner-filter': "B can read A's record",
+	'unscoped-update-only': "B changed A's record to B's own value",
 	'update-not-saved': 'the change was not saved',
 	'screen-reads-localstorage': 'does not show a record the server saved',
 	'team-route-without-team-filter': 'the route does not filter by team',
