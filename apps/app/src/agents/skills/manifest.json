@@ -9,9 +9,9 @@
 		},
 		{
 			"name": "design",
-			"version": "1.1.0",
+			"version": "1.2.0",
 			"path": "design/SKILL.md",
-			"sha256": "0b5ecda20182fa674941e6e72dee1b31a3b641f0a4a7f29f7c4704c1f4c6cc98"
+			"sha256": "fdac4bea84e44716a9814e42c971263d33d89b1b755b95841d9a5902a6b8ea04"
 		},
 		{
 			"name": "build-verify",

@@ -13,19 +13,19 @@ approves something they can SEE, not only read.
 
 ## Discipline
 
-- FIRST, set the app's LOOK from its audience and setting — who uses it and
-  where (a farmer in bright sun on a phone; an accountant at a desk; a nurse on a
-  ward at night). State that audience in one plain sentence, then choose a look
-  that fits it. Do NOT reach for the same look every time: a calm desk tool and a
-  high-contrast outdoor tool should not come out identical. The look is the first
-  decision, because every screen below is drawn in it.
-- Capture that look as ONE fenced ```caddie-theme JSON block in the brief: a
-  name, a one-line "why", the colour roles (bg, surface, text, muted, primary,
-  onPrimary, border, ok, warn, danger, plus any tinted state surfaces), two named
-  system font stacks (no web fonts), a corner radius and a density. Caddie
-  validates it — hex colours and WCAG AA contrast — and REFUSES a design save
-  with no valid theme, so get the colours readable. Every mockup and the built
-  app are painted from this block, so it is not decoration.
+- The LOOK is already chosen. Before this step, Caddie proposed 2-3 looks (a
+  `caddie-looks` set) and the owner picked one. You are handed that chosen look
+  as a ```caddie-theme block — do NOT re-decide colours, fonts or radius. Your
+  job is to lay the approved features out IN that look. If you were somehow not
+  handed a theme, stop and ask Caddie for the chosen look rather than inventing
+  one.
+- Carry the chosen look as ONE fenced ```caddie-theme JSON block in the brief,
+  UNCHANGED from what you were given: the colour roles (bg, surface, text,
+  muted, primary, onPrimary, border, ok, warn, danger, plus any tinted state
+  surfaces), two named system font stacks (no web fonts), a corner radius and a
+  density. Caddie validates it — hex colours and WCAG AA contrast — and REFUSES
+  a design save with no valid theme. Every mockup and the built app are painted
+  from this block, so it is not decoration.
 - Read the approved PRD first (the latest `prd` plan note) and the project's
   design system. You are translating a settled PRD into screens, not reopening
   product decisions. If the PRD is genuinely ambiguous about a screen, choose a
