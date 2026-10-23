@@ -5,12 +5,14 @@ import { createProject, createWorkspace } from '../apps/app/src/server/projects.
 import { projectScopeForUser, workspaceScopeForUser } from '../apps/app/src/server/scope.ts';
 import { ensureWorkflow } from '../apps/app/src/server/build-workflow.ts';
 import {
+	projectAppFeaturesOn,
 	readSwitch,
 	readSwitches,
 	setSwitch,
 	stampProjectModes,
 	SwitchError,
 } from '../apps/app/src/server/platform-switches.ts';
+import { readFileSync } from 'node:fs';
 import { createOperatorRouter } from '../apps/app/src/server/routes/operator.ts';
 import { addUser, migratedDatabase } from './fixtures/sqlite-d1.ts';
 
@@ -224,5 +226,45 @@ describe('operator switches route: operators only', () => {
 	test('a cross-origin post is refused, and an unknown switch is a 400', async () => {
 		expect((await post({ key: 'team_mode', value: 'on' }, 'https://evil.example')).status).toBe(403);
 		expect((await post({ key: 'nope', value: 'on' })).status).toBe(400);
+	});
+});
+
+describe("projectAppFeaturesOn: the project's stamp, with the switch as a global stop", () => {
+	let sqlite: Database;
+	let db: D1Database;
+
+	beforeEach(() => {
+		({ sqlite, db } = migratedDatabase());
+		addUser(sqlite, 'owner-1', 'owner@example.com');
+	});
+	afterEach(() => sqlite.close());
+
+	async function projectStamped(appFeatures: boolean): Promise<string> {
+		const ws = await createWorkspace(db, 'owner-1', { name: `W${appFeatures ? 1 : 0}` });
+		const project = await createProject(db, { workspaceId: ws.id, actorId: 'owner-1' } as never, { workspaceId: ws.id, name: 'P' });
+		sqlite
+			.prepare('insert into "build_workflows" ("projectId","runId","conversationId","intakeKey","brief","phase","updatedAt","appFeatures") values (?,?,?,?,?,?,?,?)')
+			.run(project.id, `run-${project.id}`, `conv-${project.id}`, `intake-${project.id}`, 'b', 'building', now, appFeatures ? 1 : 0);
+		return project.id;
+	}
+
+	test('stamped on and the switch not off: on; stamped off, no workflow, or the switch off: off', async () => {
+		const on = await projectStamped(true);
+		const off = await projectStamped(false);
+		expect(await projectAppFeaturesOn(db, { APP_FEATURES: 'on' }, on)).toBe(true);
+		expect(await projectAppFeaturesOn(db, { APP_FEATURES: 'owner' }, on)).toBe(true);
+		expect(await projectAppFeaturesOn(db, { APP_FEATURES: 'on' }, off)).toBe(false);
+		expect(await projectAppFeaturesOn(db, { APP_FEATURES: 'on' }, 'no-such-project')).toBe(false);
+		// MUTATION PROOF: ignore the switch and a project stamped on keeps photo
+		// AI after the owner turns app features off everywhere.
+		expect(await projectAppFeaturesOn(db, { APP_FEATURES: 'off' }, on)).toBe(false);
+		await setSwitch(db, { TEAM_MODE: 'on', APP_FEATURES: 'on' }, 'owner-1', 'app_features', 'off');
+		expect(await projectAppFeaturesOn(db, { TEAM_MODE: 'on', APP_FEATURES: 'on' }, on)).toBe(false);
+	});
+
+	test("both app AI entry points (preview and published) pass the project's app features", () => {
+		const source = readFileSync(new URL('../apps/app/src/server/app-platform.ts', import.meta.url), 'utf8');
+		// MUTATION PROOF: drop the call from either entry point and the count falls.
+		expect(source.match(/appFeatures: await projectAppFeaturesOn\(this\.env\.DB, this\.env, projectId\)/g)?.length ?? 0).toBe(2);
 	});
 });

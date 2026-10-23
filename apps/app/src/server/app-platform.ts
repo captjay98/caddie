@@ -4,6 +4,7 @@ import { appAiDepsFromEnv, runAppAi, type AppAiReply } from './app-ai.ts';
 import { sendAppSignInCode, type AppSignInDeps, type SignInCodeReply } from './app-sign-in.ts';
 import { mailerFromEnv } from './notifications.ts';
 import { appsDomainOf } from './publish-env.ts';
+import { projectAppFeaturesOn } from './platform-switches.ts';
 
 /**
  * Caddie's platform services for generated apps, as `env.CADDIE` inside the
@@ -42,8 +43,12 @@ export function appSignInDepsFromEnv(env: AppPlatformEnv): AppSignInDeps {
 const notPublished = { ok: false, reason: 'unavailable', message: "This app isn't published right now." } as const;
 
 export class AppPlatform extends WorkerEntrypoint<AppPlatformEnv, { projectId: string }> {
-	ai(request: unknown): Promise<AppAiReply> {
-		return runAppAi(this.env.DB, appAiDepsFromEnv(this.env), { projectId: this.ctx.props.projectId, mode: 'preview', request });
+	async ai(request: unknown): Promise<AppAiReply> {
+		const projectId = this.ctx.props.projectId;
+		// Part M: photos only for a project stamped with app features, and never
+		// while the owner has the app_features switch off.
+		const deps = { ...appAiDepsFromEnv(this.env), appFeatures: await projectAppFeaturesOn(this.env.DB, this.env, projectId) };
+		return runAppAi(this.env.DB, deps, { projectId, mode: 'preview', request });
 	}
 
 	signInCode(request: unknown): Promise<SignInCodeReply> {
@@ -54,7 +59,8 @@ export class AppPlatform extends WorkerEntrypoint<AppPlatformEnv, { projectId: s
 export class PublishedAppPlatform extends WorkerEntrypoint<AppPlatformEnv> {
 	async ai(projectId: unknown, request: unknown): Promise<AppAiReply> {
 		if (typeof projectId !== 'string' || projectId.length === 0) return notPublished;
-		return runAppAi(this.env.DB, appAiDepsFromEnv(this.env), { projectId, mode: 'live', request });
+		const deps = { ...appAiDepsFromEnv(this.env), appFeatures: await projectAppFeaturesOn(this.env.DB, this.env, projectId) };
+		return runAppAi(this.env.DB, deps, { projectId, mode: 'live', request });
 	}
 
 	async signInCode(projectId: unknown, request: unknown): Promise<SignInCodeReply> {

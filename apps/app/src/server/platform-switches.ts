@@ -199,3 +199,18 @@ export async function stampProjectModes(
 		appFeatures: await resolve('app_features'),
 	};
 }
+
+/**
+ * Whether app features (part M's photo input among them) are on for one
+ * project's app, at call time. The project's stamped `appFeatures` decides (it
+ * was stamped when the workflow was created, so a judge's project stays off),
+ * and the switch set to `off` is a global stop on top, so the owner can halt
+ * every app's use at once without a redeploy. No workflow row means off.
+ */
+export async function projectAppFeaturesOn(db: D1Database, env: SwitchEnv | null | undefined, projectId: string): Promise<boolean> {
+	const row = (
+		await db.prepare('select "appFeatures" from "build_workflows" where "projectId" = ?').bind(projectId).all<{ appFeatures: number }>()
+	).results?.[0];
+	if (!row || Number(row.appFeatures) !== 1) return false;
+	return (await readSwitch(db, env, 'app_features')) !== 'off';
+}
