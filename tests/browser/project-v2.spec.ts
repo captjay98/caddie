@@ -359,9 +359,13 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		});
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/project?project=proj-a`);
-		await expect(page.getByTestId('overview-next-step')).toContainText('Let’s get started');
-		await expect(page.getByTestId('overview-brief-building')).toHaveCount(0);
+		// With no workflow the focused home shows the calm "what to build" prompt,
+		// never a build/working card. The project-workflow card and the Now panel
+		// (overview-now) only exist once there is a workflow.
+		await expect(page.getByTestId('focused-project-home')).toContainText('What would you like to build?');
+		await expect(page.getByTestId('project-workflow')).toHaveCount(0);
 		await expect(page.getByTestId('overview-now')).toHaveCount(0);
+		await expect(page.locator('body')).not.toContainText('Caddie is building');
 		await context.close();
 	});
 
@@ -371,14 +375,16 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 			experience: { projectId: 'proj-a', version: Date.now() - 2 * 60_000, stage: 'planning', plan: null, preview: null, message: 'Caddie is preparing a plan for this project.', actions: [] },
 		});
 		const page = await context.newPage();
-		await page.goto(`${BASE}/app/project?project=proj-a`);
+		// The Now panel lives on the Build view (no workflow record stubbed, so it
+		// reads the experience projection there); it reports the live planning
+		// state rather than an idle "let's get started".
+		await page.goto(`${BASE}/app/runs?project=proj-a`);
 		const now = page.getByTestId('overview-now');
 		await expect(now).toHaveAttribute('data-stage', 'planning');
+		await expect(now).toHaveAttribute('data-working', 'true');
 		await expect(page.getByTestId('overview-now-title')).toHaveText('Caddie is writing your plan');
 		await expect(page.getByTestId('overview-now-updated')).toHaveText('Updated 2 min ago');
-		await expect(page.getByTestId('overview-next-step')).toHaveCount(0);
 		await expect(page.locator('body')).not.toContainText('Let’s get started');
-		await expect(page.getByTestId('overview-brief-building')).toBeVisible();
 		await context.close();
 	});
 
@@ -395,7 +401,9 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 			},
 		});
 		const page = await context.newPage();
-		await page.goto(`${BASE}/app/project?project=proj-a`);
+		// The Now panel (Build view, no workflow record) offers the server's
+		// primary action, which opens the Plan tab.
+		await page.goto(`${BASE}/app/runs?project=proj-a`);
 		await expect(page.getByTestId('overview-now-title')).toHaveText('Your plan is ready to review');
 		const primary = page.getByTestId('overview-now-review_plan');
 		await expect(primary).toHaveClass(/btn-key/);
@@ -409,10 +417,13 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await stubAccount(context, { brief: [card('brf_result_1', 'result', 'handled', 'Build finished', 'The latest build produced a preview.')] });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/project?project=proj-a`);
-		await expect(page.getByTestId('overview-next-step')).toContainText('Nothing needs you right now');
-		// Finished work folds under "What happened recently".
+		// No pending decision and no workflow: the focused home stays calm (the
+		// "what to build" prompt), and finished work folds under the project's
+		// "Earlier decisions & updates" section rather than shouting for action.
+		await expect(page.getByTestId('focused-project-home')).toContainText('What would you like to build?');
 		const recent = page.getByTestId('overview-recent');
-		await expect(recent).toContainText('What happened recently · 1');
+		await recent.locator('summary').click();
+		await expect(recent).toContainText('Build finished');
 		await context.close();
 	});
 
