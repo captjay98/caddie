@@ -77,8 +77,8 @@ function featureIds(block: ArchitectureBlock): Set<string> {
 /**
  * Which test-mode features Caddie can run for this app (parts J, K, L, N).
  * Payments and uploads come with the project's app features; emails (K's host
- * side) and scheduled jobs (N) aren't built yet (lane 10), so they are refused
- * for every app until they land. Flip them to `appFeatures` then.
+ * side) and scheduled jobs (N) have landed (lane 10), so they come with the
+ * project's app features too.
  */
 export interface AvailableFeatures {
 	readonly payments: boolean;
@@ -88,7 +88,7 @@ export interface AvailableFeatures {
 }
 
 export function availableFeatures(appFeatures: boolean): AvailableFeatures {
-	return { payments: appFeatures, files: appFeatures, emails: false, jobs: false };
+	return { payments: appFeatures, files: appFeatures, emails: appFeatures, jobs: appFeatures };
 }
 
 export function checkArchitecture(

@@ -1,6 +1,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import type { D1Database } from './auth.ts';
 import { appAiDepsFromEnv, runAppAi, type AppAiReply } from './app-ai.ts';
+import { sendAppEmail, type AppEmailReply } from './app-email.ts';
 import { sendAppSignInCode, type AppSignInDeps, type SignInCodeReply } from './app-sign-in.ts';
 import { mailerFromEnv } from './notifications.ts';
 import { appsDomainOf } from './publish-env.ts';
@@ -41,6 +42,7 @@ export function appSignInDepsFromEnv(env: AppPlatformEnv): AppSignInDeps {
 }
 
 const notPublished = { ok: false, reason: 'unavailable', message: "This app isn't published right now." } as const;
+const emailOff = { ok: false, reason: 'unavailable', message: "Emails aren't available for this app." } as const;
 
 export class AppPlatform extends WorkerEntrypoint<AppPlatformEnv, { projectId: string }> {
 	async ai(request: unknown): Promise<AppAiReply> {
@@ -49,6 +51,13 @@ export class AppPlatform extends WorkerEntrypoint<AppPlatformEnv, { projectId: s
 		// while the owner has the app_features switch off.
 		const deps = { ...appAiDepsFromEnv(this.env), appFeatures: await projectAppFeaturesOn(this.env.DB, this.env, projectId) };
 		return runAppAi(this.env.DB, deps, { projectId, mode: 'preview', request });
+	}
+
+	async email(request: unknown): Promise<AppEmailReply> {
+		const projectId = this.ctx.props.projectId;
+		// Part K: emails are an app feature, gated by the same rule as photos.
+		if (!(await projectAppFeaturesOn(this.env.DB, this.env, projectId))) return emailOff;
+		return sendAppEmail(this.env.DB, {}, { projectId, mode: 'preview', request });
 	}
 
 	signInCode(request: unknown): Promise<SignInCodeReply> {
@@ -61,6 +70,12 @@ export class PublishedAppPlatform extends WorkerEntrypoint<AppPlatformEnv> {
 		if (typeof projectId !== 'string' || projectId.length === 0) return notPublished;
 		const deps = { ...appAiDepsFromEnv(this.env), appFeatures: await projectAppFeaturesOn(this.env.DB, this.env, projectId) };
 		return runAppAi(this.env.DB, deps, { projectId, mode: 'live', request });
+	}
+
+	async email(projectId: unknown, request: unknown): Promise<AppEmailReply> {
+		if (typeof projectId !== 'string' || projectId.length === 0) return notPublished;
+		if (!(await projectAppFeaturesOn(this.env.DB, this.env, projectId))) return emailOff;
+		return sendAppEmail(this.env.DB, {}, { projectId, mode: 'live', request });
 	}
 
 	async signInCode(projectId: unknown, request: unknown): Promise<SignInCodeReply> {
