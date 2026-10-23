@@ -89,7 +89,7 @@ export function NowPanel(props: { projectId: string; fallback: ReactElement }): 
 				{model.message}
 			</p>
 			{stage === 'building' || stage === 'checking' || stage === 'repairing' ? (
-				<BuildProgress actorId={chrome.actorId} projectId={props.projectId} />
+				<BuildProgress actorId={chrome.actorId} projectId={props.projectId} embedded />
 			) : null}
 			{(stage === 'ready' || stage === 'blocked' || stage === 'stopped') && chrome.actorId ? (
 				<SavedFeatures actorId={chrome.actorId} projectId={props.projectId} />

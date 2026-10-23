@@ -1584,7 +1584,7 @@ test('Plan review has one enclosing surface and clearly starts design before bui
   }
  }
  await page.getByTestId('plan-approve-open').click();
- await expect(page.getByRole('dialog',{name:'Approve plan version 1?'})).toContainText('starts the design step');
+ await expect(page.getByRole('dialog',{name:'Approve plan version 1?'})).toContainText('prepares the screens for you to review');
  await page.getByTestId('design-review-approve').click();
  expect(fx.decisions).toEqual([{planId:'plan-1',decision:'approved'}]);
  expect(fx.admissions).toHaveLength(0);

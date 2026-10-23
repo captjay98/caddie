@@ -10349,6 +10349,7 @@ mark {
 .project-workflow.caddie-card[data-phase='building'] { padding:0;border:0;background:transparent; }
 .build-progress--focused { display:grid;gap:22px;padding:0;border:0;background:transparent;min-width:0; }
 .build-status-panel { padding:20px;border:1px solid var(--color-line);border-radius:13px;background:var(--color-panel); }
+.build-status-panel--embedded { padding:0;border:none;border-radius:0;background:transparent; }
 .build-status-heading {display:flex;align-items:center;gap:12px;margin-bottom:14px}
 .build-status-heading > .mascot {flex:none}
 .build-status-heading h2 {margin:0;font-size:20px;line-height:1.3}

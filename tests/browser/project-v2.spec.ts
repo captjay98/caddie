@@ -424,6 +424,12 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		const barBox = await bar.boundingBox();
 		expect(barBox!.y).toBeLessThan(bodyBox!.y);
 
+		// The readable plan renders as real text, not literal markdown source:
+		// the overview sentence is shown and the raw "- render a live chart"
+		// source line is not surfaced verbatim in the default view.
+		await expect(page.getByTestId('plan-body-content')).toContainText('Build a solar dashboard.');
+		await expect(page.getByTestId('plan-body-content')).not.toContainText('- render a live chart');
+
 		// The approve window fetches the real usage and states the cap.
 		await page.getByTestId('plan-approve-open').click();
 		await expect(page.getByTestId('approve-plan-window')).toBeVisible();
@@ -438,12 +444,9 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
         // A settled revision cannot be re-decided by an opposite button.
         await expect(page.getByTestId('plan-changes-open')).toHaveCount(0);
         await expect(page.getByRole('button', { name: 'Continue with Caddie' })).toBeVisible();
-        // Markdown is a real list rather than literal source text.
-        await expect(page.getByTestId('plan-body-content').locator('li')).toContainText('render a live chart');
         // What approving means is one plain sentence; the approved plan folds.
         await expect(page.getByTestId('approve-meaning')).toBeVisible();
         await expect(page.getByTestId('design-review-plan-body')).not.toHaveAttribute('open');
-        await page.screenshot({ path: '/tmp/caddie-plan-review.png' });
 
 		// No earlier versions → no "Earlier versions · 0" noise fold.
 		await expect(page.getByTestId('design-review-earlier')).toHaveCount(0);
@@ -530,8 +533,12 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/runs?project=proj-a`);
 		const now = page.getByTestId('overview-now');
-		await expect(now.getByTestId('build-stages')).toBeVisible();
+		// Features are top-level; stages now live under the "Build details" fold
+		// (Codex's single-panel redesign). Open it so the box-in-box scan covers
+		// the stage list too.
 		await expect(now.getByTestId('build-features')).toBeVisible();
+		await now.getByRole('group').filter({ has: page.getByText('Build details') }).locator('summary').click();
+		await expect(now.getByTestId('build-stages')).toBeVisible();
 		const found = await now.evaluate((card) => {
 			const boxes: string[] = [];
 			for (const el of Array.from(card.querySelectorAll('*'))) {
@@ -664,7 +671,7 @@ test.describe('the Plan tab follows the build (plan 5.3)', () => {
 	// what approving means sat in a fold of boxes.
 	const PLAN = { id: 'pdr-follow', projectId: 'proj-a', kind: 'prd', revision: 1, body: '# FarmLog AI\n\n- Log daily feed', bodyHash: 'sha256-follow', createdAt: NOW };
 	const APPROVED = { resourceId: 'pdr-follow', revisionHash: 'sha256-follow', status: 'approved', expiresAt: '2027-01-01T00:00:00Z' };
-	const MEANING = 'Caddie builds exactly this plan, privately. It asks you before publishing or changing real data.';
+	const MEANING = 'Next, Caddie prepares the screens for you to review. Building starts only after you approve the design.';
 
 	test('before a decision: as wide as the other tabs, one plain sentence on approving, the plan open to read', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });

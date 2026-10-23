@@ -17,7 +17,13 @@ export function BuildProgress(props: {
   latest?: string | null;
   onStop?: () => Promise<void>;
   onRefresh?: () => Promise<void>;
+  /** Frameless when rendered inside another card (e.g. the Now panel), so the
+   *  build status does not draw a card inside a card. */
+  embedded?: boolean;
 }): ReactElement | null {
+  const panelClass = props.embedded
+    ? "build-status-panel build-status-panel--embedded"
+    : "build-status-panel";
   const activity = useBuildActivity(
     { actorId: props.actorId },
     props.projectId,
@@ -31,7 +37,7 @@ export function BuildProgress(props: {
   if (!data?.timeline)
     return (
       <section
-        className="build-status-panel"
+        className={panelClass}
         data-testid="build-status-loading"
       >
         <p className="state-detail" role={activity.error ? "alert" : "status"}>
@@ -86,7 +92,7 @@ export function BuildProgress(props: {
       data-phase={data.phase}
       data-quiet={view.quiet ? "true" : undefined}
     >
-      <section className="build-status-panel" aria-label="Build status">
+      <section className={panelClass} aria-label="Build status">
         <div className="build-status-heading">
           <Mascot
             mood={view.mood}
