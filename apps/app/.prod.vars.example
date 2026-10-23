@@ -86,3 +86,8 @@ GITHUB_CLIENT_SECRET=
 # APPS_DOMAIN=
 # Daily recheck of published apps
 # WEB_RISK_API_KEY=
+
+# A lower-only cap on every NEW build's spending limit, in US dollars (e.g.
+# 0.75), for a smoke test or the campaign. It can never raise a limit
+# (standard $5, judge $2, big app $40). Leave it unset in normal running.
+# SPEND_LIMIT_CAP_USD=

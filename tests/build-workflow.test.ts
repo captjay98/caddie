@@ -2288,6 +2288,23 @@ describe("part A: a build never starts without its spending limit", () => {
       w.sqlite.close();
     }
   });
+
+  test("an operator spending cap in the env (SPEND_LIMIT_CAP_USD) lowers the new build's limit", async () => {
+    const w = await world();
+    try {
+      const item = await designReady(w);
+      // MUTATION PROOF: drop the env from the design approval's payer and the
+      // build gets the standard $5 limit instead of the operator's $0.75.
+      await decideDesign(w.db, item.scope, { designId: item.design.id, decision: "approved" }, { SPEND_LIMIT_CAP_USD: "0.75" });
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("building");
+      const row = w.sqlite
+        .query('select l."limitMicros" as limitMicros from build_workflows w join build_spend_limits l on l."payerId" = w."spendPayerId" where w.projectId = ?')
+        .get(item.scope.projectId) as { limitMicros: number };
+      expect(row.limitMicros).toBe(750_000);
+    } finally {
+      w.sqlite.close();
+    }
+  });
 });
 
 describe("part P: a module builder's repair limit and working copy are its own", () => {

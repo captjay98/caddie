@@ -128,13 +128,28 @@ export async function createBuildPayer(db: D1Database, payerId: string, limitMic
 		.run();
 }
 
+/**
+ * An operator's LOWER-ONLY cap on new builds' limits, read from the env as US
+ * dollars (`SPEND_LIMIT_CAP_USD`, e.g. "0.75"): it lets a smoke test or the
+ * campaign make a build stop early, for real. It can only lower a limit, never
+ * raise one. Unset, malformed, zero or negative means no cap.
+ */
+export function spendCapMicros(env: unknown): number | null {
+	const raw = (env as Record<string, unknown> | null | undefined)?.['SPEND_LIMIT_CAP_USD'];
+	if (typeof raw !== 'string' || !/^\d+(\.\d{1,6})?$/.test(raw.trim())) return null;
+	const micros = Math.round(Number(raw.trim()) * MICROS_PER_UNIT);
+	return micros > 0 ? micros : null;
+}
+
 /** Create a build's payer end-to-end: resolve the limit, write the row, return the id. */
 export async function openBuildPayer(
 	db: D1Database,
-	input: { runId: string; actorId: string; bigApps: boolean; at?: Date },
+	input: { runId: string; actorId: string; bigApps: boolean; at?: Date; capMicros?: number | null },
 ): Promise<{ payerId: string; limitMicros: number }> {
 	const payerId = buildPayerId(input.runId, input.at);
-	const limitMicros = await resolveBuildLimitMicros(db, input.actorId, { bigApps: input.bigApps });
+	const resolved = await resolveBuildLimitMicros(db, input.actorId, { bigApps: input.bigApps });
+	// The operator cap only ever lowers the D4 limit (spendCapMicros).
+	const limitMicros = input.capMicros ? Math.min(resolved, input.capMicros) : resolved;
 	await createBuildPayer(db, payerId, limitMicros);
 	return { payerId, limitMicros };
 }

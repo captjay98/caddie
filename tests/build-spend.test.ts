@@ -17,6 +17,7 @@ import {
 	routeByModelId,
 	settle,
 	settleMicrosFromCost,
+	spendCapMicros,
 	spendSnapshot,
 } from '../apps/app/src/server/build-spend.ts';
 import { findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
@@ -77,6 +78,28 @@ describe('Part A — build-spend money logic (trigger-enforced D1)', () => {
 		// The payer id ties to the run and is time-stamped (a retry is a new payer).
 		expect(buildPayerId('run-x', new Date(1000))).toBe('build:run-x:1000');
 		expect(owner.payerId.startsWith('build:run-owner:')).toBe(true);
+	});
+
+	test('an operator cap (SPEND_LIMIT_CAP_USD) only ever LOWERS a build limit', async () => {
+		addUser(sqlite, 'u-cap', 'cap@example.com');
+		expect(spendCapMicros({ SPEND_LIMIT_CAP_USD: '0.75' })).toBe(750_000);
+		expect(spendCapMicros({ SPEND_LIMIT_CAP_USD: ' 2 ' })).toBe(2 * MICROS_PER_UNIT);
+		// Unset, malformed, zero or negative: no cap at all.
+		for (const bad of [undefined, '', 'abc', '-1', '0', '0.0', '1e3', '0.5x', 3]) {
+			expect(spendCapMicros({ SPEND_LIMIT_CAP_USD: bad })).toBeNull();
+		}
+		expect(spendCapMicros(null)).toBeNull();
+		expect(spendCapMicros(undefined)).toBeNull();
+
+		const capped = await openBuildPayer(db, { runId: 'run-cap', actorId: 'u-cap', bigApps: false, capMicros: 750_000 });
+		expect(capped.limitMicros).toBe(750_000);
+		expect(await payerLimitMicros(db, capped.payerId)).toBe(750_000);
+		// MUTATION PROOF: use the cap as the limit (not the smaller of the two)
+		// and a cap above the D4 limit would RAISE it.
+		const high = await openBuildPayer(db, { runId: 'run-high', actorId: 'u-cap', bigApps: false, capMicros: 99 * MICROS_PER_UNIT });
+		expect(high.limitMicros).toBe(D4_LIMIT_MICROS.standard);
+		const none = await openBuildPayer(db, { runId: 'run-none', actorId: 'u-cap', bigApps: false, capMicros: null });
+		expect(none.limitMicros).toBe(D4_LIMIT_MICROS.standard);
 	});
 
 	test('createBuildPayer is idempotent — a replay never resets the limit', async () => {
