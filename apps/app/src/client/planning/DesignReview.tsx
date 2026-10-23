@@ -6,7 +6,7 @@ import { Markdown } from "@caddie/ui/Markdown";
 import type { ApprovalRecord, DesignOverview } from "@caddie/contracts";
 import { splitFeatureBlock, ProjectExperienceSchema } from "@caddie/contracts";
 import { PlanFeatureList } from "../project/FeatureChecklist.tsx";
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 import { formatTimeAgo } from "@caddie/ui/time";
 import { postJson } from "../api.ts";
 import { useProjectExperience } from "../queries.ts";
@@ -92,6 +92,8 @@ export function DesignReview(props: {
   onContinue?: () => void;
   /** The build's own phase; once the plan is approved the badge and button follow it. */
   buildPhase?: WorkflowPhase | null;
+  /** The "How your app works" panel, passed in by the shell (it needs the workspace's data). */
+  howItWorks?: ReactNode;
   isPending?: boolean;
   error?: unknown;
   retry?: () => void;
@@ -385,9 +387,9 @@ export function DesignReview(props: {
       {/* "How your app works" (team mode, plan part B): the approved
           architecture in plain words — what it stores, who can see what, its
           screens, its parts (big app), payments and emails, and the architect
-          review's findings. Self-fetched from the shared experience projection;
-          absent for a non-team-mode project, so nothing shows. */}
-      <HowYourAppWorks projectId={props.projectId} />
+          review's findings. The shell passes it in (HowYourAppWorks reads the
+          shared experience projection); absent for a non-team-mode project. */}
+      {props.howItWorks ?? null}
 
       {props.approvalError ? (
         <StatePanel

@@ -208,7 +208,9 @@ test.describe('page states with the character (U03)', () => {
 			return json(route, 200, {});
 		});
 		const page = await context.newPage();
-		await page.goto(`${BASE}/app/runs?project=proj-a`);
+		// The build history (with its title) lives in its own section of the Build
+		// view, open when the view carries ?tab= (focused workspace, 5f3574a).
+		await page.goto(`${BASE}/app/runs?project=proj-a&tab=activity`);
 
 		// The v2 header (name + what it's for + steps) stays real.
 		await expect(page.getByTestId('project-header')).toBeVisible();
@@ -228,9 +230,11 @@ test.describe('page states with the character (U03)', () => {
 		await expect(page.getByTestId('project-tabs')).toBeVisible();
 		// No status was passed for any step, so no step may carry the done tone.
 		await expect(page.locator('.project-step.done')).toHaveCount(0);
-		// Four steps; Overview orients above them, so none is current here.
+		// Four steps. The focused home lands on the step the work is on (Plan when
+		// nothing is planned yet), so exactly that one is current — never done.
 		await expect(page.locator('.project-step')).toHaveCount(4);
-		await expect(page.locator('.project-step.current')).toHaveCount(0);
+		await expect(page.locator('.project-step.current')).toHaveCount(1);
+		await expect(page.getByTestId('project-tab-plan')).toHaveClass(/\bcurrent\b/);
 		// On a step page exactly one step is current.
 		await page.goto(`${BASE}/app/design-review?project=proj-a`);
 		await expect(page.locator('.project-step.current')).toHaveCount(1);
@@ -360,11 +364,15 @@ test.describe('pages load in their own shape (plan 5.6)', () => {
 	// "Fetching the latest state…" box, then jumped into a different layout.
 	const PLAN_PATH = '/app/design-review?project=proj-a';
 	const BUILD_PATH = '/app/runs?project=proj-a';
+	// The build history is its own section of the Build view (open with ?tab=);
+	// it waits on run-bindings in the build's shape while the rest of the page
+	// is already usable.
+	const BUILD_HISTORY_PATH = '/app/runs?project=proj-a&tab=activity';
 	const cases = [
 		{ page: 'home', path: '/app/', hold: '**/api/brief', line: 'Reading your brief…', shapes: '.skel-card', loaded: 'account-brief-lane' },
 		{ page: 'projects', path: '/app/projects', hold: '**/api/projects', line: 'Loading your projects…', shapes: '.skel-row', loaded: 'project-list' },
 		{ page: 'plan', path: PLAN_PATH, hold: '**/api/projects/proj-a/plan-docs', line: 'Reading your plan…', shapes: '.skel-card', loaded: 'design-review' },
-		{ page: 'build', path: BUILD_PATH, hold: '**/api/projects/proj-a/run-bindings', line: 'Reading your builds…', shapes: '.skel-row', loaded: 'project-tabs' },
+		{ page: 'build', path: BUILD_HISTORY_PATH, hold: '**/api/projects/proj-a/run-bindings', line: 'Reading your builds…', shapes: '.skel-row', loaded: 'project-tabs' },
 		{ page: 'build', path: BUILD_PATH, hold: '**/api/projects', line: 'Reading your builds…', shapes: '.skel-row', loaded: 'project-tabs' },
 	] as const;
 

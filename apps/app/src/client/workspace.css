@@ -9090,6 +9090,8 @@ mark {
 .caddie-card .workflow-heading { margin-block:8px 14px; gap:10px; }
 .caddie-card .workflow-heading h3 { font-size:20px; letter-spacing:-.025em; }
 .project-workflow > .build-progress { border:0; background:transparent; padding:0; box-shadow:none; }
+/* Plan 3.6: the Now panel is one card, so the build progress inside it is drawn flat too. */
+.now-panel > .build-progress { border:0; background:transparent; padding:0; box-shadow:none; }
 .project-workflow .workflow-plan { max-height:340px; overflow:auto; padding-right:6px; }
 .build-technical, .workflow-app-options, .workflow-updates { border-top:1px solid var(--color-line); margin-top:14px; padding-top:6px; }
 .build-technical > summary, .workflow-app-options > summary, .workflow-updates > summary { padding-block:12px; min-height:44px; font-size:12px; cursor:pointer; color:var(--color-muted); }

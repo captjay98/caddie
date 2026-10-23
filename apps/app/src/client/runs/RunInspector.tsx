@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ReactElement } from 'react';
 import { formatTimeAgo } from '@caddie/ui/time';
-import { StatePanel, StaleChip, failureKind } from '../states.tsx';
+import { PageSkeleton, StatePanel, StaleChip, failureKind } from '../states.tsx';
 import { CopyableId } from '../copyable.tsx';
 
 /**
@@ -143,7 +143,7 @@ export function RunInspector(props: {
 					) : null}
 				</div>
 				{props.runs.isPending ? (
-					<StatePanel kind="loading" />
+					<PageSkeleton page="build" label="Reading your builds…" />
 				) : props.runs.error ? (
 					<StatePanel
 						kind={kindOf(props.runs.error)}
