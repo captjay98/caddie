@@ -17,6 +17,7 @@ import {
 	startProjectFromChat,
 	workflowSnapshot,
 } from '../apps/app/src/server/build-workflow.ts';
+import { chooseLook } from './fixtures/looks-fixture.ts';
 import { approvePlan, projectExperience } from '../apps/app/src/server/project-experience.ts';
 import { projectScopeForUser, ScopeError, workspaceScopeForUser } from '../apps/app/src/server/scope.ts';
 import type { Scope } from '@caddie/contracts';
@@ -438,7 +439,7 @@ describe('judge limits: build starts', () => {
 		const before = await projectExperience(world.db, world.scope);
 		expect(before.stage).toBe('review');
 
-		// Approving the plan only starts the design step: no sandbox, no build.
+		// Approving the plan only starts the look step: no sandbox, no build.
 		const applied = await approvePlan(
 			world.db,
 			world.scope,
@@ -451,7 +452,10 @@ describe('judge limits: build starts', () => {
 			env,
 		);
 		expect(applied.outcome).toBe('applied');
-		expect((await workflowSnapshot(world.db, world.scope)).workflow?.phase).toBe('design');
+		expect((await workflowSnapshot(world.db, world.scope)).workflow?.phase).toBe('looks');
+		expect(await countJudgeUsage(world.db, JUDGE_ID, 'build')).toBe(3);
+		// Choosing a look starts the design step: still no build start.
+		await chooseLook(world.db, world.scope, 'field', env);
 		expect(await countJudgeUsage(world.db, JUDGE_ID, 'build')).toBe(3);
 
 		// Approving the design is the build start, and it is refused before any write.
@@ -484,6 +488,8 @@ describe('judge limits: build starts', () => {
 		const env = { JUDGE_MAX_BUILDS_PER_DAY: '3' };
 
 		await decideWorkflow(world.db, world.scope, { planId: world.plan.id, decision: 'approved' }, env);
+		expect(await countJudgeUsage(world.db, JUDGE_ID, 'build')).toBe(0);
+		await chooseLook(world.db, world.scope, 'field', env);
 		expect(await countJudgeUsage(world.db, JUDGE_ID, 'build')).toBe(0);
 		const design = await createPlanDocRevision(world.db, world.scope, {
 			kind: 'design',
@@ -550,6 +556,7 @@ describe('judge limits: build starts', () => {
 		const plan = await createPlanDocRevision(db, scope, { kind: 'prd', body: '# Five' });
 		await workflowSnapshot(db, scope);
 		await decideWorkflow(db, scope, { planId: plan.id, decision: 'approved' }, env);
+		await chooseLook(db, scope, 'field', env);
 		const design = await createPlanDocRevision(db, scope, { kind: 'design', body: '# Design' });
 		await workflowSnapshot(db, scope);
 		await decideDesign(db, scope, { designId: design.id, decision: 'approved' }, env);
@@ -788,6 +795,9 @@ describe('judge limits: a change request is a Caddie message', () => {
 		await decideWorkflow(world.db, world.scope, { planId: revised.id, decision: 'approved' }, env);
 		expect(await countJudgeUsage(world.db, JUDGE_ID, 'message')).toBe(1);
 		expect(await countJudgeUsage(world.db, JUDGE_ID, 'build')).toBe(0);
+		// Choosing a look is not a Caddie message either.
+		await chooseLook(world.db, world.scope, 'field', env);
+		expect(await countJudgeUsage(world.db, JUDGE_ID, 'message')).toBe(1);
 		const design = await createPlanDocRevision(world.db, world.scope, { kind: 'design', body: '# Design brief\n\nOne screen.' });
 		await workflowSnapshot(world.db, world.scope);
 		await decideDesign(world.db, world.scope, { designId: design.id, decision: 'rejected', note: 'A darker theme.' }, env);

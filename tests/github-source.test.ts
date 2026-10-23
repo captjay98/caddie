@@ -141,6 +141,10 @@ beforeAll(async () => {
 		'0023_build_features.sql',
 		'0024_design_phase.sql',
 		'0025_github_source_saves.sql',
+		// build_workflows' team-mode columns, then the look step's phases.
+		'0033_judge_accounts.sql',
+		'0040_team_mode.sql',
+		'0044_looks_phase.sql',
 	]) {
 		const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), 'utf8');
 		for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);

@@ -18,6 +18,8 @@ import {
   reconcileStalledBuild,
   BUILD_STALL_MS,
 } from "../apps/app/src/server/build-workflow.ts";
+import { decideLooks } from "../apps/app/src/server/build-workflow.ts";
+import { chooseLook, saveLooks } from "./fixtures/looks-fixture.ts";
 import {
   projectExperience,
   approvePlan,
@@ -78,6 +80,8 @@ async function world() {
     // A build start opens its spending limit (judge status, team-mode tables).
     "0033_judge_accounts.sql",
     "0040_team_mode.sql",
+    // The choose-a-look step's phases.
+    "0044_looks_phase.sql",
   ]) {
     const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), "utf8");
     for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);
@@ -119,9 +123,10 @@ async function planned(w: Awaited<ReturnType<typeof world>>) {
 
 type Planned = Awaited<ReturnType<typeof planned>>;
 
-/** Plan approved -> design; the brief saved -> design-review (snapshot auto-advance). */
+/** Plan approved -> looks -> a look chosen -> design; the brief saved -> design-review. */
 async function designSaved(w: Awaited<ReturnType<typeof world>>, item: Planned) {
   await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+  await chooseLook(w.db, item.scope);
   const design = await createPlanDocRevision(w.db, item.scope, {
     kind: "design",
     body: "# Design brief\n\nOne screen: the task list, with empty, loading and error states.",
@@ -161,10 +166,34 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     expect(primary.enabled).toBe(true);
   });
 
-  test("design: an approved plan enters the design step, Caddie is working, continue is the primary", async () => {
+  test("looks: an approved plan enters the look step, Caddie is working, continue is the primary", async () => {
     const w = await world();
     const item = await planned(w);
     await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    const exp = await projectExperience(w.db, item.scope);
+    expect(exp.stage).toBe("looks");
+    expect(exp.plan!.approved).toBe(true);
+    expect(exp.message).toContain("looks");
+    expect(exp.actions.filter((a) => a.primary).map((a) => a.kind)).toEqual(["suggest_change"]);
+  });
+
+  test("looks_review: saved looks wait for the person, choose_look is the only main action", async () => {
+    const w = await world();
+    const item = await planned(w);
+    await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    await saveLooks(w.db, item.scope);
+    const exp = await projectExperience(w.db, item.scope);
+    expect(exp.stage).toBe("looks_review");
+    expect(exp.message).toContain("Choose how your app should look");
+    expect(exp.actions.map((a) => a.kind)).toEqual(["choose_look"]);
+    expect(exp.actions[0]!.primary).toBe(true);
+  });
+
+  test("design: choosing a look enters the design step, Caddie is working, continue is the primary", async () => {
+    const w = await world();
+    const item = await planned(w);
+    await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    await chooseLook(w.db, item.scope);
     const exp = await projectExperience(w.db, item.scope);
     expect(exp.stage).toBe("design");
     expect(exp.plan!.approved).toBe(true);
@@ -270,6 +299,12 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     // review
     expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(1);
     await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    // looks
+    expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(1);
+    const { looks } = await saveLooks(w.db, item.scope);
+    // looks_review
+    expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(1);
+    await decideLooks(w.db, item.scope, { looksId: looks.id, choice: "field" });
     // design
     expect((await projectExperience(w.db, item.scope)).actions.filter((a) => a.primary)).toHaveLength(1);
     const design = await createPlanDocRevision(w.db, item.scope, { kind: "design", body: "# Design brief\n\nScreens and states." });
@@ -283,7 +318,7 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
 });
 
 describe("approvePlan command — versioned + idempotent", () => {
-  test("applied: correct version + revision approves and moves to the design step", async () => {
+  test("applied: correct version + revision approves and moves to the look step", async () => {
     const w = await world();
     const item = await planned(w);
     const before = await projectExperience(w.db, item.scope);
@@ -294,7 +329,7 @@ describe("approvePlan command — versioned + idempotent", () => {
       idempotencyKey: "approve-key-0001",
     });
     expect(result.outcome).toBe("applied");
-    expect(result.experience.stage).toBe("design");
+    expect(result.experience.stage).toBe("looks");
     expect(result.experience.plan!.approved).toBe(true);
   });
 

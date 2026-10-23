@@ -14,6 +14,7 @@ import {
   stopBuild,
   readWorkflow,
 } from "../apps/app/src/server/build-workflow.ts";
+import { chooseLook } from "./fixtures/looks-fixture.ts";
 import {
   dispatchPendingWorkflow,
   needsRedelivery,
@@ -82,6 +83,8 @@ async function world() {
     // A build start opens its spending limit (judge status, team-mode tables).
     "0033_judge_accounts.sql",
     "0040_team_mode.sql",
+    // The choose-a-look step's phases.
+    "0044_looks_phase.sql",
   ]) {
     const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), "utf8");
     for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);
@@ -125,6 +128,8 @@ async function world() {
   /** A project whose pending message starts the build (design approved, phase building). */
   async function buildingProject() {
     const { scope } = await approvedProject();
+    await dispatchPendingWorkflow(db, scope, async () => ({ delivered: true }));
+    await chooseLook(db, scope);
     await dispatchPendingWorkflow(db, scope, async () => ({ delivered: true }));
     const design = await createPlanDocRevision(db, scope, { kind: "design", body: "# Design\n\nOne screen." });
     await workflowSnapshot(db, scope); // design -> design-review
@@ -270,11 +275,11 @@ describe("F01 a handoff is cleared only by an accepted delivery (review 2026-10-
     await markDispatched(db, key, conversationId);
   }
 
-  for (const phase of ["planning", "design", "building"] as const) {
+  for (const phase of ["planning", "looks", "building"] as const) {
     test(`crash before the coordinator admitted it (${phase}): kept, then re-delivered once after the lease`, async () => {
       const w = await world();
       const { scope } =
-        phase === "planning" ? await w.intakeProject() : phase === "design" ? await w.approvedProject() : await w.buildingProject();
+        phase === "planning" ? await w.intakeProject() : phase === "looks" ? await w.approvedProject() : await w.buildingProject();
       const workflow = (await readWorkflow(w.db, scope))!;
       expect(workflow.phase).toBe(phase);
       const key = workflow.pendingKey!;

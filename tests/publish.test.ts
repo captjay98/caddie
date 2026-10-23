@@ -7,6 +7,7 @@ import { CloudflareAppHost, readCloudflareConfig } from '../apps/app/src/server/
 import { requestAppSecret, setAppSecret } from '../apps/app/src/server/app-secrets.ts';
 import { recordDecision } from '../apps/app/src/server/approvals.ts';
 import { decideDesign, decideWorkflow, readPublishBundle, startProjectFromChat, storeBuildOutput, workflowSnapshot } from '../apps/app/src/server/build-workflow.ts';
+import { chooseLook } from './fixtures/looks-fixture.ts';
 import { createPlanDocRevision, ensureHomeProject } from '../apps/app/src/server/projects.ts';
 import {
 	advanceSafetyChecks,
@@ -108,6 +109,7 @@ describe('publish service', () => {
 		const plan = await createPlanDocRevision(db, projectScope, { kind: 'prd', body: '# Farm log\n\nLog feed and see totals.' });
 		await workflowSnapshot(db, projectScope);
 		await decideWorkflow(db, projectScope, { planId: plan.id, decision: 'approved' });
+		await chooseLook(db, projectScope);
 		const design = await createPlanDocRevision(db, projectScope, { kind: 'design', body: '# Design brief\n\nOne screen with a form and totals.' });
 		await workflowSnapshot(db, projectScope);
 		await decideDesign(db, projectScope, { designId: design.id, decision: 'approved' });

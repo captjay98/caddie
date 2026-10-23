@@ -29,6 +29,7 @@ import {
   workflowSnapshot,
   decideWorkflow,
   decideDesign,
+  decideLooks,
   acknowledgeDispatch,
   requireBuildApproval,
   storeBuildOutput,
@@ -72,6 +73,7 @@ import {
 import { SandboxStub } from "./fixtures/sandbox-stub.ts";
 import { upsertProfile } from "../apps/app/src/server/profiles.ts";
 import { splitSqlStatements } from "./fixtures/controls-harness.ts";
+import { chooseLook, saveLooks } from "./fixtures/looks-fixture.ts";
 
 /** LOCAL VERIFIED: real production migrations/services over SQLite, with
  * D1-shaped results and a real synchronous transaction backing D1.batch.
@@ -146,6 +148,8 @@ async function world() {
     "0042_module_builders.sql",
     // Part Q: the integration lock a part's join takes.
     "0043_integration_lock.sql",
+    // The choose-a-look step: the workflow's looks / looks-review phases.
+    "0044_looks_phase.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -219,15 +223,17 @@ async function planned(w: Awaited<ReturnType<typeof world>>) {
 }
 async function approved(w: Awaited<ReturnType<typeof world>>) {
   const item = await planned(w);
-  // Approving the PRD now enters the DESIGN step, not building. To keep the
-  // downstream build tests exercising a 'building' workflow, this helper
-  // carries through: PRD approved -> design, save the design brief ->
-  // design-review, approve the design -> building. A test that wants to assert
-  // the intermediate phases uses planned()/designReady() directly.
+  // Approving the PRD now enters the LOOKS step, then DESIGN, not building. To
+  // keep the downstream build tests exercising a 'building' workflow, this
+  // helper carries through: PRD approved -> looks, save + choose a look ->
+  // design, save the design brief -> design-review, approve the design ->
+  // building. A test that wants to assert the intermediate phases uses
+  // planned()/designReady() directly.
   await decideWorkflow(w.db, item.scope, {
     planId: item.plan.id,
     decision: "approved",
   });
+  await chooseLook(w.db, item.scope);
   const design = await createPlanDocRevision(w.db, item.scope, {
     kind: "design",
     body: "# Design brief\n\nOne screen: a feed-log form and a totals dashboard. Loading, empty and error states defined.",
@@ -247,6 +253,7 @@ async function designReady(w: Awaited<ReturnType<typeof world>>) {
     planId: item.plan.id,
     decision: "approved",
   });
+  await chooseLook(w.db, item.scope);
   const design = await createPlanDocRevision(w.db, item.scope, {
     kind: "design",
     body: "# Design brief\n\nScreens, states and token choices for the todo app.",
@@ -564,8 +571,9 @@ describe("plan review and durable build approval", () => {
         decision: "approved",
       });
       expect(doubleClick.workflow?.pendingKey).toBe(queued.pendingKey);
-      // One plan decision (PRD) + one design decision; the double-click adds neither.
-      expect(w.count("plan_decisions")).toBe(2);
+      // One plan decision (PRD) + one look choice + one design decision; the
+      // double-click adds none.
+      expect(w.count("plan_decisions")).toBe(3);
       await acknowledgeDispatch(w.db, item.scope, queued.pendingKey!);
       const replay = await decideDesign(w.db, item.scope, {
         designId: item.design.id,
@@ -573,9 +581,10 @@ describe("plan review and durable build approval", () => {
       });
       expect(replay.workflow?.phase).toBe("building");
       expect(replay.workflow?.pendingKey).toBeNull();
-      // One PRD approval + one design approval = two approvals total.
+      // One PRD approval + one design approval = two approvals total; the look
+      // choice is a plan decision only (it opens no spending and gates no build).
       expect(w.count("approvals")).toBe(2);
-      expect(w.count("plan_decisions")).toBe(2);
+      expect(w.count("plan_decisions")).toBe(3);
     } finally {
       w.sqlite.close();
     }
@@ -763,8 +772,9 @@ describe("plan review and durable build approval", () => {
         decision: "approved",
       });
       expect(accepted.approval?.id).not.toBe(rejection.approval?.id);
-      // The revised PRD's approval enters design; approve the design brief to
-      // reach the build gate.
+      // The revised PRD's approval enters the look step, then design; approve
+      // the design brief to reach the build gate.
+      await chooseLook(w.db, item.scope);
       const design = await createPlanDocRevision(w.db, item.scope, {
         kind: "design",
         body: "# Design brief\n\nCalm palette, keyboard shortcuts, states defined.",
@@ -797,7 +807,7 @@ describe("plan review and durable build approval", () => {
 });
 
 describe("design review and the build gate", () => {
-  test("approving the PRD enters design, not building; building stays gated until the design brief is approved", async () => {
+  test("approving the PRD enters the look step; choosing a look starts the design in it; building stays gated until the design is approved", async () => {
     const w = await world();
     try {
       const item = await planned(w);
@@ -805,9 +815,33 @@ describe("design review and the build gate", () => {
         planId: item.plan.id,
         decision: "approved",
       });
-      // PRD approval goes to design, NOT building — and building is refused.
-      expect(afterPlan.workflow?.phase).toBe("design");
-      expect(afterPlan.workflow?.pendingBody).toContain("DESIGN");
+      // PRD approval goes to the LOOKS step, NOT design or building.
+      expect(afterPlan.workflow?.phase).toBe("looks");
+      expect(afterPlan.workflow?.pendingBody).toContain("CHOOSE A LOOK");
+      expect(afterPlan.workflow?.pendingBody).toContain("kind:'looks'");
+      expect(afterPlan.looks).toBeNull();
+      await rejectsCode(requireBuildApproval(w.db, item.scope), "BUILD_NOT_APPROVED");
+      // A design saved before a look is chosen does not jump the owner's choice.
+      await createPlanDocRevision(w.db, item.scope, { kind: "design", body: "# Too early\n\nA brief." });
+      expect((await workflowSnapshot(w.db, item.scope)).workflow?.phase).toBe("looks");
+      // Saving the looks advances looks -> looks-review.
+      const { looks, snapshot: choosing } = await saveLooks(w.db, item.scope);
+      expect(choosing.workflow?.phase).toBe("looks-review");
+      expect(choosing.looks?.id).toBe(looks.id);
+      await rejectsCode(requireBuildApproval(w.db, item.scope), "BUILD_NOT_APPROVED");
+      // Choosing a look enters design, with that look's theme handed to the designer.
+      const chosen = await decideLooks(w.db, item.scope, { looksId: looks.id, choice: "calm", note: "a little warmer" });
+      expect(chosen.workflow?.phase).toBe("design");
+      expect(chosen.workflow?.pendingKey?.startsWith("looks:")).toBe(true);
+      expect(chosen.workflow?.pendingBody).toContain('chose the look "Calm and clear"');
+      expect(chosen.workflow?.pendingBody).toContain("```caddie-theme");
+      expect(chosen.workflow?.pendingBody).toContain('"primary": "#2B5FD9"');
+      expect(chosen.workflow?.pendingBody).toContain("poultry and catfish farmers");
+      expect(chosen.workflow?.pendingBody).toContain("a little warmer");
+      expect(chosen.workflow?.pendingBody).not.toContain('"id": "calm"');
+      const [decision] = await listPlanDecisions(w.db, item.scope, looks.id);
+      expect(decision?.decision).toBe("approved");
+      expect(decision?.note).toBe("look:calm\na little warmer");
       await rejectsCode(requireBuildApproval(w.db, item.scope), "BUILD_NOT_APPROVED");
       // Saving the design brief advances design -> design-review.
       const design = await createPlanDocRevision(w.db, item.scope, {
@@ -827,6 +861,79 @@ describe("design review and the build gate", () => {
       expect(built.workflow?.phase).toBe("building");
       expect(built.workflow?.pendingKey).toBe(`design-decision:${built.designApproval!.id}`);
       expect((await requireBuildApproval(w.db, item.scope)).plan.id).toBe(item.plan.id);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("asking for other looks returns to the look step with the owner's words, and waits for a NEW proposal", async () => {
+    const w = await world();
+    try {
+      const item = await planned(w);
+      await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+      const { looks } = await saveLooks(w.db, item.scope);
+      const more = await decideLooks(w.db, item.scope, { looksId: looks.id, more: true, note: "Designed for: office staff at a desk" });
+      expect(more.workflow?.phase).toBe("looks");
+      expect(more.workflow?.pendingBody).toContain("asked for other looks");
+      expect(more.workflow?.pendingBody).toContain('"Field-ready", "Calm and clear", "Warm and bold"');
+      expect(more.workflow?.pendingBody).toContain("office staff at a desk");
+      const [decision] = await listPlanDecisions(w.db, item.scope, looks.id);
+      expect(decision?.decision).toBe("changes");
+      // The answered proposal does not re-advance on its own.
+      expect((await workflowSnapshot(w.db, item.scope)).workflow?.phase).toBe("looks");
+      const { looks: second, snapshot } = await saveLooks(w.db, item.scope);
+      expect(snapshot.workflow?.phase).toBe("looks-review");
+      expect(snapshot.looks?.id).toBe(second.id);
+      expect(second.id).not.toBe(looks.id);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a look answer is refused for stale looks, a look not offered, or an unclear request; a replay records and sends nothing", async () => {
+    const w = await world();
+    try {
+      const item = await planned(w);
+      await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+      const { looks } = await saveLooks(w.db, item.scope);
+      await rejectsCode(decideLooks(w.db, item.scope, { looksId: "not-these", choice: "field" }), "STALE_LOOKS");
+      await rejectsCode(decideLooks(w.db, item.scope, { looksId: looks.id, choice: "neon" }), "invalid_look");
+      await rejectsCode(decideLooks(w.db, item.scope, { looksId: looks.id }), "invalid_decision");
+      await rejectsCode(decideLooks(w.db, item.scope, { looksId: looks.id, choice: "field", more: true }), "invalid_decision");
+      await rejectsCode(decideLooks(w.db, item.scope, { looksId: looks.id, choice: "field", note: "x".repeat(2001) }), "note_too_long");
+      await rejectsCode(decideLooks(w.db, { ...item.scope, actorId: "bob" }, { looksId: looks.id, choice: "field" }), "not_a_member");
+      const first = await decideLooks(w.db, item.scope, { looksId: looks.id, choice: "field" });
+      const key = first.workflow?.pendingKey;
+      const replay = await decideLooks(w.db, item.scope, { looksId: looks.id, choice: "warm" });
+      expect(replay.workflow?.phase).toBe("design");
+      expect(replay.workflow?.pendingKey).toBe(key);
+      expect(replay.workflow?.pendingBody).toContain('"Field-ready"');
+      expect(await listPlanDecisions(w.db, item.scope, looks.id)).toHaveLength(1);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("looks or a design written for an EARLIER plan version never reach the owner as current", async () => {
+    const w = await world();
+    try {
+      const item = await planned(w);
+      await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+      await chooseLook(w.db, item.scope);
+      await createPlanDocRevision(w.db, item.scope, { kind: "design", body: "# Design for v1\n\nOld screens." });
+      expect((await workflowSnapshot(w.db, item.scope)).workflow?.phase).toBe("design-review");
+      // The owner changes the plan before deciding the design.
+      const v2 = await createPlanDocRevision(w.db, item.scope, { kind: "prd", body: "# Todo app v2\n\nTasks with due dates." });
+      const back = await workflowSnapshot(w.db, item.scope);
+      expect(back.workflow?.phase).toBe("review");
+      expect(back.looks).toBeNull();
+      await decideWorkflow(w.db, item.scope, { planId: v2.id, decision: "approved" });
+      // The v1 looks were answered and are older than v2: the step waits for new looks.
+      expect((await workflowSnapshot(w.db, item.scope)).workflow?.phase).toBe("looks");
+      await chooseLook(w.db, item.scope, "warm");
+      // The undecided v1 design is older than v2: it does not skip the new design.
+      const designing = await workflowSnapshot(w.db, item.scope);
+      expect(designing.workflow?.phase).toBe("design");
     } finally {
       w.sqlite.close();
     }
@@ -1184,8 +1291,10 @@ describe("approved output and preview identity", () => {
         planId: item.plan.id,
         decision: "approved",
       });
-      // PRD approval enters design; carry through to building so the output
-      // guards below (which require phase 'building') are what is tested.
+      // PRD approval enters the look step, then design; carry through to
+      // building so the output guards below (which require phase 'building')
+      // are what is tested.
+      await chooseLook(w.db, item.scope);
       const design = await createPlanDocRevision(w.db, item.scope, {
         kind: "design",
         body: "# Design brief\n\nScreens and states for the todo app.",
@@ -1901,9 +2010,11 @@ describe("host-driven feature loop", () => {
     const started = await w.start();
     const plan = await createPlanDocRevision(w.db, started.scope, { kind: "prd", body });
     await workflowSnapshot(w.db, started.scope);
-    // PRD approval -> design; carry through the design step so the feature loop
-    // runs against a 'building' workflow (the loop itself is what these tests exercise).
+    // PRD approval -> looks -> design; carry through the look and design steps
+    // so the feature loop runs against a 'building' workflow (the loop itself
+    // is what these tests exercise).
     await decideWorkflow(w.db, started.scope, { planId: plan.id, decision: "approved" });
+    await chooseLook(w.db, started.scope);
     const design = await createPlanDocRevision(w.db, started.scope, {
       kind: "design",
       body: "# Design brief\n\nFeed-log form + totals dashboard; states defined.",

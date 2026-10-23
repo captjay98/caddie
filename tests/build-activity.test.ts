@@ -15,6 +15,7 @@ import {
   workflowSnapshot,
   setWorkflowBlocker,
 } from "../apps/app/src/server/build-workflow.ts";
+import { chooseLook } from "./fixtures/looks-fixture.ts";
 import { recordRepairRound } from "../apps/app/src/server/runs.ts";
 import { buildActivity, recordBuildActivity } from "../apps/app/src/server/build-activity.ts";
 import { projectExperience, projectStatusForActor } from "../apps/app/src/server/project-experience.ts";
@@ -74,6 +75,8 @@ async function world() {
     // A build start opens its spending limit (judge status, team-mode tables).
     "0033_judge_accounts.sql",
     "0040_team_mode.sql",
+    // The choose-a-look step's phases.
+    "0044_looks_phase.sql",
   ]) {
     const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), "utf8");
     for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);
@@ -105,11 +108,13 @@ async function world() {
     await workflowSnapshot(db, scope); // planning -> review
     return { scope, plan, workflow: started.workflow };
   }
-  // PRD approval now enters the design step; this carries a planned project all
-  // the way to 'building' (approve PRD -> design -> save brief -> approve design)
-  // for the build-progress tests, which are about the building phase itself.
+  // PRD approval now enters the look step, then design; this carries a planned
+  // project all the way to 'building' (approve PRD -> choose a look -> save
+  // brief -> approve design) for the build-progress tests, which are about the
+  // building phase itself.
   async function toBuilding(scope: Awaited<ReturnType<typeof planned>>["scope"], planId: string) {
     await decideWorkflow(db, scope, { planId, decision: "approved" });
+    await chooseLook(db, scope);
     const design = await createPlanDocRevision(db, scope, {
       kind: "design",
       body: "# Design brief\n\nScreens and states for the todo app.",

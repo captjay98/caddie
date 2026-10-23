@@ -30,6 +30,8 @@ describe('Now panel model', () => {
 		const titles: Record<ExperienceStage, string> = {
 			planning: 'Caddie is writing your plan',
 			review: 'Your plan is ready to review',
+			looks: 'Caddie is preparing looks for your app',
+			looks_review: 'Choose how your app should look',
 			design: 'Caddie is designing your app',
 			design_review: 'Your design is ready to review',
 			building: 'Caddie is building your app',

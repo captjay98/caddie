@@ -9,6 +9,7 @@ import {
 	ensureWorkflow,
 	workflowSnapshot,
 } from '../apps/app/src/server/build-workflow.ts';
+import { chooseLook } from './fixtures/looks-fixture.ts';
 import { getApprovedBlock } from '../apps/app/src/server/architecture-gate.ts';
 import { recordArchitectureReview, architectureBlockHash } from '../apps/app/src/server/architecture-review.ts';
 import { ARCHITECTURE_BLOCK_INFO, splitArchitectureBlock, type ArchitectureBlock } from '../packages/contracts/src/architecture.ts';
@@ -76,7 +77,8 @@ describe('decideDesign team-mode architecture gate', () => {
 		await ensureWorkflow(db, scope, teamEnv); // stamps teamMode
 		const plan = await createPlanDocRevision(db, scope, { kind: 'prd', body: '# Notes\n\nAdd, see, change and delete notes.' });
 		await workflowSnapshot(db, scope); // planning -> review
-		await decideWorkflow(db, scope, { planId: plan.id, decision: 'approved' }); // review -> design
+		await decideWorkflow(db, scope, { planId: plan.id, decision: 'approved' }); // review -> looks
+		await chooseLook(db, scope); // looks -> looks-review -> design
 		const design = await createPlanDocRevision(db, scope, { kind: 'design', body });
 		await workflowSnapshot(db, scope); // design -> design-review
 		return { designId: design.id };
@@ -205,6 +207,7 @@ describe('teamMode=0: the design gate behaves exactly as today', () => {
 		const plan = await createPlanDocRevision(db, scope, { kind: 'prd', body: '# Plain\n\nAdd and see items.' });
 		await workflowSnapshot(db, scope);
 		await decideWorkflow(db, scope, { planId: plan.id, decision: 'approved' });
+		await chooseLook(db, scope);
 		const design = await createPlanDocRevision(db, scope, { kind: 'design', body: '# Design brief\n\nTwo screens, no architecture block.' });
 		await workflowSnapshot(db, scope);
 		const snapshot = await decideDesign(db, scope, { designId: design.id, decision: 'approved' });

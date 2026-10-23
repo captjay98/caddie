@@ -53,6 +53,8 @@ async function world() {
     "0001_product.sql", "0002_controls.sql", "0003_artifacts.sql", "0005_runs.sql",
     "0008_profile.sql", "0017_profile_preferences.sql", "0011_home_project.sql",
     "0015_plan_decisions.sql", "0018_build_workflow.sql", "0024_design_phase.sql",
+    // build_workflows' team-mode columns, then the look step's phases.
+    "0033_judge_accounts.sql", "0040_team_mode.sql", "0044_looks_phase.sql",
   ]) {
     sqlite.exec(readFileSync(new URL(`../apps/app/migrations/${m}`, import.meta.url), "utf8"));
   }
@@ -99,10 +101,10 @@ describe("R06 one-source project experience consumption", () => {
       idempotencyKey: "r06-approve-0001",
     });
     expect(result.outcome).toBe("applied");
-    expect(result.experience.stage).toBe("design");
+    expect(result.experience.stage).toBe("looks");
     // A re-read sees the same truth the command returned (one source).
     const reread = await projectExperience(w.db, scope);
-    expect(reread.stage).toBe("design");
+    expect(reread.stage).toBe("looks");
     expect(reread.plan!.approved).toBe(true);
   });
 
