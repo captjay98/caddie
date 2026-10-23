@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { CardHeader } from '../brief/CardFrame.tsx';
 import { Icon } from '../icons.tsx';
 import { BuildFeatureList, hasFeatureList } from './FeatureChecklist.tsx';
+import { ModuleProgress } from './ModuleProgress.tsx';
 import {
 	useBuildActivity,
 	type BuildTimelineView,
@@ -67,6 +68,12 @@ export function BuildProgress(props: {
 					{t.summary}
 				</p>
 			</header>
+
+			{/* Big app (team mode, plan part P): its parts side by side, each with
+			    its state — and the spending-limit stop (part A). Renders nothing
+			    for a small app, which then shows its server and screens stages
+			    below as before. */}
+			<ModuleProgress projectId={props.projectId} />
 
 			<ol className="build-stages" aria-label="Build stages" data-testid="build-stages">
 				{t.stages.map((stage) => (
