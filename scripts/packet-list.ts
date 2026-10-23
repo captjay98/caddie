@@ -391,6 +391,20 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// (host side, app-ai.ts) and the react-hono starter's generated types
 			// and test stand-in carry the photo and email shapes.
 			'tests/app-ai-starter.test.ts',
+			// Lane 9 (part J): generated payments files (migration, routes,
+			// Billing screens) — the D10 test cards, the 402 plan_required
+			// lifecycle, cancel-keeps-until-renewal and the no-full-card-number
+			// invariant, run against the real routes in a materialised app.
+			'tests/payments-files.test.ts',
+			// Lane 9 (part L): generated photo/file uploads — chunked at 700 KB,
+			// a 5 MB byte-identical roundtrip (sha256), wrong-sha256/oversize/type
+			// refusal, the 100 MB app cap, B-privacy, and the browser shrink/split
+			// helpers.
+			'tests/files-files.test.ts',
+			// Lane 9 (part O starter files): the recipe kit — caddie/charts.tsx
+			// (SVG bar/line/donut, no new library, screen-reader table) and
+			// caddie/poll.ts (usePolling, pausing while the tab is hidden).
+			'tests/kit-files.test.ts',
 		],
 		browser: ['tests/browser/brief.spec.ts'],
 		live: [],
