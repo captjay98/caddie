@@ -412,8 +412,20 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// builders are told how to mount them, and the plan gate refuses
 			// test-mode features the project can't run (emails/jobs until lane 10).
 			'tests/app-feature-files.test.ts',
+			// Lane 6 (screens, section 7): the pure projectors that turn the
+			// architecture block + review + module board + stop into the plain
+			// shapes the Design review and build-progress screens read.
+			'tests/design-overview.test.ts',
 		],
-		browser: ['tests/browser/brief.spec.ts'],
+		browser: [
+			'tests/browser/brief.spec.ts',
+			// Lane 6 (screens, section 7): screen 1 — "How your app works" (small
+			// and big app, modules, payments/emails, the architect findings), and
+			// screen 2 — build progress (small server/screens parts, big parts
+			// board, the spending-limit stop, and the Try-again button).
+			'tests/browser/design-review-team.spec.ts',
+			'tests/browser/build-progress-team.spec.ts',
+		],
 		live: [],
 	},
 	// --- Verification net (S01) ----------------------------------------------
