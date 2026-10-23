@@ -134,6 +134,7 @@ function seams(over: Partial<CampaignSeams> = {}): CampaignSeams {
 		ledgerStore: memoryLedgerStore(),
 		base: 'http://127.0.0.1:5173',
 		ownerCookie: 'app.session_token=owner',
+		ownerStoragePath: '/tmp/owner.json',
 		workspaceId: 'ws_1',
 		payerId: 'owner',
 		coordinatorModelRouteId: 'nemotron-3.5-super-vl',

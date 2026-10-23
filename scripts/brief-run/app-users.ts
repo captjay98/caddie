@@ -71,7 +71,10 @@ export function pickRecordTarget(block: ArchitectureBlock): TargetChoice {
 	for (const table of personTables) {
 		const createRoute = block.routes.find((r) => r.table === table.name && r.op === 'create');
 		if (!createRoute) continue;
-		const screen = block.screens.find((s) => s.shows.includes(table.name));
+		// A screen whose hash path has a `:param` (e.g. `#/notes/:id`) can't be
+		// opened without the id that names, so the browser check can't drive it.
+		// Skip those — only a param-free screen is openable with `location.hash`.
+		const screen = block.screens.find((s) => s.shows.includes(table.name) && screenIsOpenable(s.path));
 		if (!screen) continue;
 		const markerField = firstTextField(createRoute);
 		if (!markerField) continue;
@@ -79,8 +82,18 @@ export function pickRecordTarget(block: ArchitectureBlock): TargetChoice {
 	}
 	return {
 		applicable: false,
-		reason: 'no person-owned table has both a create route (with a text field) and a screen showing it',
+		reason: 'no person-owned table has both a create route (with a text field) and a param-free screen showing it',
 	};
+}
+
+/**
+ * A screen's hash path is openable by the browser check only when it has no
+ * `:param` segment: a path like `#/notes/:id` needs an id the check does not
+ * have, so `location.hash = path` would land on a broken route. A param-free
+ * path like `#/notes` is openable.
+ */
+export function screenIsOpenable(path: string): boolean {
+	return !path.split('/').some((segment) => segment.startsWith(':'));
 }
 
 /** Choose the target from a DESIGN document (the /workflow design doc). */
@@ -123,4 +136,128 @@ export function readInboxCode(inbox: TestInbox, email: string, exclude: Readonly
 		if (!newest || message.createdAt > newest.createdAt) newest = { code: message.code, createdAt: message.createdAt };
 	}
 	return newest ? newest.code : null;
+}
+
+// --- form planning (item 2) --------------------------------------------------
+
+/**
+ * One form control the browser check discovered on the target screen. The DOM
+ * reader reports these (never the real Element) so the planning stays pure and
+ * unit-testable. `kind` is the tag; `type` is an <input>'s type attribute
+ * (lower-cased); `required` and `hasValue` come from the live control; `options`
+ * are a <select>'s non-empty option values in document order.
+ */
+export interface FormField {
+	kind: 'input' | 'textarea' | 'select';
+	/** An <input>'s type (text, number, date, email, …); undefined for others. */
+	type?: string;
+	required: boolean;
+	/** The control already holds a value (don't overwrite it). */
+	hasValue: boolean;
+	/** A <select>'s non-empty option values, in order (first is chosen). */
+	options?: string[];
+}
+
+/** One planned action against a form control, addressed by its index. */
+export interface FormFillStep {
+	index: number;
+	action: 'fill' | 'check' | 'select';
+	value: string;
+	/** True for the one field the unique marker goes in (the first text field). */
+	marker?: boolean;
+}
+
+/** A field counts as a free-text field (where the marker goes). */
+export function isTextLikeField(field: FormField): boolean {
+	if (field.kind === 'textarea') return true;
+	if (field.kind !== 'input') return false;
+	const type = (field.type ?? 'text').toLowerCase();
+	// `text`, `search`, and a typeless input all take free text; a specific
+	// type (number/date/email/url/…) is filled by its own rule, not the marker.
+	return type === 'text' || type === 'search' || type === '';
+}
+
+/**
+ * The today's-date value for a date/datetime control, as the control's own
+ * format needs it: `YYYY-MM-DD` for `date`, `YYYY-MM-DDТHH:MM` for
+ * `datetime-local`. Pure over an injected `now` so a test pins the day.
+ */
+export function todayValue(type: string, now: Date): string {
+	const yyyy = now.getFullYear().toString().padStart(4, '0');
+	const mm = (now.getMonth() + 1).toString().padStart(2, '0');
+	const dd = now.getDate().toString().padStart(2, '0');
+	const date = `${yyyy}-${mm}-${dd}`;
+	if (type === 'datetime-local') {
+		const hh = now.getHours().toString().padStart(2, '0');
+		const min = now.getMinutes().toString().padStart(2, '0');
+		return `${date}T${hh}:${min}`;
+	}
+	return date;
+}
+
+/**
+ * Plan how to fill a create form so its submit will succeed (item 2). The
+ * UNIQUE MARKER goes in the FIRST text-like field (an <input type=text/search>
+ * or a <textarea>). Every OTHER empty field that is required is filled by its
+ * type so the form validates:
+ *   - number/range → "1"; date → today; datetime-local → today + time;
+ *   - email → x@campaign.test; url → https://example.com;
+ *   - a <select> → its first non-empty option; a checkbox → checked.
+ * A field that already holds a value is left alone, and a non-required field
+ * with no rule is skipped (an empty optional field never blocks submit). A text
+ * field AFTER the first is only filled when it is required (so a second text box
+ * doesn't swallow a stray copy of the marker).
+ *
+ * `now` is injected so the date values are deterministic in a test.
+ */
+export function planFormFill(fields: FormField[], marker: string, now: Date): FormFillStep[] {
+	const steps: FormFillStep[] = [];
+	const firstTextIndex = fields.findIndex((f) => isTextLikeField(f));
+	fields.forEach((field, index) => {
+		if (index === firstTextIndex) {
+			steps.push({ index, action: 'fill', value: marker, marker: true });
+			return;
+		}
+		if (field.hasValue) return; // never overwrite a value already there
+		const type = field.kind === 'input' ? (field.type ?? 'text').toLowerCase() : field.kind;
+		if (field.kind === 'select') {
+			if (!field.required) return;
+			const option = (field.options ?? []).find((value) => value !== '');
+			if (option !== undefined) steps.push({ index, action: 'select', value: option });
+			return;
+		}
+		if (field.kind === 'input' && type === 'checkbox') {
+			if (field.required) steps.push({ index, action: 'check', value: 'on' });
+			return;
+		}
+		// A free-text field after the first: fill only when required.
+		if (isTextLikeField(field)) {
+			if (field.required) steps.push({ index, action: 'fill', value: marker });
+			return;
+		}
+		if (!field.required) return; // an optional typed field never blocks submit
+		const value = typedFieldValue(type, now);
+		if (value !== null) steps.push({ index, action: 'fill', value });
+	});
+	return steps;
+}
+
+/** The value for a required typed input, or null when there is no rule. */
+function typedFieldValue(type: string, now: Date): string | null {
+	switch (type) {
+		case 'number':
+		case 'range':
+			return '1';
+		case 'date':
+		case 'datetime-local':
+			return todayValue(type, now);
+		case 'email':
+			return 'x@campaign.test';
+		case 'url':
+			return 'https://example.com';
+		case 'tel':
+			return '1';
+		default:
+			return null;
+	}
 }

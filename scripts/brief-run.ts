@@ -495,6 +495,9 @@ export interface CampaignSeams {
 	base: string;
 	/** The owner's Caddie-session cookie header (item 1), for the test-inbox read. */
 	ownerCookie: string;
+	/** The owner's saved Playwright storageState file (item 1), so each app user
+	 * opens the preview page as the owner with its own fresh app-cookie jar. */
+	ownerStoragePath: string;
 	workspaceId: string;
 	/** The signed-in account A id, used as the run's payer (step 2). */
 	payerId: string;
@@ -626,7 +629,8 @@ export async function runCampaign(
 				const choice = pickRecordTargetFromDesign(designDoc);
 				const check = await seams.browserCheck({
 					base: seams.base,
-					previewUrl: `${seams.base}/api/projects/${drive.projectId}/workflow/preview/${drive.previewId}`,
+					previewPageUrl: `${seams.base}/app/preview?${new URLSearchParams({ project: drive.projectId, preview: drive.previewId, source: 'workflow' }).toString()}`,
+					ownerStoragePath: seams.ownerStoragePath,
 					ownerCookie: seams.ownerCookie,
 					projectId: drive.projectId,
 					target: choice.applicable ? choice.target : null,
@@ -863,6 +867,7 @@ async function main(): Promise<number> {
 			ledgerStore: fileLedgerStore(join(BRIEFS_DIR, 'runs', `campaign-${mode}.json`)),
 			base,
 			ownerCookie: ownerCookieHeader,
+			ownerStoragePath: authPath,
 			workspaceId,
 			payerId,
 			coordinatorModelRouteId: 'nemotron-3.5-super-vl',
