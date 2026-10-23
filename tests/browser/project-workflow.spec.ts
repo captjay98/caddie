@@ -10,7 +10,7 @@ import { previewDocument } from '../../apps/app/src/shared/preview-frame.ts';
  * transcript and generated HTML are SIMULATED at their network boundaries.
  * This suite proves UI/admission/ack behavior, not live model or sandbox success.
  * Run after `bun run build` so ProjectWorkflow is in the composed client. */
-const BASE = 'http://127.0.0.1:4173';
+const BASE = process.env.CADDIE_BROWSER_BASE ?? 'http://127.0.0.1:4173';
 const NOW = '2026-10-11T10:00:00.000Z';
 const OFFSET = '0000000000000000_0000000000000001';
 const HOME = { id: 'home-workflow', workspaceId: 'ws-workflow', name: 'Home', description: null, status: 'active', kind: 'home', createdAt: NOW, updatedAt: NOW };
@@ -289,7 +289,7 @@ async function fixture(context: BrowserContext, options: { android?: boolean; ph
 			const body = request.postDataJSON() as Record<string, unknown>;
 			decisions.push(body);
 			if (body.planId !== currentPlan.id) return json(route, 409, { error: 'STALE_PLAN', message: 'The plan changed. Review the latest version.' });
-			workflow.phase = body.decision === 'approved' ? 'building' : 'planning';
+			workflow.phase = body.decision === 'approved' ? 'design' : 'planning';
 			// R02: the SERVER delivers the pending message to the coordinator DO and
 			// acks it inside this route — so the response carries no pending slot and
 			// the browser performs no admission/ack of its own.
@@ -482,12 +482,14 @@ test('design review shows each mocked screen at phone and desktop width, script-
 test('the plan review lists what will be built as a checklist, never as raw JSON', async ({ page, context }) => {
 	await fixture(context, { planBody: FEATURE_PLAN });
 	await page.goto(`${BASE}/app/project?project=proj-workflow`);
-	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
-	await expect(card).toHaveAttribute('data-phase', 'review');
+	const card = page.getByTestId('focused-project-home').getByTestId('design-review');
+	await expect(card.getByTestId('design-review-decision-bar')).toContainText('Plan version 1');
+	await card.getByRole('button', { name: 'Explore the full plan', exact: true }).click();
 	const list = card.getByTestId('plan-features');
 	await expect(list.getByRole('heading', { name: 'What Caddie will build · 2' })).toBeVisible();
 	await expect(list.locator('.plan-feature-title')).toHaveText(['Log daily feed', 'See the feed dashboard']);
-	await expect(card.getByTestId('plan-feature-log-feed').locator('li')).toHaveText(['Saving 12 kg shows 12 kg in today’s list', 'The entry is still there after a reload']);
+	await card.getByRole('tab', { name: 'Checks', exact: true }).click();
+	await expect(card.getByTestId('plan-checks').locator('.plan-review-acceptance > li').filter({ hasText: 'Log daily feed' }).locator('ul > li')).toHaveText(['Saving 12 kg shows 12 kg in today’s list', 'The entry is still there after a reload']);
 	await expect(card).not.toContainText('caddie-features');
 	await expect(card).not.toContainText('"doneWhen"');
     // In the focused workspace the plan review is NOT wrapped in a chat bubble
@@ -510,8 +512,8 @@ test('a finished build shows each feature and rolls back to a save point in two 
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	await card.getByText('What Caddie checked', { exact: true }).click();
 	const features = card.getByTestId('build-features');
-	await expect(features.getByRole('heading', { name: 'Features · 2 of 2 done' })).toBeVisible();
-	await expect(card.getByTestId('build-feature-log-feed')).toContainText('Done · 1 test passing');
+	await expect(features.getByRole('heading')).toContainText('2 of 2 built and checked');
+	await expect(card.getByTestId('build-feature-log-feed')).toContainText('Built and checked');
 	await expect(card.getByTestId('rollback-view-dashboard')).toHaveCount(0);
 	await card.getByTestId('rollback-log-feed').click();
 	// The first click only explains what will be undone; nothing is sent yet.
@@ -534,15 +536,18 @@ test('The project workspace shows a readable plan; approval admits the correct b
 	// created merely by viewing the project (asserted via state.admissions below).
 	const state = await fixture(context);
 	await page.goto(`${BASE}/app/project?project=proj-workflow`);
-	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
+	const card = page.getByTestId('focused-project-home').getByTestId('design-review');
 	await expect(card).toHaveCount(1);
-	await expect(card).toHaveAttribute('data-phase', 'review');
-	await expect(card.getByRole('heading', { name: 'Minimal Todo app' })).toBeVisible();
-	await expect(card.locator('li')).toHaveText(['Add tasks', 'Complete and delete tasks', 'Save tasks in your browser']);
+	await expect(card.getByTestId('design-review-decision-bar')).toContainText('Plan version 1');
+	await expect(card.getByRole('heading', { name: 'What your app will do' })).toBeVisible();
+	await card.getByRole('button', { name: 'Explore the full plan', exact: true }).click();
+	await expect(card.getByRole('tabpanel').locator('li')).toHaveText(['Add tasks', 'Complete and delete tasks', 'Save tasks in your browser']);
+	await card.getByRole('button', { name: 'Close explore the full plan' }).click();
 	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'project');
     expect(state.admissions).toHaveLength(0);
-	await card.getByRole('button', { name: 'Approve plan' }).click();
-	await expect(card).toHaveAttribute('data-phase', 'building');
+	await card.getByTestId('plan-approve-open').click();
+	await card.getByTestId('design-review-approve').click();
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'design');
 	expect(state.decisions).toEqual([{ planId: 'plan-1', decision: 'approved' }]);
 	// R02: dispatch is server-owned. The browser makes NO coordinator admission
 	// and NO ack of its own — the decision route delivered + acked server-side.
@@ -551,29 +556,32 @@ test('The project workspace shows a readable plan; approval admits the correct b
 	await expect(page).toHaveURL(`${BASE}/app/project?project=proj-workflow`);
 	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'project');
 	await page.reload();
-	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'building');
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'design');
 	expect(state.admissions).toHaveLength(0);
 });
 
 test('feedback requires text, continues planning in the target conversation and returns a new readable revision after reload', async ({ page, context }) => {
 	const state = await fixture(context);
 	await page.goto(`${BASE}/app/project?project=proj-workflow`);
-	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
-	await card.getByRole('button', { name: 'Suggest a change' }).click();
-	await expect(card.getByRole('button', { name: 'Send feedback' })).toBeDisabled();
-	await card.getByLabel('What should change?').fill('Please include active and completed filters.');
-	await card.getByRole('button', { name: 'Send feedback' }).click();
-	await expect(card).toHaveAttribute('data-phase', 'planning');
+	const card = page.getByTestId('focused-project-home').getByTestId('design-review');
+	await card.getByTestId('plan-changes-open').click();
+	await expect(card.getByTestId('design-review-reject')).toBeDisabled();
+	await card.getByTestId('plan-change-note').fill('Please include active and completed filters.');
+	await card.getByTestId('design-review-reject').click();
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'planning');
 	expect(state.decisions).toEqual([{ planId: 'plan-1', decision: 'rejected', note: 'Please include active and completed filters.' }]);
 	// R02: the server delivers the revise message to the coordinator; the browser
 	// makes no admission of its own.
 	expect(state.admissions).toHaveLength(0);
 	state.revise();
 	await page.reload();
-	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'review');
-	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow').locator('li')).toContainText(['Filter active and completed tasks']);
-	await page.getByTestId('focused-project-home').getByTestId('project-workflow').getByRole('button', { name: 'Approve plan' }).click();
-	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'building');
+	await expect(card.getByTestId('design-review-decision-bar')).toContainText('Plan version 2');
+	await card.getByRole('button', { name: 'Explore the full plan', exact: true }).click();
+	await expect(card.getByRole('tabpanel').locator('li')).toContainText(['Filter active and completed tasks']);
+	await card.getByRole('button', { name: 'Close explore the full plan' }).click();
+	await card.getByTestId('plan-approve-open').click();
+	await card.getByTestId('design-review-approve').click();
+	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'design');
 	expect(state.decisions[1]).toEqual({ planId: 'plan-2', decision: 'approved' });
 	expect(state.admissions).toHaveLength(0);
 });
@@ -1067,7 +1075,7 @@ async function nestedCards(root: import('@playwright/test').Locator): Promise<st
 	});
 }
 
-test('the build card is one card: nothing inside it is drawn as a card of its own (plan 3.6)', async ({ page, context }) => {
+test('the build card has one status panel with unframed feature and technical rows', async ({ page, context }) => {
 	await fixture(context, {
 		phase: 'building',
 		approved: true,
@@ -1096,10 +1104,10 @@ test('the build card is one card: nothing inside it is drawn as a card of its ow
 	await page.goto(`${BASE}/app/project?project=proj-workflow`);
 	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'building');
-	await expect(card.getByTestId('build-stages')).toBeVisible();
+	await expect(card.getByTestId('build-stages')).toBeHidden();
 	await expect(card.getByTestId('build-features')).toBeVisible();
 	await expect(card.getByTestId('build-files')).toBeHidden();
-    await card.getByText('Technical activity · files & commands', { exact: true }).click();
+    await card.getByRole('button', { name: 'View build details', exact: true }).click();
     await expect(card.getByTestId('build-files')).toBeVisible();
 	// Evidence only: CADDIE_SHOTS=<dir> saves the card, desktop and 390px wide.
 	const dir = process.env.CADDIE_SHOTS;
@@ -1108,11 +1116,14 @@ test('the build card is one card: nothing inside it is drawn as a card of its ow
 		await card.screenshot({ path: `${dir}/build-card-desktop.png` });
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto(`${BASE}/app/project?project=proj-workflow`);
-		await expect(card.getByTestId('build-stages')).toBeVisible();
+		await expect(card.getByTestId('build-stages')).toBeHidden();
 		await card.evaluate((el) => el.scrollIntoView({ block: 'start' }));
 		await card.screenshot({ path: `${dir}/build-card-mobile.png` });
 	}
-	expect(await nestedCards(card)).toEqual([]);
+	expect(await nestedCards(card)).toEqual(['build-status-panel']);
+    expect(await card.evaluate(el => getComputedStyle(el).borderTopWidth)).toBe('0px');
+    expect(await card.getByTestId('build-progress').evaluate(el => getComputedStyle(el).borderTopWidth)).toBe('0px');
+    expect(await nestedCards(card.locator('.build-status-panel'))).toEqual([]);
 });
 
 test('Stop build is one request (the server stops the running turn) and retains the stopped project', async ({ context, page }) => {
@@ -1130,19 +1141,20 @@ test('Stop build is one request (the server stops the running turn) and retains 
   expect(fx.admissions).toHaveLength(0);
 });
 
-test('the check history is in words: a raw check result is never shown (plan 3.3)', async ({ context, page }) => {
+test('check history uses readable summaries and keeps raw recorded results behind a disclosure', async ({ context, page }) => {
   await fixture(context, { phase: 'building', rounds: [
     { issue: 'feature-2:behavior-tests', round: 'repair_attempt', outcome: 'failed', detail: "The app's own tests: 7 of 9 passed.", at: NOW },
-    // A payload from before plan 3.3: the server now words these, and the page never shows one either.
+    // Older records keep their exact payload available, behind a disclosure.
     { issue: 'feature-2:browser-bundle', round: 'repair_attempt', outcome: 'failed', detail: '{"check":"browser-bundle","passed":false,"exitCode":1,"stdout":"","stderr":"error"}', at: NOW },
   ] });
   await page.goto('/app/project?project=proj-workflow');
   const history = page.getByTestId('build-history');
-  await history.locator('summary').click();
+  await history.locator(':scope > summary').click();
   await expect(history.getByTestId('build-history-item')).toHaveCount(2);
   await expect(history).toContainText("Tried a fix — The app's own tests: 7 of 9 passed.");
-  await expect(history).not.toContainText('{');
-  await expect(history).not.toContainText('exitCode');
+  await expect(history.locator('pre')).toBeHidden();
+  await history.getByText('Exact recorded result').click();
+  await expect(history.locator('pre')).toContainText('exitCode');
 });
 
 test('a plan stuck before approval reads as a plan to continue, never as a failed build', async ({ context, page }) => {
@@ -1364,4 +1376,244 @@ test('an older preview keeps its own web/server metadata while the current build
  await page.reload();
  await expect(preview.locator('iframe')).toHaveAttribute('data-kind','web');
  expect(requests.filter(r=>r.endsWith('/metadata'))).toHaveLength(2);
+});
+
+
+test('a quiet build offers a real status refresh without claiming active work', async ({ context, page }) => {
+  const fx = await fixture(context, { phase: 'building', approved: true, features: [
+    featureView('herd', 'Add and view animals in your herd', 1, { testsPassed: 7 }),
+    ...['Save a symptom by voice or text, even offline', 'Possible causes and a recommended next action', 'See each animal’s case history', 'Sync cases when the connection returns', 'Read a disease guide with clear limitations'].map((title, index) => featureView(`feature-${index + 2}`, title, index + 2, { status: 'pending', testsPassed: null, passedAt: null })),
+  ], timeline: { quiet: true, idleMs: 68 * 60 * 60_000, elapsedMs: 71 * 60 * 60_000, tests: { passed: 56, failed: 1, at: NOW } } });
+  await page.setViewportSize({ width: 390, height: 915 });
+  await page.goto(`${BASE}/app/project?project=proj-workflow`);
+  const progress = page.getByTestId('build-progress');
+  await expect(progress.getByRole('heading', { name: 'Let’s check this build.' })).toBeVisible();
+  await expect(progress.getByTestId('build-summary')).toContainText('can’t confirm');
+  await page.setViewportSize({ width: 1456, height: 915 });
+  await expect(page.getByTestId('workflow-summary').getByRole('heading')).toHaveText('Let’s check this build.');
+  await page.setViewportSize({ width: 390, height: 915 });
+  await expect(progress.getByTestId('build-last-result')).toContainText('One check still needs attention');
+  await expect(progress.getByTestId('build-stages')).toBeHidden();
+  await expect(progress.getByText('I’m on it')).toHaveCount(0);
+  await progress.getByTestId('build-refresh-status').click();
+  await expect(progress.getByRole('status').filter({ hasText: 'No new activity was reported' })).toBeVisible();
+  if (process.env.CADDIE_SHOTS) {
+ await page.screenshot({ path: `${process.env.CADDIE_SHOTS}/build-redesign-mobile.png` });
+ await page.setViewportSize({width:1456,height:915});
+ await page.screenshot({path:`${process.env.CADDIE_SHOTS}/build-redesign-desktop.png`});
+ await page.setViewportSize({width:320,height:844});
+ await expect(progress).toBeVisible();
+ expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+ await page.screenshot({path:`${process.env.CADDIE_SHOTS}/build-redesign-320.png`});
+ await page.setViewportSize({width:390,height:915});
+}
+  expect(fx.admissions).toHaveLength(0);
+  await progress.getByRole('button', { name: 'Stop build', exact: true }).click();
+  expect(fx.stops).toEqual(['/api/projects/proj-workflow/workflow/stop']);
+});
+
+test('Plan keeps material warnings visible and lets the user inspect scope and checks before approval', async ({context,page}) => {
+ const featureBlock=FEATURE_PLAN.slice(FEATURE_PLAN.indexOf('```caddie-features'));
+ const body=`# Todoer
+
+## What your app will do
+Record daily feed and see the same saved records in the dashboard.
+
+## Included in this version / left for later
+Included: saved feed records and a dashboard. Left for later: payments.
+
+## Important limitations
+Assumption: this version supports one farm.
+
+## Hackathon requirements
+Use the required model and disclose reused code.
+
+## How Caddie will check it works
+Saved records survive a reload.
+
+## AI / integrations
+Assumption: text-only symptom interpretation; this does not analyse a photo.
+
+## Data model
+feed_entries: id text, quantity integer.
+
+${featureBlock}`;
+ const fx=await fixture(context,{phase:'review',planBody:body});
+ for(const width of [1456,390,320]) {
+  await page.setViewportSize({width,height:915});
+  await page.goto(`${BASE}/app/design-review?project=proj-workflow`);
+  const plan=page.getByTestId('plan-body-content');
+  await expect(plan.getByTestId('plan-outcomes')).toContainText('Record daily feed');
+  await expect(plan.locator('.plan-decision-warnings')).toContainText('Photo analysis is not confirmed');
+  await expect(plan.locator('details')).toHaveCount(0);
+  await expect(plan.getByTestId('plan-scope')).toHaveCount(0);
+  await plan.getByRole('button', {name:'Explore the full plan',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Explore the full plan',exact:true});
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId('plan-scope')).toContainText('Left for later: payments');
+  await expect(dialog.getByTestId('plan-limitations')).toContainText('supports one farm');
+  await expect(dialog.getByTestId('plan-limitations')).toContainText('required model');
+  await expect(dialog.getByTestId('plan-limitations')).toContainText('does not analyse a photo');
+  await dialog.getByRole('tab',{name:'Checks',exact:true}).click();
+  await expect(dialog.getByTestId('plan-checks')).toContainText('Saved records survive a reload');
+  await dialog.getByRole('tab',{name:'Technical specification',exact:true}).click();
+  await expect(dialog.getByText('feed_entries: id text, quantity integer.',{exact:true})).toBeVisible();
+  await dialog.getByRole('tab',{name:'Technical specification',exact:true}).focus();
+  await page.keyboard.press('Home');
+  await expect(dialog.getByRole('tab',{name:'Scope',exact:true})).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(dialog.getByRole('tab',{name:'Technical specification',exact:true})).toBeFocused();
+  if(process.env.CADDIE_SHOTS) await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-full-plan-${width}.png`});
+  expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(plan.getByRole('button',{name:'Explore the full plan',exact:true})).toBeFocused();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.getByTestId('design-review-decision-bar').scrollIntoViewIfNeeded();
+  if(process.env.CADDIE_SHOTS) await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-plan-guided-${width}.png`,fullPage:true});
+ }
+ expect(fx.admissions).toHaveLength(0);
+});
+
+test('Check and Submit show Caddie without claiming readiness and build history distinguishes a request from a result',async({context,page})=>{
+ await fixture(context,{phase:'review'});
+ await context.route('**/api/projects/proj-workflow/submission/packages',route=>json(route,200,{packages:[]}));
+ for(const width of [1456,390]) {
+  await page.setViewportSize({width,height:915});
+  await page.goto(`${BASE}/app/evidence?project=proj-workflow`);
+  await expect(page.getByTestId('check-not-yet').locator('.mascot')).toHaveAttribute('data-mood','needs');
+  if(process.env.CADDIE_SHOTS) await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-check-${width}.png`});
+  await page.goto(`${BASE}/app/submission?project=proj-workflow`);
+  await expect(page.getByTestId('submission-package').locator('.mascot')).toHaveAttribute('data-mood','ready');
+  await expect(page.getByRole('heading',{name:'Prepare your submission'})).toBeVisible();
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  if(process.env.CADDIE_SHOTS) await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-submit-${width}.png`});
+ }
+ await page.goto(`${BASE}/app/runs?project=proj-workflow`);
+ await page.getByTestId('project-build-resources').locator(':scope > summary').click();
+ const row=page.getByTestId('run-row');
+ await expect(row).toContainText('Build request recorded');
+ await expect(row).toContainText('Its result is not confirmed here.');
+ await expect(row.getByText('react-hono',{exact:true})).toHaveCount(0);
+ await row.getByRole('button',{name:'View build record'}).click();
+ await expect(row.getByText('react-hono',{exact:true})).toBeHidden();
+ await row.getByText('For developers — record ids').click();
+ await expect(row.getByText('react-hono',{exact:true})).toBeVisible();
+});
+
+test('Project Info removes context from the header and preserves local deadlines, keyboard focus and Settings',async({context,page})=>{
+ const fx=await fixture(context,{phase:'review',planBody:FEATURE_PLAN});
+ await context.route('**/api/profile',route=>json(route,200,{profile:{timezone:'Africa/Lagos'}}));
+ await context.route('**/api/projects/proj-workflow/hackathon',route=>json(route,200,{hackathon:{title:'Nebius AI Hackathon',url:'https://example.org/hackathon',track:null,deadline:'2026-10-30T23:59:00Z',daysLeft:7,ended:false,eligibility:'eligible'}}));
+ for(const width of [1456,390,320]) {
+  await page.setViewportSize({width,height:915});
+  await page.goto(`${BASE}/app/design-review?project=proj-workflow`);
+  const header=page.getByTestId('project-header');
+  await expect(header.getByTestId('project-head-for')).toHaveCount(0);
+  await expect(header.getByTestId('project-chip-event')).toHaveCount(0);
+  const info=header.getByRole('button',{name:'About this project',exact:true});
+  const settings=header.getByRole('link',{name:'Project settings',exact:true});
+  const i=await info.boundingBox(), gear=await settings.boundingBox();
+  expect(i!.x+i!.width).toBeLessThanOrEqual(gear!.x);
+  await info.click();
+  const dialog=page.getByRole('dialog',{name:'About this project',exact:true});
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByTestId('project-head-for')).toHaveText(PROJECT.description!);
+  await expect(dialog.getByRole('link',{name:'Nebius AI Hackathon'})).toHaveAttribute('href','https://example.org/hackathon');
+  await expect(dialog.getByTestId('project-local-deadline')).toContainText('Oct 31');
+  await expect(dialog.getByTestId('project-local-deadline')).toContainText('Your time');
+  if(process.env.CADDIE_SHOTS) await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-project-info-${width}.png`});
+  expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
+  await expect(info).toBeFocused();
+  await expect(page.locator('.plan-review--minimal details')).toHaveCount(0);
+  await expect(page.getByTestId('project-supporting-details')).toHaveCount(0);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  if(process.env.CADDIE_SHOTS) await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-minimal-plan-${width}.png`});
+ }
+ expect(fx.admissions).toHaveLength(0);
+});
+
+test('An urgent deadline remains visible without opening Project Info',async({context,page})=>{
+ await fixture(context,{phase:'review'});
+ await context.route('**/api/projects/proj-workflow/hackathon',route=>json(route,200,{hackathon:{title:'Closing event',url:'https://example.org/event',track:null,deadline:'2026-10-30',daysLeft:1,ended:false,eligibility:'eligible'}}));
+ await page.goto(`${BASE}/app/design-review?project=proj-workflow`);
+ await expect(page.getByTestId('project-urgent-deadline')).toHaveText('Ends Oct 30 · 1 day left');
+ await expect(page.getByRole('dialog',{name:'About this project',exact:true})).not.toBeVisible();
+ await page.getByRole('button',{name:'About this project',exact:true}).click();
+ await expect(page.getByTestId('project-local-deadline')).toHaveCount(0);
+ await expect(page.getByRole('dialog',{name:'About this project'})).toContainText('exact closing time and time zone have not been confirmed');
+});
+
+test('Earlier plan versions remain inspectable in the technical view without deciding them',async({context,page})=>{
+ const fx=await fixture(context,{phase:'review'});
+ await context.route('**/api/projects/proj-workflow/plan-docs',route=>json(route,200,{revisions:[plan(2),plan(1)],latest:plan(2)}));
+ await page.goto(`${BASE}/app/design-review?project=proj-workflow`);
+ await expect(page.getByTestId('design-review-earlier')).toHaveCount(0);
+ await page.getByRole('button',{name:'Explore the full plan',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Explore the full plan',exact:true});
+ await dialog.getByRole('tab',{name:'Technical specification',exact:true}).click();
+ await expect(dialog.getByTestId('design-review-earlier')).toContainText('Version 1');
+ await expect(dialog.getByTestId('copy-revision hash')).toHaveCount(1);
+ await dialog.getByTestId('earlier-version-view-1').click();
+ await expect(page.getByTestId('plan-viewing')).toContainText('Plan version 1');
+ await expect(page.getByTestId('plan-approve-open')).toHaveCount(0);
+ await page.getByTestId('plan-viewing-back').click();
+ await expect(page.getByTestId('design-review-decision-bar')).toContainText('Plan version 2');
+ expect(fx.decisions).toHaveLength(0);
+ expect(fx.admissions).toHaveLength(0);
+});
+
+test('Plan review has one enclosing surface and clearly starts design before building',async({context,page})=>{
+ const fx=await fixture(context,{phase:'review',planBody:FEATURE_PLAN});
+ for(const theme of ['light','dark']) {
+  for(const width of [1456,390]) {
+   await page.setViewportSize({width,height:915});
+   await page.goto(`${BASE}/app/design-review?project=proj-workflow`);
+   await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
+   const surface=page.getByTestId('design-review');
+   await expect(surface).toHaveClass(/plan-review-surface/);
+   expect(await surface.evaluate(el=>getComputedStyle(el).borderTopWidth)).toBe('1px');
+   expect(await surface.evaluate(el=>getComputedStyle(el).paddingLeft)).toBe(width===390?'16px':'24px');
+   expect(await surface.locator('.plan-review-note').evaluate(el=>getComputedStyle(el).borderTopWidth)).toBe('0px');
+   await expect(surface.getByTestId('approve-meaning')).toContainText('Building starts only after you approve the design');
+   await expect(surface.getByTestId('plan-approve-open')).toHaveText('Approve plan');
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+   if(process.env.CADDIE_SHOTS) await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-plan-surface-${theme}-${width}.png`});
+  }
+ }
+ await page.getByTestId('plan-approve-open').click();
+ await expect(page.getByRole('dialog',{name:'Approve plan version 1?'})).toContainText('starts the design step');
+ await page.getByTestId('design-review-approve').click();
+ expect(fx.decisions).toEqual([{planId:'plan-1',decision:'approved'}]);
+ expect(fx.admissions).toHaveLength(0);
+});
+
+test('Opening a project and selecting Plan show the same minimal review and context',async({context,page})=>{
+ const fx=await fixture(context,{phase:'review',planBody:FEATURE_PLAN});
+ for(const width of [1456,390,320]) {
+  await page.setViewportSize({width,height:915});
+  let first:string|undefined;
+  for(const route of ['project','design-review']) {
+   await page.goto(`${BASE}/app/${route}?project=proj-workflow`);
+   const review=page.getByTestId('design-review');
+   await expect(review).toHaveClass(/plan-review-surface/);
+   await expect(review.getByTestId('plan-approve-open')).toHaveText('Approve plan');
+   await expect(review.getByTestId('approve-meaning')).toContainText('approve the design');
+   await expect(review.locator('.plan-review--minimal details')).toHaveCount(0);
+   await expect(page.getByTestId('workflow-assurance')).toHaveCount(0);
+   await expect(page.getByTestId('workflow-repo-nudge')).toHaveCount(0);
+   await expect(page.getByTestId('project-supporting-details')).toHaveCount(0);
+   const text=await review.innerText();
+   if(first===undefined)first=text;else expect(text).toBe(first);
+   await page.getByRole('button',{name:'About this project',exact:true}).click();
+   await expect(page.getByRole('dialog',{name:'About this project',exact:true}).getByTestId('project-supporting-details')).toBeVisible();
+   await page.keyboard.press('Escape');
+   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+   if(process.env.CADDIE_SHOTS)await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-shared-plan-${route}-${width}.png`});
+  }
+ }
+ expect(fx.admissions).toHaveLength(0);
+ expect(fx.decisions).toHaveLength(0);
 });

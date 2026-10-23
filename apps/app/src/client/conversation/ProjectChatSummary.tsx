@@ -1,3 +1,4 @@
+import { buildPresentation } from '../project/build-presentation.ts';
 import type { ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useBuildActivity } from '../queries.ts';
@@ -78,15 +79,17 @@ export function ProjectChatSummary({ projectId, name }: {
 				status = 'Needs you';
 				action = 'Review design';
 				break;
-			case 'building':
-				design = repairing ? 'repair' : 'build';
-				headline = repairing ? 'Caddie is fixing an issue it found' : 'Caddie is building your app';
-				summary = activity.data?.timeline?.summary ?? (repairing
-					? 'Caddie is working on the issue before asking you to try the app.'
-					: 'Building the approved features and checking them as it goes.');
-				action = repairing ? 'View repair' : 'View build';
-				destination = repairing ? '/evidence' : '/runs';
-				break;
+			case 'building': {
+                const observed = activity.data?.timeline ? buildPresentation(activity.data, Boolean(activity.error)) : null;
+                const quiet = observed?.quiet === true;
+                design = quiet ? 'update' : repairing ? 'repair' : 'build';
+                headline = quiet ? observed!.title : repairing ? 'Caddie is fixing an issue it found' : 'Caddie is building your app';
+                summary = observed?.summary ?? 'Waiting for the latest build activity.';
+                status = quiet ? observed!.label : 'In progress';
+                action = quiet ? 'Check build' : repairing ? 'View repair' : 'View build';
+                destination = '/runs';
+                break;
+            }
 			case 'blocked':
 				design = 'update';
 				headline = stopped ? 'Work on this project is paused' : planningBlocked ? 'The plan needs another pass' : 'The build needs attention';
@@ -132,7 +135,7 @@ export function ProjectChatSummary({ projectId, name }: {
 					<ul className="workflow-summary-features">
 						{features.map(feature => <li key={feature.id}>
 							<span>{feature.title}</span>{' '}
-							<span className="state-detail">{feature.status === 'passed' ? 'Checked' : feature.status === 'building' ? 'In progress' : feature.status === 'failed' ? 'Needs attention' : 'Up next'}</span>
+							<span className="state-detail">{feature.status === 'passed' ? 'Checked' : feature.status === 'building' ? activity.data?.timeline?.quiet ? 'Last reported building' : 'In progress' : feature.status === 'failed' ? 'Needs attention' : 'Up next'}</span>
 						</li>)}
 					</ul>
 				</details>

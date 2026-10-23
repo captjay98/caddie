@@ -240,25 +240,27 @@ function ProjectWorkspace({
       data-tone={design === "preview" ? "green" : design === "repair" ? "amber" : "blue"}
       aria-label={name ? `${name} project` : "Your project"}
     >
-      <CardHeader design={design} context={name} status={repairing ? 'I’m on it' : workflow.phase === 'ready' ? 'Ready to try' : workflow.phase === 'review' || workflow.phase === 'design-review' ? 'Needs you' : workflow.phase === 'blocked' ? 'Needs attention' : 'In progress'} />
-      <div className="workflow-heading">
-        <div>
-          <p className="kicker">{name ?? "YOUR PROJECT"}</p>
-          <h3>{planningBlocked ? "Plan needs another pass" : LABEL[workflow.phase]}</h3>
+      {workflow.phase !== "building" ? <>
+        <CardHeader design={design} context={name} status={repairing ? 'I’m on it' : workflow.phase === 'ready' ? 'Ready to try' : workflow.phase === 'review' || workflow.phase === 'design-review' ? 'Needs you' : workflow.phase === 'blocked' ? 'Needs attention' : 'In progress'} />
+        <div className="workflow-heading">
+          <div>
+            <p className="kicker">{name ?? "YOUR PROJECT"}</p>
+            <h3>{planningBlocked ? "Plan needs another pass" : LABEL[workflow.phase]}</h3>
+          </div>
+          {/* In this project's own chat its page is already open (beside the chat
+              on desktop, under it on a phone), so "Open project" would go nowhere. */}
+          {chrome.conversation.kind === "project" && chrome.conversation.projectId === projectId ? null : (
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => chrome.openProject(projectId, true)}
+            >
+              Open project
+            </button>
+          )}
         </div>
-        {/* In this project's own chat its page is already open (beside the chat
-            on desktop, under it on a phone), so "Open project" would go nowhere. */}
-        {chrome.conversation.kind === "project" && chrome.conversation.projectId === projectId ? null : (
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={() => chrome.openProject(projectId, true)}
-          >
-            Open project
-          </button>
-        )}
-      </div>
-      {workflow.phase === "building" || (workflow.phase === "blocked" && active) ? (
+      </> : null}
+      {workflow.phase === "blocked" && active ? (
         <button type="button" className="btn-ghost" disabled={busy} onClick={async () => {
           setBusy(true); setError(null);
           try {
@@ -468,19 +470,20 @@ function ProjectWorkspace({
       ) : null}
       {workflow.phase === "building" ? (
         <>
-          <p className="workflow-step-line" data-testid="workflow-step-line">
-            <span className="workflow-step-dot" aria-hidden="true" />
-            Step 2 of 4 · {repairing ? "Fixing a check that failed" : "Building your app"}
-          </p>
-          <p className="state-detail">
-            Caddie is implementing the approved plan and running the checks.
-            Here’s what’s happening — the preview opens here when they pass.
-          </p>
           {chrome.actorId ? (
             <BuildProgress
               actorId={chrome.actorId}
               projectId={projectId}
               latest={buildLatestText}
+              onRefresh={async () => {
+                const result = await state.refetch();
+                if (result.error) throw result.error;
+              }}
+              onStop={async () => {
+                await postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow/stop`, {});
+                const result = await state.refetch();
+                if (result.error) throw result.error;
+              }}
             />
           ) : null}
         </>

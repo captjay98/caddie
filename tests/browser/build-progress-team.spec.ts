@@ -172,6 +172,7 @@ test.describe('Build progress — small and big apps (plan section 7, screen 2)'
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/runs?project=proj-a`);
 		await expect(page.getByTestId('build-progress')).toBeVisible();
+		await page.getByRole('button', { name: 'View build details', exact: true }).click();
 		await expect(page.getByTestId('build-stages')).toContainText('Write the app');
 		await expect(page.getByTestId('build-stages')).toContainText('Run its own tests');
 		// A small app has no parts board.
