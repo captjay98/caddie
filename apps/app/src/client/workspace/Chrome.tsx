@@ -752,7 +752,12 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								</div>
 							) : null}
 							{/* The resizable left edge (desktop two-panel only). */}
-							{viewportMode === 'desktop' && convOpen && !chatFull ? <ConvResizeHandle width={convWidth} /> : null}
+							{viewportMode === 'desktop' && convOpen && !chatFull ? (
+								<ConvResizeHandle
+									width={convWidth}
+									onEnterFull={() => void navigate({ to: '.', search: (prev: Record<string, unknown>) => ({ ...prev, pane: 'channel' as const }) })}
+								/>
+							) : null}
 							{/* Floating conversation head — Today-inspired but our own: a slim
 							    left-aligned row over the transcript. The Caddie mark sits
 							    top-left at chip size; the pill beside it is the conversation

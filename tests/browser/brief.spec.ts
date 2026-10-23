@@ -990,12 +990,10 @@ test('Earlier loads archived decisions on demand and retains the exact decision 
  await context.close();
 });
 
-test('the Brief fits two cards side by side at the narrow-chat default, each ≥420px (never the rejected ~300px two-up)', async ({ browser }) => {
-	// Lane rule (owner 2026-10-23): the chat defaults narrow (CONV_DEFAULT_PX
-	// 520px) so the Brief column DOES reach two columns — but each card must
-	// still be ≥420px, never the rejected ~300px two-up. At 1600px the Brief
-	// pane is ~1080px, so two cards sit side by side at ~520px each. A phone
-	// width stacks them.
+test('the Brief shows one standard-width card per row, centred, within a 420–584px band (no two-up)', async ({ browser }) => {
+	// Lane rule (owner 2026-10-23 revised): ONE standard-width card per row,
+	// centred in the Brief section — no two-up. Each card sits between a minimum
+	// (420px) and a maximum (584px) width. A phone width fills the card.
 	const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
 	await stubAccount(context, { cards: [APPROVAL_A, BLOCKED_A], unseenCount: 2 });
 	const page = await context.newPage();
@@ -1005,14 +1003,18 @@ test('the Brief fits two cards side by side at the narrow-chat default, each ≥
 	await expect(cards).toHaveCount(2);
 	const wideBoxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
 	expect(wideBoxes[0] && wideBoxes[1]).toBeTruthy();
-	// Two per row: the second card sits BESIDE the first (same row), not below.
-	expect(Math.abs(wideBoxes[1]!.y - wideBoxes[0]!.y)).toBeLessThan(wideBoxes[0]!.height / 2);
-	// Each card is still at least the mockup-readable width, never the rejected
-	// narrow two-up — and never wider than the 584px cap.
+	// ONE per row: the second card is below the first, not beside it.
+	expect(wideBoxes[1]!.y).toBeGreaterThan(wideBoxes[0]!.y + wideBoxes[0]!.height / 2);
+	// Each card is within its min/max width band.
 	expect(wideBoxes[0]!.width).toBeGreaterThanOrEqual(420);
 	expect(wideBoxes[0]!.width).toBeLessThanOrEqual(584 + 2);
+	// Centred: the Brief section has roughly equal margin either side of the card.
+	const lane = await page.getByTestId('account-brief-lane').boundingBox();
+	const leftGap = wideBoxes[0]!.x - lane!.x;
+	const rightGap = lane!.x + lane!.width - (wideBoxes[0]!.x + wideBoxes[0]!.width);
+	expect(Math.abs(leftGap - rightGap)).toBeLessThanOrEqual(8);
 
-	// At a phone width the same two cards stack one per row with no overflow.
+	// At a phone width the cards stack one per row with no overflow.
 	await page.setViewportSize({ width: 390, height: 844 });
 	const narrowBoxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
 	expect(narrowBoxes[1]!.y).toBeGreaterThan(narrowBoxes[0]!.y + narrowBoxes[0]!.height / 2);
@@ -1020,11 +1022,10 @@ test('the Brief fits two cards side by side at the narrow-chat default, each ≥
 	await context.close();
 });
 
-test('U — two rich cards (plan + fit) render two-up at ≥420px with the narrow-chat default, and stack at 390', async ({ browser }) => {
-	// Lane rule (owner 2026-10-23): at 1440px the chat defaults to 520px, so the
-	// Brief pane is ~920px — wide enough for two columns at ~448px each. The rich
-	// cards render TWO per row, each still ≥420px so the plan list + fit split
-	// stay readable. A phone width stacks them.
+test('U — rich cards (plan + fit) render one centred standard-width column, and stack at 390', async ({ browser }) => {
+	// Lane rule (owner 2026-10-23 revised): one standard-width card per row,
+	// centred, each within the 420–584px band so the plan list + fit split read
+	// at the mockup scale. A phone width stacks them.
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 	await stubAccount(context, {
 		cards: [
@@ -1039,10 +1040,9 @@ test('U — two rich cards (plan + fit) render two-up at ≥420px with the narro
 	const cards = page.getByTestId('decision-card');
 	await expect(cards).toHaveCount(2);
 	const boxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
-	// Two per row: the second card sits BESIDE the first (same row), not below.
-	expect(Math.abs(boxes[1]!.y - boxes[0]!.y)).toBeLessThan(boxes[0]!.height / 2);
-	// Each card clears the 420px minimum (capped at 584), so the lists read at
-	// the mockup type scale rather than the rejected narrow width.
+	// ONE per row: the second card sits below the first, not beside it.
+	expect(boxes[1]!.y).toBeGreaterThan(boxes[0]!.y + boxes[0]!.height / 2);
+	// Each card is within its min/max width band.
 	expect(boxes[0]!.width).toBeGreaterThanOrEqual(420);
 	expect(boxes[0]!.width).toBeLessThanOrEqual(584 + 2);
 	// The plan list and the fit split both still render.
@@ -1087,6 +1087,27 @@ test.describe('redo — each card matches its mockup', () => {
 		await context.close();
 	});
 
+
+test('a long card title is clamped to two lines (owner 2026-10-23)', async ({ browser }) => {
+	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	const longTitle = 'This is a deliberately very long decision card headline that would wrap onto three or four lines if it were not clamped to exactly two lines with an ellipsis at the end';
+	await stubAccount(context, { cards: [card({ id: 'brf_long', projectId: 'proj-a', kind: 'approval', status: 'needs-you', headline: longTitle })], unseenCount: 1 });
+	const page = await context.newPage();
+	await page.goto(`${BASE}/app/?pane=brief`);
+
+	const title = page.getByTestId('decision-card').locator('h3').first();
+	await expect(title).toBeVisible();
+	const metrics = await title.evaluate((el) => {
+		const cs = getComputedStyle(el);
+		return { clamp: cs.webkitLineClamp || (cs as unknown as Record<string, string>)['lineClamp'], clientH: (el as HTMLElement).clientHeight, scrollH: (el as HTMLElement).scrollHeight, lineHeight: parseFloat(cs.lineHeight) };
+	});
+	// Clamped to two lines, and the full text overflows (so it IS truncated).
+	expect(metrics.clamp).toBe('2');
+	expect(metrics.scrollH).toBeGreaterThan(metrics.clientH);
+	// The visible box is no taller than ~2 lines.
+	expect(metrics.clientH).toBeLessThanOrEqual(Math.ceil(metrics.lineHeight * 2) + 2);
+	await context.close();
+});
 	test('build card: Now line + feature feed with states + last-update line', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context, { cards: [{ ...BUILD_CARD, build: { current: 'offline recording', builtCount: 2, features: [

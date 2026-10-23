@@ -12,10 +12,11 @@ import { fileURLToPath } from 'node:url';
  * What U01 guarantees (HANDOFF §3.1–§3.3, §3.9):
  *   - Three viewport bands: ≥1081 two-panel desktop, 761–1080 tablet overlay
  *     (min(420px,100vw) + scrim from a top-bar Caddie button), ≤760 mobile.
- *   - The Caddie panel is a FRACTION of the window: default CONV_DEFAULT_PX
- *     (520px, narrow enough that the Brief column fits two cards), min 340px,
- *     max min(60%, window − 560px) — the content column never drops under
- *     560px. Drag + full keyboard resize (±2%, Shift ±10%, Home, End, Enter),
+ *   - The Caddie panel is a FRACTION of the window: default 50/50, min 340px,
+ *     max min(60%, window − CONTENT_MIN_PX 460) — the Brief section never drops
+ *     below a card's minimum width + padding; a pointer over-drag past the max
+ *     snaps the chat to full screen. Drag + full keyboard resize (±2%, Shift
+ *     ±10%, Home, End, Enter),
  *     double-click reset, ARIA separator semantics, percent tip.
  *   - The fraction AND the open/closed state persist per browser and survive
  *     reload; the closed state is the 64px character rail.
@@ -160,7 +161,7 @@ async function stubAccount(context: BrowserContext) {
 // --- tests ----------------------------------------------------------------------
 
 test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
-	test('desktop opens the panel at the two-up default (520px chat) so two brief cards fit', async ({ browser }) => {
+	test('desktop opens the panel at a 50/50 split by default (±1px)', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context);
 		const page = await context.newPage();
@@ -171,25 +172,21 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		await expect(panel).toBeVisible();
 		const box = await panel.boundingBox();
 		const innerWidth = await page.evaluate(() => window.innerWidth);
-		// Default chat = CONV_DEFAULT_PX (520px), narrow enough that the Brief
-		// column (≥900px) fits two cards side by side — the owner's 2026-10-23
-		// direction, replacing the old half-window that only fit one.
-		expect(Math.abs((box?.width ?? 0) - 520)).toBeLessThanOrEqual(1);
+		// 50/50 split (owner 2026-10-23 revised — the Brief shows one centred
+		// standard-width card, so the split need not fit two columns).
+		expect(Math.round(innerWidth * 0.5)).toBe(720);
+		expect(Math.abs((box?.width ?? 0) - innerWidth * 0.5)).toBeLessThanOrEqual(1);
 
 		// The resize handle is a real ARIA separator with percent semantics.
 		const handle = page.getByTestId('conv-resize-handle');
 		await expect(handle).toHaveAttribute('role', 'separator');
 		await expect(handle).toHaveAttribute('aria-orientation', 'vertical');
-		await expect(handle).toHaveAttribute('aria-valuenow', '36'); // 520/1440 ≈ 36%
-		await expect(handle).toHaveAttribute('aria-valuetext', 'Caddie takes 36% of the window');
-
-		// The Brief column is wide enough for two 420px cards + the 16px gap.
-		const leftBox = await page.getByTestId('shell-left').boundingBox();
-		expect(leftBox!.width).toBeGreaterThanOrEqual(420 * 2 + 16);
+		await expect(handle).toHaveAttribute('aria-valuenow', '50');
+		await expect(handle).toHaveAttribute('aria-valuetext', 'Caddie takes 50% of the window');
 		await context.close();
 	});
 
-	test('dragging clamps to the legal range and the content column stays ≥560px', async ({ browser }) => {
+	test('dragging clamps to the legal range (content ≥460px); an over-drag snaps to full screen', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context);
 		const page = await context.newPage();
@@ -200,21 +197,19 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		const handleBox = await handle.boundingBox();
 		const y = handleBox!.y + 300;
 
-		// Drag the panel's left edge far LEFT → panel grows to its maximum
-		// (min(60% of window, window − 560px) = 864px at 1440).
+		// A drag to just inside the max → panel clamps to its maximum
+		// (min(60%·1440, 1440−460) = 864px) and the Brief stays ≥460 (a card at
+		// its minimum width + the section padding). Target x = 1440−864 = 576.
 		await page.mouse.move(handleBox!.x + 5, y);
 		await page.mouse.down();
-		await page.mouse.move(60, y, { steps: 8 });
+		await page.mouse.move(576, y, { steps: 8 });
 		await page.mouse.up();
 		let panelBox = await page.getByTestId('conversation-panel').boundingBox();
 		expect(panelBox?.width).toBe(864);
-
-		// Content column = 1440 − 864 = 576 ≥ 560.
 		const leftBox = await page.getByTestId('shell-left').boundingBox();
-		expect(leftBox!.width).toBeGreaterThanOrEqual(560);
+		expect(leftBox!.width).toBeGreaterThanOrEqual(460);
 
-		// Drag far RIGHT → panel shrinks to its 340px minimum. The handle now
-		// sits at the panel's new left edge (1440 − 864 = 576), so start there.
+		// Drag far RIGHT → panel shrinks to its 340px minimum.
 		const handleNow = await handle.boundingBox();
 		await page.mouse.move(handleNow!.x + 5, y);
 		await page.mouse.down();
@@ -223,16 +218,16 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		panelBox = await page.getByTestId('conversation-panel').boundingBox();
 		expect(panelBox?.width).toBe(340);
 
-		// The tip shows during a drag and marks the default. Re-acquire the
-		// handle position first — it sits at the panel's current left edge.
+		// Over-drag the LEFT edge well past the max (would starve the Brief card)
+		// → the chat snaps to FULL SCREEN instead of a too-narrow split. The
+		// resize handle (desktop split only) disappears once full.
 		const handleAgain = await handle.boundingBox();
 		await page.mouse.move(handleAgain!.x + 5, y);
 		await page.mouse.down();
-		await page.mouse.move(1440 - 576, y, { steps: 4 });
-		const tip = page.getByTestId('conv-width-tip');
-		await expect(tip).toBeVisible();
-		await expect(tip).toContainText('%');
+		await page.mouse.move(40, y, { steps: 10 });
 		await page.mouse.up();
+		await expect(page).toHaveURL(/pane=channel/);
+		await expect(page.getByTestId('conv-resize-handle')).toHaveCount(0);
 		await context.close();
 	});
 
@@ -256,7 +251,7 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		await handle.press('Shift+ArrowRight');
 		expect(afterStep - (await widthOf())).toBeCloseTo(1440 * 0.1, -1);
 
-		// End = maximum = min(60%·1440, 1440−560) = 864px.
+		// End = maximum = min(60%·1440, 1440−460) = 864px.
 		await handle.press('End');
 		expect(await widthOf()).toBe(864);
 		await expect(handle).toHaveAttribute('aria-valuemax', '60');
@@ -268,15 +263,15 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		await expect(handle).toHaveAttribute('aria-valuemin', '24'); // 340/1440 ≈ 23.6 → 24
 		await expect(handle).toHaveAttribute('aria-valuetext', 'Caddie takes 24% of the window');
 
-		// Enter resets to the two-up default (520px ≈ 36%).
+		// Enter resets to the 50/50 default (720px = 50%).
 		await handle.press('Enter');
-		expect(await widthOf()).toBe(520);
-		await expect(handle).toHaveAttribute('aria-valuenow', '36');
+		expect(await widthOf()).toBe(720);
+		await expect(handle).toHaveAttribute('aria-valuenow', '50');
 
 		// Double-click also resets: drive to max, then dblclick.
 		await handle.press('End');
 		await handle.dblclick();
-		expect(await widthOf()).toBe(520);
+		expect(await widthOf()).toBe(720);
 		await context.close();
 	});
 
@@ -312,7 +307,7 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		await context.close();
 	});
 
-	test('the content column never drops under 560px even at the 1081px threshold', async ({ browser }) => {
+	test('the content column never drops under 460px even at the 1081px threshold', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1081, height: 800 } });
 		await stubAccount(context);
 		const page = await context.newPage();
@@ -320,11 +315,12 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		const handle = page.getByTestId('conv-resize-handle');
 		await handle.focus();
 		await handle.press('End');
-		// max = min(0.6·1081, 1081−560) = 521 → content exactly 560.
+		// max = min(0.6·1081, 1081−460) = 621 → content exactly 460. (End is the
+		// keyboard path, which clamps; only a pointer over-drag snaps to full.)
 		const panelBox = await page.getByTestId('conversation-panel').boundingBox();
-		expect(panelBox?.width).toBe(521);
+		expect(panelBox?.width).toBe(621);
 		const leftBox = await page.getByTestId('shell-left').boundingBox();
-		expect(leftBox!.width).toBeGreaterThanOrEqual(560);
+		expect(leftBox!.width).toBeGreaterThanOrEqual(460);
 		await context.close();
 	});
 

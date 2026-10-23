@@ -4,19 +4,21 @@ import type { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement } f
 /**
  * ConvResize — the resizable Caddie panel (v2 shell, HANDOFF §3.2).
  *
- * The panel width persists as a FRACTION of the window: the default is a
- * target pixel width CONV_DEFAULT_PX (520px, owner direction 2026-10-23 —
- * narrow enough that the Brief column fits TWO cards side by side, replacing
- * the earlier half-window that only fit one), minimum 340px, maximum min(60%
- * of the window, window − 560px) so the content column never drops under
- * 560px. A width the person set persists per browser (localStorage, rounded to
- * 4 decimals) and is re-clamped on every window resize, so a saved fraction
- * never means an off-screen panel after the window changes.
+ * The panel width persists as a FRACTION of the window: the default is a 50/50
+ * split (CONV_DEFAULT_FRAC, owner direction 2026-10-23 revised — the Brief shows
+ * ONE standard-width card centred in its section, no two-up), minimum 340px,
+ * maximum min(60% of the window, window − CONTENT_MIN_PX) where CONTENT_MIN_PX
+ * is a Brief card at its minimum width plus the section padding, so a resize can
+ * never crush the card. A width the person set persists per browser
+ * (localStorage, rounded to 4 decimals) and is re-clamped on every window
+ * resize, so a saved fraction never means an off-screen panel.
  *
  * The handle is a real ARIA separator: focusable, arrow keys ±2% (Shift ±10%),
  * Home = minimum, End = maximum, Enter/double-click = reset to the default.
+ * Dragging the chat PAST its max (which would starve the Brief card) snaps the
+ * chat to full screen instead of clamping to a too-narrow split.
  * While dragging (or while the handle is focused) a small tip shows the live
- * percentage, marked "· default" at the width-aware default (CONV_DEFAULT_PX).
+ * percentage, marked "· default" at the 50/50 default.
  *
  * Storage key `caddie:conv-frac` is a plain number string — same `caddie:`
  * prefix family as `caddie-theme` and `caddie:last-dest:*`, never the
@@ -24,33 +26,35 @@ import type { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement } f
  */
 
 /**
- * The default chat width. Owner direction 2026-10-23: the chat should be narrow
- * enough that the Brief column fits TWO cards side by side (each card wants
- * ~420px, so the column needs ~900px), not the half-window that only ever fit
- * one. Expressed as a target PIXEL width (clamped to the legal range per window)
- * so it holds across laptop sizes instead of a flat fraction that grows the chat
- * on a big screen and squeezes the cards. The person can still widen the chat —
- * doing so drops the Brief column to one card, which is the intended choice.
+ * The default chat width. Owner direction 2026-10-23 (revised): the chat opens
+ * at 50% of the window (a 50/50 split). The Brief shows ONE standard-width card
+ * centred in its section (no two-up), so the split no longer has to fit two
+ * columns. CONV_DEFAULT_FRAC is the flat half; the resize bounds below keep the
+ * Brief section wide enough for a card at its minimum width.
  */
-export const CONV_DEFAULT_PX = 520;
+export const CONV_DEFAULT_FRAC = 0.5;
 export const CONV_MIN_PX = 340;
-/** The page always keeps at least this much of the window, so the chat's
- *  MAX width can never crush the content column. Kept moderate (one-card
- *  readable) — the two-up default comes from CONV_DEFAULT_PX, not this floor. */
-export const CONTENT_MIN_PX = 560;
+/**
+ * The Brief section always keeps at least this much of the window — a card at
+ * its MINIMUM width (BRIEF_CARD_MIN_PX) plus the section's own horizontal
+ * padding. The chat's MAX width is `window − CONTENT_MIN_PX`, so a drag can
+ * never crush the card below its minimum: it clamps here, and a push past this
+ * is what sends the chat to full screen (Chrome.tsx), hiding the Brief rather
+ * than squeezing it.
+ */
+export const BRIEF_CARD_MIN_PX = 420;
+export const BRIEF_SECTION_PADDING_PX = 40; // aside-scroll 16·2 + a little room
+export const CONTENT_MIN_PX = BRIEF_CARD_MIN_PX + BRIEF_SECTION_PADDING_PX; // 460
 export const CONV_FRAC_KEY = 'caddie:conv-frac';
 
 function windowWidth(): number {
 	return typeof window === 'undefined' ? 1280 : window.innerWidth;
 }
 
-/** The default fraction at the current window width: CONV_DEFAULT_PX, clamped. */
+/** The default fraction at the current window width: a 50/50 split, clamped. */
 export function defaultFrac(width = windowWidth()): number {
-	return clampFrac(CONV_DEFAULT_PX / width, width);
+	return clampFrac(CONV_DEFAULT_FRAC, width);
 }
-
-/** Back-compat alias; callers prefer defaultFrac() which is width-aware. */
-export const CONV_DEFAULT_FRAC = 0.4;
 
 /** The widest the panel may ever be at the current window width (px). */
 export function convMaxPx(width = windowWidth()): number {
@@ -144,13 +148,17 @@ export function useConvWidth(enabled: boolean): ConvWidth {
  * (absolute at its left edge), so it only exists when the panel is the sized
  * desktop column.
  */
-export function ConvResizeHandle(props: { width: ConvWidth }): ReactElement {
+export function ConvResizeHandle(props: { width: ConvWidth; onEnterFull?: () => void }): ReactElement {
 	const { width } = props;
 	const [dragging, setDragging] = useState(false);
 	const [focused, setFocused] = useState(false);
 	const draggingRef = useRef(false);
 	const pendingFrac = useRef<number | null>(null);
 	const frame = useRef<number | null>(null);
+	// How far PAST the chat's max the pointer must go before we stop clamping
+	// the Brief to its minimum and send the chat to full screen instead
+	// (owner 2026-10-23: a resize that would starve the Brief card goes full).
+	const SNAP_TO_FULL_PX = 72;
 	useEffect(() => () => {
         if (frame.current !== null) window.cancelAnimationFrame(frame.current);
         document.body.classList.remove('conv-resizing');
@@ -172,15 +180,33 @@ export function ConvResizeHandle(props: { width: ConvWidth }): ReactElement {
 		(event: ReactPointerEvent) => {
 			if (!draggingRef.current) return;
 			// The panel's LEFT edge follows the pointer: distance from the right
-			// edge of the window is the panel width.
-			pendingFrac.current = (windowWidth() - event.clientX) / windowWidth();
+			// edge of the window is the requested panel width.
+			const requestedPx = windowWidth() - event.clientX;
+			// Pushed well past the max (so the Brief would drop below a card's
+			// minimum)? Go full screen instead of clamping to a starved split.
+			if (props.onEnterFull && requestedPx > width.maxPx + SNAP_TO_FULL_PX) {
+				draggingRef.current = false;
+				setDragging(false);
+				document.body.classList.remove('conv-resizing');
+				if (frame.current !== null) window.cancelAnimationFrame(frame.current);
+				frame.current = null;
+				pendingFrac.current = null;
+				try {
+					event.currentTarget.releasePointerCapture(event.pointerId);
+				} catch {
+					// pointer already released
+				}
+				props.onEnterFull();
+				return;
+			}
+			pendingFrac.current = requestedPx / windowWidth();
             if (frame.current !== null) return;
             frame.current = window.requestAnimationFrame(() => {
                 frame.current = null;
                 if (pendingFrac.current !== null) width.setFrac(pendingFrac.current, false);
             });
 		},
-		[width],
+		[width, props],
 	);
 
 	const endDrag = useCallback(
