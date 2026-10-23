@@ -107,7 +107,7 @@ function BriefBody(): ReactElement {
 				</header>
 			)}
 
-			<section className="card-surface home-panel" data-testid="brief-lane-panel">
+			<section className="home-panel" data-testid="brief-lane-panel">
 				<AccountBriefV2
 					state={{ kind: 'empty', stale: chrome.projectsFetching || brief.isFetching, retry: chrome.refreshAll }}
 					cards={brief.data?.cards ?? []}

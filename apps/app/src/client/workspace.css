@@ -5427,10 +5427,11 @@ a.btn-ghost.topbar-nav-link {
 	}
 }
 
-/* .card-surface carries no padding — the home panels must add their own
-   (they previously ran content to the card edges). */
+/* The brief panel no longer uses card-surface — the cards stand on the page,
+   not boxed in a container — so home-panel carries no border/surface and no
+   inset padding. It keeps only the vertical flex rhythm from the rule above. */
 .home-panel {
-	padding: 1rem 1.1rem;
+	padding: 0;
 }
 
 /* De-nest the Brief empty states: the caught-up / new-user card is the SOLE
@@ -9105,7 +9106,7 @@ mark {
  * genuinely wide pane (≥ ~900px). A card is capped at 584px so it never
  * stretches wider than the mockup. Deadlines, the Earlier fold and the
  * caught-up line stay full width. */
-.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap:16px; justify-items:start; }
+.brief-v2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap:16px; justify-items:stretch; }
 .brief-v2 > .brief-deadlines, .brief-v2 > .brief-done, .brief-v2 > .state-detail { grid-column: 1 / -1; }
 .brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap:12px; }
 .brief-done li { padding:0; border:0; }

@@ -4,33 +4,53 @@ import type { KeyboardEvent, PointerEvent as ReactPointerEvent, ReactElement } f
 /**
  * ConvResize — the resizable Caddie panel (v2 shell, HANDOFF §3.2).
  *
- * The panel is a FRACTION of the window, never pixels: default 50% (half the
- * window, owner direction 2026-10-22), minimum 340px, maximum min(60% of the
- * window, window − 520px) so the content column never drops under 520px; at
- * every desktop width (≥1081px) half fits within that. A width the person
- * set persists per browser (localStorage, rounded to 4 decimals) and is
- * re-clamped on every window resize, so a saved fraction never means an
- * off-screen panel after the window changes.
+ * The panel width persists as a FRACTION of the window: the default is a
+ * target pixel width CONV_DEFAULT_PX (520px, owner direction 2026-10-23 —
+ * narrow enough that the Brief column fits TWO cards side by side, replacing
+ * the earlier half-window that only fit one), minimum 340px, maximum min(60%
+ * of the window, window − 560px) so the content column never drops under
+ * 560px. A width the person set persists per browser (localStorage, rounded to
+ * 4 decimals) and is re-clamped on every window resize, so a saved fraction
+ * never means an off-screen panel after the window changes.
  *
  * The handle is a real ARIA separator: focusable, arrow keys ±2% (Shift ±10%),
  * Home = minimum, End = maximum, Enter/double-click = reset to the default.
  * While dragging (or while the handle is focused) a small tip shows the live
- * percentage, marked "· default" at exactly 50%.
+ * percentage, marked "· default" at the width-aware default (CONV_DEFAULT_PX).
  *
  * Storage key `caddie:conv-frac` is a plain number string — same `caddie:`
  * prefix family as `caddie-theme` and `caddie:last-dest:*`, never the
  * prototype's `caddie2.*` demo keys.
  */
 
-export const CONV_DEFAULT_FRAC = 0.5;
+/**
+ * The default chat width. Owner direction 2026-10-23: the chat should be narrow
+ * enough that the Brief column fits TWO cards side by side (each card wants
+ * ~420px, so the column needs ~900px), not the half-window that only ever fit
+ * one. Expressed as a target PIXEL width (clamped to the legal range per window)
+ * so it holds across laptop sizes instead of a flat fraction that grows the chat
+ * on a big screen and squeezes the cards. The person can still widen the chat —
+ * doing so drops the Brief column to one card, which is the intended choice.
+ */
+export const CONV_DEFAULT_PX = 520;
 export const CONV_MIN_PX = 340;
-/** The page always keeps at least this much of the window. */
-export const CONTENT_MIN_PX = 520;
+/** The page always keeps at least this much of the window, so the chat's
+ *  MAX width can never crush the content column. Kept moderate (one-card
+ *  readable) — the two-up default comes from CONV_DEFAULT_PX, not this floor. */
+export const CONTENT_MIN_PX = 560;
 export const CONV_FRAC_KEY = 'caddie:conv-frac';
 
 function windowWidth(): number {
 	return typeof window === 'undefined' ? 1280 : window.innerWidth;
 }
+
+/** The default fraction at the current window width: CONV_DEFAULT_PX, clamped. */
+export function defaultFrac(width = windowWidth()): number {
+	return clampFrac(CONV_DEFAULT_PX / width, width);
+}
+
+/** Back-compat alias; callers prefer defaultFrac() which is width-aware. */
+export const CONV_DEFAULT_FRAC = 0.4;
 
 /** The widest the panel may ever be at the current window width (px). */
 export function convMaxPx(width = windowWidth()): number {
@@ -48,9 +68,9 @@ function loadFrac(): number {
 	try {
 		const raw = localStorage.getItem(CONV_FRAC_KEY);
 		const parsed = raw === null ? NaN : Number(raw);
-		return Number.isFinite(parsed) && parsed > 0 ? parsed : CONV_DEFAULT_FRAC;
+		return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultFrac();
 	} catch {
-		return CONV_DEFAULT_FRAC;
+		return defaultFrac();
 	}
 }
 
@@ -103,7 +123,7 @@ export function useConvWidth(enabled: boolean): ConvWidth {
 		[],
 	);
 
-	const reset = useCallback(() => setFrac(CONV_DEFAULT_FRAC), [setFrac]);
+	const reset = useCallback(() => setFrac(defaultFrac()), [setFrac]);
 
 	// Computed per render (not memoized): the width must track the window even
 	// when the fraction is unchanged — the resize listener re-renders, and the
@@ -208,7 +228,7 @@ export function ConvResizeHandle(props: { width: ConvWidth }): ReactElement {
 	);
 
 	const pct = Math.round((width.widthPx / windowWidth()) * 100);
-	const isDefault = Math.abs(width.frac - CONV_DEFAULT_FRAC) < 0.005;
+	const isDefault = Math.abs(width.frac - defaultFrac()) < 0.005;
 	const showTip = dragging || focused;
 
 	return (
@@ -225,7 +245,7 @@ export function ConvResizeHandle(props: { width: ConvWidth }): ReactElement {
 				aria-valuemin={Math.round((CONV_MIN_PX / windowWidth()) * 100)}
 				aria-valuemax={Math.round((convMaxPx() / windowWidth()) * 100)}
 				aria-valuetext={`Caddie takes ${pct}% of the window`}
-				title={`Drag to resize · double-click resets to ${Math.round(CONV_DEFAULT_FRAC * 100)}%`}
+				title={`Drag to resize · double-click resets to ${Math.round(defaultFrac() * 100)}%`}
 				onPointerDown={onPointerDown}
 				onPointerMove={onPointerMove}
 				onPointerUp={endDrag}

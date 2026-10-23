@@ -990,12 +990,12 @@ test('Earlier loads archived decisions on demand and retains the exact decision 
  await context.close();
 });
 
-test('the Brief never flows two narrow cards per row: each card keeps the mockup width', async ({ browser }) => {
-	// Lane rule (2026-10-22): show two per row ONLY when each card gets >=440px.
-	// The Brief pane (beside the chat) does not reach two 440px columns at
-	// realistic widths, so the cards render ONE per row at the mockup width
-	// (>=440, capped at 584) — never the rejected ~300px two-up. A phone width
-	// also stacks them.
+test('the Brief fits two cards side by side at the narrow-chat default, each ≥420px (never the rejected ~300px two-up)', async ({ browser }) => {
+	// Lane rule (owner 2026-10-23): the chat defaults narrow (CONV_DEFAULT_PX
+	// 520px) so the Brief column DOES reach two columns — but each card must
+	// still be ≥420px, never the rejected ~300px two-up. At 1600px the Brief
+	// pane is ~1080px, so two cards sit side by side at ~520px each. A phone
+	// width stacks them.
 	const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
 	await stubAccount(context, { cards: [APPROVAL_A, BLOCKED_A], unseenCount: 2 });
 	const page = await context.newPage();
@@ -1005,10 +1005,11 @@ test('the Brief never flows two narrow cards per row: each card keeps the mockup
 	await expect(cards).toHaveCount(2);
 	const wideBoxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
 	expect(wideBoxes[0] && wideBoxes[1]).toBeTruthy();
-	// One per row: the second card is below the first, not beside it.
-	expect(wideBoxes[1]!.y).toBeGreaterThan(wideBoxes[0]!.y + wideBoxes[0]!.height / 2);
-	// Each card is at the mockup width, never the rejected narrow two-up width.
-	expect(wideBoxes[0]!.width).toBeGreaterThanOrEqual(440);
+	// Two per row: the second card sits BESIDE the first (same row), not below.
+	expect(Math.abs(wideBoxes[1]!.y - wideBoxes[0]!.y)).toBeLessThan(wideBoxes[0]!.height / 2);
+	// Each card is still at least the mockup-readable width, never the rejected
+	// narrow two-up — and never wider than the 584px cap.
+	expect(wideBoxes[0]!.width).toBeGreaterThanOrEqual(420);
 	expect(wideBoxes[0]!.width).toBeLessThanOrEqual(584 + 2);
 
 	// At a phone width the same two cards stack one per row with no overflow.
@@ -1019,11 +1020,11 @@ test('the Brief never flows two narrow cards per row: each card keeps the mockup
 	await context.close();
 });
 
-test('U — two rich cards (plan + fit) render at the mockup width one-up on a half-window pane, and stack at 390', async ({ browser }) => {
-	// Lane rule (2026-10-22): at 1440px with the chat at half the window the
-	// Brief pane is ~651px — NOT wide enough for two 440px columns — so the rich
-	// cards render ONE per row at the mockup width, and the plan list + fit
-	// split stay readable. A phone width also stacks them.
+test('U — two rich cards (plan + fit) render two-up at ≥420px with the narrow-chat default, and stack at 390', async ({ browser }) => {
+	// Lane rule (owner 2026-10-23): at 1440px the chat defaults to 520px, so the
+	// Brief pane is ~920px — wide enough for two columns at ~448px each. The rich
+	// cards render TWO per row, each still ≥420px so the plan list + fit split
+	// stay readable. A phone width stacks them.
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 	await stubAccount(context, {
 		cards: [
@@ -1038,11 +1039,11 @@ test('U — two rich cards (plan + fit) render at the mockup width one-up on a h
 	const cards = page.getByTestId('decision-card');
 	await expect(cards).toHaveCount(2);
 	const boxes = await Promise.all((await cards.all()).map((c) => c.boundingBox()));
-	// One per row: the second card sits below the first, not beside it.
-	expect(boxes[1]!.y).toBeGreaterThan(boxes[0]!.y + boxes[0]!.height / 2);
-	// Each card clears the 440px minimum (capped at 584), so the lists read at
+	// Two per row: the second card sits BESIDE the first (same row), not below.
+	expect(Math.abs(boxes[1]!.y - boxes[0]!.y)).toBeLessThan(boxes[0]!.height / 2);
+	// Each card clears the 420px minimum (capped at 584), so the lists read at
 	// the mockup type scale rather than the rejected narrow width.
-	expect(boxes[0]!.width).toBeGreaterThanOrEqual(440);
+	expect(boxes[0]!.width).toBeGreaterThanOrEqual(420);
 	expect(boxes[0]!.width).toBeLessThanOrEqual(584 + 2);
 	// The plan list and the fit split both still render.
 	await expect(page.getByTestId('card-plan-items')).toBeVisible();
