@@ -1,11 +1,13 @@
 import { Hono } from "hono";
 import { androidDownloadView, androidQrSvg } from "../android-app.ts";
 import type { AuthEnv } from "../auth.ts";
-import { ScopeError, requireProjectScope, sessionUserId } from "../scope.ts";
+import { ScopeError, requireProjectScope, sessionUserId, assertProjectOwner } from "../scope.ts";
 import { resolveAppSecrets } from "../app-secrets.ts";
 import { SecretBoxError, keyringFromEnv } from "../secret-box.ts";
 import { appAuthSecret, clearTestInbox, listTestInbox } from "../app-sign-in.ts";
 import { clearTestEmails, listTestEmails } from "../app-email.ts";
+import { appJobSecret, caddieJobHeader, finishJobRun, listJobRuns, startJobRun, JOB_SUMMARY_MAX, JOB_HEADER } from "../app-job.ts";
+import { getApprovedBlock } from "../architecture-gate.ts";
 import {
   workflowSnapshot,
   reconcileStalledBuild,
@@ -514,7 +516,121 @@ export function createBuildWorkflowRouter(
     const [messages, emails] = await Promise.all([listTestInbox(c.env.DB, scope), listTestEmails(c.env.DB, scope)]);
     return c.json({ messages, emails }, 200, { "cache-control": "no-store" });
   });
+
+  // The latest "Run now" job runs with their one-line summaries (any member).
+  router.get("/projects/:projectId/workflow/job-runs", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    return c.json({ runs: await listJobRuns(c.env.DB, scope) }, 200, { "cache-control": "no-store" });
+  });
+
+  // "Run now" for one declared job (plan part N). Caddie signs a call to the
+  // job's declared route and relays it: the preview through the preview
+  // runtime (any project member), a published app through the dispatch
+  // namespace (the owner only). Each run is recorded in app_job_runs with the
+  // route's one-line summary.
+  router.post("/projects/:projectId/workflow/jobs/:jobId/run", async (c) => {
+    const projectId = c.req.param("projectId");
+    const jobId = c.req.param("jobId");
+    const body = (await c.req.json().catch(() => ({}))) as { mode?: unknown; outputId?: unknown } | null;
+    const mode: "preview" | "live" = body?.mode === "live" ? "live" : "preview";
+    // Members can run on the preview; only the owner on the published app.
+    const scope =
+      mode === "live"
+        ? await assertProjectOwner(c.env.DB, await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, projectId))
+        : await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, projectId);
+
+    const block = await getApprovedBlock(c.env.DB, scope.projectId);
+    const job = block?.jobs.find((j) => j.id === jobId);
+    if (!job) throw new ScopeError(404, "JOB_NOT_FOUND", "There is no such job in this app's approved design.");
+    const route = block!.routes.find((r) => r.id === job.route);
+    if (!route) throw new ScopeError(409, "JOB_ROUTE_MISSING", "The job's route is not in the approved design.");
+
+    const env = c.env as AuthEnv & PreviewRuntimeBindings & { BETTER_AUTH_SECRET?: string };
+    const secret = await appJobSecret(env.BETTER_AUTH_SECRET, scope.projectId, mode);
+    const header = await caddieJobHeader(secret, route.path);
+    if (!header) throw new ScopeError(503, "JOB_SECRET_UNAVAILABLE", "Run now needs Caddie's signing secret, which isn't set up here.");
+
+    const runId = await startJobRun(c.env.DB, { projectId: scope.projectId, mode, jobId });
+
+    // The published path needs the dispatch namespace (lane 1's deploy). It is
+    // not bound in this worker yet, so a live run is recorded as failed with a
+    // plain reason rather than silently dropped.
+    if (mode === "live") {
+      const summary = "A published Run now needs the dispatch namespace, which isn't available here yet.";
+      await finishJobRun(c.env.DB, { runId, status: "failed", summary });
+      return c.json({ ok: false, runId, status: "failed", summary }, 503);
+    }
+
+    const exportsOf = previewExports(c);
+    if (!env.LOADER || !env.PREVIEW_DB || !exportsOf?.PreviewDatabaseGateway) {
+      const summary = "The preview runtime isn't available here.";
+      await finishJobRun(c.env.DB, { runId, status: "failed", summary });
+      throw new ScopeError(503, "PREVIEW_RUNTIME_UNAVAILABLE", summary);
+    }
+    const outputId = typeof body?.outputId === "string" && body.outputId.length > 0 ? body.outputId : null;
+    if (!outputId) {
+      const summary = "Run now needs the preview's output id.";
+      await finishJobRun(c.env.DB, { runId, status: "failed", summary });
+      throw new ScopeError(400, "invalid_request", summary);
+    }
+    const bundle = await readBuildBundle(c.env.DB, scope, outputId);
+    if (!bundle) {
+      const summary = "This version of the app has no server to run the job.";
+      await finishJobRun(c.env.DB, { runId, status: "failed", summary });
+      throw new ScopeError(409, "PREVIEW_HAS_NO_SERVER", summary);
+    }
+    try {
+      await previewDatabaseFor(env, scope.projectId).applyMigrations(bundle.migrations);
+      // The signed request to the job's route, built by Caddie (not a frame):
+      // the x-caddie-job header is the capability the generated access check reads.
+      const request = new Request(`https://app.preview.invalid${route.path}`, {
+        method: route.method,
+        headers: { [JOB_HEADER]: header, "content-type": "application/json" },
+        body: route.method === "GET" || route.method === "DELETE" ? undefined : "{}",
+      });
+      const relayed = await runPreviewApp({
+        loader: env.LOADER,
+        projectId: scope.projectId,
+        outputId,
+        serverSource: bundle.server,
+        vars: await previewVars(env, scope.projectId),
+        database: exportsOf.PreviewDatabaseGateway({ props: { projectId: scope.projectId } }),
+        platform: exportsOf.AppPlatform ? exportsOf.AppPlatform({ props: { projectId: scope.projectId } }) : undefined,
+        globalOutbound: exportsOf.PreviewOutbound ? exportsOf.PreviewOutbound({ props: { projectId: scope.projectId } }) : null,
+        request,
+      });
+      const ok = relayed.status >= 200 && relayed.status < 300;
+      const summary = summariseJobBody(relayed.body).slice(0, JOB_SUMMARY_MAX);
+      await finishJobRun(c.env.DB, { runId, status: ok ? "done" : "failed", summary });
+      return c.json({ ok, runId, status: ok ? "done" : "failed", summary });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const summary = `The job's route failed: ${message}`.slice(0, JOB_SUMMARY_MAX);
+      await finishJobRun(c.env.DB, { runId, status: "failed", summary });
+      if (error instanceof PreviewRuntimeError) throw new ScopeError(error.status, error.code, error.message);
+      return c.json({ ok: false, runId, status: "failed", summary }, 200);
+    }
+  });
   return router;
+}
+
+/** A one-line summary from a relayed (base64) response body, for the run record. */
+function summariseJobBody(base64Body: string | null | undefined): string {
+  if (!base64Body) return "No output.";
+  let text: string;
+  try {
+    text = decodeURIComponent(escape(atob(base64Body)));
+  } catch {
+    return "Ran.";
+  }
+  try {
+    const data = JSON.parse(text) as { summary?: unknown };
+    if (typeof data.summary === "string" && data.summary.trim().length > 0) return data.summary.trim();
+  } catch {
+    // Not JSON; fall through to the trimmed text.
+  }
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > 0 ? oneLine : "Ran.";
 }
 
 type PreviewRuntimeBindings = { LOADER?: WorkerLoaderLike; APP_SECRETS_KEYS?: string } & PreviewDatabaseEnv;
@@ -555,5 +671,10 @@ async function previewKeys(env: PreviewRuntimeBindings & { DB: AuthEnv["DB"] }, 
 async function previewVars(env: PreviewRuntimeBindings & { DB: AuthEnv["DB"]; BETTER_AUTH_SECRET?: string }, projectId: string): Promise<Record<string, string>> {
   const vars = await previewKeys(env, projectId);
   const authSecret = await appAuthSecret(env.BETTER_AUTH_SECRET, projectId, "preview");
-  return authSecret ? { ...vars, CADDIE_AUTH_SECRET: authSecret } : vars;
+  const jobSecret = await appJobSecret(env.BETTER_AUTH_SECRET, projectId, "preview");
+  return {
+    ...vars,
+    ...(authSecret ? { CADDIE_AUTH_SECRET: authSecret } : {}),
+    ...(jobSecret ? { CADDIE_JOB_SECRET: jobSecret } : {}),
+  };
 }
