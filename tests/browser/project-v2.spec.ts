@@ -185,75 +185,22 @@ async function stubAccount(context: BrowserContext, opts: { brief?: unknown[]; p
 }
 
 test.describe('Project Overview / Plan / Build v2 (U06)', () => {
-	test('Overview: a copied example with no build workflow is ready to try (review F04)', async ({ browser }) => {
-		const context = await browser.newContext();
-		await stubAccount(context, {
-			experience: { projectId: 'proj-a', version: 0, stage: 'planning', plan: null, preview: null, message: 'No plan yet.', actions: [] },
-			importPreview: { status: 'ready', origin: 'example', message: null, outputId: 'out-ex', repoFullName: 'Todoer', versionSeq: 1, hasServer: false },
-			share: false,
-		});
-		const page = await context.newPage();
-		await page.goto(`${BASE}/app/project?project=proj-a`);
-		await expect(page.getByTestId('overview-preview-ready')).toHaveText('An example app Caddie built is ready to try.');
-		await expect(page.getByTestId('overview-try-app')).toBeVisible();
-		await expect(page.getByTestId('overview-preview-share')).toHaveCount(0);
-		if (process.env.CADDIE_SHOTS) {
-			await page.setViewportSize({ width: 390, height: 844 });
-			await page.getByTestId('overview-preview').screenshot({ path: join(process.env.CADDIE_SHOTS, 'overview-app-example-mobile.png') });
-		}
-		await context.close();
-	});
+	// RETIRED (focused project workspace redesign, commit 5f3574a): the old
+	// Overview "Your app so far" preview card (overview-preview-ready/-building/
+	// -share, overview-try-app) no longer exists — the ready app is now the
+	// inline preview inside the project-workflow card on the focused home. The
+	// three tests that asserted that card are covered where the behaviour now
+	// lives: project-workflow.spec.ts (data-phase building->ready with no reload,
+	// the /seed+/document https-frame, the "Try your app" preview and persisted
+	// todos) and focused-project-chat.spec.ts + projects-v2.spec.ts (the
+	// "Try your app"/"Try app" action -> /preview?...&source=workflow).
 
-	test('Overview: a build finishing while the page is open flips "Your app" to ready, no reload (review F04)', async ({ browser }) => {
-		const context = await browser.newContext();
-		await stubAccount(context, { share: false });
-		let calls = 0;
-		await context.route('**/api/projects/proj-a/experience', (route) => {
-			calls += 1;
-			const ready = calls > 1;
-			return json(route, 200, {
-				...READY_EXPERIENCE,
-				version: Date.parse(NOW) + calls,
-				stage: ready ? 'ready' : 'building',
-				preview: ready ? READY_EXPERIENCE.preview : null,
-			});
-		});
-		const page = await context.newPage();
-		await page.goto(`${BASE}/app/project?project=proj-a`);
-		await expect(page.getByTestId('overview-preview-building')).toBeVisible();
-		await expect(page.getByTestId('overview-preview-ready')).toHaveText('Your app is ready to try.', { timeout: 10_000 });
-		await context.close();
-	});
-
-	test('Overview: Try your app opens the exact app outside chat on mobile', async ({ browser }) => {
-		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-		await stubAccount(context, { experience: READY_EXPERIENCE });
-		const page = await context.newPage();
-		await page.goto(`${BASE}/app/project?project=proj-a`);
-		await page.getByTestId('overview-try-app').click();
-		await expect(page).toHaveURL(/\/preview\?project=proj-a&preview=out-1&source=workflow/);
-		await context.close();
-	});
-
-	test('Overview: next step card from the top open brief card with one button', async ({ browser }) => {
-		const context = await browser.newContext();
-		await stubAccount(context, {
-			brief: [
-				card('brf_approval_1', 'approval', 'needs-you', 'The plan needs your OK', 'Caddie drafted version 1 and waits for your decision.'),
-				card('brf_result_1', 'result', 'handled', 'Build finished', 'The latest build produced a preview.'),
-			],
-		});
-		const page = await context.newPage();
-		await page.goto(`${BASE}/app/project?project=proj-a`);
-
-		const next = page.getByTestId('overview-next-step');
-		await expect(next).toContainText('The plan needs your OK');
-		// Exactly ONE button on the next-step card.
-		await expect(next.locator('button')).toHaveCount(1);
-		await page.getByTestId('overview-next-action').click();
-		await expect(page).toHaveURL(/design-review\?project=proj-a/);
-		await context.close();
-	});
+	// RETIRED (focused project workspace redesign, commit 5f3574a): the Overview
+	// "next step" brief card with exactly one button (overview-next-step /
+	// overview-next-action) is gone. "A plan that needs your OK surfaces one
+	// action that opens Plan" is now the Now panel's single server primary
+	// action — see 'a plan ready for review offers the server's primary action,
+	// which opens the plan' below — with the four-step bar carrying orientation.
 
 	test('Steps: the step the work is on is highlighted; phones keep all four steps reachable', async ({ browser }) => {
 		const desktop = await browser.newContext({ viewport: { width: 1280, height: 900 } });
@@ -427,23 +374,17 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await context.close();
 	});
 
-	test('Overview: "Your app" reads the checked build, offers Try your app, states a share link separately, and to-dos embed', async ({ browser }) => {
+	test('Overview: the to-do list embeds on the focused home with the add-task window', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubAccount(context, { experience: READY_EXPERIENCE });
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/project?project=proj-a`);
-		// Review F04: the app is there because the build produced it, not because a share link exists.
-		await expect(page.getByTestId('overview-preview-ready')).toHaveText('Your app is ready to try.');
-		await expect(page.getByTestId('overview-try-app')).toBeVisible();
-		await expect(page.getByTestId('overview-preview-share')).toContainText('A private share link is also live');
-		await expect(page.getByTestId('overview-preview')).not.toContainText('in the chat');
-		if (process.env.CADDIE_SHOTS) {
-			await page.getByTestId('overview-preview').screenshot({ path: join(process.env.CADDIE_SHOTS, 'overview-app-ready.png') });
-		}
-
-		// The to-do list is embedded; the create form hides behind the button.
+		// The ready app itself (the "Your app so far" preview, review F04) is now
+		// the inline preview inside the project-workflow card and is covered by
+		// project-workflow.spec.ts. What the focused home still owns here is the
+		// embedded to-do list; the create form hides behind the button.
 		await page.getByTestId('overview-todo').locator('summary').click();
-        await expect(page.getByTestId('tasks-panel')).toBeVisible();
+		await expect(page.getByTestId('tasks-panel')).toBeVisible();
 		await expect(page.getByTestId('task-create')).toHaveCount(0);
 		await page.getByTestId('add-task-open').click();
 		await expect(page.getByTestId('task-create')).toBeVisible();
