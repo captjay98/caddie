@@ -383,7 +383,7 @@ export function gate(env: Record<string, string | undefined>): GateResult {
 	// and the browser check's two users are users of the built app.
 	const missing = [
 		!authorized && 'CADDIE_LIVE_AUTHORIZED=1 (explicit authorization in the process env, never from .dev.vars)',
-		!baseUrl && 'CADDIE_DEV_BASE_URL (the local `bun run dev` base, e.g. http://127.0.0.1:5173)',
+		!baseUrl && 'CADDIE_DEV_BASE_URL (the local `bun run dev` base, e.g. http://localhost:5176, the pinned dev port where Google sign-in works)',
 	].filter(Boolean) as string[];
 	if (missing.length > 0) {
 		return {
@@ -405,7 +405,7 @@ export function signInGate(env: Record<string, string | undefined>): GateResult 
 	const baseUrl = env.CADDIE_DEV_BASE_URL;
 	const missing = [
 		!authorized && 'CADDIE_LIVE_AUTHORIZED=1 (explicit authorization in the process env, never from .dev.vars)',
-		!baseUrl && 'CADDIE_DEV_BASE_URL (the local `bun run dev` base, e.g. http://127.0.0.1:5173)',
+		!baseUrl && 'CADDIE_DEV_BASE_URL (the local `bun run dev` base, e.g. http://localhost:5176, the pinned dev port where Google sign-in works)',
 	].filter(Boolean) as string[];
 	if (missing.length > 0) {
 		return {
