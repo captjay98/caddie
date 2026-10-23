@@ -255,7 +255,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await context.close();
 	});
 
-	test('Steps: the step the work is on is highlighted; phones get "Step 1 of 4 · Plan" and a bar', async ({ browser }) => {
+	test('Steps: the step the work is on is highlighted; phones keep all four steps reachable', async ({ browser }) => {
 		const desktop = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 		await stubAccount(desktop, { workflowPhase: 'planning' });
 		const page = await desktop.newPage();
@@ -264,27 +264,40 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await expect(page.getByTestId('project-tab-plan')).toContainText('Caddie is drafting it');
 		await expect(page.getByTestId('project-tab-build')).toContainText('After you approve');
 		await expect(page.getByTestId('project-steps-compact')).toBeHidden();
-		await expect(page.getByTestId('overview-brief-open')).toContainText('Read the full brief');
+		// The full brief is readable on the focused home, in the Project brief
+		// fold of the supporting details (it replaces the old overview "Read the
+		// full brief" card). The fold's text comes from the workflow brief.
+		const brief = page.getByTestId('project-supporting-details').locator('details', { has: page.getByText('Project brief', { exact: true }) });
+		await brief.locator('summary').click();
+		await expect(brief).toContainText('Build FarmLog AI.');
 		await desktop.close();
 
 		const phone = await browser.newContext({ viewport: { width: 390, height: 844 } });
 		await stubAccount(phone, { workflowPhase: 'planning' });
 		const mobile = await phone.newPage();
 		await mobile.goto(`${BASE}/app/project?project=proj-a`);
-		await expect(mobile.getByTestId('project-steps-compact')).toBeVisible();
-		await expect(mobile.getByTestId('project-steps-compact')).toContainText('Step 1 of 4 · Plan');
-		await expect(mobile.locator('.project-steps-bar span[data-filled="true"]')).toHaveCount(1);
-		// The four steps stay reachable as tabs.
+		// On phones the focused head keeps all four steps reachable as a slim,
+		// horizontally-scrollable strip (the focused workspace replaced the old
+		// "Step 1 of 4 · Plan" compact line with the strip itself). The step the
+		// work is on is still the marked active one.
+		await expect(mobile.getByTestId('project-tabs')).toBeVisible();
 		await expect(mobile.locator('.project-step')).toHaveCount(4);
+		await expect(mobile.getByTestId('project-tab-plan')).toHaveAttribute('data-active', 'true');
+		await expect(mobile.getByTestId('project-tab-plan')).toHaveClass(/\bactive\b/);
 		await phone.close();
 	});
 
 	test('Steps: a build paused after approval keeps Plan approved; a plan stuck before approval stays on Plan', async ({ browser }) => {
 		// Both read `blocked` as the workflow phase; only the project status
-		// knows whether the plan was approved (the Now card's truth).
+		// knows whether the plan was approved. On the focused home the four-step
+		// bar makes the call (ProjectTabs reads plan.approved), and the project
+		// workflow card carries the headline that the old Now title did.
 		const paused = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 		await stubAccount(paused, {
 			workflowPhase: 'blocked',
+			// An approved-then-paused build: the /workflow approval proves the plan
+			// was approved, so the card is "Needs attention", not a stuck plan.
+			approval: { resourceId: 'plan-2', revisionHash: 'sha256-2', status: 'approved', expiresAt: '2027-01-01T00:00:00Z' },
 			experience: {
 				projectId: 'proj-a', version: Date.now(), stage: 'blocked', plan: { id: 'plan-2', revision: '2', approved: true }, preview: null,
 				message: 'Caddie stopped making progress on the build for 12 minutes, so it was paused. Your plan and files are saved. Press Retry to continue from here.',
@@ -293,7 +306,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		});
 		const page = await paused.newPage();
 		await page.goto(`${BASE}/app/project?project=proj-a`);
-		await expect(page.getByTestId('overview-now-title')).toHaveText('Caddie needs something from you');
+		await expect(page.getByTestId('project-workflow')).toContainText('Needs attention');
 		await expect(page.getByTestId('project-tab-plan')).toContainText('Approved');
 		await expect(page.getByTestId('project-tab-plan')).not.toContainText('Paused');
 		await expect(page.getByTestId('project-tab-plan')).toHaveClass(/\bdone\b/);
@@ -303,6 +316,8 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 
 		const stuck = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 		await stubAccount(stuck, {
+			// No approval on /workflow: the blocked phase is a plan that never got
+			// approved, so the card says the plan needs another pass.
 			workflowPhase: 'blocked',
 			experience: {
 				projectId: 'proj-a', version: Date.now(), stage: 'planning_blocked', plan: { id: 'plan-1', revision: '1', approved: false }, preview: null,
@@ -312,7 +327,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		});
 		const stuckPage = await stuck.newPage();
 		await stuckPage.goto(`${BASE}/app/project?project=proj-a`);
-		await expect(stuckPage.getByTestId('overview-now-title')).toHaveText("Caddie couldn't finish your plan");
+		await expect(stuckPage.getByTestId('project-workflow')).toContainText('Plan needs another pass');
 		await expect(stuckPage.getByTestId('project-tab-plan')).toContainText('Paused — check with Caddie');
 		await expect(stuckPage.getByTestId('project-tab-plan')).toHaveAttribute('data-active', 'true');
 		await expect(stuckPage.getByTestId('project-tab-build')).toContainText('After you approve');
