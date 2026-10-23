@@ -24,6 +24,7 @@ import type { FlueEvent, FlueExecutionContext, FlueExecutionOperation, FlueInstr
 import type { D1Database } from './auth.ts';
 import { readSwitch, type SwitchEnv } from './platform-switches.ts';
 import {
+	costliestRoute,
 	estimateCallMicros,
 	payerLimitMicros,
 	release,
@@ -287,15 +288,15 @@ export function makeSpendInstrumentation(config: SpendInstrumentConfig): FlueIns
 
 			// The requested model is on turn_request (the ctx does not carry it), so
 			// the route is resolved from the model the observer stashed for this
-			// turn. When turn_request has not arrived there is no frozen route to
-			// price against, so pass through unpriced — the settle path still records
-			// the turn's real usage. (turn_request precedes the interceptor for a
-			// turn, S1 Q4, so this is only the genuine cold-start case.)
+			// turn. When it can't be resolved (an unknown model id, or turn_request
+			// has not arrived), the call is priced at the costliest route's worst
+			// case: a paying build never makes an unpriced call (lead fix,
+			// 2026-10-23). The settle path still records the turn's real usage.
 			const requestChars = requestCharsByTurn.get(turnId);
 			const resolvedRoute = resolveRouteForTurn(turnId);
-			if (!resolvedRoute) return next();
+			const route = resolvedRoute ?? costliestRoute();
 
-			const estimateMicros = estimateCallMicros(resolvedRoute, requestChars);
+			const estimateMicros = estimateCallMicros(route, requestChars);
 			const result = await reserve(db, {
 				payerId,
 				turnId,
