@@ -14,6 +14,7 @@ import {
 	type ContractPhase,
 } from '../apps/app/src/server/host-checks.ts';
 import { NOTES_BLOCK, TEAM_BLOCK } from './fixtures/contract/notes-apps.ts';
+import { FEATURES_BLOCK } from './fixtures/contract/features-apps.ts';
 import type { ArchitectureBlock } from '@caddie/contracts';
 
 /** A stub phase runner from a per-phase {exitCode, output} map. */
@@ -110,25 +111,51 @@ describe('part E: the generated test is never vacuous and bites on declared feat
 		}
 	});
 
-	test('a block that declares payments makes the test-mode phase FAIL with a plain sentence (step 9)', () => {
-		const withPayments: ArchitectureBlock = {
-			...NOTES_BLOCK,
-			payments: { plan: 'pro', plain: 'Pro plan', interval: 'month', amount: 500, currency: 'usd' } as unknown as ArchitectureBlock['payments'],
-		};
-		const src = gen(withPayments);
-		// The test-mode phase names payments and the must-be-checked sentence.
-		expect(src).toContain('META.features.payments');
-		expect(src).toContain('those are not checked yet');
-		// And the feature flag is actually set in the embedded META for this block.
-		expect(src).toContain('"payments":true');
+	test('a block that declares payments: the guard locks the route (part J) and the test checks the 402, the cards and End now (step 9)', () => {
+		const files = writeContractFiles(FEATURES_BLOCK, 'small');
+		// The generated guard answers 402 on a locked route until the person has a plan.
+		expect(files['caddie/contract.ts']).toContain('export const LOCKED: Record<string, string[]> = {"reports.export":["pro"]};');
+		expect(files['caddie/contract.ts']).toContain('reason: "plan_required"');
+		const meta = metaOf(files['caddie/contract.test.ts']!);
+		expect((meta.payments as { locked: Array<{ id: string; plans: string[] }> }).locked.map((l) => [l.id, l.plans])).toEqual([['reports.export', ['pro']]]);
+		expect(files['caddie/contract.test.ts']).toContain('4000 0000 0000 0002');
+		expect(files['caddie/contract.test.ts']).toContain('/api/caddie/end-now');
 	});
 
-	test('a block that declares no test-mode feature does not force a test-mode failure', () => {
-		const src = gen(NOTES_BLOCK);
-		expect(src).toContain('"payments":false');
-		expect(src).toContain('"emails":false');
-		expect(src).toContain('"jobs":false');
-		expect(src).toContain('"files":false');
+	test('a block that declares no test-mode feature gets no test-mode checks', () => {
+		const files = writeContractFiles(NOTES_BLOCK, 'small');
+		const meta = metaOf(files['caddie/contract.test.ts']!);
+		expect(meta.payments).toBeNull();
+		expect(meta.emails).toEqual([]);
+		expect(meta.jobs).toEqual([]);
+		expect(meta.files).toBe(false);
+		expect(meta.unchecked).toEqual([]);
+		expect(files['caddie/contract.ts']).toContain('export const LOCKED: Record<string, string[]> = {};');
+	});
+
+	test('step 9 waits for each feature: only built routes are checked while building; the final check covers all', () => {
+		const scoped = metaOf(writeContractFiles(FEATURES_BLOCK, 'small', ['reports'])['caddie/contract.test.ts']!);
+		expect(scoped.payments).toBeNull(); // the locked export is a later feature
+		expect(scoped.emails).toEqual([]);
+		expect(scoped.jobs).toEqual([]);
+		expect(scoped.files).toBe(true); // the reports table, with its file field, is built
+		const whole = metaOf(writeContractFiles(FEATURES_BLOCK, 'small')['caddie/contract.test.ts']!);
+		expect((whole.emails as Array<{ id: string }>).map((e) => e.id)).toEqual(['share']);
+		expect((whole.jobs as Array<{ id: string }>).map((x) => x.id)).toEqual(['nightly']);
+	});
+
+	test('caddie/contract.ts tells the builder the email template, the job rule, and how to mount payments and files', () => {
+		const contract = writeContractFiles(FEATURES_BLOCK, 'small')['caddie/contract.ts']!;
+		expect(contract).toContain('template: "share"');
+		expect(contract).toContain('Job "nightly": the route jobs.nightly runs only from Caddie');
+		expect(contract).toContain('mountPayments(app, { currency, plans })');
+		expect(contract).toContain('mountFiles(app)');
+	});
+
+	test('a declared email whose route the design does not have fails the final check in plain words', () => {
+		const broken: ArchitectureBlock = { ...FEATURES_BLOCK, emails: [{ id: 'share', plain: 'Shares a report', route: 'reports.mail', to: 'person' }] };
+		const meta = metaOf(writeContractFiles(broken, 'small')['caddie/contract.test.ts']!);
+		expect(meta.unchecked).toEqual(['the email "share" names the route reports.mail, which the design does not have']);
 	});
 
 	test('a team block embeds the full team subject so step 6 is exercised, not skipped', () => {

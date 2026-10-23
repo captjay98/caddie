@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { materializeFixtureApp, applyFixture, runPhase, type FixtureApp } from './support/contract-fixtures-app.ts';
 import { genericAppFiles } from './fixtures/contract/generic-app.ts';
+import { FEATURES_BLOCK, FEATURE_FIXTURES } from './fixtures/contract/features-apps.ts';
 import {
 	CONTRACT_FIXTURES,
 	TEAM_FIXTURES,
@@ -65,6 +66,11 @@ const WHY: Readonly<Record<string, string>> = {
 	'second-screen-shows-another-table': 'The tasks screen does not show a record the server saved',
 	'team-second-table-without-team-filter': "tools: A's record leaks into B's own-team list",
 	'team-teammate-reads-personal': "notes: a teammate can read A's personal record",
+	// Step 9: the test-mode features.
+	'locked-route-left-open': 'reports.export: a locked route answered 200 before checkout',
+	'email-sent-outside-caddie': 'share: the reports.share route stored 0 messages in the test inbox',
+	'job-route-open': "nightly: the jobs.nightly route answered 200 without Caddie's signature",
+	'file-readable-by-anyone': "B can read A's file",
 };
 
 /** Assert a fixture passes the phases it should and fails exactly the ones it must. */
@@ -138,19 +144,24 @@ describe('part E: the check covers only the features built so far (passed plus t
 	}
 });
 
+describe('part E step 9: payments, emails, jobs and files are checked in test mode', () => {
+	let app: FixtureApp;
+	beforeAll(() => {
+		app = materializeFixtureApp();
+	}, SLOW);
+	afterAll(() => app?.cleanup());
+
+	for (const fixture of FEATURE_FIXTURES) {
+		test(`${fixture.id}: ${fixture.plain}`, () => assertFixture(app, fixture, FEATURES_BLOCK), SLOW);
+	}
+});
+
 /**
- * The big farm design (37 tables, 38 screens, 186 routes). Step 9 (payments,
- * emails, jobs and file uploads) is checked separately, so this copy leaves
- * those four out; everything else is the design as approved.
+ * The big farm design (37 tables, 38 screens, 186 routes), as approved: with
+ * its locked export (payments), the invite email, the daily-summary job and
+ * the photo uploads, so step 9 runs on it too.
  */
 const FARM = JSON.parse(readFileSync(join(import.meta.dir, 'fixtures/architecture/farm-block.json'), 'utf8')) as ArchitectureBlock;
-const FARM_CORE: ArchitectureBlock = {
-	...FARM,
-	payments: null,
-	emails: [],
-	jobs: [],
-	tables: FARM.tables.map((t) => ({ ...t, fields: t.fields.map((f) => (f.type === 'file' ? { ...f, type: 'text' as const } : f)) })),
-};
 
 describe('part E: a correct big app (the 37-table farm design) passes every phase, in time', () => {
 	let app: FixtureApp;
@@ -159,9 +170,9 @@ describe('part E: a correct big app (the 37-table farm design) passes every phas
 	}, SLOW);
 	afterAll(() => app?.cleanup());
 
-	test('every table and screen is checked, every phase passes, and each phase stays under 60 s', () => {
-		const fixture: ContractFixture = { id: 'farm-generic', plain: 'A generic correct app for the farm design.', mustFail: [], files: genericAppFiles(FARM_CORE) };
-		applyFixture(app, fixture, FARM_CORE);
+	test('every table, screen and test-mode feature is checked, every phase passes, and each phase stays under 60 s', () => {
+		const fixture: ContractFixture = { id: 'farm-generic', plain: 'A generic correct app for the farm design.', mustFail: [], files: genericAppFiles(FARM) };
+		applyFixture(app, fixture, FARM);
 		const ms: Record<string, number> = {};
 		for (const phase of PHASES) {
 			const started = performance.now();
