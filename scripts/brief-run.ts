@@ -206,14 +206,22 @@ export interface CapDecision {
  */
 export async function reserveAgainstCap(
 	reader: SpendReader,
-	opts: { capMicros: number; buildLimitMicros: number },
+	opts: { capMicros: number; buildLimitMicros: number; outstandingLiabilityMicros?: number },
 ): Promise<CapDecision> {
 	const spent = await reader.totalSpentMicros();
-	const wouldBe = spent + opts.buildLimitMicros;
+	// FINDING #7 (review 2026-10-23): a build that TIMED OUT is not proven
+	// terminated — its coordinator can still spend up to the rest of its build
+	// limit after driveBrief returned. That unspent allowance is real liability
+	// the spend tables do not yet show, so the cap must count it alongside what
+	// is already spent. Without this, build A ($40 limit) timing out after $1
+	// lets build B ($40) in on a $50 cap while A can still spend $39 → $79.
+	const outstanding = Math.max(0, opts.outstandingLiabilityMicros ?? 0);
+	const wouldBe = spent + outstanding + opts.buildLimitMicros;
 	if (wouldBe > opts.capMicros) {
 		const d = (n: number) => `$${(n / USD).toFixed(2)}`;
+		const liabilityNote = outstanding > 0 ? ` + outstanding liability ${d(outstanding)}` : '';
 		throw new CampaignCapError(
-			`campaign cap would be exceeded: spent ${d(spent)} + build limit ${d(
+			`campaign cap would be exceeded: spent ${d(spent)}${liabilityNote} + build limit ${d(
 				opts.buildLimitMicros,
 			)} = ${d(wouldBe)} > cap ${d(opts.capMicros)}`,
 			spent,
@@ -554,6 +562,10 @@ export async function runCampaign(
 	const rows: CampaignRunRow[] = [];
 	let ledger: Ledger | null = seams.ledgerStore.read();
 	const only = new Set(opts.onlyBriefIds ?? []);
+	// FINDING #7: unspent allowance of builds that timed out and were not proven
+	// terminated. Carried into every later admission so the cap cannot be
+	// overshot by a background build that is still able to spend.
+	let outstandingLiabilityMicros = 0;
 
 	for (const brief of briefs) {
 		if (only.size > 0 && !only.has(brief.id)) continue;
@@ -576,9 +588,11 @@ export async function runCampaign(
 		try {
 			const d = await reserveAgainstCap(
 				{ totalSpentMicros: async () => realSpentBefore },
-				{ capMicros: opts.capMicros, buildLimitMicros },
+				{ capMicros: opts.capMicros, buildLimitMicros, outstandingLiabilityMicros },
 			);
-			capReason = `allowed; ${(d.remainingMicros / USD).toFixed(2)} remaining`;
+			capReason = `allowed; ${(d.remainingMicros / USD).toFixed(2)} remaining${
+				outstandingLiabilityMicros > 0 ? ` (after $${(outstandingLiabilityMicros / USD).toFixed(2)} outstanding from timed-out builds)` : ''
+			}`;
 		} catch (error) {
 			capAllowed = false;
 			capReason = error instanceof Error ? error.message : String(error);
@@ -661,6 +675,14 @@ export async function runCampaign(
 		const browserNote = drive.outcome === 'ready' && drive.previewId ? `; browser ${browserVerdict}: ${browserReason}` : '';
 		const stopReason = (d1 ? `${d1.phase}${d1.detail ? `: ${d1.detail}` : ''}` : drive.outcome) + browserNote + (spendCrossCheckNote ? `; ${spendCrossCheckNote}` : '');
 		const buildSpentMicros = d1?.spentMicros ?? null;
+
+		// FINDING #7: a timed-out build is not proven stopped. Its unspent
+		// allowance (limit minus what it has spent so far) stays claimable by its
+		// still-running coordinator, so carry it as outstanding liability into
+		// every later admission. ready/blocked are terminal — no carry.
+		if (drive.outcome === 'timeout') {
+			outstandingLiabilityMicros += Math.max(0, buildLimitMicros - (buildSpentMicros ?? 0));
+		}
 
 		const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore: realSpentBefore, capAllowed, capReason, result, stopReason, complete, buildSpentMicros });
 		ledger = appendRun(seams.ledgerStore, opts.capMicros, record);

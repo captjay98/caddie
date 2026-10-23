@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { runCampaign, type Brief, type CampaignSeams } from '../scripts/brief-run.ts';
+import { runCampaign, reserveAgainstCap, CampaignCapError, type Brief, type CampaignSeams } from '../scripts/brief-run.ts';
 import { AccountSession, CookieJar, type AccountProfile } from '../scripts/brief-run/dev-client.ts';
 import { FakeClock } from '../scripts/brief-run/clock.ts';
 import { memoryLedgerStore } from '../scripts/brief-run/ledger.ts';
@@ -81,7 +81,7 @@ function greenD1(micros: number): D1Query {
 			{ checksJson: JSON.stringify({ 'sign-in': true, 'second-person': true, restart: true }) },
 		];
 		if (/run_rounds/.test(sql)) return [{ total: 0 }];
-		if (/build_spend_reservations/.test(sql)) return [{ settled: micros, reserved: 0 }];
+		if (/build_spend_reservations/.test(sql)) return [{ spent: micros }];
 		if (/build_spend_limits/.test(sql)) return [{ limitMicros: 5 * USD }];
 		return [];
 	};
@@ -280,5 +280,37 @@ describe('runCampaign orchestration (steps 1-6)', () => {
 		const { rows } = await runCampaign([brief('publicapp')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
 		expect(sawTargetNull).toBe(true);
 		expect(rows[0].complete.complete).toBe(false);
+	});
+});
+
+describe('reserveAgainstCap — finding #7: a timed-out build keeps its allowance as liability', () => {
+	const reader = (spentMicros: number) => ({ totalSpentMicros: async () => spentMicros });
+
+	test('without outstanding liability, the cap behaves as before', async () => {
+		const d = await reserveAgainstCap(reader(1 * USD), { capMicros: 50 * USD, buildLimitMicros: 40 * USD });
+		expect(d.allowed).toBe(true);
+		expect(d.remainingMicros).toBe(9 * USD);
+	});
+
+	test("the review's counterexample: $40 build A times out after $1, so a second $40 build is REFUSED on a $50 cap", async () => {
+		// A spent $1 and timed out; its unspent allowance is $40 - $1 = $39.
+		// realSpent = $1, outstanding = $39, next build limit $40 → $80 > $50.
+		const outstandingLiabilityMicros = 40 * USD - 1 * USD;
+		let refused = false;
+		try {
+			await reserveAgainstCap(reader(1 * USD), { capMicros: 50 * USD, buildLimitMicros: 40 * USD, outstandingLiabilityMicros });
+		} catch (error) {
+			refused = true;
+			expect(error).toBeInstanceOf(CampaignCapError);
+			expect((error as Error).message).toContain('outstanding liability');
+		}
+		expect(refused).toBe(true);
+	});
+
+	test('a small build still fits under the cap once the timed-out liability is counted, if there is room', async () => {
+		// realSpent $1 + outstanding $39 + a $5 small build = $45 ≤ $50 cap.
+		const d = await reserveAgainstCap(reader(1 * USD), { capMicros: 50 * USD, buildLimitMicros: 5 * USD, outstandingLiabilityMicros: 39 * USD });
+		expect(d.allowed).toBe(true);
+		expect(d.remainingMicros).toBe(5 * USD);
 	});
 });
