@@ -689,6 +689,7 @@ export * from './features.ts';
 export * from './architecture.ts';
 export * from './demo-contract.ts';
 export * from './theme.ts';
+export * from './looks.ts';
 export * from './app-icon.ts';
 export * from './publish.ts';
 

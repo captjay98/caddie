@@ -187,22 +187,32 @@ export function parseAppTheme(body: string): ThemeParse {
 	} catch (error) {
 		return { ok: false, error: `the ${THEME_BLOCK_INFO} block is not valid JSON (${error instanceof Error ? error.message : 'parse error'})` };
 	}
+	return validateAppTheme(json, `the ${THEME_BLOCK_INFO} block`);
+}
+
+/**
+ * Validate one theme object (already parsed JSON): the schema (hex colours,
+ * system fonts, radius, density), then every required contrast pair at WCAG AA.
+ * `subject` names it in the error, e.g. 'the caddie-theme block' or 'look "calm"'.
+ * Never throws. Shared by the design brief's theme block and each proposed look.
+ */
+export function validateAppTheme(json: unknown, subject = 'the theme'): ThemeParse {
 	const parsed = v.safeParse(AppThemeSchema, json);
 	if (!parsed.success) {
 		const issue = parsed.issues[0];
 		const path = issue?.path?.map((p) => String(p.key)).join('.') ?? '';
-		return { ok: false, error: `the ${THEME_BLOCK_INFO} block is invalid${path ? ` at ${path}` : ''}: ${issue?.message ?? 'unknown problem'}` };
+		return { ok: false, error: `${subject} is invalid${path ? ` at ${path}` : ''}: ${issue?.message ?? 'unknown problem'}` };
 	}
 	const theme = parsed.output;
 	for (const [fg, bg, label] of contrastPairs(theme.colors)) {
 		const ratio = contrastRatio(fg, bg);
 		if (ratio < AA_CONTRAST)
-			return { ok: false, error: `not enough contrast for ${label}: ${fg} on ${bg} is ${ratio.toFixed(1)}:1, but ${AA_CONTRAST}:1 is needed so it stays readable. Pick a darker or lighter colour.` };
+			return { ok: false, error: `${subject}: not enough contrast for ${label}: ${fg} on ${bg} is ${ratio.toFixed(1)}:1, but ${AA_CONTRAST}:1 is needed so it stays readable. Pick a darker or lighter colour.` };
 	}
 	for (const surface of theme.stateSurfaces ?? []) {
 		const ratio = contrastRatio(surface.fg, surface.bg);
 		if (ratio < AA_CONTRAST)
-			return { ok: false, error: `not enough contrast on the "${surface.name}" surface: ${surface.fg} on ${surface.bg} is ${ratio.toFixed(1)}:1, but ${AA_CONTRAST}:1 is needed.` };
+			return { ok: false, error: `${subject}: not enough contrast on the "${surface.name}" surface: ${surface.fg} on ${surface.bg} is ${ratio.toFixed(1)}:1, but ${AA_CONTRAST}:1 is needed.` };
 	}
 	return { ok: true, theme };
 }
