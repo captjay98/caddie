@@ -201,18 +201,6 @@ export function lastDeployedCommit(receiptsText: string): string | null {
 	}
 }
 
-/** The migrations tags a wrangler.jsonc held at a given commit (via git show). */
-export function doTagsAtCommit(deps: DeployDeps, commit: string): string[] | null {
-	const show = deps.run(['git', 'show', `${commit}:apps/app/wrangler.jsonc`], { cwd: deps.repoRoot });
-	if (show.exitCode !== 0) return null;
-	try {
-		const config = parseJsoncLoose(show.stdout) as WranglerConfig;
-		return productionDoTags(config);
-	} catch {
-		return null;
-	}
-}
-
 /** JSONC parse via Bun.JSONC, falling back to comment-stripping JSON.parse. */
 export function parseJsoncLoose(text: string): unknown {
 	const bun = (globalThis as { Bun?: { JSONC?: { parse(input: string): unknown } } }).Bun;
@@ -396,24 +384,46 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	record({ name: 'deployments-list', ok: true, command: deploymentsArgv, detail: `live/rollback version id: ${rollbackId ?? '(none parsed)'}` });
 
 	// --- Step 7: compare DO migration tags HEAD vs last deployed commit ------
+	// Item F: if there is no P17 receipt to name the last deployed commit, or the
+	// wrangler.jsonc at that commit can't be read, we cannot know which tags are
+	// old — so EVERY DO tag at HEAD counts as new and --accept-do-migration is
+	// required. Fail safe, never silently proceed.
 	const headTags = productionDoTags(authored);
 	const receiptsPath = join(deps.repoRoot, 'docs', 'live-receipts.json');
 	const lastCommit = fileExists(receiptsPath) ? lastDeployedCommit(readFile(receiptsPath)) : null;
-	let newDoTags: string[] = [];
-	if (lastCommit) {
-		const priorTags = doTagsAtCommit(deps, lastCommit) ?? [];
-		newDoTags = headTags.filter((tag) => !priorTags.includes(tag));
+	let newDoTags: string[];
+	let tagBaseline: string;
+	if (!lastCommit) {
+		newDoTags = [...headTags];
+		tagBaseline = 'no P17 receipt — treating every DO tag as new';
+	} else {
+		const show = run(['git', 'show', `${lastCommit}:apps/app/wrangler.jsonc`], { cwd: deps.repoRoot });
+		let priorTags: string[] | null = null;
+		if (show.exitCode === 0) {
+			try {
+				priorTags = productionDoTags(parseJsoncLoose(show.stdout) as WranglerConfig);
+			} catch {
+				priorTags = null;
+			}
+		}
+		if (priorTags === null) {
+			newDoTags = [...headTags];
+			tagBaseline = `tags at ${lastCommit.slice(0, 12)} unreadable — treating every DO tag as new`;
+		} else {
+			newDoTags = headTags.filter((tag) => !priorTags!.includes(tag));
+			tagBaseline = `baseline ${lastCommit.slice(0, 12)}`;
+		}
 	}
 	if (newDoTags.length > 0) {
 		log(`    WARN: new Durable Object migration tag(s): ${newDoTags.join(', ')} — rollback PAST this boundary is refused by Cloudflare`);
 		if (options.yes && !options.acceptDoMigration) {
-			return stop({ name: 'do-migration-tags', ok: false, detail: `new DO tag(s) ${newDoTags.join(', ')} need --accept-do-migration as well as --yes` });
+			return stop({ name: 'do-migration-tags', ok: false, detail: `new DO tag(s) ${newDoTags.join(', ')} (${tagBaseline}) need --accept-do-migration as well as --yes` });
 		}
 	}
 	record({
 		name: 'do-migration-tags',
 		ok: true,
-		detail: newDoTags.length > 0 ? `new DO tag(s): ${newDoTags.join(', ')} (accepted)` : `no new DO tag since ${lastCommit ? lastCommit.slice(0, 12) : 'unknown'}`,
+		detail: newDoTags.length > 0 ? `new DO tag(s): ${newDoTags.join(', ')} (accepted; ${tagBaseline})` : `no new DO tag (${tagBaseline})`,
 	});
 
 	// --- Rollback-handle guard (item D) --------------------------------------

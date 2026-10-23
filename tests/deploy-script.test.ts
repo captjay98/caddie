@@ -89,6 +89,10 @@ interface HarnessOverrides {
 	readonly hasJudgeCode?: boolean;
 	/** Local migration filenames present under apps/app/migrations. */
 	readonly localMigrations?: string[];
+	/** The receipts file content; overrides the default P17 receipt. */
+	readonly receiptsText?: string;
+	/** Omit docs/live-receipts.json entirely (fileExists -> false). */
+	readonly noReceiptsFile?: boolean;
 	/** Override ONLY the real `wrangler deploy` output (not the dry-run). */
 	readonly deployOutput?: string;
 }
@@ -117,11 +121,13 @@ function makeHarness(over: HarnessOverrides = {}): Harness {
 		[`${APP}/wrangler.jsonc`]: JSON.stringify(authored),
 		[`${APP}/dist/caddie_app/wrangler.json`]: JSON.stringify(built),
 		[`${APP}/dist/caddie_app/app/index.html`]: `<script src="/assets/${LIVE_JS}"></script>`,
-		[`${REPO}/docs/live-receipts.json`]: JSON.stringify([
-			{ packet: 'P17', commit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', at: '2026-10-22T11:00:00Z' },
-		]),
 		[`${APP}/.prod.vars`]: over.hasJudgeCode ? 'JUDGE_ACCESS_CODE=xxxxxxxxxxxxxxxx\n' : 'BETTER_AUTH_SECRET=x\n',
 	};
+	if (!over.noReceiptsFile) {
+		files[`${REPO}/docs/live-receipts.json`] = over.receiptsText ?? JSON.stringify([
+			{ packet: 'P17', id: 'lr_deadbeefcafef00d', commit: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', at: '2026-10-22T11:00:00Z' },
+		]);
+	}
 
 	const dirFiles: Record<string, string[]> = {
 		[`${APP}/migrations`]: localMigrations,
@@ -476,5 +482,26 @@ describe('deploy.ts — item E: unparsed Version ID warns, does not stop', () =>
 		expect(joinAll(h.commands).some((c) => c.includes('test:live'))).toBe(true);
 		expect(joinAll(h.commands).some((c) => c.includes('platform_switches'))).toBe(true);
 		expect(h.logs.some((l) => l.includes('WARN') && l.includes('Version ID'))).toBe(true);
+	});
+});
+
+describe('deploy.ts — item F: unknown DO baseline counts every tag as new', () => {
+	test('no P17 receipt means every HEAD DO tag is new, so --yes alone is refused', () => {
+		const blocked = makeHarness({ noReceiptsFile: true });
+		const result = runDeploy(DEPLOY, blocked.deps);
+		expect(result.ok).toBe(false);
+		expect(result.steps.at(-1)?.name).toBe('do-migration-tags');
+		expect(joinAll(blocked.commands).some((c) => c.includes('d1 migrations apply'))).toBe(false);
+
+		const accepted = makeHarness({ noReceiptsFile: true });
+		expect(runDeploy({ ...DEPLOY, acceptDoMigration: true }, accepted.deps).ok).toBe(true);
+	});
+
+	test('an unreadable wrangler.jsonc at the last deployed commit counts every tag as new', () => {
+		const blocked = makeHarness({ responses: { 'git show': { exitCode: 1 } } });
+		const result = runDeploy(DEPLOY, blocked.deps);
+		expect(result.ok).toBe(false);
+		expect(result.steps.at(-1)?.name).toBe('do-migration-tags');
+		expect(result.steps.at(-1)?.detail).toContain('unreadable');
 	});
 });
