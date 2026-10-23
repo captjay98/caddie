@@ -106,12 +106,27 @@ const designDocWithPersonTable = [
 	'```',
 ].join('\n');
 
+/**
+ * A stateful fake of the REAL spend tables (item 3): totalSpentMicros() returns
+ * the running total, and tick() adds this build's real spend after it runs. The
+ * default reader in seams() starts at 0 and never grows (a single-brief test);
+ * the cross-run cap test uses one that grows.
+ */
+function spendReaderStub(initial = 0): { reader: { totalSpentMicros(): Promise<number> }; add(micros: number): void } {
+	let total = initial;
+	return {
+		reader: { totalSpentMicros: async () => total },
+		add: (micros: number) => void (total += micros),
+	};
+}
+
 function seams(over: Partial<CampaignSeams> = {}): CampaignSeams {
 	return {
 		sessionA: readySession(A),
 		sessionB: readySession(B),
 		clock: new FakeClock(0),
 		d1: greenD1(3 * USD),
+		spendReader: spendReaderStub(0).reader,
 		readProposal: proposalReady,
 		coordinatorSend: sendNoop,
 		readDesignDoc: async () => designDocWithPersonTable,
@@ -148,22 +163,50 @@ describe('runCampaign orchestration (steps 1-6)', () => {
 		expect(rows[0].complete.reason).toMatch(/browser/);
 	});
 
-	test('the cap refuses a build once the ledger spend leaves no room (D5, across runs)', async () => {
-		// Each small build spends $4; the cap is tiny so the 2nd build cannot
-		// fit its $5 LIMIT under it even though only $4 was actually spent.
-		const s = seams({ d1: greenD1(4 * USD) });
+	test('the cap refuses a build once the REAL spend tables leave no room (item 3, D5)', async () => {
+		// The REAL spend tables report $0 before build a and $4 before build b.
+		// The cap is enforced from THAT, not the ledger: b's $5 LIMIT can't fit
+		// under the $8 cap on top of the $4 already spent.
+		const sr = spendReaderStub(0);
+		let briefSeen = 0;
+		const growing = {
+			totalSpentMicros: async () => {
+				const v = await sr.reader.totalSpentMicros();
+				if (briefSeen++ === 0) sr.add(4 * USD); // after reading for a, the real tables gain $4
+				return v;
+			},
+		};
+		const s = seams({ spendReader: growing });
 		const { rows, ledger } = await runCampaign(
 			[brief('a'), brief('b')],
 			s,
 			{ mode: 'baseline', capMicros: 8 * USD, pollEveryMs: 1000 },
 		);
-		// a: spent-before 0, 0+5 ≤ 8 → allowed. b: spent-before 4, 4+5=9 > 8 → refused.
+		// a: real-spent-before 0, 0+5 ≤ 8 → allowed. b: real-spent-before 4, 4+5=9 > 8 → refused.
 		expect(rows[0].capAllowed).toBe(true);
+		expect(rows[0].realSpentBeforeMicros).toBe(0);
 		expect(rows[1].capAllowed).toBe(false);
+		expect(rows[1].realSpentBeforeMicros).toBe(4 * USD);
 		expect(rows[1].complete.complete).toBe(false);
 		// The refused build is recorded (audit of what did NOT run) and spent nothing.
 		expect(ledger.runs.length).toBe(2);
 		expect(ledger.runs[1].buildSpentMicros).toBeNull();
+	});
+
+	test('the ledger figure is a CROSS-CHECK reported when it differs from the real tables (item 3)', async () => {
+		// The real tables say $10 already spent; the ledger (empty) says $0. The
+		// cap uses the real $10, and the divergence is reported.
+		const s = seams({ spendReader: spendReaderStub(10 * USD).reader });
+		const { rows } = await runCampaign([brief('moodloop')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
+		expect(rows[0].realSpentBeforeMicros).toBe(10 * USD);
+		expect(rows[0].ledgerSpentBeforeMicros).toBe(0);
+		expect(rows[0].spendCrossCheckNote).toMatch(/real tables 10\.00 vs ledger 0\.00/);
+	});
+
+	test('no cross-check note when the real tables and the ledger agree (item 3)', async () => {
+		const s = seams({ spendReader: spendReaderStub(0).reader });
+		const { rows } = await runCampaign([brief('moodloop')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
+		expect(rows[0].spendCrossCheckNote).toBeNull();
 	});
 
 	test('the big brief is charged against the $40 limit, not $5', async () => {

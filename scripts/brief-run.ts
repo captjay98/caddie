@@ -453,7 +453,7 @@ function redact(value: string | undefined): string {
 import type { AccountSession } from './brief-run/dev-client.ts';
 import type { Clock } from './brief-run/clock.ts';
 import { driveBrief, type ProposalReader, type CoordinatorSend } from './brief-run/driver.ts';
-import { readBuildResults, type D1Query } from './brief-run/d1-reader.ts';
+import { readBuildResults, totalCampaignSpentMicros, type D1Query } from './brief-run/d1-reader.ts';
 import type { BrowserCheck, BrowserCheckResult } from './brief-run/browser-check.ts';
 import { pickRecordTargetFromDesign } from './brief-run/app-users.ts';
 import {
@@ -476,6 +476,11 @@ export interface CampaignSeams {
 	clock: Clock;
 	/** Read-only D1 query against the local dev DB. */
 	d1: D1Query;
+	/** Item 3: total campaign spend so far from the REAL spend tables
+	 * (build_spend_reservations across all payers, through the d1-reader seam).
+	 * The cap is enforced from THIS, not the ledger; the ledger is a cross-check.
+	 * Injectable so a test proves the cap from the real-tables figure. */
+	spendReader: SpendReader;
 	/** Read the newest project_proposals row for the Home project (step 3). */
 	readProposal: ProposalReader;
 	/** Send the brief to the Home coordinator over Flue's HTTP route (step 2). */
@@ -515,20 +520,29 @@ export interface CampaignRunRow {
 	result: BriefRunResult | null;
 	stopReason: string | null;
 	buildSpentMicros: number | null;
+	/** Item 3: the real-tables spend-so-far the cap was enforced against. */
+	realSpentBeforeMicros: number;
+	/** Item 3: the ledger's own spend figure (the cross-check). */
+	ledgerSpentBeforeMicros: number;
+	/** Item 3: set when the real-tables figure and the ledger figure differ. */
+	spendCrossCheckNote: string | null;
 }
 
 /**
  * Run the campaign over the injected seams. For each brief:
- *   1. check the D5 cap against the ledger's spend-so-far PLUS this build's
- *      limit — refuse (and record) a build that would not fit;
+ *   1. check the D5 cap against the REAL spend tables' total-so-far PLUS this
+ *      build's limit (item 3) — refuse (and record) a build that would not fit.
+ *      The ledger's own figure is computed too, as a CROSS-CHECK that is
+ *      reported only when the two differ;
  *   2. drive the brief to a terminal build outcome (driveBrief, step 2);
  *   3. read the build's results from D1 (step 3);
- *   4. if the build is ready, run the browser check (step 4);
+ *   4. if the build is ready, run the two-app-user browser check (step 4);
  *   5. judge "complete" and append the run to the ledger (step 5).
  *
- * The cap is enforced from the LEDGER's own recorded spend, so a test proves it
- * across runs without any D1. NO build is ever started from a test: the drive
- * and D1 seams are fakes there.
+ * The cap is enforced from the REAL spend tables (seams.spendReader), so a
+ * crashed campaign that never wrote a ledger row is still held under the cap by
+ * what the build payers actually reserved/settled. NO build is ever started
+ * from a test: the drive and D1 seams are fakes there.
  */
 export async function runCampaign(
 	briefs: Brief[],
@@ -543,14 +557,23 @@ export async function runCampaign(
 		if (only.size > 0 && !only.has(brief.id)) continue;
 		const size = brief.size;
 		const buildLimitMicros = size === 'big' ? BIG_BUILD_LIMIT_MICROS : SMALL_BUILD_LIMIT_MICROS;
-		const spentBefore = ledger ? ledgerSpentMicros(ledger) : 0;
 
-		// 1. Cap check against the ledger's own spend (D5). Refuse and record.
+		// 1. Cap check against the REAL spend tables (item 3, D5). The ledger's
+		//    own figure is computed as a CROSS-CHECK only, reported when it
+		//    diverges from the real tables (e.g. a build that spent but never
+		//    wrote a ledger row, or vice versa).
+		const realSpentBefore = await seams.spendReader.totalSpentMicros();
+		const ledgerSpentBefore = ledger ? ledgerSpentMicros(ledger) : 0;
+		const spendCrossCheckNote =
+			realSpentBefore !== ledgerSpentBefore
+				? `spend cross-check differs: real tables ${(realSpentBefore / USD).toFixed(2)} vs ledger ${(ledgerSpentBefore / USD).toFixed(2)} (the cap used the real tables)`
+				: null;
+
 		let capAllowed = true;
 		let capReason = 'allowed';
 		try {
 			const d = await reserveAgainstCap(
-				{ totalSpentMicros: async () => spentBefore },
+				{ totalSpentMicros: async () => realSpentBefore },
 				{ capMicros: opts.capMicros, buildLimitMicros },
 			);
 			capReason = `allowed; ${(d.remainingMicros / USD).toFixed(2)} remaining`;
@@ -560,9 +583,9 @@ export async function runCampaign(
 		}
 
 		if (!capAllowed) {
-			const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore, capAllowed, capReason, result: null, stopReason: 'cap-refused', complete: { complete: false, reason: capReason }, buildSpentMicros: null });
+			const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore: realSpentBefore, capAllowed, capReason, result: null, stopReason: 'cap-refused', complete: { complete: false, reason: capReason }, buildSpentMicros: null });
 			ledger = appendRun(seams.ledgerStore, opts.capMicros, record);
-			rows.push({ briefId: brief.id, size, mode: opts.mode, capAllowed, complete: record.complete ? { complete: true, reason: record.completeReason } : { complete: false, reason: record.completeReason }, result: null, stopReason: 'cap-refused', buildSpentMicros: null });
+			rows.push({ briefId: brief.id, size, mode: opts.mode, capAllowed, complete: { complete: false, reason: record.completeReason }, result: null, stopReason: 'cap-refused', buildSpentMicros: null, realSpentBeforeMicros: realSpentBefore, ledgerSpentBeforeMicros: ledgerSpentBefore, spendCrossCheckNote });
 			continue;
 		}
 
@@ -624,12 +647,13 @@ export async function runCampaign(
 			browserCheckPassed: browserPassed,
 		};
 		const complete = evaluateComplete(result);
-		const stopReason = d1 ? `${d1.phase}${d1.detail ? `: ${d1.detail}` : ''}` : drive.outcome;
+		const browserNote = drive.outcome === 'ready' && drive.previewId ? `; browser ${browserVerdict}: ${browserReason}` : '';
+		const stopReason = (d1 ? `${d1.phase}${d1.detail ? `: ${d1.detail}` : ''}` : drive.outcome) + browserNote + (spendCrossCheckNote ? `; ${spendCrossCheckNote}` : '');
 		const buildSpentMicros = d1?.spentMicros ?? null;
 
-		const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore, capAllowed, capReason, result, stopReason, complete, buildSpentMicros });
+		const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore: realSpentBefore, capAllowed, capReason, result, stopReason, complete, buildSpentMicros });
 		ledger = appendRun(seams.ledgerStore, opts.capMicros, record);
-		rows.push({ briefId: brief.id, size, mode: opts.mode, capAllowed, complete, result, stopReason, buildSpentMicros });
+		rows.push({ briefId: brief.id, size, mode: opts.mode, capAllowed, complete, result, stopReason, buildSpentMicros, realSpentBeforeMicros: realSpentBefore, ledgerSpentBeforeMicros: ledgerSpentBefore, spendCrossCheckNote });
 	}
 
 	return { ledger: ledger ?? { campaign: 'team-mode-monday', cap_micros: opts.capMicros, runs: [] }, rows };
@@ -822,6 +846,7 @@ async function main(): Promise<number> {
 			sessionB,
 			clock: systemClock,
 			d1,
+			spendReader: { totalSpentMicros: () => totalCampaignSpentMicros(d1) },
 			readProposal,
 			coordinatorSend,
 			readDesignDoc,
