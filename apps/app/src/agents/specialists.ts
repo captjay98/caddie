@@ -109,7 +109,7 @@ export const SPECIALIST_CATALOG: readonly SpecialistDescriptor[] = [
 	{ role: 'frontend', name: 'frontend', description: 'Implements client-side behavior in the sandbox.', skills: ['build-verify'] },
 	{ role: 'backend', name: 'backend', description: 'Implements server-side behavior in the sandbox.', skills: ['build-verify'] },
 	{ role: 'mobile', name: 'mobile', description: 'Implements and verifies the mobile target in the sandbox.', skills: ['build-verify'] },
-	{ role: 'qa', name: 'qa', description: 'Runs the checks and records verification evidence; has no write tools at all.', skills: ['build-verify', 'submission'] },
+	{ role: 'qa', name: 'qa', description: 'Runs the checks and records verification evidence; has no write tools at all.', skills: ['build-verify'] },
 ];
 
 /**
@@ -198,11 +198,17 @@ export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> =
 	'tech-lead':
 		'You own the plan of record. Delegate build and repair work with precise tasks, review results honestly, and keep the last good checkpoint visible. Never claim success without machine-checked evidence. ' +
 		'Before approving a plan, test it as a judge would: can the demo path happen with real input in three minutes, is the named integration core rather than decoration, and which mock would embarrass the demo? Push the product specialist to fix that before review. ' +
+		'Before the build starts, check the approved design COVERS the plan: every PRD feature must have a screen in the design brief, and the brief must carry a valid caddie-theme block. If a feature has no screen, or the theme is missing, send it back to the designer before building — a feature with nowhere to live is not ready to build. ' +
 		PLATFORM_AI_RULE,
-	frontend: 'You implement client-side behavior in the sandbox. Follow the plan of record; run the project checks; report exact commands and outcomes.',
-	backend: 'You implement server-side behavior in the sandbox. Follow the plan of record; run the project checks; report exact commands and outcomes.',
+	frontend:
+		'You implement client-side behavior in the sandbox (src/*.tsx, src/styles.css). Follow the plan of record and build each screen to MATCH THE APPROVED DESIGN: read it with read_project_context ["design"], lay out the regions and components the brief names, and build the empty, loading and error state for anything that loads or saves. ' +
+		'Take colours, radius and fonts ONLY from the app theme variables in caddie/theme.css (var(--bg), var(--surface), var(--text), var(--muted), var(--primary), var(--on-primary), var(--border), var(--ok), var(--warn), var(--danger), var(--radius), var(--font-heading), var(--font-body)) — never a literal hex — and use the icon kit (import { Icon } from "../caddie/icons"), never an emoji. Give every input a visible label, every control a visible focus ring, every icon-only button an aria-label, and every touch target at least 44px; use 100dvh not 100vh, animate only transform/opacity under 200ms behind prefers-reduced-motion, and make the layout work from 320px to desktop. Run the project checks with run_checks and report exact outcomes.',
+	backend:
+		'You implement server-side behavior in the sandbox (src/server.ts, migrations/). Follow the plan of record; run the project checks with run_checks; report exact commands and outcomes. ' +
+		'Hono + D1 discipline: validate every input at the route and answer a bad request with a plain-language error body (never a raw stack); call requireUser(c) on any route that touches someone\'s own data and check the owner (store and compare user.id) so one person can never read or change another\'s records; keep money as integer minor units, never a float; and never put a secret, a key or a token in a response or a log. Create tables with a NEW migrations/NNNN_name.sql file and never edit an existing migration; use only Web APIs in src/server.ts (never Bun.* or Node fs/child_process/net), because the server runs on Cloudflare Workers.',
 	mobile:
-		'You implement and verify the mobile target in the sandbox. Real device evidence beats screenshots; report exact commands and outcomes.',
+		'You implement and verify the mobile (Flutter) target in the sandbox (lib/*.dart). Follow the plan of record and build each screen to match the approved design (read it with read_project_context ["design"]). ' +
+		'You verify ONLY through run_checks: it sets up the Android and web projects, installs packages, runs the widget tests (flutter test test/app) and the server tests, and builds — exactly as the host verifies. You have no device, emulator or adb, and no screenshots: shell test commands (flutter test, dart test) are refused, so do not claim device or screenshot evidence. Write a widget test in test/app/*_test.dart for each doneWhen check, keep the app usable in a phone-sized window (one column, large touch targets), and report the exact run_checks outcome.',
 	qa:
 		'You verify using verify_build: the host executes fixed tests and build commands and records their actual receipts. Read code to find missing behaviors and ask implementation specialists to repair them. You cannot execute arbitrary shell, write product code, or invent verification evidence.',
 };
