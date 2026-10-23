@@ -97,19 +97,23 @@ matching hashes prove the domain serves exactly the built bytes.
 Ordered by value. Nothing here is permission to skip gates — each proposal
 makes the existing gates harder to skip by accident.
 
-1. **One-command deploy (`scripts/deploy.ts`).** Runs steps 1–8 in order,
-   stops on first failure, prints progress. It should: capture the
-   pre-deploy version id (for rollback), require an explicit `--yes` as
-   the deployment-authorization acknowledgement, read the version id out
-   of the deploy output, append the evidence row itself, and on a failed
-   smoke print the exact rollback command. This kills the two worst
-   failure modes: steps done out of order (migrations after code) and the
-   evidence step being skipped. Highest value; everything else is smaller.
-2. **Make the wrong-env build undeployable, not just guarded.** Today a
-   dev build still produces a deployable Worker. Make `bun run build`
-   without `CLOUDFLARE_ENV` either refuse to write the built worker
-   config or name the worker `caddie-app-dev` so `wrangler deploy`
-   physically cannot ship it to production by accident.
+1. **One-command deploy (`scripts/deploy.ts`).** — **BUILT** (P17, 2026-10-23).
+   `bun run deploy` is the rehearsal (every gate + two remote reads, prints the
+   plan, no remote write); `bun run deploy --yes` also runs the remote writes.
+   It captures the pre-deploy version id for rollback, runs migrations strictly
+   before the code, reads the Version ID out of the deploy output, prints the
+   evidence row, and on a failed smoke prints the exact rollback command. See
+   "Every deploy" in `production-deploy.md`. (Proposal 6 folded in: the run
+   diffs the remote `d1_migrations` list against the local migrations and
+   refuses a surprise pending migration.)
+2. **Make the wrong-env build undeployable, not just guarded.** — **BUILT**
+   (P17, 2026-10-23). `scripts/compose-assets.ts` names the Worker
+   `caddie-app-dev` whenever the build did not request `CLOUDFLARE_ENV=
+   production`, so a `wrangler deploy` of a dev build lands on a harmless
+   separate Worker, never on `caddie-app` / `caddie.jamalibrahim.dev`. The
+   preflight's env check still FAILs such a build; this is the physical belt to
+   that braces. Local dev and the browser tests are unaffected (they serve the
+   static assets through Vite and never read the worker name).
 3. **One Cloudflare account on the token** (or `CLOUDFLARE_ACCOUNT_ID`
    pinned in the shell profile). Owner action, one time; deletes the
    silent-failure trap from every future `secret` command.
@@ -121,12 +125,13 @@ makes the existing gates harder to skip by accident.
    **Precondition:** the repo-history rewrite + secret rotation recorded
    in the hygiene notes must happen first — this repo cannot push to a
    remote until then. Keep last for that reason.
-6. **Release-check learns about remote migrations.** A check that diffs
-   local migration files against the remote `d1_migrations` table, so
-   step 5 reporting "surprise pending migrations" can never be the first
-   sign of drift. Small; fold into proposal 1 when built.
+6. **Release-check learns about remote migrations.** — **BUILT**, folded into
+   proposal 1: `bun run deploy` reads the remote `d1_migrations` list (step 6)
+   and refuses any pending remote migration that is not in `apps/app/migrations`
+   before it writes anything.
 
-The destination state: `bun scripts/deploy.ts --yes` does the right thing
-in the right order, refuses unsafe inputs, records its own evidence, and
-hands back a version id. Until then, the runbook's eight steps are the
-contract.
+The destination state is now reached for the deploy itself: `bun run deploy
+--yes` does the right thing in the right order, refuses unsafe inputs, prints
+the evidence row and hands back a version id. The eight manual steps remain the
+documented fallback (and the contract the script implements). Proposals 3, 4
+and 5 are owner/infra actions that still sit ahead.

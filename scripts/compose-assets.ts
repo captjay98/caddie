@@ -133,6 +133,30 @@ if (existsSync(WORKER_CONFIG)) {
 	}
 }
 
+// --- 6b. a non-production build must be undeployable to production ----------
+// Roadmap item 2 (deployment-explained.md): production is chosen at BUILD time
+// with CLOUDFLARE_ENV=production. Without it, the build silently carries the
+// local D1 placeholder but KEEPS the production worker name "caddie-app" — so
+// `wrangler deploy` run by mistake would overwrite the live Worker with a
+// dev-shaped bundle. Renaming the built worker to "caddie-app-dev" when the
+// production environment was NOT requested makes that physically impossible:
+// a deploy of a dev build lands on a different (harmless) Worker, never on
+// caddie-app / caddie.jamalibrahim.dev. The preflight's env check still FAILs
+// such a build; this is the belt to that braces. The name lives only in the
+// generated dist config — local dev (Vite dev) and the browser tests (Vite
+// `preview`, which serves the static assets) never read it, so nothing local
+// changes. A production build is untouched.
+const DEV_WORKER_NAME = 'caddie-app-dev';
+let devNamed = false;
+if (process.env.CLOUDFLARE_ENV !== 'production' && existsSync(WORKER_CONFIG)) {
+	const workerConfig = JSON.parse(readFileSync(WORKER_CONFIG, 'utf8')) as Record<string, unknown>;
+	if (typeof workerConfig.name === 'string' && workerConfig.name !== DEV_WORKER_NAME) {
+		workerConfig.name = DEV_WORKER_NAME;
+		writeFileSync(WORKER_CONFIG, `${JSON.stringify(workerConfig)}\n`);
+		devNamed = true;
+	}
+}
+
 // The environment must be the one that was asked for. The Cloudflare Vite
 // plugin resolves `env.<name>` from CLOUDFLARE_ENV, and it has been observed
 // to resolve the TOP-LEVEL config instead (2026-10-22): the build then
@@ -158,5 +182,5 @@ if (requestedEnvironment && existsSync(WORKER_CONFIG)) {
 }
 
 console.log(
-	`compose-assets: composed ${relocated.length} relocated SPA + ${unchanged.length} SPA asset + ${landingEntries.length} landing files; collisions: 0; sw.js build ${swStamp}; manifest: ${relative(REPO_ROOT, MANIFEST_PATH)}${legacyEnvRemoved ? '; legacy_env removed from the Worker config' : ''}`,
+	`compose-assets: composed ${relocated.length} relocated SPA + ${unchanged.length} SPA asset + ${landingEntries.length} landing files; collisions: 0; sw.js build ${swStamp}; manifest: ${relative(REPO_ROOT, MANIFEST_PATH)}${legacyEnvRemoved ? '; legacy_env removed from the Worker config' : ''}${devNamed ? `; non-production build named ${DEV_WORKER_NAME} (undeployable to production)` : ''}`,
 );

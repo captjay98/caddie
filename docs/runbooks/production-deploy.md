@@ -61,14 +61,50 @@ and start one judge account yourself before sharing the code.
 
 ## Every deploy
 
-On `main` with a clean tree:
+One command, from the repo root on `main` with a clean tree:
+
+```sh
+bun run deploy          # REHEARSAL: every gate below + two remote READS,
+                        # then prints exactly what --yes would write, and stops.
+bun run deploy --yes    # the owner's authorization: also runs the remote writes
+                        # (migrations BEFORE the code), the smoke and the report.
+```
+
+`bun run deploy` runs the eight steps in the one correct order, stops at the
+first failure, reads the live version id (the rollback handle) before any write
+and refuses to deploy without it, parses the new Version ID, and on a passing
+smoke **appends an evidence section to `docs/release-evidence.md`** — a small
+table of URL, version id, commit, rollback id, gate counts, migrations applied,
+DO tags, the smoke receipt id (the newest P17 entry in `docs/live-receipts.json`)
+and the hash match — then prints the `git add … && git commit` line for you to
+run. On a failed smoke it prints the exact rollback command. It saves every
+step's stdout and stderr under `.deploy-logs/<UTC stamp>/` (gitignored) and
+prints the log path when a step fails. It never issues `wrangler secret put`,
+`deploy --env` or `migrations … --local`, and it never writes
+`docs/live-receipts.json` (the smoke run owns that file).
+
+Two flags beyond `--yes`:
+
+- `--with-secrets` — deploy with `--secrets-file .prod.vars`. Leave it off on a
+  normal deploy: a re-upload undoes any value you set later with `secret put`.
+- `--accept-do-migration` — required (with `--yes`) when `wrangler.jsonc` adds a
+  new Durable Object `migrations` tag since the last deploy. Rollback past that
+  boundary is refused by Cloudflare, so the flag is a deliberate acknowledgement.
+
+While judge access is off (no `JUDGE_ACCESS_CODE` in `.prod.vars`), the script
+passes `--owner-only` to the preflight for you.
+
+### Manual steps (fallback)
+
+The eight steps `bun run deploy` automates, if you need to run them by hand. On
+`main` with a clean tree:
 
 1. `bun scripts/release-check.ts`: 0 FAIL.
 2. `CLOUDFLARE_ENV=production bun run build`.
 3. `bun scripts/deploy-preflight.ts`, with `--owner-only` while judge access
    is off: 0 FAIL. Read every WARN.
 4. `cd apps/app && bunx wrangler deploy --dry-run`. It lists DB, LOADER,
-   PREVIEW_DB and the two Flue agents, and uploads nothing.
+   PREVIEW_DB and the Flue agents, and uploads nothing.
 5. **[remote] Migrations, before the code** (in `apps/app`):
    `bunx wrangler d1 migrations apply caddie --remote --config wrangler.jsonc --env production`.
    The first run applies 0001-0035; later runs apply only new ones. Never edit
@@ -83,8 +119,15 @@ On `main` with a clean tree:
    - sign in as yourself;
    - if judge access is on, start a judge account in a private window.
 8. **Record** (in `apps/app`): `bunx wrangler deployments list` shows the
-   version id. Add the URL, version id, commit and smoke result to
-   `docs/release-evidence.md`.
+   version id. `bun run deploy` appends the evidence section to
+   `docs/release-evidence.md` for you (URL, version id, commit, rollback id,
+   gate counts, migrations applied, DO tags, smoke receipt id, hash match) and
+   prints the `git add docs/release-evidence.md docs/live-receipts.json &&
+   git commit` line to run. Running the steps by hand instead, add the URL,
+   version id, commit and smoke result to `docs/release-evidence.md` yourself.
+   Either way, each step's stdout and stderr is saved under
+   `.deploy-logs/<UTC stamp>/` (gitignored); the path of a failing step's log
+   is printed.
 
 ## Changing settings without a rebuild
 

@@ -22,3 +22,6 @@ playwright-report/
 # local logs and dev DB backups
 *.log
 .wrangler-backup-*.tar.gz
+
+# per-run deploy step logs (scripts/deploy.ts, item H)
+.deploy-logs/
