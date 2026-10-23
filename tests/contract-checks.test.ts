@@ -8,7 +8,10 @@
 //
 // Classification: LOCAL VERIFIED.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { materializeFixtureApp, applyFixture, runPhase, type FixtureApp } from './support/contract-fixtures-app.ts';
+import { genericAppFiles } from './fixtures/contract/generic-app.ts';
 import {
 	CONTRACT_FIXTURES,
 	TEAM_FIXTURES,
@@ -56,6 +59,12 @@ const WHY: Readonly<Record<string, string>> = {
 	'team-screen-reads-localstorage': "does not show the team's saved record",
 	'team-delete-without-team-filter': "B deleted A's record through B's own team",
 	'team-crews-built-whole-design': 'This route is not built yet',
+	// Every table is checked (not only the first), and each screen against its own table.
+	'second-table-kept-in-memory': "tasks: reading A's record after restart failed",
+	'second-table-no-owner-filter': "tasks: B can read A's record",
+	'second-screen-shows-another-table': 'The tasks screen does not show a record the server saved',
+	'team-second-table-without-team-filter': "tools: A's record leaks into B's own-team list",
+	'team-teammate-reads-personal': "notes: a teammate can read A's personal record",
 };
 
 /** Assert a fixture passes the phases it should and fails exactly the ones it must. */
@@ -127,4 +136,41 @@ describe('part E: the check covers only the features built so far (passed plus t
 	for (const fixture of TEAM_SCOPED_FIXTURES) {
 		test(`${fixture.id}: ${fixture.plain}`, () => assertFixture(app, fixture, TEAM_BLOCK), SLOW);
 	}
+});
+
+/**
+ * The big farm design (37 tables, 38 screens, 186 routes). Step 9 (payments,
+ * emails, jobs and file uploads) is checked separately, so this copy leaves
+ * those four out; everything else is the design as approved.
+ */
+const FARM = JSON.parse(readFileSync(join(import.meta.dir, 'fixtures/architecture/farm-block.json'), 'utf8')) as ArchitectureBlock;
+const FARM_CORE: ArchitectureBlock = {
+	...FARM,
+	payments: null,
+	emails: [],
+	jobs: [],
+	tables: FARM.tables.map((t) => ({ ...t, fields: t.fields.map((f) => (f.type === 'file' ? { ...f, type: 'text' as const } : f)) })),
+};
+
+describe('part E: a correct big app (the 37-table farm design) passes every phase, in time', () => {
+	let app: FixtureApp;
+	beforeAll(() => {
+		app = materializeFixtureApp();
+	}, SLOW);
+	afterAll(() => app?.cleanup());
+
+	test('every table and screen is checked, every phase passes, and each phase stays under 60 s', () => {
+		const fixture: ContractFixture = { id: 'farm-generic', plain: 'A generic correct app for the farm design.', mustFail: [], files: genericAppFiles(FARM_CORE) };
+		applyFixture(app, fixture, FARM_CORE);
+		const ms: Record<string, number> = {};
+		for (const phase of PHASES) {
+			const started = performance.now();
+			const r = runPhase(app, phase);
+			ms[phase] = Math.round(performance.now() - started);
+			expect(r.ok && r.failed === 0 && r.passed > 0, `${phase} should PASS on a correct big app:\n${r.out.slice(-4000)}`).toBe(true);
+		}
+		console.log(`farm design phase times (ms): ${JSON.stringify(ms)}`);
+		// The host stops a phase at 120 s; a sandbox may be slower than this machine.
+		for (const phase of PHASES) expect(ms[phase]!, `${phase} took ${ms[phase]} ms`).toBeLessThan(60_000);
+	}, 600_000);
 });
