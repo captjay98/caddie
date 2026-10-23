@@ -26,8 +26,11 @@ export const MAX_RELAY_BODY = Math.ceil((1024 * 1024) / 3) * 4 + 4;
 export const MAX_IN_FLIGHT = 8;
 // 'wasm-unsafe-eval' lets the app compile WebAssembly (sql.js and the like);
 // JavaScript eval stays blocked (owner OK, 2026-10-20).
+// img-src also allows https://tile.openstreetmap.org — the ONE tile host the
+// Maps recipe uses (part O, D13) — so Leaflet's OpenStreetMap tiles load in the
+// preview. Only images, and only that host; connect-src stays 'none'.
 const CSP =
-  "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+  "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob: https://tile.openstreetmap.org; font-src data:; connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 /**
  * Android apps' browser preview (Track 3): Flutter's web engine (CanvasKit,
  * WebAssembly) and its Roboto font come from Google's two Flutter CDNs, and

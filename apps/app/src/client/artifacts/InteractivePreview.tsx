@@ -336,6 +336,7 @@ export function InteractivePreview(props: {
           title="Your app preview"
           name="caddie-interactive-preview"
           sandbox="allow-scripts allow-forms"
+          allow="geolocation"
           referrerPolicy="no-referrer"
           src={loaded.url}
           srcDoc={loaded.document}
