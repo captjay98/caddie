@@ -249,9 +249,11 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	let rollbackId: string | undefined;
 	let evidenceRow: string | undefined;
 
-	/** Run a command through the injected runner, recording it. */
+	/** Run a command through the injected runner, recording it. Prints the
+	 * command first (item I). */
 	const run = (argv: readonly string[], opts?: RunOptions): RunResult => {
 		commands.push(argv);
+		log(`running: ${argv.join(' ')}`);
 		return deps.run(argv, opts);
 	};
 

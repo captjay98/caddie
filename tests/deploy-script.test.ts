@@ -541,3 +541,13 @@ describe('deploy.ts — item F: unknown DO baseline counts every tag as new', ()
 		expect(result.steps.at(-1)?.detail).toContain('unreadable');
 	});
 });
+
+describe('deploy.ts — item I: running: line before each command', () => {
+	test('every command the runner ran is echoed with a running: line', () => {
+		const h = makeHarness();
+		runDeploy(DEPLOY, h.deps);
+		const running = h.logs.filter((l) => l.startsWith('running: '));
+		expect(running.length).toBe(h.commands.length);
+		expect(running.some((l) => l.includes('wrangler deploy'))).toBe(true);
+	});
+});
