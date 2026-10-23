@@ -161,6 +161,13 @@ a {
 	color: var(--color-ink);
 	border: none;
 	border-radius: 8px;
+	/* A full touch target (>=44px) so every primary button is comfortably
+	   tappable; inline-flex centers the label now that min-height drives height. */
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4em;
 	padding: 0.45rem 0.9rem;
 	font-weight: 600;
 	cursor: pointer;
@@ -188,6 +195,12 @@ a.btn-ghost {
 	color: var(--color-bright);
 	border: 1px solid var(--color-line-soft);
 	border-radius: 8px;
+	/* Matches .btn-key: a >=44px touch target, label centered. */
+	min-height: 44px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.4em;
 	padding: 0.4rem 0.8rem;
 	font-weight: 600;
 	cursor: pointer;
@@ -6769,6 +6782,11 @@ body.conv-resizing * {
 		flex: 0 0 auto;
 		padding: 6px 12px;
 		border-radius: 999px;
+		/* A full 44px touch target on phones, where these pills are the way to
+		   each step's page. */
+		min-height: 44px;
+		display: inline-flex;
+		align-items: center;
 	}
 	.project-steps-compact ~ .project-steps .step-state {
 		display: none;
@@ -9537,7 +9555,7 @@ mark {
 .project-card-foot { margin:2px -18px -18px; padding:12px 18px; border-top:1px solid var(--color-line-soft); border-radius:0 0 13px 13px; background:var(--color-raised); gap:12px; }
 .project-card-foot .btn-key { min-height:38px; font-size:13px; padding:7px 14px; background:transparent; color:var(--color-action); border:1px solid color-mix(in srgb, var(--color-action) 45%, var(--color-line)); box-shadow:none; }
 .project-card-foot .btn-key:hover { background:color-mix(in srgb, var(--color-action) 10%, transparent); border-color:var(--color-action); }
-.project-back { flex:none; display:inline-grid; place-items:center; width:32px; height:32px; margin-left:-7px; color:var(--color-muted); text-decoration:none; border-radius:9px; }
+.project-back { flex:none; display:inline-grid; place-items:center; width:44px; height:44px; margin-left:-7px; color:var(--color-muted); text-decoration:none; border-radius:11px; }
 .project-back:hover { background:var(--color-raised); color:var(--color-bright); }
 .focused-project-page { gap:22px; }
 .focused-project-head { padding:0; border:0; background:none; gap:10px; }
@@ -10492,3 +10510,58 @@ mark {
 .approval-more {margin:12px 0 18px;font-size:13px;color:var(--color-muted)}
 .approval-more > summary {min-height:44px;align-content:center;cursor:pointer}
 .approval-more .state-detail {margin:8px 0;font-size:12px;line-height:1.6}
+
+/* ---------- Look-and-feel picker (planning/LooksPicker.tsx) ----------
+   Caddie's own chrome uses Caddie's tokens; each app PREVIEW is an iframe that
+   paints with ITS OWN theme, which is the point of the feature. The approved
+   mock lives at docs/reviews/2026-10-23-look-and-feel-picker. */
+.look-picker { margin-top: 4px; }
+.look-for { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 4px 0 0; font-size: 14px; color: var(--color-muted); }
+.look-for b { color: var(--color-bright); font-weight: 600; }
+.look-for .look-for-change { min-height: 44px; display: inline-flex; align-items: center; }
+
+.look-options { border: 0; margin: 20px 0 0; padding: 0; min-width: 0; }
+.look-track { position: relative; display: grid; grid-template-columns: repeat(var(--look-count, 3), minmax(0, 1fr)); gap: 22px 16px; }
+.look-switch { display: none; }
+.look-option { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid var(--color-line); border-radius: 16px; background: var(--color-panel); color: var(--color-bright); cursor: pointer; min-width: 0; }
+.look-option input { position: absolute; opacity: 0; pointer-events: none; }
+.look-option:has(input:checked) { border-color: var(--color-action); box-shadow: 0 0 0 1px var(--color-action); }
+.look-option:has(input:focus-visible) { outline: 2px solid var(--color-action); outline-offset: 3px; }
+.look-selected { display: none; position: absolute; top: -12px; right: 16px; z-index: 1; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; background: var(--color-action); color: var(--color-ink); font-size: 12px; font-weight: 700; }
+.look-selected svg { width: 14px; height: 14px; }
+.look-option:has(input:checked) .look-selected { display: inline-flex; }
+
+/* The app preview: a locked-down, script-free iframe painted in the look's own
+   theme; the mask fades its lower edge so it reads as a peek, not a cut-off. */
+.look-app { width: 100%; height: 400px; border: 1px solid var(--color-line-soft); border-radius: 12px; background: var(--color-raised);
+  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent); mask-image: linear-gradient(to bottom, #000 82%, transparent); }
+.look-app--empty { display: flex; align-items: center; justify-content: center; padding: 16px; color: var(--color-muted); font-size: 13px; text-align: center; }
+
+.look-text { display: grid; gap: 6px; padding: 0 4px 4px; }
+.look-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; font-size: 16px; font-weight: 650; color: var(--color-bright); }
+.look-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--color-line); border-radius: 999px; font-size: 12px; font-weight: 500; color: var(--color-muted); }
+.look-tag svg { width: 13px; height: 13px; }
+.look-why { margin: 0; font-size: 14px; line-height: 1.45; color: var(--color-muted); }
+.look-swatches { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.look-swatches i { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--color-line); }
+.look-swatches span { margin-left: 6px; font-size: 15px; color: var(--color-bright); }
+
+.look-next { margin-top: 24px; display: grid; gap: 14px; max-width: 640px; }
+.look-next label { display: grid; gap: 6px; font-size: 14px; font-weight: 600; }
+.look-next label span { font-weight: 400; color: var(--color-muted); }
+.look-next textarea { font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--color-line); background: var(--color-raised); color: var(--color-bright); resize: vertical; }
+.look-next .state-detail { margin: 0; }
+
+@media (max-width: 760px) {
+  .look-switch { display: flex; gap: 4px; margin: 16px 0 0; padding: 4px; border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-panel); }
+  .look-switch button { flex: 1; min-height: 44px; padding: 0 6px; border: 0; border-radius: 10px; background: transparent; color: var(--color-muted); font: inherit; font-size: 13px; font-weight: 600; }
+  .look-switch button[aria-pressed="true"] { background: var(--color-raised); color: var(--color-bright); box-shadow: inset 0 0 0 1px var(--color-action); }
+  .look-options { margin-top: 0; }
+  .look-track { display: flex; grid-template-columns: none; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; margin: 0 -16px; padding: 18px 16px 6px; scrollbar-width: none; }
+  .look-track::-webkit-scrollbar { display: none; }
+  .look-option { flex: 0 0 84%; scroll-snap-align: start; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .look-track { scroll-behavior: auto; }
+}

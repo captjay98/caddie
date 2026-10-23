@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useFlueAgent } from "@flue/react";
 import { Markdown } from "@caddie/ui/Markdown";
 import type { PlanDocRevision, ApprovalRecord } from "@caddie/contracts";
-import { splitDesignMocks, splitArchitectureBlock, parseAppTheme } from "@caddie/contracts";
+import { splitDesignMocks, splitArchitectureBlock, parseAppTheme, parseLooks } from "@caddie/contracts";
 import type { BuildWorkflow, WorkflowPhase } from "../../server/build-workflow.ts";
 import { fetchJson, postJson } from "../api.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
@@ -17,6 +17,7 @@ import { BuildProgress } from "../project/BuildProgress.tsx";
 import { ModuleProgress } from "../project/ModuleProgress.tsx";
 import { SavedFeatures } from "../project/FeatureChecklist.tsx";
 import { PlanReview } from "../planning/PlanReview.tsx";
+import { LooksPicker } from "../planning/LooksPicker.tsx";
 import { AndroidDownload } from "../project/AndroidDownload.tsx";
 import { AppKeys } from "../project/AppKeys.tsx";
 import { PublishApp } from "../project/PublishApp.tsx";
@@ -161,6 +162,24 @@ function ProjectWorkspace({
           ? cause.message
           : "Caddie could not save your decision.",
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+  // The LOOKS gate: choose a look -> design (the brief is written in that
+  // look), or ask for different looks -> back to the looks step. Server-owned
+  // dispatch, like the design decision, so the next step runs even if the
+  // browser closes.
+  async function decideLooks(body: { looksId: string; choice?: string; more?: boolean; note?: string }) {
+    setBusy(true);
+    setError(null);
+    try {
+      await postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow/looks-decision`, body);
+      setNote("");
+      chrome.refreshAll();
+      await state.refetch();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Caddie could not save your choice.");
     } finally {
       setBusy(false);
     }
@@ -389,6 +408,36 @@ function ProjectWorkspace({
             </>
           }
         />
+      ) : null}
+      {workflow.phase === "looks" ? (
+        <p className="state-detail">
+          Caddie is putting together a few looks for your app — different colours
+          and styles to choose from. You’ll pick one before the screens are
+          designed.
+        </p>
+      ) : null}
+      {workflow.phase === "looks-review" && state.data?.looks ? (
+        (() => {
+          const parsed = parseLooks(state.data.looks.body);
+          if (!parsed.ok)
+            return (
+              <p className="state-detail" role="status" data-testid="looks-unavailable">
+                Caddie is still preparing the looks. This will refresh on its own.
+              </p>
+            );
+          return (
+            <LooksPicker
+              set={parsed.set}
+              busy={busy}
+              onChoose={(lookId, lookNote) =>
+                void decideLooks({ looksId: state.data!.looks!.id, choice: lookId, note: lookNote || undefined })
+              }
+              onMore={(lookNote) =>
+                void decideLooks({ looksId: state.data!.looks!.id, more: true, note: lookNote || undefined })
+              }
+            />
+          );
+        })()
       ) : null}
       {workflow.phase === "design" ? (
         <p className="state-detail">

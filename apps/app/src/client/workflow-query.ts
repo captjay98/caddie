@@ -8,6 +8,9 @@ export interface WorkflowSnapshot {
  workflow: BuildWorkflow | null;
  plan: PlanDocRevision | null;
  approval: ApprovalRecord | null;
+ /** The looks proposal the owner is choosing from (its raw plan note), or null
+  * outside the look step. Parse its body with parseLooks to render the picker. */
+ looks?: PlanDocRevision | null;
  design: PlanDocRevision | null;
  designApproval: ApprovalRecord | null;
  previewHasServer?: boolean;
