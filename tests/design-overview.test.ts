@@ -182,6 +182,19 @@ describe('moduleBoardToProgress (screen 2 — parts side by side)', () => {
 		const board = moduleBoardToProgress(rows, bigBlock());
 		expect(board.map((m) => m.state)).toEqual(['joined', 'stopped']);
 	});
+
+	test('only a part that stopped or could not be joined offers Try again, and only to the person allowed to press it', () => {
+		const rows = [moduleRow('core', 'merged'), moduleRow('feed', 'not-merged', ['core']), moduleRow('money', 'stopped', ['core']), moduleRow('tasks', 'building', ['core'])];
+		// MUTATION: offer Try again on every part, and a joined or building part shows the button.
+		expect(moduleBoardToProgress(rows, bigBlock(), { canRetry: true }).map((m) => [m.id, m.canRetry ?? false])).toEqual([
+			['core', false],
+			['feed', true],
+			['money', true],
+			['tasks', false],
+		]);
+		// Someone else on the project sees the states but no button.
+		expect(moduleBoardToProgress(rows, bigBlock()).some((m) => m.canRetry)).toBe(false);
+	});
 });
 
 describe('spendStopFrom (screen 2 — the spending-limit stop)', () => {

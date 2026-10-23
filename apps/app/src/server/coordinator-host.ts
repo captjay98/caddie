@@ -81,6 +81,7 @@ import {
 } from "./build-features.ts";
 import { openWorkingCopy } from "./working-copy.ts";
 import { stopModule, failModule, openModuleWorkingCopy, type DispatchModuleBuilder } from "./modules.ts";
+import { moduleInstanceId, type ModuleRow } from "./module-slots.ts";
 import { bigBuildOutcome, bigBuildSeq, foundationModuleOf, isBigBlock, moduleFeatureMap, moduleOfFeature, partlyBuiltDetail, startAfterFoundation, type MissingReason } from "./big-build.ts";
 import { continueBigBuild, joinFinishedModule, partsSettledMessage, pointBuildSessionAt } from "./module-join.ts";
 import { runVerifiedInstall } from "./verified-install.ts";
@@ -414,6 +415,35 @@ export async function createCoordinatorContext(
     `Every feature of the "${part}" part passed. Call finish_module to join it into the app.`;
   /** A scope no repair issue belongs to: a join's checks are never paused by any part's spent tries. */
   const NEVER_PAUSED: RepairPauseScope = { featureIds: [] };
+  /**
+   * Big apps: after a Retry, wake each part that was building (or waiting to
+   * be joined) when the build stopped and has not moved since: its builder's
+   * turn ended at the stop. Keyed per Retry, so asking again is the same one
+   * delivery. A part started after the Retry is running and is left alone.
+   */
+  const wakeInterruptedParts = async (parts: { buildSeq: number; rows: readonly ModuleRow[] }) => {
+    const dispatch = hostDeps.dispatchModuleBuilder;
+    if (!dispatch || !bigBlock) return;
+    const resume = (
+      await env.DB.prepare('select "id", "createdAt" from "workflow_resumes" where "runId" = ? order by rowid desc limit 1')
+        .bind(runId)
+        .all<{ id: string; createdAt: string }>()
+    ).results?.[0];
+    if (!resume) return;
+    const features = await partFeatureMap(bigBlock);
+    for (const row of parts.rows) {
+      if (row.status !== "building" && row.status !== "passed") continue;
+      if (row.updatedAt >= resume.createdAt) continue;
+      await dispatch({
+        instanceId: moduleInstanceId(scope.projectId, parts.buildSeq, row.moduleId),
+        moduleId: row.moduleId,
+        buildSeq: parts.buildSeq,
+        features: features.get(row.moduleId) ?? [],
+        message: `The build was stopped and has now been started again with a fresh spending limit. Carry on where you left off with the "${row.moduleId}" part: call build_next_feature, and when every feature of the part has passed, call finish_module.`,
+        idempotencyKey: `wake:${resume.id}:${row.moduleId}`,
+      });
+    }
+  };
   /** The save point of the last passed feature in a row list (the foundation's, for a big build). */
   const lastSavePoint = (rows: BuildFeatureRow[]): string | null =>
     [...rows]
@@ -992,7 +1022,10 @@ export async function createCoordinatorContext(
             parts = await partsOutcome();
           }
         }
-        if (parts && !parts.done) return { done: false, waiting: true, next: PARTS_BUILDING_NEXT };
+        if (parts && !parts.done) {
+          await wakeInterruptedParts(parts);
+          return { done: false, waiting: true, next: PARTS_BUILDING_NEXT };
+        }
         if (parts && parts.missing.length > 0)
           return {
             done: true,
@@ -1184,12 +1217,23 @@ export async function createCoordinatorContext(
           },
           runChecks: async ({ attempt: key, features: covered }) => {
             const outcome = await runHostChecks("join", key, signal, undefined, { session, contractFeatures: covered });
-            return {
-              passed: outcome.passed,
-              failures: outcome.receipts
-                .filter((receipt) => !receipt.passed)
-                .map((receipt) => ({ check: receipt.check, output: `${receipt.stdout}\n${receipt.stderr}`.trim() })),
-            };
+            if (!outcome.passed)
+              return {
+                passed: false,
+                failures: outcome.receipts
+                  .filter((receipt) => !receipt.passed)
+                  .map((receipt) => ({ check: receipt.check, output: `${receipt.stdout}\n${receipt.stderr}`.trim() })),
+              };
+            // Part Q: "the server starting" — the joined app's server must start
+            // in the Workers runtime, as verify_build checks for the whole app.
+            if (env.LOADER) {
+              const { server } = await readBuiltServer(sandbox, sessionId, root);
+              if (server !== null) {
+                const startup = await checkServerStarts(env.LOADER, server);
+                if (!startup.ok) return { passed: false, failures: [{ check: "server-starts", output: startup.reason }] };
+              }
+            }
+            return { passed: true, failures: [] };
           },
           checkpoint: async () => (await sandbox.checkpoint(sessionId)).checkpointRef,
         };

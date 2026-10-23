@@ -41,9 +41,13 @@ import type { D1Database } from './auth.ts';
 import type { SnapshotReadPort } from './part-manifests.ts';
 import { mergeFinishedModule, type CheckFailure, type MergeDeps } from './integration.ts';
 import { getModule, listModules, moduleInstanceId, recordModuleAttempt, releaseSlot, setModuleStatus } from './module-slots.ts';
-import { startReadyModules, type DispatchModuleBuilder } from './modules.ts';
-import { bigBuildOutcome, foundationModuleOf } from './big-build.ts';
+import { retryModule, startReadyModules, type DispatchModuleBuilder } from './modules.ts';
+import { bigBuildOutcome, bigBuildSeq, foundationModuleOf, isBigBlock, moduleFeatureMap } from './big-build.ts';
 import { ScopeError } from './scope.ts';
+import { readWorkflow, workflowSnapshot } from './build-workflow.ts';
+import { listBuildFeatures } from './build-features.ts';
+import { lookupRunByConversation } from './runs.ts';
+import { getApprovedBlock } from './architecture-gate.ts';
 
 /** How many times a part is joined before it is "not joined" (plan part Q). */
 export const MAX_JOIN_TRIES = 2;
@@ -176,9 +180,20 @@ export async function continueBigBuild(
 	if (newest)
 		await startReadyModules(db, scope, { runId: input.runId, buildSeq: input.buildSeq, latestMergedSave: newest, dispatch: ports.dispatch, features: (m) => ports.features(m) });
 	const outcome = await bigBuildOutcome(db, projectId, input.buildSeq);
-	if (outcome.done)
-		await ports.notifyCoordinator?.({ key: `parts-settled:${input.runId}:${input.buildSeq}`, message: partsSettledMessage(outcome.missing) });
+	if (outcome.done) {
+		// Keyed by the settled board: two callers that see the same settled
+		// build send one turn, and a later settle (after a part's Try again) is
+		// a new message. Flue refuses a reused key with a different message.
+		const board = outcome.rows.map((r) => `${r.moduleId}:${r.status}`).join(',');
+		await ports.notifyCoordinator?.({ key: `parts-settled:${input.runId}:${input.buildSeq}:${await shortHash(board)}`, message: partsSettledMessage(outcome.missing) });
+	}
 	return { settled: outcome.done };
+}
+
+/** The first 12 hex characters of a SHA-256. */
+async function shortHash(text: string): Promise<string> {
+	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+	return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
 }
 
 /**
@@ -303,4 +318,68 @@ export async function joinFinishedModule(
 		return { joined: false, failures, triesLeft, next: retryText(failures, triesLeft) };
 	}
 	return { joined: false, final: true, reason: result.reason, next: FINAL_NEXT };
+}
+
+// --- Try again on one part (plan part P step 3) --------------------------------
+
+/**
+ * The person who started the build presses Try again on a part that stopped
+ * or could not be joined. That part goes back to pending with fresh tries and
+ * a fresh repair window, the build is building again (so Caddie checks the
+ * app once the part settles), and the part starts from the newest joined save
+ * point. Its builder continues in its own copy and conversation, so its
+ * earlier work and failures are still there. Idempotent on `key`.
+ */
+export async function retryPart(
+	db: D1Database,
+	scope: Scope,
+	input: { moduleId: unknown; key: unknown },
+	deps: { dispatchFor: ((conversationId: string) => DispatchModuleBuilder) | null },
+) {
+	if (typeof input.key !== 'string' || !/^[a-zA-Z0-9:_-]{8,160}$/.test(input.key))
+		throw new ScopeError(400, 'invalid_retry_key', 'An idempotent retry key is required.');
+	if (typeof input.moduleId !== 'string' || !/^[a-z][a-z0-9-]{0,47}$/.test(input.moduleId))
+		throw new ScopeError(400, 'invalid_part', 'Say which part to try again.');
+	const { key, moduleId } = input as { key: string; moduleId: string };
+	const projectId = scope.projectId;
+	const workflow = await readWorkflow(db, scope);
+	if (!workflow?.planId) throw new ScopeError(404, 'workflow_not_found', 'No build exists.');
+	const run = await lookupRunByConversation(db, workflow.conversationId);
+	if (run?.createdBy !== scope.actorId) throw new ScopeError(403, 'not_run_owner', 'Only the person who started this build can try a part again.');
+	const replay = (await db.prepare('select "id" from "workflow_resumes" where "projectId" = ? and "id" = ?').bind(projectId, key).all()).results ?? [];
+	if (replay.length > 0) return workflowSnapshot(db, scope);
+	if (workflow.phase !== 'ready' && workflow.phase !== 'building')
+		throw new ScopeError(
+			409,
+			'BUILD_NOT_SETTLED',
+			workflow.phase === 'blocked' ? 'This build is stopped. Press Retry on the build first.' : 'This app is not being built yet.',
+		);
+	const block = await getApprovedBlock(db, projectId);
+	if (!isBigBlock(block)) throw new ScopeError(409, 'NOT_A_BIG_BUILD', 'This app is not built in parts.');
+	const payer =
+		((await db.prepare('select "spendPayerId" from "build_workflows" where "projectId" = ?').bind(projectId).all<{ spendPayerId: string | null }>()).results?.[0]
+			?.spendPayerId ?? null);
+	const buildSeq = await bigBuildSeq(db, projectId, payer);
+	const row = buildSeq === null ? null : await getModule(db, projectId, buildSeq, moduleId);
+	if (buildSeq === null || !row) throw new ScopeError(404, 'NO_SUCH_PART', 'That part is not in this build.');
+	if (row.status !== 'stopped' && row.status !== 'not-merged')
+		throw new ScopeError(409, 'PART_NOT_STOPPED', 'Only a part that stopped or could not be joined can be tried again.');
+	const dispatch = deps.dispatchFor?.(workflow.conversationId);
+	if (!dispatch) throw new ScopeError(503, 'PARTS_UNAVAILABLE', "This app is built in parts, but Caddie can't start the part builders here.");
+
+	const stamp = new Date().toISOString();
+	await db.batch([
+		// A fresh repair window: the part's earlier failed tries don't count.
+		db
+			.prepare(
+				'insert or ignore into "workflow_resumes" ("id","projectId","runId","actorId","afterRoundRowId","createdAt") values (?,?,?,?,coalesce((select max(rowid) from "run_rounds" where "runId" = ?),0),?)',
+			)
+			.bind(key, projectId, workflow.runId, scope.actorId, workflow.runId, stamp),
+		db.prepare('update "build_workflows" set "phase" = \'building\', "detail" = null, "updatedAt" = ? where "projectId" = ? and "phase" in (\'ready\',\'building\')').bind(stamp, projectId),
+	]);
+	await retryModule(db, scope, { buildSeq, moduleId });
+	const features = moduleFeatureMap(block, (await listBuildFeatures(db, projectId, workflow.planId)).map((r) => r.featureId));
+	const newest = (await getModule(db, projectId, buildSeq, foundationModuleOf(block)))?.checkpointRef;
+	if (newest) await startReadyModules(db, scope, { runId: workflow.runId, buildSeq, latestMergedSave: newest, dispatch, features: (m) => features.get(m) ?? [] });
+	return workflowSnapshot(db, scope);
 }

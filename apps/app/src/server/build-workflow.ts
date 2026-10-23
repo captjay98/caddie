@@ -81,6 +81,9 @@ async function openBuildSpendPayer(
   // payer BEFORE they record any decision or consume a judge build start, so a
   // refusal leaves nothing half-done and the user can simply try again.
   const bigApps = Number((workflow as unknown as { bigApps?: number }).bigApps) === 1;
+  const previousPayer = opts.reset
+    ? ((await rows(db, "select spendPayerId from build_workflows where projectId = ?", scope.projectId))[0]?.["spendPayerId"] as string | null | undefined) ?? null
+    : null;
   const { payerId } = await openBuildPayer(db, {
     runId: workflow.runId,
     actorId: scope.actorId,
@@ -106,6 +109,21 @@ async function openBuildSpendPayer(
     await rows(db, "select spendPayerId from build_workflows where projectId = ?", scope.projectId)
   )[0]?.["spendPayerId"] as string | null | undefined;
   const effective = stored ?? payerId;
+  // Big apps (part P): a retried build keeps its parts — joined ones stay in
+  // the app, interrupted ones carry on — so they move to the new payer and its
+  // fresh limit. Left on the old payer, the coordinator would not find them
+  // and would start a fresh set of parts from the core, losing joined work.
+  if (opts.reset && previousPayer && effective && previousPayer !== effective) {
+    try {
+      await db
+        .prepare('update "build_modules" set "payerId" = ?, "updatedAt" = "updatedAt" where "projectId" = ? and "payerId" = ?')
+        .bind(effective, scope.projectId, previousPayer)
+        .run();
+    } catch (error) {
+      // A database without the module tables (an old local DB) has no parts.
+      if (!String(error).includes("no such table")) throw error;
+    }
+  }
   if (effective) registerBuildPayer(workflow.conversationId, effective);
   return effective ?? null;
 }

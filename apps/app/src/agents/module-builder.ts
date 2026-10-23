@@ -95,6 +95,7 @@ export function ModuleBuilder({ id }: AgentProps) {
         id: input.instanceId,
         message: input.message,
         initialData: { conversationId, moduleId: input.moduleId, buildSeq: input.buildSeq, features: [...input.features] },
+        ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
       });
     },
     notifyCoordinator: async ({ key, message }) => {

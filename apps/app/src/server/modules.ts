@@ -68,6 +68,8 @@ export type DispatchModuleBuilder = (input: {
 	buildSeq: number;
 	features: readonly string[];
 	message: string;
+	/** Names this delivery (Flue's idempotencyKey): a resend with the same key is the same one turn. */
+	idempotencyKey?: string;
 }) => Promise<void> | void;
 
 /** The message a ModuleBuilder dispatch carries (part P). Plain, deterministic. */

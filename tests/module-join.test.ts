@@ -238,7 +238,7 @@ describe('joining a finished part into the app (part P step 3)', () => {
 		expect(h.dispatched.map((d) => d.moduleId)).toEqual([]);
 		expect(await status(db, scope, 'money')).toBe('pending');
 		expect(h.notified.length).toBe(1);
-		expect(h.notified[0]!.key).toBe(`parts-settled:${RUN}:0`);
+		expect(h.notified[0]!.key).toMatch(new RegExp(`^parts-settled:${RUN}:0:[0-9a-f]{12}$`));
 		expect(h.notified[0]!.message).toContain('feed');
 		expect(h.notified[0]!.message).toContain('money');
 	});
@@ -421,6 +421,6 @@ describe('when a part stops (its tries are spent, or its builder reported a bloc
 		for (const id of ['p2', 'p3', 'p4', 'p5']) await setModuleStatus(s.db, s.scope.projectId, 0, id, 'merged', { checkpointRef: 'img-core' });
 		await stopModule(s.db, s.scope, { buildSeq: 0, moduleId: 'p1' });
 		expect(await continueBigBuild(s.db, s.scope, { runId: RUN, buildSeq: 0, block: fiveParts() }, s.ports)).toEqual({ settled: true });
-		expect(s.notified).toEqual([{ key: `parts-settled:${RUN}:0`, message: expect.stringContaining('p1 (stopped)') }]);
+		expect(s.notified).toEqual([{ key: expect.stringMatching(new RegExp(`^parts-settled:${RUN}:0:[0-9a-f]{12}$`)), message: expect.stringContaining('p1 (stopped)') }]);
 	});
 });

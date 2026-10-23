@@ -22,6 +22,7 @@ export function moduleBuilderDispatcher(conversationId: string): DispatchModuleB
       id: input.instanceId,
       message: input.message,
       initialData: { conversationId, moduleId: input.moduleId, buildSeq: input.buildSeq, features: [...input.features] },
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
     });
   };
 }

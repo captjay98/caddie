@@ -54,6 +54,7 @@ import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, ROLE_TOOL_POLICY } from "..
 import { resolveCoordinatorContext, resolveModuleBuilderContext } from "../apps/app/src/server/coordinator-host.ts";
 import { getModule, seedModules, takeSlot } from "../apps/app/src/server/module-slots.ts";
 import { ContreeClient } from "../apps/app/src/server/adapters/contree.ts";
+import { retryPart } from "../apps/app/src/server/module-join.ts";
 import { listAppSecrets, setAppSecret } from "../apps/app/src/server/app-secrets.ts";
 import { parseKeyring } from "../apps/app/src/server/secret-box.ts";
 import { makeRequestAppKey } from "../apps/app/src/agents/tools.ts";
@@ -2413,6 +2414,35 @@ describe("host-driven feature loop", () => {
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 
+  test("a join whose app server doesn't start on Cloudflare's runtime is red, with that reason for the part's builder", async () => {
+    // Part Q: the join checks include "the server starting". The Worker
+    // Loader is faked: the app's GET /api/health answers 500.
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      stub.setBehavior("bun run build", { stdout: "built", writes: { [`${p.root}/dist/main.js`]: "1", [`${p.root}/dist/server.js`]: "export default {}" } });
+      let loads = 0;
+      const LOADER = {
+        get: () => {
+          loads += 1;
+          return { getEntrypoint: () => ({ fetch: async () => new Response("boom: env.DB is undefined", { status: 500 }) }) };
+        },
+      };
+      const part = await resolveModuleBuilderContext({ ...env(w, stub), LOADER } as never, { conversationId: p.item.workflow.conversationId, moduleId: "structures", buildSeq: p.buildSeq, features: ["structures"] }, {
+        dispatchModuleBuilder: () => {},
+      });
+      const out = (await part.finishModuleBuild!("join-start")) as { joined: boolean; failures: Array<{ check: string; output: string }> };
+      // MUTATION: skip the server-start check in a join, and this part joins
+      // an app whose server can't start.
+      expect(out.joined).toBe(false);
+      expect(loads).toBe(1);
+      expect(out.failures).toEqual([{ check: "server-starts", output: expect.stringContaining("GET /api/health answered 500") }]);
+      expect(p.status("structures")).toBe("building");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
   test("a red join goes back to the part's builder and never counts toward any repair limit", async () => {
     const w = await world();
     const stub = bigStub();
@@ -2454,6 +2484,109 @@ describe("host-driven feature loop", () => {
     expect(((await host.finishFeature(featureId, `${moduleId}-1`)) as { passed: boolean }).passed).toBe(true);
     return host;
   }
+
+  test("S3 end to end: two parts build at the same time on their own copies, both join under the lock, and the app is verified", async () => {
+    // The production path through the REAL coordinator and module hosts; the
+    // "builders" are scripted (each writes its part's file in its own copy),
+    // and the sandbox is the local stub. LOCAL VERIFIED, SIMULATED builders.
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const item = await bigBuild(w);
+      const root = `/workspace/${item.scope.projectId}`;
+      stub.setBehavior("bun run build", builtFiles(root));
+      const started: Array<{ moduleId: string; buildSeq: number }> = [];
+      const notified: Array<{ key: string; message: string }> = [];
+      const deps = {
+        dispatchModuleBuilder: (input: { moduleId: string; buildSeq: number }) => void started.push(input),
+        notifyCoordinator: (input: { key: string; message: string }) => void notified.push(input),
+      };
+      const coordinator = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, deps);
+      await coordinator.buildNextFeature();
+      await coordinator.driver.writeFile({ sessionId: coordinator.sessionId, path: `${root}/src/server/core/farms.ts`, content: "core" });
+      await coordinator.finishFeature("farm-registry", "core-1");
+      expect(started.map((s) => s.moduleId)).toEqual(["structures", "money"]);
+      const buildSeq = started[0]!.buildSeq;
+
+      const spans: Record<string, { from: number; to: number }> = {};
+      const runPart = async (moduleId: string, featureId: string) => {
+        const host = await resolveModuleBuilderContext(env(w, stub), { conversationId: item.workflow.conversationId, moduleId, buildSeq, features: [featureId] }, deps);
+        const from = Date.now();
+        await host.buildNextFeature();
+        await host.driver.writeFile({ sessionId: host.sessionId, path: `${root}/src/server/${moduleId}/${featureId}.ts`, content: moduleId });
+        expect(((await host.finishFeature(featureId, `${moduleId}-1`)) as { passed: boolean }).passed).toBe(true);
+        const joined = (await host.finishModuleBuild!(`join-${moduleId}`)) as { joined: boolean; queued?: boolean };
+        spans[moduleId] = { from, to: Date.now() };
+        return joined;
+      };
+      const outcomes = await Promise.all([runPart("structures", "structures"), runPart("money", "sales")]);
+      // The two parts really worked at the same time (each started before the other finished).
+      expect(spans.structures!.from).toBeLessThan(spans.money!.to);
+      expect(spans.money!.from).toBeLessThan(spans.structures!.to);
+      // Each joined, or waited and was joined by the holder of the lock.
+      expect(outcomes.every((o) => o.joined || o.queued)).toBe(true);
+      const status = (moduleId: string) =>
+        (w.sqlite.query('select "status" from build_modules where "projectId" = ? and "moduleId" = ?').get(item.scope.projectId, moduleId) as { status: string }).status;
+      expect([status("structures"), status("money")]).toEqual(["merged", "merged"]);
+      expect(notified.length).toBe(1);
+
+      // The newest save point holds the core and both parts.
+      const newest = (await getModule(w.db, item.scope.projectId, buildSeq, "core"))!.checkpointRef!;
+      const inspect = new ContreeClient({ baseUrl: stub.url, apiToken: "local-feature-token", platformProjectId: "local-project" });
+      const read = async (path: string) => {
+        const bytes = await inspect.inspectDownload(newest, `${root}/${path}`);
+        return bytes === null ? null : new TextDecoder().decode(bytes);
+      };
+      expect(await read("src/server/core/farms.ts")).toBe("core");
+      expect(await read("src/server/structures/structures.ts")).toBe("structures");
+      expect(await read("src/server/money/sales.ts")).toBe("money");
+
+      // Caddie checks the joined app and it is ready.
+      const verifier = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, deps);
+      expect(await verifier.buildNextFeature()).toMatchObject({ done: true });
+      expect(((await verifier.verifyBuild("s3-verify")) as { passed: boolean }).passed).toBe(true);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("ready");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("Retry after a big build stops keeps its parts: joined ones stay joined, interrupted ones are woken under the new limit", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      stub.setBehavior("bun run build", builtFiles(p.root));
+      expect(await p.part.finishModuleBuild!("join-structures")).toMatchObject({ joined: true });
+      // The build stops (e.g. its spending limit) while money is still building.
+      await setWorkflowBlocker(w.db, p.item.scope, "This build reached its spending limit.");
+      const oldPayer = (w.sqlite.query('select "spendPayerId" from build_workflows where projectId = ?').get(p.item.scope.projectId) as { spendPayerId: string }).spendPayerId;
+      const boardRows = w.count("build_modules", `projectId='${p.item.scope.projectId}'`);
+      await retryWorkflow(w.db, p.item.scope, "retry-big-build-1");
+      const newPayer = (w.sqlite.query('select "spendPayerId" from build_workflows where projectId = ?').get(p.item.scope.projectId) as { spendPayerId: string }).spendPayerId;
+      expect(newPayer).not.toBe(oldPayer);
+      // The same parts carry on under the new payer (and so the new limit).
+      // MUTATION: leave the parts on the old payer, and the coordinator starts
+      // a fresh set of parts from the core, losing structures from the app.
+      expect(w.count("build_modules", `projectId='${p.item.scope.projectId}' and "payerId"='${newPayer}'`)).toBe(boardRows);
+
+      const woken: Array<{ moduleId: string; idempotencyKey?: string; message: string }> = [];
+      const coordinator = await resolveCoordinatorContext(env(w, stub), p.item.workflow.conversationId, {
+        dispatchModuleBuilder: (input: { moduleId: string; idempotencyKey?: string; message: string }) => void woken.push(input),
+      });
+      expect(await coordinator.buildNextFeature()).toMatchObject({ done: false, waiting: true });
+      expect(w.count("build_modules", `projectId='${p.item.scope.projectId}'`)).toBe(boardRows);
+      expect(p.status("structures")).toBe("merged");
+      // money's builder was interrupted: it is woken once per Retry (keyed),
+      // however often the coordinator asks. MUTATION: no wake, and money never moves.
+      await coordinator.buildNextFeature();
+      expect(woken.map((d) => [d.moduleId, d.idempotencyKey])).toEqual([
+        ["money", "wake:retry-big-build-1:money"],
+        ["money", "wake:retry-big-build-1:money"],
+      ]);
+      expect(woken[0]!.message).toContain("started again");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
 
   test("a big build waits for its parts: verify_build publishes nothing while a part is still building", async () => {
     const w = await world();
@@ -2550,6 +2683,48 @@ describe("host-driven feature loop", () => {
       const contractTest = await p.read(outputImage, "caddie/contract.test.ts");
       expect(contractTest).toContain('"scoped":true');
       expect(contractTest).not.toContain("billing_profiles");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("Try again on one missing part re-opens the build and starts only that part; a replay, a joined part and a stopped build are refused", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      stub.setBehavior("bun run build", builtFiles(p.root));
+      expect(await p.part.finishModuleBuild!("join-structures")).toMatchObject({ joined: true });
+      const money = await resolveModuleBuilderContext(env(w, stub), { conversationId: p.item.workflow.conversationId, moduleId: "money", buildSeq: p.buildSeq, features: ["sales"] }, {
+        dispatchModuleBuilder: () => {},
+        notifyCoordinator: (input: { key: string; message: string }) => void p.notified.push(input),
+      });
+      await money.buildNextFeature();
+      await money.blockBuild("The payment provider's test keys are missing.");
+      const coordinator = await resolveCoordinatorContext(env(w, stub), p.item.workflow.conversationId, { dispatchModuleBuilder: () => {} });
+      expect(((await coordinator.verifyBuild("partly-1")) as { passed: boolean }).passed).toBe(true);
+      expect((await readWorkflow(w.db, p.item.scope))?.phase).toBe("ready");
+
+      const dispatched: Array<{ moduleId: string; instanceId: string }> = [];
+      const dispatchFor = (conversationId: string) => {
+        expect(conversationId).toBe(p.item.workflow.conversationId);
+        return (input: { moduleId: string; instanceId: string }) => void dispatched.push(input);
+      };
+      // A joined part has nothing to try again.
+      await rejectsCode(retryPart(w.db, p.item.scope, { moduleId: "structures", key: "try-structures-1" }, { dispatchFor }), "PART_NOT_STOPPED");
+      // MUTATION: skip re-opening the build, and the coordinator is never asked
+      // to check the app again once money joins (the build stays "ready").
+      await retryPart(w.db, p.item.scope, { moduleId: "money", key: "try-money-1" }, { dispatchFor });
+      const workflow = await readWorkflow(w.db, p.item.scope);
+      expect(workflow?.phase).toBe("building");
+      expect(workflow?.detail).toBeNull();
+      expect(p.status("money")).toBe("building");
+      expect(dispatched.map((d) => [d.moduleId, d.instanceId])).toEqual([["money", `${p.item.scope.projectId}:${p.buildSeq}:money`]]);
+      // The same press again changes nothing.
+      await retryPart(w.db, p.item.scope, { moduleId: "money", key: "try-money-1" }, { dispatchFor });
+      expect(dispatched.length).toBe(1);
+      // While the whole build is stopped, a part can't be tried on its own.
+      await setWorkflowBlocker(w.db, p.item.scope, "Stopped.");
+      await rejectsCode(retryPart(w.db, p.item.scope, { moduleId: "money", key: "try-money-2" }, { dispatchFor }), "BUILD_NOT_SETTLED");
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 });
