@@ -290,10 +290,13 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		});
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/project?project=proj-a`);
+		await expect(page.getByTestId('project-chip-event')).toHaveCount(0);
+		await page.getByRole('button', {name:'About this project',exact:true}).click();
 		await expect(page.getByTestId('project-chip-event')).toHaveText('Nebius x NVIDIA Global AI Hackathon');
-		await expect(page.getByTestId('project-chip-event')).toHaveAttribute('target', '_blank');
+		await expect(page.getByTestId('project-chip-event').locator('a')).toHaveAttribute('target', '_blank');
 		await expect(page.getByTestId('project-chip-deadline')).toHaveText('Ends Oct 30 · 15 days left');
 		await expect(page.getByTestId('project-chip-eligibility')).toHaveText('You can enter');
+		await page.getByRole('button',{name:'Close about this project'}).click();
 		await expect(page.getByTestId('project-settings-gear')).toHaveText('Settings');
 		await expect(page.getByTestId('project-ask-caddie')).toHaveCount(0);
 		await expect(page.getByTestId('project-head-model')).toHaveCount(0);
@@ -424,6 +427,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		// The approve window fetches the real usage and states the cap.
 		await page.getByTestId('plan-approve-open').click();
 		await expect(page.getByTestId('approve-plan-window')).toBeVisible();
+		await page.getByTestId('approve-plan-more').locator('summary').click();
 		await expect(page.getByTestId('approve-plan-spend')).toContainText('$500');
 		await expect(page.getByTestId('approve-plan-spend')).toContainText('$25 used so far');
 
@@ -581,7 +585,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await page.getByTestId('project-build-resources').locator('summary').first().click();
 		await page.getByTestId('run-detail-toggle').click();
 		const details = page.getByTestId('run-details');
-		await expect(details).toContainText('Built with');
+		await expect(details.getByText('react-hono', {exact:true})).toBeHidden();
 		await expect(details.getByText('plan-r2')).toBeHidden();
 		await details.locator('summary', { hasText: 'For developers' }).click();
 		await expect(details.getByText('plan-r2')).toBeVisible();
@@ -618,7 +622,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await page.getByTestId('project-build-resources').locator('summary').first().click();
 
 		// Past builds are sentences, not "run 14" tokens.
-		await expect(page.getByTestId('run-row')).toContainText('A build ran');
+		await expect(page.getByTestId('run-row')).toContainText('Build request recorded');
 		await expect(page.getByTestId('run-row')).not.toContainText(/run \d+/);
 
 		// The Files tab shows the code viewer inline.

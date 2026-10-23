@@ -14,7 +14,7 @@ import { ModuleProgress } from './ModuleProgress.tsx';
  * host builds one feature at a time, so approving the plan approves this.
  * Plans without a list (approved before lists existed) render nothing.
  */
-export function PlanFeatureList(props: { body: string }): ReactElement | null {
+export function PlanFeatureList(props: { body: string; showChecks?: boolean }): ReactElement | null {
 	const parsed = parsePlanFeatures(props.body);
 	if (!parsed.ok) return null;
 	return (
@@ -24,11 +24,11 @@ export function PlanFeatureList(props: { body: string }): ReactElement | null {
 				{parsed.features.map((feature) => (
 					<li key={feature.id} className="plan-feature" data-testid={`plan-feature-${feature.id}`}>
 						<span className="plan-feature-title">{feature.title}</span>
-						<ul className="plan-feature-checks" aria-label={`How “${feature.title}” is checked`}>
+						{props.showChecks !== false ? <ul className="plan-feature-checks" aria-label={`How “${feature.title}” is checked`}>
 							{feature.doneWhen.map((check, i) => (
 								<li key={i}>{check}</li>
 							))}
-						</ul>
+						</ul> : null}
 					</li>
 				))}
 			</ol>
@@ -132,12 +132,13 @@ export function TryAgainButton(props: { projectId: string }): ReactElement | nul
  * back to on every finished feature that has later work after it. Rolling back
  * is two clicks: the first states exactly what will be undone.
  */
-export function BuildFeatureList(props: { projectId: string; features: readonly BuildFeatureView[] }): ReactElement {
+export function BuildFeatureList(props: { projectId: string; features: readonly BuildFeatureView[]; stale?: boolean }): ReactElement {
 	const queryClient = useQueryClient();
 	const [confirming, setConfirming] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const done = props.features.filter((f) => f.status === 'passed').length;
+	const nextPending = props.features.find((f) => f.status === 'pending')?.id;
 
 	const rollBack = async (feature: BuildFeatureView) => {
 		setBusy(true);
@@ -162,7 +163,7 @@ export function BuildFeatureList(props: { projectId: string; features: readonly 
 	return (
 		<section className="build-features" data-testid="build-features" aria-label="Features">
 			<h4 className="build-features-head">
-				Features · {done} of {props.features.length} done
+				What’s being built <span>{done} of {props.features.length} built and checked</span>
 			</h4>
 			<ol className="build-features-list">
 				{props.features.map((feature) => {
@@ -176,7 +177,8 @@ export function BuildFeatureList(props: { projectId: string; features: readonly 
 								<span className="build-feature-title">
 									{feature.position}. {feature.title}
 								</span>
-								<span className="build-feature-meta">{statusLine(feature)}</span>
+								<span className="build-feature-meta">{feature.status === 'passed' ? 'Built and checked' : feature.status === 'building' && props.stale ? 'Last reported: building' : feature.status === 'pending' ? feature.id === nextPending ? 'Next' : 'Waiting' : statusLine(feature)}</span>
+                                {feature.testsPassed !== null || feature.attempts > 0 ? <details className="build-feature-check-detail"><summary>Check details</summary><p>{statusLine(feature)}</p></details> : null}
 							</span>
 							{feature.canRollBack && confirming !== feature.id ? (
 								<button

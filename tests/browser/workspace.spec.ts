@@ -350,9 +350,9 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		// open that section to reach them (its details fold; Files is a tab).
 		await page.getByTestId('project-build-resources').locator('summary').first().click();
 		await expect(page.getByTestId('run-row')).toHaveCount(1);
-		await expect(page.getByTestId('run-row')).toContainText('react-hono');
+		await expect(page.getByTestId('run-row')).toContainText('Build request recorded');
 		await page.getByTestId('run-detail-toggle').click();
-		await expect(page.getByTestId('run-details')).toContainText('Built with');
+		await expect(page.getByTestId('run-details').getByText('react-hono', {exact:true})).toBeHidden();
 		// Raw record ids live in the developer fold inside the details.
 		await page.getByTestId('run-details').locator('summary', { hasText: 'For developers' }).click();
 		await expect(page.getByTestId('run-details')).toContainText('conv-01HZX');

@@ -1,3 +1,4 @@
+import { Mascot } from '@caddie/ui/Mascot';
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Icon } from '../icons.tsx';
@@ -299,7 +300,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string; 
 		<section aria-label="Submission package" className="submission-panel" data-testid="submission-package">
 			<div className="r-section-head">
 				<div>
-					<h2 className="ev-title">Submit</h2>
+					<div className="project-caddie-heading"><Mascot mood={detail?.confirmations.length ? 'done' : 'ready'} size={48} /><h2 className="ev-title">Prepare your submission</h2></div>
 					<p className="page-lede">
 						Caddie lists what the contest asks you to hand in and checks each item against the rules it
 						read. You submit on the contest site yourself — Caddie never submits for you.

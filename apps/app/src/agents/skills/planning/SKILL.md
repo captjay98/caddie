@@ -11,22 +11,25 @@ Turn an accepted brief into versioned scope, PRD and spec documents.
 
 - Read the project's existing plan notes first; you are revising, not inventing.
 - Every requirement cites the evidence it came from (claim id or source URL).
-- Scope: what one builder can ship in the stated hours, with the cut list explicit —
-  but cut breadth, never the one thing that makes the demo worth watching.
+- Scope: complete connected user journeys within the platform’s supported
+  execution, verified time and budget limits. Make any cut list explicit; the
+  user’s available hours describe participation, not Caddie’s coding capacity.
 - PRD: user-visible behavior only. Spec: interfaces, data, and acceptance checks.
 
-## Quality bar: plan a demo, not a CRUD app
+## Quality bar: a useful app with a convincing demonstration
 
-A complete PRD can still describe a toy. The plan is judged by what a judge can
-see working in three minutes, not by how many tables it names.
+A complete PRD must describe a useful app whose connected workflows actually
+work, not merely a collection of tables or attractive screens. For a contest,
+the demonstration highlights that value in three minutes.
 
 - Name ONE real integration the core value depends on (usually Caddie's AI via
   `c.env.CADDIE.ai`, called from `src/server.ts`) and make it do real work on
   real input. It is not decoration, and a mock may never carry it.
 - Mocks are allowed only where they do not carry the demo. A mock price feed,
   seed dataset or rule table may support a screen; it cannot be the product.
-- Every feature must move the demo forward. If a feature would not appear in the
-  three-minute path, cut it or explain in one line why it still matters.
+- Every feature must serve an approved user journey. Supporting workflows
+  still belong when they are necessary to complete that journey, even if they
+  do not appear in a three-minute demonstration.
 - Prefer one deep, working flow over five shallow screens. A judge remembers
   the moment the thing did something they did not expect, not the settings page.
 - The demo path must survive a skeptical judge: real input, a visible result,
@@ -35,6 +38,40 @@ see working in three minutes, not by how many tables it names.
   you were briefed on. Never edit history; append new revisions.
 - If a requirement conflicts with a pinned claim, surface the conflict instead
   of resolving it silently.
+
+## Plan for a person who has never coded
+
+The user describes a useful app; Caddie owns the implementation choices. Do not
+ask them to choose a database, API design, framework, specialist role, or test
+tool. Choose supported defaults from the project and platform, and record them
+in the technical specification. Do not treat the user's available hours as the
+number of coding hours Caddie has: those hours describe their participation.
+Use verified delivery constraints and platform limits when reducing scope.
+
+The default review must feel like a short note from Caddie, not a PRD dump.
+Write the overview in at most two short sentences, using ordinary words. Give
+journeys short names that explain the user's task, without implementation
+terms or editorial labels. Keep fields, endpoints, model tiers, individual test
+steps and detailed reasoning in the technical specification. State material
+exclusions and limitations plainly; do not hide a reduced capability in jargon.
+
+Before the technical specification, write these readable sections in the first
+saved PRD, with all meaningful choices already resolved:
+
+- **What your app will do:** concrete, connected user journeys and their results.
+- **Included in this version / left for later:** explicit boundaries. Do not
+  quietly replace a requested capability with a smaller or simulated one.
+- **Important limitations:** assumptions, unavailable integrations, offline
+  limits, and meaningful compromises. For example, text interpretation is not
+  photo analysis; call out that difference before asking for approval.
+- **How Caddie will check it works:** observable behavior, including saving,
+  reopening, permissions, errors and recovery where relevant.
+
+Ask a follow-up only when the missing answer materially changes the user's
+workflow, privacy, costs, or scope and cannot be safely defaulted. Bundle those
+necessary choices. Later questions should concern new requirements or genuine
+scope adjustments, not fill holes in the first plan. Keep the exact demo
+contract and feature block below; these readable sections do not replace them.
 
 ## A PRD is COMPREHENSIVE on the first pass — never drip-fed
 

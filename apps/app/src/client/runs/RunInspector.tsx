@@ -1,3 +1,4 @@
+import { buildSentence } from './run-status.ts';
 import { useState } from 'react';
 import type { ReactElement } from 'react';
 import { formatTimeAgo } from '@caddie/ui/time';
@@ -23,21 +24,6 @@ import { CopyableId } from '../copyable.tsx';
 
 export type RunStatus = 'recorded' | 'running' | 'completed' | 'failed' | 'cancelled';
 
-/** The past build as one sentence (§4). Statuses come from real data only. */
-function buildSentence(status: RunStatus, stackId: string, when: string): string {
-	switch (status) {
-		case 'running':
-			return `Building now on ${stackId}.`;
-		case 'completed':
-			return `A build finished on ${stackId} ${when}.`;
-		case 'failed':
-			return `A build stopped ${when} — the run was marked failed. Ask Caddie in the chat what happened.`;
-		case 'cancelled':
-			return `A build was cancelled ${when}.`;
-		default:
-			return `A build ran ${when} on ${stackId}.`;
-	}
-}
 
 function RunRow(props: {
 	runId: string;
@@ -55,7 +41,7 @@ function RunRow(props: {
 	return (
 		<div className="inspector-row" data-testid="run-row" data-status={props.status}>
 			<div className="row-main">
-				<span className="row-title">{buildSentence(props.status, props.stackId, when)}</span>
+				<span className="row-title">{buildSentence(props.status, when)}</span>
 				<button
 					type="button"
 					className="detail-toggle"
@@ -63,15 +49,12 @@ function RunRow(props: {
 					data-testid="run-detail-toggle"
 					onClick={() => setOpen((value) => !value)}
 				>
-					{open ? 'Hide details' : 'Details'}
+					{open ? 'Hide build record' : 'View build record'}
 				</button>
 			</div>
 			{open ? (
 				<div className="row-details run-details" data-testid="run-details">
-					<span className="run-fact">
-						<span className="fk">Built with</span>
-						<span className="fv">{props.stackId}</span>
-					</span>
+
 					<span className="run-fact">
 						<span className="fk">When</span>
 						<span className="fv">{when}</span>
@@ -82,6 +65,10 @@ function RunRow(props: {
 						onToggle={(event) => setDevOpen((event.target as HTMLDetailsElement).open)}
 					>
 						<summary className="kicker">For developers — record ids</summary>
+					<span className="run-fact">
+						<span className="fk">Build template</span>
+						<span className="fv">{props.stackId}</span>
+					</span>
 						{/* Every record id lives here, the plan's too (plan 3.5). */}
 						<span className="run-fact">
 							<span className="fk">plan</span>

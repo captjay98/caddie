@@ -1,3 +1,4 @@
+import { Mascot } from "@caddie/ui/Mascot";
 import { resumeWorkflow } from "../conversation/workflow-dispatch.ts";
 import { useState } from "react";
 import * as v from "valibot";
@@ -11,7 +12,6 @@ import { postJson } from "../api.ts";
 import { useProjectExperience } from "../queries.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
 import { PageSkeleton, StatePanel, failureKind } from "../states.tsx";
-import { CopyableId } from "../copyable.tsx";
 import type { WorkflowPhase } from "../workspace/project-status.ts";
 
 /**
@@ -162,7 +162,7 @@ export function DesignReview(props: {
     setBusy(decision);
     setDecisionError(null);
     try {
-      let payload: { approval: { id: string; status: string } };
+      let payload: { approval: { id: string; status: string } | null };
       if (props.autoBuild) {
         payload = await postJson(
           `/api/projects/${encodeURIComponent(props.projectId)}/workflow/decision`,
@@ -188,6 +188,7 @@ export function DesignReview(props: {
         );
         // A dated decision record — the newest is the live outcome; older
         // ones stay on screen instead of being overwritten.
+        if (!payload.approval) throw new Error('The decision could not be confirmed. Refresh the plan before trying again.');
         if (decision === "rejected") {
           try {
             await postJson(
@@ -207,13 +208,9 @@ export function DesignReview(props: {
       }
       props.onDecisionSaved?.();
       setWindowOpen(null);
-      setRecords((prev) => [
-        {
-          decision,
-          revisionId: revision.id,
-          status: payload.approval.status,
-          at: new Date().toISOString(),
-        },
+      const savedApproval = payload.approval;
+      if (savedApproval) setRecords((prev) => [
+        { decision, revisionId: revision.id, status: savedApproval.status, at: new Date().toISOString() },
         ...prev,
       ]);
       if (props.autoBuild) {
@@ -316,61 +313,9 @@ export function DesignReview(props: {
     requestAnimationFrame(() => document.querySelector('[data-testid="design-review"]')?.scrollIntoView({ block: "start" }));
   };
 
-  return (
-    <div
-      data-testid="design-review"
-      className="design-review-panel settings-stack"
-    >
-      {/* v2 §4 order: the "Is this OK?" decision bar comes FIRST, then the
-			    plan itself. Both decisions act through the real approvals API. */}
-      {viewed ? (
-        <section className="plan-decision plan-viewing" data-testid="plan-viewing">
-          <div className="plan-decision-head">
-            <h2 className="ev-title">Plan version {viewed.revision}</h2>
-            <span className="badge" data-tone="neutral">Replaced</span>
-          </div>
-          <p className="page-lede">
-            Written {formatTimeAgo(viewed.createdAt)}. Version {latest.revision} replaced it — this one is kept to read.
-          </p>
-          <div className="row-actions">
-            <button type="button" className="btn-key" data-testid="plan-viewing-back" onClick={() => showVersion(null)}>
-              Back to version {latest.revision}
-            </button>
-          </div>
-        </section>
-      ) : (
-      <section
-        className="card-surface settings-panel plan-decision"
-        data-testid="design-review-decision-bar"
-      >
-        {/* One title row (owner 2026-10-23): "Plan version N" with the ask —
-            or, once decided, the outcome — on the right. A plain "Ready for
-            review" pill is not repeated here: the Plan step above already
-            says it, so a badge appears only for an unusual state. */}
-        <div className="plan-decision-head">
-          <h2 className="ev-title">Plan version {latest.revision}</h2>
-          {latestRecord ? (
-            <span
-              className="badge"
-              data-tone={follow ? follow.tone : approved ? "ok" : "danger"}
-              data-testid="design-review-outcome"
-              data-decision={latestRecord.decision}
-            >
-              {follow ? follow.badge : approved ? "Plan approved" : "Changes requested"}{" "}
-              · version {latest.revision}
-            </span>
-          ) : approvalNote ? (
-            <span className="badge" data-tone="warn" data-testid="design-review-status">
-              {approvalNote}
-            </span>
-          ) : (
-            <p className="kicker plan-decision-ask" data-tone="action">
-              IS THIS OK?
-            </p>
-          )}
-        </div>
+  const decisionControls = <>
         <p className="page-lede" data-testid="approve-meaning">
-          {APPROVE_MEANING}
+          {props.autoBuild && !latestRecord ? 'Next, Caddie prepares the screens for you to review. Building starts only after you approve the design.' : APPROVE_MEANING}
         </p>
         <div className="row-actions">
           {follow ? (
@@ -400,7 +345,7 @@ export function DesignReview(props: {
                 disabled={decisionsDisabled}
                 onClick={() => openWindow("approve")}
               >
-                {props.autoBuild ? "Approve and build" : "Approve plan"}
+                Approve plan
               </button>
               <button
                 type="button"
@@ -414,6 +359,99 @@ export function DesignReview(props: {
             </>
           ) : null}
         </div>
+  </>;
+
+  const versionHistory = props.planRevisions.length > 1 ? (
+        <section id="earlier" data-testid="design-review-earlier">
+          <h3>
+            Earlier versions
+            <span className="fold-count">{props.planRevisions.length - 1}</span>
+          </h3>
+          <ul className="fold-list">
+            {props.planRevisions.slice(1).map((revision) => (
+              <li
+                className="fold-row"
+                data-testid="design-review-row"
+                data-latest="false"
+                key={revision.id}
+              >
+                <span className="fold-row-main">
+                  <span className="fold-row-title">Version {revision.revision}</span>
+                  <span className="fold-row-meta">Written {formatTimeAgo(revision.createdAt)} · replaced</span>
+                </span>
+                {revision.body.trim() ? (
+                  <button
+                    type="button"
+                    className="btn-ghost fold-row-action"
+                    data-testid={`earlier-version-view-${revision.revision}`}
+                    disabled={viewing === revision.revision}
+                    onClick={() => showVersion(revision.revision)}
+                  >
+                    {viewing === revision.revision ? "Showing" : "View"}
+                  </button>
+                ) : (
+                  <span className="fold-row-meta">No saved text</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+  ) : null;
+
+  return (
+    <div
+      data-testid="design-review"
+      className="design-review-panel settings-stack plan-review-surface"
+    >
+      {/* The version/status header leads. Decision controls follow the readable
+          review; both decisions still use the revision-bound approvals API. */}
+      {viewed ? (
+        <section className="plan-decision plan-viewing" data-testid="plan-viewing">
+          <div className="plan-decision-head">
+            <h2 className="ev-title">Plan version {viewed.revision}</h2>
+            <span className="badge" data-tone="neutral">Replaced</span>
+          </div>
+          <p className="page-lede">
+            Written {formatTimeAgo(viewed.createdAt)}. Version {latest.revision} replaced it — this one is kept to read.
+          </p>
+          <div className="row-actions">
+            <button type="button" className="btn-key" data-testid="plan-viewing-back" onClick={() => showVersion(null)}>
+              Back to version {latest.revision}
+            </button>
+          </div>
+        </section>
+      ) : (
+      <section
+        className="card-surface settings-panel plan-decision"
+        data-testid="design-review-decision-bar"
+      >
+        {/* One title row (owner 2026-10-23): "Plan version N" with the ask —
+            or, once decided, the outcome — on the right. A plain "Ready for
+            review" pill is not repeated here: the Plan step above already
+            says it, so a badge appears only for an unusual state. */}
+        <div className="plan-decision-head">
+          <div className="project-caddie-heading"><Mascot mood={approved ? "done" : "needs"} size={48} /><h2 className="ev-title">Plan version {latest.revision}</h2></div>
+          {latestRecord ? (
+            <span
+              className="badge"
+              data-tone={follow ? follow.tone : approved ? "ok" : "danger"}
+              data-testid="design-review-outcome"
+              data-decision={latestRecord.decision}
+            >
+              {follow ? follow.badge : approved ? "Plan approved" : "Changes requested"}{" "}
+              · version {latest.revision}
+            </span>
+          ) : approvalNote ? (
+            <span className="badge" data-tone="warn" data-testid="design-review-status">
+              {approvalNote}
+            </span>
+          ) : (
+            <p className="kicker plan-decision-ask" data-tone="action">
+              IS THIS OK?
+            </p>
+          )}
+        </div>
+
       </section>
       )}
 
@@ -422,7 +460,7 @@ export function DesignReview(props: {
           screens, its parts (big app), payments and emails, and the architect
           review's findings. The shell passes it in (HowYourAppWorks reads the
           shared experience projection); absent for a non-team-mode project. */}
-      {props.howItWorks ?? null}
+      {/* Architecture detail is available inside the full-plan view. */}
 
       {props.approvalError ? (
         <StatePanel
@@ -456,10 +494,11 @@ export function DesignReview(props: {
               Approve plan version {latest.revision}?
             </h3>
             <p className="state-detail">
-              Your approval covers building this version in a private workspace.
-              Publishing, merging code, and destructive database changes need
-              separate approval.
+              {props.autoBuild ? 'Next, Caddie prepares the screens for you to review.' : 'This records your approval of this plan.'}
             </p>
+            <details className="approval-more" data-testid="approve-plan-more">
+              <summary>More details</summary>
+              <p className="state-detail">Publishing, merging code, and destructive database changes need separate approval.</p>
             <p className="state-detail" data-testid="approve-plan-spend">
               {capLoading
                 ? "Checking your spending limit…"
@@ -467,6 +506,7 @@ export function DesignReview(props: {
                   ? `Your configured spending limit is ${spendCap.limit}${spendCap.settled ? ` (${spendCap.settled} used so far)` : ""}.`
                   : "No spending limit is configured. This decision approves the plan; it does not set a budget."}
             </p>
+            </details>
             {decisionError ? (
               <div
                 role="alert"
@@ -487,11 +527,7 @@ export function DesignReview(props: {
                   void decide("approved", latest);
                 }}
               >
-                {busy === "approved"
-                  ? "Starting…"
-                  : props.autoBuild
-                    ? "Approve and build"
-                    : "Approve plan"}
+                {busy === "approved" ? "Approving…" : "Approve plan"}
               </button>
               <button
                 type="button"
@@ -595,7 +631,7 @@ export function DesignReview(props: {
           {viewed.body.trim() === "" ? (
             <p className="state-detail">This version has no saved text.</p>
           ) : (
-            <PlanReview body={viewed.body} projectName={props.projectName} />
+            <PlanReview body={viewed.body} projectName={props.projectName} revisionHash={viewed.bodyHash} history={versionHistory} />
           )}
         </div>
       ) : (
@@ -611,59 +647,23 @@ export function DesignReview(props: {
           <p className="state-detail">This revision carries no plan text.</p>
         ) : (
           <div className="plan-body" data-testid="plan-body-content">
-            <PlanReview body={latest.body} projectName={props.projectName} />
+            <PlanReview body={latest.body} projectName={props.projectName} revisionHash={latest.bodyHash} context={props.howItWorks} history={versionHistory} decision={!latestRecord ? decisionControls : undefined} />
           </div>
         )}
-        <details className="ev-devdetail plan-devhash">
-          <summary className="plan-devhash-summary">For developers — exact revision hash</summary>
-          <div className="ev-field">
-            <span className="fk">revision hash</span>
-            <CopyableId value={latest.bodyHash} label="revision hash" />
-          </div>
-        </details>
+
       </details>
       )}
+
+      {!viewed && latestRecord ? <section className="plan-decision-footer" data-testid="plan-decision-actions">
+        <h3>Your recorded decision</h3>
+        {decisionControls}
+      </section> : null}
 
       {/* Earlier versions (§4 anchor #earlier): one fold row like the others,
           a flat list inside. "View" swaps the version into the plan's place
           (with a way back) instead of nesting a second plan in the list.
           Hidden when there is nothing earlier (owner steering, 2026-10-15). */}
-      {props.planRevisions.length > 1 ? (
-        <details className="fold" id="earlier" data-testid="design-review-earlier" open={viewing !== null ? true : undefined}>
-          <summary>
-            Earlier versions
-            <span className="fold-count">{props.planRevisions.length - 1}</span>
-          </summary>
-          <ul className="fold-list">
-            {props.planRevisions.slice(1).map((revision) => (
-              <li
-                className="fold-row"
-                data-testid="design-review-row"
-                data-latest="false"
-                key={revision.id}
-              >
-                <span className="fold-row-main">
-                  <span className="fold-row-title">Version {revision.revision}</span>
-                  <span className="fold-row-meta">Written {formatTimeAgo(revision.createdAt)} · replaced</span>
-                </span>
-                {revision.body.trim() ? (
-                  <button
-                    type="button"
-                    className="btn-ghost fold-row-action"
-                    data-testid={`earlier-version-view-${revision.revision}`}
-                    disabled={viewing === revision.revision}
-                    onClick={() => showVersion(revision.revision)}
-                  >
-                    {viewing === revision.revision ? "Showing" : "View"}
-                  </button>
-                ) : (
-                  <span className="fold-row-meta">No saved text</span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
+
 
       {records.length > 0 ? (
         <details

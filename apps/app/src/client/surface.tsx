@@ -1,3 +1,4 @@
+import { Mascot } from '@caddie/ui/Mascot';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
@@ -794,9 +795,10 @@ function FocusedProjectHome({ projectId }: { projectId: string }): ReactElement 
 	// where the project stands, above the four steps (the tappable step bar
 	// below). From the shared ProjectExperience — the same truth as the Projects
 	// card and the Now panel — so every surface tells one story.
+	const reviewingPlan = phase === 'review';
 	const overview = parsed?.success && parsed.output.version > 0 ? projectCardFromExperience(parsed.output) : null;
 	return <>
-		<ProjectTabs current={step} />
+		<ProjectTabs current={step} context={reviewingPlan ? <ProjectSupportingDetails projectId={projectId} /> : null} />
 		{overview && phase !== 'review' && phase !== 'design-review' ? (
 			<p className="project-overview-summary" data-testid="project-overview-summary" data-tone={overview.tone}>
 				{overview.working ? <span className="project-overview-live" aria-hidden="true" /> : null}
@@ -804,10 +806,10 @@ function FocusedProjectHome({ projectId }: { projectId: string }): ReactElement 
 			</p>
 		) : null}
 		<div className="focused-project-content" data-testid="focused-project-home" data-step={step}>
-			{workflow.data?.workflow || workflow.data?.importPreview ? <ProjectWorkflow projectId={projectId} presentation="workspace" />
-				: <section className="focused-project-empty"><h2>What would you like to build?</h2><p className="page-lede">Tell Caddie what this project should do. Your plan appears here before anything is built.</p><button type="button" className="btn-key" onClick={() => chrome.openProject(projectId, true)}>Continue with Caddie</button></section>}
+			{reviewingPlan ? <DesignReviewBody projectId={projectId} /> : workflow.data?.workflow || workflow.data?.importPreview ? <ProjectWorkflow projectId={projectId} presentation="workspace" />
+				: <section className="focused-project-empty project-caddie-empty"><Mascot mood="ready" size={56} /><div><h2>What would you like to build?</h2><p className="page-lede">Tell Caddie what this project should do. Your plan appears here before anything is built.</p><button type="button" className="btn-key" onClick={() => chrome.openProject(projectId, true)}>Continue with Caddie</button></div></section>}
 		</div>
-		<ProjectSupportingDetails projectId={projectId} />
+		{!reviewingPlan ? <ProjectSupportingDetails projectId={projectId} /> : null}
 	</>;
 }
 
@@ -845,12 +847,13 @@ function onCardRoute(card: DecisionCardType, _projectId: string): { to: string; 
 // --- PLAN (design gate) ----------------------------------------------------------
 
 export function DesignReviewPage(): ReactElement {
+	const chrome = useWorkspaceChrome();
 	return (
 		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col focused-project-page">
-					<ProjectTabs current="plan" />
-					<ProjectGate skeleton={{ page: 'plan', label: 'Reading your plan…' }}>{(projectId) => <><div className="focused-project-content"><DesignReviewBody projectId={projectId} /></div><ProjectSupportingDetails projectId={projectId} /></>}</ProjectGate>
+					<ProjectTabs current="plan" context={chrome.selectedProject ? <ProjectSupportingDetails projectId={chrome.selectedProject.id} /> : null} />
+					<ProjectGate skeleton={{ page: 'plan', label: 'Reading your plan…' }}>{(projectId) => <div className="focused-project-content"><DesignReviewBody projectId={projectId} /></div>}</ProjectGate>
 				</div>
 			</div>
 		</>
@@ -968,10 +971,13 @@ function RunsBody(props: { projectId: string }): ReactElement {
 			    the project home show it (plan 3.5). It once followed this browser's
 			    chat connection, so a paused build said nothing here. */}
 			{beforeBuild ? (
-				<div className="focused-project-content"><section className="focused-project-empty" data-testid="build-not-started">
-					<h2>No build yet</h2>
-					<p className="state-detail">Caddie starts building once you approve the plan.</p>
-					<button type="button" className="btn-key" onClick={() => chrome.goProjectTab('/design-review', { project: props.projectId })}>Go to the Plan step</button>
+				<div className="focused-project-content"><section className="focused-project-empty project-caddie-empty" data-testid="build-not-started">
+                    <Mascot mood="needs" size={56} />
+                    <div>
+                      <h2>Let’s get ready to build</h2>
+                      <p className="state-detail">First, review the plan with Caddie. You’ll see what your app will do before you approve the build.</p>
+                      <button type="button" className="btn-key" onClick={() => chrome.goProjectTab('/design-review', { project: props.projectId })}>Go to Plan</button>
+                    </div>
 				</section></div>
 			) : (
 				<div className="focused-project-content"><ProjectWorkflow projectId={props.projectId} presentation="workspace" /></div>
@@ -1269,22 +1275,23 @@ function CheckBody(props: { projectId: string; openScore: boolean; focusClaimTyp
 		<div className="settings-stack">
 			<div className="focused-project-content" data-testid="project-app-checks">
 				{hasApp ? (
-					<ProjectWorkflow projectId={props.projectId} presentation="workspace" />
+                    <><div className="project-step-guide project-caddie-heading"><Mascot mood="ready" size={48} /><div><h2>Try and check your app</h2><p className="state-detail">Try the main tasks yourself, then review what Caddie has checked.</p></div></div><ProjectWorkflow projectId={props.projectId} presentation="workspace" /></>
 				) : workflow.isPending ? (
 					<p className="state-detail">Reading the latest build…</p>
 				) : workflow.error ? (
 					<StatePanel compact kind={failureKind(workflow.error)} title="Couldn’t load the build." detail={readableFailure(workflow.error)} onRetry={() => void workflow.refetch()} />
 				) : preBuild ? (
-					<section className="focused-project-empty" data-testid="check-not-yet">
-						<h2>Nothing to try yet</h2>
+					<section className="focused-project-empty project-caddie-empty" data-testid="check-not-yet">
+                        <Mascot mood="needs" size={56} /><div>
+						<h2>We’ll check your app here</h2>
 						<p className="state-detail">Caddie checks your app here once it’s built. Approve the plan first.</p>
-						<button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/design-review', { project: props.projectId })}>Go to the Plan step</button>
+						<button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/design-review', { project: props.projectId })}>Go to Plan</button></div>
 					</section>
 				) : (
-					<section>
+					<section className="focused-project-empty project-caddie-empty"><Mascot mood="needs" size={56} /><div>
 						<h2>Try and check your app</h2>
 						<p className="state-detail">The app and its checks appear here after the build.</p>
-						<button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/runs', { project: props.projectId })}>Open Build</button>
+						<button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/runs', { project: props.projectId })}>Open Build</button></div>
 					</section>
 				)}
 			</div>

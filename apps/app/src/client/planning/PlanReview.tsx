@@ -1,168 +1,268 @@
-import type { ReactElement, ReactNode } from "react";
+import { useId, useState, type ReactElement, type ReactNode } from "react";
+import { Mascot } from "@caddie/ui/Mascot";
 import { Markdown } from "@caddie/ui/Markdown";
 import { splitFeatureBlock, parsePlanFeatures } from "@caddie/contracts";
 import { PlanFeatureList } from "../project/FeatureChecklist.tsx";
+import { ProjectDialog } from "../project/ProjectDialog.tsx";
+import { CopyableId } from "../copyable.tsx";
+import {
+  parsePlanSections,
+  planSectionGroup,
+  embeddedPlanCaveats,
+  planOverview,
+  planJourneys,
+  planDecisionWarnings,
+  type PlanSection,
+} from "./plan-sections.ts";
+export { parsePlanSections } from "./plan-sections.ts";
 
-/**
- * PlanReview — the ONE structured, scannable presentation of a plan that is
- * ready for review, shared by both entry points (DesignReviewBody at
- * /design-review and ProjectWorkspace's review phase at /project) so clicking
- * "Review plan" and clicking the project name land on identical content.
- *
- * It owns only the PRESENTATION of the plan body. Each caller keeps its own
- * data fetching and its real approve/reject logic and passes those controls in
- * as the `decision` node, which is rendered FIRST (the owner: lead with the
- * decision, then what a non-technical user cares about — what Caddie will
- * build — and keep the technical detail one tap away).
- *
- * The PRD body is markdown whose `##` section headings (Overview, Goals,
- * Non-goals, Data model, API surface, …) become collapsible cards:
- *   - Overview and Goals open by default;
- *   - a PROMOTED accent card "What Caddie will build" (the feature checklist)
- *     sits above the reference set;
- *   - every remaining section folds under a "Reference" subheading.
- * Sections are parsed from `splitFeatureBlock(body).display` — the prose a
- * person reads, with the machine-readable feature block removed (the feature
- * list renders that).
- */
-
-/** A `##` section of the PRD prose: its heading and the markdown beneath it. */
-interface PlanSection {
-  heading: string;
-  body: string;
-}
-
-/** The prose before the first `##` (keeps the `# H1` and any lead paragraph). */
-interface ParsedPlan {
-  intro: string;
-  sections: PlanSection[];
-}
-
-/** Section headings shown open by default (matched case-insensitively). */
-const OPEN_SECTIONS = new Set(["overview", "goals"]);
-
-/** Same name ignoring case, spacing and punctuation ("Farmhand" = "farmhand."). */
-function sameName(a: string, b: string): boolean {
-  const norm = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-  return norm(a) !== "" && norm(a) === norm(b);
-}
-
-/**
- * Split PRD prose into the lead (before the first `##`) and its `##` sections.
- * `#` (H1) and `###`+ stay inside whatever section contains them, so only the
- * top-level `##` headings become cards.
- */
-export function parsePlanSections(display: string): ParsedPlan {
-  const lines = display.split("\n");
-  const sections: PlanSection[] = [];
-  const introLines: string[] = [];
-  let current: { heading: string; lines: string[] } | null = null;
-  for (const line of lines) {
-    const match = /^##[ \t]+(.+?)[ \t]*#*\s*$/.exec(line);
-    if (match && !line.startsWith("###")) {
-      if (current) sections.push({ heading: current.heading, body: current.lines.join("\n").trim() });
-      current = { heading: match[1]!.trim(), lines: [] };
-    } else if (current) {
-      current.lines.push(line);
-    } else {
-      introLines.push(line);
-    }
-  }
-  if (current) sections.push({ heading: current.heading, body: current.lines.join("\n").trim() });
-  return { intro: introLines.join("\n").trim(), sections };
-}
-
-/** One collapsible `##` section as a card. */
-function SectionCard(props: { heading: string; body: string; open: boolean }): ReactElement {
+function SectionText({ section }: { section: PlanSection }) {
   return (
-    <details className="plan-review-section" open={props.open}>
-      <summary className="plan-review-section-head">{props.heading}</summary>
-      <div className="plan-review-section-body">
-        <Markdown text={props.body} />
-      </div>
-    </details>
+    <section className="plan-review-source">
+      <h3>{section.heading}</h3>
+      <Markdown text={section.body} />
+    </section>
   );
 }
+const TABS = ["scope", "checks", "technical"] as const;
+type DetailTab = (typeof TABS)[number];
+const LABELS: Record<DetailTab, string> = {
+  scope: "Scope",
+  checks: "Checks",
+  technical: "Technical specification",
+};
 
+/** A short decision surface, with one optional place to inspect the full plan. */
 export function PlanReview(props: {
-  /** The full PRD body (with the feature block); the feature list reads it. */
   body: string;
-  /** The approve/reject controls from the caller, rendered first. Optional:
-   *  a caller that keeps its decision bar as a separate section omits this. */
   decision?: ReactNode;
-  /** Plan / project name shown on the title line. */
   title?: string;
-  /** Plan revision number, shown as "· plan version N" when known. */
   version?: number;
-  /** The project's name: a plan `# Title` that only repeats it is not shown. */
   projectName?: string;
+  revisionHash?: string;
+  context?: ReactNode;
+  history?: ReactNode;
 }): ReactElement {
   const { display } = splitFeatureBlock(props.body);
   const { intro, sections } = parsePlanSections(display);
   const features = parsePlanFeatures(props.body);
-  const featureCount = features.ok ? features.features.length : 0;
-
-  // Overview + Goals lead (open); everything else is reference (collapsed).
-  const open: PlanSection[] = [];
-  const reference: PlanSection[] = [];
-  for (const section of sections) {
-    (OPEN_SECTIONS.has(section.heading.toLowerCase()) ? open : reference).push(section);
-  }
-  // A plan with no `##` sections (e.g. a one-line brief) still shows its body.
-  // The plan's own `# Title` is dropped when it only repeats the project's
-  // name: the page header already shows it, and a lone "Farmhand" card pushed
-  // the plan down (owner 2026-10-23). A different title ("Minimal Todo app"
-  // for project "Todoer") says something, so it stays — as a plain heading.
-  const h1 = /^#[ \t]+([^\n]*)\n?/.exec(intro);
-  const repeatsName = Boolean(h1 && props.projectName && sameName(h1[1]!, props.projectName));
-  const lead = (repeatsName ? intro.slice(h1![0].length) : intro).trim();
-  const hasIntro = lead.length > 0;
-
+  const grouped = (group: ReturnType<typeof planSectionGroup>) =>
+    sections.filter((section) => planSectionGroup(section.heading) === group);
+  const overview = planOverview(intro, sections);
+  const journeys = planJourneys(sections);
+  const warnings = planDecisionWarnings(sections);
+  const caveats = embeddedPlanCaveats(sections);
+  const [exploring, setExploring] = useState(false);
+  const [tab, setTab] = useState<DetailTab>("scope");
+  const tabId = useId();
+  const rows = journeys.length
+    ? journeys.map((journey) => journey.heading)
+    : features.ok
+      ? features.features.slice(0, 4).map((feature) => feature.title)
+      : [];
   return (
-    <div className="plan-review">
-      {props.decision ? <div className="plan-review-decision">{props.decision}</div> : null}
-
+    <div className="plan-review plan-review--guided plan-review--minimal">
       {props.title ? (
         <p className="plan-review-title" data-testid="plan-review-title">
           {props.title}
-          {typeof props.version === "number" ? (
-            <span className="plan-review-version"> · plan version {props.version}</span>
+          {props.version ? (
+            <span className="plan-review-version">
+              {" "}
+              · plan version {props.version}
+            </span>
           ) : null}
         </p>
       ) : null}
-
-      {hasIntro ? (
-        <div className="plan-review-lead" data-plan-intro="">
-          <Markdown text={lead} />
-        </div>
-      ) : null}
-
-      {open.map((section) => (
-        <SectionCard key={section.heading} heading={section.heading} body={section.body} open />
-      ))}
-
-      {/* PROMOTED: what a non-technical person actually cares about — the
-          feature list in a prominent accent-bordered card, above the reference
-          detail. PlanFeatureList self-nulls for a plan with no feature block. */}
-      {featureCount > 0 ? (
-        <section className="plan-review-build" data-testid="plan-review-build">
-          <span className="plan-review-build-count" aria-hidden="true">
-            {featureCount} {featureCount === 1 ? "feature" : "features"}
-          </span>
-          <PlanFeatureList body={props.body} />
+      <section className="plan-review-note" data-testid="plan-outcomes">
+        <h3>What your app will do</h3>
+        {overview ? (
+          <p className="plan-review-overview">{overview}</p>
+        ) : (
+          <p className="state-detail">
+            Your plan is ready to review. Explore it below to see the full
+            scope.
+          </p>
+        )}
+        {rows.length ? (
+          <ul className="plan-journey-rows">
+            {rows.map((row, index) => (
+              <li key={index}>{row}</li>
+            ))}
+          </ul>
+        ) : null}
+      </section>
+      {warnings.length ? (
+        <section data-testid="plan-before-approval">
+          <h3 className="plan-caveat-title">Before you approve</h3>
+          <ul className="plan-decision-warnings">
+            {warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
         </section>
-      ) : (
-        <PlanFeatureList body={props.body} />
-      )}
-
-      {reference.length > 0 ? (
-        <div className="plan-review-reference" data-testid="plan-review-reference">
-          <p className="plan-review-reference-head">Technical detail</p>
-          {reference.map((section) => (
-            <SectionCard key={section.heading} heading={section.heading} body={section.body} open={false} />
+      ) : null}
+      {props.decision ? (
+        <section className="plan-review-decision">
+          <div className="project-caddie-heading plan-review-guide">
+            <Mascot mood="needs" size={48} />
+            <h3>Does this plan look right?</h3>
+          </div>
+          {props.decision}
+        </section>
+      ) : null}
+      <button
+        type="button"
+        className="plan-explore-link"
+        onClick={() => {
+          setTab("scope");
+          setExploring(true);
+        }}
+      >
+        Explore the full plan <span aria-hidden="true">↗</span>
+      </button>
+      <ProjectDialog
+        open={exploring}
+        onClose={() => setExploring(false)}
+        title="Explore the full plan"
+        wide
+      >
+        <div
+          className="plan-detail-tabs"
+          role="tablist"
+          aria-label="Full plan sections"
+          onKeyDown={(event) => {
+            const index = TABS.indexOf(tab);
+            const next =
+              event.key === "ArrowRight"
+                ? (index + 1) % TABS.length
+                : event.key === "ArrowLeft"
+                  ? (index + TABS.length - 1) % TABS.length
+                  : event.key === "Home"
+                    ? 0
+                    : event.key === "End"
+                      ? TABS.length - 1
+                      : null;
+            if (next === null) return;
+            event.preventDefault();
+            setTab(TABS[next]!);
+            event.currentTarget
+              .querySelectorAll<HTMLButtonElement>('[role="tab"]')
+              [next]?.focus();
+          }}
+        >
+          {TABS.map((item) => (
+            <button
+              key={item}
+              type="button"
+              role="tab"
+              id={`${tabId}-${item}`}
+              aria-selected={tab === item}
+              aria-controls={`${tabId}-panel`}
+              tabIndex={tab === item ? 0 : -1}
+              onClick={() => setTab(item)}
+            >
+              {LABELS[item]}
+            </button>
           ))}
         </div>
-      ) : null}
+        <div
+          className="plan-detail-content"
+          role="tabpanel"
+          id={`${tabId}-panel`}
+          aria-labelledby={`${tabId}-${tab}`}
+          tabIndex={0}
+        >
+          {tab === "scope" ? (
+            <>
+              <h3>What’s included</h3>
+              {features.ok ? (
+                <PlanFeatureList body={props.body} showChecks={false} />
+              ) : (
+                grouped("outcomes").map((section, index) => (
+                  <SectionText key={index} section={section} />
+                ))
+              )}
+              {journeys.map((section, index) => (
+                <SectionText key={`journey-${index}`} section={section} />
+              ))}
+              <section data-testid="plan-scope">
+                <h3>What’s left for later</h3>
+                {grouped("scope").length ? (
+                  grouped("scope").map((section, index) => (
+                    <SectionText key={index} section={section} />
+                  ))
+                ) : (
+                  <p className="state-detail">
+                    This plan does not yet separate what’s included from what’s
+                    left for later.
+                  </p>
+                )}
+              </section>
+              <section data-testid="plan-limitations">
+                <h3>Assumptions and limitations</h3>
+                {grouped("limitations").map((section, index) => (
+                  <SectionText key={index} section={section} />
+                ))}
+                {caveats.map((line, index) => (
+                  <Markdown key={index} text={line} />
+                ))}
+                {!grouped("limitations").length && !caveats.length ? (
+                  <p className="state-detail">
+                    No separate limitations or assumptions were recorded. That
+                    does not mean there are none.
+                  </p>
+                ) : null}
+              </section>
+              {grouped("other").map((section, index) => (
+                <SectionText key={index} section={section} />
+              ))}
+              {props.context}
+            </>
+          ) : tab === "checks" ? (
+            <section data-testid="plan-checks">
+              <h3>How Caddie will check it works</h3>
+              {features.ok ? (
+                <ul className="plan-review-acceptance">
+                  {features.features.map((feature) => (
+                    <li key={feature.id}>
+                      <strong>{feature.title}</strong>
+                      <ul>
+                        {feature.doneWhen.map((check, index) => (
+                          <li key={index}>{check}</li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {grouped("checks").map((section, index) => (
+                <SectionText key={index} section={section} />
+              ))}
+              {!features.ok && !grouped("checks").length ? (
+                <p className="state-detail">
+                  This plan does not yet state the checks that will demonstrate
+                  it works.
+                </p>
+              ) : null}
+            </section>
+          ) : (
+            <section data-testid="plan-review-reference">
+              <h3>Technical specification</h3>
+              <Markdown text={display} />
+              {props.revisionHash ? (
+                <div className="plan-revision-hash">
+                  <span>Exact revision</span>
+                  <CopyableId
+                    value={props.revisionHash}
+                    label="revision hash"
+                  />
+                </div>
+              ) : null}
+              {props.history}
+            </section>
+          )}
+        </div>
+      </ProjectDialog>
     </div>
   );
 }
