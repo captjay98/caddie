@@ -416,6 +416,22 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 		detail: newDoTags.length > 0 ? `new DO tag(s): ${newDoTags.join(', ')} (accepted)` : `no new DO tag since ${lastCommit ? lastCommit.slice(0, 12) : 'unknown'}`,
 	});
 
+	// --- Rollback-handle guard (item D) --------------------------------------
+	// The rollback handle is the live version id parsed from `deployments list`.
+	// With --yes, deploying without it means a failed smoke has no rollback
+	// target — so STOP before the first remote write, having changed nothing.
+	// In a rehearsal there is no write to protect, so only warn.
+	if (!rollbackId) {
+		if (options.yes) {
+			return stop({
+				name: 'rollback-handle',
+				ok: false,
+				detail: 'could not parse the live version id from `deployments list`: nothing was changed. Check `bunx wrangler deployments list` by hand before deploying.',
+			});
+		}
+		log('    WARN: could not parse the live version id from `deployments list` — a real deploy would stop here; check `bunx wrangler deployments list` by hand');
+	}
+
 	// --- REHEARSAL boundary: without --yes, print the plan and STOP ----------
 	if (!options.yes) {
 		const host = productionHost(authored) ?? '(no host)';

@@ -442,3 +442,25 @@ describe('deploy.ts — item C: every d1 execute carries --config wrangler.jsonc
 		for (const c of executes) expect(c).toContain('--config wrangler.jsonc');
 	});
 });
+
+describe('deploy.ts — item D: rollback handle must be parseable before a write', () => {
+	test('with --yes, an unparseable live version id STOPS before any remote write', () => {
+		const h = makeHarness({ responses: { 'deployments list': ok('Created: now\n(no version id here)\n') } });
+		const result = runDeploy(DEPLOY, h.deps);
+		expect(result.ok).toBe(false);
+		expect(result.steps.at(-1)?.name).toBe('rollback-handle');
+		expect(result.wroteRemote).toBe(false);
+		expect(joinAll(h.commands).some((c) => c.includes('d1 migrations apply'))).toBe(false);
+		expect(joinAll(h.commands).some((c) => /\bwrangler deploy\b/.test(c) && !c.includes('--dry-run'))).toBe(false);
+		expect(result.steps.at(-1)?.detail).toContain('nothing was changed');
+		expect(result.steps.at(-1)?.detail).toContain('deployments list');
+	});
+
+	test('in a rehearsal, an unparseable live version id only WARNs (no write to protect)', () => {
+		const h = makeHarness({ responses: { 'deployments list': ok('Created: now\n(no version id here)\n') } });
+		const result = runDeploy(REHEARSAL, h.deps);
+		expect(result.ok).toBe(true);
+		expect(result.wroteRemote).toBe(false);
+		expect(h.logs.some((l) => l.includes('WARN') && l.includes('deployments list'))).toBe(true);
+	});
+});
