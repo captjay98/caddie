@@ -162,6 +162,21 @@ export function parsePendingMigrations(output: string): string[] {
 	return names;
 }
 
+/**
+ * Migration names already applied on the remote, read from
+ * `d1 execute ... select name from d1_migrations`. Each row's `name` column is
+ * a migration filename (e.g. `0001_product.sql`); wrangler prints the result as
+ * a bordered table, JSON, or loose rows, so we capture every filename-shaped
+ * token anywhere in the output.
+ */
+export function parseAppliedMigrations(output: string): string[] {
+	const names = new Set<string>();
+	for (const match of output.matchAll(/\b(\d{4}_[A-Za-z0-9_.-]+\.sql)\b/g)) {
+		names.add(match[1]!);
+	}
+	return [...names];
+}
+
 /** The production route hostname from the authored or built config. */
 export function productionHost(config: WranglerConfig): string | null {
 	const routes = config.env?.production?.routes ?? config.routes ?? [];
@@ -337,13 +352,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	record({ name: 'dry-run', ok: true, command: [WRANGLER, APP, 'deploy', '--dry-run'], detail: `lists ${expectedBindings.join(', ')} and DO classes ${doClasses.join(', ')}` });
 
 	// --- Step 6: remote READS (always safe) ----------------------------------
-	const migrationsListArgv = [WRANGLER, APP, 'd1', 'migrations', 'list', 'caddie', '--remote', '--config', 'wrangler.jsonc', '--env', 'production'];
-	const migList = run(migrationsListArgv, { cwd: appDir });
-	if (migList.exitCode !== 0) {
-		return stop({ name: 'migrations-list', ok: false, command: migrationsListArgv, detail: `exit ${migList.exitCode}` });
-	}
-	const pending = parsePendingMigrations(migList.stdout);
-	// Drift: a pending remote migration that is not in apps/app/migrations.
+	// Local migration filenames — the source of truth the remote must not drift from.
 	const localMigrations = new Set<string>();
 	const migrationsDir = join(appDir, 'migrations');
 	if (fileExists(migrationsDir)) {
@@ -353,10 +362,29 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 			/* ignore */
 		}
 	}
-	const drift = pending.filter((name) => !localMigrations.has(name));
-	if (drift.length > 0) {
-		return stop({ name: 'migration-drift', ok: false, command: migrationsListArgv, detail: `remote has migration(s) not in apps/app/migrations: ${drift.join(', ')} — refusing` });
+
+	// Drift check (item B): `d1 migrations list` prints only LOCAL files not yet
+	// applied, so it can never reveal a remote-ahead-of-repo migration. Read the
+	// names actually applied on the remote from the d1_migrations table instead.
+	const appliedArgv = [WRANGLER, APP, 'd1', 'execute', 'caddie', '--remote', '--config', 'wrangler.jsonc', '--env', 'production', '--command', 'select name from d1_migrations'];
+	const applied = run(appliedArgv, { cwd: appDir });
+	if (applied.exitCode !== 0) {
+		return stop({ name: 'migrations-applied', ok: false, command: appliedArgv, detail: `exit ${applied.exitCode}` });
 	}
+	const appliedRemote = parseAppliedMigrations(applied.stdout);
+	const drift = appliedRemote.filter((name) => !localMigrations.has(name));
+	if (drift.length > 0) {
+		return stop({ name: 'migration-drift', ok: false, command: appliedArgv, detail: `remote has migration(s) not in apps/app/migrations: ${drift.join(', ')} — refusing` });
+	}
+	record({ name: 'migrations-applied', ok: true, command: appliedArgv, detail: `${appliedRemote.length} applied remotely; none ahead of apps/app/migrations` });
+
+	// The pending list is still printed, for the operator's eyes.
+	const migrationsListArgv = [WRANGLER, APP, 'd1', 'migrations', 'list', 'caddie', '--remote', '--config', 'wrangler.jsonc', '--env', 'production'];
+	const migList = run(migrationsListArgv, { cwd: appDir });
+	if (migList.exitCode !== 0) {
+		return stop({ name: 'migrations-list', ok: false, command: migrationsListArgv, detail: `exit ${migList.exitCode}` });
+	}
+	const pending = parsePendingMigrations(migList.stdout);
 	record({ name: 'migrations-list', ok: true, command: migrationsListArgv, detail: pending.length > 0 ? `pending: ${pending.join(', ')}` : 'no pending migrations' });
 
 	const deploymentsArgv = [WRANGLER, APP, 'deployments', 'list'];

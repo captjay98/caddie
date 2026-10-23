@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
 	builtBindings,
 	lastDeployedCommit,
+	parseAppliedMigrations,
 	parseLatestDeploymentId,
 	parsePendingMigrations,
 	parseVersionId,
@@ -152,6 +153,7 @@ function makeHarness(over: HarnessOverrides = {}): Harness {
 		else if (joined === 'bun run build') base = ok('compose-assets: composed\n');
 		else if (joined.includes('deploy-preflight.ts')) base = ok('[PASS] config\n[WARN] values: reused keys\ndeploy-preflight: 18 PASS, 2 WARN, 0 FAIL\n');
 		else if (joined.includes('deploy --dry-run')) base = ok(DRY_RUN_OK);
+		else if (joined.includes('d1 execute') && joined.includes('d1_migrations')) base = ok('name\n0001_a.sql\n0002_b.sql\n');
 		else if (joined.includes('d1 migrations list')) base = ok(MIGRATIONS_LIST_NONE);
 		else if (joined.includes('deployments list')) base = ok(DEPLOYMENTS_LIST);
 		else if (joined.includes('d1 migrations apply')) base = ok('Migrations applied\n');
@@ -318,8 +320,8 @@ describe('deploy.ts — stops at first failure', () => {
 		expect(result.ok).toBe(false);
 		expect(result.steps.at(-1)?.name).toBe('smoke');
 		expect(h.logs.some((l) => l.includes(`rollback ${ROLLBACK_ID}`))).toBe(true);
-		// the switch report never ran after the failure
-		expect(joinAll(h.commands).some((c) => c.includes('d1 execute'))).toBe(false);
+		// the switch report (platform_switches) never ran after the failure
+		expect(joinAll(h.commands).some((c) => c.includes('platform_switches'))).toBe(false);
 	});
 });
 
@@ -364,15 +366,24 @@ describe('deploy.ts — the flag & drift rules', () => {
 		expect(accepted.logs.some((l) => l.includes('rollback') && l.toLowerCase().includes('refused'))).toBe(true);
 	});
 
-	test('drift — a remote pending migration not in apps/app/migrations is refused', () => {
+	test('drift — a remote APPLIED migration not in apps/app/migrations is refused (item B)', () => {
 		const h = makeHarness({
-			responses: { 'd1 migrations list': ok('Migrations to be applied:\n│ 9999_surprise.sql │\n') },
+			responses: { 'select name from d1_migrations': ok('name\n0001_a.sql\n9999_surprise.sql\n') },
 			localMigrations: ['0001_a.sql'],
 		});
 		const result = runDeploy(DEPLOY, h.deps);
 		expect(result.ok).toBe(false);
 		expect(result.steps.at(-1)?.name).toBe('migration-drift');
+		expect(joinAll(h.commands).some((c) => c.includes('select name from d1_migrations'))).toBe(true);
 		expect(joinAll(h.commands).some((c) => c.includes('d1 migrations apply'))).toBe(false);
+	});
+
+	test('no drift when every applied-remote migration is present locally (item B)', () => {
+		const h = makeHarness({
+			responses: { 'select name from d1_migrations': ok('name\n0001_a.sql\n0002_b.sql\n') },
+			localMigrations: ['0001_a.sql', '0002_b.sql', '0003_c.sql'],
+		});
+		expect(runDeploy(DEPLOY, h.deps).ok).toBe(true);
 	});
 });
 
@@ -410,5 +421,14 @@ describe('deploy.ts — item A: listDir dep (no real filesystem read)', () => {
 		const result = runDeploy(DEPLOY, deps);
 		expect(result.ok).toBe(true);
 		expect(seen.some((p) => p.endsWith('apps/app/migrations'))).toBe(true);
+	});
+});
+
+describe('deploy.ts — item B: parseAppliedMigrations', () => {
+	test('reads applied names from a d1_migrations result in table, loose and JSON shapes', () => {
+		expect(parseAppliedMigrations('name\n0001_a.sql\n0002_b.sql\n')).toEqual(['0001_a.sql', '0002_b.sql']);
+		expect(parseAppliedMigrations('│ name │\n│ 0040_team_mode.sql │\n')).toEqual(['0040_team_mode.sql']);
+		expect(parseAppliedMigrations('[{"name":"0001_a.sql"},{"name":"0002_b.sql"}]')).toEqual(['0001_a.sql', '0002_b.sql']);
+		expect(parseAppliedMigrations('no rows')).toEqual([]);
 	});
 });
