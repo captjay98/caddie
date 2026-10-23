@@ -74,10 +74,52 @@ function featureIds(block: ArchitectureBlock): Set<string> {
 	return new Set(block.routes.map((r) => r.feature));
 }
 
-export function checkArchitecture(block: ArchitectureBlock, options: { kind: ArchitectureKind }): ArchitectureIssue[] {
+/**
+ * Which test-mode features Caddie can run for this app (parts J, K, L, N).
+ * Payments and uploads come with the project's app features; emails (K's host
+ * side) and scheduled jobs (N) aren't built yet (lane 10), so they are refused
+ * for every app until they land. Flip them to `appFeatures` then.
+ */
+export interface AvailableFeatures {
+	readonly payments: boolean;
+	readonly files: boolean;
+	readonly emails: boolean;
+	readonly jobs: boolean;
+}
+
+export function availableFeatures(appFeatures: boolean): AvailableFeatures {
+	return { payments: appFeatures, files: appFeatures, emails: false, jobs: false };
+}
+
+export function checkArchitecture(
+	block: ArchitectureBlock,
+	options: { kind: ArchitectureKind; available?: AvailableFeatures },
+): ArchitectureIssue[] {
 	const issues: ArchitectureIssue[] = [];
 	const add = (rule: string, path: string, message: string) => issues.push({ rule, path, message });
 	const { kind } = options;
+
+	// --- test-mode features Caddie can run for this app (J, K, L, N) ---------
+	// Checked only when the caller says what is available (the design gate
+	// passes the project's app features). Refusing here makes the plan drop a
+	// feature Caddie can't run yet, instead of building it and failing the
+	// test-mode contract check three times.
+	const available = options.available;
+	if (available) {
+		const hasFileField = block.tables.some((table) => table.fields.some((field) => field.type === 'file'));
+		if (block.payments && !available.payments) {
+			add('feature.payments', 'payments', "Taking payments isn't available for this app yet. Remove it from the plan.");
+		}
+		if (hasFileField && !available.files) {
+			add('feature.files', 'tables', "Photo and file uploads aren't available for this app yet. Remove them from the plan.");
+		}
+		if (block.emails.length > 0 && !available.emails) {
+			add('feature.emails', 'emails', "Sending emails isn't available yet. Remove them from the plan.");
+		}
+		if (block.jobs.length > 0 && !available.jobs) {
+			add('feature.jobs', 'jobs', "Scheduled jobs aren't available yet. Remove them from the plan.");
+		}
+	}
 
 	const moduleIds = new Set(block.modules.map((m) => m.id));
 	const tableByName = new Map(block.tables.map((t) => [t.name, t]));
@@ -390,7 +432,7 @@ export type DesignGateResult =
  */
 export function evaluateDesignGate(
 	designBody: string,
-	options: { kind: ArchitectureKind; reviews: ArchitectureReviewRound[] },
+	options: { kind: ArchitectureKind; reviews: ArchitectureReviewRound[]; available?: AvailableFeatures },
 ): DesignGateResult {
 	const parsed = parseArchitectureBlock(designBody);
 	if (!parsed.ok) {
@@ -400,7 +442,7 @@ export function evaluateDesignGate(
 			messages: ['The design does not yet describe how the app works. Caddie must add the "How your app works" block before this can be approved.'],
 		};
 	}
-	const issues = checkArchitecture(parsed.block, { kind: options.kind });
+	const issues = checkArchitecture(parsed.block, { kind: options.kind, ...(options.available ? { available: options.available } : {}) });
 	if (issues.length > 0) {
 		return { ok: false, reason: 'rules', messages: issues.map((i) => i.message) };
 	}

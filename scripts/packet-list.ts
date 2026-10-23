@@ -407,6 +407,11 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// (SVG bar/line/donut, no new library, screen-reader table) and
 			// caddie/poll.ts (usePolling, pausing while the tab is hidden).
 			'tests/kit-files.test.ts',
+			// Lead wiring for J and L: the generated payments/upload files reach
+			// apps that declare them (app features only), stay protected, the
+			// builders are told how to mount them, and the plan gate refuses
+			// test-mode features the project can't run (emails/jobs until lane 10).
+			'tests/app-feature-files.test.ts',
 		],
 		browser: ['tests/browser/brief.spec.ts'],
 		live: [],
