@@ -999,7 +999,7 @@ ${
     let t2Id: unknown = null;
     if (META.teamCreate) {
       const t2 = await req(META.teamCreate.path.replace(/:[a-zA-Z]+/g, "x"), { method: META.teamCreate.method, headers: jsonHeaders(bHeaders), body: JSON.stringify(META.teamCreate.body) }, env);
-      expect([200, 201]).toContain(t2.status);
+      expect([200, 201], "B starting their own team T2 failed: " + t2.status).toContain(t2.status);
       t2Id = ((await t2.json()) as Row)["id"];
       await seedMember(env, t2Id, b.id, META.creatorRole!);
       // Step 8 opens B's screens with B's own team T2 as the current team.
@@ -1060,8 +1060,9 @@ ${
       }
     }
     if (META.teamList && t2Id !== null) {
-      const bList = await req(META.teamList.path.replace(/:[a-zA-Z]+/g, "x"), { method: META.teamList.method, headers: bHeaders }, env);
-      expect(bList.status).toBe(200);
+      // A team list under a team path (/api/teams/:teamId/…) is read as B's own team T2.
+      const bList = await req(path(META.teamList.path, t2Id), { method: META.teamList.method, headers: bHeaders }, env);
+      expect(bList.status, "B cannot list B's own teams: " + bList.status).toBe(200);
       const rows = (await bList.json()) as Row[];
       const ids = rows.map((r) => String(r["id"]));
       expect(ids.includes(String(t2Id)), "B's own team T2 is missing from B's team list").toBe(true);
