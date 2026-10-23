@@ -59,6 +59,10 @@ Before the technical specification, write these readable sections in the first
 saved PRD, with all meaningful choices already resolved:
 
 - **What your app will do:** concrete, connected user journeys and their results.
+- **Who uses it and where:** one plain line naming the audience and the setting
+  they use it in (a farmer in bright sun on a phone; an accountant at a desk).
+  Keep it short and readable — it is what the design step uses to choose the
+  app's look, so it must be honest about who and where.
 - **Included in this version / left for later:** explicit boundaries. Do not
   quietly replace a requested capability with a smaller or simulated one.
 - **Important limitations:** assumptions, unavailable integrations, offline

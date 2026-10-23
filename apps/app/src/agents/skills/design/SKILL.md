@@ -13,6 +13,19 @@ approves something they can SEE, not only read.
 
 ## Discipline
 
+- FIRST, set the app's LOOK from its audience and setting — who uses it and
+  where (a farmer in bright sun on a phone; an accountant at a desk; a nurse on a
+  ward at night). State that audience in one plain sentence, then choose a look
+  that fits it. Do NOT reach for the same look every time: a calm desk tool and a
+  high-contrast outdoor tool should not come out identical. The look is the first
+  decision, because every screen below is drawn in it.
+- Capture that look as ONE fenced ```caddie-theme JSON block in the brief: a
+  name, a one-line "why", the colour roles (bg, surface, text, muted, primary,
+  onPrimary, border, ok, warn, danger, plus any tinted state surfaces), two named
+  system font stacks (no web fonts), a corner radius and a density. Caddie
+  validates it — hex colours and WCAG AA contrast — and REFUSES a design save
+  with no valid theme, so get the colours readable. Every mockup and the built
+  app are painted from this block, so it is not decoration.
 - Read the approved PRD first (the latest `prd` plan note) and the project's
   design system. You are translating a settled PRD into screens, not reopening
   product decisions. If the PRD is genuinely ambiguous about a screen, choose a
@@ -51,13 +64,18 @@ the heading even when short; say "none" rather than omitting one):
    reduced-motion.
 6. **Accessibility** — focus order, keyboard operability for every custom
    control, labels, and contrast (text on its surface must be legible in the
-   app's dark default). Call out anything that needs an aria role.
+   app's own theme, light or dark — the theme block is contrast-checked, so keep
+   the mockups consistent with it). Call out anything that needs an aria role.
 
 ## Craft rules (hold these, they are the point)
 
 - Warmth over coldness: this is a tool for a solo nontechnical builder. Reassure,
   don't lecture. No meta copy that explains the interface to itself.
-- Use the project's Icon set — NEVER emoji — for glyphs.
+- Hierarchy: each view has ONE primary action, made obvious; everything else is
+  quieter. Use an intentional type scale (a few deliberate sizes, not ad-hoc
+  ones) and consistent spacing, both drawn from the app theme's density.
+- Use the app's inline-SVG icon kit (every app ships `caddie/icons.tsx`) — NEVER
+  an emoji — for glyphs.
 - No double padding, no box-in-box: one framed surface, not a card inside a card
   inside a panel. No header/title duplication (one kicker + one page title).
 - Prefer segmented pickers and searchable fields over long dropdowns; short copy
@@ -89,17 +107,22 @@ a screen picker and checks each at phone (390px) and desktop (1280px) width.
   ```
   ````
 
-- Style ONLY with the design-system tokens, never a literal hex or `bg-white`.
-  The roles are fixed — get them right:
-  - `var(--color-ink)` is the PAGE BACKGROUND (dark in the default theme), never text.
-  - `var(--color-bright)` is the main TEXT; `var(--color-muted)` secondary text.
-  - `var(--color-panel)` / `var(--color-raised)` are card and raised surfaces;
-    `var(--color-line)` / `var(--color-line-soft)` are borders.
-  - `var(--color-action)` fills the one primary action, with its label in
-    `var(--color-ink)`; `var(--color-ok)`, `var(--color-warn)`,
-    `var(--color-danger)` mark states.
-  Set every surface's background AND text color together. The frame already
-  paints the page background and body text, so a mock only styles its own parts.
+- Style ONLY with the app theme's tokens, never a literal hex or `bg-white`. The
+  mockups are painted in the SAME theme the built app uses (your ```caddie-theme
+  block), so use the plain names and get the roles right:
+  - `var(--bg)` is the PAGE BACKGROUND, `var(--surface)` a card or raised surface.
+  - `var(--text)` is the main text; `var(--muted)` secondary text.
+  - `var(--border)` is borders and hairlines.
+  - `var(--primary)` fills the one primary action, with its label in
+    `var(--on-primary)`; `var(--ok)`, `var(--warn)`, `var(--danger)` mark states
+    (with a tinted state surface behind them when you defined one).
+  - `var(--radius)` is the corner radius; `var(--font-heading)` /
+    `var(--font-body)` the type.
+  Set every surface's background AND text colour together. The older Caddie
+  `--color-*` names still resolve (they are aliased to your app theme's values),
+  so existing mock snippets keep working — but write new mockups with the plain
+  names. The frame already paints the page background and body text, so a mock
+  only styles its own parts.
 - Static markup only: no `<script>`, no external assets or fonts, no network,
   no `<form action>`. The frame runs no scripts at all. Interaction that CSS can
   show is welcome: `:hover` and `:focus-visible` styles, `<details>`/`<summary>`
