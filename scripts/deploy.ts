@@ -563,7 +563,27 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 		const fetchArgv = ['curl', '-fsS', `${releaseUrl}/app/`];
 		const liveHtml = run(fetchArgv, { cwd: deps.repoRoot }, 'live-fetch');
 		const live = /index-([A-Za-z0-9_-]+)\.js/.exec(liveHtml.stdout)?.[0] ?? '';
-		const distAppHtmlPath = join(appDir, 'dist', 'caddie_app', 'app', 'index.html');
+		// The composed app index lives in the Worker's assets directory, which
+		// the built config declares relative to dist/caddie_app (today: ../client,
+		// i.e. dist/client/app/index.html). Resolve it from the config rather than
+		// hardcoding a path that a layout change silently breaks; fall back to the
+		// two known locations so an unreadable config still finds the index.
+		const assetsDir = ((): string => {
+			try {
+				const cfg = JSON.parse(readFile(builtConfigPath)) as { assets?: { directory?: string } };
+				const dir = cfg.assets?.directory;
+				if (dir) return resolve(dirname(builtConfigPath), dir);
+			} catch {
+				/* fall through to the known locations */
+			}
+			return join(appDir, 'dist', 'client');
+		})();
+		const distCandidates = [
+			join(assetsDir, 'app', 'index.html'),
+			join(appDir, 'dist', 'client', 'app', 'index.html'),
+			join(appDir, 'dist', 'caddie_app', 'app', 'index.html'),
+		];
+		const distAppHtmlPath = distCandidates.find((p) => fileExists(p)) ?? distCandidates[0]!;
 		const distHtml = fileExists(distAppHtmlPath) ? readFile(distAppHtmlPath) : '';
 		const distJs = /index-([A-Za-z0-9_-]+)\.js/.exec(distHtml)?.[0] ?? '';
 		liveHash = live;
