@@ -2,7 +2,8 @@
 /**
  * Campaign runner — plan `docs/plans/2026-10-22-software-team-mode.md` part I
  * (lane 8). It drives the REAL Caddie HTTP API on a local `bun run dev`
- * (127.0.0.1) as signed-in test accounts, starts a project from each brief,
+ * (127.0.0.1) as the owner (the session saved by `--sign-in`), starts a
+ * project from each brief,
  * accepts the proposal, approves the design, waits for the build, reads results
  * from the local D1, runs a Playwright browser check, judges "complete", and
  * scores section 10's go/no-go marks. It enforces the campaign cap (D5) before
@@ -378,18 +379,38 @@ export type GateResult =
 export function gate(env: Record<string, string | undefined>): GateResult {
 	const authorized = env.CADDIE_LIVE_AUTHORIZED === '1';
 	const baseUrl = env.CADDIE_DEV_BASE_URL;
-	const accountsPresent = Boolean(
-		env.TEST_ACCOUNT_A_EMAIL && env.TEST_ACCOUNT_B_EMAIL && env.TEST_ACCOUNT_C_EMAIL,
-	);
+	// No test accounts: the live run uses the owner's saved sign-in (--sign-in),
+	// and the browser check's two users are users of the built app.
 	const missing = [
 		!authorized && 'CADDIE_LIVE_AUTHORIZED=1 (explicit authorization in the process env, never from .dev.vars)',
-		!baseUrl && 'CADDIE_DEV_BASE_URL (the local `bun run dev` base, e.g. http://127.0.0.1:5173)',
-		!accountsPresent && 'TEST_ACCOUNT_{A,B,C}_EMAIL (the signed-in test accounts A, B, C)',
+		!baseUrl && 'CADDIE_DEV_BASE_URL (the local `bun run dev` base, e.g. http://localhost:5176, the pinned dev port where Google sign-in works)',
 	].filter(Boolean) as string[];
 	if (missing.length > 0) {
 		return {
 			ok: false,
-			reason: `BLOCKED — the live campaign requires explicit authorization and local test credentials. Missing: ${missing.join('; ')}.`,
+			reason: `BLOCKED — the live campaign requires explicit authorization and the local base URL. Missing: ${missing.join('; ')}.`,
+		};
+	}
+	return { ok: true, env: env as Record<string, string> };
+}
+
+/**
+ * The gate for `--sign-in` (item 1): it opens a visible browser for the owner,
+ * so it needs authorization and the local base URL, but NOT the A/B/C test
+ * accounts — only the owner's own Caddie account is used. Same honesty rule:
+ * CADDIE_LIVE_AUTHORIZED is read from the process env only.
+ */
+export function signInGate(env: Record<string, string | undefined>): GateResult {
+	const authorized = env.CADDIE_LIVE_AUTHORIZED === '1';
+	const baseUrl = env.CADDIE_DEV_BASE_URL;
+	const missing = [
+		!authorized && 'CADDIE_LIVE_AUTHORIZED=1 (explicit authorization in the process env, never from .dev.vars)',
+		!baseUrl && 'CADDIE_DEV_BASE_URL (the local `bun run dev` base, e.g. http://localhost:5176, the pinned dev port where Google sign-in works)',
+	].filter(Boolean) as string[];
+	if (missing.length > 0) {
+		return {
+			ok: false,
+			reason: `BLOCKED — --sign-in requires explicit authorization and the local base URL. Missing: ${missing.join('; ')}.`,
 		};
 	}
 	return { ok: true, env: env as Record<string, string> };
@@ -431,8 +452,9 @@ function redact(value: string | undefined): string {
 import type { AccountSession } from './brief-run/dev-client.ts';
 import type { Clock } from './brief-run/clock.ts';
 import { driveBrief, type ProposalReader, type CoordinatorSend } from './brief-run/driver.ts';
-import { readBuildResults, type D1Query } from './brief-run/d1-reader.ts';
-import type { BrowserCheck } from './brief-run/browser-check.ts';
+import { readBuildResults, totalCampaignSpentMicros, type D1Query } from './brief-run/d1-reader.ts';
+import type { BrowserCheck, BrowserCheckResult } from './brief-run/browser-check.ts';
+import { pickRecordTargetFromDesign } from './brief-run/app-users.ts';
 import {
 	appendRun,
 	ledgerSpentMicros,
@@ -444,22 +466,35 @@ import { isTeamMode, type RunMode } from './brief-run/mode.ts';
 
 /** The seams the campaign is driven over — every one injectable for tests. */
 export interface CampaignSeams {
-	/** The signed-in account A session (and B for the browser check). */
+	/** The OWNER's Caddie session (item 1): drives the start flow and reads the
+	 * test inbox for the two app-user sign-ins (item 2). */
 	sessionA: AccountSession;
+	/** Kept for the start flow's symmetry; the browser check no longer uses a
+	 * second Caddie account (item 2 uses two APP users, both from the owner). */
 	sessionB: AccountSession;
 	clock: Clock;
 	/** Read-only D1 query against the local dev DB. */
 	d1: D1Query;
+	/** Item 3: total campaign spend so far from the REAL spend tables
+	 * (build_spend_reservations across all payers, through the d1-reader seam).
+	 * The cap is enforced from THIS, not the ledger; the ledger is a cross-check.
+	 * Injectable so a test proves the cap from the real-tables figure. */
+	spendReader: SpendReader;
 	/** Read the newest project_proposals row for the Home project (step 3). */
 	readProposal: ProposalReader;
 	/** Send the brief to the Home coordinator over Flue's HTTP route (step 2). */
 	coordinatorSend: CoordinatorSend;
-	/** The browser check (A persists, B cannot see). */
+	/** Read the approved design DOCUMENT markdown for a project (item 2), so the
+	 * browser check can pick the person-owned record from its architecture block. */
+	readDesignDoc: (projectId: string) => Promise<string>;
+	/** The browser check with two APP users (A persists + screen renders, B can't see). */
 	browserCheck: BrowserCheck;
 	/** The ledger store (file-backed live; in-memory in tests). */
 	ledgerStore: LedgerStore;
 	/** The dev base, for the browser check's preview URL. */
 	base: string;
+	/** The owner's Caddie-session cookie header (item 1), for the test-inbox read. */
+	ownerCookie: string;
 	workspaceId: string;
 	/** The signed-in account A id, used as the run's payer (step 2). */
 	payerId: string;
@@ -484,20 +519,29 @@ export interface CampaignRunRow {
 	result: BriefRunResult | null;
 	stopReason: string | null;
 	buildSpentMicros: number | null;
+	/** Item 3: the real-tables spend-so-far the cap was enforced against. */
+	realSpentBeforeMicros: number;
+	/** Item 3: the ledger's own spend figure (the cross-check). */
+	ledgerSpentBeforeMicros: number;
+	/** Item 3: set when the real-tables figure and the ledger figure differ. */
+	spendCrossCheckNote: string | null;
 }
 
 /**
  * Run the campaign over the injected seams. For each brief:
- *   1. check the D5 cap against the ledger's spend-so-far PLUS this build's
- *      limit — refuse (and record) a build that would not fit;
+ *   1. check the D5 cap against the REAL spend tables' total-so-far PLUS this
+ *      build's limit (item 3) — refuse (and record) a build that would not fit.
+ *      The ledger's own figure is computed too, as a CROSS-CHECK that is
+ *      reported only when the two differ;
  *   2. drive the brief to a terminal build outcome (driveBrief, step 2);
  *   3. read the build's results from D1 (step 3);
- *   4. if the build is ready, run the browser check (step 4);
+ *   4. if the build is ready, run the two-app-user browser check (step 4);
  *   5. judge "complete" and append the run to the ledger (step 5).
  *
- * The cap is enforced from the LEDGER's own recorded spend, so a test proves it
- * across runs without any D1. NO build is ever started from a test: the drive
- * and D1 seams are fakes there.
+ * The cap is enforced from the REAL spend tables (seams.spendReader), so a
+ * crashed campaign that never wrote a ledger row is still held under the cap by
+ * what the build payers actually reserved/settled. NO build is ever started
+ * from a test: the drive and D1 seams are fakes there.
  */
 export async function runCampaign(
 	briefs: Brief[],
@@ -512,14 +556,23 @@ export async function runCampaign(
 		if (only.size > 0 && !only.has(brief.id)) continue;
 		const size = brief.size;
 		const buildLimitMicros = size === 'big' ? BIG_BUILD_LIMIT_MICROS : SMALL_BUILD_LIMIT_MICROS;
-		const spentBefore = ledger ? ledgerSpentMicros(ledger) : 0;
 
-		// 1. Cap check against the ledger's own spend (D5). Refuse and record.
+		// 1. Cap check against the REAL spend tables (item 3, D5). The ledger's
+		//    own figure is computed as a CROSS-CHECK only, reported when it
+		//    diverges from the real tables (e.g. a build that spent but never
+		//    wrote a ledger row, or vice versa).
+		const realSpentBefore = await seams.spendReader.totalSpentMicros();
+		const ledgerSpentBefore = ledger ? ledgerSpentMicros(ledger) : 0;
+		const spendCrossCheckNote =
+			realSpentBefore !== ledgerSpentBefore
+				? `spend cross-check differs: real tables ${(realSpentBefore / USD).toFixed(2)} vs ledger ${(ledgerSpentBefore / USD).toFixed(2)} (the cap used the real tables)`
+				: null;
+
 		let capAllowed = true;
 		let capReason = 'allowed';
 		try {
 			const d = await reserveAgainstCap(
-				{ totalSpentMicros: async () => spentBefore },
+				{ totalSpentMicros: async () => realSpentBefore },
 				{ capMicros: opts.capMicros, buildLimitMicros },
 			);
 			capReason = `allowed; ${(d.remainingMicros / USD).toFixed(2)} remaining`;
@@ -529,9 +582,9 @@ export async function runCampaign(
 		}
 
 		if (!capAllowed) {
-			const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore, capAllowed, capReason, result: null, stopReason: 'cap-refused', complete: { complete: false, reason: capReason }, buildSpentMicros: null });
+			const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore: realSpentBefore, capAllowed, capReason, result: null, stopReason: 'cap-refused', complete: { complete: false, reason: capReason }, buildSpentMicros: null });
 			ledger = appendRun(seams.ledgerStore, opts.capMicros, record);
-			rows.push({ briefId: brief.id, size, mode: opts.mode, capAllowed, complete: record.complete ? { complete: true, reason: record.completeReason } : { complete: false, reason: record.completeReason }, result: null, stopReason: 'cap-refused', buildSpentMicros: null });
+			rows.push({ briefId: brief.id, size, mode: opts.mode, capAllowed, complete: { complete: false, reason: record.completeReason }, result: null, stopReason: 'cap-refused', buildSpentMicros: null, realSpentBeforeMicros: realSpentBefore, ledgerSpentBeforeMicros: ledgerSpentBefore, spendCrossCheckNote });
 			continue;
 		}
 
@@ -557,19 +610,40 @@ export async function runCampaign(
 		// 3. Read the results from D1.
 		const d1 = drive.runId ? await readBuildResults(seams.d1, { projectId: drive.projectId, runId: drive.runId }) : null;
 
-		// 4. Browser check, only on a ready build with a preview.
+		// 4. Browser check with two APP users, only on a ready build with a
+		//    preview. The record is chosen from the approved design's
+		//    architecture block (the first person-owned table with a create
+		//    route and a screen). An app with no such table is "not applicable"
+		//    — recorded, never counted as passed.
 		let browserPassed = false;
+		let browserVerdict: BrowserCheckResult['verdict'] | 'skipped' = 'skipped';
+		let browserReason = 'build not ready';
 		if (drive.outcome === 'ready' && drive.previewId) {
-			const check = await seams.browserCheck({
-				base: seams.base,
-				previewUrl: `${seams.base}/api/projects/${drive.projectId}/workflow/preview/${drive.previewId}`,
-				cookieA: seams.sessionA.jar.header(),
-				cookieB: seams.sessionB.jar.header(),
-				recordMarker: `campaign-${brief.id}-${Date.now()}`,
-				timeoutMs: 2 * 60 * 1000,
-			});
-			browserPassed = check.passed;
+			// A real browser can time out or crash: that is this build's failed
+			// check, recorded with its reason, never the end of the campaign.
+			try {
+				const designDoc = await seams.readDesignDoc(drive.projectId);
+				const choice = pickRecordTargetFromDesign(designDoc);
+				const check = await seams.browserCheck({
+					base: seams.base,
+					previewUrl: `${seams.base}/api/projects/${drive.projectId}/workflow/preview/${drive.previewId}`,
+					ownerCookie: seams.ownerCookie,
+					projectId: drive.projectId,
+					target: choice.applicable ? choice.target : null,
+					markerA: `campaign-${brief.id}-a-${Date.now()}`,
+					markerB: `campaign-${brief.id}-b-${Date.now()}`,
+					timeoutMs: 2 * 60 * 1000,
+				});
+				browserPassed = check.verdict === 'pass';
+				browserVerdict = check.verdict;
+				browserReason = check.reason;
+			} catch (error) {
+				browserPassed = false;
+				browserVerdict = 'fail';
+				browserReason = `the browser check could not finish: ${error instanceof Error ? error.message : String(error)}`;
+			}
 		}
+		void browserVerdict;
 
 		// 5. Judge "complete" from the real gates.
 		const result: BriefRunResult = {
@@ -580,12 +654,13 @@ export async function runCampaign(
 			browserCheckPassed: browserPassed,
 		};
 		const complete = evaluateComplete(result);
-		const stopReason = d1 ? `${d1.phase}${d1.detail ? `: ${d1.detail}` : ''}` : drive.outcome;
+		const browserNote = drive.outcome === 'ready' && drive.previewId ? `; browser ${browserVerdict}: ${browserReason}` : '';
+		const stopReason = (d1 ? `${d1.phase}${d1.detail ? `: ${d1.detail}` : ''}` : drive.outcome) + browserNote + (spendCrossCheckNote ? `; ${spendCrossCheckNote}` : '');
 		const buildSpentMicros = d1?.spentMicros ?? null;
 
-		const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore, capAllowed, capReason, result, stopReason, complete, buildSpentMicros });
+		const record = ledgerRecord({ brief, opts, buildLimitMicros, spentBefore: realSpentBefore, capAllowed, capReason, result, stopReason, complete, buildSpentMicros });
 		ledger = appendRun(seams.ledgerStore, opts.capMicros, record);
-		rows.push({ briefId: brief.id, size, mode: opts.mode, capAllowed, complete, result, stopReason, buildSpentMicros });
+		rows.push({ briefId: brief.id, size, mode: opts.mode, capAllowed, complete, result, stopReason, buildSpentMicros, realSpentBeforeMicros: realSpentBefore, ledgerSpentBeforeMicros: ledgerSpentBefore, spendCrossCheckNote });
 	}
 
 	return { ledger: ledger ?? { campaign: 'team-mode-monday', cap_micros: opts.capMicros, runs: [] }, rows };
@@ -624,6 +699,38 @@ function ledgerRecord(args: {
 // main — wires the REAL seams behind the gate. Never reached from a test.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Item 1 — `--sign-in`. Open a visible Chromium at `${base}/app/`, wait (up to
+ * 10 minutes) for the owner to sign in, and save the browser storage state to
+ * tests/briefs/runs/.auth/owner.json. Never reached from a test; the flow seam
+ * (playwrightSignInPage) is the only thing that launches a browser.
+ */
+async function runOwnerSignIn(env: Record<string, string | undefined>): Promise<number> {
+	const gated = signInGate(env);
+	if (!gated.ok) {
+		console.error(`brief-run: ${gated.reason}`);
+		return 1;
+	}
+	const base = gated.env.CADDIE_DEV_BASE_URL;
+	const { assertLocalBase } = await import('./brief-run/dev-client.ts');
+	const { runSignInFlow, playwrightSignInPage } = await import('./brief-run/sign-in.ts');
+	const { saveStorageState, ownerAuthPath } = await import('./brief-run/auth-store.ts');
+	const { systemClock } = await import('./brief-run/clock.ts');
+	const authPath = ownerAuthPath(join(BRIEFS_DIR, 'runs'));
+
+	console.error(`brief-run --sign-in: opening a visible browser at ${base}/app/. Sign in as the owner; I'll save your session when /api/home-project answers (up to 10 minutes).`);
+	try {
+		assertLocalBase(base); // refuse a non-local base before opening a browser
+		const { state, waitedMs } = await runSignInFlow(playwrightSignInPage, systemClock, { baseUrl: base });
+		saveStorageState(authPath, state);
+		console.error(`brief-run --sign-in: saved the owner's session to ${authPath} after ${Math.round(waitedMs / 1000)}s. Later runs will load their cookies from it.`);
+		return 0;
+	} catch (error) {
+		console.error(`brief-run --sign-in: ${error instanceof Error ? error.message : String(error)}`);
+		return 1;
+	}
+}
+
 async function main(): Promise<number> {
 	// Authorization is taken from the PROCESS env ONLY; credentials may come
 	// from .dev.vars. The merged map is used for credentials; the flag is read
@@ -634,6 +741,13 @@ async function main(): Promise<number> {
 		...process.env,
 		CADDIE_LIVE_AUTHORIZED: process.env.CADDIE_LIVE_AUTHORIZED,
 	};
+
+	// Item 1: `--sign-in` opens a visible browser for the owner and saves the
+	// cookies every later run uses. It has its own lighter gate (no A/B/C
+	// accounts) and does NOT run the campaign.
+	if (process.argv.slice(2).includes('--sign-in')) {
+		return runOwnerSignIn(env);
+	}
 
 	const gated = gate(env);
 	if (!gated.ok) {
@@ -651,7 +765,7 @@ async function main(): Promise<number> {
 	const base = gated.env.CADDIE_DEV_BASE_URL;
 	console.error(
 		`brief-run: gate open — base ${base}, mode ${mode}, ` +
-			`test accounts A/B/C present, model key ${redact(gated.env.NEBIUS_API_KEY)}. No secret values are printed.`,
+			`signing in with the owner's saved session, model key ${redact(gated.env.NEBIUS_API_KEY)}. No secret values are printed.`,
 	);
 
 	// Build the REAL seams. These touch the network / wrangler / Chromium and
@@ -663,8 +777,37 @@ async function main(): Promise<number> {
 	const { fileLedgerStore } = await import('./brief-run/ledger.ts');
 
 	const client = new DevClient(base, (input, init) => fetch(input, init));
-	const sessionA = await client.signIn({ label: 'A', sub: 'campaign-a', email: gated.env.TEST_ACCOUNT_A_EMAIL, name: 'Campaign A' });
-	const sessionB = await client.signIn({ label: 'B', sub: 'campaign-b', email: gated.env.TEST_ACCOUNT_B_EMAIL, name: 'Campaign B' });
+
+	// Item 1: load the OWNER's saved sign-in (never the stub provider, which
+	// cannot sign in against the owner's real Google sign-in). A missing file or
+	// a 401 stops the run with one plain sentence telling the owner to run
+	// `--sign-in`. Only the owner's one Caddie account is used; both the API
+	// seams and the browser check carry its cookies.
+	const { requireOwnerSignIn, ownerAuthPath } = await import('./brief-run/auth-store.ts');
+	const { SignInRequiredError } = await import('./brief-run/auth-store.ts');
+	const authPath = ownerAuthPath(join(BRIEFS_DIR, 'runs'));
+	let ownerCookieHeader: string;
+	try {
+		const owner = await requireOwnerSignIn({
+			path: authPath,
+			baseUrl: base,
+			probe: async (cookieHeader) => {
+				const res = await client.sessionFromCookieHeader({ label: 'A', sub: 'owner', email: 'owner', name: 'Owner' }, cookieHeader).fetch('/api/home-project');
+				return res.status;
+			},
+		});
+		ownerCookieHeader = owner.cookieHeader;
+	} catch (error) {
+		if (error instanceof SignInRequiredError) {
+			console.error(`brief-run: ${error.message}`);
+			return 1;
+		}
+		throw error;
+	}
+	// A is the owner's session; B is the same owner session (the two browser-app
+	// users in item 2 are both driven from the owner's one Caddie session).
+	const sessionA = client.sessionFromCookieHeader({ label: 'A', sub: 'owner', email: 'owner', name: 'Owner' }, ownerCookieHeader);
+	const sessionB = client.sessionFromCookieHeader({ label: 'B', sub: 'owner', email: 'owner', name: 'Owner' }, ownerCookieHeader);
 
 	// The workspace the fresh account lands in. The home-project route returns
 	// it; a missing workspace is a live-only gap and surfaces as a thrown error.
@@ -678,7 +821,11 @@ async function main(): Promise<number> {
 	const { readNewestProposal } = await import('./brief-run/d1-reader.ts');
 	const d1 = wranglerD1Query(REPO);
 	const session = (await sessionA.json<{ user?: { id?: string } }>(`/api/auth/get-session`).catch(() => ({}) as { user?: { id?: string } }));
-	const payerId = session.user?.id ?? gated.env.TEST_ACCOUNT_A_EMAIL;
+	const payerId = session.user?.id;
+	if (!payerId) {
+		console.error('brief-run: Caddie did not say who is signed in. Run `bun scripts/brief-run.ts --sign-in` again, then rerun.');
+		return 1;
+	}
 	const readProposal: ProposalReader = (opts) => readNewestProposal(d1, opts);
 	const coordinatorSend: CoordinatorSend = async ({ conversationId, idempotencyKey, body }) => {
 		const res = await sessionA.fetch(`/agents/coordinator/${encodeURIComponent(conversationId)}`, {
@@ -687,6 +834,15 @@ async function main(): Promise<number> {
 			body: JSON.stringify({ idempotencyKey, kind: 'user', body }),
 		});
 		if (!res.ok) throw new Error(`coordinator send → HTTP ${res.status}`);
+	};
+
+	// Item 2: read the design markdown for a project, so the browser check can
+	// pick the person-owned record from its architecture block. GET /workflow
+	// returns the latest design revision as `design` (a plan_doc_revisions row);
+	// its `body` carries the caddie-architecture block.
+	const readDesignDoc = async (projectId: string): Promise<string> => {
+		const snap = await sessionA.json<{ design?: { body?: string } | null }>(`/api/projects/${projectId}/workflow`);
+		return snap.design?.body ?? '';
 	};
 
 	const briefs = loadBriefs(BRIEFS_DIR);
@@ -699,11 +855,14 @@ async function main(): Promise<number> {
 			sessionB,
 			clock: systemClock,
 			d1,
+			spendReader: { totalSpentMicros: () => totalCampaignSpentMicros(d1) },
 			readProposal,
 			coordinatorSend,
+			readDesignDoc,
 			browserCheck: playwrightBrowserCheck,
 			ledgerStore: fileLedgerStore(join(BRIEFS_DIR, 'runs', `campaign-${mode}.json`)),
 			base,
+			ownerCookie: ownerCookieHeader,
 			workspaceId,
 			payerId,
 			coordinatorModelRouteId: 'nemotron-3.5-super-vl',

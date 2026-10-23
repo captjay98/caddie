@@ -421,6 +421,14 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/brief-run-ledger.test.ts',
 			'tests/brief-run-mode.test.ts',
 			'tests/brief-run-campaign.test.ts',
+			// Item 1: the owner's saved sign-in — the cookie-file load, the
+			// missing-file and 401 refusals, and the --sign-in flow over a fake
+			// page (no real browser). Every later run loads the owner's cookies.
+			'tests/brief-run-auth-store.test.ts',
+			// Item 2: the two-APP-user browser check's pure parts — picking the
+			// person-owned record from the design's architecture block, and
+			// reading the sign-in code from the real test-inbox shape.
+			'tests/brief-run-app-users.test.ts',
 			// Lead wiring for J and L: the generated payments/upload files reach
 			// apps that declare them (app features only), stay protected, the
 			// builders are told how to mount them, and the plan gate refuses

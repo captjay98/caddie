@@ -87,7 +87,38 @@ function greenD1(micros: number): D1Query {
 	};
 }
 
-const passBrowser: BrowserCheck = async () => ({ passed: true, aPersisted: true, bIsolated: true, reason: 'ok' });
+const passBrowser: BrowserCheck = async () => ({ verdict: 'pass', passed: true, aPersisted: true, bRendered: true, bIsolated: true, reason: 'ok' });
+
+/** A design doc with a person-owned table + create route + screen (item 2). */
+const designDocWithPersonTable = [
+	'# How your app works',
+	'```caddie-architecture',
+	JSON.stringify({
+		version: 2,
+		signIn: 'required',
+		team: null,
+		modules: [{ id: 'app', plain: 'The app', dependsOn: [] }],
+		tables: [{ name: 'notes', module: 'app', plain: 'Each note', owner: 'person', fields: [{ name: 'body', type: 'text', references: null }] }],
+		routes: [{ id: 'notes.create', module: 'app', feature: 'notes', op: 'create', method: 'POST', path: '/api/notes', table: 'notes', plain: 'Add a note', access: 'person', request: [{ name: 'body', type: 'text', example: 'Buy milk' }], response: ['id', 'body'] }],
+		screens: [{ id: 'notes', module: 'app', path: '#/notes', plain: 'Your notes', shows: ['notes'] }],
+		services: [], ai: [], payments: null, emails: [], jobs: [], screenOnly: [],
+	}),
+	'```',
+].join('\n');
+
+/**
+ * A stateful fake of the REAL spend tables (item 3): totalSpentMicros() returns
+ * the running total, and tick() adds this build's real spend after it runs. The
+ * default reader in seams() starts at 0 and never grows (a single-brief test);
+ * the cross-run cap test uses one that grows.
+ */
+function spendReaderStub(initial = 0): { reader: { totalSpentMicros(): Promise<number> }; add(micros: number): void } {
+	let total = initial;
+	return {
+		reader: { totalSpentMicros: async () => total },
+		add: (micros: number) => void (total += micros),
+	};
+}
 
 function seams(over: Partial<CampaignSeams> = {}): CampaignSeams {
 	return {
@@ -95,11 +126,14 @@ function seams(over: Partial<CampaignSeams> = {}): CampaignSeams {
 		sessionB: readySession(B),
 		clock: new FakeClock(0),
 		d1: greenD1(3 * USD),
+		spendReader: spendReaderStub(0).reader,
 		readProposal: proposalReady,
 		coordinatorSend: sendNoop,
+		readDesignDoc: async () => designDocWithPersonTable,
 		browserCheck: passBrowser,
 		ledgerStore: memoryLedgerStore(),
 		base: 'http://127.0.0.1:5173',
+		ownerCookie: 'app.session_token=owner',
 		workspaceId: 'ws_1',
 		payerId: 'owner',
 		coordinatorModelRouteId: 'nemotron-3.5-super-vl',
@@ -123,28 +157,74 @@ describe('runCampaign orchestration (steps 1-6)', () => {
 	});
 
 	test('a build whose browser check fails is NOT complete', async () => {
-		const s = seams({ browserCheck: async () => ({ passed: false, aPersisted: true, bIsolated: false, reason: 'B saw it' }) });
+		const s = seams({ browserCheck: async () => ({ verdict: 'fail', passed: false, aPersisted: true, bRendered: true, bIsolated: false, reason: 'B saw it' }) });
 		const { rows } = await runCampaign([brief('moodloop')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
 		expect(rows[0].complete.complete).toBe(false);
 		expect(rows[0].complete.reason).toMatch(/browser/);
 	});
 
-	test('the cap refuses a build once the ledger spend leaves no room (D5, across runs)', async () => {
-		// Each small build spends $4; the cap is tiny so the 2nd build cannot
-		// fit its $5 LIMIT under it even though only $4 was actually spent.
-		const s = seams({ d1: greenD1(4 * USD) });
+	test('a browser check that cannot finish is recorded as failed, and the next brief still runs', async () => {
+		// A real browser can time out or crash; a campaign of many builds must
+		// not stop at the first one. MUTATION: drop the catch around step 4 and
+		// runCampaign rejects with the browser's error.
+		let checks = 0;
+		const s = seams({
+			browserCheck: async () => {
+				checks += 1;
+				if (checks === 1) throw new Error('Timeout 120000ms exceeded waiting for the Code field');
+				return { verdict: 'pass', passed: true, aPersisted: true, bRendered: true, bIsolated: true, reason: 'ok' };
+			},
+		});
+		const { rows, ledger } = await runCampaign([brief('moodloop'), brief('farmlog')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
+		expect(rows.map((r) => r.complete.complete)).toEqual([false, true]);
+		expect(rows[0].stopReason).toContain('browser fail: the browser check could not finish: Timeout 120000ms exceeded');
+		expect(ledger.runs.length).toBe(2);
+	});
+
+	test('the cap refuses a build once the REAL spend tables leave no room (item 3, D5)', async () => {
+		// The REAL spend tables report $0 before build a and $4 before build b.
+		// The cap is enforced from THAT, not the ledger: b's $5 LIMIT can't fit
+		// under the $8 cap on top of the $4 already spent.
+		const sr = spendReaderStub(0);
+		let briefSeen = 0;
+		const growing = {
+			totalSpentMicros: async () => {
+				const v = await sr.reader.totalSpentMicros();
+				if (briefSeen++ === 0) sr.add(4 * USD); // after reading for a, the real tables gain $4
+				return v;
+			},
+		};
+		const s = seams({ spendReader: growing });
 		const { rows, ledger } = await runCampaign(
 			[brief('a'), brief('b')],
 			s,
 			{ mode: 'baseline', capMicros: 8 * USD, pollEveryMs: 1000 },
 		);
-		// a: spent-before 0, 0+5 ≤ 8 → allowed. b: spent-before 4, 4+5=9 > 8 → refused.
+		// a: real-spent-before 0, 0+5 ≤ 8 → allowed. b: real-spent-before 4, 4+5=9 > 8 → refused.
 		expect(rows[0].capAllowed).toBe(true);
+		expect(rows[0].realSpentBeforeMicros).toBe(0);
 		expect(rows[1].capAllowed).toBe(false);
+		expect(rows[1].realSpentBeforeMicros).toBe(4 * USD);
 		expect(rows[1].complete.complete).toBe(false);
 		// The refused build is recorded (audit of what did NOT run) and spent nothing.
 		expect(ledger.runs.length).toBe(2);
 		expect(ledger.runs[1].buildSpentMicros).toBeNull();
+	});
+
+	test('the ledger figure is a CROSS-CHECK reported when it differs from the real tables (item 3)', async () => {
+		// The real tables say $10 already spent; the ledger (empty) says $0. The
+		// cap uses the real $10, and the divergence is reported.
+		const s = seams({ spendReader: spendReaderStub(10 * USD).reader });
+		const { rows } = await runCampaign([brief('moodloop')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
+		expect(rows[0].realSpentBeforeMicros).toBe(10 * USD);
+		expect(rows[0].ledgerSpentBeforeMicros).toBe(0);
+		expect(rows[0].spendCrossCheckNote).toMatch(/real tables 10\.00 vs ledger 0\.00/);
+	});
+
+	test('no cross-check note when the real tables and the ledger agree (item 3)', async () => {
+		const s = seams({ spendReader: spendReaderStub(0).reader });
+		const { rows } = await runCampaign([brief('moodloop')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
+		expect(rows[0].spendCrossCheckNote).toBeNull();
 	});
 
 	test('the big brief is charged against the $40 limit, not $5', async () => {
@@ -170,5 +250,34 @@ describe('runCampaign orchestration (steps 1-6)', () => {
 		});
 		expect(rows.length).toBe(1);
 		expect(rows[0].briefId).toBe('b');
+	});
+
+	test('a design with no person-owned screen → browser check not-applicable → NOT complete (item 2)', async () => {
+		// The browser check sees target=null (no person-owned table in the
+		// design), returns not-applicable, and the brief is not complete —
+		// "never as passed".
+		const sharedDesign = [
+			'# How your app works',
+			'```caddie-architecture',
+			JSON.stringify({
+				version: 2, signIn: 'none', team: null,
+				modules: [{ id: 'app', plain: 'The app', dependsOn: [] }],
+				tables: [{ name: 'facts', module: 'app', plain: 'Shared facts', owner: 'public', fields: [{ name: 'body', type: 'text', references: null }] }],
+				routes: [], screens: [{ id: 'facts', module: 'app', path: '#/facts', plain: 'Facts', shows: ['facts'] }],
+				services: [], ai: [], payments: null, emails: [], jobs: [], screenOnly: [],
+			}),
+			'```',
+		].join('\n');
+		let sawTargetNull = false;
+		const s = seams({
+			readDesignDoc: async () => sharedDesign,
+			browserCheck: async (input) => {
+				sawTargetNull = input.target === null;
+				return { verdict: 'not-applicable', passed: false, aPersisted: false, bRendered: false, bIsolated: false, reason: 'no private record' };
+			},
+		});
+		const { rows } = await runCampaign([brief('publicapp')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
+		expect(sawTargetNull).toBe(true);
+		expect(rows[0].complete.complete).toBe(false);
 	});
 });
