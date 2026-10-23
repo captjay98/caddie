@@ -402,6 +402,17 @@ describe('deploy.ts — the flag & drift rules', () => {
 		});
 		expect(runDeploy(DEPLOY, h.deps).ok).toBe(true);
 	});
+
+	test("an applied-migrations result with no readable names stops before any write (lead review)", () => {
+		// The live database always has migrations applied; reading none means the
+		// output was not understood, and the drift check would silently pass.
+		const h = makeHarness({ responses: { 'select name from d1_migrations': ok('┌──────┐\n│ name │\n└──────┘\n') } });
+		const result = runDeploy(DEPLOY, h.deps);
+		expect(result.ok).toBe(false);
+		expect(result.steps.at(-1)?.name).toBe('migrations-applied');
+		expect(joinAll(h.commands).some((c) => c.includes('d1 migrations apply'))).toBe(false);
+		expect(result.wroteRemote).toBe(false);
+	});
 });
 
 describe('deploy.ts — evidence (item G)', () => {

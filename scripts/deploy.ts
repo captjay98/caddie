@@ -409,6 +409,17 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 		return stop({ name: 'migrations-applied', ok: false, command: appliedArgv, detail: `exit ${applied.exitCode}` });
 	}
 	const appliedRemote = parseAppliedMigrations(applied.stdout);
+	// The live database always has migrations applied. Reading none means the
+	// output wasn't understood, and the drift check below would pass blindly,
+	// so stop before any write (lead review, 2026-10-23).
+	if (appliedRemote.length === 0) {
+		return stop({
+			name: 'migrations-applied',
+			ok: false,
+			command: appliedArgv,
+			detail: "couldn't read which database changes the live database already has: nothing was changed. Check the d1_migrations table by hand, or follow the manual steps in production-deploy.md",
+		});
+	}
 	const drift = appliedRemote.filter((name) => !localMigrations.has(name));
 	if (drift.length > 0) {
 		return stop({ name: 'migration-drift', ok: false, command: appliedArgv, detail: `remote has migration(s) not in apps/app/migrations: ${drift.join(', ')} — refusing` });
