@@ -179,6 +179,49 @@ function routeTableLiteral(block: ArchitectureBlock): string {
 	return '[\n' + rows.join(',\n') + '\n]';
 }
 
+/** route id -> the plan ids that unlock it (plan part J), from the approved block. */
+function lockedRoutes(block: ArchitectureBlock): Record<string, string[]> {
+	return Object.fromEntries((block.payments?.locked ?? []).map((l) => [l.route, [...l.plans]]));
+}
+
+/**
+ * What caddie/contract.ts tells the builder about the declared test-mode
+ * features (plan parts J, K, L, N) — the generated contract test checks exactly
+ * this. Comment lines only; empty when the block declares none.
+ */
+function testModeGuide(block: ArchitectureBlock): string[] {
+	const lines: string[] = [];
+	if (block.payments) {
+		lines.push(
+			'//',
+			"// Payments (test mode, no money moves): mount Caddie's billing routes once with",
+			'// mountPayments(app, { currency, plans }) from ./payments. A route in LOCKED',
+			'// answers 402 { "reason": "plan_required" } until the person has an active',
+			'// plan; this file does that check, so never add your own.',
+		);
+	}
+	for (const email of block.emails) {
+		const to = email.to === 'person' ? 'the signed-in person' : `the address in the request's ${email.to.slice('request-field:'.length)} field`;
+		lines.push(
+			'//',
+			`// Email "${email.id}": the route ${email.route} sends it once per call with`,
+			`// env.CADDIE.email({ to, subject, text, template: "${email.id}" }), to ${to}.`,
+			'// It lands in the test inbox; send nothing any other way.',
+		);
+	}
+	for (const job of block.jobs) {
+		lines.push(
+			'//',
+			`// Job "${job.id}": the route ${job.route} runs only from Caddie's signed Run-now`,
+			"// call (this file refuses anyone else). Do the job's work and answer 2xx.",
+		);
+	}
+	if (block.tables.some((t) => t.fields.some((f) => f.type === 'file'))) {
+		lines.push('//', "// Files: mount Caddie's upload routes once with mountFiles(app) from ./files;", '// a file field stores the file id.');
+	}
+	return lines;
+}
+
 function contractTs(block: ArchitectureBlock): string {
 	const teamTable = block.team?.table ?? null;
 	return [
@@ -187,6 +230,7 @@ function contractTs(block: ArchitectureBlock): string {
 		'// route BEFORE the builder\'s handler runs — 401 without a session or a valid',
 		'// job signature, 403 for the wrong team, role or admin. A builder cannot forget',
 		'// the access check: it is mounted here, from the approved design.',
+		...testModeGuide(block),
 		'import type { Context, Hono, MiddlewareHandler } from "hono";',
 		'import { requireUser, currentUser } from "./auth";',
 		'',
@@ -268,30 +312,58 @@ function contractTs(block: ArchitectureBlock): string {
 		'  return diff === 0;',
 		'}',
 		'',
-		'/** The access guard for one route. Returns a Response to refuse, or null to let the handler run. */',
+		'/** Routes a plan unlocks (plan part J): route id -> the plan ids that open it. */',
+		'export const LOCKED: Record<string, string[]> = ' + j(lockedRoutes(block)) + ';',
+		'',
+		'/**',
+		' * Whether the person has an active plan in planIds right now. The subscriptions',
+		' * live in caddie_subscriptions (caddie/payments.ts writes them); an ended plan,',
+		' * or a cancelled one past its renewal date, does not count.',
+		' */',
+		'async function hasActivePlan(c: Context, personId: string, planIds: string[]): Promise<boolean> {',
+		'  const row = await c.env.DB.prepare("select planId, status, renewsAt from caddie_subscriptions where personId = ?")',
+		'    .bind(personId)',
+		'    .first<{ planId: string; status: string; renewsAt: string | null }>();',
+		'  if (!row || !planIds.includes(row.planId) || row.status === "ended") return false;',
+		'  return !(row.renewsAt && new Date(row.renewsAt).getTime() <= Date.now());',
+		'}',
+		'',
+		'/** Why this caller may NOT use the route: a Response to refuse, or null to let it through. */',
+		'async function refusal(route: ContractRoute, c: Context): Promise<Response | null> {',
+		'  const access = route.access;',
+		'  if (access === "public") return null;',
+		'  if (access === "job") {',
+		'    return (await validJobSignature(c, route.path)) ? null : unauthorized("This can only run from Caddie\'s scheduled run.");',
+		'  }',
+		'  // Every other access needs a signed-in person.',
+		'  const user = await currentUser(c);',
+		'  if (!user) return unauthorized("Sign in first.");',
+		'  if (access === "signed-in" || access === "person") return null;',
+		'  if (access === "admin") return (await isAdmin(c, user.id)) ? null : forbidden("Only an admin can do this.");',
+		'  if (access === "team" || route.role !== null) {',
+		'    const teamId = c.req.param("teamId");',
+		'    if (!teamId) return forbidden("This needs a team.");',
+		'    const { inTeam, role } = await isTeamMember(c, teamId, user.id);',
+		'    if (!inTeam) return forbidden("You are not a member of this team.");',
+		'    if (route.role !== null && role !== route.role) return forbidden("You do not have the right role for this.");',
+		'  }',
+		'  return null;',
+		'}',
+		'',
+		'/** The access guard for one route: who may call it, then (a locked route) whether they have a plan. */',
 		'function guardFor(route: ContractRoute): MiddlewareHandler {',
 		'  return async (c, next) => {',
-		'    const access = route.access;',
-		'    if (access === "public") return next();',
-		'    if (access === "job") {',
-		'      if (!(await validJobSignature(c, route.path))) return unauthorized("This can only run from Caddie\'s scheduled run.");',
-		'      return next();',
-		'    }',
-		'    // Every other access needs a signed-in person.',
-		'    const user = await currentUser(c);',
-		'    if (!user) return unauthorized("Sign in first.");',
-		'    if (access === "signed-in" || access === "person") return next();',
-		'    if (access === "admin") {',
-		'      if (!(await isAdmin(c, user.id))) return forbidden("Only an admin can do this.");',
-		'      return next();',
-		'    }',
-		'    if (access === "team" || route.role !== null) {',
-		'      const teamId = c.req.param("teamId");',
-		'      if (!teamId) return forbidden("This needs a team.");',
-		'      const { inTeam, role } = await isTeamMember(c, teamId, user.id);',
-		'      if (!inTeam) return forbidden("You are not a member of this team.");',
-		'      if (route.role !== null && role !== route.role) return forbidden("You do not have the right role for this.");',
-		'      return next();',
+		'    const refused = await refusal(route, c);',
+		'    if (refused) return refused;',
+		'    // A locked route (plan part J) answers 402 until the person has a plan, so a',
+		'    // builder can\'t leave one open.',
+		'    const plans = LOCKED[route.id];',
+		'    if (plans) {',
+		'      const user = await currentUser(c);',
+		'      if (!user) return unauthorized("Sign in first.");',
+		'      if (!(await hasActivePlan(c, user.id, plans))) {',
+		'        return new Response(JSON.stringify({ reason: "plan_required" }), { status: 402, headers: { "content-type": "application/json" } });',
+		'      }',
 		'    }',
 		'    return next();',
 		'  };',
@@ -661,14 +733,28 @@ function contractTestTs(block: ArchitectureBlock, features?: readonly string[]):
 			return table ? [{ id: s.id, path: s.path, kind: bySubject.get(table)!.kind, table }] : [];
 		});
 
-	// Step 9: declared test-mode features. A declared feature with no generated
-	// check makes the test-mode phase FAIL (see the phase below).
-	const declaredFeatures = {
-		payments: block.payments !== null,
-		emails: block.emails.length > 0,
-		jobs: block.jobs.length > 0,
-		files: block.tables.some((t) => t.fields.some((f) => f.type === 'file')),
-	};
+	// Step 9: the test-mode features. Each is checked once its route is built (in
+	// scope); at the final check every declared one is. A declared feature whose
+	// route the design does not have can never be checked, so it fails there.
+	const routeById = new Map(block.routes.map((r) => [r.id, r]));
+	const inView = new Set(view.routes.map((r) => r.id));
+	const lockedPlans = new Map((block.payments?.locked ?? []).map((l) => [l.route, [...l.plans]]));
+	const routeMeta = (r: ArchitectureRoute) => ({ id: r.id, path: r.path, method: r.method, body: exampleBody(r), plans: lockedPlans.get(r.id) ?? null });
+	const built = (route: string) => inView.has(route) && routeById.has(route);
+	const lockedInScope = (block.payments?.locked ?? []).filter((l) => built(l.route)).map((l) => routeMeta(routeById.get(l.route)!));
+	// Without a locked route, the checkout alone is checked, at the final check.
+	const payments =
+		block.payments && (lockedInScope.length > 0 || !scoped) ? { firstPlan: block.payments.plans[0]?.id ?? null, locked: lockedInScope } : null;
+	const emails = block.emails.filter((e) => built(e.route)).map((e) => ({ id: e.id, to: e.to, route: routeMeta(routeById.get(e.route)!) }));
+	const jobs = block.jobs.filter((x) => built(x.route)).map((x) => ({ id: x.id, route: routeMeta(routeById.get(x.route)!) }));
+	const files = block.tables.some((t) => t.fields.some((f) => f.type === 'file') && view.routes.some((r) => r.table === t.name));
+	const unchecked = scoped
+		? []
+		: [
+				...block.emails.filter((e) => !routeById.has(e.route)).map((e) => `the email "${e.id}" names the route ${e.route}, which the design does not have`),
+				...block.jobs.filter((x) => !routeById.has(x.route)).map((x) => `the job "${x.id}" names the route ${x.route}, which the design does not have`),
+				...(block.payments?.locked ?? []).filter((l) => !routeById.has(l.route)).map((l) => `the locked route ${l.route} is not in the design`),
+			];
 
 	const meta = {
 		scoped,
@@ -684,7 +770,11 @@ function contractTestTs(block: ArchitectureBlock, features?: readonly string[]):
 			: null,
 		admin: adminRoute ? { path: adminRoute.path, method: adminRoute.method, body: exampleBody(adminRoute) } : null,
 		screens: tableScreens,
-		features: declaredFeatures,
+		payments,
+		emails,
+		jobs,
+		files,
+		unchecked,
 	};
 	const personalInTeam = hasTeam && subjects.some((s) => s.kind === 'person');
 
@@ -697,7 +787,7 @@ import { expect, test } from "bun:test";
 import { app } from "../src/server";
 import { signInForTest } from "../test/setup/auth";
 import { createFileEnv } from "../test/setup/d1-file";
-import { ROUTES, TEAM_TABLE } from "./contract";
+import { JOB_HEADER, ROUTES, TEAM_TABLE } from "./contract";
 
 interface Subject {
   table: string;
@@ -720,6 +810,8 @@ interface Subject {
   response: string[];
   refs: { field: string; table: string }[];
 }
+/** A declared route the step-9 checks call: its example body, and the plans that unlock it (null when it is not locked). */
+interface RouteMeta { id: string; path: string; method: string; body: Record<string, string>; plans: string[] | null }
 interface Meta {
   scoped: boolean;
   hasTeam: boolean;
@@ -732,7 +824,11 @@ interface Meta {
   role: { path: string; method: string; role: string | null; body: Record<string, string>; table: string | null } | null;
   admin: { path: string; method: string; body: Record<string, string> } | null;
   screens: { id: string; path: string; kind: "person" | "team"; table: string }[];
-  features: { payments: boolean; emails: boolean; jobs: boolean; files: boolean };
+  payments: { firstPlan: string | null; locked: RouteMeta[] } | null;
+  emails: { id: string; to: string; route: RouteMeta }[];
+  jobs: { id: string; route: RouteMeta }[];
+  files: boolean;
+  unchecked: string[];
 }
 
 const PHASE = process.env.CADDIE_CONTRACT_PHASE ?? "create";
@@ -816,6 +912,43 @@ async function seedAdmin(env: any, personId: string) {
   await env.DB.prepare("insert or replace into caddie_admins (personId, createdAt) values (?, ?)").bind(personId, now).run();
 }
 
+/** Caddie's job secret for this check's runs (the app reads env.CADDIE_JOB_SECRET). */
+const JOB_SECRET = "caddie-contract-check-job-secret";
+/** The request for a declared route: its example body when it takes one. */
+function sendInit(r: RouteMeta, headers: Record<string, string>): RequestInit {
+  return r.method === "GET" || r.method === "DELETE" ? { method: r.method, headers } : { method: r.method, headers: jsonHeaders(headers), body: JSON.stringify(r.body) };
+}
+/** Caddie's test-mode checkout (caddie/payments.ts) with one of the D10 test cards. */
+function checkout(env: unknown, cookie: string, planId: string, card: string) {
+  return req("/api/caddie/checkout", { method: "POST", headers: jsonHeaders({ cookie }), body: JSON.stringify({ planId, cardNumber: card, expiry: "12/30", cvc: "123" }) }, env);
+}
+/** Test mode's "End now": the plan ends at once. */
+function endNow(env: unknown, cookie: string) {
+  return req("/api/caddie/end-now", { method: "POST", headers: jsonHeaders({ cookie }), body: "{}" }, env);
+}
+/** Caddie's Run-now signature: "<ms>.<hex>", an HMAC-SHA256 over "<ms>.<route path>". */
+async function jobSignature(secret: string, routePath: string): Promise<string> {
+  const stamp = String(Date.now());
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(stamp + "." + routePath));
+  return stamp + "." + [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+/** 5 MB of varied bytes, the same every run. */
+function fiveMegabytes(): Uint8Array {
+  const bytes = new Uint8Array(5 * 1024 * 1024);
+  let x = 2463534242;
+  for (let i = 0; i < bytes.length; i++) {
+    x ^= x << 13; x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5; x >>>= 0;
+    bytes[i] = x & 255;
+  }
+  return bytes;
+}
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 // ==== phase: create (steps 1-3, 7) =======================================
 if (PHASE === "create") {
   test("every route is registered through implement() (step 1)", async () => {
@@ -1209,6 +1342,30 @@ ${
 		: '  // (no table-backed screen declared: step 8 does not apply)'
 }
 
+${
+	meta.files
+		? `  test("A stores a 5 MB file in parts (step 9; it is read back after the restart)", async () => {
+    const env = createFileEnv(FILE);
+    const h = await readHandoff();
+    const cookie = String(h.aCookie);
+    const bytes = fiveMegabytes();
+    const sha = await sha256Hex(bytes);
+    const start = await req("/api/caddie/files/start", { method: "POST", headers: jsonHeaders({ cookie }), body: JSON.stringify({ name: "contract-check.pdf", type: "application/pdf", size: bytes.length, sha256: sha }) }, env);
+    if (start.status === 404) throw new Error("This app stores files, but Caddie's upload routes aren't mounted: call mountFiles(app) once in src/server.ts (caddie/files.ts).");
+    expect(start.status, "starting a 5 MB upload failed: " + start.status + " " + (await start.clone().text())).toBe(200);
+    const { id, parts, partBytes } = (await start.json()) as { id: string; parts: number; partBytes: number };
+    for (let n = 0; n < parts; n++) {
+      const slice = bytes.subarray(n * partBytes, Math.min(bytes.length, (n + 1) * partBytes));
+      const put = await req("/api/caddie/files/" + id + "/parts/" + n, { method: "PUT", headers: { cookie, "content-type": "text/plain" }, body: Buffer.from(slice).toString("base64") }, env);
+      expect(put.status, "storing part " + n + " of the file failed: " + put.status + " " + (await put.clone().text())).toBe(200);
+    }
+    const done = await req("/api/caddie/files/" + id + "/finish", { method: "POST", headers: jsonHeaders({ cookie }), body: "{}" }, env);
+    expect(done.status, "finishing the 5 MB upload failed: " + done.status + " " + (await done.clone().text())).toBe(200);
+    await writeHandoff({ ...h, file: { id, parts, sha } });
+  }, LONG);`
+		: '  // (no file field in scope: the file check does not apply)'
+}
+
   test("A deletes the record in every table that can be deleted from (step 4, delete half — the read is checked in test-mode)", async () => {
     const env = createFileEnv(FILE);
     const h = await readHandoff();
@@ -1256,17 +1413,136 @@ if (PHASE === "test-mode") {
     }
   }, LONG);
 
-  test("declared test-mode features (payments/emails/jobs/files) have a check (step 9)", () => {
-    // Lanes 9/10 extend this phase with the real payment/email/job/file checks.
-    // Until then, a block that DECLARES such a feature must not pass silently:
-    // a declared feature with no generated check fails here, in plain words.
-    const missing: string[] = [];
-    if (META.features.payments) missing.push("payments (a locked route should answer 402 before checkout)");
-    if (META.features.emails) missing.push("emails (a message should land in the test inbox and nothing real is sent)");
-    if (META.features.jobs) missing.push("scheduled jobs (a job route should need Caddie's signature)");
-    if (META.features.files) missing.push("file uploads (a file should come back byte-identical after a restart)");
-    expect(missing.length === 0, missing.length === 0 ? "" : "This app declares " + missing.join(", ") + ", but those are not checked yet. They must be checked before the app can pass.").toBe(true);
-  });
+${
+	meta.files
+		? `  test("after a restart, A's 5 MB file comes back byte-identical, and B can't read or delete it (step 9)", async () => {
+    const env = createFileEnv(FILE);
+    const h = await readHandoff();
+    const f = h.file as { id: string; parts: number; sha: string } | undefined;
+    if (!f) throw new Error("The 5 MB file was never stored (see the upload check), so it can't be read back after the restart.");
+    const cookie = String(h.aCookie);
+    const chunks: Uint8Array[] = [];
+    for (let n = 0; n < f.parts; n++) {
+      const part = await req("/api/caddie/files/" + f.id + "/parts/" + n, { method: "GET", headers: { cookie } }, env);
+      expect(part.status, "reading part " + n + " of A's file after a restart failed: " + part.status).toBe(200);
+      chunks.push(new Uint8Array(Buffer.from(((await part.json()) as { data: string }).data, "base64")));
+    }
+    const whole = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+    let at = 0;
+    for (const chunk of chunks) {
+      whole.set(chunk, at);
+      at += chunk.length;
+    }
+    expect(await sha256Hex(whole), "A's 5 MB file came back changed after a restart (its sha256 differs)").toBe(f.sha);
+    const { headers: bHeaders } = await signInForTest(app, env, "bo@example.com");
+    const bRead = await req("/api/caddie/files/" + f.id + "/parts/0", { method: "GET", headers: bHeaders }, env);
+    expect([403, 404], "B can read A's file").toContain(bRead.status);
+    await req("/api/caddie/files/" + f.id, { method: "DELETE", headers: bHeaders }, env);
+    const still = await req("/api/caddie/files/" + f.id + "/parts/0", { method: "GET", headers: { cookie } }, env);
+    expect(still.status, "B deleted A's file").toBe(200);
+  }, LONG);`
+		: '  // (no file field in scope: the file check does not apply)'
+}
+
+${
+	meta.payments
+		? `  test("payments in test mode: a locked route needs a plan; the declined card leaves it shut, the paying card opens it, End now shuts it again (step 9)", async () => {
+    const env = createFileEnv(FILE);
+    const h = await readHandoff();
+    const cookie = String(h.aCookie);
+    const pay = META.payments!;
+    const billing = await req("/api/caddie/billing", { method: "GET", headers: { cookie } }, env);
+    if (billing.status === 404) throw new Error("This app takes payments, but Caddie's billing routes aren't mounted: call mountPayments(app, { currency, plans }) once in src/server.ts (caddie/payments.ts).");
+    if (pay.locked.length === 0) {
+      // No route needs a plan: the checkout itself must still work.
+      const paid = await checkout(env, cookie, pay.firstPlan ?? "", "4242 4242 4242 4242");
+      expect(paid.status, "the paying test card (4242 4242 4242 4242) was refused: " + paid.status + " " + (await paid.clone().text())).toBe(200);
+      const ended = await endNow(env, cookie);
+      expect(ended.status, "End now (test mode) failed: " + ended.status).toBe(200);
+      return;
+    }
+    for (const locked of pay.locked) {
+      const plan = locked.plans![0]!;
+      const before = await req(path(locked.path, h.t1Id), sendInit(locked, { cookie }), env);
+      expect(before.status, locked.id + ": a locked route answered " + before.status + " before checkout; it must answer 402 until the person has a plan").toBe(402);
+      const reason = ((await before.json().catch(() => ({}))) as Row).reason;
+      expect(reason, locked.id + ': before checkout a locked route answers { "reason": "plan_required" }').toBe("plan_required");
+      const declined = await checkout(env, cookie, plan, "4000 0000 0000 0002");
+      expect(declined.status, "the declined test card (4000 0000 0000 0002) must be refused with 402 (it answered " + declined.status + ")").toBe(402);
+      const still = await req(path(locked.path, h.t1Id), sendInit(locked, { cookie }), env);
+      expect(still.status, locked.id + ": after the declined card the route answered " + still.status + "; it must still answer 402").toBe(402);
+      const paid = await checkout(env, cookie, plan, "4242 4242 4242 4242");
+      expect(paid.status, "the paying test card (4242 4242 4242 4242) was refused for the " + plan + " plan: " + paid.status + " " + (await paid.clone().text())).toBe(200);
+      const open = await req(path(locked.path, h.t1Id), sendInit(locked, { cookie }), env);
+      expect(open.status !== 402 && open.status !== 401 && open.status !== 403 && open.status < 500, locked.id + ": after paying, the route must answer normally (it answered " + open.status + ")").toBe(true);
+      const ended = await endNow(env, cookie);
+      expect(ended.status, "End now (test mode) failed: " + ended.status).toBe(200);
+      const shut = await req(path(locked.path, h.t1Id), sendInit(locked, { cookie }), env);
+      expect(shut.status, locked.id + ": after End now the route answered " + shut.status + "; it must answer 402 again").toBe(402);
+    }
+  }, LONG);`
+		: '  // (no payments in scope: the payment check does not apply)'
+}
+
+${
+	meta.emails.length > 0
+		? `  test("emails in test mode: each email's route stores exactly one message in the test inbox, with its template, and sends nothing (step 9)", async () => {
+    const h = await readHandoff();
+    const cookie = String(h.aCookie);
+    for (const e of META.emails) {
+      const env = createFileEnv(FILE);
+      // A route behind a plan is opened with the paying card first, and ended after.
+      if (e.route.plans) await checkout(env, cookie, e.route.plans[0]!, "4242 4242 4242 4242");
+      const outside: string[] = [];
+      const realFetch = globalThis.fetch;
+      (globalThis as any).fetch = async (input: any) => {
+        outside.push(String(typeof input === "string" ? input : input?.url));
+        return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+      };
+      let res: Response;
+      try {
+        res = await req(path(e.route.path, h.t1Id), sendInit(e.route, { cookie }), env);
+      } finally {
+        (globalThis as any).fetch = realFetch;
+      }
+      if (e.route.plans) await endNow(env, cookie);
+      expect(res.status < 400, e.id + ": the " + e.route.id + " route answered " + res.status + " " + (await res.clone().text())).toBe(true);
+      const inbox = env.CADDIE.emails;
+      expect(inbox.length, e.id + ": the " + e.route.id + " route stored " + inbox.length + " messages in the test inbox; it must store exactly one, sent with env.CADDIE.email(...)").toBe(1);
+      expect(inbox[0]!.template, e.id + ': the message must carry the template "' + e.id + '"').toBe(e.id);
+      const field = e.to.startsWith("request-field:") ? e.to.slice("request-field:".length) : null;
+      const to = field ? String(e.route.body[field] ?? "") : "ada@example.com";
+      expect(inbox[0]!.to.toLowerCase(), e.id + ": the message must go to " + (field ? "the address in the request's " + field + " field" : "the signed-in person")).toBe(to.toLowerCase());
+      expect(outside, e.id + ": the route also reached outside Caddie (" + outside.join(", ") + "); an email goes through env.CADDIE.email only, to the test inbox").toEqual([]);
+    }
+  }, LONG);`
+		: '  // (no email in scope: the email check does not apply)'
+}
+
+${
+	meta.jobs.length > 0
+		? `  test("jobs: each job's route answers 401 without Caddie's signature and does its work with it (step 9)", async () => {
+    const h = await readHandoff();
+    for (const job of META.jobs) {
+      const env = { ...createFileEnv(FILE), CADDIE_JOB_SECRET: JOB_SECRET };
+      const bare = await req(path(job.route.path, h.t1Id), sendInit(job.route, {}), env);
+      expect(bare.status, job.id + ": the " + job.route.id + " route answered " + bare.status + " without Caddie's signature; it must answer 401").toBe(401);
+      const forged = await req(path(job.route.path, h.t1Id), sendInit(job.route, { [JOB_HEADER]: await jobSignature("not-caddies-secret", job.route.path) }), env);
+      expect(forged.status, job.id + ": the route accepted a signature made with the wrong secret (it answered " + forged.status + ")").toBe(401);
+      const signed = await req(path(job.route.path, h.t1Id), sendInit(job.route, { [JOB_HEADER]: await jobSignature(JOB_SECRET, job.route.path) }), env);
+      expect(signed.status >= 200 && signed.status < 300, job.id + ": with Caddie's signature the job must do its work and answer 2xx (it answered " + signed.status + " " + (await signed.clone().text()) + ")").toBe(true);
+    }
+  }, LONG);`
+		: '  // (no job in scope: the job check does not apply)'
+}
+
+${
+	meta.unchecked.length > 0
+		? `  test("every declared test-mode feature can be checked (step 9)", () => {
+    expect(META.unchecked, "This design declares test-mode features that can't be checked: " + META.unchecked.join("; ") + ".").toEqual([]);
+  });`
+		: ''
+}
 }
 `;
 }

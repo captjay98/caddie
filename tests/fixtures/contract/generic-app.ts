@@ -6,12 +6,14 @@
 // prove the every-table checks pass a correct big app and to time the phases.
 import type { ArchitectureBlock, ArchitectureRoute, ArchitectureTable } from '@caddie/contracts';
 import { generateSchema } from '../../../apps/app/src/server/schema-gen.ts';
+import { appFeatureFiles } from '../../../apps/app/src/server/app-feature-files.ts';
 
 const q = (value: unknown): string => JSON.stringify(value);
 
-/** The app's builder files: its server, its screens and the generated schema. */
+/** The app's builder files: its server, its screens, the generated schema, and Caddie's feature files. */
 export function genericAppFiles(block: ArchitectureBlock): Record<string, string> {
 	return {
+		...appFeatureFiles(block, { appFeatures: true }),
 		'src/server.ts': genericServer(block),
 		'src/App.tsx': genericScreens(block),
 		'migrations/0001_schema.sql': generateSchema(block),
@@ -26,6 +28,19 @@ function scopeOf(table: ArchitectureTable, route: ArchitectureRoute): { column: 
 }
 
 function handlerFor(route: ArchitectureRoute, block: ArchitectureBlock): string {
+	// A declared email's route sends it once, to the test inbox, with its template (part K).
+	const email = block.emails.find((e) => e.route === route.id);
+	if (email) {
+		const to = email.to === 'person' ? 'user.email' : `String(body[${q(email.to.slice('request-field:'.length))}] ?? "")`;
+		return [
+			'async (c) => {',
+			'    const user = await requireUser(c);',
+			'    const body = await c.req.json<Body>().catch(() => ({}) as Body);',
+			`    const sent = await c.env.CADDIE.email({ to: ${to}, subject: ${q(email.plain)}, text: ${q(email.plain)}, template: ${q(email.id)} });`,
+			'    return c.json({ ok: sent.ok });',
+			'  }',
+		].join('\n');
+	}
 	if (!route.table) return 'async (c) => c.json({ ok: true })';
 	const table = block.tables.find((t) => t.name === route.table)!;
 	const name = table.name;
@@ -114,17 +129,23 @@ function handlerFor(route: ArchitectureRoute, block: ArchitectureBlock): string 
 }
 
 function genericServer(block: ArchitectureBlock): string {
+	const files = block.tables.some((t) => t.fields.some((f) => f.type === 'file'));
+	const plans = block.payments ? block.payments.plans.map((p) => ({ id: p.id, priceMinor: p.priceMinor, interval: p.interval })) : [];
 	return [
 		'import { Hono } from "hono";',
 		'import type { D1Database } from "../caddie/d1";',
 		'import type { CaddiePlatform } from "../caddie/platform";',
 		'import { mountSignIn } from "../caddie/auth";',
+		...(block.payments ? ['import { mountPayments } from "../caddie/payments";'] : []),
+		...(files ? ['import { mountFiles } from "../caddie/files";'] : []),
 		'import { implement, requireUser } from "../caddie/contract";',
 		'',
-		'export type Env = { DB: D1Database; CADDIE: CaddiePlatform; CADDIE_AUTH_SECRET?: string };',
+		'export type Env = { DB: D1Database; CADDIE: CaddiePlatform; CADDIE_AUTH_SECRET?: string; CADDIE_JOB_SECRET?: string };',
 		'export const app = new Hono<{ Bindings: Env }>().basePath("/api");',
 		'app.get("/health", (c) => c.json({ ok: true }));',
 		'mountSignIn(app);',
+		...(block.payments ? [`mountPayments(app, { currency: ${q(block.payments.currency)}, plans: ${q(plans)} });`] : []),
+		...(files ? ['mountFiles(app);'] : []),
 		'type Body = Record<string, unknown>;',
 		'const now = () => new Date().toISOString();',
 		'/** The declared fields this request sets (never a column the request names itself). */',
