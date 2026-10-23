@@ -5,6 +5,7 @@ import { ScopeError, requireProjectScope, sessionUserId } from "../scope.ts";
 import { resolveAppSecrets } from "../app-secrets.ts";
 import { SecretBoxError, keyringFromEnv } from "../secret-box.ts";
 import { appAuthSecret, clearTestInbox, listTestInbox } from "../app-sign-in.ts";
+import { clearTestEmails, listTestEmails } from "../app-email.ts";
 import {
   workflowSnapshot,
   reconcileStalledBuild,
@@ -502,13 +503,16 @@ export function createBuildWorkflowRouter(
     if (!env.PREVIEW_DB) throw new ScopeError(503, "PREVIEW_RUNTIME_UNAVAILABLE", "The preview database isn't available here.");
     await previewDatabaseFor(env, scope.projectId).reset();
     await clearTestInbox(c.env.DB, scope.projectId);
+    await clearTestEmails(c.env.DB, scope.projectId);
     return c.json({ reset: true });
   });
 
-  // The preview's test inbox: sign-in codes the app sent while you tried it.
+  // The preview's test inbox: the sign-in codes and the emails the app sent
+  // while you tried it. Both are kept in Caddie; nothing is delivered.
   router.get("/projects/:projectId/workflow/test-inbox", async (c) => {
     const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
-    return c.json({ messages: await listTestInbox(c.env.DB, scope) }, 200, { "cache-control": "no-store" });
+    const [messages, emails] = await Promise.all([listTestInbox(c.env.DB, scope), listTestEmails(c.env.DB, scope)]);
+    return c.json({ messages, emails }, 200, { "cache-control": "no-store" });
   });
   return router;
 }
