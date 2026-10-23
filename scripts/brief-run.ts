@@ -395,6 +395,28 @@ export function gate(env: Record<string, string | undefined>): GateResult {
 	return { ok: true, env: env as Record<string, string> };
 }
 
+/**
+ * The gate for `--sign-in` (item 1): it opens a visible browser for the owner,
+ * so it needs authorization and the local base URL, but NOT the A/B/C test
+ * accounts — only the owner's own Caddie account is used. Same honesty rule:
+ * CADDIE_LIVE_AUTHORIZED is read from the process env only.
+ */
+export function signInGate(env: Record<string, string | undefined>): GateResult {
+	const authorized = env.CADDIE_LIVE_AUTHORIZED === '1';
+	const baseUrl = env.CADDIE_DEV_BASE_URL;
+	const missing = [
+		!authorized && 'CADDIE_LIVE_AUTHORIZED=1 (explicit authorization in the process env, never from .dev.vars)',
+		!baseUrl && 'CADDIE_DEV_BASE_URL (the local `bun run dev` base, e.g. http://127.0.0.1:5173)',
+	].filter(Boolean) as string[];
+	if (missing.length > 0) {
+		return {
+			ok: false,
+			reason: `BLOCKED — --sign-in requires explicit authorization and the local base URL. Missing: ${missing.join('; ')}.`,
+		};
+	}
+	return { ok: true, env: env as Record<string, string> };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // .dev.vars loading (values never printed)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -624,6 +646,38 @@ function ledgerRecord(args: {
 // main — wires the REAL seams behind the gate. Never reached from a test.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Item 1 — `--sign-in`. Open a visible Chromium at `${base}/app/`, wait (up to
+ * 10 minutes) for the owner to sign in, and save the browser storage state to
+ * tests/briefs/runs/.auth/owner.json. Never reached from a test; the flow seam
+ * (playwrightSignInPage) is the only thing that launches a browser.
+ */
+async function runOwnerSignIn(env: Record<string, string | undefined>): Promise<number> {
+	const gated = signInGate(env);
+	if (!gated.ok) {
+		console.error(`brief-run: ${gated.reason}`);
+		return 1;
+	}
+	const base = gated.env.CADDIE_DEV_BASE_URL;
+	const { assertLocalBase } = await import('./brief-run/dev-client.ts');
+	const { runSignInFlow, playwrightSignInPage } = await import('./brief-run/sign-in.ts');
+	const { saveStorageState, ownerAuthPath } = await import('./brief-run/auth-store.ts');
+	const { systemClock } = await import('./brief-run/clock.ts');
+	const authPath = ownerAuthPath(join(BRIEFS_DIR, 'runs'));
+
+	console.error(`brief-run --sign-in: opening a visible browser at ${base}/app/. Sign in as the owner; I'll save your session when /api/home-project answers (up to 10 minutes).`);
+	try {
+		assertLocalBase(base); // refuse a non-local base before opening a browser
+		const { state, waitedMs } = await runSignInFlow(playwrightSignInPage, systemClock, { baseUrl: base });
+		saveStorageState(authPath, state);
+		console.error(`brief-run --sign-in: saved the owner's session to ${authPath} after ${Math.round(waitedMs / 1000)}s. Later runs will load their cookies from it.`);
+		return 0;
+	} catch (error) {
+		console.error(`brief-run --sign-in: ${error instanceof Error ? error.message : String(error)}`);
+		return 1;
+	}
+}
+
 async function main(): Promise<number> {
 	// Authorization is taken from the PROCESS env ONLY; credentials may come
 	// from .dev.vars. The merged map is used for credentials; the flag is read
@@ -634,6 +688,13 @@ async function main(): Promise<number> {
 		...process.env,
 		CADDIE_LIVE_AUTHORIZED: process.env.CADDIE_LIVE_AUTHORIZED,
 	};
+
+	// Item 1: `--sign-in` opens a visible browser for the owner and saves the
+	// cookies every later run uses. It has its own lighter gate (no A/B/C
+	// accounts) and does NOT run the campaign.
+	if (process.argv.slice(2).includes('--sign-in')) {
+		return runOwnerSignIn(env);
+	}
 
 	const gated = gate(env);
 	if (!gated.ok) {
@@ -663,8 +724,37 @@ async function main(): Promise<number> {
 	const { fileLedgerStore } = await import('./brief-run/ledger.ts');
 
 	const client = new DevClient(base, (input, init) => fetch(input, init));
-	const sessionA = await client.signIn({ label: 'A', sub: 'campaign-a', email: gated.env.TEST_ACCOUNT_A_EMAIL, name: 'Campaign A' });
-	const sessionB = await client.signIn({ label: 'B', sub: 'campaign-b', email: gated.env.TEST_ACCOUNT_B_EMAIL, name: 'Campaign B' });
+
+	// Item 1: load the OWNER's saved sign-in (never the stub provider, which
+	// cannot sign in against the owner's real Google sign-in). A missing file or
+	// a 401 stops the run with one plain sentence telling the owner to run
+	// `--sign-in`. Only the owner's one Caddie account is used; both the API
+	// seams and the browser check carry its cookies.
+	const { requireOwnerSignIn, ownerAuthPath } = await import('./brief-run/auth-store.ts');
+	const { SignInRequiredError } = await import('./brief-run/auth-store.ts');
+	const authPath = ownerAuthPath(join(BRIEFS_DIR, 'runs'));
+	let ownerCookieHeader: string;
+	try {
+		const owner = await requireOwnerSignIn({
+			path: authPath,
+			baseUrl: base,
+			probe: async (cookieHeader) => {
+				const res = await client.sessionFromCookieHeader({ label: 'A', sub: 'owner', email: gated.env.TEST_ACCOUNT_A_EMAIL, name: 'Owner' }, cookieHeader).fetch('/api/home-project');
+				return res.status;
+			},
+		});
+		ownerCookieHeader = owner.cookieHeader;
+	} catch (error) {
+		if (error instanceof SignInRequiredError) {
+			console.error(`brief-run: ${error.message}`);
+			return 1;
+		}
+		throw error;
+	}
+	// A is the owner's session; B is the same owner session (the two browser-app
+	// users in item 2 are both driven from the owner's one Caddie session).
+	const sessionA = client.sessionFromCookieHeader({ label: 'A', sub: 'owner', email: gated.env.TEST_ACCOUNT_A_EMAIL, name: 'Owner' }, ownerCookieHeader);
+	const sessionB = client.sessionFromCookieHeader({ label: 'B', sub: 'owner', email: gated.env.TEST_ACCOUNT_A_EMAIL, name: 'Owner' }, ownerCookieHeader);
 
 	// The workspace the fresh account lands in. The home-project route returns
 	// it; a missing workspace is a live-only gap and surfaces as a thrown error.

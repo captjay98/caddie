@@ -89,6 +89,16 @@ export class CookieJar {
 	has(name: string): boolean {
 		return this.cookies.has(name);
 	}
+
+	/** Seed the jar from a `Cookie:` header (the owner's saved sign-in, item 1). */
+	setFromHeader(header: string): void {
+		for (const pair of header.split(';')) {
+			const trimmed = pair.trim();
+			if (!trimmed) continue;
+			const eq = trimmed.indexOf('=');
+			if (eq > 0) this.cookies.set(trimmed.slice(0, eq).trim(), trimmed.slice(eq + 1).trim());
+		}
+	}
 }
 
 /** Split a folded Set-Cookie header on commas that start a new `name=` pair. */
@@ -162,6 +172,19 @@ export class DevClient {
 		const res = await this.rawFetch(path, { ...init, headers });
 		jar.absorb(res);
 		return res;
+	}
+
+	/**
+	 * Build a session from the owner's SAVED cookie header (item 1): every live
+	 * run loads the owner's cookies from tests/briefs/runs/.auth/owner.json for
+	 * the API calls instead of the stub-provider sign-in, which cannot work
+	 * against the owner's real Google sign-in. The profile is cosmetic (labels
+	 * in reports); the identity is the cookies.
+	 */
+	sessionFromCookieHeader(profile: AccountProfile, cookieHeader: string): AccountSession {
+		const jar = new CookieJar();
+		jar.setFromHeader(cookieHeader);
+		return new AccountSession(profile, this.base, jar, (p, init) => this.fetchWithJar(jar, p, init));
 	}
 }
 
