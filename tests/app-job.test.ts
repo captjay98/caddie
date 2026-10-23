@@ -132,3 +132,25 @@ describe('Run-now job signatures and runs', () => {
 		});
 	});
 });
+
+// FINDING #9 (review 2026-10-23): a published "Run now" is deliberately not
+// implemented, so jobs are PREVIEW-ONLY. The product must never request a live
+// run, and the server must refuse one up front (not claim it works).
+describe('part N finding #9: Run now is preview-only', () => {
+	const ROOT = join(import.meta.dir, '..');
+	test('the jobs UI only ever posts mode:"preview"', () => {
+		const client = readFileSync(join(ROOT, 'apps/app/src/client/project/AppJobs.tsx'), 'utf8');
+		expect(client).toContain('mode: "preview"');
+		expect(client).not.toContain('mode: "live"');
+	});
+	test('the server refuses a live Run now up front, previewOnly, before any run is recorded', () => {
+		const route = readFileSync(join(ROOT, 'apps/app/src/server/routes/build-workflow.ts'), 'utf8');
+		const run = route.slice(route.indexOf('workflow/jobs/:jobId/run'));
+		const liveGuard = run.slice(run.indexOf('mode === "live"'), run.indexOf('startJobRun'));
+		// The live refusal comes BEFORE startJobRun (no run row is opened), is
+		// previewOnly, and is an honest 501 — never a claim that it worked.
+		expect(liveGuard).toContain('previewOnly: true');
+		expect(liveGuard).toContain('501');
+		expect(liveGuard).toMatch(/preview only/i);
+	});
+});

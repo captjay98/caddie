@@ -552,11 +552,17 @@ export function createBuildWorkflowRouter(
     const jobId = c.req.param("jobId");
     const body = (await c.req.json().catch(() => ({}))) as { mode?: unknown; outputId?: unknown } | null;
     const mode: "preview" | "live" = body?.mode === "live" ? "live" : "preview";
-    // Members can run on the preview; only the owner on the published app.
-    const scope =
-      mode === "live"
-        ? await assertProjectOwner(c.env.DB, await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, projectId))
-        : await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, projectId);
+    // FINDING #9 (review 2026-10-23): a PUBLISHED "Run now" is deliberately not
+    // implemented — the published app carries no job-signing secret and there is
+    // no dispatch relay — so jobs are PREVIEW-ONLY. The owner's UI only ever
+    // sends mode:"preview"; a live call (e.g. a direct API request) is refused
+    // up front with a plain, honest reason, never silently dropped or counted as
+    // a working published capability.
+    if (mode === "live") {
+      return c.json({ ok: false, status: "unavailable", previewOnly: true, summary: "Jobs run on the preview only. A published 'Run now' isn't available yet." }, 501);
+    }
+    // Members can run on the preview.
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, projectId);
 
     const block = await getApprovedBlock(c.env.DB, scope.projectId);
     const job = block?.jobs.find((j) => j.id === jobId);
@@ -571,14 +577,9 @@ export function createBuildWorkflowRouter(
 
     const runId = await startJobRun(c.env.DB, { projectId: scope.projectId, mode, jobId });
 
-    // The published path needs the dispatch namespace (lane 1's deploy). It is
-    // not bound in this worker yet, so a live run is recorded as failed with a
-    // plain reason rather than silently dropped.
-    if (mode === "live") {
-      const summary = "A published Run now needs the dispatch namespace, which isn't available here yet.";
-      await finishJobRun(c.env.DB, { runId, status: "failed", summary });
-      return c.json({ ok: false, runId, status: "failed", summary }, 503);
-    }
+    // FINDING #9 (review 2026-10-23): a PUBLISHED "Run now" is deliberately not
+    // implemented — the published app carries no job-signing secret and there is
+    // no dispatch relay — so jobs are PREVIEW-ONLY (refused up front above).
 
     const exportsOf = previewExports(c);
     if (!env.LOADER || !env.PREVIEW_DB || !exportsOf?.PreviewDatabaseGateway) {
