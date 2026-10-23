@@ -9,7 +9,7 @@ const PROJECT = { ...HOME, id: 'proj-focused', name: 'Pantry Pilot', kind: 'stan
 const json = (route: Route, body: unknown) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
 
 test.beforeEach(async ({ page }) => {
-	page.on('pageerror', error => console.error('Focused workspace page error:', error.message));
+	page.on('pageerror', error => console.error('Focused workspace page error:', error.stack));
 });
 
 async function fixture(context: BrowserContext, phase: string, options: { repair?: boolean; copied?: boolean } = {}) {
@@ -171,6 +171,7 @@ test('Check selects its own tab and contains the full app preview', async ({ pag
 	const app = page.getByTestId('project-app-checks');
 	await expect(app.getByTestId('project-workflow')).toHaveAttribute('data-phase', 'ready');
 	await expect(app.locator('iframe')).toHaveCount(1);
+	await expect(app.frameLocator('iframe').getByRole('heading', { name: 'Pantry Pilot', exact: true })).toBeVisible();
 	await expect(page.getByTestId('channel').locator('iframe')).toHaveCount(0);
 });
 
