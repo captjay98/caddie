@@ -142,6 +142,11 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
     /** Big apps: the foundation is done and its parts are still being built by their own builders. */
     waitingOnParts?: boolean;
   } | null>;
+  /**
+   * Big apps (part P step 3): join this finished part into the app. Present
+   * only on a part builder's (module-scoped) host.
+   */
+  finishModuleBuild?: (operationKey: string, signal?: AbortSignal) => Promise<unknown>;
   blockBuild: (reason: string) => Promise<void>;
   /**
    * Team mode (part B): record one architecture-review round. The host closure

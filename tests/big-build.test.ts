@@ -218,4 +218,19 @@ describe('the agents wire the big build', () => {
 		const builder = read('../apps/app/src/agents/module-builder.ts');
 		for (const field of ['conversationId:', 'moduleId:', 'buildSeq:', 'features:']) expect(builder).toContain(field);
 	});
+
+	test("a part's builder has finish_module, and its host can start parts and tell the coordinator once (keyed)", () => {
+		const src = read('../apps/app/src/agents/module-builder.ts');
+		expect(src).toContain('name: "finish_module"');
+		expect(src).toContain('host.finishModuleBuild(ctx.toolCallId, ctx.signal)');
+		// The host gets both deps; the coordinator is imported lazily (a static
+		// import would be a cycle through host-context.ts), and its message is
+		// keyed so a resend is the same one turn.
+		expect(src).toContain('}, hostDeps(seed.conversationId));');
+		expect(src).toContain('await import("./coordinator.ts")');
+		expect(src).toMatch(/dispatch\(Coordinator, \{ id: conversationId, message: \{ kind: "user", body: message \}, idempotencyKey: key \}\)/);
+		expect(src).not.toMatch(/^import (?!type )[^\n]*from "\.\/coordinator\.ts";$/m);
+		// The builder is told to join its part when every feature has passed.
+		expect(src).toContain('call finish_module to join the part into the app');
+	});
 });

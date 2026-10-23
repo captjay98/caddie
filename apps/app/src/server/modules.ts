@@ -72,7 +72,7 @@ export type DispatchModuleBuilder = (input: {
 
 /** The message a ModuleBuilder dispatch carries (part P). Plain, deterministic. */
 export function moduleBuilderMessage(moduleId: string): string {
-	return `Build the "${moduleId}" module: its features only, backend then frontend, its area, its tests and contract checks. Finish each feature with finish_feature; when all of its features pass, the module is done.`;
+	return `Build the "${moduleId}" module: its features only, backend then frontend, its area, its tests and contract checks. Finish each feature with finish_feature; when all of its features pass, call finish_module to join it into the app.`;
 }
 
 // --- what a module's dependencies tell us ------------------------------------

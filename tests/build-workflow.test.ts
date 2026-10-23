@@ -53,6 +53,7 @@ import { rollbackToFeature } from "../apps/app/src/server/build-features.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, ROLE_TOOL_POLICY } from "../apps/app/src/agents/permissions.ts";
 import { resolveCoordinatorContext, resolveModuleBuilderContext } from "../apps/app/src/server/coordinator-host.ts";
 import { getModule, seedModules, takeSlot } from "../apps/app/src/server/module-slots.ts";
+import { ContreeClient } from "../apps/app/src/server/adapters/contree.ts";
 import { listAppSecrets, setAppSecret } from "../apps/app/src/server/app-secrets.ts";
 import { parseKeyring } from "../apps/app/src/server/secret-box.ts";
 import { makeRequestAppKey } from "../apps/app/src/agents/tools.ts";
@@ -139,6 +140,8 @@ async function world() {
     "0040_team_mode.sql",
     // Part P: the module rows and slots the module-builder tests seed.
     "0042_module_builders.sql",
+    // Part Q: the integration lock a part's join takes.
+    "0043_integration_lock.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -2312,6 +2315,97 @@ describe("host-driven feature loop", () => {
       expect(passed.next).toContain("Add barns and pens");
       expect(dispatched).toEqual([]);
       expect(w.count("build_modules")).toBe(0);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  // --- Big apps, joining a part (plan part P step 3) ------------------------
+  // The coordinator builds the foundation on the REAL host; the structures
+  // part's builder then runs on the REAL module host, and finish_module joins
+  // it into the app through the sandbox stub (sessions, commits, inspect).
+  async function partReady(w: Awaited<ReturnType<typeof world>>, stub: SandboxStub) {
+    const item = await bigBuild(w);
+    const root = `/workspace/${item.scope.projectId}`;
+    const started: Array<{ moduleId: string; buildSeq: number }> = [];
+    const notified: Array<{ key: string; message: string }> = [];
+    const deps = {
+      dispatchModuleBuilder: (input: { moduleId: string; buildSeq: number }) => void started.push(input),
+      notifyCoordinator: (input: { key: string; message: string }) => void notified.push(input),
+    };
+    const coordinator = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, deps);
+    await coordinator.buildNextFeature();
+    await coordinator.driver.writeFile({ sessionId: coordinator.sessionId, path: `${root}/src/server/core/farms.ts`, content: "export const farms = 'core';" });
+    expect(((await coordinator.finishFeature("farm-registry", "core-1")) as { partsStarted?: boolean }).partsStarted).toBe(true);
+    const buildSeq = started[0]!.buildSeq;
+    const part = await resolveModuleBuilderContext(env(w, stub), { conversationId: item.workflow.conversationId, moduleId: "structures", buildSeq, features: ["structures"] }, deps);
+    expect(await part.buildNextFeature()).toMatchObject({ feature: { id: "structures" } });
+    await part.driver.writeFile({ sessionId: part.sessionId, path: `${root}/src/server/structures/barns.ts`, content: "export const barns = 'structures';" });
+    const finished = (await part.finishFeature("structures", "structures-1")) as { passed: boolean; next: string };
+    expect(finished.passed).toBe(true);
+    expect(finished.next).toContain("Call finish_module");
+    const status = (moduleId: string) =>
+      (w.sqlite.query('select "status" from build_modules where "projectId" = ? and "moduleId" = ?').get(item.scope.projectId, moduleId) as { status: string }).status;
+    const inspect = new ContreeClient({ baseUrl: stub.url, apiToken: "local-feature-token", platformProjectId: "local-project" });
+    const read = async (image: string, path: string) => {
+      const bytes = await inspect.inspectDownload(image, `${root}/${path}`);
+      return bytes === null ? null : new TextDecoder().decode(bytes);
+    };
+    return { item, root, part, buildSeq, started, notified, status, read };
+  }
+
+  test("a big build: finish_module joins a finished part into a copy of the newest save point and makes that the app", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      const foundation = (await getModule(w.db, p.item.scope.projectId, p.buildSeq, "core"))!.checkpointRef!;
+      const spawnsBefore = stub.requests.length;
+      const joined = (await p.part.finishModuleBuild!("join-1")) as { joined: boolean; next: string };
+      expect(joined).toMatchObject({ joined: true });
+      expect(joined.next).toContain("end your turn now");
+      expect(p.status("structures")).toBe("merged");
+
+      // The join copy was started from the foundation's save point...
+      const spawned = stub.requests.slice(spawnsBefore).filter((r) => r.method === "POST" && r.path === "/v1/instances");
+      expect((spawned[0]?.body as { image?: string })?.image).toBe(foundation);
+      // ...and its commit, now the newest save point, holds the core AND the part.
+      // MUTATION: start the join copy from the base image instead, and the
+      // core's file is missing from the app.
+      const newest = (await getModule(w.db, p.item.scope.projectId, p.buildSeq, "core"))!.checkpointRef!;
+      expect(newest).not.toBe(foundation);
+      expect(await p.read(newest, "src/server/core/farms.ts")).toBe("export const farms = 'core';");
+      expect(await p.read(newest, "src/server/structures/barns.ts")).toBe("export const barns = 'structures';");
+      // The build's own working copy now opens from it (verify_build and the preview use it).
+      const override = w.sqlite.query('select "image","reason" from build_sandbox_sessions where "projectId" = ?').get(p.item.scope.projectId) as { image: string; reason: string };
+      expect(override.image).toBe(newest);
+      // The name lists every joined part in the design's order, including the
+      // parts with no planned features (joined as they stood at the start).
+      expect(override.reason).toBe("joined:core + structures + events + feed + tasks + insights + notifications + subscriptions merged");
+      // money is still building, so Caddie is not told anything yet.
+      expect(p.notified).toEqual([]);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("a red join goes back to the part's builder and never counts toward any repair limit", async () => {
+    const w = await world();
+    const stub = bigStub();
+    await stub.start();
+    try {
+      const p = await partReady(w, stub);
+      const roundsBefore = w.count("run_rounds");
+      stub.setBehavior("bun run test", { exitCode: 1, stderr: "1 fail: the barns list is empty" });
+      const out = (await p.part.finishModuleBuild!("join-red")) as { joined: boolean; triesLeft: number; failures: Array<{ check: string; output: string }>; next: string };
+      expect(out).toMatchObject({ joined: false, triesLeft: 1 });
+      expect(out.failures[0]).toMatchObject({ check: "behavior-tests" });
+      expect(out.failures[0]!.output).toContain("the barns list is empty");
+      expect(out.next).toContain("call finish_module again");
+      expect(p.status("structures")).toBe("building");
+      // MUTATION: drop the join-mode return in the check runner, and the join's
+      // failure is recorded as a repair round that could pause the build.
+      expect(w.count("run_rounds")).toBe(roundsBefore);
+      expect((await readWorkflow(w.db, p.item.scope))?.phase).toBe("building");
+      // Nothing changed in the app: the newest save point and the build's copy stay put.
+      expect(w.count("build_sandbox_sessions", "reason like 'joined:%'")).toBe(0);
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 });

@@ -80,7 +80,8 @@ import {
 } from "./build-features.ts";
 import { openWorkingCopy } from "./working-copy.ts";
 import { stopModule, failModule, openModuleWorkingCopy, type DispatchModuleBuilder } from "./modules.ts";
-import { bigBuildOutcome, bigBuildSeq, foundationModuleOf, isBigBlock, moduleOfFeature, startAfterFoundation } from "./big-build.ts";
+import { bigBuildOutcome, bigBuildSeq, foundationModuleOf, isBigBlock, moduleFeatureMap, moduleOfFeature, startAfterFoundation } from "./big-build.ts";
+import { joinFinishedModule, pointBuildSessionAt } from "./module-join.ts";
 import { runVerifiedInstall } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { checkSentence, newTestsSentence } from "./round-detail.ts";
@@ -167,6 +168,12 @@ export interface CoordinatorEnvironment {
  */
 export interface CoordinatorHostDeps {
   dispatchModuleBuilder?: DispatchModuleBuilder;
+  /**
+   * Big apps (part P step 3): tell the coordinator that every part is joined,
+   * stopped or not joined, so it checks the whole app. Keyed: a resend with
+   * the same key is the same one turn. Passed by the ModuleBuilder's host.
+   */
+  notifyCoordinator?: (input: { key: string; message: string }) => Promise<void> | void;
 }
 /** Called inside the owning DO, including alarms/recovery; no HTTP module globals. */
 export async function resolveCoordinatorContext(
@@ -375,6 +382,11 @@ export async function createCoordinatorContext(
   };
   const PARTS_BUILDING_NEXT =
     "The core of the app is built and saved. Its other parts are now being built at the same time by their own builders. There is nothing for you to build: end your turn now. Caddie messages you when every part is joined.";
+  /** A part builder whose features have all passed joins its part next. */
+  const partDoneNext = (part: string) =>
+    `Every feature of the "${part}" part passed. Call finish_module to join it into the app.`;
+  /** A scope no repair issue belongs to: a join's checks are never paused by any part's spent tries. */
+  const NEVER_PAUSED: RepairPauseScope = { featureIds: [] };
   /** The save point of the last passed feature in a row list (the foundation's, for a big build). */
   const lastSavePoint = (rows: BuildFeatureRow[]): string | null =>
     [...rows]
@@ -482,14 +494,18 @@ export async function createCoordinatorContext(
   // the contract test always matches the design the user approved. Written at
   // hand-out and before every check run. A no-op with team mode off, or when no
   // design is approved yet (nothing to generate from).
-  const writeGeneratedContractFiles = async (features?: readonly string[]): Promise<boolean> => {
+  const writeGeneratedContractFiles = async (
+    features?: readonly string[],
+    /** Big apps: write into this session (a join copy) instead of the host's own. */
+    session?: { driver: SandboxDriver; id: string },
+  ): Promise<boolean> => {
     if (!teamMode) return false;
     const block = await getApprovedBlock(env.DB, scope.projectId).catch(() => null);
     if (!block) return false;
     // Parts J and L: the test-mode payments/upload files the block declares
     // ride along (nothing without app features), so a builder can't drop them.
     const files = { ...appFeatureFiles(block, { appFeatures }), ...writeContractFiles(block, bigApps ? "big" : "small", features) };
-    const { driver, id } = await ensureSession();
+    const { driver, id } = session ?? (await ensureSession());
     await driver.uploadFiles(
       id,
       Object.entries(files).map(([path, text]) => ({
@@ -508,8 +524,8 @@ export async function createCoordinatorContext(
   // sentence (host-checks.runTeamModeContractChecks gates on exit code AND
   // counts). The db file lives under the app's own scratch dir, fresh per run.
   const CONTRACT_TEST_FILE = "caddie/contract.test.ts";
-  const runContractPhases = async (attempt: string, signal?: AbortSignal) => {
-    const { driver: runDriver, id } = await ensureSession();
+  const runContractPhases = async (attempt: string, signal?: AbortSignal, session?: { driver: SandboxDriver; id: string }) => {
+    const { driver: runDriver, id } = session ?? (await ensureSession());
     const dbFile = `.caddie-scratch/contract-${attempt.replace(/[^A-Za-z0-9_-]/g, "_")}.sqlite`;
     const runner = async (phase: ContractPhase) => {
       signal?.throwIfAborted();
@@ -754,27 +770,39 @@ export async function createCoordinatorContext(
    * operation keys) while sharing every rule; only verify_build publishes.
    */
   const runHostChecks = async (
-    mode: "checks" | "verify" | "feature",
+    mode: "checks" | "verify" | "feature" | "join",
     attempt: string,
     signal?: AbortSignal,
     /** Feature id: failures count toward THAT feature's repair limit. */
     issuePrefix?: string,
+    /**
+     * Big apps, mode "join": the join copy to check (never the host's own
+     * session) and the features its contract test covers. A join failure is
+     * the part builder's to fix, so it records no repair round and never
+     * pauses or stops anything (module-join.ts counts the joins).
+     */
+    join?: { session: { driver: SandboxDriver; id: string }; contractFeatures: readonly string[] },
   ) => {
     signal?.throwIfAborted();
-    const { workflow, plan } = await requireBuildApproval(env.DB, scope, pauseScope);
-    await scaffold();
+    const approvalScope = mode === "join" ? NEVER_PAUSED : pauseScope;
+    const { workflow, plan } = await requireBuildApproval(env.DB, scope, approvalScope);
+    // The join copy starts from a joined save point, which already has the scaffold.
+    if (mode !== "join") await scaffold();
     // Team mode (part E): write the generated contract files from the approved
     // design BEFORE every check run, so the contract test matches the design.
     // During the build it covers the passed features plus the current one; the
-    // final verify covers the whole design.
-    await writeGeneratedContractFiles(mode === "verify" ? undefined : await contractScope());
+    // final verify covers the whole design; a join covers every joined part.
+    await writeGeneratedContractFiles(
+      mode === "verify" ? undefined : join ? join.contractFeatures : await contractScope(),
+      join?.session,
+    );
     await guardBudget();
-    const { driver, id } = await ensureSession();
+    const { driver, id } = join?.session ?? (await ensureSession());
     const commands = hostCheckCommands(stack);
     const receipts: { check: string; passed: boolean; exitCode: number | null; stdout: string; stderr: string; operationKey: string }[] = [];
     for (const check of commands) {
       const operationKey = `${mode}:${runId}:${plan.id}:${attempt}:${check.check}`;
-      await requireBuildApproval(env.DB, scope, pauseScope);
+      await requireBuildApproval(env.DB, scope, approvalScope);
       const checkStarted = new Date().toISOString();
       // The dependencies check is the ONE verified install step: fetch every
       // pinned tarball, verify its sha512 against bun.lock, extract it, then
@@ -835,6 +863,8 @@ export async function createCoordinatorContext(
         operationKey,
       });
       if (!passed) {
+        // A join's failure goes back to the part's builder (module-join.ts).
+        if (mode === "join") return { passed: false as const, paused: false, receipts, workflow, plan, driver, id };
         await recordRepairRound(env.DB, scope, workflow.runId, {
           issue: issuePrefix ? `${issuePrefix}:${check.check}` : check.check,
           operationKey,
@@ -860,7 +890,7 @@ export async function createCoordinatorContext(
     // nothing from the snapshot client the part boundary uses.
     let contractChecks: ContractCheckMap | null = null;
     if (teamMode) {
-      const contract = await runContractPhases(attempt, signal);
+      const contract = await runContractPhases(attempt, signal, join?.session);
       contractChecks = contract.checks;
       if (!contract.passed) {
         const sentence = contract.failureSentence ?? "A team-mode contract check did not pass.";
@@ -869,6 +899,7 @@ export async function createCoordinatorContext(
         // a failing base check's output.
         const failedReceipt = contractFailureReceipt(contract, `contract:${runId}:${attempt}`);
         if (failedReceipt) receipts.push(failedReceipt);
+        if (mode === "join") return { passed: false as const, paused: false, receipts, workflow, plan, driver, id, contractChecks };
         const check = failedReceipt?.check ?? "contract";
         await recordRepairRound(env.DB, scope, workflow.runId, {
           issue: issuePrefix ? `${issuePrefix}:${check}` : check,
@@ -928,7 +959,7 @@ export async function createCoordinatorContext(
         if (parts && !parts.done) return { done: false, waiting: true, next: PARTS_BUILDING_NEXT };
       }
       return { done: true, next: moduleId
-        ? `Every feature of the "${moduleId}" module passed. The module is done.`
+        ? partDoneNext(moduleId)
         : "Every feature passed. Ask QA to run verify_build to publish the preview." };
     }
     await markFeatureBuilding(env.DB, current);
@@ -962,7 +993,7 @@ export async function createCoordinatorContext(
     const current = currentFeature(rows);
     if (!current)
       return { passed: true, done: true, next: moduleId
-        ? `Every feature of the "${moduleId}" module passed. The module is done.`
+        ? partDoneNext(moduleId)
         : "Every feature passed. Ask QA to run verify_build to publish the preview." };
     if (current.featureId !== featureId)
       throw new ScopeError(
@@ -1048,7 +1079,7 @@ export async function createCoordinatorContext(
       next: after
         ? `Saved. Feature ${after.position} of ${rows.length}, “${after.title}”, is next: call build_next_feature.`
         : moduleId
-          ? `Saved. Every feature of the "${moduleId}" module passed. The module is done.`
+          ? `Saved. ${partDoneNext(moduleId)}`
           : "Every feature passed. Ask QA to run verify_build to publish the preview.",
     };
   };
@@ -1072,6 +1103,67 @@ export async function createCoordinatorContext(
       passed: rows.filter((row) => row.status === "passed").length,
       current: current ? { id: current.featureId, title: current.title, position: current.position } : null,
     };
+  };
+  /**
+   * Big apps (part P step 3): finish_module. Every feature of this part has
+   * passed in its own copy; join the part into the app (module-join.ts). The
+   * join copy is a fresh sandbox session started from the newest joined save
+   * point, checked with the host's own fixed checks in "join" mode.
+   */
+  const finishModuleBuild = async (attempt: string, signal?: AbortSignal) => {
+    if (moduleId === undefined || moduleBuildSeq === undefined)
+      throw new ScopeError(409, "NOT_A_PART", "Only a part's own builder can finish a part.");
+    signal?.throwIfAborted();
+    const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
+    const rows = scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan));
+    const open = rows.filter((row) => row.status !== "passed");
+    if (open.length > 0)
+      throw new ScopeError(409, "PART_NOT_DONE", `Finish every feature of this part first: ${open.map((row) => `“${row.title}”`).join(", ")}.`);
+    const block = await getApprovedBlock(env.DB, scope.projectId);
+    if (!isBigBlock(block)) throw new ScopeError(409, "NOT_A_BIG_BUILD", "This build's approved design has no parts to join.");
+    const dispatch = hostDeps.dispatchModuleBuilder;
+    if (!dispatch)
+      throw new ScopeError(503, "PARTS_UNAVAILABLE", "This app is built in parts, but Caddie can't start the part builders here.");
+    if (!inspect)
+      throw new SandboxError(503, "SANDBOX_NOT_CONFIGURED", "The build sandbox is not configured. Planning remains available.");
+    const planned = parsePlanFeatures(plan.body);
+    const features = moduleFeatureMap(block, planned.ok ? planned.features.map((f) => f.id) : rows.map((row) => row.featureId));
+    // A fresh commit of this part's own copy: it includes any fix made after
+    // the last feature's save point (a red join is fixed in the part's copy).
+    const moduleRef = await currentImage();
+    const { driver: sandbox } = await ensureSession();
+    return joinFinishedModule(env.DB, scope, { runId, buildSeq: moduleBuildSeq, moduleId, moduleRef, block, attempt }, {
+      openCopy: async (image, key) => {
+        const { sessionId } = await sandbox.ensureSession({ sessionKey: key, image, projectId: scope.projectId, runId });
+        const session = { driver: sandbox, id: sessionId };
+        return {
+          write: async (files) => {
+            if (files.length === 0) return;
+            await sandbox.uploadFiles(sessionId, files.map((file) => ({ path: `${root}/${file.path}`, contentBase64: file.contentBase64 })));
+          },
+          runChecks: async ({ attempt: key, features: covered }) => {
+            const outcome = await runHostChecks("join", key, signal, undefined, { session, contractFeatures: covered });
+            return {
+              passed: outcome.passed,
+              failures: outcome.receipts
+                .filter((receipt) => !receipt.passed)
+                .map((receipt) => ({ check: receipt.check, output: `${receipt.stdout}\n${receipt.stderr}`.trim() })),
+            };
+          },
+          checkpoint: async () => (await sandbox.checkpoint(sessionId)).checkpointRef,
+        };
+      },
+      readSnapshot: (image) => snapshotReadPort(inspect, image, root),
+      readFile: async (image, path) => {
+        const bytes = await inspect.inspectDownload(image, `${root}/${path.replace(/^\/+/, "")}`);
+        if (bytes === null) throw new Error(`${path} is missing from the part's finished copy`);
+        return bytesToBase64(bytes);
+      },
+      pointBuildCopyAt: (image, name) => pointBuildSessionAt(env.DB, { projectId: scope.projectId, runId, image, name }),
+      dispatch,
+      features: (part) => features.get(part) ?? [],
+      notifyCoordinator: hostDeps.notifyCoordinator,
+    });
   };
   const verifyBuild = async (attempt: string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
@@ -1296,6 +1388,9 @@ export async function createCoordinatorContext(
     restorePartFiles: teamMode
       ? (paths: string[], mod: string | undefined = moduleId) => restorePartFiles(paths, mod)
       : undefined,
+    // Big apps (part P step 3): a part's builder joins its finished part into
+    // the app. Only a module-scoped host has it.
+    finishModuleBuild: moduleScope ? finishModuleBuild : undefined,
     projectId: scope.projectId,
     homeOverview,
     actorContext: actor.text,

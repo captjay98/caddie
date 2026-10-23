@@ -36,6 +36,7 @@
 import type { AgentProps } from "@flue/runtime";
 import { getCloudflareContext } from "@flue/runtime/cloudflare";
 import {
+  dispatch,
   useAgentStart,
   useInitialData,
   useInstruction,
@@ -44,7 +45,7 @@ import {
   useTool,
 } from "@flue/runtime";
 import * as v from "valibot";
-import type { CoordinatorEnvironment } from "../server/coordinator-host.ts";
+import type { CoordinatorEnvironment, CoordinatorHostDeps } from "../server/coordinator-host.ts";
 import type { CoordinatorHostContext } from "./coordinator.ts";
 import { resolveModuleBuilderContext } from "../server/coordinator-host.ts";
 import { registerBuildPayerForInstance } from "../server/spend-instrument.ts";
@@ -83,6 +84,25 @@ export function ModuleBuilder({ id }: AgentProps) {
   const seed = useInitialData<ModuleBuilderInitialDataT>();
   const env = getCloudflareContext().env as unknown as CoordinatorEnvironment;
 
+  // Big apps (part P step 3): a part that joins can start the parts that were
+  // waiting on it (a ModuleBuilder dispatch, like the coordinator's) and, when
+  // every part is settled, tell the coordinator with one keyed message. The
+  // coordinator is imported lazily: coordinator.ts reaches this file through
+  // host-context.ts, so a static import would be a cycle.
+  const hostDeps = (conversationId: string): CoordinatorHostDeps => ({
+    dispatchModuleBuilder: async (input) => {
+      await dispatch(ModuleBuilder, {
+        id: input.instanceId,
+        message: input.message,
+        initialData: { conversationId, moduleId: input.moduleId, buildSeq: input.buildSeq, features: [...input.features] },
+      });
+    },
+    notifyCoordinator: async ({ key, message }) => {
+      const { Coordinator } = await import("./coordinator.ts");
+      await dispatch(Coordinator, { id: conversationId, message: { kind: "user", body: message }, idempotencyKey: key });
+    },
+  });
+
   // Resolve the module-scoped host context lazily (same pattern as the
   // coordinator's host-context: identity comes from the owning DO's env and the
   // build's conversation binding, never from render-time data the caller could
@@ -94,7 +114,7 @@ export function ModuleBuilder({ id }: AgentProps) {
       moduleId: seed.moduleId,
       buildSeq: seed.buildSeq,
       features: seed.features,
-    });
+    }, hostDeps(seed.conversationId));
   };
 
   // Register this instance's payer on the isolate fast path so the spend
@@ -152,6 +172,17 @@ export function ModuleBuilder({ id }: AgentProps) {
       const host = await resolve();
       await host.blockBuild(ctx.data.reason);
       return { output: "Blocker saved; this module stopped." };
+    },
+  });
+  useTool({
+    name: "finish_module",
+    description:
+      "When every feature of this part has passed, join the part into the app: the host copies this part's folders into the app, runs the full checks there, and answers joined, the failing checks to fix in this part's own folders (then call finish_module again), waiting for another part's join, or finished without this part.",
+    input: v.object({}),
+    async run(ctx) {
+      const host = await resolve();
+      if (!host.finishModuleBuild) throw new Error("This builder has no part to join.");
+      return { output: JSON.stringify(await host.finishModuleBuild(ctx.toolCallId, ctx.signal)) };
     },
   });
 
@@ -215,7 +246,7 @@ export function ModuleBuilder({ id }: AgentProps) {
   for (const declaration of buildSpecialistDeclarations(moduleContext)) useSubagent(declaration);
 
   useInstruction(
-    `You are the builder for ONE module of a big app: ${seed?.moduleId ?? "a module"}. Build ONLY this module's features, in the order build_next_feature gives them, backend then frontend. For each feature: call build_next_feature, delegate exactly that feature with its doneWhen checks to the implementation specialist, get run_checks green, then call finish_feature. ${FEATURE_DELEGATION_RULE} Keep every change inside this module's own area (its server and screens folders) — the host refuses a feature that changed files outside it. When every feature of this module has passed, the module is done; do not build another module's features and do not run verify_build. If a real prerequisite is missing, call report_blocker and stop — a stopped module does not stop the others.`,
+    `You are the builder for ONE module of a big app: ${seed?.moduleId ?? "a module"}. Build ONLY this module's features, in the order build_next_feature gives them, backend then frontend. For each feature: call build_next_feature, delegate exactly that feature with its doneWhen checks to the implementation specialist, get run_checks green, then call finish_feature. ${FEATURE_DELEGATION_RULE} Keep every change inside this module's own area (its server and screens folders) — the host refuses a feature that changed files outside it. When every feature of this module has passed, call finish_module to join the part into the app. If it answers with failing checks, fix them in this part's own folders, get run_checks green, and call finish_module again; if it answers joined, waiting, or finished without this part, end your turn. Do not build another module's features and do not run verify_build. If a real prerequisite is missing, call report_blocker and stop — a stopped module does not stop the others.`,
   );
 
   return `Caddie's builder for one module of a big app, running its feature loop on its own copy.`;

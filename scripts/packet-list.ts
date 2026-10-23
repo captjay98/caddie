@@ -376,6 +376,10 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// wiring (the coordinator settles while parts build; the real
 			// ModuleBuilder dispatcher).
 			'tests/big-build.test.ts',
+			// Big apps, joining a finished part (part P step 3 / Q): green, red
+			// with a try left, red twice, newest save point, queued + drained,
+			// settled notify, replays.
+			'tests/module-join.test.ts',
 			// S3 spike: two ModuleBuilders build one feature each on their own
 			// copies at the same time (overlap proven), each with its own save
 			// point and one onModuleFinished hook call. Local, scripted, no cost.
