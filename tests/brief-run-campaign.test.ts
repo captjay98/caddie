@@ -87,7 +87,24 @@ function greenD1(micros: number): D1Query {
 	};
 }
 
-const passBrowser: BrowserCheck = async () => ({ passed: true, aPersisted: true, bIsolated: true, reason: 'ok' });
+const passBrowser: BrowserCheck = async () => ({ verdict: 'pass', passed: true, aPersisted: true, bRendered: true, bIsolated: true, reason: 'ok' });
+
+/** A design doc with a person-owned table + create route + screen (item 2). */
+const designDocWithPersonTable = [
+	'# How your app works',
+	'```caddie-architecture',
+	JSON.stringify({
+		version: 2,
+		signIn: 'required',
+		team: null,
+		modules: [{ id: 'app', plain: 'The app', dependsOn: [] }],
+		tables: [{ name: 'notes', module: 'app', plain: 'Each note', owner: 'person', fields: [{ name: 'body', type: 'text', references: null }] }],
+		routes: [{ id: 'notes.create', module: 'app', feature: 'notes', op: 'create', method: 'POST', path: '/api/notes', table: 'notes', plain: 'Add a note', access: 'person', request: [{ name: 'body', type: 'text', example: 'Buy milk' }], response: ['id', 'body'] }],
+		screens: [{ id: 'notes', module: 'app', path: '#/notes', plain: 'Your notes', shows: ['notes'] }],
+		services: [], ai: [], payments: null, emails: [], jobs: [], screenOnly: [],
+	}),
+	'```',
+].join('\n');
 
 function seams(over: Partial<CampaignSeams> = {}): CampaignSeams {
 	return {
@@ -97,9 +114,11 @@ function seams(over: Partial<CampaignSeams> = {}): CampaignSeams {
 		d1: greenD1(3 * USD),
 		readProposal: proposalReady,
 		coordinatorSend: sendNoop,
+		readDesignDoc: async () => designDocWithPersonTable,
 		browserCheck: passBrowser,
 		ledgerStore: memoryLedgerStore(),
 		base: 'http://127.0.0.1:5173',
+		ownerCookie: 'app.session_token=owner',
 		workspaceId: 'ws_1',
 		payerId: 'owner',
 		coordinatorModelRouteId: 'nemotron-3.5-super-vl',
@@ -123,7 +142,7 @@ describe('runCampaign orchestration (steps 1-6)', () => {
 	});
 
 	test('a build whose browser check fails is NOT complete', async () => {
-		const s = seams({ browserCheck: async () => ({ passed: false, aPersisted: true, bIsolated: false, reason: 'B saw it' }) });
+		const s = seams({ browserCheck: async () => ({ verdict: 'fail', passed: false, aPersisted: true, bRendered: true, bIsolated: false, reason: 'B saw it' }) });
 		const { rows } = await runCampaign([brief('moodloop')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
 		expect(rows[0].complete.complete).toBe(false);
 		expect(rows[0].complete.reason).toMatch(/browser/);
@@ -170,5 +189,34 @@ describe('runCampaign orchestration (steps 1-6)', () => {
 		});
 		expect(rows.length).toBe(1);
 		expect(rows[0].briefId).toBe('b');
+	});
+
+	test('a design with no person-owned screen → browser check not-applicable → NOT complete (item 2)', async () => {
+		// The browser check sees target=null (no person-owned table in the
+		// design), returns not-applicable, and the brief is not complete —
+		// "never as passed".
+		const sharedDesign = [
+			'# How your app works',
+			'```caddie-architecture',
+			JSON.stringify({
+				version: 2, signIn: 'none', team: null,
+				modules: [{ id: 'app', plain: 'The app', dependsOn: [] }],
+				tables: [{ name: 'facts', module: 'app', plain: 'Shared facts', owner: 'public', fields: [{ name: 'body', type: 'text', references: null }] }],
+				routes: [], screens: [{ id: 'facts', module: 'app', path: '#/facts', plain: 'Facts', shows: ['facts'] }],
+				services: [], ai: [], payments: null, emails: [], jobs: [], screenOnly: [],
+			}),
+			'```',
+		].join('\n');
+		let sawTargetNull = false;
+		const s = seams({
+			readDesignDoc: async () => sharedDesign,
+			browserCheck: async (input) => {
+				sawTargetNull = input.target === null;
+				return { verdict: 'not-applicable', passed: false, aPersisted: false, bRendered: false, bIsolated: false, reason: 'no private record' };
+			},
+		});
+		const { rows } = await runCampaign([brief('publicapp')], s, { mode: 'team', capMicros: 150 * USD, pollEveryMs: 1000 });
+		expect(sawTargetNull).toBe(true);
+		expect(rows[0].complete.complete).toBe(false);
 	});
 });

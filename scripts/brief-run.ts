@@ -454,7 +454,8 @@ import type { AccountSession } from './brief-run/dev-client.ts';
 import type { Clock } from './brief-run/clock.ts';
 import { driveBrief, type ProposalReader, type CoordinatorSend } from './brief-run/driver.ts';
 import { readBuildResults, type D1Query } from './brief-run/d1-reader.ts';
-import type { BrowserCheck } from './brief-run/browser-check.ts';
+import type { BrowserCheck, BrowserCheckResult } from './brief-run/browser-check.ts';
+import { pickRecordTargetFromDesign } from './brief-run/app-users.ts';
 import {
 	appendRun,
 	ledgerSpentMicros,
@@ -466,8 +467,11 @@ import { isTeamMode, type RunMode } from './brief-run/mode.ts';
 
 /** The seams the campaign is driven over — every one injectable for tests. */
 export interface CampaignSeams {
-	/** The signed-in account A session (and B for the browser check). */
+	/** The OWNER's Caddie session (item 1): drives the start flow and reads the
+	 * test inbox for the two app-user sign-ins (item 2). */
 	sessionA: AccountSession;
+	/** Kept for the start flow's symmetry; the browser check no longer uses a
+	 * second Caddie account (item 2 uses two APP users, both from the owner). */
 	sessionB: AccountSession;
 	clock: Clock;
 	/** Read-only D1 query against the local dev DB. */
@@ -476,12 +480,17 @@ export interface CampaignSeams {
 	readProposal: ProposalReader;
 	/** Send the brief to the Home coordinator over Flue's HTTP route (step 2). */
 	coordinatorSend: CoordinatorSend;
-	/** The browser check (A persists, B cannot see). */
+	/** Read the approved design DOCUMENT markdown for a project (item 2), so the
+	 * browser check can pick the person-owned record from its architecture block. */
+	readDesignDoc: (projectId: string) => Promise<string>;
+	/** The browser check with two APP users (A persists + screen renders, B can't see). */
 	browserCheck: BrowserCheck;
 	/** The ledger store (file-backed live; in-memory in tests). */
 	ledgerStore: LedgerStore;
 	/** The dev base, for the browser check's preview URL. */
 	base: string;
+	/** The owner's Caddie-session cookie header (item 1), for the test-inbox read. */
+	ownerCookie: string;
 	workspaceId: string;
 	/** The signed-in account A id, used as the run's payer (step 2). */
 	payerId: string;
@@ -579,19 +588,32 @@ export async function runCampaign(
 		// 3. Read the results from D1.
 		const d1 = drive.runId ? await readBuildResults(seams.d1, { projectId: drive.projectId, runId: drive.runId }) : null;
 
-		// 4. Browser check, only on a ready build with a preview.
+		// 4. Browser check with two APP users, only on a ready build with a
+		//    preview. The record is chosen from the approved design's
+		//    architecture block (the first person-owned table with a create
+		//    route and a screen). An app with no such table is "not applicable"
+		//    — recorded, never counted as passed.
 		let browserPassed = false;
+		let browserVerdict: BrowserCheckResult['verdict'] | 'skipped' = 'skipped';
+		let browserReason = 'build not ready';
 		if (drive.outcome === 'ready' && drive.previewId) {
+			const designDoc = await seams.readDesignDoc(drive.projectId);
+			const choice = pickRecordTargetFromDesign(designDoc);
 			const check = await seams.browserCheck({
 				base: seams.base,
 				previewUrl: `${seams.base}/api/projects/${drive.projectId}/workflow/preview/${drive.previewId}`,
-				cookieA: seams.sessionA.jar.header(),
-				cookieB: seams.sessionB.jar.header(),
-				recordMarker: `campaign-${brief.id}-${Date.now()}`,
+				ownerCookie: seams.ownerCookie,
+				projectId: drive.projectId,
+				target: choice.applicable ? choice.target : null,
+				markerA: `campaign-${brief.id}-a-${Date.now()}`,
+				markerB: `campaign-${brief.id}-b-${Date.now()}`,
 				timeoutMs: 2 * 60 * 1000,
 			});
-			browserPassed = check.passed;
+			browserPassed = check.verdict === 'pass';
+			browserVerdict = check.verdict;
+			browserReason = check.reason;
 		}
+		void browserVerdict;
 
 		// 5. Judge "complete" from the real gates.
 		const result: BriefRunResult = {
@@ -779,6 +801,17 @@ async function main(): Promise<number> {
 		if (!res.ok) throw new Error(`coordinator send → HTTP ${res.status}`);
 	};
 
+	// Item 2: read the approved design DOCUMENT markdown for a project, so the
+	// browser check can pick the person-owned record from its architecture
+	// block. GET /workflow returns the design document; its markdown is under
+	// `design.document` (the field carrying the caddie-architecture block).
+	const readDesignDoc = async (projectId: string): Promise<string> => {
+		const snap = await sessionA
+			.json<{ design?: { document?: string; body?: string; markdown?: string } | null }>(`/api/projects/${projectId}/workflow`)
+			.catch(() => ({ design: null }));
+		return snap.design?.document ?? snap.design?.markdown ?? snap.design?.body ?? '';
+	};
+
 	const briefs = loadBriefs(BRIEFS_DIR);
 	console.error(`brief-run: ${briefs.length} briefs loaded (${briefs.filter((b) => b.size === 'big').length} big).`);
 
@@ -791,9 +824,11 @@ async function main(): Promise<number> {
 			d1,
 			readProposal,
 			coordinatorSend,
+			readDesignDoc,
 			browserCheck: playwrightBrowserCheck,
 			ledgerStore: fileLedgerStore(join(BRIEFS_DIR, 'runs', `campaign-${mode}.json`)),
 			base,
+			ownerCookie: ownerCookieHeader,
 			workspaceId,
 			payerId,
 			coordinatorModelRouteId: 'nemotron-3.5-super-vl',
