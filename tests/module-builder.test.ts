@@ -372,3 +372,49 @@ describe('the build shared spend limit — a ModuleBuilder turn (part A / part P
 		sqlite.close();
 	});
 });
+
+// --- item 1: a dependent waits for MERGED, not merely PASSED -----------------
+
+describe('a dependent starts only when its dependency is MERGED (part Q, item 1)', () => {
+	test("a dependency that is only 'passed' (awaiting merge) does NOT make its dependent ready", async () => {
+		const { sqlite, db, scope } = await seedProject();
+		await seedModulesWithPayer(db, scope, 'pay', [
+			{ moduleId: 'core', dependsOn: [] },
+			{ moduleId: 'feed', dependsOn: ['core'] },
+		]);
+		// core finished its features and is recorded 'passed' (awaiting its merge
+		// into the integration copy). The merge has NOT happened yet.
+		await setModuleStatus(db, scope.projectId, BUILD_SEQ, 'core', 'passed');
+		const whilePassed = await listModules(db, scope.projectId, BUILD_SEQ);
+		// feed depends on core; core is not yet merged, so feed must still WAIT —
+		// a dependent builds on the merged integration copy, not on a module that
+		// only passed its own checks.
+		// MUTATION: let isFinished() accept 'passed' and feed would be ready here
+		// before core is actually part of the app — asserted in the mutation block.
+		expect(readyModules(whilePassed).map((m) => m.moduleId)).toEqual([]);
+		// Once core is MERGED, feed becomes ready.
+		await setModuleStatus(db, scope.projectId, BUILD_SEQ, 'core', 'merged');
+		const afterMerge = await listModules(db, scope.projectId, BUILD_SEQ);
+		expect(readyModules(afterMerge).map((m) => m.moduleId)).toEqual(['feed']);
+		sqlite.close();
+	});
+
+	test('startReadyModules does not dispatch a dependent while its dependency is only passed', async () => {
+		const { sqlite, db, scope } = await seedProject();
+		await seedModulesWithPayer(db, scope, 'pay', [
+			{ moduleId: 'core', dependsOn: [] },
+			{ moduleId: 'feed', dependsOn: ['core'] },
+		]);
+		await setModuleStatus(db, scope.projectId, BUILD_SEQ, 'core', 'passed');
+		const dispatched: string[] = [];
+		const started = await startReadyModules(db, scope, {
+			runId: 'run1', buildSeq: BUILD_SEQ, latestMergedSave: 'img',
+			dispatch: (d) => { dispatched.push(d.moduleId); }, features: () => ['f1'],
+		});
+		// core is 'passed', not 'pending', so it is not re-dispatched; feed waits
+		// on core being MERGED, so nothing starts.
+		expect(started.map((m) => m.moduleId)).toEqual([]);
+		expect(dispatched).toEqual([]);
+		sqlite.close();
+	});
+});

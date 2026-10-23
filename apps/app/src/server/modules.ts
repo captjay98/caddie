@@ -76,11 +76,13 @@ export function moduleBuilderMessage(moduleId: string): string {
 
 // --- what a module's dependencies tell us ------------------------------------
 
-/** A module is READY to start when every module it depends on is finished. */
-function isFinished(status: ModuleStatus): boolean {
-	// A module counts as done for a dependent when it has passed or merged (the
-	// merge is lane 13's; until then finished === passed, see finishModule).
-	return status === 'passed' || status === 'merged';
+/** A module is READY to start when every module it depends on is MERGED. */
+function isMergedForDependents(status: ModuleStatus): boolean {
+	// A dependent builds on the MERGED integration copy, so a dependency counts
+	// as done ONLY once it is merged — not when it has merely 'passed' its own
+	// checks and is still awaiting its merge (part Q, item 1). A module that
+	// only passed is not yet part of the app a dependent would build on.
+	return status === 'merged';
 }
 
 /**
@@ -95,7 +97,7 @@ export function readyModules(modules: readonly ModuleRow[]): ModuleRow[] {
 		if (m.status !== 'pending') return false;
 		return m.dependsOn.every((dep) => {
 			const d = byId.get(dep);
-			return d ? isFinished(d.status) : false;
+			return d ? isMergedForDependents(d.status) : false;
 		});
 	});
 }
@@ -178,7 +180,7 @@ export async function finishModule(
 ): Promise<{ finished: boolean; status: ModuleStatus }> {
 	const row = await getModule(db, scope.projectId, input.buildSeq, input.moduleId);
 	if (!row) throw new Error(`no such module "${input.moduleId}" in build ${input.buildSeq}`);
-	if (isFinished(row.status)) return { finished: false, status: row.status };
+	if (row.status === 'passed' || row.status === 'merged') return { finished: false, status: row.status };
 	// Record the save point, then — because the merge is lane 13's and a
 	// finished module counts as merged until then — mark it merged and free its
 	// slot. Lane 13's Q will take the module from `passed` through its merge and
