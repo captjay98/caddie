@@ -1577,18 +1577,20 @@ a.btn-ghost.topbar-nav-link {
 	font-size: 15px;
 	line-height: 1.35;
 	letter-spacing: -0.01em;
-	/* Owner 2026-10-23: the title shows at most TWO lines; a longer one is
-	   truncated with an ellipsis so the card never grows past two title lines. */
+	/* Owner 2026-10-23: the title ALWAYS reserves exactly TWO lines. A one-line
+	   title leaves the second line as whitespace; two lines fit; a longer title
+	   is truncated with an ellipsis — never a third line. Fixed height, not just
+	   a max, so every card's title block is the same height. */
 	display: -webkit-box;
 	-webkit-box-orient: vertical;
 	-webkit-line-clamp: 2;
 	line-clamp: 2;
 	overflow: hidden;
-	max-height: calc(2 * 1.35em);
+	height: calc(2 * 1.35em);
 }
 .decision-card.caddie-card h3 {
-	/* caddie-card titles use line-height 1.25 (rule below) — match the clamp. */
-	max-height: calc(2 * 1.25em);
+	/* caddie-card titles use line-height 1.25 (rule below) — reserve two of them. */
+	height: calc(2 * 1.25em);
 }
 
 .decision-card .summary {
@@ -9118,13 +9120,25 @@ mark {
  * genuinely wide pane (≥ ~900px). A card is capped at 584px so it never
  * stretches wider than the mockup. Deadlines, the Earlier fold and the
  * caught-up line stay full width. */
-/* Brief cards: ONE standard-width column, centred in the Brief section
-   (owner 2026-10-23 revised — no two-up). The card keeps its own design width
-   band (.decision-card.caddie-card: min 420 / max 584); brief-v2 only centres
-   it and lets it fill up to that max. On a phone the card fills the width. */
+/* Brief cards: ONE column, CENTRED in the Brief section (owner 2026-10-23).
+   The items size to the card's width band — NOT 100% of the column — so
+   align-items:center genuinely centres them; width:100% had filled the column
+   and left-aligned the card inside it. The card fills up to its max (a touch
+   wider now, 640px) and never below its min. On a phone it fills the width. */
 .brief-v2 { display:flex; flex-direction:column; align-items:center; gap:16px; }
-.brief-v2 > * { width:100%; max-width:584px; }
-.decision-card.caddie-card { min-width:min(420px, 100%); }
+.brief-v2 > * { width:100%; max-width:640px; }
+.decision-card.caddie-card { width:100%; min-width:min(420px, 100%); max-width:640px; margin-inline:auto; }
+/* The header shares the cards' centred 640px column and reads as a clean row:
+   a bold count (with warn/accent tints for 'waiting'/'new'), a muted 'updated'
+   meta on the right (no code font), and a quiet Mark-all-read link. */
+.brief-v2-head { width:100%; max-width:640px; margin:0 auto 2px; display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.brief-head-count { font-size:13px; font-weight:650; color:var(--color-bright); letter-spacing:-.01em; }
+.brief-head-waiting { color:var(--color-warn); font-weight:650; }
+.brief-head-unseen { color:var(--color-action); font-weight:650; }
+.brief-head-side { display:flex; align-items:center; gap:12px; }
+.brief-head-asof { font-size:12px; color:var(--color-muted); }
+.brief-head-markread { border:0; background:transparent; padding:4px 0; font:inherit; font-size:12px; font-weight:600; color:var(--color-action); cursor:pointer; min-height:auto; }
+.brief-head-markread:hover { text-decoration:underline; }
 .brief-done ul { list-style:none; padding:0; display:grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap:12px; }
 .brief-done li { padding:0; border:0; }
 .brief-done .caddie-card { box-shadow:none; }

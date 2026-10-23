@@ -743,23 +743,23 @@ export function AccountBriefV2(props: {
 
 	return (
 		<div data-testid="account-brief-lane">
-			<div className="section-head brief-v2-head">
-				<span className="count" data-testid="brief-count">
+			<div className="brief-v2-head" data-testid="brief-head">
+				<span className="brief-head-count" data-testid="brief-count">
 					{cards.length} update{cards.length === 1 ? '' : 's'}
-					{waitingCount > 0 ? ` · ${waitingCount} waiting on you` : ''}
-					{unseenCount > 0 ? ` · ${unseenCount} unseen` : ''}
+					{waitingCount > 0 ? <span className="brief-head-waiting"> · {waitingCount} waiting on you</span> : null}
+					{unseenCount > 0 ? <span className="brief-head-unseen"> · {unseenCount} unseen</span> : null}
 				</span>
-				{props.asOf ? (
-					<span className="mono-id" data-testid="brief-asof">
-						updated {formatTimeAgo(props.asOf)}
-					</span>
-				) : null}
-				<StaleChip stale={state.stale} />
-				{unseenCount > 0 && props.onMarkAllRead ? (
-					<button type="button" className="detail-toggle" data-testid="brief-mark-all-read" onClick={props.onMarkAllRead}>
-						Mark all read
-					</button>
-				) : null}
+				<span className="brief-head-side">
+					{props.asOf ? (
+						<span className="brief-head-asof" data-testid="brief-asof">updated {formatTimeAgo(props.asOf)}</span>
+					) : null}
+					<StaleChip stale={state.stale} />
+					{unseenCount > 0 && props.onMarkAllRead ? (
+						<button type="button" className="brief-head-markread" data-testid="brief-mark-all-read" onClick={props.onMarkAllRead}>
+							Mark all read
+						</button>
+					) : null}
+				</span>
 			</div>
 			<div className="brief-v2">
 				{bigCards.map((card) => (

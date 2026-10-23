@@ -990,10 +990,10 @@ test('Earlier loads archived decisions on demand and retains the exact decision 
  await context.close();
 });
 
-test('the Brief shows one standard-width card per row, centred, within a 420–584px band (no two-up)', async ({ browser }) => {
+test('the Brief shows one standard-width card per row, centred, within a 420–640px band (no two-up)', async ({ browser }) => {
 	// Lane rule (owner 2026-10-23 revised): ONE standard-width card per row,
 	// centred in the Brief section — no two-up. Each card sits between a minimum
-	// (420px) and a maximum (584px) width. A phone width fills the card.
+	// (420px) and a maximum (640px) width. A phone width fills the card.
 	const context = await browser.newContext({ viewport: { width: 1600, height: 900 } });
 	await stubAccount(context, { cards: [APPROVAL_A, BLOCKED_A], unseenCount: 2 });
 	const page = await context.newPage();
@@ -1007,7 +1007,7 @@ test('the Brief shows one standard-width card per row, centred, within a 420–5
 	expect(wideBoxes[1]!.y).toBeGreaterThan(wideBoxes[0]!.y + wideBoxes[0]!.height / 2);
 	// Each card is within its min/max width band.
 	expect(wideBoxes[0]!.width).toBeGreaterThanOrEqual(420);
-	expect(wideBoxes[0]!.width).toBeLessThanOrEqual(584 + 2);
+	expect(wideBoxes[0]!.width).toBeLessThanOrEqual(640 + 2);
 	// Centred: the Brief section has roughly equal margin either side of the card.
 	const lane = await page.getByTestId('account-brief-lane').boundingBox();
 	const leftGap = wideBoxes[0]!.x - lane!.x;
@@ -1024,7 +1024,7 @@ test('the Brief shows one standard-width card per row, centred, within a 420–5
 
 test('U — rich cards (plan + fit) render one centred standard-width column, and stack at 390', async ({ browser }) => {
 	// Lane rule (owner 2026-10-23 revised): one standard-width card per row,
-	// centred, each within the 420–584px band so the plan list + fit split read
+	// centred, each within the 420–640px band so the plan list + fit split read
 	// at the mockup scale. A phone width stacks them.
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 	await stubAccount(context, {
@@ -1044,7 +1044,7 @@ test('U — rich cards (plan + fit) render one centred standard-width column, an
 	expect(boxes[1]!.y).toBeGreaterThan(boxes[0]!.y + boxes[0]!.height / 2);
 	// Each card is within its min/max width band.
 	expect(boxes[0]!.width).toBeGreaterThanOrEqual(420);
-	expect(boxes[0]!.width).toBeLessThanOrEqual(584 + 2);
+	expect(boxes[0]!.width).toBeLessThanOrEqual(640 + 2);
 	// The plan list and the fit split both still render.
 	await expect(page.getByTestId('card-plan-items')).toBeVisible();
 	await expect(page.getByTestId('card-fit-cautions')).toBeVisible();
@@ -1088,24 +1088,39 @@ test.describe('redo — each card matches its mockup', () => {
 	});
 
 
-test('a long card title is clamped to two lines (owner 2026-10-23)', async ({ browser }) => {
+test('the card title always reserves exactly two lines — short and long titles are the same height (owner 2026-10-23)', async ({ browser }) => {
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 	const longTitle = 'This is a deliberately very long decision card headline that would wrap onto three or four lines if it were not clamped to exactly two lines with an ellipsis at the end';
+	// A LONG title: clamps to two lines and truncates (overflows).
 	await stubAccount(context, { cards: [card({ id: 'brf_long', projectId: 'proj-a', kind: 'approval', status: 'needs-you', headline: longTitle })], unseenCount: 1 });
 	const page = await context.newPage();
 	await page.goto(`${BASE}/app/?pane=brief`);
-
-	const title = page.getByTestId('decision-card').locator('h3').first();
-	await expect(title).toBeVisible();
-	const metrics = await title.evaluate((el) => {
+	const longH3 = page.getByTestId('decision-card').locator('h3').first();
+	await expect(longH3).toBeVisible();
+	const longM = await longH3.evaluate((el) => {
 		const cs = getComputedStyle(el);
 		return { clamp: cs.webkitLineClamp || (cs as unknown as Record<string, string>)['lineClamp'], clientH: (el as HTMLElement).clientHeight, scrollH: (el as HTMLElement).scrollHeight, lineHeight: parseFloat(cs.lineHeight) };
 	});
-	// Clamped to two lines, and the full text overflows (so it IS truncated).
-	expect(metrics.clamp).toBe('2');
-	expect(metrics.scrollH).toBeGreaterThan(metrics.clientH);
-	// The visible box is no taller than ~2 lines.
-	expect(metrics.clientH).toBeLessThanOrEqual(Math.ceil(metrics.lineHeight * 2) + 2);
+	expect(longM.clamp).toBe('2');
+	expect(longM.scrollH).toBeGreaterThan(longM.clientH); // truncated, never a third line
+	await page.close();
+
+	// A SHORT (one-word) title: the block is the SAME height — the second line is
+	// reserved whitespace, not collapsed.
+	const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	await stubAccount(ctx2, { cards: [card({ id: 'brf_short', projectId: 'proj-a', kind: 'approval', status: 'needs-you', headline: 'Ready' })], unseenCount: 1 });
+	const page2 = await ctx2.newPage();
+	await page2.goto(`${BASE}/app/?pane=brief`);
+	const shortH3 = page2.getByTestId('decision-card').locator('h3').first();
+	await expect(shortH3).toBeVisible();
+	const shortH = await shortH3.evaluate((el) => (el as HTMLElement).clientHeight);
+	// Both titles occupy exactly two line-heights (±2px), so every card's title
+	// block is the same height regardless of title length.
+	const twoLines = Math.round(longM.lineHeight * 2);
+	expect(Math.abs(longM.clientH - twoLines)).toBeLessThanOrEqual(2);
+	expect(Math.abs(shortH - twoLines)).toBeLessThanOrEqual(2);
+	expect(Math.abs(shortH - longM.clientH)).toBeLessThanOrEqual(2);
+	await ctx2.close();
 	await context.close();
 });
 	test('build card: Now line + feature feed with states + last-update line', async ({ browser }) => {
