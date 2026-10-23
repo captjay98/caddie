@@ -35,8 +35,8 @@
  * and no test ever touches the network.
  */
 
-import { appendFileSync, existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
@@ -70,6 +70,8 @@ export interface DeployDeps {
 	readonly listDir?: (path: string) => string[];
 	/** Appends UTF-8 text to a file; defaults to node:fs. Used for the evidence file. */
 	readonly appendFile?: (path: string, text: string) => void;
+	/** Writes a per-step log to .deploy-logs; defaults to node:fs. */
+	readonly writeLog?: (relativePath: string, text: string) => void;
 	/** The wall clock, so the evidence row is deterministic in tests. */
 	readonly now?: () => Date;
 	/** Sink for progress lines (default: console.log). */
@@ -242,19 +244,47 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	const now = deps.now ?? (() => new Date());
 	const appDir = join(deps.repoRoot, 'apps', 'app');
 
+	// --- per-run log directory (item H): .deploy-logs/<UTC stamp>/ -----------
+	const logStamp = now().toISOString().replace(/[:.]/g, '-');
+	const logBase = join('.deploy-logs', logStamp);
+	let stepSeq = 0;
+	const defaultWriteLog = (relativePath: string, text: string): void => {
+		const full = join(deps.repoRoot, relativePath);
+		mkdirSync(dirname(full), { recursive: true });
+		writeFileSync(full, text, 'utf8');
+	};
+	const writeLog = deps.writeLog ?? defaultWriteLog;
+	/** Slugify a step name for the log filename. */
+	const slug = (name: string): string => name.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
 	const steps: StepRecord[] = [];
 	const commands: (readonly string[])[] = [];
 	let wroteRemote = false;
 	let versionId: string | undefined;
 	let rollbackId: string | undefined;
 	let evidenceRow: string | undefined;
+	/** The path of the log file the most recent run() wrote (for failure hints). */
+	let lastWrittenLog = '';
 
-	/** Run a command through the injected runner, recording it. Prints the
-	 * command first (item I). */
-	const run = (argv: readonly string[], opts?: RunOptions): RunResult => {
+	/**
+	 * Run a command through the injected runner, recording it. Prints
+	 * `running: <command>` first (item I) and saves stdout+stderr to a
+	 * per-step log (item H). `stepName` labels the log file.
+	 */
+	const run = (argv: readonly string[], opts?: RunOptions, stepName?: string): RunResult => {
 		commands.push(argv);
 		log(`running: ${argv.join(' ')}`);
-		return deps.run(argv, opts);
+		const result = deps.run(argv, opts);
+		const nn = String(++stepSeq).padStart(2, '0');
+		const label = stepName ? slug(stepName) : 'cmd';
+		const logPath = join(logBase, `${nn}-${label}.log`);
+		lastWrittenLog = logPath;
+		try {
+			writeLog(logPath, `$ ${argv.join(' ')}\n--- exit ${result.exitCode} ---\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}\n`);
+		} catch {
+			/* logging must never break a deploy */
+		}
+		return result;
 	};
 
 	/** Record a step and print its one line. */
@@ -276,6 +306,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 
 	const stop = (step: StepRecord): DeployResult => {
 		record(step);
+		if (lastWrittenLog) log(`    log: ${lastWrittenLog}`);
 		return finish();
 	};
 
@@ -373,7 +404,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	// applied, so it can never reveal a remote-ahead-of-repo migration. Read the
 	// names actually applied on the remote from the d1_migrations table instead.
 	const appliedArgv = [WRANGLER, APP, 'd1', 'execute', 'caddie', '--remote', '--config', 'wrangler.jsonc', '--env', 'production', '--command', 'select name from d1_migrations'];
-	const applied = run(appliedArgv, { cwd: appDir });
+	const applied = run(appliedArgv, { cwd: appDir }, 'migrations-applied');
 	if (applied.exitCode !== 0) {
 		return stop({ name: 'migrations-applied', ok: false, command: appliedArgv, detail: `exit ${applied.exitCode}` });
 	}
@@ -386,7 +417,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 
 	// The pending list is still printed, for the operator's eyes.
 	const migrationsListArgv = [WRANGLER, APP, 'd1', 'migrations', 'list', 'caddie', '--remote', '--config', 'wrangler.jsonc', '--env', 'production'];
-	const migList = run(migrationsListArgv, { cwd: appDir });
+	const migList = run(migrationsListArgv, { cwd: appDir }, 'migrations-list');
 	if (migList.exitCode !== 0) {
 		return stop({ name: 'migrations-list', ok: false, command: migrationsListArgv, detail: `exit ${migList.exitCode}` });
 	}
@@ -394,7 +425,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	record({ name: 'migrations-list', ok: true, command: migrationsListArgv, detail: pending.length > 0 ? `pending: ${pending.join(', ')}` : 'no pending migrations' });
 
 	const deploymentsArgv = [WRANGLER, APP, 'deployments', 'list'];
-	const deployments = run(deploymentsArgv, { cwd: appDir });
+	const deployments = run(deploymentsArgv, { cwd: appDir }, 'deployments-list');
 	if (deployments.exitCode !== 0) {
 		return stop({ name: 'deployments-list', ok: false, command: deploymentsArgv, detail: `exit ${deployments.exitCode}` });
 	}
@@ -415,7 +446,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 		newDoTags = [...headTags];
 		tagBaseline = 'no P17 receipt — treating every DO tag as new';
 	} else {
-		const show = run(['git', 'show', `${lastCommit}:apps/app/wrangler.jsonc`], { cwd: deps.repoRoot });
+		const show = run(['git', 'show', `${lastCommit}:apps/app/wrangler.jsonc`], { cwd: deps.repoRoot }, 'do-tags-prior');
 		let priorTags: string[] | null = null;
 		if (show.exitCode === 0) {
 			try {
@@ -478,7 +509,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	// --- Step 8: migrations apply STRICTLY BEFORE deploy (remote writes) -----
 	const applyArgv = [WRANGLER, APP, 'd1', 'migrations', 'apply', 'caddie', '--remote', '--config', 'wrangler.jsonc', '--env', 'production'];
 	wroteRemote = true;
-	const apply = run(applyArgv, { cwd: appDir });
+	const apply = run(applyArgv, { cwd: appDir }, 'migrations-apply');
 	if (apply.exitCode !== 0) {
 		return stop({ name: 'migrations-apply', ok: false, command: applyArgv, detail: `exit ${apply.exitCode} — migrations failed; code NOT deployed` });
 	}
@@ -487,7 +518,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	const deployArgv = options.withSecrets
 		? [WRANGLER, APP, 'deploy', '--secrets-file', '.prod.vars']
 		: [WRANGLER, APP, 'deploy'];
-	const deploy = run(deployArgv, { cwd: appDir });
+	const deploy = run(deployArgv, { cwd: appDir }, 'deploy');
 	if (deploy.exitCode !== 0) {
 		return stop({ name: 'deploy', ok: false, command: deployArgv, detail: `exit ${deploy.exitCode} — deploy failed` });
 	}
@@ -507,13 +538,13 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 	}
 	const releaseUrl = `https://${host}`;
 	const smokeArgv = ['bun', 'run', 'test:live', '--', 'P17'];
-	const smoke = run(smokeArgv, { cwd: deps.repoRoot, env: { CADDIE_LIVE_AUTHORIZED: '1', CADDIE_RELEASE_URL: releaseUrl } });
+	const smoke = run(smokeArgv, { cwd: deps.repoRoot, env: { CADDIE_LIVE_AUTHORIZED: '1', CADDIE_RELEASE_URL: releaseUrl } }, 'smoke');
 	let hashMatch = false;
 	let liveHash = '';
 	if (smoke.exitCode === 0) {
 		// Fetch the live /app/ HTML and compare its hashed index-*.js to dist.
 		const fetchArgv = ['curl', '-fsS', `${releaseUrl}/app/`];
-		const liveHtml = run(fetchArgv, { cwd: deps.repoRoot });
+		const liveHtml = run(fetchArgv, { cwd: deps.repoRoot }, 'live-fetch');
 		const live = /index-([A-Za-z0-9_-]+)\.js/.exec(liveHtml.stdout)?.[0] ?? '';
 		const distAppHtmlPath = join(appDir, 'dist', 'caddie_app', 'app', 'index.html');
 		const distHtml = fileExists(distAppHtmlPath) ? readFile(distAppHtmlPath) : '';
@@ -538,7 +569,7 @@ export function runDeploy(options: DeployOptions, deps: DeployDeps): DeployResul
 
 	// --- Step 10: read-only switch report ------------------------------------
 	const switchesArgv = [WRANGLER, APP, 'd1', 'execute', 'caddie', '--remote', '--config', 'wrangler.jsonc', '--env', 'production', '--command', 'select key, value from platform_switches'];
-	const switches = run(switchesArgv, { cwd: appDir });
+	const switches = run(switchesArgv, { cwd: appDir }, 'switches');
 	if (switches.exitCode !== 0) {
 		return stop({ name: 'switches', ok: false, command: switchesArgv, detail: `exit ${switches.exitCode}` });
 	}

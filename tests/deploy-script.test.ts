@@ -104,6 +104,8 @@ interface Harness {
 	logs: string[];
 	/** Every (path, text) the script appended — the real fs is never touched. */
 	appends: { path: string; text: string }[];
+	/** Every per-step log the script wrote: relative path -> text. */
+	writtenLogs: { path: string; text: string }[];
 }
 
 function ok(stdout = ''): RunResult {
@@ -114,6 +116,7 @@ function makeHarness(over: HarnessOverrides = {}): Harness {
 	const commands: string[][] = [];
 	const logs: string[] = [];
 	const appends: { path: string; text: string }[] = [];
+	const writtenLogs: { path: string; text: string }[] = [];
 	const headDoTags = over.headDoTags ?? ['v1', 'v2', 'v3', 'v4'];
 	const priorDoTags = over.priorDoTags ?? ['v1', 'v2', 'v3', 'v4'];
 	const localMigrations = over.localMigrations ?? ['0001_a.sql', '0002_b.sql'];
@@ -188,10 +191,11 @@ function makeHarness(over: HarnessOverrides = {}): Harness {
 		fileExists: (path: string) => files[path] !== undefined || path === `${APP}/migrations`,
 		listDir: (path: string) => (path === `${APP}/migrations` ? localMigrations : []),
 		appendFile: (path: string, text: string) => appends.push({ path, text }),
+		writeLog: (path: string, text: string) => writtenLogs.push({ path, text }),
 		now: () => new Date('2026-10-23T00:00:00Z'),
 		log: (line: string) => logs.push(line),
 	};
-	return { deps, commands, logs, appends };
+	return { deps, commands, logs, appends, writtenLogs };
 }
 
 const REHEARSAL: DeployOptions = { yes: false, withSecrets: false, acceptDoMigration: false };
@@ -549,5 +553,26 @@ describe('deploy.ts — item I: running: line before each command', () => {
 		const running = h.logs.filter((l) => l.startsWith('running: '));
 		expect(running.length).toBe(h.commands.length);
 		expect(running.some((l) => l.includes('wrangler deploy'))).toBe(true);
+	});
+});
+
+describe('deploy.ts — item H: per-step logs and failure-path log hint', () => {
+	test('each step writes a .deploy-logs/<stamp>/NN-<step>.log with stdout and stderr', () => {
+		const h = makeHarness();
+		runDeploy(DEPLOY, h.deps);
+		expect(h.writtenLogs.length).toBe(h.commands.length);
+		for (const l of h.writtenLogs) {
+			expect(l.path).toContain('.deploy-logs/');
+			expect(/\.deploy-logs\/[^/]+\/\d{2}-[A-Za-z0-9-]+\.log$/.test(l.path)).toBe(true);
+			expect(l.text).toContain('--- stdout ---');
+			expect(l.text).toContain('--- stderr ---');
+		}
+	});
+
+	test('a failing step prints the path of its log', () => {
+		const h = makeHarness({ responses: { 'test:live': { exitCode: 1 } } });
+		const result = runDeploy(DEPLOY, h.deps);
+		expect(result.ok).toBe(false);
+		expect(h.logs.some((l) => l.includes('log: ') && l.includes('.deploy-logs/'))).toBe(true);
 	});
 });
