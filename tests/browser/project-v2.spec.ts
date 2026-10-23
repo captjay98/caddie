@@ -427,7 +427,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		// The approve window fetches the real usage and states the cap.
 		await page.getByTestId('plan-approve-open').click();
 		await expect(page.getByTestId('approve-plan-window')).toBeVisible();
-		await page.getByTestId('approve-plan-more').locator('summary').click();
+		// A configured spending limit is shown (the only useful line at this step).
 		await expect(page.getByTestId('approve-plan-spend')).toContainText('$500');
 		await expect(page.getByTestId('approve-plan-spend')).toContainText('$25 used so far');
 

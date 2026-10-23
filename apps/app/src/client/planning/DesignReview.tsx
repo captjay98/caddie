@@ -496,16 +496,17 @@ export function DesignReview(props: {
             <p className="state-detail">
               {props.autoBuild ? 'Next, Caddie prepares the screens for you to review.' : 'This records your approval of this plan.'}
             </p>
+            {/* Only say something if it is genuinely useful here: a spending
+               limit the owner actually set. At plan-approval there is no app to
+               publish and no money is spent, so those "reassurances" are noise. */}
+            {spendCap?.limit ? (
+              <p className="state-detail" data-testid="approve-plan-spend">
+                {`Your spending limit is ${spendCap.limit}${spendCap.settled ? ` (${spendCap.settled} used so far)` : ""}.`}
+              </p>
+            ) : null}
             <details className="approval-more" data-testid="approve-plan-more">
               <summary>More details</summary>
-              <p className="state-detail">Publishing, merging code, and destructive database changes need separate approval.</p>
-            <p className="state-detail" data-testid="approve-plan-spend">
-              {capLoading
-                ? "Checking your spending limit…"
-                : spendCap?.limit
-                  ? `Your configured spending limit is ${spendCap.limit}${spendCap.settled ? ` (${spendCap.settled} used so far)` : ""}.`
-                  : "No spending limit is configured. This decision approves the plan; it does not set a budget."}
-            </p>
+              <p className="state-detail">Publishing, merging code, and destructive database changes each need a separate approval later — this decision does none of them.</p>
             </details>
             {decisionError ? (
               <div
