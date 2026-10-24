@@ -1,5 +1,6 @@
 import type { D1Database } from './auth.ts';
 import { ScopeError } from './scope.ts';
+import { sendWebPush, type VapidKeys } from './web-push.ts';
 
 /**
  * P12 slice 3 — notifications (feature-ledger C20, ADAPT/IMPROVE): in-app
@@ -143,18 +144,18 @@ export interface DeliveryContext {
 	mailer: Mailer;
 	/** The configured deployment origin, for links in the email body. */
 	origin: string;
+	/** VAPID keys for web push (vapidFromEnv); null when push is not configured. */
+	vapid?: VapidKeys | null;
 }
 
 /**
  * Create a notification AND fan it out to the opt-in channels the user has on
- * for its kind. The in-app row is always written (it is the record); email is
- * sent only when the kind's email channel is on, the user has a verified
- * address, and a mailer is configured. Fire-and-capture: a delivery that fails
- * (or a missing/unverified email, or an unconfigured mailer) NEVER fails this
- * call — the inbox notification still stands, and the email attempt leaves a
- * retry-visible receipt. A de-duplicated repeat (created=false) sends nothing.
- *
- * Push fan-out lands in the next slice; email is wired here.
+ * for its kind. The in-app row is always written (it is the record); email and
+ * push are sent only when the kind's channel is on (and the prerequisite — a
+ * verified address for email, a subscribed device + VAPID for push — is met).
+ * Fire-and-capture: any delivery that fails NEVER fails this call — the inbox
+ * notification still stands and each attempt leaves a retry-visible receipt. A
+ * de-duplicated repeat (created=false) sends nothing.
  */
 export async function createAndDeliverNotification(
 	db: D1Database,
@@ -165,7 +166,6 @@ export async function createAndDeliverNotification(
 	if (!result.created || !result.notification) return result;
 	const notification = result.notification;
 
-	// Email, only when the kind's email channel is on for this user.
 	try {
 		const explicitRows = await queryAll(
 			db,
@@ -177,6 +177,8 @@ export async function createAndDeliverNotification(
 			? { email: Number(explicitRows[0]['email']) === 1, push: Number(explicitRows[0]['push']) === 1 }
 			: null;
 		const channels = channelsForKind(input.kind, explicit);
+
+		// Email, only when the kind's email channel is on for this user.
 		if (channels.email) {
 			// ownerEmail fails closed on a missing/unverified address; that is a
 			// captured non-send, never a thrown error up here.
@@ -189,10 +191,89 @@ export async function createAndDeliverNotification(
 				);
 			}
 		}
+
+		// Push, only when the kind's push channel is on AND a device is subscribed
+		// AND VAPID is configured. Each device gets one send; a 404/410 prunes it.
+		if (channels.push && delivery.vapid) {
+			await deliverPush(db, input.userId, notification, delivery.vapid);
+		}
 	} catch {
 		// Fire-and-capture: delivery must never fail the domain operation.
 	}
 	return result;
+}
+
+/**
+ * Send one notification to every device the user has subscribed, recording a
+ * push delivery receipt per device and pruning any the push service reports
+ * gone. Never throws.
+ */
+async function deliverPush(
+	db: D1Database,
+	userId: string,
+	notification: NotificationRecord,
+	vapid: VapidKeys,
+): Promise<void> {
+	const subs = await listPushSubscriptions(db, userId);
+	const payload = {
+		title: notification.title,
+		body: notification.body,
+		url: notification.projectId ? `/app/project?project=${notification.projectId}` : '/app/',
+		tag: notification.kind,
+	};
+	for (const sub of subs) {
+		const res = await sendWebPush(sub, payload, vapid);
+		const now = nowIso();
+		const status = res.ok ? 'sent' : 'failed';
+		await db
+			.prepare(
+				'insert into "notification_deliveries" ("id","notificationId","channel","status","error","attempts","createdAt") values (?,?,\'push\',?,?,1,?)',
+			)
+			.bind(`dlv_${crypto.randomUUID()}`, notification.id, status, res.ok ? null : res.error ?? `push ${res.status}`, now)
+			.run();
+		if (res.expired) await db.prepare('delete from "push_subscriptions" where "endpoint" = ?').bind(sub.endpoint).run();
+		if (res.ok) await db.prepare('update "push_subscriptions" set "lastUsedAt" = ? where "endpoint" = ?').bind(now, sub.endpoint).run();
+	}
+}
+
+// --- push subscription storage (0045) ------------------------------------------------
+
+export interface StoredPushSubscription {
+	endpoint: string;
+	p256dh: string;
+	auth: string;
+}
+
+/** Save (or update in place) a browser's push subscription for a user. */
+export async function savePushSubscription(
+	db: D1Database,
+	userId: string,
+	sub: { endpoint: string; p256dh: string; auth: string },
+): Promise<void> {
+	requireText(userId, 'userId');
+	const endpoint = requireText(sub.endpoint, 'endpoint');
+	const p256dh = requireText(sub.p256dh, 'p256dh');
+	const auth = requireText(sub.auth, 'auth');
+	await db
+		.prepare(
+			'insert into "push_subscriptions" ("id","userId","endpoint","p256dh","auth","createdAt") values (?,?,?,?,?,?) ' +
+				'on conflict("endpoint") do update set "userId" = excluded."userId", "p256dh" = excluded."p256dh", "auth" = excluded."auth"',
+		)
+		.bind(`psub_${crypto.randomUUID()}`, userId, endpoint, p256dh, auth, nowIso())
+		.run();
+}
+
+/** A user's push subscriptions (endpoint + keys), for sending. */
+export async function listPushSubscriptions(db: D1Database, userId: string): Promise<StoredPushSubscription[]> {
+	requireText(userId, 'userId');
+	const rows = await queryAll(db, 'select "endpoint","p256dh","auth" from "push_subscriptions" where "userId" = ?', userId);
+	return rows.map((row) => ({ endpoint: String(row['endpoint']), p256dh: String(row['p256dh']), auth: String(row['auth']) }));
+}
+
+/** Remove one subscription by endpoint (the browser unsubscribed). */
+export async function deletePushSubscription(db: D1Database, userId: string, endpoint: string): Promise<void> {
+	requireText(userId, 'userId');
+	await db.prepare('delete from "push_subscriptions" where "userId" = ? and "endpoint" = ?').bind(userId, endpoint).run();
 }
 
 export interface NotificationFilter {

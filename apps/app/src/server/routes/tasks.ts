@@ -23,7 +23,10 @@ import {
 	markNotificationRead,
 	ownerEmail,
 	setNotificationPref,
+	savePushSubscription,
+	deletePushSubscription,
 } from '../notifications.ts';
+import { vapidFromEnv } from '../web-push.ts';
 import { listSentinelResults } from '../sentinel.ts';
 
 /**
@@ -262,6 +265,34 @@ export function createTasksRouter(): Hono<{ Bindings: Env }> {
 			push: body.push === true,
 		});
 		return c.json({ pref });
+	});
+
+	// --- web push subscription (0045) ------------------------------------------
+	/** The server's VAPID public key, so the browser can subscribe. Public by design. */
+	router.get('/notifications/vapid', (c) => {
+		const vapid = vapidFromEnv(c.env as unknown as Record<string, unknown>);
+		return c.json({ publicKey: vapid?.publicKey ?? null });
+	});
+
+	router.post('/notifications/push/subscribe', async (c) => {
+		const userId = await sessionUserId(c.env, c.req.raw.headers);
+		if (!userId) throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
+		const body = await parseJsonBody(c.req.raw);
+		const sub = body.subscription as { endpoint?: string; keys?: { p256dh?: string; auth?: string } } | undefined;
+		if (!sub?.endpoint || !sub.keys?.p256dh || !sub.keys?.auth) {
+			throw new ScopeError(400, 'invalid_input', 'a push subscription with endpoint and keys is required');
+		}
+		await savePushSubscription(c.env.DB, userId, { endpoint: sub.endpoint, p256dh: sub.keys.p256dh, auth: sub.keys.auth });
+		return c.json({ ok: true });
+	});
+
+	router.post('/notifications/push/unsubscribe', async (c) => {
+		const userId = await sessionUserId(c.env, c.req.raw.headers);
+		if (!userId) throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
+		const body = await parseJsonBody(c.req.raw);
+		const endpoint = typeof body.endpoint === 'string' ? body.endpoint : '';
+		if (endpoint) await deletePushSubscription(c.env.DB, userId, endpoint);
+		return c.json({ ok: true });
 	});
 
 	return router;
