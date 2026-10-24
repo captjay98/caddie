@@ -20,6 +20,7 @@
 
 import type { AuthEnv } from './server/auth.ts';
 import { dispatchDueSchedules } from './server/schedules.ts';
+import { deliveryFromEnv } from './server/notifications.ts';
 import { sweepStalledBuilds } from './server/build-workflow.ts';
 import { advanceSafetyChecks, recheckLiveApps } from './server/publish.ts';
 import { publishDepsFromEnv, type PublishEnv } from './server/publish-env.ts';
@@ -45,7 +46,7 @@ interface CronController {
 export default {
 	async scheduled(controller: CronController, env: Pick<AuthEnv, 'DB'> & PublishEnv & ImportPreviewEnv & { WEB_RISK_API_KEY?: string }, ctx: { waitUntil(promise: Promise<unknown>): void }): Promise<void> {
 		ctx.waitUntil(
-			dispatchDueSchedules(env.DB, Date.now()).then((fired) => {
+			dispatchDueSchedules(env.DB, Date.now(), deliveryFromEnv(env)).then((fired) => {
 				if (fired > 0) {
 					console.log(`[schedules] cron ${controller.cron} dispatched ${fired} occurrence(s)`);
 				}
@@ -55,7 +56,7 @@ export default {
 		// honestly even when no one has the project open. Independent of the
 		// schedule dispatch above: a failed sweep is logged, never fails the tick.
 		ctx.waitUntil(
-			sweepStalledBuilds(env.DB, Date.now())
+			sweepStalledBuilds(env.DB, Date.now(), deliveryFromEnv(env))
 				.then((stopped) => {
 					if (stopped > 0) console.log(`[builds] cron ${controller.cron} stopped ${stopped} stalled build(s)`);
 				})

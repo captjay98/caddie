@@ -20,6 +20,7 @@ import {
 	listNotifications,
 	listNotificationPrefs,
 	mailerFromEnv,
+	deliveryFromEnv,
 	markNotificationRead,
 	ownerEmail,
 	setNotificationPref,
@@ -182,7 +183,7 @@ export function createTasksRouter(): Hono<{ Bindings: Env }> {
 		const userId = await sessionUserId(c.env, c.req.raw.headers);
 		if (!userId) throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
 		const scope = await projectScopeForUser(c.env.DB, userId, c.req.param('projectId'));
-		const outcome = await runScheduleNow(c.env.DB, scope, c.req.param('scheduleId'));
+		const outcome = await runScheduleNow(c.env.DB, scope, c.req.param('scheduleId'), Date.now(), deliveryFromEnv(c.env as unknown as Record<string, unknown>));
 		return c.json({
 			elected: outcome.elected,
 			result: outcome.result,

@@ -939,6 +939,7 @@ export async function reconcileStalledBuild(
   db: D1Database,
   projectId: string,
   nowMs: number = Date.now(),
+  delivery?: DeliveryContext,
 ): Promise<boolean> {
   const found = await rows(db, "select * from build_workflows where projectId = ?", projectId);
   const workflow = (found[0] ?? null) as unknown as BuildWorkflow | null;
@@ -955,12 +956,12 @@ export async function reconcileStalledBuild(
     .bind(detail, new Date(nowMs).toISOString(), projectId, workflow.updatedAt)
     .run();
   const paused = Number((result as { meta?: { changes?: number } }).meta?.changes ?? 0) > 0;
-  if (paused) await notifyBuildPaused(db, projectId, detail);
+  if (paused) await notifyBuildPaused(db, projectId, detail, delivery);
   return paused;
 }
 
 /** Cron sweep: stop every stalled build. Returns how many were stopped. */
-export async function sweepStalledBuilds(db: D1Database, nowMs: number = Date.now()): Promise<number> {
+export async function sweepStalledBuilds(db: D1Database, nowMs: number = Date.now(), delivery?: DeliveryContext): Promise<number> {
   let building: Record<string, unknown>[];
   try {
     building = await rows(db, "select projectId from build_workflows where phase = 'building'");
@@ -971,7 +972,7 @@ export async function sweepStalledBuilds(db: D1Database, nowMs: number = Date.no
   }
   let stopped = 0;
   for (const row of building) {
-    if (await reconcileStalledBuild(db, String(row.projectId), nowMs)) stopped += 1;
+    if (await reconcileStalledBuild(db, String(row.projectId), nowMs, delivery)) stopped += 1;
   }
   return stopped;
 }

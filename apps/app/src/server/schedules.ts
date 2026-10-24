@@ -3,7 +3,7 @@ import type { Scope } from '@caddie/contracts';
 import { ScopeError, assertProjectScope } from './scope.ts';
 import { recordRepairRound } from './runs.ts';
 import { runSentinelCheckForSchedule } from './sentinel.ts';
-import { createNotification } from './notifications.ts';
+import { createNotification, createAndDeliverNotification, type DeliveryContext, type NotificationInput } from './notifications.ts';
 import { runDiscoverySweep } from './discovery.ts';
 import { getProfile } from './profiles.ts';
 
@@ -628,7 +628,13 @@ async function fireOccurrence(
 		dispatchedBy: string;
 		nowMs: number;
 	},
+	delivery?: DeliveryContext,
 ): Promise<FireOutcome> {
+	// When a delivery context is present (the caller holds the Worker env), a
+	// fired notification also goes out by email/push per the owner's prefs;
+	// without it, in-app only. Fire-and-capture either way.
+	const notify = (notification: NotificationInput) =>
+		delivery ? createAndDeliverNotification(db, notification, delivery) : createNotification(db, notification);
 	const id = `occ_${crypto.randomUUID()}`;
 	const now = nowIso();
 	const insert = await db
@@ -669,7 +675,7 @@ async function fireOccurrence(
 				// Rules-tier change: notify the schedule's owner. The dedupe key is
 				// the SOURCE+SNAPSHOT state, so repeated ticks on the same pair do
 				// not duplicate the alert — only a genuinely new snapshot re-alerts.
-				await createNotification(db, {
+				await notify({
 					userId: schedule.createdBy,
 					projectId: schedule.projectId,
 					kind: 'sentinel_material_change',
@@ -735,7 +741,7 @@ async function fireOccurrence(
 			if (sweep.hits.length > 0) {
 				const titles = sweep.hits.slice(0, 3).map((h) => h.title).join(', ');
 				const ids = sweep.hits.map((h) => h.candidateId).sort().join(',');
-				await createNotification(db, {
+				await notify({
 					userId: schedule.createdBy,
 					projectId: schedule.projectId,
 					kind: 'discovery_fit',
@@ -757,7 +763,7 @@ async function fireOccurrence(
 		// the occurrence row itself is the durable trigger and the owner gets an
 		// in-app notification, deduped per occurrence key — a retried or
 		// overlapping fire can never notify twice for one slot.
-		await createNotification(db, {
+		await notify({
 			userId: schedule.createdBy,
 			projectId: schedule.projectId,
 			kind: 'schedule_fired',
@@ -808,6 +814,7 @@ export async function runScheduleNow(
 	scope: Scope,
 	scheduleId: string,
 	nowMs: number = Date.now(),
+	delivery?: DeliveryContext,
 ): Promise<FireOutcome> {
 	const verified = await assertProjectScope(db, scope);
 	const schedule = await getSchedule(db, scope, scheduleId);
@@ -817,7 +824,7 @@ export async function runScheduleNow(
 		kind: 'manual',
 		dispatchedBy: verified.actorId,
 		nowMs,
-	});
+	}, delivery);
 }
 
 /**
@@ -827,7 +834,7 @@ export async function runScheduleNow(
  * A per-schedule failure is recorded in lastResult AND still advances
  * nextRunAt — one poison schedule can never wedge the executor.
  */
-export async function dispatchDueSchedules(db: D1Database, nowMs: number): Promise<number> {
+export async function dispatchDueSchedules(db: D1Database, nowMs: number, delivery?: DeliveryContext): Promise<number> {
 	const due = await selectDueSchedules(db, nowMs);
 	let fired = 0;
 	for (const schedule of due) {
@@ -838,7 +845,7 @@ export async function dispatchDueSchedules(db: D1Database, nowMs: number): Promi
 				kind: 'scheduled',
 				dispatchedBy: 'system:cron',
 				nowMs,
-			});
+			}, delivery);
 			if (outcome.elected) fired++;
 		} catch (error) {
 			const nextMs = nextCronOccurrence(schedule.cron, schedule.timezone, nowMs);

@@ -7,7 +7,7 @@
  */
 
 import type { D1Database } from './auth.ts';
-import { createNotification } from './notifications.ts';
+import { createNotification, createAndDeliverNotification, type DeliveryContext } from './notifications.ts';
 
 export interface StackCatalogEntry {
 	id: string;
@@ -140,7 +140,7 @@ export async function listStackNotifySubscriptions(db: D1Database, actorId: stri
  * One notification per subscriber, deduped per (stack, flip) by the unique
  * dedupeKey.
  */
-export async function notifyStackEnabled(db: D1Database, stackId: string): Promise<{ notified: number }> {
+export async function notifyStackEnabled(db: D1Database, stackId: string, delivery?: DeliveryContext): Promise<{ notified: number }> {
 	const entry = STACK_CATALOG.find((candidate) => candidate.id === stackId);
 	if (!entry || entry.status !== 'enabled') {
 		throw new StackNotifyError(409, 'stack_not_enabled', `${stackId} is not enabled in the catalog`);
@@ -152,14 +152,17 @@ export async function notifyStackEnabled(db: D1Database, stackId: string): Promi
 	let notified = 0;
 	for (const row of (subs.results ?? []) as Record<string, unknown>[]) {
 		const userId = String(row['actorId']);
-		const { created } = await createNotification(db, {
+		const notification = {
 			userId,
 			projectId: null,
 			kind: 'stack_enabled',
 			title: `${stackId} is ready to build with`,
 			body: `The build tool you asked about passed its live test and is open for new projects. Start one from Projects and pick ${stackId}.`,
 			dedupeKey: `stack_enabled:${stackId}:${userId}`,
-		});
+		};
+		const { created } = delivery
+			? await createAndDeliverNotification(db, notification, delivery)
+			: await createNotification(db, notification);
 		if (created) notified += 1;
 	}
 	return { notified };
