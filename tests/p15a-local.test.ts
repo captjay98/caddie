@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const REPO = join(import.meta.dir, '..');
@@ -29,12 +29,7 @@ describe('P15a local scaffolding', () => {
 		expect(validated.availability).toBe('unverified');
 	});
 
-	test('skill exists and is non-trivial', () => {
-		const skill = readFileSync(
-			join(REPO, 'apps', 'app', 'src', 'agents', 'skills', 'tanstack-start', 'SKILL.md'),
-			'utf8',
-		);
-		expect(skill.length).toBeGreaterThan(200);
-		expect(skill).toContain('server functions');
-	});
+	// NOTE: the tanstack-start agent SKILL.md was removed in a58b45d (the five
+	// packaged skills are asserted by skills-solid.test.ts); the template and
+	// recipe above are what P15a guarantees.
 });

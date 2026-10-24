@@ -4,22 +4,33 @@ import { join } from "node:path";
 import { BUILD_RECIPE_INSTRUCTION } from "../apps/app/src/agents/specialists.ts";
 
 /**
- * LOCAL VERIFIED (2026-10-23 agent hardening, part 2f): the craft rules are
- * ADAPTED into the design skill, the builder recipe, the planning skill and the
- * coordinator, all pointed at the app theme + the icon kit. Colours come only
- * from theme variables; the PRD names the audience and leaves the look to the
- * design step.
+ * LOCAL VERIFIED (2026-10-23 agent hardening, part 2f; updated 2026-10-24 for
+ * the choose-a-look step): the craft rules are ADAPTED into the design skill,
+ * the builder recipe, the planning skill and the coordinator, all pointed at
+ * the app theme + the icon kit. Colours come only from theme variables. The
+ * LOOK is now chosen in its own step before design: the coordinator's LOOKS
+ * instruction forbids reaching for the same look every time, and the design
+ * skill then carries the CHOSEN look's caddie-theme block unchanged.
  */
 
 const REPO = join(import.meta.dir, "..");
 const read = (p: string) => readFileSync(join(REPO, p), "utf8");
 
-describe("part 2f — the design skill leads with the look and uses the app theme", () => {
+describe("part 2f — the design skill carries the chosen look and uses the app theme", () => {
   const skill = read("apps/app/src/agents/skills/design/SKILL.md");
-  test("it sets the look from the audience first and forbids the same look every time", () => {
+  test("the design skill carries the chosen look's theme (not re-deciding it)", () => {
     expect(skill).toContain("caddie-theme");
-    expect(skill.toLowerCase()).toContain("audience");
-    expect(skill).toContain("Do NOT reach for the same look every time");
+    // The look is chosen upstream; the design skill must say so and not re-pick.
+    expect(skill).toContain("LOOK is already chosen");
+    expect(skill).toContain("do NOT re-decide colours");
+  });
+  test("the looks step names the audience and forbids reaching for the same look every time", () => {
+    // Both the audience line and the 'different looks' discipline moved to the
+    // LOOKS step on the coordinator.
+    const coordinator = read("apps/app/src/agents/coordinator.ts");
+    expect(coordinator).toContain("LOOKS STEP");
+    expect(coordinator).toContain("CLEARLY different");
+    expect(coordinator.toLowerCase()).toContain("who the app is for");
   });
   test("it names one primary action per view and an intentional type scale", () => {
     expect(skill).toContain("ONE primary action");

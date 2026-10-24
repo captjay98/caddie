@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const REPO = join(import.meta.dir, '..');
@@ -13,12 +13,6 @@ const REQUIRED_FILES: Record<Stack, string[]> = {
 	// Track 3 replaced the placeholder template folder with a scaffold module
 	// (stacks/flutter/scaffold.ts) and its lockfiles.
 	flutter: ['scaffold.ts', 'scaffold-lock.ts'],
-};
-
-const SKILL_ASSERTS: Record<Stack, string> = {
-	'laravel-inertia': 'disposable test database',
-	'fastapi-react': 'uv sync --frozen',
-	flutter: 'never a web-render screenshot',
 };
 
 describe('P15b/c/d local scaffolding', () => {
@@ -38,14 +32,9 @@ describe('P15b/c/d local scaffolding', () => {
 			}
 		});
 
-		test(`${stack}: skill exists and carries its discipline`, () => {
-			const skill = readFileSync(
-				join(REPO, 'apps', 'app', 'src', 'agents', 'skills', stack, 'SKILL.md'),
-				'utf8',
-			);
-			expect(skill.length).toBeGreaterThan(200);
-			expect(skill).toContain(SKILL_ASSERTS[stack]);
-		});
+		// NOTE: the per-stack agent SKILL.md files were deliberately removed in
+		// a58b45d (the five packaged skills are asserted by skills-solid.test.ts);
+		// the stacks' templates and recipes above are what P15b/c/d guarantee.
 	}
 
 	test('flutter defaults to the proven Hono backend (per the frozen scope)', async () => {
