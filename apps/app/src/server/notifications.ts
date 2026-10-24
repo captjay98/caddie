@@ -138,6 +138,63 @@ export async function createNotification(
 	};
 }
 
+export interface DeliveryContext {
+	/** The mailer to send through (mailerFromEnv). */
+	mailer: Mailer;
+	/** The configured deployment origin, for links in the email body. */
+	origin: string;
+}
+
+/**
+ * Create a notification AND fan it out to the opt-in channels the user has on
+ * for its kind. The in-app row is always written (it is the record); email is
+ * sent only when the kind's email channel is on, the user has a verified
+ * address, and a mailer is configured. Fire-and-capture: a delivery that fails
+ * (or a missing/unverified email, or an unconfigured mailer) NEVER fails this
+ * call — the inbox notification still stands, and the email attempt leaves a
+ * retry-visible receipt. A de-duplicated repeat (created=false) sends nothing.
+ *
+ * Push fan-out lands in the next slice; email is wired here.
+ */
+export async function createAndDeliverNotification(
+	db: D1Database,
+	input: NotificationInput,
+	delivery: DeliveryContext,
+): Promise<{ created: boolean; notification: NotificationRecord | null }> {
+	const result = await createNotification(db, input);
+	if (!result.created || !result.notification) return result;
+	const notification = result.notification;
+
+	// Email, only when the kind's email channel is on for this user.
+	try {
+		const explicitRows = await queryAll(
+			db,
+			'select "email","push" from "notification_prefs" where "userId" = ? and "kind" = ?',
+			input.userId,
+			input.kind,
+		);
+		const explicit = explicitRows[0]
+			? { email: Number(explicitRows[0]['email']) === 1, push: Number(explicitRows[0]['push']) === 1 }
+			: null;
+		const channels = channelsForKind(input.kind, explicit);
+		if (channels.email) {
+			// ownerEmail fails closed on a missing/unverified address; that is a
+			// captured non-send, never a thrown error up here.
+			const to = await ownerEmail(db, input.userId).catch(() => null);
+			if (to) {
+				await attemptEmailDelivery(
+					db,
+					{ notificationId: notification.id, to, origin: delivery.origin },
+					delivery.mailer,
+				);
+			}
+		}
+	} catch {
+		// Fire-and-capture: delivery must never fail the domain operation.
+	}
+	return result;
+}
+
 export interface NotificationFilter {
 	unreadOnly?: boolean;
 	limit?: number;
