@@ -242,16 +242,26 @@ export function DesignReview(props: {
       ? { decision: persisted.status, revisionId: latest.id }
       : null
     : (records.find((record) => record.revisionId === latest.id) ?? null);
+  // An approval RECORD is only the user's click; the approval has taken EFFECT
+  // only once the workflow left 'review'. When we can SEE the phase is still
+  // 'review' with an approved record, the decision recorded but never advanced
+  // the workflow — a stuck half-approval (e.g. the advance errored). Offer
+  // Approve again rather than claiming "Plan approved", so the Plan tab and the
+  // chat card can never disagree with no way to continue. A rejection still
+  // settles. When the phase is unknown (no workflow info) we trust the record,
+  // so a plain navigate/reload still restores a saved approval.
+  const stuckAtReview = props.buildPhase === "review" && latestRecord?.decision === "approved";
+  const effectiveRecord = stuckAtReview ? null : latestRecord;
   const decisionsDisabled =
     busy !== null ||
     Boolean(
       props.approvalPending ||
       props.approvalError ||
-      latestRecord ||
+      effectiveRecord ||
       expired ||
-      (persisted && persisted.status !== "pending"),
+      (persisted && persisted.status !== "pending" && !stuckAtReview),
     );
-  const approved = latestRecord?.decision === "approved";
+  const approved = effectiveRecord?.decision === "approved";
   const follow = approved ? buildFollow(props.buildPhase) : null;
   // Only an unusual approval state earns a badge; the normal case is "IS THIS OK?".
   const approvalNote = props.approvalPending
