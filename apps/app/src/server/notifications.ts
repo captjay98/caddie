@@ -503,3 +503,101 @@ export async function attemptEmailDelivery(
 		createdAt: now,
 	});
 }
+
+// --- per-kind delivery preferences (0045) --------------------------------------------
+
+/** The two OPT-IN delivery channels. In-app is always on and never stored. */
+export interface ChannelPrefs {
+	email: boolean;
+	push: boolean;
+}
+
+/**
+ * The DEFAULT channels for each notification kind, used when the user has set
+ * no explicit preference. In-app is always on (the inbox is the record); these
+ * decide only email and push. The guiding rule: a kind that NEEDS the person
+ * (a paused build, a plan waiting) defaults email ON so they hear about it when
+ * away; routine or informational kinds default both OFF. Push is off by default
+ * for every kind until the person subscribes a device AND opts a kind in.
+ */
+export const DEFAULT_CHANNEL_PREFS: Readonly<Record<string, ChannelPrefs>> = {
+	build_paused: { email: true, push: true },
+	task_reminder: { email: true, push: false },
+	sentinel_material_change: { email: true, push: false },
+	discovery_fit: { email: false, push: false },
+	schedule_fired: { email: false, push: false },
+	stack_enabled: { email: false, push: false },
+};
+
+/** The fallback for a kind not in the default map: email on (safe — the person
+ *  hears about a new kind of alert), push off (never surprise-push). */
+export const FALLBACK_CHANNEL_PREFS: ChannelPrefs = { email: true, push: false };
+
+/**
+ * The effective channels for one kind: the user's explicit row when present,
+ * otherwise the kind's default (or the fallback). PURE — unit-tested — so the
+ * fan-out decision never depends on I/O.
+ */
+export function channelsForKind(
+	kind: string,
+	explicit: ChannelPrefs | null | undefined,
+): ChannelPrefs {
+	if (explicit) return { email: explicit.email, push: explicit.push };
+	return DEFAULT_CHANNEL_PREFS[kind] ?? FALLBACK_CHANNEL_PREFS;
+}
+
+export interface NotificationPref {
+	readonly kind: string;
+	readonly email: boolean;
+	readonly push: boolean;
+	/** true when this is the stored default (no explicit row), false when set. */
+	readonly isDefault: boolean;
+}
+
+/**
+ * Every kind the UI lets a person tune, with its EFFECTIVE channels: the stored
+ * row where one exists, else the default. The kind list is the default map's
+ * keys (the knowable kinds), so the Settings panel always shows the full set.
+ */
+export async function listNotificationPrefs(
+	db: D1Database,
+	userId: string,
+): Promise<NotificationPref[]> {
+	requireText(userId, 'userId');
+	const rows = await queryAll(
+		db,
+		'select "kind","email","push" from "notification_prefs" where "userId" = ?',
+		userId,
+	);
+	const explicit = new Map<string, ChannelPrefs>();
+	for (const row of rows) {
+		explicit.set(String(row['kind']), { email: Number(row['email']) === 1, push: Number(row['push']) === 1 });
+	}
+	return Object.keys(DEFAULT_CHANNEL_PREFS).map((kind) => {
+		const set = explicit.get(kind);
+		const channels = channelsForKind(kind, set);
+		return { kind, email: channels.email, push: channels.push, isDefault: set === undefined };
+	});
+}
+
+/** Set (upsert) a user's explicit channel preference for one kind. */
+export async function setNotificationPref(
+	db: D1Database,
+	userId: string,
+	kind: string,
+	channels: ChannelPrefs,
+): Promise<NotificationPref> {
+	requireText(userId, 'userId');
+	requireText(kind, 'kind');
+	if (!(kind in DEFAULT_CHANNEL_PREFS)) {
+		fail(400, 'unknown_kind', `no such notification kind: ${kind}`);
+	}
+	await db
+		.prepare(
+			'insert into "notification_prefs" ("userId","kind","email","push","updatedAt") values (?,?,?,?,?) ' +
+				'on conflict("userId","kind") do update set "email" = excluded."email", "push" = excluded."push", "updatedAt" = excluded."updatedAt"',
+		)
+		.bind(userId, kind, channels.email ? 1 : 0, channels.push ? 1 : 0, nowIso())
+		.run();
+	return { kind, email: channels.email, push: channels.push, isDefault: false };
+}
