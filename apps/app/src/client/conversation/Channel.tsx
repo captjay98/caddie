@@ -75,6 +75,37 @@ type ToolPart = Extract<FlueConversationPart, { type: 'dynamic-tool' }>;
  */
 type Turn = { role: 'user'; message: FlueConversationMessage } | { role: 'assistant'; messages: FlueConversationMessage[] };
 
+/**
+ * The transcript performance fix (slowness / hangs / clicks not registering on
+ * long project conversations): react-markdown parses every message, and a long
+ * history blocks the main thread for seconds on each status change. We render
+ * only the most recent slice by default and reveal the rest on demand.
+ *
+ * Windowing is on MESSAGES (not turns) because an assistant turn is a run of
+ * consecutive assistant messages — cutting at a message boundary only ever
+ * drops OLDER context and never splits the newest turn, which is what matters
+ * for the live view. The split point is pulled back to the newest user message
+ * at or before the cut, so the window always opens on a question, not mid-reply.
+ */
+export const TRANSCRIPT_WINDOW = 40;
+
+export function windowMessages(
+	messages: readonly FlueConversationMessage[],
+	limit = TRANSCRIPT_WINDOW,
+	showAll = false,
+): { shown: FlueConversationMessage[]; hiddenCount: number } {
+	if (showAll || messages.length <= limit) return { shown: [...messages], hiddenCount: 0 };
+	let cut = messages.length - limit;
+	// Pull the cut back to a user message so the window starts on a question.
+	for (let i = cut; i < messages.length; i++) {
+		if (messages[i]?.role === 'user') {
+			cut = i;
+			break;
+		}
+	}
+	return { shown: messages.slice(cut), hiddenCount: cut };
+}
+
 function groupTurns(messages: readonly FlueConversationMessage[]): Turn[] {
 	const turns: Turn[] = [];
 	for (const message of messages) {
@@ -533,6 +564,9 @@ export function Channel(props: {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const pinnedToBottom = useRef(true);
     const [showLatest, setShowLatest] = useState(false);
+    // Long conversations render only their recent slice (see windowMessages);
+    // this reveals the whole history when the person asks for it.
+    const [showAllHistory, setShowAllHistory] = useState(false);
 	// §3.6: leftover typing restored from an earlier visit is labelled until it
 	// is sent or cleared. "From earlier" = text is present and the user has not
 	// typed in this visit — any edit (or clearing) retires the label, and a
@@ -575,13 +609,19 @@ export function Channel(props: {
 	// so Flue's failed copy is hidden instead.
 	const failedIds = useMemo(() => new Set(source.failedSends.map((send) => send.id)), [source.failedSends]);
 	const unsentKey = props.drafts.filter((d) => d.state === 'unsent').map((d) => d.text).join('\u0000');
-	const shownMessages = useMemo(() => {
+	const allShownMessages = useMemo(() => {
 		const unsent = unsentKey ? unsentKey.split('\u0000') : [];
 		if (unsent.length === 0 || failedIds.size === 0) return source.messages;
 		return source.messages.filter(
 			(message) => !(message.role === 'user' && failedIds.has(String(message.id)) && unsent.some((text) => sameSend(userText(message), text))),
 		);
 	}, [source.messages, failedIds, unsentKey]);
+	// Only the recent slice is parsed and rendered unless the person opens the
+	// whole history — this is the fix for the long-conversation hang.
+	const { shown: shownMessages, hiddenCount } = useMemo(
+		() => windowMessages(allShownMessages, TRANSCRIPT_WINDOW, showAllHistory),
+		[allShownMessages, showAllHistory],
+	);
 	const visibleDrafts = useMemo(() => {
 		const onTheirWay = source.messages
 			.filter((message) => message.role === 'user' && String(message.id).startsWith('local:') && !failedIds.has(String(message.id)))
@@ -676,7 +716,19 @@ export function Channel(props: {
 						}
 					/>
 ) : (
-						<TurnActions.Provider value={turnActions}>{transcriptRows}</TurnActions.Provider>
+						<TurnActions.Provider value={turnActions}>
+							{hiddenCount > 0 ? (
+								<button
+									type="button"
+									className="btn-ghost channel-show-earlier"
+									data-testid="channel-show-earlier"
+									onClick={() => setShowAllHistory(true)}
+								>
+									Show {hiddenCount} earlier {hiddenCount === 1 ? "message" : "messages"}
+								</button>
+							) : null}
+							{transcriptRows}
+						</TurnActions.Provider>
 					)}
 
 				{settledFailed.map((settlement) => {
