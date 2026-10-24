@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { migratedDatabase } from './fixtures/sqlite-d1.ts';
 import {
 	createAndDeliverNotification,
+	caddieEmailHtml,
 	setNotificationPref,
 	type Mailer,
 	type MailMessage,
@@ -60,6 +61,8 @@ describe('createAndDeliverNotification — email fan-out', () => {
 		expect(r.created).toBe(true);
 		expect(sent).toHaveLength(1);
 		expect(sent[0]!.to).toBe('u1@example.com');
+		// A styled HTML alternative rides along with the text body.
+		expect(sent[0]!.htmlBody).toContain('Open your workspace');
 		sqlite.close();
 	});
 
@@ -115,5 +118,19 @@ describe('createAndDeliverNotification — email fan-out', () => {
 		const deliveries = sqlite.prepare('select status from notification_deliveries where notificationId = ?').all(r.notification!.id) as { status: string }[];
 		expect(deliveries.some((d) => d.status === 'failed')).toBe(true);
 		sqlite.close();
+	});
+});
+
+describe('caddieEmailHtml', () => {
+	test('escapes the title/body and carries both the light and dark palettes', () => {
+		const html = caddieEmailHtml('Build <paused> & "stuck"', 'line one\nline two', 'https://caddie.test');
+		// Escaped — no raw angle brackets from the content leak into markup.
+		expect(html).toContain('Build &lt;paused&gt; &amp; &quot;stuck&quot;');
+		expect(html).toContain('line one<br>line two');
+		// Light base + a dark-mode override, and the workspace link.
+		expect(html).toContain('#155fbe'); // light accent
+		expect(html).toContain('prefers-color-scheme: dark');
+		expect(html).toContain('#4d9fff'); // dark accent
+		expect(html).toContain('href="https://caddie.test/app"');
 	});
 });

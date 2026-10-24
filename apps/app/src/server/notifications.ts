@@ -395,6 +395,8 @@ export interface MailMessage {
 	to: string;
 	subject: string;
 	textBody: string;
+	/** Styled HTML alternative (Caddie colours, light/dark). Falls back to text. */
+	htmlBody?: string;
 	/** Overrides the deployment default sender (e.g. "Caddie <caddie@jamalibrahim.dev>"). */
 	from?: string;
 }
@@ -452,6 +454,7 @@ export function makeResendMailer(apiKey: string): Mailer {
 						to: [message.to],
 						subject: message.subject,
 						text: message.textBody,
+						...(message.htmlBody ? { html: message.htmlBody } : {}),
 				}),
 			});
 			if (!res.ok) {
@@ -552,6 +555,52 @@ function receiptFromRow(row: Record<string, unknown>): MailReceipt {
 	};
 }
 
+/** Escape text for safe interpolation into the HTML email body. */
+function escapeHtml(s: string): string {
+	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * A Caddie-branded HTML email: the Azure palette (the default app theme), with
+ * a light base and a `prefers-color-scheme: dark` override so it matches the
+ * app in either mode. Table layout + inline styles for client compatibility;
+ * title and body are HTML-escaped. Email clients ignore CSS variables, so the
+ * colours are literal — light: bg #f6f8fc, card #ffffff, text #0b1220, accent
+ * #155fbe; dark: bg #090b10, card #141922, text #e6e9ef, accent #4d9fff.
+ */
+export function caddieEmailHtml(title: string, body: string, origin: string): string {
+	const t = escapeHtml(title);
+	const b = escapeHtml(body).replace(/\n/g, '<br>');
+	const url = origin ? `${origin}/app` : '#';
+	return `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark">
+<style>
+  :root { color-scheme: light dark; }
+  .bg { background:#f6f8fc; } .card { background:#ffffff; border:1px solid #e2e8f3; }
+  .title { color:#0b1220; } .body { color:#3a4455; } .brand { color:#155fbe; }
+  .btn { background:#155fbe; color:#ffffff !important; }
+  .muted { color:#8a93a6; }
+  @media (prefers-color-scheme: dark) {
+    .bg { background:#090b10 !important; } .card { background:#141922 !important; border-color:#242c38 !important; }
+    .title { color:#e6e9ef !important; } .body { color:#b4bccb !important; } .brand { color:#4d9fff !important; }
+    .btn { background:#4d9fff !important; color:#09121c !important; } .muted { color:#6b7484 !important; }
+  }
+</style></head>
+<body class="bg" style="margin:0;background:#f6f8fc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="bg" style="background:#f6f8fc;padding:24px 0;"><tr><td align="center">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
+    <tr><td style="padding:0 8px 14px;"><span class="brand" style="color:#155fbe;font-weight:700;font-size:15px;letter-spacing:.3px;">Caddie</span></td></tr>
+    <tr><td class="card" style="background:#ffffff;border:1px solid #e2e8f3;border-radius:14px;padding:24px;">
+      <h1 class="title" style="margin:0 0 10px;font-size:19px;line-height:1.3;color:#0b1220;">${t}</h1>
+      <p class="body" style="margin:0 0 20px;font-size:15px;line-height:1.5;color:#3a4455;">${b}</p>
+      <a href="${url}" class="btn" style="display:inline-block;background:#155fbe;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 18px;border-radius:10px;">Open your workspace</a>
+    </td></tr>
+    <tr><td style="padding:14px 8px 0;"><p class="muted" style="margin:0;font-size:12px;color:#8a93a6;">You’re getting this because you turned on email for this kind of update. Change it in Caddie → Settings → Notifications.</p></td></tr>
+  </table>
+</td></tr></table></body></html>`;
+}
+
 /**
  * Attempt email delivery of a notification. NEVER throws and NEVER fails the
  * calling domain operation: the mailer's outcome (or its explosion) is
@@ -587,10 +636,11 @@ export async function attemptEmailDelivery(
 		'',
 		origin ? `Open your workspace: ${origin}/app` : '(origin not configured)',
 	].join('\n');
+	const htmlBody = caddieEmailHtml(notification.title, notification.body, origin);
 
 	let outcome: MailSendResult;
 	try {
-		outcome = await mailer.send({ to, subject: notification.title, textBody });
+		outcome = await mailer.send({ to, subject: notification.title, textBody, htmlBody });
 	} catch (error) {
 		outcome = { ok: false, error: String(error) };
 	}
