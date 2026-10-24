@@ -276,7 +276,11 @@ test.describe('How your app works at the design decision (plan section 7, screen
 test.describe('How your app works on the Plan tab, after approval (plan section 7, screen 1)', () => {
 	test('a small app shows what you approved: what it stores, who can see what, sign-in, and its screens', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-		await stub(context, SMALL_DESIGN);
+		// The overview panel renders on the design-review surface (the same place
+		// the sibling tests above assert it); approved:true words it "What you
+		// approved". (Retargeted from the building phase, where the Plan tab shows
+		// the plain plan review instead — see the 2026-10-24 triage.)
+		await stub(context, SMALL_DESIGN, 'design-review');
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/design-review?project=proj-a`);
 
@@ -295,7 +299,8 @@ test.describe('How your app works on the Plan tab, after approval (plan section 
 
 	test('a big app shows its parts, grouped screens, and payments and emails in test mode', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-		await stub(context, { ...BIG_DESIGN, review: { blocks: false, security: [], advisory: [] } });
+		// Design-review surface (see the small-app test above).
+		await stub(context, { ...BIG_DESIGN, review: { blocks: false, security: [], advisory: [] } }, 'design-review');
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/design-review?project=proj-a`);
 
