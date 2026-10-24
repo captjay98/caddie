@@ -1,8 +1,8 @@
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { fetchJson } from '../api.ts';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchJson, postJson } from '../api.ts';
 import { failureKind, StatePanel } from '../states.tsx';
 import { useSessionActor, useSessionEmail } from '../queries.ts';
 import { Memory } from '../memory/Memory.tsx';
@@ -20,7 +20,6 @@ import {
 	hoursForChoice,
 	sectionFor,
 	serviceStatus,
-	stackLabel,
 	type SettingsTab,
 } from './settings-model.ts';
 
@@ -61,10 +60,6 @@ interface IntegrationsHealth {
 	sandbox: { configured: boolean; missing: string[] };
 }
 
-interface StacksResponse {
-	stacks: { id: string; status: 'enabled' | 'planned'; note?: string }[];
-}
-
 const TIME_ZONES: readonly string[] = (() => {
 	try {
 		return Intl.supportedValuesOf('timeZone');
@@ -88,16 +83,11 @@ export function Settings(): ReactElement {
 		queryFn: () => fetchJson<IntegrationsHealth>('/api/integrations/health'),
 		enabled: actor.data != null,
 	});
-	const stacks = useQuery({
-		queryKey: ['stacks'],
-		queryFn: () => fetchJson<StacksResponse>('/api/stacks'),
-		enabled: actor.data != null,
-	});
 
-	if (actor.isPending || profile.isPending || health.isPending || stacks.isPending) {
+	if (actor.isPending || profile.isPending || health.isPending) {
 		return <StatePanel kind="loading" title="Loading your settings…" />;
 	}
-	const error = actor.error ?? profile.error ?? health.error ?? stacks.error;
+	const error = actor.error ?? profile.error ?? health.error;
 	if (error) {
 		return (
 			<StatePanel
@@ -125,7 +115,7 @@ export function Settings(): ReactElement {
 						</header>
 						{section.id === 'profile' ? <ProfileSection initial={stored} /> : null}
 						{section.id === 'interests' ? <InterestsSection initial={stored} /> : null}
-						{section.id === 'tools' ? <ToolsSection stacks={stacks.data!.stacks} /> : null}
+						{section.id === 'notifications' ? <NotificationsSection /> : null}
 						{section.id === 'knows' ? <Memory embedded /> : null}
 						{section.id === 'routines' ? <AutomationsBody /> : null}
 						{section.id === 'accounts' ? <AccountsSection health={health.data!} /> : null}
@@ -363,29 +353,84 @@ function InterestsSection({ initial }: { initial: ProfileRecord | null }): React
 	);
 }
 
-function ToolsSection({ stacks }: { stacks: StacksResponse['stacks'] }): ReactElement {
+/** Plain-language names for the notification kinds a person can tune. */
+const NOTIFICATION_KIND_LABELS: Record<string, { title: string; detail: string }> = {
+	build_paused: { title: 'A build needs your attention', detail: 'Caddie paused a build and needs you to look.' },
+	task_reminder: { title: 'A task is due', detail: 'A reminder for something on your to-do list.' },
+	sentinel_material_change: { title: 'Something changed on a watch', detail: 'A page or source Caddie watches for you has changed.' },
+	discovery_fit: { title: 'A good hackathon match', detail: 'Caddie found a hackathon that fits what you build.' },
+	schedule_fired: { title: 'A routine ran', detail: 'One of your scheduled checks has run.' },
+	stack_enabled: { title: 'A new build tool is ready', detail: 'A new way to build became available.' },
+};
+
+interface NotificationPrefRow {
+	kind: string;
+	email: boolean;
+	push: boolean;
+	isDefault: boolean;
+}
+
+function NotificationsSection(): ReactElement {
+	const queryClient = useQueryClient();
+	const prefs = useQuery({
+		queryKey: ['notification-prefs'],
+		queryFn: () => fetchJson<{ prefs: NotificationPrefRow[] }>('/api/notifications/prefs'),
+	});
+	const setPref = useMutation({
+		mutationFn: (body: { kind: string; email: boolean; push: boolean }) =>
+			postJson<{ pref: NotificationPrefRow }>('/api/notifications/prefs', body),
+		onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['notification-prefs'] }),
+	});
+
+	if (prefs.isPending) return <StatePanel kind="loading" title="Loading your notification settings…" />;
+	if (prefs.error)
+		return <StatePanel kind={failureKind(prefs.error)} detail={prefs.error instanceof Error ? prefs.error.message : undefined} onRetry={() => void prefs.refetch()} />;
+
+	const rows = prefs.data?.prefs ?? [];
+	const toggle = (row: NotificationPrefRow, channel: 'email' | 'push') =>
+		setPref.mutate({ kind: row.kind, email: channel === 'email' ? !row.email : row.email, push: channel === 'push' ? !row.push : row.push });
+
 	return (
-		<section className="settings-section-body" data-testid="stacks-panel" id="stacks-panel">
-			<ul className="settings-rows" data-testid="stacks-list">
-				{stacks.map((stack) => {
-					const label = stackLabel(stack.id);
-					const available = stack.status === 'enabled';
+		<section className="settings-section-body" data-testid="notifications-panel" id="notifications-panel">
+			<p className="settings-row-detail" style={{ marginBottom: '12px' }}>
+				Caddie always keeps these in your inbox here. Turn on email or push to also hear about them when you’re away.
+			</p>
+			<ul className="settings-rows" data-testid="notification-prefs-list">
+				{rows.map((row) => {
+					const label = NOTIFICATION_KIND_LABELS[row.kind] ?? { title: row.kind, detail: '' };
 					return (
-						<li className="settings-row" key={stack.id} data-testid={`stack-${stack.id}`}>
+						<li className="settings-row" key={row.kind} data-testid={`notif-pref-${row.kind}`}>
 							<div className="settings-row-main">
-								<span className="settings-row-title">{label.name}</span>
-								<span className="settings-row-detail">
-									{label.detail}
-									{available ? ' · being proven first' : ''}
-								</span>
+								<span className="settings-row-title">{label.title}</span>
+								<span className="settings-row-detail">{label.detail}</span>
 							</div>
-							<span className="status-pill" data-status={available ? 'handled' : 'planned'}>
-								{available ? 'Available' : 'Coming later'}
-							</span>
+							<div className="notif-pref-toggles" role="group" aria-label={`How to be told about: ${label.title}`}>
+								<label className="notif-pref-toggle">
+									<input
+										type="checkbox"
+										checked={row.email}
+										disabled={setPref.isPending}
+										data-testid={`notif-pref-${row.kind}-email`}
+										onChange={() => toggle(row, 'email')}
+									/>
+									Email
+								</label>
+								<label className="notif-pref-toggle">
+									<input
+										type="checkbox"
+										checked={row.push}
+										disabled={setPref.isPending}
+										data-testid={`notif-pref-${row.kind}-push`}
+										onChange={() => toggle(row, 'push')}
+									/>
+									Push
+								</label>
+							</div>
 						</li>
 					);
 				})}
 			</ul>
+			{setPref.error ? <p className="state-detail" role="alert">Couldn’t save that change. Try again.</p> : null}
 		</section>
 	);
 }

@@ -199,6 +199,15 @@ async function stubApi(request: Request): Promise<Response> {
 		return json(searchResults[q] ?? { total: 0, sections: { projects: { items: [] }, planDocs: { items: [] }, tasks: { items: [] }, memory: { items: [] } } });
 	}
 	if (path === '/api/integrations/health') return json(health);
+	if (path === '/api/notifications/prefs') {
+		return json({
+			prefs: [
+				{ kind: 'build_paused', email: true, push: true, isDefault: true },
+				{ kind: 'task_reminder', email: true, push: false, isDefault: true },
+				{ kind: 'discovery_fit', email: false, push: false, isDefault: true },
+			],
+		});
+	}
 	if (path === '/api/stacks') {
 		return json({
 			stacks: [
@@ -347,13 +356,13 @@ test.describe('P14 settings UI (real components, /api stubbed at the network lay
 		await expect(page.getByTestId('profile-format').getByRole('radio', { name: 'In person' })).toBeVisible();
 		await expect(page.getByTestId('profile-weekly-hours').getByRole('radio', { name: '20+' })).toBeVisible();
 
-		// Build tools: plain names; "Available" only where the server says enabled.
-		await page.getByTestId('settings-tab-tools').click();
-		await expect(page.getByTestId('settings-title')).toHaveText('Build tools');
-		await expect(page.getByTestId('stack-react-hono')).toContainText('React + Hono');
-		await expect(page.getByTestId('stack-react-hono')).toContainText('Available');
-		await expect(page.getByTestId('stack-tanstack-start')).toContainText('Coming later');
-		await expect(page.getByTestId('stack-flutter')).toContainText('Coming later');
+		// Notifications: per-kind, plain-language, with Email + Push toggles.
+		await page.getByTestId('settings-tab-notifications').click();
+		await expect(page.getByTestId('settings-title')).toHaveText('Notifications');
+		await expect(page.getByTestId('notif-pref-build_paused')).toContainText('A build needs your attention');
+		await expect(page.getByTestId('notif-pref-build_paused-email')).toBeChecked();
+		await expect(page.getByTestId('notif-pref-build_paused-push')).toBeChecked();
+		await expect(page.getByTestId('notif-pref-discovery_fit-email')).not.toBeChecked();
 
 		// Connected accounts: the user's own accounts first…
 		await page.getByTestId('settings-tab-accounts').click();

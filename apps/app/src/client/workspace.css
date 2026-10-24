@@ -10565,3 +10565,8 @@ mark {
 @media (prefers-reduced-motion: reduce) {
   .look-track { scroll-behavior: auto; }
 }
+
+/* Notification preferences (Settings → Notifications): Email / Push per kind. */
+.notif-pref-toggles { display: flex; gap: 16px; flex: none; align-items: center; }
+.notif-pref-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; color: var(--color-bright); cursor: pointer; }
+.notif-pref-toggle input { width: 18px; height: 18px; accent-color: var(--color-action); cursor: pointer; }

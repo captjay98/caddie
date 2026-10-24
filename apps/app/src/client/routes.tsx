@@ -455,7 +455,7 @@ function validateSettingsSearch(search: Record<string, unknown>): { project?: st
 	return {
 		...base,
 		...(typeof tab === 'string' &&
-		['profile', 'interests', 'tools', 'knows', 'accounts', 'routines', 'spending', 'appearance'].includes(tab)
+		['profile', 'interests', 'notifications', 'knows', 'accounts', 'routines', 'spending', 'appearance'].includes(tab)
 			? { tab }
 			: {}),
 	};

@@ -4,7 +4,7 @@
  * in tests/settings-model.test.ts.
  */
 
-export type SettingsTab = 'profile' | 'interests' | 'tools' | 'knows' | 'routines' | 'accounts' | 'spending' | 'appearance';
+export type SettingsTab = 'profile' | 'interests' | 'notifications' | 'knows' | 'routines' | 'accounts' | 'spending' | 'appearance';
 
 export interface SettingsSection {
 	readonly id: SettingsTab;
@@ -21,7 +21,7 @@ export const SETTINGS_GROUPS: readonly { readonly label: string; readonly sectio
 		sections: [
 			{ id: 'profile', label: 'Profile', lede: 'What Caddie uses to check who can enter and to suggest the right size of project.' },
 			{ id: 'interests', label: 'Interests', lede: 'What you’d enjoy building, and what you’re good at. Caddie ranks hackathons with both.' },
-			{ id: 'tools', label: 'Build tools', lede: 'What Caddie can build your project with. More are added once they’re tested end to end.' },
+			{ id: 'notifications', label: 'Notifications', lede: 'How Caddie reaches you about your projects — in the app, by email, or by push.' },
 		],
 	},
 	{
@@ -70,19 +70,6 @@ export function hoursChoiceFor(hours: number | null | undefined): string {
 
 export function hoursForChoice(choice: string): number | null {
 	return HOURS_CHOICES.find((c) => c.value === choice)?.hours ?? null;
-}
-
-/** Plain names for the stack ids the server reports; an unknown id shows as itself. */
-const STACK_LABELS: Record<string, { readonly name: string; readonly detail: string }> = {
-	'react-hono': { name: 'React + Hono', detail: 'Web app with a small API' },
-	'tanstack-start': { name: 'TanStack Start', detail: 'Full-stack React app' },
-	'fastapi-react': { name: 'FastAPI + React', detail: 'Python API with a web front end' },
-	'laravel-inertia': { name: 'Laravel + Inertia', detail: 'PHP web app' },
-	flutter: { name: 'Flutter', detail: 'Mobile app' },
-};
-
-export function stackLabel(id: string): { name: string; detail: string } {
-	return STACK_LABELS[id] ?? { name: id, detail: '' };
 }
 
 /**

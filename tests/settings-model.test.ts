@@ -7,14 +7,13 @@ import {
 	hoursForChoice,
 	sectionFor,
 	serviceStatus,
-	stackLabel,
 } from '../apps/app/src/client/settings/settings-model.ts';
 
 describe('settings model', () => {
 	test('the rail keeps every existing ?tab= link reachable, grouped You / Caddie / Account', () => {
 		expect(SETTINGS_GROUPS.map((g) => g.label)).toEqual(['You', 'Caddie', 'Account']);
 		// Links elsewhere in the app use these ids (account menu, search, redirects).
-		for (const id of ['profile', 'interests', 'tools', 'knows', 'accounts', 'routines', 'spending', 'appearance']) {
+		for (const id of ['profile', 'interests', 'notifications', 'knows', 'accounts', 'routines', 'spending', 'appearance']) {
 			expect(sectionFor(id).id).toBe(id as never);
 		}
 		expect(SETTINGS_SECTIONS).toHaveLength(8);
@@ -33,12 +32,6 @@ describe('settings model', () => {
 		expect(hoursChoiceFor(40)).toBe('20plus');
 		for (const c of HOURS_CHOICES) expect(hoursChoiceFor(hoursForChoice(c.value))).toBe(c.value);
 		expect(hoursForChoice('')).toBeNull();
-	});
-
-	test('stack labels are plain; an unknown id is shown as itself', () => {
-		expect(stackLabel('react-hono').name).toBe('React + Hono');
-		expect(stackLabel('flutter').detail).toBe('Mobile app');
-		expect(stackLabel('zig-htmx')).toEqual({ name: 'zig-htmx', detail: '' });
 	});
 
 	test('service status is one honest line', () => {

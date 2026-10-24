@@ -18,9 +18,11 @@ import {
 	attemptEmailDelivery,
 	getNotification,
 	listNotifications,
+	listNotificationPrefs,
 	mailerFromEnv,
 	markNotificationRead,
 	ownerEmail,
+	setNotificationPref,
 } from '../notifications.ts';
 import { listSentinelResults } from '../sentinel.ts';
 
@@ -240,6 +242,26 @@ export function createTasksRouter(): Hono<{ Bindings: Env }> {
 			mailerFromEnv(c.env as unknown as Record<string, unknown>),
 		);
 		return c.json({ delivery });
+	});
+
+	// --- per-kind delivery preferences (0045) ----------------------------------
+	router.get('/notifications/prefs', async (c) => {
+		const userId = await sessionUserId(c.env, c.req.raw.headers);
+		if (!userId) throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
+		return c.json({ prefs: await listNotificationPrefs(c.env.DB, userId) });
+	});
+
+	router.post('/notifications/prefs', async (c) => {
+		const userId = await sessionUserId(c.env, c.req.raw.headers);
+		if (!userId) throw new ScopeError(401, 'unauthenticated', 'a verified session is required');
+		const body = await parseJsonBody(c.req.raw);
+		const kind = typeof body.kind === 'string' ? body.kind : '';
+		if (!kind) throw new ScopeError(400, 'invalid_input', 'kind is required');
+		const pref = await setNotificationPref(c.env.DB, userId, kind, {
+			email: body.email === true,
+			push: body.push === true,
+		});
+		return c.json({ pref });
 	});
 
 	return router;
