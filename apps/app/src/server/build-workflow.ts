@@ -16,7 +16,7 @@ import {
   ScopeError,
 } from "./scope.ts";
 import { createRun, isRunPaused, lookupRunByConversation } from "./runs.ts";
-import { createNotification } from "./notifications.ts";
+import { createNotification, createAndDeliverNotification, type DeliveryContext } from "./notifications.ts";
 import { admitJudgeBuildStart, admitJudgeMessage, judgeProjectCap, judgeProjectRefusal, judgeProjectRoom } from "./judge-limits.ts";
 import {
   getProject,
@@ -861,6 +861,9 @@ export async function setWorkflowBlocker(
     )
     .bind("blocked", detail.slice(0, 2000), now(), scope.projectId)
     .run();
+  // In-app only here: setWorkflowBlocker has no Worker env in scope. A caller
+  // that holds env can pass a delivery context to notifyBuildPaused directly to
+  // also email/push; threading env through every blocker caller is a follow-up.
   await notifyBuildPaused(db, scope.projectId, detail);
 }
 
@@ -871,7 +874,7 @@ export async function setWorkflowBlocker(
  * come here: the person's Stop (stopWorkflow) never does. A notification that
  * cannot be saved never undoes or hides the pause.
  */
-async function notifyBuildPaused(db: D1Database, projectId: string, detail: string): Promise<void> {
+async function notifyBuildPaused(db: D1Database, projectId: string, detail: string, delivery?: DeliveryContext): Promise<void> {
   try {
     const found = await rows(
       db,
@@ -882,14 +885,19 @@ async function notifyBuildPaused(db: D1Database, projectId: string, detail: stri
     if (!workflow) return;
     const run = await lookupRunByConversation(db, String(workflow.conversationId));
     if (!run?.createdBy) return;
-    await createNotification(db, {
+    const input = {
       userId: run.createdBy,
       projectId,
       kind: "build_paused",
       title: `Caddie paused the build of ${String(workflow.name)}`,
       body: detail.slice(0, 600),
       dedupeKey: `brief:${String(workflow.runId)}:blocked`,
-    });
+    };
+    // When the caller has the Worker env in scope it passes a delivery context,
+    // and a paused build also reaches the person by email/push per their prefs.
+    // Without it (a background sweep with no env), the in-app inbox still fires.
+    if (delivery) await createAndDeliverNotification(db, input, delivery);
+    else await createNotification(db, input);
   } catch (error) {
     console.warn("build-paused notification not saved", error);
   }

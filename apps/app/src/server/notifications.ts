@@ -1,6 +1,6 @@
 import type { D1Database } from './auth.ts';
 import { ScopeError } from './scope.ts';
-import { sendWebPush, type VapidKeys } from './web-push.ts';
+import { sendWebPush, vapidFromEnv, type VapidKeys } from './web-push.ts';
 
 /**
  * P12 slice 3 — notifications (feature-ledger C20, ADAPT/IMPROVE): in-app
@@ -146,6 +146,22 @@ export interface DeliveryContext {
 	origin: string;
 	/** VAPID keys for web push (vapidFromEnv); null when push is not configured. */
 	vapid?: VapidKeys | null;
+}
+
+/**
+ * A DeliveryContext from the Worker env (threaded in as `unknown` by callers
+ * that hold it). Returns undefined when there is no env, so a caller without
+ * one simply does in-app-only delivery. The origin comes from PUBLIC_ORIGIN /
+ * BETTER_AUTH_URL when set, else '' (email still sends; its link degrades).
+ */
+export function deliveryFromEnv(env: unknown): DeliveryContext | undefined {
+	if (!env || typeof env !== 'object') return undefined;
+	const e = env as Record<string, unknown>;
+	const origin =
+		(typeof e['PUBLIC_ORIGIN'] === 'string' && (e['PUBLIC_ORIGIN'] as string)) ||
+		(typeof e['BETTER_AUTH_URL'] === 'string' && (e['BETTER_AUTH_URL'] as string)) ||
+		'';
+	return { mailer: mailerFromEnv(e), origin, vapid: vapidFromEnv(e) };
 }
 
 /**

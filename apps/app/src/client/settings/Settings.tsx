@@ -395,6 +395,7 @@ function NotificationsSection(): ReactElement {
 			<p className="settings-row-detail" style={{ marginBottom: '12px' }}>
 				Caddie always keeps these in your inbox here. Turn on email or push to also hear about them when you’re away.
 			</p>
+			<PushEnable />
 			<ul className="settings-rows" data-testid="notification-prefs-list">
 				{rows.map((row) => {
 					const label = NOTIFICATION_KIND_LABELS[row.kind] ?? { title: row.kind, detail: '' };
@@ -432,6 +433,117 @@ function NotificationsSection(): ReactElement {
 			</ul>
 			{setPref.error ? <p className="state-detail" role="alert">Couldn’t save that change. Try again.</p> : null}
 		</section>
+	);
+}
+
+/** base64url VAPID public key → the Uint8Array pushManager.subscribe wants. */
+function vapidKeyToBytes(b64url: string): Uint8Array {
+	const pad = '='.repeat((4 - (b64url.length % 4)) % 4);
+	const b64 = (b64url + pad).replace(/-/g, '+').replace(/_/g, '/');
+	const raw = atob(b64);
+	const out = new Uint8Array(raw.length);
+	for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+	return out;
+}
+
+/**
+ * Turn web push on/off for THIS browser. Push needs: a service worker (we have
+ * one), the server's VAPID public key, and the person's permission. The button
+ * reflects the real state and says plainly when the browser or the server does
+ * not support it, rather than failing silently.
+ */
+function PushEnable(): ReactElement {
+	const supported = typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window;
+	const [state, setState] = useState<'unknown' | 'on' | 'off' | 'denied' | 'unavailable' | 'busy'>('unknown');
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (!supported) return setState('unavailable');
+		if (Notification.permission === 'denied') return setState('denied');
+		(async () => {
+			const reg = await navigator.serviceWorker.getRegistration();
+			const sub = await reg?.pushManager.getSubscription();
+			setState(sub ? 'on' : 'off');
+		})().catch(() => setState('off'));
+	}, [supported]);
+
+	async function enable() {
+		setError(null);
+		setState('busy');
+		try {
+			const { publicKey } = await fetchJson<{ publicKey: string | null }>('/api/notifications/vapid');
+			if (!publicKey) {
+				setState('unavailable');
+				setError('Push isn’t set up on this server yet.');
+				return;
+			}
+			const permission = await Notification.requestPermission();
+			if (permission !== 'granted') {
+				setState(permission === 'denied' ? 'denied' : 'off');
+				return;
+			}
+			const reg = (await navigator.serviceWorker.getRegistration()) ?? (await navigator.serviceWorker.register('/sw.js', { scope: '/app/' }));
+			const sub = await reg.pushManager.subscribe({
+				userVisibleOnly: true,
+				applicationServerKey: vapidKeyToBytes(publicKey) as BufferSource,
+			});
+			const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
+			await postJson('/api/notifications/push/subscribe', { subscription: json });
+			setState('on');
+		} catch (cause) {
+			setState('off');
+			setError(cause instanceof Error ? cause.message : 'Could not turn on push.');
+		}
+	}
+
+	async function disable() {
+		setError(null);
+		setState('busy');
+		try {
+			const reg = await navigator.serviceWorker.getRegistration();
+			const sub = await reg?.pushManager.getSubscription();
+			if (sub) {
+				await postJson('/api/notifications/push/unsubscribe', { endpoint: sub.endpoint });
+				await sub.unsubscribe();
+			}
+			setState('off');
+		} catch (cause) {
+			setState('on');
+			setError(cause instanceof Error ? cause.message : 'Could not turn off push.');
+		}
+	}
+
+	return (
+		<div className="notif-push-enable" data-testid="push-enable" data-state={state}>
+			<div className="settings-row-main">
+				<span className="settings-row-title">Push on this device</span>
+				<span className="settings-row-detail">
+					{state === 'unavailable'
+						? 'This browser or server doesn’t support push.'
+						: state === 'denied'
+							? 'Blocked in your browser settings — allow notifications for this site to use push.'
+							: state === 'on'
+								? 'Push is on for this browser. Turn on Push for a kind below to get it.'
+								: 'Get a push notification in this browser when something needs you.'}
+				</span>
+			</div>
+			{state === 'on' ? (
+				<button type="button" className="btn-ghost" data-testid="push-disable-btn" onClick={() => void disable()}>
+					Turn off
+				</button>
+			) : (
+				<button
+					type="button"
+					className="btn-key"
+					data-testid="push-enable-btn"
+					disabled={state === 'busy' || state === 'unavailable' || state === 'denied'}
+					onClick={() => void enable()}
+				>
+					{state === 'busy' ? 'Turning on…' : 'Turn on push'}
+				</button>
+			)}
+			{error ? <p className="state-detail" role="alert" style={{ flexBasis: '100%' }}>{error}</p> : null}
+		</div>
 	);
 }
 
