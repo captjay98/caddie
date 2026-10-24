@@ -151,6 +151,19 @@ for (const width of [390, 1440]) {
 	});
 }
 
+test('the chat summary is hidden beside the Plan tab in a pre-build phase, kept in chat-only and once building', async ({ page, context }) => {
+	await page.setViewportSize({ width: 1440, height: 960 });
+	await fixture(context, 'design-review');
+	// A pre-build phase: the Plan tab's left pane already shows the full
+	// workflow card, so the chat summary beside it would be pure duplication.
+	await page.goto('/app/design-review?project=proj-focused');
+	await expect(page.getByTestId('workflow-summary')).toHaveCount(0);
+	// The chat-only view (pane=channel) always keeps it — it is the only
+	// workflow view there.
+	await page.goto('/app/design-review?project=proj-focused&pane=channel');
+	await expect(page.getByTestId('workflow-summary')).toBeVisible();
+});
+
 test('Plan workspace keeps the design review and its explicit build decision', async ({ page, context }) => {
 	const writes = await fixture(context, 'design-review');
 	await page.goto('/app/design-review?project=proj-focused');

@@ -1,6 +1,7 @@
 import { buildPresentation } from '../project/build-presentation.ts';
 import type { ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useLocation, useSearch } from '@tanstack/react-router';
 import { useBuildActivity } from '../queries.ts';
 import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
 import { workflowQueryOptions } from '../workflow-query.ts';
@@ -18,6 +19,28 @@ export function ProjectChatSummary({ projectId, name }: {
 }): ReactElement | null {
 	const chrome = useWorkspaceChrome();
 	const hidden = chrome.homeProject?.id === projectId;
+	// The Plan tab (/design-review) already renders the FULL workflow card. When
+	// the chat is split BESIDE that tab for this same project, this summary is
+	// pure duplication — hide it there only. Everywhere else it earns its place:
+	// the Build/Check/Submit tabs (the page shows build/evidence/submission, not
+	// the plan workflow), the chat-only view (?pane=channel, including mobile
+	// where there is no page beside the chat), and the Home/general chat. We key
+	// off the live route, so switching tabs flips it without a reload.
+	const location = useLocation();
+	const search = useSearch({ strict: false }) as { project?: string; pane?: string };
+	const path = location.pathname.replace(/^\/app/, '') || '/';
+	// The Plan tab shows the full workflow card ONLY for the pre-build phases
+	// (review / looks / design and their reviews). Once building/ready/blocked
+	// the Plan-tab page no longer owns that state, so the chat summary still
+	// carries it. We therefore compute the phase first and only suppress the
+	// summary beside the Plan tab for a phase the page itself renders.
+	const besideOwnPlanTab =
+		chrome.isDesktop &&
+		search.pane !== 'channel' &&
+		path === '/design-review' &&
+		chrome.conversation.kind === 'project' &&
+		chrome.conversation.projectId === projectId &&
+		search.project === projectId;
 	const state = useQuery({
 		...workflowQueryOptions(chrome.actorId, projectId),
 		enabled: Boolean(chrome.actorId && !hidden),
@@ -26,7 +49,13 @@ export function ProjectChatSummary({ projectId, name }: {
 	const workflow = snapshot?.workflow;
 	const hasBuild = workflow && ['building', 'blocked', 'ready'].includes(workflow.phase);
 	const activity = useBuildActivity({ actorId: chrome.actorId }, !hidden && hasBuild ? projectId : null);
-	if (hidden) return null;
+	// The Plan-tab page renders the full workflow card only for the pre-build
+	// phases; for those, the beside-the-Plan-tab summary is duplication. Once
+	// the build starts the Plan tab no longer carries live status, so the
+	// summary stays.
+	const planTabOwnsPhase =
+		workflow != null && ['review', 'looks', 'looks-review', 'design', 'design-review'].includes(workflow.phase);
+	if (hidden || (besideOwnPlanTab && planTabOwnsPhase)) return null;
 	if (state.isPending) return <p className="state-detail" role="status">Loading your project…</p>;
 	if (state.isError) return (
 		<p className="state-detail" role="alert">
