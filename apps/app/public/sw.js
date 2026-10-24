@@ -97,3 +97,50 @@ async function builtFile(request) {
 	if (response.ok) await cache.put(request, response.clone());
 	return response;
 }
+
+/*
+ * Web push. The server sends an encrypted payload carrying { title, body, url }.
+ * We show it as a notification; clicking it focuses an open workspace tab (or
+ * opens one) at the payload's url. A payload that fails to parse still shows a
+ * plain Caddie notice rather than nothing.
+ */
+self.addEventListener('push', (event) => {
+	event.waitUntil(
+		(async () => {
+			let data = {};
+			try {
+				data = event.data ? event.data.json() : {};
+			} catch {
+				data = {};
+			}
+			const title = typeof data.title === 'string' && data.title ? data.title : 'Caddie';
+			const body = typeof data.body === 'string' ? data.body : '';
+			const url = typeof data.url === 'string' && data.url.startsWith('/') ? data.url : '/app/';
+			await self.registration.showNotification(title, {
+				body,
+				tag: typeof data.tag === 'string' ? data.tag : undefined,
+				data: { url },
+				icon: '/icons/icon-192.png',
+				badge: '/icons/badge-72.png',
+			});
+		})(),
+	);
+});
+
+self.addEventListener('notificationclick', (event) => {
+	event.notification.close();
+	const url = (event.notification.data && event.notification.data.url) || '/app/';
+	event.waitUntil(
+		(async () => {
+			const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+			for (const client of all) {
+				if (client.url.includes('/app') && 'focus' in client) {
+					await client.focus();
+					if ('navigate' in client) await client.navigate(url).catch(() => {});
+					return;
+				}
+			}
+			await self.clients.openWindow(url);
+		})(),
+	);
+});
