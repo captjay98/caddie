@@ -24,7 +24,7 @@ import {
   useTool,
 } from "@flue/runtime";
 import * as v from "valibot";
-import { DEMO_CONTRACT_GUIDE, FEATURE_BLOCK_GUIDE, HackathonResultsCardSchema, LOOKS_BLOCK_GUIDE } from "@caddie/contracts";
+import { DEMO_CONTRACT_GUIDE, FEATURE_BLOCK_GUIDE, HackathonResultsCardSchema, LOOKS_BLOCK_GUIDE, PROTOTYPE_GUIDE } from "@caddie/contracts";
 import { buildHackathonReference, buildHackathonResultsCard, type DiscoveryResultForCard } from "../server/hackathon-card.ts";
 import {
   FIND_HACKATHONS_DESCRIPTION,
@@ -34,7 +34,8 @@ import {
   HACKATHON_IDEATION_INSTRUCTION,
   RESEARCH_DESCRIPTION,
 } from "./hackathon-prompts.ts";
-import { coordinatorModelRole, findModelRouteForRole, IDEATION_TURN_WINDOW } from "./providers.ts";
+import { coordinatorModelSelection, findModelRouteForRole, IDEATION_TURN_WINDOW, ROLE_THINKING } from "./providers.ts";
+import { guardPlanWrites } from "./plan-write-guard.ts";
 import { COORDINATOR_DURABILITY } from "./permissions.ts";
 import { makeListStacks, makeVerifyBuild, makeUpdateProfile, makeRememberFact, makeInspectRepository, makeWritePlanNote, makeReadProjectContext } from "./tools.ts";
 import {
@@ -189,9 +190,8 @@ export function Coordinator({ id }: AgentProps) {
   // Brainstorming window: entered when the user picks an event to dig into
   // (hackathon_details) or asks to work out what to build (start_brainstorm),
   // counted down per user turn, cleared by propose_project. While it is open
-  // the HOME coordinator runs on the deeper ideation model; Flue reads the
-  // model when a submission starts, so the switch lands on the next turn.
-  // Project conversations never switch: their specialists inherit this model.
+  // either conversation can use deeper ideation; execution specialists keep
+  // explicit model declarations. Explicit brainstorm requests route immediately.
   const [ideationTurnsLeft, setIdeationTurnsLeft] = usePersistentState("ideation-turns-left", 0);
   const isHome = snapshot !== null && snapshot.homeOverview !== null;
   const delivery = useDelivery();
@@ -199,7 +199,12 @@ export function Coordinator({ id }: AgentProps) {
   // the model when the submission starts, so the image turn itself switches).
   const hasImage =
     delivery.kind === "user" && (delivery.attachments ?? []).some((part) => part.type === "image");
-  useModel(findModelRouteForRole(coordinatorModelRole({ isHome, ideationTurnsLeft, hasImage })).specifier);
+  const selection = coordinatorModelSelection({ isHome, ideationTurnsLeft, hasImage,
+    ...(delivery.kind === "user" ? { request: delivery.body } : { execution: true }),
+  });
+  const selectedRole = selection.role;
+  const modelRoute = findModelRouteForRole(selectedRole);
+  useModel(modelRoute.specifier, { thinkingLevel: ROLE_THINKING[selectedRole] });
   const { context, resolve } = scopedCoordinatorContext(env, id, snapshot);
   const [lastUserRequest, setLastUserRequest] = usePersistentState(
     "last-user-request",
@@ -226,6 +231,14 @@ export function Coordinator({ id }: AgentProps) {
     "looks-continuations",
     0,
   );
+  const [looksValidationFailures, setLooksValidationFailures] = usePersistentState("looks-validation-failures", 0);
+  let observedLookFailures = looksValidationFailures;
+  const savePlanNote = guardPlanWrites({
+    failures: () => observedLookFailures,
+    remember: count => { observedLookFailures = count; setLooksValidationFailures(count); },
+    write: context.writePlanNote,
+    block: context.blockBuild,
+  });
   const [looksContinuationFocus, setLooksContinuationFocus] = usePersistentState(
     "looks-continuation-focus",
     "",
@@ -261,7 +274,7 @@ export function Coordinator({ id }: AgentProps) {
   // No useSandbox: native tools would be inherited by QA and bypass role
   // boundaries. All filesystem and execution effects use scoped host tools.
   if (!snapshot || context.homeOverview === null) {
-    for (const declaration of buildSpecialistDeclarations({ ...context, currentRequest: delivery.kind === "user" ? delivery.body : lastUserRequest }))
+    for (const declaration of buildSpecialistDeclarations({ ...context, writePlanNote: savePlanNote, currentRequest: delivery.kind === "user" ? delivery.body : lastUserRequest }))
       useSubagent(declaration);
     // Team mode (part B): the read-only architecture reviewer, on the Ultra
     // `architect` model role. Mounted only when the workflow is team-mode and
@@ -278,7 +291,7 @@ export function Coordinator({ id }: AgentProps) {
     // revision directly when a delegate stalls, so the save actually lands in
     // ONE round instead of burning the turn budget on empty hand-offs.
     useTool(makeReadProjectContext({ readPlanNote: context.readPlanNote }));
-    useTool(makeWritePlanNote({ writePlanNote: context.writePlanNote }));
+    useTool(makeWritePlanNote({ writePlanNote: savePlanNote }));
     useTool(makeVerifyBuild({ verify: context.verifyBuild }));
     // The host-driven feature loop: the host says which feature is next and
     // decides when it is done (green checks + new passing tests + save point).
@@ -385,7 +398,7 @@ export function Coordinator({ id }: AgentProps) {
       const details = await context.hackathonDetails(ctx.data);
       // Digging into ONE event is where brainstorming starts (the follow-up
       // rule offers it next), so the following turns get the ideation model.
-      if (isHome && (details as { found?: unknown } | null)?.found !== false)
+      if ((details as { found?: unknown } | null)?.found !== false)
         setIdeationTurnsLeft(IDEATION_TURN_WINDOW);
       return { output: JSON.stringify(details) };
     },
@@ -393,10 +406,9 @@ export function Coordinator({ id }: AgentProps) {
   useTool({
     name: "start_brainstorm",
     description:
-      "Call when the user wants to work out WHAT to build — they ask for project ideas, say \"let's brainstorm\", pick a track, or describe a problem they want to solve — and no project idea has been settled yet. It gives the next replies more careful thinking; it creates nothing and shows nothing. Call it once per brainstorm, then follow the IDEATION rule in the same reply. Do not call it for questions about an existing project.",
+      "Call when the user wants to work out WHAT to build — they ask for project ideas, say \"let's brainstorm\", pick a track, or describe a problem they want to solve — and no project idea has been settled yet. It gives the next replies more careful thinking; it creates nothing and shows nothing. Call it once per brainstorm, then follow the IDEATION rule in the same reply. For an existing project, call it only to explore product ideas or scope tradeoffs, never for routine status or implementation. Exploring alternatives does not approve a scope change.",
     input: v.object({}),
     async run() {
-      if (!isHome) return { output: "Brainstorming already happens in this conversation." };
       setIdeationTurnsLeft(IDEATION_TURN_WINDOW);
       return { output: JSON.stringify({ brainstorming: true, next: "Follow the IDEATION rule now. Never mention this tool or a mode change to the user." }) };
     },
@@ -527,6 +539,7 @@ export function Coordinator({ id }: AgentProps) {
     },
   });
   useAgentStart(async (ctx) => {
+    ctx.log.info("caddie.model_selection", { role: selection.role, reason: selection.reason, routeId: findModelRouteForRole(selection.role).id });
     const authority = await resolve();
     setStoredContext(coordinatorSnapshot(id, authority));
     setContinuations(0);
@@ -534,9 +547,11 @@ export function Coordinator({ id }: AgentProps) {
     setLooksContinuations(0);
     if (delivery.kind === "user") {
       setLastUserRequest(delivery.body);
+      observedLookFailures = 0;
+      setLooksValidationFailures(0);
       // One user turn spent from the brainstorm window (this turn's model was
       // already chosen at submission start, so this only affects later turns).
-      setIdeationTurnsLeft((left) => (left > 0 ? left - 1 : 0));
+      setIdeationTurnsLeft((left) => selection.reason === "execution_request" ? 0 : (selectedRole === "ideation" && left === 0 ? IDEATION_TURN_WINDOW - 1 : Math.max(0, left - 1)));
       if (authority.homeOverview !== null) {
         let sequence = 0;
         setHomeDeliverySequence(previous => { sequence = previous + 1; return sequence; });
@@ -595,7 +610,7 @@ export function Coordinator({ id }: AgentProps) {
       ctx.append({
         kind: "signal",
         type: "looks_incomplete",
-        body: "The look options are unfinished: the host has NOT received a looks note — nothing was saved, and the workflow phase is still 'looks', NOT 'looks-review'. Do NOT tell the user the looks are ready. A delegate result of \"(task completed with no text)\" or prose without a SAVED: confirmation means nothing was saved — never re-delegate the same empty hand-off expecting a different result. Instead, call write_plan_note yourself with kind:'looks', the same planRevision, and a valid caddie-looks block: 2-3 CLEARLY different looks (no two sharing both background and primary), each a full caddie-theme theme with a slug id and a name, one marked recommended, plus 'audience' (who the app is for, from the PRD) and ONE shared key screen as a titled ```html-mock so the owner can preview each look on it. " + LOOKS_BLOCK_GUIDE + " Only after write_plan_note returns a line beginning 'SAVED:' and the next coordinator_context shows phase 'looks-review' may you tell the user the looks are ready to choose from.",
+        body: "The look options are unfinished: the host has NOT received a looks note — nothing was saved, and the workflow phase is still 'looks', NOT 'looks-review'. Do NOT tell the user the looks are ready. A delegate result of \"(task completed with no text)\" or prose without a SAVED: confirmation means nothing was saved — never re-delegate the same empty hand-off expecting a different result. Instead, call write_plan_note yourself with kind:'looks', the same planRevision, and a valid caddie-looks block: 2-3 CLEARLY different looks (no two sharing both background and primary), each a full caddie-theme theme with a slug id and a name, one marked recommended, plus 'audience' (who the app is for, from the PRD) and the same user task, using per-look screen compositions when useful or one shared html-mock fallback. " + LOOKS_BLOCK_GUIDE + " Only after write_plan_note returns a line beginning 'SAVED:' and the next coordinator_context shows phase 'looks-review' may you tell the user the looks are ready to choose from.",
       });
       return;
     }
@@ -618,7 +633,7 @@ export function Coordinator({ id }: AgentProps) {
       ctx.append({
         kind: "signal",
         type: "design_incomplete",
-        body: "Design is unfinished: the host has NOT received a design brief — nothing was saved, and the workflow phase is still 'design', NOT 'design-review'. Do NOT tell the user the design brief is saved, written or ready. A delegate result of \"(task completed with no text)\" or prose without a SAVED: confirmation means the designer stopped WITHOUT saving — never re-delegate the same empty hand-off expecting a different result. Instead, call write_plan_note yourself with kind:'design', the same planRevision, and the full brief (screen inventory; each key screen's layout and components; tokens and interaction patterns; empty, loading and error states; one titled ```html-mock block per key screen and state). The brief MUST carry the chosen look's caddie-theme block unchanged — the host refuses a design with no valid theme, so copy the theme from the chosen look (it is in the coordinator_context for this planRevision) into a ```caddie-theme block in the brief. Only after write_plan_note returns a line beginning 'SAVED:' and the next coordinator_context shows phase 'design-review' may you tell the user it is ready.",
+        body: "Design is unfinished: the host has NOT received a design brief — nothing was saved, and the workflow phase is still 'design', NOT 'design-review'. Do NOT tell the user the design brief is saved, written or ready. A delegate result of \"(task completed with no text)\" or prose without a SAVED: confirmation means the designer stopped WITHOUT saving — never re-delegate the same empty hand-off expecting a different result. Instead, call write_plan_note yourself with kind:'design', the same planRevision, and the full brief (screen inventory; each key screen's layout and components; tokens and interaction patterns; empty, loading and error states; one titled ```html-mock block per key screen and state). Save ONE complete reviewable design revision, never separate part-numbered revisions: review and build use only the latest revision. If the content is too large, reduce repetition while retaining the complete screen inventory and key screens; do not describe a partial save as ready. The brief MUST carry the chosen look's caddie-theme block unchanged — the host refuses a design with no valid theme, so copy the theme from the chosen look (it is in the coordinator_context for this planRevision) into a ```caddie-theme block in the brief. Only after write_plan_note returns a line beginning 'SAVED:' and the next coordinator_context shows phase 'design-review' may you tell the user it is ready.",
       });
       return;
     }
@@ -661,6 +676,8 @@ export function Coordinator({ id }: AgentProps) {
     `You are Caddie, a helpful assistant for solo builders. Priorities: find suitable hackathons, plan and build new projects, then continue existing projects. Speak in clear user-facing language, never raw internal tool names or opaque ids. The supported proving stack is React + Bun + Hono; the other stacks remain planned. When the user refers to an existing project call continue_project with its actual id from context; never create a duplicate or tell them to navigate first. For a new app, first make sure the user has agreed on a specific idea, then call propose_project with a faithful full brief and a sensible name; the card lets them start it. Nothing is created until they press Start this project. Make a proposal ONLY by calling propose_project, and never write its fields into your reply (not as JSON, a list or a code block): the person sees nothing until propose_project returns. Mention the card only after propose_project has returned in this turn; if it did not, say the proposal did not go through and offer to try again. Never ask the user to open another page or repeat the request. Profile facts supplied by the host are known; never pretend this is anonymous. Use find_hackathons for actual hackathon results — call it directly for any "find/suggest a hackathon" request, without first asking the user what they like (their saved profile already drives the ranking); explicitly acknowledge when fresh official rules/listings are unavailable. A planning step or greeting is not a completed build. Plan approval does not authorize deployment, purchases, merge, or destructive data changes. If blocked explain the specific prerequisite and stop. A ready workflow means build checks passed, not proof of every real-world outcome.`,
   );
   useInstruction("Caddie serves nontechnical people and technical people short on time. Own setup, task handoffs, tests and repairs. The user describes the outcome, reviews a readable plan, and tries the app. Ask only for product choices or missing information that changes the result; choose sensible defaults for implementation details. Keep tool names, run ids, revision hashes and debugging steps out of normal replies. Explain progress briefly in terms of the app, and show technical evidence only when requested. Never ask the user to configure the test environment, move between workspaces or pass instructions to specialists. A genuine blocker needs a plain explanation of what is saved, what is incomplete and the specific decision needed. Do not imply the user must repair Caddie. Never describe a generated app as ready until the host-backed workflow publishes its preview.");
+  useInstruction("PROJECT IDEATION: you may explore product ideas and scope tradeoffs inside this project without creating another project. Keep its agreed purpose and decisions in context. Any proposed change to approved scope remains a proposal; save a new revision for review before executing it. Do not restart the intake or ask questions already answered in the project context.");
+  useInstruction("RESPONSE STYLE: be concise throughout the conversation, not just at the end. For routine progress and completed actions, use one to three short sentences: the result first, then the next useful action if there is one. Do not narrate tool calls, specialist handoffs, schema corrections or recovered retries, and do not restate a card's contents or instructions. Save complete plans, designs and evidence in their proper artifacts rather than pasting them into chat. Acknowledge a saved result only after host confirmation. Keep material limitations, unresolved failures and decisions visible; brevity must never conceal them. Give a fuller explanation when the user asks for one or needs it to make an informed choice. Avoid repeated reassurance, status recaps and unnecessary follow-up questions.");
   useInstruction("Be smart, proactive and personal, but never presumptuous. Lead with what you already know from the host-supplied profile and confirmed memory — default the stack from a stated preference, greet by what you know, and ask only for facts that are genuinely missing and matter to the current choice. When the user tells you something durable about themselves (a skill, a tool preference, how they work), call update_profile or remember so you keep it. When they tell you something lasting about this project (who it is for, what it must do, a decision), call remember with about 'project' so it stays with the project. A memory is a PROPOSAL: tell them you noted it and that it sticks once they confirm; never present a proposed or inferred fact as already saved. You may call inspect_repository to see what the user has already built and offer an observation (\"looks like you work in TypeScript + React — want me to remember that?\"); it records nothing on its own. Never record anything resembling spending or deployment permission as a preference or memory — those remain separate explicit approvals.");
   useInstruction(HACKATHON_HONESTY_INSTRUCTION);
   useInstruction(HACKATHON_FOLLOWUPS_INSTRUCTION);
@@ -675,7 +692,8 @@ export function Coordinator({ id }: AgentProps) {
     useInstruction(`DEMO CONTRACT: completeness is not the bar — a judge watching for three minutes is. Every PRD must carry this section before the feature list, and the host refuses a PRD without one. ${DEMO_CONTRACT_GUIDE} The real integration must carry the core value, not decorate it: no Ollama, local model or third-party AI key, and a mock (price feed, seed data, rule table) may support the demo but never be the reason it is impressive. Order the features so the demo path is buildable end to end, and cut any feature that would not appear in the demo.`);
     useInstruction(`FEATURE LIST: every PRD you save must list what will be built, so the user approves exactly that list and the host builds it one feature at a time. ${FEATURE_BLOCK_GUIDE} Order features so each builds on the last; keep each one small enough to finish and test on its own; write doneWhen checks as behaviors a person could see. write_plan_note refuses a PRD without a valid list.`);
     useInstruction("COMPREHENSIVE PRD, FIRST PASS: write the whole thing before saving — the user must never have to ask for the schema, then say 'not comprehensive', then 'still ambiguous'. Every PRD covers, as explicit sections: overview + goals/non-goals; user stories/flows; a DATA MODEL with every entity's fields, types, keys and relations (money as integer minor units, never a float); the API surface (Hono routes in/out) or an explicit 'local-only, no server API'; the frontend screens + key components with each loading/empty/error state; offline/sync (what's stored locally, what syncs, the conflict rule) when it is a PWA/offline app; the SPECIFIC AI model/service with its call path and fail-soft behavior, never 'an AI model'; and observable success metrics. Where the brief lacks a detail, choose a sensible default and label it 'assumption:' so the user corrects one line — do NOT leave a section blank, do NOT drip-feed depth across turns, and do NOT stop to ask one question at a time.");
-    useInstruction("LOOKS STEP: after the PRD is approved the project enters the 'looks' phase FIRST — before design, and the user has NOT approved a build. Do NOT scaffold, build or write a design brief yet. Propose how the app could look: call write_plan_note kind:'looks' with a valid caddie-looks block — 2-3 CLEARLY different looks (no two sharing both background and primary colour), each a full caddie-theme theme with a short slug id and a human name, exactly one marked recommended, plus 'audience' (who the app is for, taken from the PRD's who-it's-for line) and ONE shared key screen as a titled ```html-mock so the owner can preview every look on the same screen. " + LOOKS_BLOCK_GUIDE + " Save it and STOP for the owner to choose. If the host confirms SAVED and the phase moves to 'looks-review', say the look options are ready; until then say Caddie is still preparing them. Only after the owner chooses a look does the phase become 'design'; the chosen look's theme is then given to you for the design brief — do not re-decide colours.");
+    useInstruction("LOOKS STEP: after the PRD is approved the project enters the 'looks' phase FIRST — before design, and the user has NOT approved a build. Do NOT scaffold, build or write a design brief yet. Propose how the app could look: call write_plan_note kind:'looks' with a valid caddie-looks block — 2-3 CLEARLY different looks (no two sharing both background and primary colour), each a full caddie-theme theme with a short slug id and a human name, exactly one marked recommended, plus 'audience' (who the app is for, taken from the PRD's who-it's-for line) and the same user task, using per-look screen compositions when useful or one shared html-mock fallback. " + LOOKS_BLOCK_GUIDE + " Save it and STOP for the owner to choose. If the host confirms SAVED and the phase moves to 'looks-review', say the look options are ready; until then say Caddie is still preparing them. Only after the owner chooses a look does the phase become 'design'; the chosen look's theme is then given to you for the design brief — do not re-decide colours.");
+    useInstruction(PROTOTYPE_GUIDE);
     useInstruction("DESIGN STEP: after the owner CHOOSES A LOOK the project enters the 'design' phase — the user has NOT approved a build yet. Do NOT scaffold or build. The chosen look is given to you as a caddie-theme block; the design brief MUST carry that exact theme block (same background, primary and tokens) — do not pick new colours. Delegate the designer (or author it yourself with write_plan_note kind:'design', same planRevision) to produce ONE design brief: the screen inventory; each key screen's layout and components; the token/component choices and the interaction pattern for each input; and the empty, loading and error state for anything that loads or saves; plus the chosen look's caddie-theme block and one titled ```html-mock block per key screen and state (static markup styled only with the chosen theme's tokens) so the user can see it. If the designer returns text without a SAVED: confirmation, do NOT stop and do NOT re-delegate the same hand-off: call write_plan_note yourself with kind:'design', the same planRevision, the full brief AND the chosen caddie-theme block. Save it and STOP for the authenticated design review. Only after the design review approves does the phase become 'building' and the feature loop begins. The design brief is NOT the PRD and carries no caddie-features block. Never paste a mockup or any HTML into a reply: the card draws the brief's mockups; to show one screen in chat, put its static HTML in one ```html-mock <screen name> block.");
     // Team mode (part B/C): the design document also carries the
     // caddie-architecture block v2, so there is one approval and one revision

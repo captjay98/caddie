@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
 	LOOKS_BLOCK_INFO,
+	LOOKS_BLOCK_GUIDE,
 	decodeLookChoice,
 	encodeLookChoice,
 	lookThemeBlock,
@@ -110,6 +111,48 @@ describe('a set of looks (caddie-looks)', () => {
 		const parsed = parseLooks(body({ ...GOOD, looks: [FIELD, twin] }));
 		expect(parsed.ok).toBe(false);
 		if (!parsed.ok) expect(parsed.error).toContain('different');
+	});
+
+	test('each look can carry its own composition without leaking preview fields into the approved theme', () => {
+		const screen = { title: 'Task-first', html: '<main>Record an observation</main>' };
+		const parsed = parseLooks(body({ ...GOOD, looks: [{ ...FIELD, screen }, CALM] }));
+		expect(parsed.ok).toBe(true);
+		if (!parsed.ok) return;
+		expect(parsed.set.looks[0]!.screen).toEqual(screen);
+		expect(parsed.set.screen.title).toBe('Today');
+		const block = lookThemeBlock(parsed.set.looks[0]!);
+		expect(block).not.toContain('"screen"');
+		expect(parseAppTheme(block).ok).toBe(true);
+	});
+
+	test('independent schema and contrast errors are returned together before saving', () => {
+		const parsed = parseLooks(body({ ...GOOD, audience: '', looks: [
+			{ ...FIELD, radius: 90, density: 'spacious', colors: { ...FIELD.colors, muted: '#FFFFFF' } },
+			{ ...CALM, fonts: { heading: 'url(https://bad.test/font)', body: 'system-ui' } },
+		] }));
+		expect(parsed.ok).toBe(false);
+		if (parsed.ok) return;
+		for (const detail of ['audience', 'radius', 'density', 'contrast', 'fonts.heading']) expect(parsed.error).toContain(detail);
+	});
+
+	test('one malformed colour does not hide independent readable-colour failures', () => {
+		const parsed = parseLooks(body({ ...GOOD, looks: [{ ...FIELD, colors: { ...FIELD.colors, warn: 'orange', muted: '#FFFFFF' } }, CALM] }));
+		expect(parsed.ok).toBe(false);
+		if (parsed.ok) return;
+		expect(parsed.error).toContain('colors.warn');
+		expect(parsed.error).toContain('contrast for muted');
+	});
+
+	test('all per-look compositions can replace the old shared screen; partial sets still need a fallback', () => {
+		const screen = { title: 'Today', html: '<main>Today</main>' };
+		expect(parseLooks(body({ ...GOOD, looks: [{ ...FIELD, screen }, { ...CALM, screen }] }, '')).ok).toBe(true);
+		expect(parseLooks(body({ ...GOOD, looks: [{ ...FIELD, screen }, CALM] }, '')).ok).toBe(false);
+		expect(parseLooks(body({ ...GOOD, looks: [{ ...FIELD, screen: { ...screen, extra: 'no' } }, CALM] })).ok).toBe(false);
+	});
+
+	test('the generation guide contains a complete valid canonical payload', () => {
+		const parsed = parseLooks(LOOKS_BLOCK_GUIDE);
+		expect(parsed.ok).toBe(true);
 	});
 
 	test('a choice round-trips through the decision note, with or without the owner\'s own words', () => {

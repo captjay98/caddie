@@ -100,8 +100,9 @@ describe('coordinator ideation rule', () => {
  * rules never made.
  */
 describe('coordinator ideation model + tightened rules', () => {
-	test('the coordinator picks its model per turn from the ideation window, Home only', () => {
-		expect(source).toContain('coordinatorModelRole({ isHome, ideationTurnsLeft, hasImage })');
+	test('the coordinator picks a model from task and ideation state in either conversation', () => {
+		expect(source).toContain('coordinatorModelSelection({ isHome, ideationTurnsLeft, hasImage,');
+		expect(source).toContain('{ request: delivery.body } : { execution: true }');
 		// an attached image routes the turn to the vision model
 		expect(source).toContain('(delivery.attachments ?? []).some((part) => part.type === "image")');
 		expect(source).toContain('usePersistentState("ideation-turns-left", 0)');
@@ -111,7 +112,7 @@ describe('coordinator ideation model + tightened rules', () => {
 		expect(source).toContain('name: "start_brainstorm"');
 		expect(source.match(/setIdeationTurnsLeft\(IDEATION_TURN_WINDOW\)/g)?.length).toBe(2);
 		expect(source).toContain('setIdeationTurnsLeft(0);');
-		expect(source).toContain('setIdeationTurnsLeft((left) => (left > 0 ? left - 1 : 0));');
+		expect(source).toContain('Math.max(0, left - 1)');
 	});
 
 	test('a mid-brainstorm reaction is not prefixed into the saved brief', () => {
@@ -146,7 +147,7 @@ describe('coordinator plan-save honesty (FarmLog AI rewrite fix)', () => {
 	test('the project coordinator can save a PRD revision directly, not only via delegates', () => {
 		expect(coordinatorSource).toContain('makeWritePlanNote');
 		expect(coordinatorSource).toContain('makeReadProjectContext');
-		expect(coordinatorSource).toContain('useTool(makeWritePlanNote({ writePlanNote: context.writePlanNote }));');
+		expect(coordinatorSource).toContain('useTool(makeWritePlanNote({ writePlanNote: savePlanNote }));');
 		expect(coordinatorSource).toContain('useTool(makeReadProjectContext({ readPlanNote: context.readPlanNote }));');
 	});
 

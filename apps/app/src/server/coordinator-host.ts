@@ -1,3 +1,4 @@
+import { approvedAppearanceDocument, documentHash, reviewVisualFidelity, type FidelityPort } from "./visual-fidelity.ts";
 import type { AuthEnv } from "./auth.ts";
 import type { ArchitectureBlock, RunBindingRecord } from "@caddie/contracts";
 import type { CoordinatorHostContext } from "../agents/coordinator.ts";
@@ -88,7 +89,7 @@ import { runVerifiedInstall } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { checkSentence, newTestsSentence } from "./round-detail.ts";
 import { projectStatusForActor } from "./project-experience.ts";
-import { FEATURE_BLOCK_GUIDE, LOOKS_BLOCK_GUIDE, looksSaveError, parseDemoContract, parsePlanFeatures, themeSaveError, THEME_BLOCK_GUIDE } from "@caddie/contracts";
+import { PROTOTYPE_GUIDE, splitDesignPrototype, FEATURE_BLOCK_GUIDE, LOOKS_BLOCK_GUIDE, looksSaveError, parseDemoContract, parsePlanFeatures, themeSaveError, THEME_BLOCK_GUIDE } from "@caddie/contracts";
 import { collectSourceSnapshot } from "./source-export.ts";
 import { recordCodeVersion } from "./code-versions.ts";
 import { codeStoreFor } from "./code-store-env.ts";
@@ -169,6 +170,8 @@ export interface CoordinatorEnvironment {
  * and the foundation step says so plainly.
  */
 export interface CoordinatorHostDeps {
+  /** Host-owned browser capture/comparison. Never exposed as an agent tool. */
+  visualFidelity?: FidelityPort;
   dispatchModuleBuilder?: DispatchModuleBuilder;
   /**
    * Big apps (part P step 3): tell the coordinator that every part is joined,
@@ -1117,21 +1120,23 @@ export async function createCoordinatorContext(
     const passing = parseTestCounts(`${tests?.stdout ?? ""}\n${tests?.stderr ?? ""}`)?.passed ?? 0;
     const baseline = testsBaseline(rows);
     if (passing <= baseline) {
-      const round = await recordRepairRound(env.DB, scope, runId, {
+      await recordRepairRound(env.DB, scope, runId, {
         issue: `${current.featureId}:new-tests`,
         operationKey: `feature:${runId}:${plan.id}:${featureId}:${attempt}:new-tests`,
         round: "repair_attempt",
         outcome: "failed",
         detail: newTestsSentence(passing, baseline),
       });
-      await recordFeatureAttempt(env.DB, current, round.paused);
-      if (round.paused)
+      // Retain lifetime evidence, but enforce the current explicit-resume window.
+      const { paused } = await workflowRepairPause(env.DB, runId, pauseScope);
+      await recordFeatureAttempt(env.DB, current, paused);
+      if (paused)
         await pauseOrStop(
           `Caddie could not add working tests for “${current.title}” after three attempts. The features before it are saved. The app is not ready to try yet.`,
         );
       return {
         passed: false,
-        paused: round.paused,
+        paused,
         next: `The checks pass, but this feature added no new passing tests (${passing} passing now, ${baseline} before it). Add tests in src/*.test.tsx for each doneWhen check, then call finish_feature again.`,
       };
     }
@@ -1403,6 +1408,32 @@ export async function createCoordinatorContext(
           receipts: [...receipts, receipt],
           next: `The app's server does not start on Cloudflare's runtime: ${startup.reason}. Fix src/server.ts so it uses only Web APIs and env.DB (GET /api/health must answer 200), then run verify_build again.`,
         };
+      }
+    }
+    // Appearance is separate from functional checks. Bind real screenshot
+    // receipts to the approved design AND checked image; absent infrastructure
+    // never becomes a visual pass or prevents trying the functional preview.
+    const approvedDesignId = (await env.DB.prepare('select "approvedDesignRevisionId" from "build_workflows" where "projectId" = ?')
+      .bind(scope.projectId).all<{ approvedDesignRevisionId: string | null }>()).results?.[0]?.approvedDesignRevisionId;
+    if (approvedDesignId) {
+      const design = (await env.DB.prepare(`select "id","body","bodyHash" from "plan_doc_revisions" where "projectId" = ? and "id" = ? and "kind" = 'design'`)
+        .bind(scope.projectId, approvedDesignId).all<{ id: string; body: string; bodyHash: string }>()).results?.[0];
+      const builtDocument = built.kind === "flutter" ? built.page : previewDocument({ js: built.js, css: built.css });
+      const visualKey = `verify:${runId}:${plan.id}:${attempt}:visual-fidelity`;
+      const visual = await reviewVisualFidelity({
+        identity: { projectId: scope.projectId, planRevisionId: plan.id, designRevisionId: approvedDesignId, designHash: design?.bodyHash ?? "", buildImage: checkedImage, builtDocumentHash: await documentHash(builtDocument) },
+        approvedDocument: design ? approvedAppearanceDocument(design.body) : null,
+        builtDocument, operationKey: visualKey, port: hostDeps.visualFidelity, ...(signal ? { signal } : {}),
+      });
+      if ((await driver.checkpoint(id)).checkpointRef !== checkedImage)
+        throw new ScopeError(409, "STALE_BUILD", "Files changed during the appearance check. Run checks again.");
+      await recordVerification(env.DB, scope, workflow.runId, { check: "visual-fidelity", passed: visual.status === "passed", evidence: JSON.stringify(visual), planRevision: plan.id });
+      if (visual.status === "needs-repair") {
+        const differences = visual.viewports.flatMap((view) => view.differences.filter((difference) => difference.severity === "blocking").map((difference) => `${view.viewport.name}: ${difference.message}`)).join("; ");
+        await recordRepairRound(env.DB, scope, workflow.runId, { issue: "visual-fidelity", operationKey: visualKey, round: "repair_attempt", outcome: "failed", detail: differences.slice(0, 2000) });
+        const paused = (await workflowRepairPause(env.DB, workflow.runId, pauseScope)).paused;
+        if (paused) await setWorkflowBlocker(env.DB, scope, "The app still doesn't match the design you approved after three attempts. Your plan and files are saved.");
+        return { passed: false, paused, receipts: [...receipts, { check: "visual-fidelity", passed: false, exitCode: 1, stdout: "", stderr: differences, operationKey: visualKey }], next: `Repair these appearance differences without changing the approved scope, then run verify_build again: ${differences}` };
       }
     }
     // Native packaging follows all preview/checkpoint checks. It cannot turn a
@@ -1700,6 +1731,8 @@ export async function createCoordinatorContext(
       // designer can fix. Old saved designs are read, never re-saved, so they
       // stay readable.
       if (input.kind === "design") {
+        const prototype = splitDesignPrototype(input.body);
+        if (prototype.error) throw new Error(`PROTOTYPE_INVALID: not saved — ${prototype.error}. ${PROTOTYPE_GUIDE}`);
         const themeError = themeSaveError(input.body);
         if (themeError)
           throw new Error(`THEME_INVALID: not saved — ${themeError}. ${THEME_BLOCK_GUIDE}`);

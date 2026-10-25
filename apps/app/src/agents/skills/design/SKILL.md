@@ -13,6 +13,16 @@ approves something they can SEE, not only read.
 
 ## Discipline
 
+- Keep the actual audience and selected screen composition in view. At the
+  proposal stage, Do NOT reach for the same look every time; in this design
+  stage, preserve the owner's chosen look and task hierarchy rather than
+  replacing them with a generic dashboard. Expand it into the remaining screens.
+- For a journey whose interaction needs review, include a small clearly labelled
+  sample interaction using script-free native HTML (details, labels, local
+  anchors and form controls). Explain which behavior is simulated. A design
+  preview never proves saving, sign-in, offline sync or integrations; those
+  require checks against the built app. Never relax the preview sandbox.
+
 - The LOOK is already chosen. Before this step, Caddie proposed 2-3 looks (a
   `caddie-looks` set) and the owner picked one. You are handed that chosen look
   as a ```caddie-theme block — do NOT re-decide colours, fonts or radius. Your
@@ -68,6 +78,12 @@ the heading even when short; say "none" rather than omitting one):
    the mockups consistent with it). Call out anything that needs an aria role.
 
 ## Craft rules (hold these, they are the point)
+
+- Product-grade, never toy: a key-screen mock carries real data (actual
+  numbers, names, times - never lorem or "Item 1"), roughly 10-15 elements,
+  at least one data or list region, and ONE obvious primary action. A heading
+  plus a button is not a designed screen; the owner judges the whole product
+  by these mocks.
 
 - Warmth over coldness: this is a tool for a solo nontechnical builder. Reassure,
   don't lecture. No meta copy that explains the interface to itself.
@@ -135,3 +151,13 @@ a screen picker and checks each at phone (390px) and desktop (1280px) width.
 If a brief genuinely cannot carry a mockup yet (e.g. the design system has no
 token for something central), say so in one line under the Component section and
 proceed with the prose — do not invent a palette.
+
+### Try uncertain interactions before building
+
+When confirming, editing, navigation or a multi-step flow is genuinely uncertain,
+include one optional `caddie-prototype` JSON block alongside the static screens.
+It is a small sample journey in the chosen theme: 2–8 reachable screens, up to six
+plain text fields and four actions per screen. It never runs generated scripts,
+HTML, network requests, AI, persistence or offline synchronization. Do not claim
+that it proves those capabilities. Skip it for a straightforward settled flow.
+The exact schema/example is supplied by the host's prototype guide.

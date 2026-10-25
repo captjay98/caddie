@@ -696,3 +696,5 @@ export * from './publish.ts';
 // --- software-team mode (2026-10-22 plan, section 4) --------------------------
 
 export * from './team-mode.ts';
+
+export * from "./prototype.ts";

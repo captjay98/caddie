@@ -198,22 +198,33 @@ export function parseAppTheme(body: string): ThemeParse {
  */
 export function validateAppTheme(json: unknown, subject = 'the theme'): ThemeParse {
 	const parsed = v.safeParse(AppThemeSchema, json);
+	const errors: string[] = [];
 	if (!parsed.success) {
-		const issue = parsed.issues[0];
-		const path = issue?.path?.map((p) => String(p.key)).join('.') ?? '';
-		return { ok: false, error: `${subject} is invalid${path ? ` at ${path}` : ''}: ${issue?.message ?? 'unknown problem'}` };
+		for (const issue of parsed.issues) {
+			const path = issue.path?.map((p) => String(p.key)).join('.') ?? '';
+			errors.push(`${subject} is invalid${path ? ` at ${path}` : ''}: ${issue.message}`);
+		}
 	}
-	const theme = parsed.output;
-	for (const [fg, bg, label] of contrastPairs(theme.colors)) {
+	// Report independent contrast failures even when another field (e.g. density)
+	// is invalid. Only compare colours that have passed their strict schema.
+	const source = json && typeof json === 'object' ? json as Record<string, unknown> : {};
+	const colors = source.colors && typeof source.colors === 'object' ? source.colors as ThemeColors : null;
+	if (colors) for (const [fg, bg, label] of contrastPairs(colors)) {
+		if (!v.safeParse(Hex, fg).success || !v.safeParse(Hex, bg).success) continue;
 		const ratio = contrastRatio(fg, bg);
 		if (ratio < AA_CONTRAST)
-			return { ok: false, error: `${subject}: not enough contrast for ${label}: ${fg} on ${bg} is ${ratio.toFixed(1)}:1, but ${AA_CONTRAST}:1 is needed so it stays readable. Pick a darker or lighter colour.` };
+			errors.push(`${subject}: not enough contrast for ${label}: ${fg} on ${bg} is ${ratio.toFixed(1)}:1, but ${AA_CONTRAST}:1 is needed so it stays readable. Pick a darker or lighter colour.`);
 	}
-	for (const surface of theme.stateSurfaces ?? []) {
+	for (const item of Array.isArray(source.stateSurfaces) ? source.stateSurfaces : []) {
+		const checked = v.safeParse(StateSurfaceSchema, item);
+		if (!checked.success) continue;
+		const surface = checked.output;
 		const ratio = contrastRatio(surface.fg, surface.bg);
 		if (ratio < AA_CONTRAST)
-			return { ok: false, error: `${subject}: not enough contrast on the "${surface.name}" surface: ${surface.fg} on ${surface.bg} is ${ratio.toFixed(1)}:1, but ${AA_CONTRAST}:1 is needed.` };
+			errors.push(`${subject}: not enough contrast on the "${surface.name}" surface: ${surface.fg} on ${surface.bg} is ${ratio.toFixed(1)}:1, but ${AA_CONTRAST}:1 is needed.`);
 	}
+	if (!parsed.success || errors.length) return { ok: false, error: errors.join('\n') };
+	const theme = parsed.output;
 	return { ok: true, theme };
 }
 

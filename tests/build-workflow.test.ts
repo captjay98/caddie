@@ -73,7 +73,8 @@ import {
 import { SandboxStub } from "./fixtures/sandbox-stub.ts";
 import { upsertProfile } from "../apps/app/src/server/profiles.ts";
 import { splitSqlStatements } from "./fixtures/controls-harness.ts";
-import { chooseLook, saveLooks } from "./fixtures/looks-fixture.ts";
+import { documentHash, type FidelityPort } from "../apps/app/src/server/visual-fidelity.ts";
+import { chooseLook, saveLooks, FIELD_LOOK } from "./fixtures/looks-fixture.ts";
 
 /** LOCAL VERIFIED: real production migrations/services over SQLite, with
  * D1-shaped results and a real synchronous transaction backing D1.batch.
@@ -553,6 +554,18 @@ describe("plan review and durable build approval", () => {
     } finally {
       w.sqlite.close();
     }
+  });
+
+  test("a separately saved design part cannot start a build", async () => {
+    const w = await world();
+    try {
+      const item = await designReady(w);
+      const fragment = await createPlanDocRevision(w.db, item.scope, {
+        kind: "design", body: "# Farmhand — Design Brief (part 3)\nOnly the final screens.",
+      });
+      await expect(decideDesign(w.db, item.scope, { designId: fragment.id, decision: "approved" })).rejects.toMatchObject({ code: "DESIGN_INCOMPLETE" });
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("design-review");
+    } finally { w.sqlite.close(); }
   });
 
   test("authenticated design approval queues one build and replay after dispatch acknowledgment cannot restart it", async () => {
@@ -2006,7 +2019,7 @@ const FEATURE_PRD = [
 ].join("\n");
 
 describe("host-driven feature loop", () => {
-  async function featureBuild(w: Awaited<ReturnType<typeof world>>, body = FEATURE_PRD) {
+  async function featureBuild(w: Awaited<ReturnType<typeof world>>, body = FEATURE_PRD, designBody = "# Design brief\n\nFeed-log form + totals dashboard; states defined.") {
     const started = await w.start();
     const plan = await createPlanDocRevision(w.db, started.scope, { kind: "prd", body });
     await workflowSnapshot(w.db, started.scope);
@@ -2017,7 +2030,7 @@ describe("host-driven feature loop", () => {
     await chooseLook(w.db, started.scope);
     const design = await createPlanDocRevision(w.db, started.scope, {
       kind: "design",
-      body: "# Design brief\n\nFeed-log form + totals dashboard; states defined.",
+      body: designBody,
     });
     await workflowSnapshot(w.db, started.scope);
     const snapshot = await decideDesign(w.db, started.scope, { designId: design.id, decision: "approved" });
@@ -2078,6 +2091,35 @@ describe("host-driven feature loop", () => {
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 
+  test("resuming a feature opens a fresh new-test repair window without deleting earlier failures", async () => {
+    const w = await world();
+    const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+    stub.seedImage("tag:feature:1");
+    stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+    await stub.start();
+    try {
+      const item = await featureBuild(w);
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      await host.buildNextFeature();
+      await host.finishFeature("log-feed", "checkpoint-first");
+      const saved = feature(w, "log-feed").checkpointRef;
+      await host.buildNextFeature();
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const result = await host.finishFeature("view-dashboard", `before-resume-${attempt}`) as { paused: boolean };
+        expect(result.paused).toBe(attempt === 3);
+      }
+      await retryWorkflow(w.db, item.scope, "resume-new-test-window");
+      const resumed = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      await resumed.buildNextFeature();
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const result = await resumed.finishFeature("view-dashboard", `after-resume-${attempt}`) as { paused: boolean };
+        expect(result.paused).toBe(attempt === 3);
+      }
+      expect(w.count("run_rounds", "issue = 'view-dashboard:new-tests' and outcome = 'failed'")).toBe(6);
+      expect(feature(w, "log-feed").checkpointRef).toBe(saved);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
   test("verify_build keeps a working Flutter preview when saving the Android package fails", async () => {
     const w = await world(); const stub = new SandboxStub({ expectedToken: "local-feature-token" });
     stub.seedImage("tag:feature:1"); stub.setBehavior("sh caddie/run-tests.sh", { stdout: "1 pass\n0 fail" }); await stub.start();
@@ -2106,6 +2148,42 @@ describe("host-driven feature loop", () => {
       const saved = w.sqlite.prepare('select apkSha256,apkBytes from workflow_outputs where id = ?').get(result.outputId);
       expect(saved).toEqual({ apkSha256: null, apkBytes: null });
       expect(stub.spawnedCommands().some(command => command.startsWith('flutter build apk --release'))).toBe(true);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("verify_build refuses appearance drift, binds evidence to the approved revision and pauses after three repairs", async () => {
+    const w = await world();
+    const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+    stub.seedImage("tag:feature:1"); stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" }); await stub.start();
+    try {
+      const { id: _id, ...theme } = FIELD_LOOK;
+      const item = await featureBuild(w, FEATURE_PRD, `# Approved design\n\n\`\`\`caddie-theme\n${JSON.stringify(theme)}\n\`\`\`\n\n\`\`\`html-mock Feed log\n<main><button>Log feed</button></main>\n\`\`\``);
+      const root = `/workspace/${item.scope.projectId}`;
+      const capturedDesigns: string[] = [];
+      const visualFidelity: FidelityPort = {
+        capture: async (request) => {
+          capturedDesigns.push(request.identity.designRevisionId);
+          return { artifact: `private:${request.operationKey}`, sha256: await documentHash(request.document), documentHash: request.documentHash, width: request.viewport.width, height: request.viewport.height, capturedAt: new Date().toISOString() };
+        },
+        compare: async () => ({ differences: [{ severity: "blocking", area: "controls", message: "The approved Log feed action is missing." }] }),
+      };
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId, { visualFidelity });
+      await host.buildNextFeature();
+      w.sqlite.prepare("update build_features set status='passed',testsPassed=1 where projectId = ?").run(item.scope.projectId);
+      stub.setBehavior("bun run build", { stdout: "built", writes: { [`${root}/dist/main.js`]: 'console.log("feed")' } });
+      // A newer draft must never replace the design the owner approved.
+      await createPlanDocRevision(w.db, item.scope, { kind: "design", body: "# Unapproved replacement" });
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const outcome = await host.verifyBuild(`visual-${attempt}`) as { passed: boolean; paused: boolean; next: string };
+        expect(outcome.passed).toBe(false);
+        expect(outcome.paused).toBe(attempt === 3);
+        expect(outcome.next).toContain("Log feed action is missing");
+      }
+      expect(new Set(capturedDesigns)).toEqual(new Set([item.design.id]));
+      expect(w.count("workflow_outputs")).toBe(0);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
+      expect(w.count("run_rounds", "issue = 'visual-fidelity' and outcome = 'failed'")).toBe(3);
+      expect(w.count("run_verifications", "\"check\" = 'visual-fidelity' and passed = 0")).toBe(3);
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 
