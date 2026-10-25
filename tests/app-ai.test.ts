@@ -59,7 +59,7 @@ describe('AI inside apps', () => {
 		expect(p.calls).toHaveLength(1);
 		expect(p.calls[0]!.url).toBe('https://api.tokenfactory.nebius.com/v1/chat/completions');
 		expect(p.calls[0]!.auth).toBe('Bearer nebius-test-key');
-		expect(p.calls[0]!.body).toMatchObject({ model: route.modelId, max_tokens: route.maxTokens, messages: [{ role: 'user', content: 'What can I cook with lentils?' }] });
+		expect(p.calls[0]!.body).toMatchObject({ model: route.modelId, max_tokens: Math.min(route.maxTokens, APP_AI_LIMITS.maxOutputTokens), messages: [{ role: 'user', content: 'What can I cook with lentils?' }] });
 		expect(usageRows()).toEqual([
 			expect.objectContaining({
 				mode: 'preview', month: '2026-10', status: 'settled', routeId: route.id,

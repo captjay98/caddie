@@ -1,3 +1,4 @@
+import { helperModelCompletion, type HelperAccounting } from './helper-model-call.ts';
 import { findModelRouteForRole } from '../agents/providers.ts';
 import { DIGEST_CALL_TIMEOUT_MS, MODEL_CALL_TIMEOUT_MS, timeoutSignal } from './http-timeouts.ts';
 
@@ -68,6 +69,7 @@ export interface InspectionProfile {
 }
 
 export interface InspectCandidatesInput {
+	readonly accounting?: HelperAccounting;
 	readonly apiKey?: string;
 	readonly profile: InspectionProfile;
 	readonly candidates: readonly InspectableCandidate[];
@@ -156,10 +158,10 @@ export async function inspectCandidates(input: InspectCandidatesInput): Promise<
 	if (!input.apiKey) {
 		return { byId: EMPTY, gap: 'AI fit inspection is unavailable: the model key is not configured — results are ranked by heuristics only.' };
 	}
-	const route = findModelRouteForRole('helper');
+	const route = findModelRouteForRole('helperRanking');
 	let content: string;
 	try {
-		const res = await fetch(`${NEBIUS_BASE_URL}/chat/completions`, {
+		const res = await helperModelCompletion({ role: 'helperRanking', accounting: input.accounting, url: `${NEBIUS_BASE_URL}/chat/completions`, request: {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${input.apiKey}` },
 			signal: timeoutSignal(MODEL_CALL_TIMEOUT_MS),
@@ -169,13 +171,13 @@ export async function inspectCandidates(input: InspectCandidatesInput): Promise<
 				temperature: 0,
 				max_tokens: route.maxTokens,
 			}),
-		}).catch((cause: unknown) => {
+		} }).catch((cause: unknown) => {
 			throw new Error(cause instanceof Error ? cause.message : 'network error');
 		});
 		if (!res.ok) {
 			return { byId: EMPTY, gap: `AI fit inspection failed (status ${res.status}) — results are ranked by heuristics only.` };
 		}
-		const body = (await res.json()) as { choices?: { message?: { content?: unknown } }[] };
+		const body = res.body as { choices?: { message?: { content?: unknown } }[] };
 		const raw = body.choices?.[0]?.message?.content;
 		content = typeof raw === 'string' ? raw : '';
 	} catch {
@@ -303,6 +305,7 @@ export function digestProfileFrom(
 }
 
 export interface DigestCandidateInput {
+	readonly accounting?: HelperAccounting;
 	readonly apiKey?: string;
 	readonly profile: InspectionProfile;
 	readonly candidate: InspectableCandidate;
@@ -407,10 +410,10 @@ export async function digestCandidate(input: DigestCandidateInput): Promise<Dige
 	if (!input.apiKey) {
 		return { digest: null, gap: 'AI digest is unavailable: the model key is not configured — read the verbatim rules below.' };
 	}
-	const route = findModelRouteForRole('helper');
+	const route = findModelRouteForRole('helperSummary');
 	let content: string;
 	try {
-		const res = await fetch(`${NEBIUS_BASE_URL}/chat/completions`, {
+		const res = await helperModelCompletion({ role: 'helperSummary', accounting: input.accounting, url: `${NEBIUS_BASE_URL}/chat/completions`, request: {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${input.apiKey}` },
 			signal: timeoutSignal(DIGEST_CALL_TIMEOUT_MS),
@@ -423,13 +426,13 @@ export async function digestCandidate(input: DigestCandidateInput): Promise<Dige
 				// DIGEST_MAX_TOKENS.
 				max_tokens: DIGEST_MAX_TOKENS,
 			}),
-		}).catch((cause: unknown) => {
+		} }).catch((cause: unknown) => {
 			throw new Error(cause instanceof Error ? cause.message : 'network error');
 		});
 		if (!res.ok) {
 			return { digest: null, gap: `AI digest failed (status ${res.status}) — read the verbatim rules below.` };
 		}
-		const body = (await res.json()) as { choices?: { message?: { content?: unknown } }[] };
+		const body = res.body as { choices?: { message?: { content?: unknown } }[] };
 		const raw = body.choices?.[0]?.message?.content;
 		content = typeof raw === 'string' ? raw : '';
 	} catch {

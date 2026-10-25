@@ -460,6 +460,7 @@ export async function discoverForActor(
 	// after it) takes ~13s off a fresh search.
 	const notInspected: InspectCandidatesResult = { byId: new Map(), gap: null };
 	const inspectionPending: Promise<InspectCandidatesResult> = options.inspect === false ? Promise.resolve(notInspected) : inspectCandidates({
+		accounting: { db, projectId: scope.projectId },
 		apiKey: options.nebiusApiKey,
 		profile: {
 			country: profile?.country ?? null,

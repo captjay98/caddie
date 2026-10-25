@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { afterEach, beforeEach } from 'bun:test';
+import { afterEach, beforeEach, setSystemTime } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import type { Scope } from '@caddie/contracts';
@@ -187,6 +187,8 @@ describe('actor discovery', () => {
 });
 
 describe('actor discovery — Devpost API as the primary list (Stage 2)', () => {
+	beforeEach(() => setSystemTime(new Date('2026-10-20T12:00:00Z')));
+	afterEach(() => setSystemTime());
 	const PAGES: Record<number, unknown> = {
 		1: JSON.parse(readFileSync(new URL('./fixtures/devpost/open-page1.json', import.meta.url), 'utf8')),
 		2: JSON.parse(readFileSync(new URL('./fixtures/devpost/open-page2.json', import.meta.url), 'utf8')),
@@ -273,6 +275,8 @@ describe('actor discovery — Devpost API as the primary list (Stage 2)', () => 
 });
 
 describe('actor discovery — Tavily for other platforms and as Devpost backup (Stage 3)', () => {
+	beforeEach(() => setSystemTime(new Date('2026-10-20T12:00:00Z')));
+	afterEach(() => setSystemTime());
 	const PAGES: Record<number, unknown> = {
 		1: JSON.parse(readFileSync(new URL('./fixtures/devpost/open-page1.json', import.meta.url), 'utf8')),
 		2: JSON.parse(readFileSync(new URL('./fixtures/devpost/open-page2.json', import.meta.url), 'utf8')),

@@ -7,6 +7,7 @@ import {
 	coordinatorModelRole,
 	routeAcceptsImage,
 	IDEATION_TURN_WINDOW,
+	ROLE_THINKING,
 	type ModelRole,
 } from '../apps/app/src/agents/providers.ts';
 
@@ -103,13 +104,18 @@ describe('model registry (providers.ts)', () => {
 			.toBeLessThan(findModelRouteForRole('ideation').outputPriceMinorUnits);
 	});
 
-	test('coordinatorModelRole: ideation only in Home with an open window; never in a project conversation', () => {
+	test('coordinatorModelRole: brainstorming follows the task in either conversation', () => {
 		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 3 })).toBe('ideation');
 		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 0 })).toBe('chat');
-		// project coordinators: specialists inherit this model — a brainstorm flag must not change a build
-		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 12 })).toBe('chat');
+		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 12 })).toBe('ideation');
 		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0 })).toBe('chat');
 		expect(IDEATION_TURN_WINDOW).toBeGreaterThan(0);
+	});
+	test('explicit brainstorming uses the deeper model immediately, routine status and execution do not', () => {
+		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0, request: 'Can we brainstorm a simpler first version?' })).toBe('ideation');
+		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 8, request: 'Where did we stop?' })).toBe('chat');
+		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 8, execution: true })).toBe('chat');
+		expect(coordinatorModelRole({ isHome: true, ideationTurnsLeft: 0, request: 'Thanks' })).toBe('chat');
 	});
 
 	test('coordinatorModelRole: an image turn routes to the vision model in any conversation', () => {
@@ -125,4 +131,21 @@ describe('model registry (providers.ts)', () => {
 		// no image: unchanged
 		expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 0, hasImage: false })).toBe('chat');
 	});
+});
+
+test('execution instructions do not inherit the brainstorming window', () => {
+  for (const request of ['Build the approved plan', 'Fix the failed test', 'Please resume the build', 'Stop building', 'Let’s build the approved plan', 'Can you fix the failed test?', 'Yes, implement it']) {
+    expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 8, request })).toBe('chat');
+  }
+  expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 8, request: 'Please build on that idea and explore options' })).toBe('ideation');
+  expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 8, request: 'For small farms' })).toBe('ideation');
+});
+
+test('every role carries a thinking level, at the live-verified maximum (2026-10-25)', () => {
+	// scripts/probe-thinking.ts LIVE VERIFIED all five Nebius routes accept
+	// reasoning_effort up to 'max'. The owner directive is maximum effort per
+	// model; this pins the registry so a future edit cannot silently drop it.
+	for (const role of Object.keys(MODEL_ROLES) as ModelRole[]) {
+		expect(ROLE_THINKING[role], `role ${role}`).toBe('max');
+	}
 });

@@ -2,6 +2,7 @@ import { setProvider } from '@flue/runtime';
 import {
 	createProvider,
 	envApiKeyAuth,
+	type ThinkingLevel,
 } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 
@@ -99,7 +100,11 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		outputPriceMinorUnits: 300, // $3.00/Mtok
 		currency: 'usd',
 		contextWindow: 1048576,
-		maxTokens: 8192,
+		// Owner 2026-10-25: max reasoning effort (ROLE_THINKING) needs output
+		// headroom — at 8192 the model spent the WHOLE cap on reasoning and
+		// returned empty (model_call_usage shows delegate calls cut at exactly
+		// 8192). A cap is a ceiling, not a spend.
+		maxTokens: 32768,
 	},
 	{
 		// Balanced 3.x mid tier — superseded as the chat route by Super VL
@@ -142,8 +147,11 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		// cover a coordinator turn with tool calls AND a vision reply. It is a
 		// 3.5-tier reasoning model: the cap is not spend, and a tight one
 		// returns a truncated or empty reply (the Nano note, re-observed on
-		// Lightning in the same probe).
-		maxTokens: 8192,
+		// Lightning in the same probe). Raised 8192 → 32768 with max reasoning
+		// effort: five build-delegate calls hit the 8192 cap mid-reasoning and
+		// returned "(task completed with no text)" — the Farmhand feature-1
+		// blocker (model_call_usage, 2026-10-25).
+		maxTokens: 32768,
 	},
 	{
 		// Nemotron 3.5 Lightning — the cheap 3.5-tier model (helper calls, and
@@ -163,7 +171,9 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		outputPriceMinorUnits: 24, // $0.24/Mtok
 		currency: 'usd',
 		contextWindow: 1048576,
-		maxTokens: 4096,
+		// Raised 4096 → 8192: the app role runs at max reasoning effort now; a
+		// tight cap on a reasoning model returns empty (same failure class).
+		maxTokens: 8192,
 	},
 	{
 		// Small/fast/cheap reasoning model — bounded helper calls (discovery query
@@ -283,6 +293,11 @@ export const MODEL_ROLES = {
 	 *  generous, see its entry. Both routes cost the same ($0.06/$0.24), so
 	 *  staying on Nano gives up no saving. */
 	helper: 'nemotron-3-nano',
+	/** Independently evaluable helper tasks. Keep the proven route until a
+	 * representative comparison supports changing that particular job. */
+	helperRules: 'nemotron-3-nano',
+	helperRanking: 'nemotron-3-nano',
+	helperSummary: 'nemotron-3-nano',
 	/** AI inside generated apps (env.CADDIE.ai, app-ai.ts): a visitor waits on
 	 *  every reply, so the fast cheap tier — not a deep reasoning one. Caddie
 	 *  pays; each project has a monthly allowance. */
@@ -309,6 +324,35 @@ export const MODEL_ROLES = {
 export type ModelRole = keyof typeof MODEL_ROLES;
 
 /**
+ * Reasoning effort per role (owner 2026-10-25: "use the maximum reasoning
+ * effort available to each model"). This is the single registry; agents pass
+ * it to `useModel(specifier, { thinkingLevel })` and specialist declarations
+ * carry it on `SubagentDefinition.thinkingLevel`, so the effort follows the
+ * ROLE, not the call site. Levels are the pi-ai union
+ * (off|minimal|low|medium|high|xhigh|max).
+ *
+ * LIVE VERIFIED 2026-10-25 (scripts/probe-thinking.ts): all five Nebius
+ * routes accept `reasoning_effort` up to `max` with HTTP 200 (Super-VL,
+ * Ultra, GLM-5.3-Flash, Lightning, Nano) — so `max` is the maximum
+ * AVAILABLE to every model today. The map stays per-role so any future
+ * cost/latency tuning is a one-line change here, not a call-site hunt.
+ */
+export const ROLE_THINKING: Record<ModelRole, ThinkingLevel> = {
+	chat: 'max',
+	ideation: 'max',
+	plan: 'max',
+	build: 'max',
+	helper: 'max',
+	helperRules: 'max',
+	helperRanking: 'max',
+	helperSummary: 'max',
+	app: 'max',
+	appSuper: 'max',
+	vision: 'max',
+	architect: 'max',
+};
+
+/**
  * How many user turns a brainstorm keeps the deeper `ideation` model after it
  * is entered. A bound, so a conversation that drifts off ideas without a
  * proposal falls back to the fast chat model on its own. Sized to outlast a
@@ -324,22 +368,39 @@ export const IDEATION_TURN_WINDOW = 30;
 /**
  * Which role drives THIS coordinator turn. Flue reads `useModel` when a
  * submission starts and allows the argument to vary render to render from
- * durable state, so this is evaluated per turn. Ideation applies only in the
- * Home conversation: a project conversation's specialists inherit the
- * coordinator's model, and a brainstorm flag must never change what a build
- * runs on. An unknown home/project identity (first render, no snapshot yet)
- * is treated as NOT home — the default chat model, never a silent upgrade.
+ * durable state. Ideation follows the task in either conversation; specialists
+ * declare their own models. Background execution and routine status questions
+ * never inherit a lingering brainstorm window.
  *
- * Pricing note: the Home run binding still records the `chat` route; chat
- * turns reserve no budget today. When chat budgets are wired, ideation turns
- * must be priced at the ideation route, not the binding's.
+ * The immutable run binding records its initial route only. The spending
+ * instrument prices each paying build turn from its own requested model, and
+ * per-call telemetry records the actual request/response model separately.
  */
-export function coordinatorModelRole(input: { isHome: boolean; ideationTurnsLeft: number; hasImage?: boolean }): ModelRole {
-	// A turn that carries an image must reach a model that can see it — a
-	// text-only route would drop or reject the image. Wins in any conversation:
-	// project specialists declare their own model, so this never changes a build.
-	if (input.hasImage) return 'vision';
-	return input.isHome && input.ideationTurnsLeft > 0 ? 'ideation' : 'chat';
+export interface CoordinatorModelInput {
+	isHome: boolean;
+	ideationTurnsLeft: number;
+	hasImage?: boolean;
+	request?: string;
+	execution?: boolean;
+}
+
+/** Content-free selection reason; safe to record without logging the request. */
+export type CoordinatorSelectionReason = 'image_attachment' | 'background_execution' | 'routine_status' | 'execution_request' | 'explicit_ideation' | 'active_ideation' | 'default_chat';
+
+export function coordinatorModelSelection(input: CoordinatorModelInput): { role: ModelRole; reason: CoordinatorSelectionReason } {
+	if (input.hasImage) return { role: 'vision', reason: 'image_attachment' };
+	if (input.execution) return { role: 'chat', reason: 'background_execution' };
+	const request = input.request?.trim() ?? '';
+	if (/^(?:(?:hi|hey)[,! ]+)?(?:where (?:did we stop|are we)|(?:what(?:'s| is)|any) (?:the )?(?:status|progress|update)|(?:is|are) (?:it|we|you|the app|the build) (?:done|ready)|thanks|thank you)[?!. ]*$/i.test(request)) return { role: 'chat', reason: 'routine_status' };
+	const explicitIdeation = /\b(?:brainstorm|(?:rethink|explore|compare) (?:the |our |this )?(?:idea|scope|approach|options)|(?:project|app) ideas|what (?:could|should|can) (?:we|I) build)\b/i.test(request);
+	if (!explicitIdeation && /^(?:(?:please|yes[,!]?|ok(?:ay)?[,!]?|let['’]s|can you|could you|would you)\s+)*(?:build|implement|fix|repair|resume|continue|start|run|approve|stop|cancel)\b/i.test(request)) return { role: 'chat', reason: 'execution_request' };
+	if (explicitIdeation) return { role: 'ideation', reason: 'explicit_ideation' };
+	return input.ideationTurnsLeft > 0 ? { role: 'ideation', reason: 'active_ideation' } : { role: 'chat', reason: 'default_chat' };
+}
+
+/** Backwards-compatible role-only API used by existing consumers. */
+export function coordinatorModelRole(input: CoordinatorModelInput): ModelRole {
+	return coordinatorModelSelection(input).role;
 }
 
 /** Route ids that accept image input (the vision-capable routes). The one place

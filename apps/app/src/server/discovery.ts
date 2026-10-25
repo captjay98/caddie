@@ -1826,6 +1826,7 @@ export async function candidateDetail(
 			digestGap = refusal;
 		} else {
 			const computed = await digestCandidate({
+			accounting: { db, projectId: scope.projectId },
 				apiKey: digestApiKey,
 				profile: digestProfile,
 				candidate: { id: candidate.id, url: candidate.url, title: candidate.title, summary: candidate.summary },
@@ -1981,6 +1982,7 @@ export async function prewarmDigest(
 		const contentHash = await digestContentHash(candidate, facts, overviewText, digestProfile);
 		if (await getCachedDigest(db, scope, candidate.id, contentHash)) return false; // already warm
 		const computed = await digestCandidate({
+			accounting: { db, projectId: scope.projectId },
 			apiKey: digestApiKey,
 			profile: digestProfile,
 			candidate,

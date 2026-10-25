@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import type { Scope } from '@caddie/contracts';
@@ -326,6 +326,9 @@ describe('readRulesForCandidates', () => {
 // --- end to end through discovery -------------------------------------------------
 
 describe('discoverForActor — quoted rules decide eligibility', () => {
+	// Eligibility fixtures must not turn into deadline-expiry tests as time passes.
+	beforeEach(() => setSystemTime(new Date('2026-10-20T12:00:00Z')));
+	afterEach(() => setSystemTime());
 	test('NG builder: Amazon becomes "eligible" with its rule quoted; a US-only event becomes "ineligible" and sinks', async () => {
 		const { db, sqlite, scope } = await world();
 		try {

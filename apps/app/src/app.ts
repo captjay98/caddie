@@ -4,6 +4,7 @@ import { getCloudflareContext } from '@flue/runtime/cloudflare';
 import { Hono } from 'hono';
 import { Hello } from './agents/hello.ts';
 import { registerNebiusProvider } from './agents/providers.ts';
+import { makeModelCallInstrumentation } from './server/model-call-instrument.ts';
 import { makeSpendInstrumentation } from './server/spend-instrument.ts';
 import { blockBuildByPayer } from './server/build-spend.ts';
 import { Coordinator } from './agents/coordinator.ts';
@@ -117,6 +118,15 @@ instrument(
 		},
 	}),
 );
+
+// Per-leaf observations retain actual route/usage independently of a run's initial model.
+instrument(makeModelCallInstrumentation({
+ resolve: () => {
+  const env = getCloudflareContext().env as unknown as { DB?: AuthEnv['DB'] };
+  return env?.DB ?? null;
+ },
+ onError: () => console.error('Model call accounting write unavailable'),
+}));
 
 const app = new Hono<{ Bindings: Env }>();
 

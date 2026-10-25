@@ -1,3 +1,4 @@
+import { helperModelCompletion, type HelperAccounting } from './helper-model-call.ts';
 import type { Scope } from '@caddie/contracts';
 import { MODEL_CALL_TIMEOUT_MS, timeoutSignal } from './http-timeouts.ts';
 import { findModelRouteForRole } from '../agents/providers.ts';
@@ -212,10 +213,10 @@ export function parseClaims(content: string): { type?: unknown; value?: unknown;
 }
 
 /** One small model call per page. Returns null on any failure (caller records a gap). */
-async function proposeClaims(apiKey: string, excerpt: string): Promise<ProposedClaim[] | null> {
-	const route = findModelRouteForRole('helper');
+async function proposeClaims(apiKey: string, excerpt: string, accounting: HelperAccounting): Promise<ProposedClaim[] | null> {
+	const route = findModelRouteForRole('helperRules');
 	try {
-		const res = await fetch(`${NEBIUS_BASE_URL}/chat/completions`, {
+		const res = await helperModelCompletion({ role: 'helperRules', accounting, url: `${NEBIUS_BASE_URL}/chat/completions`, request: {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
 			signal: timeoutSignal(MODEL_CALL_TIMEOUT_MS),
@@ -228,9 +229,9 @@ async function proposeClaims(apiKey: string, excerpt: string): Promise<ProposedC
 				temperature: 0,
 				max_tokens: route.maxTokens,
 			}),
-		});
+		} });
 		if (!res.ok) return null;
-		const body = (await res.json()) as { choices?: { message?: { content?: unknown } }[] };
+		const body = res.body as { choices?: { message?: { content?: unknown } }[] };
 		const raw = body.choices?.[0]?.message?.content;
 		const items = parseClaims(typeof raw === 'string' ? raw : '');
 		if (!items) return null;
@@ -394,7 +395,7 @@ export async function readRulesForCandidates(
 			pending.map(async ({ snapshot, title }) => ({
 				snapshot,
 				title,
-				claims: await proposeClaims(options.nebiusApiKey!, eligibilityExcerpt(snapshot.content)),
+				claims: await proposeClaims(options.nebiusApiKey!, eligibilityExcerpt(snapshot.content), { db, projectId: scope.projectId }),
 			})),
 		);
 		const failed: string[] = [];
