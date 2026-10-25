@@ -354,7 +354,9 @@ places; the work was to lock the invariants and fix the real gaps found.
 - **B07.4 — release gate.** Root `bun run typecheck` clean; all affected unit
   suites green (project-status, visual-fidelity, build-failure-message,
   feature-acceptance, build-resume-context = 42/0; build-workflow 107/0 from
-  B05). The composed `bun run build` was DEFERRED under sustained host
-  memory-pressure/load (8–22/core across cycles) — forcing a full Astro+Vite
-  build on a thrashing host proves nothing; to be run on a calm host as the
-  final integration confirmation. Recorded honestly, not claimed.
+  B05). The composed `bun run build` was first deferred under sustained host
+  load (8–22/core), then ran GREEN once the host was calm (1.93/core): Astro +
+  Vite built in 360ms and compose-assets relocated 1 SPA + 104 SPA assets + 99
+  landing files with 0 collisions (non-production `caddie-app-dev` build; a
+  >500 kB chunk-size advisory, not a failure). The B07.4 release gate is MET
+  locally: typecheck + affected units + composed build all green.
