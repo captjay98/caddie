@@ -213,3 +213,31 @@ bounds), so it is deliberately NOT added.
 
 B02 §A–§D addressed. Next: B03 — progress detection by content fingerprint.
 
+## B03 — close-out (2026-10-25)
+
+Commit `501aaaf` (pure `8878294`-style policy `f4e1e7e` + wiring + migration).
+Repeat guard now compares file CONTENT (sha256), not byte count: equal-length
+different edits proceed, identical rewrites and alternating cmd/error loops
+stop. Append-only migration `0047` adds `build_activity.contentHash` (a hash,
+never contents). LOCAL VERIFIED, mutation-proven.
+
+## B04 — close-out (2026-10-25)
+
+Commits `7df8512` (pure `feature-acceptance.ts`) + `db376a4` (wiring).
+
+- finishFeature's `passing <= baseline` reject is replaced by
+  `acceptanceVerdict`: a dropped count rejects (weakened/deleted baseline), a
+  grown count accepts, and a FLAT count accepts only when this feature repaired
+  a real host check that was failing.
+- **Repair signal:** a prior FAILED `run_rounds` row for this feature on a real
+  check (`issue LIKE '<featureId>:%' AND issue <> '<featureId>:new-tests'`).
+  NOT `attempts > 0` (too loose — the full suite caught that: a feature that
+  only failed the new-tests gate repaired nothing and must still add coverage).
+- **Honest limitation (documented, not faked):** host-check receipts carry
+  per-check pass/fail + passed/baseline COUNTS, not per-test NAMES. So "a named
+  test exists per doneWhen criterion" is NOT enforced — it needs per-test
+  identity the host does not record today. Recorded as a follow-up, not claimed.
+
+LOCAL VERIFIED, mutation-proven; full build-workflow + feature-acceptance 105/0.
+
+
