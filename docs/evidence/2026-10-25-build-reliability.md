@@ -360,3 +360,26 @@ places; the work was to lock the invariants and fix the real gaps found.
   landing files with 0 collisions (non-production `caddie-app-dev` build; a
   >500 kB chunk-size advisory, not a failure). The B07.4 release gate is MET
   locally: typecheck + affected units + composed build all green.
+
+## Root takeover — implementation audit and completion (in progress)
+
+Owner requested direct completion and a controlled Farmhand resume on 2026-10-25.
+The prior B00–B08 close-out headings are not a claim that every approved packet
+is implemented: B00a/B02a are absent, several policy functions have no runtime
+callers, B05 wiring was reverted, and multi-state capture is not wired. The
+review reproduced acceptance of a feature after only an unrelated bundle repair
+(no new feature coverage), plus helper transport/retry/accounting failures.
+
+- Baseline review: 191 targeted tests passed; independent regression probes
+  exposed the gaps above. Existing green tests are insufficient completion proof.
+- Helper corrections: transient network recovery, one receipt per physical
+  request, unshortened Retry-After, deadline-aware retry refusal, abortable
+  backoff and terminal quota refusal. New regression cases reproduced RED,
+  then 37 affected tests passed. Additional work remains.
+- Real local Farmhand D1 located read-only: migration head 0046 while the new
+  build-activity reader requires 0047.contentHash. Preserve this database and
+  its existing checkpoints; back up before applying local migrations. No reset
+  is authorized or required merely to resolve this mismatch.
+- Local state backup: `/private/tmp/caddie-before-reliability-shixm28d` contains
+  consistent SQLite backups of all 16 current D1/DO files. Opening Build caused
+  the existing watchdog to pause the stale run; its plan and checkpoints remain.
