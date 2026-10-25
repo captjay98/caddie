@@ -318,6 +318,17 @@ describe('Part A — spend instrument wiring (real agents, real D1)', () => {
 			.run();
 		expect(await resolveTurnPayer(db, ctx)).toBe('build:fresh:new');
 	});
+
+	test("a stale in-memory payer never overrides the build row's newer retry payer", async () => {
+		// Live incident (Farmhand): the coordinator's isolate registered the payer
+		// of an earlier attempt; every later Retry stored a fresh payer on the
+		// build row, but the registry hit won, so every call charged the
+		// exhausted old payer and was refused at its $5 limit.
+		registerBuildPayer('conv_build_stale', 'build:stale:old');
+		await seedWorkflowPayer(db, 'conv_build_stale', 'build:stale:new');
+		const ctx = { instanceId: 'conv_build_stale', conversationId: 'conv_flue_internal' } as FlueExecutionContext;
+		expect(await resolveTurnPayer(db, ctx)).toBe('build:stale:new');
+	});
 });
 
 /** Seed a build_workflows row carrying a conversationId -> spendPayerId mapping. */

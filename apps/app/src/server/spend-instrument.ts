@@ -107,12 +107,12 @@ function looksLikeModuleInstance(instanceId: string): boolean {
 }
 
 /**
- * Resolve the payer for a turn, by lineage. Tries the registry first (instance,
- * then conversation); then, for a ModuleBuilder turn (part P), the build's
- * shared payer from its `build_modules` row; then falls back to D1: a
- * coordinator's conversationId is stored on its `build_workflows` row as
- * `spendPayerId`. Returns null when no build owns the turn (ordinary chat),
- * which means "pass through".
+ * Resolve the payer for a turn, by lineage. The durable rows are authoritative
+ * and read fresh: first the build's `build_workflows.spendPayerId` (matched on
+ * instance or conversation id), then, for a ModuleBuilder turn (part P), its
+ * `build_modules` row. The in-isolate registry is only a fallback for an
+ * identity with no durable row. Returns null when no build owns the turn
+ * (ordinary chat), which means "pass through".
  *
  * REFUSAL (part P / plan §A step 4): when the turn's instance id is a module
  * builder's AND its `build_modules` row carries no payer, this THROWS
@@ -123,8 +123,29 @@ function looksLikeModuleInstance(instanceId: string): boolean {
 export async function resolveTurnPayer(db: D1Database, ctx: FlueExecutionContext): Promise<string | null> {
 	const instanceId = ctx.instanceId ?? '';
 	const conversationId = ctx.conversationId ?? '';
-	if (instanceId && payerByKey.has(instanceId)) return payerByKey.get(instanceId)!;
-	if (conversationId && payerByKey.has(conversationId)) return payerByKey.get(conversationId)!;
+	// D1 FIRST, read fresh on every call, and AUTHORITATIVE. Caddie addresses a
+	// build's coordinator as /agents/coordinator/<build_workflows.conversationId>,
+	// and Flue makes that URL id the agent's instanceId (a delegate shares it).
+	// Flue's own ctx.conversationId is a different, internal id, so the row is
+	// matched on both. A retry stores a fresh payer on this row, and the next call
+	// must see it — the in-isolate registry below can hold an EARLIER attempt's
+	// payer (the isolate that registered it is not the one that retried), and
+	// letting it win charged every retried call to an exhausted payer, so the
+	// build was refused at its limit forever (Farmhand, 2026-10-25).
+	const keys = [instanceId, conversationId].filter((key) => key.length > 0);
+	if (keys.length > 0) {
+		const row = (
+			await db
+				.prepare(
+					`select "spendPayerId" from build_workflows where "conversationId" in (${keys.map(() => '?').join(',')}) and "spendPayerId" is not null limit 1`,
+				)
+				.bind(...keys)
+				.all<{ spendPayerId: string }>()
+		).results?.[0];
+		if (row?.spendPayerId) return row.spendPayerId;
+	}
+	// The registry is a FALLBACK for identities with no durable row of their own.
+	const registered = (instanceId && payerByKey.get(instanceId)) || (conversationId && payerByKey.get(conversationId)) || null;
 
 	// Part P: a ModuleBuilder (and its delegates, which share its instance id)
 	// is charged to its build's shared payer, read from the module's
@@ -149,31 +170,16 @@ export async function resolveTurnPayer(db: D1Database, ctx: FlueExecutionContext
 		}
 		// No module row: only Caddie dispatches ids of this shape (ModuleBuilder
 		// is dispatch-only; chat and coordinator ids are conv_<hex>), so this is a
-		// lost or broken module build. Refuse: it must never run unmetered.
+		// lost or broken module build. A payer registered for it in this isolate
+		// still meters it; otherwise refuse: it must never run unmetered.
+		if (registered) return registered;
 		throw new ModulePayerMissingError(instanceId);
 	}
+	if (registered) return registered;
 	// A ModuleBuilder's own turn under any other id (a malformed dispatch) has no
 	// build to charge either: refuse rather than fall through to chat.
 	if (ctx.agentName === 'ModuleBuilder') throw new ModulePayerMissingError(instanceId);
-
-	// D1, read fresh on every call: Caddie addresses a build's coordinator as
-	// /agents/coordinator/<build_workflows.conversationId>, and Flue makes that
-	// URL id the agent's instanceId (a delegate shares it). Flue's own
-	// ctx.conversationId is a different, internal id, so the row is matched on
-	// the instanceId first. The coordinator runs in its own Durable Object, whose
-	// registry starts empty, so this is the live path. Nothing is cached: a retry
-	// stores a fresh payer on the same row, and the next call must see it.
-	const keys = [instanceId, conversationId].filter((key) => key.length > 0);
-	if (keys.length === 0) return null;
-	const row = (
-		await db
-			.prepare(
-				`select "spendPayerId" from build_workflows where "conversationId" in (${keys.map(() => '?').join(',')}) and "spendPayerId" is not null limit 1`,
-			)
-			.bind(...keys)
-			.all<{ spendPayerId: string }>()
-	).results?.[0];
-	return row?.spendPayerId ?? null;
+	return null;
 }
 
 // --- request-size tracking for the estimate ---------------------------------
