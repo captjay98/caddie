@@ -2100,6 +2100,38 @@ describe("host-driven feature loop", () => {
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 
+  test("B04: a repaired later feature passes with a flat test count (no inflation needed)", async () => {
+    const w = await world();
+    const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+    stub.seedImage("tag:feature:1");
+    stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+    await stub.start();
+    try {
+      const item = await featureBuild(w);
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      // Feature 1 passes with one test → the protected baseline is now 1.
+      await host.buildNextFeature();
+      expect(((await host.finishFeature("log-feed", "f1")) as { passed: boolean }).passed).toBe(true);
+      expect(feature(w, "log-feed").testsPassed).toBe(1);
+
+      // Feature 2: attempt 1 FAILS a check (a real failing test), bumping attempts.
+      await host.buildNextFeature();
+      stub.setBehavior("bun run test", { stdout: "1 pass\n1 fail", exitCode: 1 });
+      const fail1 = (await host.finishFeature("view-dashboard", "f2a")) as { passed: boolean };
+      expect(fail1.passed).toBe(false);
+      expect(Number(feature(w, "view-dashboard").attempts)).toBeGreaterThan(0);
+
+      // Attempt 2: the check is REPAIRED and green, but the test count is FLAT
+      // (1 pass == the baseline of 1). Today this is wrongly rejected as
+      // "no new passing tests"; a valid repair must be accepted without
+      // inflating the count.
+      stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+      const repaired = (await host.finishFeature("view-dashboard", "f2b")) as { passed: boolean };
+      expect(repaired.passed).toBe(true);
+      expect(feature(w, "view-dashboard").status).toBe("passed");
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
   test("resuming a feature opens a fresh new-test repair window without deleting earlier failures", async () => {
     const w = await world();
     const stub = new SandboxStub({ expectedToken: "local-feature-token" });

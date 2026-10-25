@@ -41,6 +41,7 @@ import { stackCatalog } from "./stacks.ts";
 import { recordBuildActivity } from "./build-activity.ts";
 import { sha256Hex } from "./artifacts.ts";
 import { actionFingerprint, progressVerdict } from "./build-progress-policy.ts";
+import { acceptanceVerdict } from "./feature-acceptance.ts";
 import { checkServerStarts, type WorkerLoaderLike } from "./preview-runtime.ts";
 import { SCAFFOLD_FILES } from "../../../../stacks/react-hono/scaffold.ts";
 import { FLUTTER_SCAFFOLD_FILES } from "../../../../stacks/flutter/scaffold.ts";
@@ -1135,7 +1136,31 @@ export async function createCoordinatorContext(
     const tests = outcome.receipts.find((receipt) => receipt.check === "behavior-tests");
     const passing = parseTestCounts(`${tests?.stdout ?? ""}\n${tests?.stderr ?? ""}`)?.passed ?? 0;
     const baseline = testsBaseline(rows);
-    if (passing <= baseline) {
+    // B04: completion is meaningful, not a bare count. All host checks already
+    // passed here, so: a dropped count is a weakened baseline; a grown count is
+    // new coverage; a FLAT count is acceptable only when this feature REPAIRED
+    // a real host check that was failing. The repair signal is a prior failed
+    // run_round for THIS feature on a real check (issue "<featureId>:<check>"),
+    // NOT the new-tests gate itself ("<featureId>:new-tests") — a feature that
+    // only ever failed the new-tests gate has repaired nothing, so a flat count
+    // must still be rejected.
+    const priorCheckRepair = await env.DB
+      .prepare(
+        `select 1 from "run_rounds"
+          where "runId" = ? and "outcome" = 'failed'
+            and "issue" like ? and "issue" <> ?
+          limit 1`,
+      )
+      .bind(runId, `${current.featureId}:%`, `${current.featureId}:new-tests`)
+      .all();
+    const priorFailingCheckNowGreen = (priorCheckRepair.results?.length ?? 0) > 0;
+    const acceptance = acceptanceVerdict({
+      checksPassed: true,
+      passing,
+      baseline,
+      priorFailingCheckNowGreen,
+    });
+    if (acceptance.kind === "reject") {
       await recordRepairRound(env.DB, scope, runId, {
         issue: `${current.featureId}:new-tests`,
         operationKey: `feature:${runId}:${plan.id}:${featureId}:${attempt}:new-tests`,
