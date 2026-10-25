@@ -289,3 +289,38 @@ mutation-proven. B06 (device-capture visual fidelity + folded craft-skills),
 B07 (truthful progress + release gate), B08 (benchmark — paid, gated) remain
 and were deliberately NOT opened near the patrol-budget cap rather than left
 half-done.
+
+## B06 — close-out (2026-10-25)
+
+Verify the delivered app and its design. The existing `visual-fidelity.ts`
+gate already covered most of B06; the work was to find the real gaps rather
+than re-implement what holds.
+
+- **B06.1/.2/.5 — already satisfied.** `reviewVisualFidelity` captures both
+  real viewports, validates every capture (hash/viewport/freshness), treats a
+  missing port as `not-checked` (never a pass), never turns an invalid compare
+  or a browser failure into a pass, leaks no provider-error secrets, and
+  propagates cancellation. Covered by the 8 existing `visual-fidelity.test.ts`
+  cases — not re-wired.
+- **B06.4 — enforced upstream (documented, not re-wired).** A design change
+  returns to review rather than silently rewriting the target: the visual check
+  runs behind `requireBuildApproval`, which re-reads approval before effects and
+  denies expired/revoked, and `approvedDesignRevisionId` is read fresh at verify
+  time. Tested: `build-workflow.test.ts:666` (expired/revoked re-read and denied
+  before effects), `:720` (forged phase cannot bypass review). A staleness guard
+  inside the visual checker would be dead code.
+- **B06.3 — pure helper shipped (`a9ea4d7`).** The gate compared only the first
+  html-mock, so a broken error/empty/recovery state could pass behind a good
+  home screen. `approvedAppearanceDocuments(body)` now yields one sandboxed
+  document per titled designed state (the design format already allows one mock
+  per screen OR state, e.g. "Today · empty"), capped at
+  `MAX_APPEARANCE_STATES=4`. `approvedAppearanceDocument` delegates to the first,
+  so single-mock designs are unchanged (8 existing tests stay green). 9/0,
+  mutation-proven, typecheck clean.
+- **B06.3 capture — honest boundary (follow-up).** Multi-state *capture of the
+  built app* is NOT pure-wireable: `builtDocument` at the call site
+  (`coordinator-host.ts:1462`) is a single render of the running app, and
+  driving it into each state needs real browser interaction. Comparing N
+  approved states against one built render would false-flag every non-home
+  state. Recorded as browser-spec scope (`tests/browser/visual-fidelity.spec.ts`)
+  rather than shipped as a wire that would make the gate lie.
