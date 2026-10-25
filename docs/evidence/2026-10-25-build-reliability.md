@@ -156,3 +156,60 @@ source edits, no commits in B00. Proceed to B01.
   already-authorized evidence in `docs/evidence/2026-10-25-model-validation/`.
 - Local fault tests (B01/B02) use fake clocks and controlled adapters — never
   real multi-minute waits or paid calls.
+
+## B02 — close-out (2026-10-25)
+
+Commits this wave (all LOCAL VERIFIED, test-first, mutation-proven where a fix
+was involved):
+
+| Commit | Section | What |
+|---|---|---|
+| `77c194a` | B01 | lock operation-identity + receipt invariants (inv.1/2/4 row level) |
+| `8878294` | B02 §A | pure layered deadline policy (`build-deadlines.ts`) |
+| `dc6e0e9` | B02 §A | enforce the absolute build deadline in the stall watchdog (WIRED) |
+| `c3d7675` | B02 §B | bounded transient retry for direct helper model calls (WIRED) |
+| `e32864a` | B02 §C | classify empty delegate results (`build-empty-result.ts`) |
+| `c184c29` | B02 §C | guard the build loop against empty-delegate re-delegation (WIRED) |
+| `504b3e1` | B02 §D | lock late-effect fencing at finish + publish (regression lock) |
+
+### Per-request / stream-idle deadline — why no extra wiring (LOCAL VERIFIED reasoning)
+
+The plan's B02 §A asks for request, stream-idle and specialist deadlines. A
+single model REQUEST is already bounded in the live path, so the policy
+`build-deadlines.ts` encodes is the decision layer, not a missing enforcer:
+
+- `COORDINATOR_DURABILITY = { timeoutMs: 60*60_000, maxAttempts: 3 }`
+  (`permissions.ts:183`) bounds a submission; Flue aborts and settles past it
+  (`coordinator.ts:711`).
+- Flue's runtime retries transient model failures itself
+  (`MAX_TRANSIENT_MODEL_RETRIES = 3`, `@flue/runtime` conversation-stream) over
+  pi-ai's `retryProviderRequest` (429/5xx + Retry-After + 60s cap).
+- Flue cross-process abort is durable and enforced (flue-contracts: 5.3–6.6s to
+  terminal-aborted, resurrection blocked).
+
+The real missing layer was the ABSOLUTE build deadline — a build that kept
+emitting intermittent activity reset the 20-min idle watchdog and could outlive
+its admitted hour (the 103-min incident). That is now closed host-side
+(`dc6e0e9`). `build-deadlines.ts`'s request/stream-idle verdicts remain the
+policy the host would consult if it ever drove its own request loop; wiring a
+second per-request timer over Flue's would violate plan §B.1 (no stacked
+bounds), so it is deliberately NOT added.
+
+### Scenario → test index — B02 status
+
+| Scenario | Class | Covered by | Status |
+|---|---|---|---|
+| Duplicate receipt replay is a no-op | inv.2 | build-fault-recovery.test.ts | **LOCAL VERIFIED** |
+| Different receipt on settled row = conflict | inv.2 | build-fault-recovery.test.ts | **LOCAL VERIFIED** |
+| One logical effect = one identity | inv.1 | build-fault-recovery.test.ts | **LOCAL VERIFIED** |
+| Ambiguous dispatch → reconciliation-required | inv.2 | build-fault-recovery.test.ts | **LOCAL VERIFIED** |
+| Request/specialist never resolves (103-min hang) | F2 | build-deadlines.test.ts + build-workflow.test.ts (absolute deadline) | **LOCAL VERIFIED** |
+| Stream stalls / chunk can't extend hard deadline | F2 | build-deadlines.test.ts | **LOCAL VERIFIED** |
+| Absolute deadline survives restart | F2 | build-deadlines.test.ts | **LOCAL VERIFIED** |
+| Transient 429/529 un-retried (helper path) | F3 | helper-model-call.test.ts | **LOCAL VERIFIED** |
+| Output-cap truncation / empty-after-tools / no-progress | F1 | build-empty-result.test.ts | **LOCAL VERIFIED** |
+| Build loop re-delegates an empty hand-off | F1 | build-empty-delegate.test.ts | **LOCAL VERIFIED** |
+| Late effect after Stop can't advance/publish | inv.4 | build-workflow.test.ts (§D lock) | **LOCAL VERIFIED** |
+
+B02 §A–§D addressed. Next: B03 — progress detection by content fingerprint.
+
