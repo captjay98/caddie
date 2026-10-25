@@ -1,3 +1,4 @@
+import { boundedProvider } from './bounded-provider.ts';
 import { setProvider } from '@flue/runtime';
 import {
 	createProvider,
@@ -82,6 +83,18 @@ export const PRICING_VERSION = '2026-10-nemotron-listing';
  * several roles and a re-route is a one-line change.
  */
 export const MODEL_ROUTES: readonly ModelRoute[] = [
+	{
+		id: 'deepseek-v4.1-flash-1017', specifier: 'nebius/deepseek-ai/DeepSeek-V4.1-Flash-1017', providerId: 'nebius',
+		modelId: 'deepseek-ai/DeepSeek-V4.1-Flash-1017', pricingVersion: '2026-10-25-repair-catalog',
+		unitPriceMinorUnits: 120, inputPriceMinorUnits: 30, outputPriceMinorUnits: 120,
+		currency: 'usd', contextWindow: 1048576, maxTokens: 32768,
+	},
+	{
+		id: 'glm-5.3', specifier: 'nebius/zai-org/GLM-5.3', providerId: 'nebius',
+		modelId: 'zai-org/GLM-5.3', pricingVersion: '2026-10-25-repair-catalog',
+		unitPriceMinorUnits: 440, inputPriceMinorUnits: 140, outputPriceMinorUnits: 440,
+		currency: 'usd', contextWindow: 1024000, maxTokens: 32768,
+	},
 	{
 		// Frontier judgment for ideation only (the 30-turn Home brainstorm
 		// window; chat and vision moved to Super VL on 2026-10-18). The G1
@@ -414,7 +427,7 @@ export const VISION_ROUTE_IDS: readonly string[] = ['nemotron-3.5-super-vl', 'gl
 /** Whether a route accepts image input (used to pick a vision route for an
  *  image message, and to report the capability honestly). */
 export function routeAcceptsImage(modelRouteId: string): boolean {
-	return VISION_ROUTE_IDS.includes(modelRouteId);
+	return modelRouteId === 'deepseek-v4.1-flash-1017' || VISION_ROUTE_IDS.includes(modelRouteId);
 }
 
 /** Resolve a role to its route, fail-closed (unknown role id is a bug, throws). */
@@ -469,7 +482,7 @@ export function registerNebiusProvider(): void {
 					maxTokensField: 'max_tokens',
 				},
 			})),
-			api: openAICompletionsApi(),
+			api: boundedProvider(openAICompletionsApi()),
 		}),
 	);
 }

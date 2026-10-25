@@ -18,7 +18,7 @@ import {
 import type { Area, AreaRole } from '../server/part-manifests.ts';
 import type { ToolDefinition } from '@flue/runtime';
 import { useInstruction, useSkill, useSubagent, useTool } from '@flue/runtime';
-import { findModelRouteForRole, ROLE_THINKING } from './providers.ts';
+import { findModelRouteForRole, findModelRoute, ROLE_THINKING } from './providers.ts';
 import { FEATURE_DELEGATION_RULE } from './delegation.ts';
 import { DEMO_CONTRACT_GUIDE, FEATURE_BLOCK_GUIDE, LOOKS_BLOCK_GUIDE, PROTOTYPE_GUIDE } from '@caddie/contracts';
 import { CADDIE_SCRATCH_DIR } from '../server/source-export.ts';
@@ -43,6 +43,7 @@ import { RECIPES } from '../../../../stacks/react-hono/recipe.ts';
  */
 
 export interface SpecialistBuildContext {
+  repairModelRouteId?: string;
   /** Full current request; delegation summaries must not drop user feedback. */
   currentRequest?: string;
   /** The run's kind of app: 'flutter' for an Android app (Track 3), else a web app. */
@@ -364,7 +365,8 @@ export function buildSpecialistDeclarations(context: SpecialistBuildContext) {
 		name: descriptor.name,
 		description: descriptor.description,
 		agent: buildSpecialist(descriptor.role, context),
-		model: findModelRouteForRole(specialistModelRole(descriptor)).specifier,
+		model: (specialistModelRole(descriptor) === 'build' && context.repairModelRouteId
+      ? findModelRoute(context.repairModelRouteId) : findModelRouteForRole(specialistModelRole(descriptor))).specifier,
 		thinkingLevel: ROLE_THINKING[specialistModelRole(descriptor)],
 	}));
 }

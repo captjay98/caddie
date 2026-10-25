@@ -86,3 +86,17 @@ describe('B08 — runBenchmark is gated and budget-bounded', () => {
 		expect(r.spentUsd).toBe(tasks.tasks.length);
 	});
 });
+
+
+test('benchmark rejects non-finite budgets, repeats and costs, and withholds acceptance', async () => {
+ expect(spendGate({allowSpend:true,budgetUsd:Infinity}).allowed).toBe(false);
+ expect((await runBenchmark(tasks.tasks,{allowSpend:true,budgetUsd:1,repeats:NaN},async()=>{throw Error('must not call');})).stopped).toBe('refused');
+ let calls=0;
+ const over=await runBenchmark(tasks.tasks,{allowSpend:true,budgetUsd:1,repeats:1},async(task)=>{
+  calls++;expect(Object.hasOwn(task,'acceptance')).toBe(false);
+  return {taskId:task.id,ok:true,costUsd:2,detail:'over budget'};
+ });
+ expect(calls).toBe(1);expect(over.stopped).toBe('budget-exhausted');
+ const unknown=await runBenchmark(tasks.tasks,{allowSpend:true,budgetUsd:1,repeats:1},async(task)=>({taskId:task.id,ok:true,costUsd:NaN,detail:'unknown'}));
+ expect(unknown.stopped).toBe('refused');expect(unknown.executed.length).toBe(1);
+});

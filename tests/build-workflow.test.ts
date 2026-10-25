@@ -153,6 +153,7 @@ async function world() {
     "0044_looks_phase.sql",
     // B03: content hash on build_activity for the progress guard.
     "0047_build_activity_content_hash.sql",
+    "0048_repair_escalation.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -2051,6 +2052,24 @@ describe("host-driven feature loop", () => {
   const feature = (w: Awaited<ReturnType<typeof world>>, id: string) =>
     w.sqlite.query("select * from build_features where featureId = ?").get(id) as Record<string, unknown>;
 
+  test("repair admission selects pinned models through fresh host contexts without resetting the payer", async () => {
+    const w=await world(); const stub=new SandboxStub({expectedToken:'local-feature-token'}); stub.seedImage('tag:feature:1');
+    try {
+      const item=await featureBuild(w); await stub.start();
+      const host=await resolveCoordinatorContext(env(w,stub),item.workflow.conversationId); await host.buildNextFeature();
+      w.sqlite.prepare("update build_workflows set repairPolicyVersion='repair-v1' where projectId=?").run(item.project.id);
+      const payer=(await readWorkflow(w.db,item.scope))?.spendPayerId;
+      for(let i=0;i<6;i++) {
+        const fresh=await resolveCoordinatorContext(env(w,stub),item.workflow.conversationId);
+        expect(fresh.repairModelRouteId).toBe(['nemotron-3.5-super-vl','nemotron-3.5-super-vl','deepseek-v4.1-flash-1017','deepseek-v4.1-flash-1017','glm-5.3','glm-5.3'][i]);
+        await recordRepairRound(w.db,item.scope,item.workflow.runId,{issue:'log-feed:test-'+i,round:'repair_attempt',outcome:'failed',operationKey:'repair-'+i,admissionId:payer ?? undefined});
+      }
+      expect((await workflowRepairPause(w.db,item.workflow.runId)).paused).toBe(true);
+      expect((await readWorkflow(w.db,item.scope))?.spendPayerId).toBe(payer);
+      expect(w.count('workflow_resumes')).toBe(0);
+    } finally {await stub.stop();w.sqlite.close();}
+  });
+
   test("builds features in plan order, needs new passing tests per feature, and saves a checkpoint for each", async () => {
     const w = await world();
     const stub = new SandboxStub({ expectedToken: "local-feature-token" });
@@ -2100,7 +2119,7 @@ describe("host-driven feature loop", () => {
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 
-  test("B04: a repaired later feature passes with a flat test count (no inflation needed)", async () => {
+  test("B04: removing a failing test does not complete a later feature", async () => {
     const w = await world();
     const stub = new SandboxStub({ expectedToken: "local-feature-token" });
     stub.seedImage("tag:feature:1");
@@ -2121,14 +2140,12 @@ describe("host-driven feature loop", () => {
       expect(fail1.passed).toBe(false);
       expect(Number(feature(w, "view-dashboard").attempts)).toBeGreaterThan(0);
 
-      // Attempt 2: the check is REPAIRED and green, but the test count is FLAT
-      // (1 pass == the baseline of 1). Today this is wrongly rejected as
-      // "no new passing tests"; a valid repair must be accepted without
-      // inflating the count.
+      // A failing test vanished: this summary cannot distinguish deletion from
+      // repair and supplies no independent evidence of the dashboard feature.
       stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
       const repaired = (await host.finishFeature("view-dashboard", "f2b")) as { passed: boolean };
-      expect(repaired.passed).toBe(true);
-      expect(feature(w, "view-dashboard").status).toBe("passed");
+      expect(repaired.passed).toBe(false);
+      expect(feature(w, "view-dashboard").status).not.toBe("passed");
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 

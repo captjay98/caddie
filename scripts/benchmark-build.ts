@@ -37,7 +37,7 @@ export type SpendDecision =
 /** Decide whether a live/paid run may proceed. Refuses by default. */
 export function spendGate(opts: RunnerOptions): SpendDecision {
 	if (!opts.allowSpend) return { allowed: false, reason: 'live run refused: pass --allow-spend to authorize paid calls' };
-	if (!(typeof opts.budgetUsd === 'number' && opts.budgetUsd > 0))
+	if (!(typeof opts.budgetUsd === 'number' && Number.isFinite(opts.budgetUsd) && opts.budgetUsd > 0))
 		return { allowed: false, reason: 'live run refused: a positive --budget-usd ceiling is required with --allow-spend' };
 	return { allowed: true, budgetUsd: opts.budgetUsd };
 }
@@ -76,7 +76,7 @@ export interface RunOutcome {
 /** A task executor. The runner NEVER embeds a model client; the caller injects
  * one, so a run cannot happen without a deliberately-wired, authorized path.
  * The executor returns the real measured cost of the run. */
-export type TaskExecutor = (task: BenchmarkTask, budgetRemainingUsd: number) => Promise<RunOutcome>;
+export type TaskExecutor = (task: Omit<BenchmarkTask, 'acceptance'>, budgetRemainingUsd: number) => Promise<RunOutcome>;
 
 export interface RunReport {
 	executed: RunOutcome[];
@@ -101,8 +101,10 @@ export async function runBenchmark(
 	const gate = spendGate(opts);
 	if (!gate.allowed) return { executed: [], spentUsd: 0, stopped: 'refused', reason: gate.reason };
 	if (!executor) return { executed: [], spentUsd: 0, stopped: 'refused', reason: 'no executor injected: the runner never embeds a model client' };
-	const perRun = Math.max(0, opts.estPerRunUsd ?? 0);
-	const repeats = Math.max(1, opts.repeats ?? 3);
+	const perRun = opts.estPerRunUsd ?? 0;
+  const repeats = opts.repeats ?? 3;
+  if (!Number.isFinite(perRun) || perRun < 0 || !Number.isSafeInteger(repeats) || repeats < 1)
+    return { executed: [], spentUsd: 0, stopped: 'refused', reason: 'invalid estimate or repeat count' };
 	const executed: RunOutcome[] = [];
 	let spent = 0;
 	for (let r = 0; r < repeats; r++) {
@@ -111,9 +113,14 @@ export async function runBenchmark(
 			// Stop BEFORE a run that could breach the ceiling — never overspend.
 			if (remaining < perRun || remaining <= 0)
 				return { executed, spentUsd: spent, stopped: 'budget-exhausted', reason: `stopped before ${task.id}: $${remaining.toFixed(2)} left, est $${perRun.toFixed(2)}/run` };
-			const outcome = await executor(task, remaining);
-			spent += Math.max(0, outcome.costUsd);
+			const { acceptance: _hostOnlyAcceptance, ...executionTask } = task;
+      const outcome = await executor(executionTask, remaining);
 			executed.push(outcome);
+      if (!Number.isFinite(outcome.costUsd) || outcome.costUsd < 0)
+        return { executed, spentUsd: spent, stopped: 'refused', reason: 'executor returned unknown or invalid spend; no further runs admitted' };
+      spent += outcome.costUsd;
+      if (outcome.costUsd > remaining)
+        return { executed, spentUsd: spent, stopped: 'budget-exhausted', reason: 'executor exceeded its allowance; no further runs admitted' };
 		}
 	}
 	return { executed, spentUsd: spent, stopped: 'completed' };

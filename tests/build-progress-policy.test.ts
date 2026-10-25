@@ -74,3 +74,11 @@ describe("B03 — content-fingerprint progress policy", () => {
     expect(command("c", "ok")).not.toBe(command("c", "failed"));
   });
 });
+
+
+test('a real alternating A/B loop stops, while a new result breaks it',()=>{
+ const a=actionFingerprint({kind:'file',subject:'src/App.tsx',contentHash:'a',outcome:'ok'});
+ const b=actionFingerprint({kind:'file',subject:'src/App.tsx',contentHash:'b',outcome:'ok'});
+ expect(progressVerdict([a,b,a,b,a,b],a,3).kind).toBe('no-progress');
+ expect(progressVerdict([a,b,a,b,a,b],b+'changed',3).kind).toBe('proceed');
+});

@@ -383,3 +383,39 @@ review reproduced acceptance of a feature after only an unrelated bundle repair
 - Local state backup: `/private/tmp/caddie-before-reliability-shixm28d` contains
   consistent SQLite backups of all 16 current D1/DO files. Opening Build caused
   the existing watchdog to pause the stale run; its plan and checkpoints remain.
+
+### Takeover packet: runtime bounds and repair admission (2026-10-26)
+
+LOCAL VERIFIED (not deployed; Farmhand not resumed yet):
+- Added an opt-in `repair-v1` admission. Six checked failures across pinned
+  Super VL / DeepSeek V4.1 Flash-1017 / GLM 5.3, two per model. D1 receipts
+  survive reconstruction, ignore replayed operations and fence stopped/older
+  admissions. Model changes keep the same spending payer. Legacy admissions
+  keep their existing policy. Activation is deliberately separate from code.
+- Wired the actual specialist declarations and refreshed coordinator snapshots,
+  with a real coordinator-host test checking all six selections and unchanged
+  payer/resume records. Completed features close their repair issues.
+- The registered provider now aborts the actual request at 300 seconds and
+  cancels a response body idle for 90 seconds. Parent cancellation propagates;
+  hidden SDK retries are disabled, preserving one physical request per Flue
+  reservation/usage record. Tested both provider entry points and stalled body.
+- Host checks fence the original plan/payer after asynchronous execution and
+  again before feature advancement and preview publication. Build effects also
+  check the persisted admission deadline before further work.
+- Repeating A/B action cycles are detected from bounded real outcome/content
+  fingerprints, alongside identical writes. Equal-length changed content is
+  still allowed. Fixed chronological ordering of the history window.
+- Removed generic prior-red-check acceptance for flat test counts. A deleted
+  failing test or unrelated bundle repair is not evidence of a new feature.
+  Full independent criteria mapping remains outstanding; legacy count growth
+  is explicitly not described as production-readiness evidence.
+- Benchmark runner refuses non-finite limits/repeats/cost, stops after an
+  executor allowance breach, and withholds host acceptance checks from the
+  executor's task. This is local fake-executor evidence, not paid benchmark proof.
+- Local migration 0048 applied after the SQLite backup. No database reset.
+
+Verification: root + app typecheck passed. Coordinator workflow/policy packet
+121 tests passed; additional provider/repair/acceptance/activity/benchmark packet
+43 tests passed. Full suite is being run separately; do not infer its result
+from these targeted counts. B00a, independent B04 coverage, restored environment
+validation and complete multi-state browser integration still need work.

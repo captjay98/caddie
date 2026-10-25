@@ -29,6 +29,7 @@ export function moduleBuilderDispatcher(conversationId: string): DispatchModuleB
 
 /** Only serializable presentation data persists; env/secrets/functions never do. */
 export interface CoordinatorSnapshot {
+  repairModelRouteId?: string;
   conversationId: string;
   runId: string;
   sessionId: string;
@@ -43,6 +44,7 @@ export function coordinatorSnapshot(
 ): CoordinatorSnapshot {
   return {
     conversationId,
+    repairModelRouteId: context.repairModelRouteId,
     runId: context.runId,
     sessionId: context.sessionId,
     projectId: context.projectId,
@@ -88,6 +90,7 @@ export function scopedCoordinatorContext(
 ) {
   const resolve = () => resolveCoordinatorContext(env, conversationId, { dispatchModuleBuilder: moduleBuilderDispatcher(conversationId) });
   const context: CoordinatorHostContext = {
+    repairModelRouteId: snapshot?.repairModelRouteId,
     runId: snapshot?.runId ?? `uninitialized:${conversationId}`,
     sessionId: snapshot?.sessionId ?? `uninitialized:${conversationId}`,
     projectId: snapshot?.projectId ?? "",

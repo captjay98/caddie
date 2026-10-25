@@ -56,18 +56,19 @@ export function progressVerdict(
 	next: ActionFingerprint,
 	limit: number,
 ): ProgressVerdict {
-	if (limit <= 0) return { kind: "proceed" };
-	if (recent.length < limit) return { kind: "proceed" };
-	// The run already requires `limit` prior identical actions AND this one
-	// repeating them; check the last `limit` entries of recent.
-	for (let i = 0; i < limit; i++) {
-		if (recent[recent.length - 1 - i] !== next) return { kind: "proceed" };
-	}
-	return {
-		kind: "no-progress",
-		reason:
-			next.startsWith("file\u0000")
-				? "the same file was written with identical content repeatedly — nothing changed"
-				: "the same command repeated with the same outcome — nothing changed",
-	};
+  if (!Number.isSafeInteger(limit) || limit <= 0) return {kind:'proceed'};
+  // Bounded repeating cycles: A A A A, or A B A B A B A, etc. A genuinely
+  // changed fingerprint breaks the cycle. Do not scan unbounded history.
+  const window = [...recent.slice(-Math.max(12,limit*4)), next];
+  for (let period=1;period<=4;period++) {
+    const needed=period*limit+1;
+    if(window.length<needed) continue;
+    const start=window.length-needed;
+    let repeats=true;
+    for(let i=start+period;i<window.length;i++) {
+      if(window[i]!==window[i-period]) { repeats=false; break; }
+    }
+    if(repeats) return {kind:'no-progress',reason:'The same actions and outcomes are cycling without a changed result.'};
+  }
+  return {kind:'proceed'};
 }

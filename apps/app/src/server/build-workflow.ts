@@ -1,3 +1,4 @@
+import { repairState, REPAIR_POLICY_VERSION } from './repair-escalation.ts';
 import { designCompletenessIssue } from "../shared/design-completeness.ts";
 import { createHash } from "node:crypto";
 import type { Scope, PlanDocRevision } from "@caddie/contracts";
@@ -134,6 +135,11 @@ async function openBuildSpendPayer(
     )
     .bind(payerId, now(), scope.projectId)
     .run();
+  // Policy is stamped only at a new, operator-enabled admission. A replay/model switch never resets it.
+  if ((opts.env as { CADDIE_REPAIR_POLICY?: string } | undefined)?.CADDIE_REPAIR_POLICY === REPAIR_POLICY_VERSION) {
+    await db.prepare('update build_workflows set repairPolicyVersion=? where projectId=? and spendPayerId=?')
+      .bind(REPAIR_POLICY_VERSION, scope.projectId, payerId).run();
+  }
   // The stored value wins (a replay keeps the first payer); read it back so the
   // registry always maps to the payer actually on the row.
   const stored = (
@@ -1456,6 +1462,8 @@ export interface RepairPauseScope {
 }
 /** Explicit user recovery starts a fresh repair window; previous failures remain evidence. */
 export async function workflowRepairPause(db: D1Database, runId: string, pauseScope: RepairPauseScope = {}) {
+  const repair = await repairState(db, runId, pauseScope.featureIds);
+  if (repair) return { paused: repair.paused, issue: repair.issue };
   const ids = pauseScope.featureIds;
   // instr(issue, '<id>:') = 1 means the issue starts with that feature's prefix
   // (an exact prefix test: no LIKE wildcards to escape in a feature id).

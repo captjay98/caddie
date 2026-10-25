@@ -1,3 +1,5 @@
+import { buildAttemptAdmittedAt } from './build-deadlines.ts';
+import { repairState } from './repair-escalation.ts';
 import { approvedAppearanceDocument, documentHash, reviewVisualFidelity, type FidelityPort } from "./visual-fidelity.ts";
 import type { AuthEnv } from "./auth.ts";
 import type { ArchitectureBlock, RunBindingRecord } from "@caddie/contracts";
@@ -132,13 +134,13 @@ async function recentActions(db: CoordinatorEnvironment["DB"], runId: string, li
   try {
     const result = await db
       .prepare(
-        `select "id","kind","subject","bytes","contentHash" from "build_activity"
+        `select "id","kind","subject","bytes","contentHash","outcome" from "build_activity"
          where "runId" = ? and "kind" in ('command','file','check')
          order by "startedAt" desc, "id" desc limit ?`,
       )
       .bind(runId, limit)
       .all();
-    return result.results as { id: string; kind: string; subject: string; bytes: number | null; contentHash: string | null }[];
+    return result.results as { id: string; kind: string; subject: string; bytes: number | null; contentHash: string | null; outcome: "ok" | "failed" | "cancelled" }[];
   } catch (error) {
     if (NO_SUCH_TABLE(error)) return [];
     throw error;
@@ -739,33 +741,45 @@ export async function createCoordinatorContext(
   // lenient, never refuse wrongly.
   const budgetMessage =
     `Caddie used this build's ${BUILD_ACTION_BUDGET}-step budget without getting the checks to pass, so the build was paused. Your plan and files are saved. Retry to continue with a fresh budget.`;
+  const assertAdmissionActive = async (expected?: { planId: string | null; spendPayerId?: string | null }) => {
+    const { workflow } = await requireBuildApproval(env.DB, scope, pauseScope);
+    if (expected && (workflow.planId !== expected.planId || workflow.spendPayerId !== expected.spendPayerId))
+      throw new ScopeError(409, 'STALE_BUILD', 'This result belongs to an earlier build attempt. Saved work is retained.');
+    const admitted = buildAttemptAdmittedAt(workflow.spendPayerId, null);
+    if (admitted !== null && Date.now() >= admitted + 60 * 60_000) {
+      await env.DB.prepare("update build_workflows set phase='blocked',detail=?,updatedAt=? where projectId=? and spendPayerId=? and phase='building'")
+        .bind('This build reached its time allowance. Your plan and saved work are retained.',new Date().toISOString(),scope.projectId,workflow.spendPayerId).run();
+      throw new ScopeError(409,'BUILD_DEADLINE_EXHAUSTED','The build time allowance is exhausted.');
+    }
+  };
   const guardBudget = async () => {
+    await assertAdmissionActive();
     if ((await buildWindowActionCount(env.DB, runId)) < BUILD_ACTION_BUDGET) return;
     await setWorkflowBlocker(env.DB, scope, budgetMessage);
     throw new SandboxError(429, "BUILD_BUDGET_EXHAUSTED", budgetMessage);
   };
   const guardAction = async (action: { kind: "command" | "file"; subject: string; bytes?: number; contentHash?: string }) => {
     await guardBudget();
-    const recent = await recentActions(env.DB, runId, REPEATED_ACTION_LIMIT);
+    const recent = await recentActions(env.DB, runId, Math.max(12, REPEATED_ACTION_LIMIT * 4));
     const subject = action.subject.slice(0, 500);
     // B03: compare CONTENT, not byte count. A file is the same only when its
     // path AND content hash repeat; a command only when its subject repeats
     // (its outcome is not known at guard time — this is a pre-dispatch guard).
-    const fingerprintOf = (row: { kind: string; subject: string; contentHash: string | null }) =>
+    const fingerprintOf = (row: { kind: string; subject: string; contentHash: string | null; outcome: "ok" | "failed" | "cancelled" }) =>
       actionFingerprint({
-        kind: row.kind === "file" ? "file" : "command",
+        kind: row.kind === "file" ? "file" : row.kind === "check" ? "check" : "command",
         subject: row.subject,
         contentHash: row.contentHash ?? undefined,
-        outcome: "ok",
+        outcome: row.outcome,
       });
     const nextFingerprint = actionFingerprint({
       kind: action.kind,
       subject,
       contentHash: action.contentHash,
-      outcome: "ok",
+      outcome: recent.find(row => row.kind === action.kind && row.subject === subject)?.outcome ?? "ok",
     });
     const repeated =
-      progressVerdict(recent.map(fingerprintOf), nextFingerprint, REPEATED_ACTION_LIMIT).kind ===
+      progressVerdict([...recent].reverse().map(fingerprintOf), nextFingerprint, REPEATED_ACTION_LIMIT).kind ===
       "no-progress";
     if (repeated)
       throw new SandboxError(
@@ -933,6 +947,8 @@ export async function createCoordinatorContext(
               cwd: root,
               env: runtimeEnv,
             });
+      signal?.throwIfAborted();
+      await assertAdmissionActive(workflow);
       const receipt = await driver.getOperationReceipt(operationKey);
       const passed = Boolean(
         receipt &&
@@ -971,7 +987,7 @@ export async function createCoordinatorContext(
       if (!passed) {
         // A join's failure goes back to the part's builder (module-join.ts).
         if (mode === "join") return { passed: false as const, paused: false, receipts, workflow, plan, driver, id };
-        await recordRepairRound(env.DB, scope, workflow.runId, {
+        await recordRepairRound(env.DB, scope, workflow.runId, { admissionId: workflow.spendPayerId ?? undefined,
           issue: issuePrefix ? `${issuePrefix}:${check.check}` : check.check,
           operationKey,
           round: "repair_attempt",
@@ -982,7 +998,7 @@ export async function createCoordinatorContext(
           .paused;
         if (paused)
           await pauseOrStop(
-            "Caddie could not get the app checks passing after three attempts. Your plan and files are saved. The app is not ready to try yet.",
+            "Caddie could not get the app checks passing within this build’s repair allowance. Your plan and files are saved. The app is not ready to try yet.",
           );
         return { passed: false as const, paused, receipts, workflow, plan, driver, id };
       }
@@ -1007,7 +1023,7 @@ export async function createCoordinatorContext(
         if (failedReceipt) receipts.push(failedReceipt);
         if (mode === "join") return { passed: false as const, paused: false, receipts, workflow, plan, driver, id, contractChecks };
         const check = failedReceipt?.check ?? "contract";
-        await recordRepairRound(env.DB, scope, workflow.runId, {
+        await recordRepairRound(env.DB, scope, workflow.runId, { admissionId: workflow.spendPayerId ?? undefined,
           issue: issuePrefix ? `${issuePrefix}:${check}` : check,
           round: "repair_attempt",
           outcome: "failed",
@@ -1016,7 +1032,7 @@ export async function createCoordinatorContext(
         const paused = (await workflowRepairPause(env.DB, workflow.runId, pauseScope)).paused;
         if (paused)
           await pauseOrStop(
-            "Caddie could not get the app's contract checks (sign-in, privacy, restart) passing after three attempts. Your plan and files are saved. The app is not ready to try yet.",
+            "Caddie could not get the app's contract checks (sign-in, privacy, restart) passing within this build’s repair allowance. Your plan and files are saved. The app is not ready to try yet.",
           );
         return { passed: false as const, paused, receipts, workflow, plan, driver, id, contractChecks };
       }
@@ -1129,39 +1145,24 @@ export async function createCoordinatorContext(
         paused: outcome.paused,
         receipts: outcome.receipts,
         next: outcome.paused
-          ? `“${current.title}” failed its checks three times, so the build is paused. Report what is failing.`
+          ? `“${current.title}” used its repair allowance, so the build is paused. Report what is failing.`
           : `Delegate a focused repair for the failing check, then call finish_feature again. ${FEATURE_DELEGATION_RULE}`,
       };
     }
     const tests = outcome.receipts.find((receipt) => receipt.check === "behavior-tests");
     const passing = parseTestCounts(`${tests?.stdout ?? ""}\n${tests?.stderr ?? ""}`)?.passed ?? 0;
     const baseline = testsBaseline(rows);
-    // B04: completion is meaningful, not a bare count. All host checks already
-    // passed here, so: a dropped count is a weakened baseline; a grown count is
-    // new coverage; a FLAT count is acceptable only when this feature REPAIRED
-    // a real host check that was failing. The repair signal is a prior failed
-    // run_round for THIS feature on a real check (issue "<featureId>:<check>"),
-    // NOT the new-tests gate itself ("<featureId>:new-tests") — a feature that
-    // only ever failed the new-tests gate has repaired nothing, so a flat count
-    // must still be rejected.
-    const priorCheckRepair = await env.DB
-      .prepare(
-        `select 1 from "run_rounds"
-          where "runId" = ? and "outcome" = 'failed'
-            and "issue" like ? and "issue" <> ?
-          limit 1`,
-      )
-      .bind(runId, `${current.featureId}:%`, `${current.featureId}:new-tests`)
-      .all();
-    const priorFailingCheckNowGreen = (priorCheckRepair.results?.length ?? 0) > 0;
+    // Historical failures are not acceptance evidence: an unrelated bundle fix
+    // (or deleting a failing test) must never unlock a new feature.
     const acceptance = acceptanceVerdict({
       checksPassed: true,
       passing,
       baseline,
-      priorFailingCheckNowGreen,
+      priorFailingCheckNowGreen: false,
     });
     if (acceptance.kind === "reject") {
       await recordRepairRound(env.DB, scope, runId, {
+        admissionId: outcome.workflow.spendPayerId ?? undefined,
         issue: `${current.featureId}:new-tests`,
         operationKey: `feature:${runId}:${plan.id}:${featureId}:${attempt}:new-tests`,
         round: "repair_attempt",
@@ -1173,7 +1174,7 @@ export async function createCoordinatorContext(
       await recordFeatureAttempt(env.DB, current, paused);
       if (paused)
         await pauseOrStop(
-          `Caddie could not add working tests for “${current.title}” after three attempts. The features before it are saved. The app is not ready to try yet.`,
+          `Caddie could not add working tests for “${current.title}” within this build’s repair allowance. The features before it are saved. The app is not ready to try yet.`,
         );
       return {
         passed: false,
@@ -1191,6 +1192,7 @@ export async function createCoordinatorContext(
       const boundary = await finishActivePart();
       if (!boundary.ok) {
         await recordRepairRound(env.DB, scope, runId, {
+          admissionId: outcome.workflow.spendPayerId ?? undefined,
           issue: `${current.featureId}:part-boundary`,
           operationKey: `feature:${runId}:${plan.id}:${featureId}:${attempt}:part-boundary`,
           round: "repair_attempt",
@@ -1201,7 +1203,7 @@ export async function createCoordinatorContext(
         await recordFeatureAttempt(env.DB, current, paused);
         if (paused)
           await pauseOrStop(
-            `“${current.title}” kept changing files outside its area after three tries. The features before it are saved. The app is not ready to try yet.`,
+            `“${current.title}” kept changing files outside its area within its repair allowance. The features before it are saved. The app is not ready to try yet.`,
           );
         return {
           passed: false,
@@ -1210,6 +1212,8 @@ export async function createCoordinatorContext(
         };
       }
     }
+    signal?.throwIfAborted();
+    await assertAdmissionActive(outcome.workflow);
     await recordFeaturePassed(env.DB, current, { checkpointRef, testsPassed: passing });
     const after = currentFeature(scopeToModule(await listBuildFeatures(env.DB, scope.projectId, plan.id)));
     // Big apps (part P step 2): the foundation module's last feature is saved,
@@ -1429,7 +1433,7 @@ export async function createCoordinatorContext(
       });
       if (!startup.ok) {
         const receipt = { check: "server-starts", passed: false, exitCode: 1, stdout: "", stderr: startup.reason, operationKey };
-        await recordRepairRound(env.DB, scope, workflow.runId, {
+        await recordRepairRound(env.DB, scope, workflow.runId, { admissionId: workflow.spendPayerId ?? undefined,
           issue: "server-starts",
           operationKey,
           round: "repair_attempt",
@@ -1441,7 +1445,7 @@ export async function createCoordinatorContext(
           await setWorkflowBlocker(
             env.DB,
             scope,
-            "Caddie could not get the app's server starting on Cloudflare after three attempts. Your plan and files are saved. The app is not ready to try yet.",
+            "Caddie could not get the app's server starting on Cloudflare within this build’s repair allowance. Your plan and files are saved. The app is not ready to try yet.",
           );
         return {
           passed: false,
@@ -1471,9 +1475,9 @@ export async function createCoordinatorContext(
       await recordVerification(env.DB, scope, workflow.runId, { check: "visual-fidelity", passed: visual.status === "passed", evidence: JSON.stringify(visual), planRevision: plan.id });
       if (visual.status === "needs-repair") {
         const differences = visual.viewports.flatMap((view) => view.differences.filter((difference) => difference.severity === "blocking").map((difference) => `${view.viewport.name}: ${difference.message}`)).join("; ");
-        await recordRepairRound(env.DB, scope, workflow.runId, { issue: "visual-fidelity", operationKey: visualKey, round: "repair_attempt", outcome: "failed", detail: differences.slice(0, 2000) });
+        await recordRepairRound(env.DB, scope, workflow.runId, { admissionId: workflow.spendPayerId ?? undefined, issue: "visual-fidelity", operationKey: visualKey, round: "repair_attempt", outcome: "failed", detail: differences.slice(0, 2000) });
         const paused = (await workflowRepairPause(env.DB, workflow.runId, pauseScope)).paused;
-        if (paused) await setWorkflowBlocker(env.DB, scope, "The app still doesn't match the design you approved after three attempts. Your plan and files are saved. The app is not ready to try yet.");
+        if (paused) await setWorkflowBlocker(env.DB, scope, "The app still doesn't match the design you approved within this build’s repair allowance. Your plan and files are saved. The app is not ready to try yet.");
         return { passed: false, paused, receipts: [...receipts, { check: "visual-fidelity", passed: false, exitCode: 1, stdout: "", stderr: differences, operationKey: visualKey }], next: `Repair these appearance differences without changing the approved scope, then run verify_build again: ${differences}` };
       }
     }
@@ -1503,6 +1507,7 @@ export async function createCoordinatorContext(
         ? "<!doctype html><html><body><p>An Android app built by Caddie. Open it in Caddie to try it in the browser.</p></body></html>"
         : previewDocument({ js: built.js, css: built.css });
     signal?.throwIfAborted();
+    await assertAdmissionActive(workflow);
     const output = await storeBuildOutput(env.DB, scope, {
       html,
       image: outputImage,
@@ -1567,6 +1572,7 @@ export async function createCoordinatorContext(
   };
   const tools = paidDiscoveryTools(env, scope);
   return {
+    repairModelRouteId: (await repairState(env.DB, runId, moduleScope?.features))?.routeId ?? undefined,
     driver: deps,
     sessionId,
     runId,

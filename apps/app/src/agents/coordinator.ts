@@ -301,7 +301,9 @@ export function Coordinator({ id }: AgentProps) {
         "During an approved build, get the ONE feature to build next (its id, title and doneWhen checks) from the host. Features are built one at a time in plan order; call this before delegating any implementation.",
       input: v.object({}),
       async run() {
-        return { output: JSON.stringify(await context.buildNextFeature()) };
+        const result = await context.buildNextFeature();
+        setStoredContext(coordinatorSnapshot(id, await resolve()));
+        return { output: JSON.stringify(result) };
       },
     });
     useTool({
@@ -310,7 +312,9 @@ export function Coordinator({ id }: AgentProps) {
         "Ask the host to finish the current feature: it runs the project checks, requires new passing tests for this feature, and saves a checkpoint the user can roll back to. Only the feature build_next_feature returned can be finished.",
       input: v.object({ featureId: v.pipe(v.string(), v.minLength(1), v.maxLength(48)) }),
       async run(ctx) {
-        return { output: JSON.stringify(await context.finishFeature(ctx.data.featureId, ctx.toolCallId, ctx.signal)) };
+        const result = await context.finishFeature(ctx.data.featureId, ctx.toolCallId, ctx.signal);
+        setStoredContext(coordinatorSnapshot(id, await resolve()));
+        return { output: JSON.stringify(result) };
       },
     });
     useTool({
@@ -579,6 +583,7 @@ export function Coordinator({ id }: AgentProps) {
   });
   useAgentFinish(async (ctx) => {
     const authority = await resolve();
+    setStoredContext(coordinatorSnapshot(id, authority));
     if (authority.homeOverview !== null) return;
     const state = await authority.workflowState();
     // A plan in prose is not a saved reviewable revision. Both planning and

@@ -1,3 +1,4 @@
+import { recordCheckedRepair, repairState } from './repair-escalation.ts';
 import { createHash } from 'node:crypto';
 import type { D1Database } from './auth.ts';
 import type { RunBindingRecord, Scope } from '@caddie/contracts';
@@ -133,6 +134,7 @@ function runBindingFromRow(row: Record<string, unknown>): RunBindingRecord {
 }
 
 export interface RepairRoundInput {
+  admissionId?: string;
 	issue: string;
 	round: RepairRoundKind;
 	outcome: 'started' | 'succeeded' | 'failed';
@@ -173,14 +175,13 @@ export async function recordRepairRound(
 	if (!REPAIR_ROUND_KINDS.includes(input.round)) {
 		throw new ScopeError(400, 'invalid_request', `unknown round kind ${input.round}`);
 	}
+	const roundId = input.operationKey ? `round_${createHash('sha256').update(JSON.stringify([verified.projectId, runId, input.issue, input.operationKey])).digest('hex')}` : newId('round');
 	await db
 		.prepare(
 			'insert or ignore into "run_rounds" ("id","runId","projectId","issue","round","outcome","detail","createdAt") values (?,?,?,?,?,?,?,?)',
 		)
 		.bind(
-			input.operationKey
-				? `round_${createHash('sha256').update(JSON.stringify([verified.projectId, runId, input.issue, input.operationKey])).digest('hex')}`
-				: newId('round'),
+			roundId,
 			runId,
 			verified.projectId,
 			input.issue,
@@ -190,6 +191,10 @@ export async function recordRepairRound(
 			nowIso(),
 		)
 		.run();
+	if (input.round === 'repair_attempt' && input.outcome === 'failed') {
+    const repair = await recordCheckedRepair(db, { runId, operationKey: roundId, admissionId: input.admissionId, issue: input.issue, detail: input.detail ?? input.issue });
+    if (repair) return { paused: repair.paused, failedRepairAttempts: repair.failures };
+  }
 	const rows = await queryAll(
 		db,
 		`select count(*) as "failed" from "run_rounds"
@@ -203,6 +208,8 @@ export async function recordRepairRound(
 
 /** Is this run currently paused (threshold reached on any issue)? */
 export async function isRunPaused(db: D1Database, runId: string): Promise<{ paused: boolean; issue: string | null }> {
+  const repair = await repairState(db, runId);
+  if (repair) return { paused: repair.paused, issue: repair.issue };
 	const rows = await queryAll(
 		db,
 		`select "issue", count(*) as "failed" from "run_rounds"

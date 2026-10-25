@@ -157,6 +157,8 @@ export async function recordFeaturePassed(
 		.prepare('update "build_features" set "status" = \'passed\', "checkpointRef" = ?, "testsPassed" = ?, "passedAt" = ?, "updatedAt" = ? where "projectId" = ? and "planId" = ? and "featureId" = ?')
 		.bind(result.checkpointRef, result.testsPassed, stamp, stamp, row.projectId, row.planId, row.featureId)
 		.run();
+  await db.prepare("update build_repair_issues set state='completed',updatedAt=? where runId=? and planId=? and featureId=? and state='active'")
+    .bind(stamp,row.runId,row.planId,row.featureId).run();
 }
 
 /**
