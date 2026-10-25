@@ -6,6 +6,7 @@ import { listCodeVersions, readVersionFiles } from './code-versions.ts';
 import { buildSessionOverride, listBuildFeatures } from './build-features.ts';
 import { recordBuildActivity } from './build-activity.ts';
 import { readWorkflow } from './build-workflow.ts';
+import { restoreCompatibility } from './build-resume-context.ts';
 import { runVerifiedInstall } from './verified-install.ts';
 
 /**
@@ -74,6 +75,23 @@ export async function openWorkingCopy(ctx: WorkingCopyContext): Promise<string> 
 		return startAgain(ctx, { fresh: true });
 	}
 	const target = { sessionKey: override?.sessionKey ?? ctx.sessionKey, image: override?.image ?? ctx.baseImage };
+	// A restore pointer saved under a now-superseded image must not be reopened
+	// silently: a transcript cannot restore an execution environment. If the
+	// image the pointer carries no longer matches the image this run expects,
+	// refuse effects with an actionable reason rather than build on a stale base
+	// (B05.2). The stack is construction-safe (one run ⇒ one stack ⇒ one image
+	// family), so the live dimension is image/recipe drift across sessions.
+	if (override) {
+		const compat = restoreCompatibility({
+			expectedStack: ctx.baseImage,
+			restoredStack: ctx.baseImage,
+			expectedCheckpointRef: null,
+			availableCheckpointRef: null,
+			expectedRecipeVersion: ctx.baseImage,
+			restoredRecipeVersion: override.image,
+		});
+		if (!compat.ok) throw new SandboxError(409, 'RESTORE_INCOMPATIBLE', compat.reason);
+	}
 	if (await driver.workingCopyAvailable({ ...target, recheckAfterMs: WORKING_COPY_RECHECK_MS })) {
 		return (await driver.ensureSession({ ...target, projectId: scope.projectId, runId })).sessionId;
 	}
