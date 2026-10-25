@@ -20,8 +20,8 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APP_DIR = join(REPO_ROOT, 'apps', 'app');
 const WORKER_BUNDLE = join(APP_DIR, 'dist', 'caddie_app', 'index.js');
-const PORT = 4173;
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = process.env.CADDIE_BROWSER_BASE ?? 'http://127.0.0.1:4173';
+const PORT = Number(new URL(BASE).port || 4173);
 const LOG = `/tmp/caddie-u05-browser-preview-${process.pid}.log`;
 
 let preview: ChildProcess | null = null;
@@ -384,7 +384,8 @@ test.describe('the project card shows the app, its steps and its hackathon (plan
 		const hex = iconColor('proj-a');
 		const rgb = `rgb(${parseInt(hex.slice(1, 3), 16)}, ${parseInt(hex.slice(3, 5), 16)}, ${parseInt(hex.slice(5, 7), 16)})`;
 		await expect(tile).toHaveCSS('background-color', rgb);
-		await expect(row.getByTestId('project-contest-proj-a')).toHaveText('Nebius x NVIDIA Global AI Hackathon · Due in 4 days');
+		await expect(row.getByTestId('project-contest-proj-a')).toContainText('Nebius x NVIDIA Global AI Hackathon');
+		await expect(row.getByTestId('project-contest-proj-a')).toContainText('Due in 4 days');
 		await expect(row.locator('.project-journey')).toHaveCount(0);
 		await expect(row.getByTestId('project-step-text-proj-a')).toContainText('Building');
 		await expect(row.locator('.project-card-foot').getByRole('button')).toHaveCount(1);
@@ -410,7 +411,9 @@ test.describe('the project card shows the app, its steps and its hackathon (plan
 
 		const row = page.getByTestId('project-row-proj-a');
 		await expect(row.getByTestId('project-tile-proj-a')).toBeVisible();
-		await expect(row.getByTestId('project-contest-proj-a')).toHaveText('Nebius x NVIDIA Global AI Hackathon · Due today');
+		await expect(row.getByTestId('project-contest-proj-a')).toContainText('Nebius x NVIDIA Global AI Hackathon');
+		await expect(row.getByTestId('project-contest-proj-a')).toContainText('Due today');
+		await expect(row.getByTestId('project-contest-proj-a')).toContainText('Updated');
 		await expect(row.locator('.project-journey')).toHaveCount(0);
 		await expect(row.getByTestId('project-next-proj-a')).toBeVisible();
 		const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -434,4 +437,24 @@ test('Bring your code works as the first project using the signed-in Home worksp
  await expect.poll(()=>reads.length).toBeGreaterThan(0);
  expect(reads.every(url=>new URL(url).searchParams.get('workspaceId')===HOME.workspaceId)).toBe(true);
  await context.close();
+});
+
+for (const width of [320, 390, 412]) test(`mobile project action pair fills its row at ${width}px`, async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width, height: 915 } });
+  await stubAccount(context);
+  const page = await context.newPage();
+  await page.goto(`${BASE}/app/projects`);
+  const first = page.getByRole('button', { name: 'New project', exact: true });
+  const second = page.getByRole('button', { name: 'Bring your code', exact: true });
+  await expect(first).toBeVisible();
+  const a = (await first.boundingBox())!;
+  const b = (await second.boundingBox())!;
+  const parent = await first.evaluate(el => el.parentElement!.getBoundingClientRect().toJSON());
+  expect(Math.abs(a.y - b.y)).toBeLessThan(2);
+  expect(Math.abs(a.width - b.width)).toBeLessThan(2);
+  expect(Math.abs(a.x - parent.x)).toBeLessThan(2);
+  expect(Math.abs(b.x + b.width - parent.right)).toBeLessThan(2);
+  expect(parent.width).toBeGreaterThan(width - 55);
+  expect(Math.min(a.height, b.height)).toBeGreaterThanOrEqual(44);
+  await context.close();
 });

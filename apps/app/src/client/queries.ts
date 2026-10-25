@@ -1,3 +1,4 @@
+import { experienceRefreshMs } from './refresh-policy.ts';
 import {
 	useMutation,
 	useQuery,
@@ -389,7 +390,7 @@ export function useProjectExperience(actor: ActorScope, projectId: string | null
 				`/api/projects/${encodeURIComponent(projectId ?? '')}/experience`,
 			),
 		enabled: actor.actorId !== null && projectId !== null,
-		refetchInterval: 3000,
+		refetchInterval: query => experienceRefreshMs(query.state.data),
 	});
 }
 

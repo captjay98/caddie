@@ -15,8 +15,28 @@ export function shouldRegisterServiceWorker(env: { production: boolean; pathname
 	return env.production && env.supported && (env.pathname === '/app' || env.pathname.startsWith('/app/'));
 }
 
+/** A production preview on the dev origin can leave an offline shell behind. */
+export async function unregisterDevelopmentWorker(workers: Pick<ServiceWorkerContainer, 'getRegistrations'>, origin: string): Promise<void> {
+	const registrations = await workers.getRegistrations();
+	for (const registration of registrations) {
+		const worker = registration.active ?? registration.waiting ?? registration.installing;
+		if (registration.scope === `${origin}${SERVICE_WORKER_SCOPE}` && worker?.scriptURL === `${origin}${SERVICE_WORKER_URL}`) {
+			// An owner who turned on push notifications in dev owns this worker:
+			// unregistering would orphan the subscription and kill its pushes.
+			try {
+				if (registration.pushManager && await registration.pushManager.getSubscription()) continue;
+			} catch { /* a locked-down pushManager is not a reason to keep the shell */ }
+			await registration.unregister();
+		}
+	}
+}
+
 export function registerServiceWorker(): void {
 	if (typeof window === 'undefined' || typeof navigator === 'undefined') return;
+	if (import.meta.env.DEV && 'serviceWorker' in navigator) {
+		void unregisterDevelopmentWorker(navigator.serviceWorker, window.location.origin).catch(() => {});
+		return;
+	}
 	const ok = shouldRegisterServiceWorker({
 		production: import.meta.env.PROD,
 		pathname: window.location.pathname,

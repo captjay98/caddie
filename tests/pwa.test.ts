@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { describe, expect, test } from 'bun:test';
-import { shouldRegisterServiceWorker } from '../apps/app/src/client/pwa.ts';
+import { shouldRegisterServiceWorker, unregisterDevelopmentWorker } from '../apps/app/src/client/pwa.ts';
 import {
 	SHARE_PARAMS,
 	SHARED_DRAFT_KEY,
@@ -585,4 +585,12 @@ describe('safe areas (apps/app/src/client/workspace.css)', () => {
 		const overlays = [...sheet.matchAll(/\.shell-right \{([^}]*)\}/g)].map((match) => match[1]!);
 		expect(overlays.some((body) => body.includes('position: fixed') && body.includes('var(--safe-top)') && body.includes('var(--safe-right)'))).toBe(true);
 	});
+});
+
+test('development retires only the Caddie production-preview worker on the same origin', async () => {
+  const removed: string[] = [];
+  const registration = (scope: string, scriptURL: string) => ({ scope, active: { scriptURL }, unregister: async () => { removed.push(scope); return true; } });
+  const registrations = [registration('http://localhost:5176/app/', 'http://localhost:5176/sw.js'), registration('http://localhost:5176/other/', 'http://localhost:5176/other.js'), registration('http://localhost:5176/app/', 'http://localhost:5176/other.js')];
+  await unregisterDevelopmentWorker({ getRegistrations: async () => registrations } as unknown as Parameters<typeof unregisterDevelopmentWorker>[0], 'http://localhost:5176');
+  expect(removed).toEqual(['http://localhost:5176/app/']);
 });

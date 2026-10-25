@@ -23,7 +23,7 @@ import { Icon } from "../icons.tsx";
  */
 
 const MOCK_LIMIT = 512 * 1024; // per screen
-const MAX_SCREENS = 6;
+const MAX_SCREENS = 32;
 const VIEWPORT = { phone: 390, desktop: 1280 } as const;
 type Device = keyof typeof VIEWPORT;
 
@@ -124,14 +124,29 @@ function MockStage(props: { doc: string; viewport: number; title: string; frameC
   );
 }
 
-export function DesignMockPreview(props: { mocks: DesignMock[]; theme?: AppTheme | null }): ReactElement | null {
+export function DesignMockPreview(props: { mocks: DesignMock[]; theme?: AppTheme | null; fullRequest?: number; onFullChange?: (full: boolean) => void; dialogOnly?: boolean }): ReactElement | null {
   const screens = props.mocks.slice(0, MAX_SCREENS);
   const [active, setActive] = useState(0);
   const [device, setDevice] = useState<Device>("phone");
   const [full, setFull] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
-  const index = Math.min(active, Math.max(screens.length - 1, 0));
+  // Requests are caller epochs: a mount WITH fullRequest>0 means "open now",
+  // so the marker starts at 0 and every new value opens once.
+  const lastRequest = useRef(0);  const index = Math.min(active, Math.max(screens.length - 1, 0));
   const current = screens[index] ?? null;
+
+  // A caller (e.g. a look card's preview overlay) can pop the dialog open:
+  // each NEW request value opens; closing reports back so the caller resets.
+  const request = props.fullRequest ?? 0;
+  useEffect(() => {
+    if (request > lastRequest.current) {
+      lastRequest.current = request;
+      setFull(true);
+    }
+  }, [request]);
+  useEffect(() => {
+    props.onFullChange?.(full);
+  }, [full, props.onFullChange]);
 
   const html = current?.html ?? "";
   const theme = props.theme ?? null;
@@ -157,6 +172,7 @@ export function DesignMockPreview(props: { mocks: DesignMock[]; theme?: AppTheme
 
   const controls = (prefix: string) => (
     <>
+      <label className="design-mock__screen-picker"><span>Screen</span><select aria-label={`${prefix === 'design-mock-full' ? 'Full size ' : ''}Screen`} value={index} onChange={event => setActive(Number(event.target.value))}>{screens.map((screen,i) => <option key={i} value={i}>{screen.title}</option>)}</select></label>
       {screens.length > 1 ? (
         <span className="disc-seg design-mock__screens" role="group" aria-label="Screen" data-testid={`${prefix}-screens`}>
           {screens.map((screen, i) => (
@@ -194,20 +210,20 @@ export function DesignMockPreview(props: { mocks: DesignMock[]; theme?: AppTheme
   );
 
   return (
-    <figure className="design-mock" data-testid="design-mock-preview" data-device={device}>
-      <figcaption className="kicker" data-tone="action">
-        a look at the design — a mockup, not the finished app
-      </figcaption>
-      <div className="design-mock__bar">
-        {controls("design-mock")}
-        <button type="button" className="btn-ghost design-mock__expand" data-testid="design-mock-full" onClick={() => setFull(true)}>
-          <Icon name="expand" title="" /> View full size
-        </button>
-      </div>
-      {tooLarge ? (
-        tooLargeNote
-      ) : (
-        <MockStage doc={doc} viewport={VIEWPORT[device]} title={current.title} frameClass="design-mock__frame" testId="design-mock-frame" />
+    <figure className={props.dialogOnly ? "design-mock design-mock--dialog-only" : "design-mock"} data-testid={props.dialogOnly ? undefined : "design-mock-preview"} data-device={device}>
+      {props.dialogOnly ? null : (
+        <>
+          <figcaption className="sr-only">Screen mockups</figcaption>
+          <div className="design-mock__bar">
+            {controls("design-mock")}
+            <button type="button" className="btn-ghost design-mock__expand" data-testid="design-mock-full" onClick={() => setFull(true)}>
+              <Icon name="expand" title="" /> View full size
+            </button>
+          </div>
+          {tooLarge ? tooLargeNote : (
+            <MockStage doc={doc} viewport={VIEWPORT[device]} title={current.title} frameClass="design-mock__frame" testId="design-mock-frame" />
+          )}
+        </>
       )}
       <dialog
         ref={dialog}
@@ -221,8 +237,10 @@ export function DesignMockPreview(props: { mocks: DesignMock[]; theme?: AppTheme
           <div className="design-mock__dialog-body">
             <div className="design-mock__bar">
               {controls("design-mock-full")}
-              <button type="button" className="btn-ghost design-mock__expand" data-testid="design-mock-close" onClick={() => setFull(false)}>
-                <Icon name="x" title="" /> Close
+              {/* Owner 2026-10-24: one compact control row — the x sits right of
+                  the device toggle; no caption, no separate Close button. */}
+              <button type="button" className="btn-ghost design-mock__close" data-testid="design-mock-close" aria-label="Close preview" onClick={() => setFull(false)}>
+                <Icon name="x" title="" />
               </button>
             </div>
             {tooLarge ? (

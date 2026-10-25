@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Project } from '@caddie/contracts';
 import { Markdown } from '@caddie/ui/Markdown';
@@ -12,6 +12,8 @@ import { RepositoryPicker, type SelectedRepository } from '../repositories/Repos
 import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
 import { useProjectRepo } from '../queries.ts';
 import { fetchJson, postJson } from '../api.ts';
+import { ProjectDialog } from '../project/ProjectDialog.tsx';
+import './project-settings.css';
 
 /**
  * Project settings (v2, HANDOFF §4 + §2 route table) — a NEW route at
@@ -29,7 +31,7 @@ export function ProjectSettingsPage(): ReactElement {
 		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col">
-					<ProjectGate2>{(projectId) => <ProjectSettingsBody projectId={projectId} />}</ProjectGate2>
+					<ProjectGate2>{(projectId) => <ProjectSettingsBody key={projectId} projectId={projectId} />}</ProjectGate2>
 				</div>
 			</div>
 		</>
@@ -62,14 +64,17 @@ function ProjectSettingsBody(props: { projectId: string }): ReactElement {
 	const navigate = useNavigate();
 	const [editOpen, setEditOpen] = useState(false);
 	const [archiveOpen, setArchiveOpen] = useState(false);
-	const [section, setSection] = useState<'general' | 'code' | 'routines' | 'knows' | 'archive'>('general');
-
-	// Old deep links land here with a hash (/schedules → #routines,
-	// /repositories → #code): open the section they name, not General.
+	const location = useLocation();
+	const hash = location.hash.replace(/^#/, '');
+	const explicitSection = ['general', 'code', 'routines', 'knows', 'archive'].includes(hash) ? hash : null;
+	const section = explicitSection ?? 'general';
+	const [visited, setVisited] = useState<Set<string>>(() => new Set([section]));
 	useEffect(() => {
-		const hash = window.location.hash.replace('#', '') as typeof section;
-		if (hash === 'code' || hash === 'routines' || hash === 'knows' || hash === 'archive') setSection(hash);
-	}, []);
+		setVisited((previous) => previous.has(section) ? previous : new Set([...previous, section]));
+	}, [section]);
+	function openSection(id: string) {
+		void navigate({ to: '/project/settings', search: { project: props.projectId }, hash: id });
+	}
 
 	if (!project) return <StatePanel kind="loading" title="Loading project settings…" />;
 
@@ -98,8 +103,15 @@ function ProjectSettingsBody(props: { projectId: string }): ReactElement {
 	const current = SECTIONS.find((s) => s.id === section)!;
 
 	return (
-		<div className="shell-page" data-testid="project-settings-screen">
-			<div className="settings-layout">
+		<div className="shell-page project-settings-page" data-testid="project-settings-screen">
+			<div className="settings-layout settings-account-layout project-settings-layout" data-detail={Boolean(explicitSection)}>
+				<header className="settings-mobile-index ps-index-head">
+					<button type="button" className="settings-back" onClick={() => chrome.goProjectTab('/project', { project: props.projectId })}>
+						<Icon name="arrowLeft" title="" /> Back to {project.name}
+					</button>
+					<h1 className="page-title">Project settings</h1>
+					<p className="page-lede">Make {project.name} work for you.</p>
+				</header>
 				<nav className="settings-rail" aria-label="Project settings sections" data-testid="ps-tabs">
 					<div className="settings-rail-group" role="group" aria-label={project.name}>
 						<p className="settings-rail-label" aria-hidden="true">{project.name}</p>
@@ -110,14 +122,18 @@ function ProjectSettingsBody(props: { projectId: string }): ReactElement {
 								className="settings-tab"
 								data-testid={`ps-tab-${s.id}`}
 								aria-current={section === s.id ? 'page' : undefined}
-								onClick={() => setSection(s.id)}
+								onClick={() => openSection(s.id)}
 							>
-								{s.label}
+								<span className="ps-section-label"><span>{s.label}</span><span className="ps-section-description">{s.lede}</span></span>
+								<span className="settings-section-chevron" aria-hidden="true">›</span>
 							</button>
 						))}
 					</div>
 				</nav>
 				<div className="settings-content" data-section={section}>
+					<button type="button" className="settings-back" data-testid="ps-section-back" onClick={() => openSection('')}>
+						<Icon name="arrowLeft" title="" /> Back to Project settings
+					</button>
 					<header className="settings-head">
 						{/* Back is always reachable — settings is one click from the
 						    project page and one click home (owner steering, 2026-10-15). */}
@@ -137,8 +153,8 @@ function ProjectSettingsBody(props: { projectId: string }): ReactElement {
 						<p className="page-lede">{current.lede}</p>
 					</header>
 
-					{section === 'general' ? (
-						<section className="settings-section-body ps-general-body" data-testid="ps-general">
+					{(visited.has('general') || section === 'general') ? (
+						<section className="settings-section-body ps-general-body" data-testid="ps-general" hidden={section !== 'general'}>
 							<div className="ps-field">
 								<span className="settings-field-label">Name</span>
 								<p className="ps-field-value">{project.name}</p>
@@ -163,26 +179,26 @@ function ProjectSettingsBody(props: { projectId: string }): ReactElement {
 						</section>
 					) : null}
 
-					{section === 'code' ? (
-						<section className="settings-section-body" data-testid="ps-code">
+					{(visited.has('code') || section === 'code') ? (
+						<section className="settings-section-body" data-testid="ps-code" hidden={section !== 'code'}>
 							<CodeSection project={project} />
 						</section>
 					) : null}
 
-					{section === 'routines' ? (
-						<section className="settings-section-body" data-testid="ps-routines">
+					{(visited.has('routines') || section === 'routines') ? (
+						<section className="settings-section-body" data-testid="ps-routines" hidden={section !== 'routines'}>
 							<Schedules projectId={props.projectId} embedded />
 						</section>
 					) : null}
 
-					{section === 'knows' ? (
-						<section className="settings-section-body" data-testid="ps-knows">
+					{(visited.has('knows') || section === 'knows') ? (
+						<section className="settings-section-body" data-testid="ps-knows" hidden={section !== 'knows'}>
 							<Memory embedded />
 						</section>
 					) : null}
 
-					{section === 'archive' ? (
-						<section className="settings-section-body" data-testid="ps-archive">
+					{(visited.has('archive') || section === 'archive') ? (
+						<section className="settings-section-body" data-testid="ps-archive" hidden={section !== 'archive'}>
 							<p className="state-detail">
 								Archiving hides the project from your lists and stops its routines. Nothing is
 								permanently deleted today.
@@ -237,12 +253,11 @@ function EditDescriptionWindow(props: {
 	}
 
 	return (
-		<div className="modal-backdrop" data-testid="edit-description-backdrop" onMouseDown={props.onClose}>
-			<div className="commit-panel card-surface" data-testid="edit-description-window" onMouseDown={(e) => e.stopPropagation()}>
+		<ProjectDialog open title="Describe the project" onClose={props.onClose}>
+			<div className="ps-dialog-body" data-testid="edit-description-window">
 				<p className="kicker" data-tone="action">
 					EDIT — WHAT IT IS
 				</p>
-				<h3 className="state-title">Describe the project</h3>
 				<p className="state-detail">Caddie uses this to stay on target. Changing it does not change an approved plan.</p>
 				<label className="kicker" htmlFor="ps-name">
 					Name
@@ -275,7 +290,7 @@ function EditDescriptionWindow(props: {
 					</button>
 				</div>
 			</div>
-		</div>
+		</ProjectDialog>
 	);
 }
 
@@ -554,12 +569,11 @@ function ArchiveWindow(props: {
 	}
 
 	return (
-		<div className="modal-backdrop" data-testid="archive-backdrop" onMouseDown={props.onClose}>
-			<div className="commit-panel card-surface" data-testid="archive-window" onMouseDown={(e) => e.stopPropagation()}>
+		<ProjectDialog open title={`Archive ${props.project.name}?`} onClose={props.onClose}>
+			<div className="ps-dialog-body" data-testid="archive-window">
 				<p className="kicker" data-tone="danger">
 					ARCHIVE PROJECT
 				</p>
-				<h3 className="state-title">Archive {props.project.name}?</h3>
 				<p className="state-detail">
 					It disappears from your lists and its routines stop. Nothing is permanently deleted; a
 					restored archive keeps its history.
@@ -589,6 +603,6 @@ function ArchiveWindow(props: {
 					</button>
 				</div>
 			</div>
-		</div>
+		</ProjectDialog>
 	);
 }

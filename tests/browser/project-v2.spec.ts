@@ -24,8 +24,8 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APP_DIR = join(REPO_ROOT, 'apps', 'app');
 const WORKER_BUNDLE = join(APP_DIR, 'dist', 'caddie_app', 'index.js');
-const PORT = 4173;
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = process.env.CADDIE_BROWSER_BASE ?? 'http://127.0.0.1:4173';
+const PORT = Number(new URL(BASE).port || 4173);
 const LOG = `/tmp/caddie-u06-browser-preview-${process.pid}.log`;
 
 let preview: ChildProcess | null = null;
@@ -214,6 +214,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		// The full brief is readable on the focused home, in the Project brief
 		// fold of the supporting details (it replaces the old overview "Read the
 		// full brief" card). The fold's text comes from the workflow brief.
+		await page.getByRole('button', { name: 'About this project' }).click();
 		const brief = page.getByTestId('project-supporting-details').locator('details', { has: page.getByText('Project brief', { exact: true }) });
 		await brief.locator('summary').click();
 		await expect(brief).toContainText('Build FarmLog AI.');
@@ -372,6 +373,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		// "what to build" prompt), and finished work folds under the project's
 		// "Earlier decisions & updates" section rather than shouting for action.
 		await expect(page.getByTestId('focused-project-home')).toContainText('What would you like to build?');
+		await page.getByRole('button', { name: 'About this project' }).click();
 		const recent = page.getByTestId('overview-recent');
 		await recent.locator('summary').click();
 		await expect(recent).toContainText('Build finished');
@@ -387,6 +389,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		// the inline preview inside the project-workflow card and is covered by
 		// project-workflow.spec.ts. What the focused home still owns here is the
 		// embedded to-do list; the create form hides behind the button.
+		await page.getByRole('button', { name: 'About this project' }).click();
 		await page.getByTestId('overview-todo').locator('summary').click();
 		await expect(page.getByTestId('tasks-panel')).toBeVisible();
 		await expect(page.getByTestId('task-create')).toHaveCount(0);
@@ -537,12 +540,13 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		// (Codex's single-panel redesign). Open it so the box-in-box scan covers
 		// the stage list too.
 		await expect(now.getByTestId('build-features')).toBeVisible();
-		await now.getByRole('group').filter({ has: page.getByText('Build details') }).locator('summary').click();
+		await now.getByRole('button',{name:'Build activity',exact:true}).click();
 		await expect(now.getByTestId('build-stages')).toBeVisible();
 		const found = await now.evaluate((card) => {
 			const boxes: string[] = [];
 			for (const el of Array.from(card.querySelectorAll('*'))) {
-				if (el.closest('button, a, input, textarea, select, summary, iframe, [role="button"]')) continue;
+				// Native dialogs live in the top layer, not inside the card visually.
+				if (el.closest('dialog, button, a, input, textarea, select, summary, iframe, [role="button"]')) continue;
 				const s = getComputedStyle(el);
 				if (!/^(block|flex|grid|list-item)$/.test(s.display)) continue;
 				const boxed = ['top', 'right', 'bottom', 'left'].every((side) => parseFloat(s.getPropertyValue(`border-${side}-width`)) >= 1 && s.getPropertyValue(`border-${side}-style`) !== 'none');
@@ -589,7 +593,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await expect(now).toContainText('Caddie stopped making progress on the build for 12 minutes');
 		await expect(now.getByRole('button', { name: 'Retry build' })).toBeVisible();
 		// Past builds and their record ids live under "Build history & files".
-		await page.getByTestId('project-build-resources').locator('summary').first().click();
+		await page.getByTestId('project-build-resources').getByRole('button').click();
 		await page.getByTestId('run-detail-toggle').click();
 		const details = page.getByTestId('run-details');
 		await expect(details.getByText('react-hono', {exact:true})).toBeHidden();
@@ -626,7 +630,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await page.goto(`${BASE}/app/runs?project=proj-a`);
 
 		// Build history & files live under their own section on the Build view.
-		await page.getByTestId('project-build-resources').locator('summary').first().click();
+		await page.getByTestId('project-build-resources').getByRole('button').click();
 
 		// Past builds are sentences, not "run 14" tokens.
 		await expect(page.getByTestId('run-row')).toContainText('Build request recorded');
@@ -643,6 +647,8 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		const win = page.getByTestId('change-request-window');
 		await expect(win).toBeVisible();
 		await page.getByTestId('change-request-text').fill('Add a dark mode toggle');
+		await expect(page.getByTestId('change-request-text')).toHaveValue('Add a dark mode toggle');
+		await expect(page.getByTestId('change-request-send')).toBeEnabled();
 		await page.getByTestId('change-request-send').click();
 		await expect(page).toHaveURL(/pane=channel/);
 		await expect(page.getByTestId('composer-input')).toHaveValue('Please change: Add a dark mode toggle');

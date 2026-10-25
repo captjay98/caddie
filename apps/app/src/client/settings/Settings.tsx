@@ -482,7 +482,19 @@ function PushEnable(): ReactElement {
 				setState(permission === 'denied' ? 'denied' : 'off');
 				return;
 			}
-			const reg = (await navigator.serviceWorker.getRegistration()) ?? (await navigator.serviceWorker.register('/sw.js', { scope: '/app/' }));
+			const reg = (await navigator.serviceWorker.getRegistration('/app/')) ?? (await navigator.serviceWorker.register('/sw.js', { scope: '/app/' }));
+			// pushManager.subscribe throws "no active Service Worker" unless the
+			// worker has finished activating — a fresh registration (dev
+			// deliberately unregisters at startup) is still installing here.
+			if (!reg.active) {
+				await new Promise<void>((resolve, reject) => {
+					const timer = setTimeout(() => reject(new Error('The notification worker did not activate. Reload the page and try again.')), 10_000);
+					const settle = () => { clearTimeout(timer); resolve(); };
+					void navigator.serviceWorker.ready.then(settle, reject);
+					const worker = reg.waiting ?? reg.installing;
+					if (worker) worker.addEventListener('statechange', () => { if (worker.state === 'activated') settle(); }, { once: true });
+				});
+			}
 			const sub = await reg.pushManager.subscribe({
 				userVisibleOnly: true,
 				applicationServerKey: vapidKeyToBytes(publicKey) as BufferSource,

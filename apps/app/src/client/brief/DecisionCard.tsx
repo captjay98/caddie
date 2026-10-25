@@ -1,3 +1,4 @@
+import './brief-polish.css';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import type { ReactElement } from 'react';
@@ -10,6 +11,7 @@ import { ReadyPeek } from './ReadyPeek.tsx';
 import { DecisionHistory } from './DecisionHistory.tsx';
 import { CardHeader, CardPanel, BuildRail, CardFooter } from './CardFrame.tsx';
 import { cardDesign, CARD_DESIGNS } from './card-design.ts';
+import { plainBlockingSummary } from '../plain-blocking.ts';
 
 /**
  * The typed brief card — feature-ledger row C6 (ADAPT/IMPROVE).
@@ -131,35 +133,18 @@ export function DecisionCardView(props: {
 	const design = cardDesign(card);
 	const [detailOpen, setDetailOpen] = useState(false);
 	const secondary = secondaryLabel(design);
-	// Earlier/history gets its own compact layout (mockup 7), not the big card.
+	// Resolved decisions use the same frame and actions as the current feed.
+	// Their headline carries the actual outcome; "Recorded" does not imply approval.
 	if (design === 'earlier') {
 		return (
-			<article
-				className="decision-card card-surface caddie-card"
-				data-testid="decision-card"
-				data-kind={card.kind}
-				data-design={design}
-				data-tone={CARD_DESIGNS[design].tone}
-				data-status={card.status}
-				data-seen={props.seen === true ? 'true' : 'false'}
-			>
-				<div className="compact-card-history-head">
-					<h3>Earlier</h3>
-					{props.contextLabel ? <span className="compact-card-history-label" data-testid="card-foot-subject">{props.contextLabel} · {formatTimeAgo(card.updatedAt, props.now)}</span> : <span className="compact-card-history-label">{formatTimeAgo(card.updatedAt, props.now)}</span>}
-				</div>
-				<div className="compact-card-record">
-					<span className="compact-card-record-mark" aria-hidden="true"><Icon name="check" title="" /></span>
-					<div className="compact-card-record-body">
-						<h4>{card.headline}</h4>
-						<p>{card.summary}</p>
-						<button type="button" className="detail-toggle" data-testid="card-primary-action" onClick={() => props.onAction?.(card)}>{card.primaryAction.label}</button>
-					</div>
-					<time>{formatTimeAgo(card.updatedAt, props.now)}</time>
-				</div>
-				<div className="compact-card-foot" data-testid="card-foot">
-					<span className="compact-card-foot-subject">1 completed update</span>
-					<span className="compact-card-foot-note">Read-only history</span>
-				</div>
+			<article className="decision-card card-surface caddie-card decision-card--record"
+				data-testid="decision-card" data-kind={card.kind} data-design={design}
+				data-tone={CARD_DESIGNS[design].tone} data-status={card.status}
+				data-seen={props.seen === true ? 'true' : 'false'}>
+				<CardHeader design={design} context={props.contextLabel} status="Recorded" freshLabel={formatTimeAgo(card.updatedAt, props.now)} />
+				<h3>{card.headline}</h3>
+				<p className="summary">{card.summary}</p>
+				<div className="actions"><button type="button" className="btn-ghost" data-testid="card-primary-action" onClick={() => props.onAction?.(card)}>{card.primaryAction.label}</button></div>
 			</article>
 		);
 	}
@@ -177,8 +162,10 @@ export function DecisionCardView(props: {
             {props.seen === false ? <span className="sr-only" data-testid="card-unseen">New</span> : null}
 			<h3>{card.headline}</h3>
 			{/* The lede (mockup `cc-copy`) sits under the title on every big card;
-			    the plan's feature list follows in its own panel. */}
-			<p className="summary">{card.summary}</p>
+			    the plan's feature list follows in its own panel. Owner 2026-10-25:
+			    a raw blocked-build report is compressed to one plain sentence —
+			    the full report stays in Details. */}
+			<p className="summary">{plainBlockingSummary(card.summary) ?? card.summary}</p>
 			{design === 'plan' && card.planItems && card.planItems.length > 0 ? (
 				<CardPanel title="What you’re approving">
 					<ul className="compact-card-list" data-testid="card-plan-items">
@@ -206,14 +193,32 @@ export function DecisionCardView(props: {
 								<h4 data-testid="card-build-current">Now: {card.build.current}</h4>
 							</div>
 						) : null}
+						{/* Owner 2026-10-25: the Brief card reports the state and the
+						    next steps — not the whole plan inventory (the Build tab
+						    carries that). The Now row already names the active feature,
+						    so the feed shows the features after it, capped at two, with
+						    one honest "N more" line into the Build tab. */}
 						<div className="compact-card-feed" data-testid="card-build-feed">
-							{card.build.features.map((feature, index) => (
-								<div key={index} className="compact-card-feed-row" data-state={feature.state} data-testid="card-build-feed-row">
-									<span className="compact-card-icon" aria-hidden="true"><Icon name={feature.state === 'built' ? 'check' : feature.state === 'building' ? 'play' : 'clock'} title="" /></span>
-									<span>{feature.title}</span>
-									<span className="compact-card-feed-state">{BUILD_STATE_LABEL[feature.state]}</span>
-								</div>
-							))}
+							{(() => {
+								// The Now line may or may not repeat a feature row; the
+								// remainder count comes from what is actually rendered.
+								const after = card.build!.features.filter(feature => feature.title !== card.build!.current);
+								const shown = after.slice(0, 2);
+								return <>
+									{shown.map((feature, index) => (
+										<div key={index} className="compact-card-feed-row" data-state={feature.state} data-testid="card-build-feed-row">
+											<span className="compact-card-icon" aria-hidden="true"><Icon name={feature.state === 'built' ? 'check' : feature.state === 'building' ? 'play' : 'clock'} title="" /></span>
+											<span>{feature.title}</span>
+											<span className="compact-card-feed-state">{BUILD_STATE_LABEL[feature.state]}</span>
+										</div>
+									))}
+									{after.length > shown.length ? (
+										<p className="compact-card-feed-more" data-testid="card-build-more">
+											{after.length - shown.length} more {after.length - shown.length === 1 ? 'feature' : 'features'} · View activity
+										</p>
+									) : null}
+								</>;
+							})()}
 						</div>
 					</div>
 					<p className="compact-card-live" data-testid="card-build-update">
@@ -712,7 +717,7 @@ export function AccountBriefV2(props: {
 								with one clear action.
 							</p>
 						</section>
-                        <details className="brief-done"><summary>Earlier decisions</summary><DecisionHistory existingIds={[]} names={projectName} onAction={props.onAction} /></details>
+                        <details className="brief-done"><summary><span>Earlier decisions</span><Icon name="chevronDown" title="" /></summary><DecisionHistory existingIds={[]} names={projectName} onAction={props.onAction} /></details>
                     </div>
                 ) : (
 					<div className="card-stack" data-testid="brief-new-user">
@@ -779,7 +784,7 @@ export function AccountBriefV2(props: {
 				{done.length > 0 || props.hasBuildProjects ? (
 					<details className="brief-done" data-testid="brief-done">
 						<summary>
-							Earlier · {done.length}
+							<span>Earlier · {done.length}</span><Icon name="chevronDown" title="" />
 						</summary>
 						<ul>
                             {done.map(card => <li key={card.id} data-testid="brief-done-item"><DecisionCardView card={card} seen={card.seen} contextLabel={projectName.get(card.projectId)} onAction={props.onAction} /></li>)}

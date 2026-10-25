@@ -1,5 +1,5 @@
 import { ProjectWorkflow } from './ProjectWorkflow.tsx';
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import type { ReactElement } from 'react';
 import type { FlueConversationMessage, FlueConversationPart } from '@flue/react';
 import { answerParts } from './answer-parts.ts';
@@ -20,7 +20,8 @@ import { useCurrentDecisionCard, useDecisionCardAction } from '../brief/actions.
 import { Composer } from './Composer.tsx';
 import type { ChannelDraft, ChannelSource } from './channel-store.ts';
 import { cleanAssistantText, sanitizeAssistantText } from './response-hygiene.ts';
-import { ReplyText } from './ReplyText.tsx';
+import { ReplyText, prepareReplyMarkdown } from './ReplyText.tsx';
+import { createMarkdownCache, MarkdownCacheProvider } from '@caddie/ui/Markdown';
 import { MemoryOffers } from './MemoryOffers.tsx';
 
 /** What a turn may do from inside the transcript. The rows are memoized, so
@@ -75,35 +76,26 @@ type ToolPart = Extract<FlueConversationPart, { type: 'dynamic-tool' }>;
  */
 type Turn = { role: 'user'; message: FlueConversationMessage } | { role: 'assistant'; messages: FlueConversationMessage[] };
 
-/**
- * The transcript performance fix (slowness / hangs / clicks not registering on
- * long project conversations): react-markdown parses every message, and a long
- * history blocks the main thread for seconds on each status change. We render
- * only the most recent slice by default and reveal the rest on demand.
- *
- * Windowing is on MESSAGES (not turns) because an assistant turn is a run of
- * consecutive assistant messages — cutting at a message boundary only ever
- * drops OLDER context and never splits the newest turn, which is what matters
- * for the live view. The split point is pulled back to the newest user message
- * at or before the cut, so the window always opens on a question, not mid-reply.
- */
+/** Bounded transcript pages. Normal boundaries prefer a question, but a very
+ * large assistant turn can continue across pages. The page anchor is a stable
+ * message id so new streaming messages cannot shift a page being read. */
 export const TRANSCRIPT_WINDOW = 40;
 
 export function windowMessages(
-	messages: readonly FlueConversationMessage[],
-	limit = TRANSCRIPT_WINDOW,
-	showAll = false,
-): { shown: FlueConversationMessage[]; hiddenCount: number } {
-	if (showAll || messages.length <= limit) return { shown: [...messages], hiddenCount: 0 };
-	let cut = messages.length - limit;
-	// Pull the cut back to a user message so the window starts on a question.
-	for (let i = cut; i < messages.length; i++) {
-		if (messages[i]?.role === 'user') {
-			cut = i;
-			break;
-		}
-	}
-	return { shown: messages.slice(cut), hiddenCount: cut };
+ messages: readonly FlueConversationMessage[], limit = TRANSCRIPT_WINDOW,
+ showAll = false, beforeId: string | null = null,
+): { shown: FlueConversationMessage[]; hiddenCount: number; newerCount: number } {
+ // A saved message id anchors a history page even while new replies arrive.
+ const anchor = beforeId === null ? -1 : messages.findIndex(message => message.id === beforeId);
+ const end = anchor < 0 ? messages.length : anchor;
+ if (showAll) return { shown: [...messages], hiddenCount: 0, newerCount: 0 };
+ let cut = Math.max(0, end - limit);
+ // Keep normal pages on a question where possible; a huge assistant turn
+ // may continue across pages, but must never defeat the rendering bound.
+ for (let i = cut; i < end; i++) {
+  if (messages[i]?.role === 'user') { cut = i; break; }
+ }
+ return { shown: messages.slice(cut, end), hiddenCount: cut, newerCount: messages.length - end };
 }
 
 function groupTurns(messages: readonly FlueConversationMessage[]): Turn[] {
@@ -166,6 +158,10 @@ function dayLabel(timestamp: string | undefined): string | null {
  * unmapped tool falls back to a neutral "Working" rather than leaking its id.
  */
 const TOOL_ACTION_LABELS: Record<string, { working: string; done: string }> = {
+  read_project_context: { working: 'Reading your project', done: 'Read your project' },
+  write_plan_note: { working: 'Saving the design', done: 'Saved the design' },
+  designer: { working: 'Designing the screens', done: 'Designed the screens' },
+  delegate: { working: 'Working with a specialist', done: 'Consulted a specialist' },
 	find_hackathons: { working: 'Searching for hackathons', done: 'Searched for hackathons' },
 	research: { working: 'Researching the web', done: 'Researched the web' },
 	hackathon_details: { working: 'Looking up that hackathon', done: 'Looked up that hackathon' },
@@ -184,7 +180,7 @@ const TOOL_ACTION_LABELS: Record<string, { working: string; done: string }> = {
 
 function toolActionLabel(toolName: string, done: boolean): string {
 	const entry = TOOL_ACTION_LABELS[toolName];
-	if (!entry) return done ? 'Worked' : 'Working';
+	if (!entry) return toolName.replace(/[_-]+/g, ' ').replace(/^./, char => char.toUpperCase());
 	return done ? entry.done : entry.working;
 }
 
@@ -206,6 +202,7 @@ function ToolBanner({ part }: { part: ToolPart }): ReactElement {
 }
 
 function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
+ const [open, setOpen] = useState(false);
 	const running = parts.some((part) => part.state === 'input-available');
 	const failed = parts.filter((part) => part.state === 'output-error').length;
 	const totalMs = parts.reduce((sum, part) => sum + (typeof part.durationMs === 'number' ? part.durationMs : 0), 0);
@@ -225,13 +222,22 @@ function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
 			? `${actionPhrase} · ${failed} didn't complete${secs ? ` · ${secs}s` : ''}`
 			: `${actionPhrase}${secs ? ` · ${secs}s` : ''}`;
 	return (
-		<details className="tool-strip" data-testid="tool-strip">
-			<summary>{summary}</summary>
-			{parts.map((part, index) => (
+		<details className="tool-strip" data-testid="tool-strip" onToggle={event => setOpen(event.currentTarget.open)}>
+			<summary role="button">{running ? "Working" : "Work summary"} · {actionPhrase}</summary>
+            {open ? <p className="state-detail">{summary}</p> : null}
+			{open ? parts.map((part, index) => (
 				<ToolBanner key={index} part={part} />
-			))}
+			)) : null}
 		</details>
 	);
+}
+
+function DataDisclosure({ part }: { part: FlueConversationPart }): ReactElement {
+ const [open, setOpen] = useState(false);
+ return <details className="tool-banner" data-testid="data-part" onToggle={event => setOpen(event.currentTarget.open)}>
+  <summary>Technical detail</summary>
+  {open ? <pre>{JSON.stringify((part as { data: unknown }).data, null, 2)}</pre> : null}
+ </details>;
 }
 
 function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement | null {
@@ -328,20 +334,13 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 		}
 		return <GuidedStepsCardView data={parsed.output} />;
 	}
-	// any other data-* part: display-only collapsed disclosure
-	const name = part.type.slice('data-'.length) || 'note';
-	return (
-		<details className="tool-banner" data-testid="data-part">
-			<summary>specialist data · {name}</summary>
-			<pre>{JSON.stringify((part as { data: unknown }).data, null, 2)}</pre>
-		</details>
-	);
+	return <DataDisclosure part={part} />;
 }
 
 /** Transcript rows with day dividers (Today / Yesterday / short date between
  *  day groups); per-message clocks live in title tooltips only. One row per
  *  TURN — a user message, or an assistant turn as one bubble. */
-function buildTranscriptRows(turns: ReturnType<typeof groupTurns>): ReactElement[] {
+function buildTranscriptRows(turns: ReturnType<typeof groupTurns>, arrivals: ReadonlySet<string>): ReactElement[] {
 	const rows: ReactElement[] = [];
   // A handoff may mention the same project again. Keep one live workspace
   // at its latest mention so previews cannot diverge across duplicate frames.
@@ -376,7 +375,7 @@ function buildTranscriptRows(turns: ReturnType<typeof groupTurns>): ReactElement
 		}
 		if (turn.role === 'user') {
 			const followsSameAuthor = prevAuthor === 'user';
-			rows.push(<UserRow key={turn.message.id} message={turn.message} followsSameAuthor={followsSameAuthor} />);
+			rows.push(<UserRow key={turn.message.id} message={turn.message} followsSameAuthor={followsSameAuthor} arriving={arrivals.has(turn.message.id)} />);
 			prevAuthor = 'user';
 			continue;
 		}
@@ -386,14 +385,15 @@ function buildTranscriptRows(turns: ReturnType<typeof groupTurns>): ReactElement
 			.filter((message) => message.parts.length > 0 || message.display === 'diagnostic');
 		if (messages.length === 0) continue;
 		const followsSameAuthor = prevAuthor === 'assistant';
-		rows.push(<AssistantTurn key={messages[0]!.id} messages={messages} followsSameAuthor={followsSameAuthor} />);
+		rows.push(<AssistantTurn key={messages[0]!.id} messages={messages} followsSameAuthor={followsSameAuthor} arriving={arrivals.has(messages[0]!.id)} />);
 		prevAuthor = 'assistant';
 	}
 	return rows;
 }
 
 /** The user's own message — right-aligned bubble, attachments listed. */
-function UserRow({ message, followsSameAuthor }: { message: FlueConversationMessage; followsSameAuthor?: boolean }): ReactElement {
+function UserRow({ message, followsSameAuthor, arriving }: { message: FlueConversationMessage; followsSameAuthor?: boolean; arriving?: boolean }): ReactElement {
+ const [expanded, setExpanded] = useState(false);
 	const clock = turnClock(message.timestamp);
 	const raw = message.parts
 		.filter((part): part is Extract<FlueConversationPart, { type: 'text' }> => part.type === 'text')
@@ -402,10 +402,11 @@ function UserRow({ message, followsSameAuthor }: { message: FlueConversationMess
 	const text = stripAttachedFileText(raw);
 	const files = attachedFileNames(raw);
 	return (
-		<div className="msg user" data-testid="msg-user" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(message.timestamp)}>
+		<div className="msg user" data-arriving={arriving || undefined} data-testid="msg-user" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(message.timestamp)}>
 			<span className="sr-only">You{clock ? ` at ${clock}` : ''}</span>
 			<div className="bubble">
-				{text}
+				{!expanded && text.length > 720 ? `${text.slice(0, 720)}…` : text}
+                {text.length > 720 ? <button type="button" className="btn-ghost message-read-more" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? "Show less" : "Read full message"}</button> : null}
 				{files.length ? (
 					<span className="bubble-files" data-testid="msg-user-files">
 						{text ? <br /> : null}
@@ -421,8 +422,9 @@ function UserRow({ message, followsSameAuthor }: { message: FlueConversationMess
  * outer frame; completed tool activity is a quiet disclosure, and active work
  * is represented by the channel's one status line. Internal reasoning is not
  * a transcript section. Specialist diagnostics remain explicitly foldable. */
-function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversationMessage[]; followsSameAuthor?: boolean }): ReactElement | null {
+function AssistantTurn({ messages, followsSameAuthor, arriving }: { messages: FlueConversationMessage[]; followsSameAuthor?: boolean; arriving?: boolean }): ReactElement | null {
 	const actions = useContext(TurnActions);
+    const [diagnosticOpen, setDiagnosticOpen] = useState(false);
 	const first = messages[0];
 	if (!first) return null;
 	const clock = turnClock(first.timestamp);
@@ -468,14 +470,14 @@ function AssistantTurn({ messages, followsSameAuthor }: { messages: FlueConversa
 
 	if (first.display === 'diagnostic') {
 		return (
-			<details className="msg assistant" data-testid="msg-diagnostic" data-seq={followsSameAuthor ? 'cont' : 'first'}>
-				<summary className="msg-meta kicker">Caddie · specialist diagnostic</summary>
-				<div className="bubble">{body}</div>
+			<details onToggle={event => setDiagnosticOpen(event.currentTarget.open)} className="msg assistant" data-testid="msg-diagnostic" data-seq={followsSameAuthor ? 'cont' : 'first'}>
+				<summary className="msg-meta kicker">Work summary &amp; tools</summary>
+				{diagnosticOpen ? <div className="bubble">{body}</div> : null}
 			</details>
 		);
 	}
 	return (
-		<div className="msg assistant" data-testid="msg-assistant" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(first.timestamp)}>
+		<div className="msg assistant" data-arriving={arriving || undefined} data-testid="msg-assistant" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(first.timestamp)}>
 			<span className="sr-only">Caddie{clock ? ` at ${clock}` : ''}</span>
 			<div className="bubble">{body}</div>
 		</div>
@@ -561,12 +563,46 @@ export function Channel(props: {
 	onDiscardDraft: (id: string) => void;
 }): ReactElement {
 	const { source, projectId } = props;
+    const waitingForHistory = source.messages.length === 0 && !source.historyReady;
+    const [slowHistory, setSlowHistory] = useState(false);
+    const [historyRetry, setHistoryRetry] = useState(0);
+    useEffect(() => {
+      setSlowHistory(false);
+      if (!waitingForHistory) return;
+      const timer = setTimeout(() => setSlowHistory(true), 10_000);
+      return () => clearTimeout(timer);
+    }, [waitingForHistory, projectId, historyRetry]);
+    const markdownCache = useMemo(() => createMarkdownCache(), [projectId]);
+    useEffect(() => { if (!source.historyReady) markdownCache.clear(); }, [source.historyReady, markdownCache]);
+    useEffect(() => () => markdownCache.clear(), [markdownCache]);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const pinnedToBottom = useRef(true);
     const [showLatest, setShowLatest] = useState(false);
     // Long conversations render only their recent slice (see windowMessages);
     // this reveals the whole history when the person asks for it.
-    const [showAllHistory, setShowAllHistory] = useState(false);
+    const [beforeMessage, setBeforeMessage] = useState<string | null>(null);
+    const [historyPending, changeHistory] = useTransition();
+    const historyNavigation = useRef(false);
+ const fetchingHistory = useRef(false);
+ const historyAtBottom = useRef(false);
+ const historyTouch = useRef<number | null>(null);
+ const olderCursor = useRef<string | null>(null);
+ const openEarlier = async (fromScroll = false) => {
+  if (historyPending || source.olderPending || fetchingHistory.current) return;
+  const first = shownMessages[0]?.id ?? null;
+  pinnedToBottom.current = false;
+  historyAtBottom.current = fromScroll;
+  if (hiddenCount > 0) {
+   historyNavigation.current = true;
+   changeHistory(() => setBeforeMessage(first));
+   return;
+  }
+  if (!source.hasOlder || !source.loadOlder) return;
+  fetchingHistory.current = true;
+  olderCursor.current = first;
+  try { await source.loadOlder(); } finally { fetchingHistory.current = false; }
+ };
+
 	// §3.6: leftover typing restored from an earlier visit is labelled until it
 	// is sent or cleared. "From earlier" = text is present and the user has not
 	// typed in this visit — any edit (or clearing) retires the label, and a
@@ -599,8 +635,15 @@ export function Channel(props: {
 
 	useEffect(() => {
 		const el = scrollRef.current;
-		if (el && pinnedToBottom.current) el.scrollTop = el.scrollHeight;
-	}, [source.messages, props.drafts, source.status]);
+		if (el && pinnedToBottom.current && beforeMessage === null) el.scrollTop = el.scrollHeight;
+	}, [source.messages, props.drafts, source.status, beforeMessage]);
+    useLayoutEffect(() => {
+        if (!historyNavigation.current) return;
+        if (scrollRef.current) scrollRef.current.scrollTop = historyAtBottom.current ? scrollRef.current.scrollHeight : 0;
+        historyAtBottom.current = false;
+        historyNavigation.current = false;
+    }, [beforeMessage]);
+    useEffect(() => { setBeforeMessage(null); pinnedToBottom.current = true; setShowLatest(false); }, [projectId]);
 
 	// One copy of each message (live finding, 2026-10-20). Flue shows its own
 	// copy the moment a message is sent (an id starting "local:"). While it is
@@ -611,17 +654,56 @@ export function Channel(props: {
 	const unsentKey = props.drafts.filter((d) => d.state === 'unsent').map((d) => d.text).join('\u0000');
 	const allShownMessages = useMemo(() => {
 		const unsent = unsentKey ? unsentKey.split('\u0000') : [];
-		if (unsent.length === 0 || failedIds.size === 0) return source.messages;
-		return source.messages.filter(
+		const readable = source.messages.filter(message => message.display !== 'hidden' && (message.role === 'user' || message.role === 'assistant'));
+		if (unsent.length === 0 || failedIds.size === 0) return readable;
+		return readable.filter(
 			(message) => !(message.role === 'user' && failedIds.has(String(message.id)) && unsent.some((text) => sameSend(userText(message), text))),
 		);
 	}, [source.messages, failedIds, unsentKey]);
 	// Only the recent slice is parsed and rendered unless the person opens the
 	// whole history — this is the fix for the long-conversation hang.
-	const { shown: shownMessages, hiddenCount } = useMemo(
-		() => windowMessages(allShownMessages, TRANSCRIPT_WINDOW, showAllHistory),
-		[allShownMessages, showAllHistory],
+	const { shown: shownMessages, hiddenCount, newerCount } = useMemo(
+		() => windowMessages(allShownMessages, TRANSCRIPT_WINDOW, false, beforeMessage),
+		[allShownMessages, beforeMessage],
 	);
+    // Predict only the adjacent history page, not the whole conversation.
+    // Parsing runs in small idle slices and is cancelled on scope/page changes.
+    useEffect(() => {
+      if (!source.historyReady || source.status === 'streaming' || !hiddenCount) return;
+      const adjacent = windowMessages(allShownMessages, TRANSCRIPT_WINDOW, false, shownMessages[0]?.id ?? null).shown;
+      const jobs = adjacent.filter(message => message.role === 'assistant').flatMap(message => message.parts)
+        .filter((part): part is Extract<FlueConversationPart, {type:'text'}> => part.type === 'text' && part.state !== 'streaming');
+      let index = 0, cancelled = false, idle = 0;
+      const hasIdle = typeof window.requestIdleCallback === 'function';
+      const schedule = () => { idle = hasIdle ? window.requestIdleCallback(step, { timeout: 1000 }) : window.setTimeout(() => step(), 32); };
+      const step = (deadline?: IdleDeadline) => {
+        if (cancelled || document.hidden) return;
+        if (deadline && !deadline.didTimeout && deadline.timeRemaining() < 4) { schedule(); return; }
+        const part = jobs[index++];
+        if (part) prepareReplyMarkdown(markdownCache, part.text);
+        if (index < jobs.length) schedule();
+      };
+      if (jobs.length) schedule();
+      return () => { cancelled = true; if (hasIdle) window.cancelIdleCallback(idle); else clearTimeout(idle); };
+    }, [allShownMessages, shownMessages, hiddenCount, source.historyReady, source.status, markdownCache]);
+ useLayoutEffect(() => {
+  const target = olderCursor.current;
+  if (!target || source.olderPending || !allShownMessages.some(message => message.id !== target)) return;
+  const first = allShownMessages[0];
+  if (!first || first.id === target) return;
+  olderCursor.current = null;
+  historyNavigation.current = true;
+  setBeforeMessage(target);
+ }, [allShownMessages, source.olderPending]);
+ useEffect(() => { if (source.olderError) olderCursor.current = null; }, [source.olderError]);
+ // Initial SDK pages can contain only internal activity. Backfill a small
+ // readable context without claiming an active but empty chat is brand new.
+ useEffect(() => {
+  if (!source.historyReady || source.olderPending || source.olderError || !source.hasOlder || !source.loadOlder) return;
+  const readable = allShownMessages.filter(message => message.display !== 'hidden' && (message.role === 'user' || message.role === 'assistant')).length;
+  if (readable < 8) void source.loadOlder();
+ }, [source.historyReady, source.olderPending, source.olderError, source.hasOlder, source.loadOlder, allShownMessages]);
+
 	const visibleDrafts = useMemo(() => {
 		const onTheirWay = source.messages
 			.filter((message) => message.role === 'user' && String(message.id).startsWith('local:') && !failedIds.has(String(message.id)))
@@ -638,16 +720,29 @@ export function Channel(props: {
 	const onSendRef = useRef(props.onSend);
 	onSendRef.current = props.onSend;
 	const turnActions = useMemo(() => ({ ask: (text: string) => onSendRef.current(text, []), live: ['connecting', 'submitted', 'streaming'].includes(source.status) }), [source.status]);
+    const knownMessages = useRef<Set<string> | null>(null);
+    const [arrivals, setArrivals] = useState<ReadonlySet<string>>(new Set());
+    useEffect(() => {
+      if (!source.historyReady) { knownMessages.current = null; return; }
+      const ids = new Set(source.messages.map(message => message.id));
+      if (knownMessages.current === null) { knownMessages.current = ids; return; }
+      const added = new Set([...ids].filter(id => !knownMessages.current!.has(id)));
+      knownMessages.current = ids;
+      if (!added.size || beforeMessage !== null) return;
+      setArrivals(added);
+      const timer = setTimeout(() => setArrivals(new Set()), 200);
+      return () => { clearTimeout(timer); setArrivals(new Set()); };
+    }, [source.messages, source.historyReady, beforeMessage]);
 	const transcriptRows = useMemo(
-		() => buildTranscriptRows(groupTurns(shownMessages)),
-		[shownMessages],
+		() => buildTranscriptRows(groupTurns(shownMessages), arrivals),
+		[shownMessages, arrivals],
 	);
 	const admittedUserMessages = useMemo(
 		() => source.messages.filter((message) => message.role === 'user' && !String(message.id).startsWith('local:')).length,
 		[source.messages],
 	);
 
-	const live = source.status === 'connecting' || source.status === 'submitted' || source.status === 'streaming';
+	const live = source.historyReady && (source.status === 'submitted' || source.status === 'streaming');
 	const latestSettlement = source.settlements.at(-1);
 	const settledFailed = !live && latestSettlement && latestSettlement.outcome !== 'completed' ? [latestSettlement] : [];
 
@@ -693,19 +788,25 @@ export function Channel(props: {
 
 
 	return (
-		<HackathonDetailProvider value={{ openDetail: (candidate) => setDetailCandidate(candidate) }}>
+		<MarkdownCacheProvider value={markdownCache}>
+        <HackathonDetailProvider value={{ openDetail: (candidate) => setDetailCandidate(candidate) }}>
 		<div className="channel-pane" data-testid="channel" data-transport-status={source.status}>
 			<div
 				className="transcript"
 				data-testid="channel-transcript"
 				ref={scrollRef}
+                onWheel={event => { if (event.deltaY < 0 && event.currentTarget.scrollTop < 64) void openEarlier(true); }}
+                onTouchStart={event => { historyTouch.current = event.touches[0]?.clientY ?? null; }}
+                onTouchMove={event => { const y = event.touches[0]?.clientY; if (y !== undefined && historyTouch.current !== null && y > historyTouch.current && event.currentTarget.scrollTop < 64) void openEarlier(true); historyTouch.current = y ?? null; }}
+                onKeyDown={event => { if (['PageUp','Home','ArrowUp'].includes(event.key) && event.currentTarget.scrollTop < 64) void openEarlier(true); }}
 				onScroll={(event) => {
 					const el = event.currentTarget;
 					pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
                     setShowLatest(!pinnedToBottom.current);
+
 				}}
 			>
-				{source.messages.length === 0 && !props.hideEmptyState ? (
+				{waitingForHistory ? source.error || slowHistory ? <div className="conversation-load-recovery" role="status" data-testid="conversation-load-recovery"><strong>{source.error ? 'Your conversation could not be loaded.' : 'Your conversation is taking longer to load.'}</strong><p>The project status below is separate from your chat history.</p>{source.refresh ? <button type="button" className="btn-ghost" onClick={() => { setHistoryRetry(value => value + 1); source.refresh?.(); }}>Reload conversation</button> : null}</div> : <p className="state-detail" role="status">Loading your conversation…</p> : source.messages.length === 0 && !props.hideEmptyState ? (
 					<StatePanel
 						kind="empty"
 						title={props.emptyTitle ?? "Say hello — your first message starts a run"}
@@ -717,17 +818,21 @@ export function Channel(props: {
 					/>
 ) : (
 						<TurnActions.Provider value={turnActions}>
-							{hiddenCount > 0 ? (
+							{hiddenCount > 0 || source.hasOlder ? (
 								<button
 									type="button"
 									className="btn-ghost channel-show-earlier"
 									data-testid="channel-show-earlier"
-									onClick={() => setShowAllHistory(true)}
+									disabled={historyPending || source.olderPending}
+                                    aria-busy={historyPending || source.olderPending}
+                                    onClick={() => void openEarlier()}
 								>
-									Show {hiddenCount} earlier {hiddenCount === 1 ? "message" : "messages"}
+									{historyPending || source.olderPending ? "Opening earlier messages…" : hiddenCount > 0 ? `Show earlier messages · ${hiddenCount} remaining` : "Load earlier messages"}
 								</button>
 							) : null}
-							{transcriptRows}
+							{source.olderError ? <p className="state-detail" role="alert">Earlier messages could not be loaded. Use “Load earlier messages” to try again.</p> : null}
+                            {newerCount > 0 ? <p className="channel-history-note" role="status">Earlier conversation · {newerCount} newer messages <button type="button" className="btn-ghost" disabled={historyPending} onClick={() => { const next = allShownMessages[allShownMessages.length - newerCount + TRANSCRIPT_WINDOW]; historyNavigation.current = true; changeHistory(() => setBeforeMessage(next?.id ?? null)); }}>Newer messages</button></p> : null}
+                            {transcriptRows}
 						</TurnActions.Provider>
 					)}
 
@@ -751,10 +856,10 @@ export function Channel(props: {
 				    each time another of their messages is admitted (Flue's own
 				    "local:" copy is not yet admitted). */}
 				{/* The model can propose a memory after admission, during its turn. */}
-      <MemoryOffers projectId={projectId} refreshKey={`${admittedUserMessages}:${source.settlements.length}`} />
+      {newerCount === 0 ? <MemoryOffers projectId={projectId} refreshKey={`${admittedUserMessages}:${source.settlements.length}`} /> : null}
 
-				<ProjectWorkflow key={projectId} projectId={projectId} showTranscript={false}/>
-				{live ? (
+				{newerCount === 0 ? <ProjectWorkflow key={projectId} projectId={projectId} showTranscript={false}/> : null}
+				{live && newerCount === 0 ? (
 					<div className="channel-activity" role="status" data-testid="channel-status">
 						<span className="channel-activity-dot" aria-hidden="true" />
 						<span className="channel-activity-label">
@@ -793,12 +898,12 @@ export function Channel(props: {
 					/>
 				))}
 			</div>
-            {showLatest ? <button type="button" className="btn-ghost channel-jump-latest" onClick={() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; pinnedToBottom.current = true; setShowLatest(false); }}>Back to latest</button> : null}
+            {showLatest || newerCount > 0 ? <button type="button" data-testid="channel-jump-latest" className="btn-ghost channel-jump-latest" onClick={() => { setBeforeMessage(null); const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; pinnedToBottom.current = true; setShowLatest(false); }}>Back to latest</button> : null}
 			{!props.composerHidden ? (
 				<Composer
 					onSend={props.onSend}
-					disabled={live}
-					disabledReason={live ? 'A run is working — wait for it to settle.' : undefined}
+					busy={live}
+
 					value={props.composerText}
 					onValueChange={handleComposerTextChange}
 					draftNote={draftNote ? (props.composerNote ?? 'Draft from earlier · not sent yet') : undefined}
@@ -818,5 +923,6 @@ export function Channel(props: {
 			/>
 		) : null}
 		</HackathonDetailProvider>
+        </MarkdownCacheProvider>
 	);
 }

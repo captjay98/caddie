@@ -3725,7 +3725,7 @@ a.btn-ghost.topbar-nav-link {
 	height: min(92vh, 1000px);
 	max-width: none;
 	max-height: none;
-	padding: 1rem;
+	padding: 10px;
 	border: 1px solid var(--color-line);
 	border-radius: 14px;
 	background: var(--color-panel);
@@ -3737,9 +3737,15 @@ a.btn-ghost.topbar-nav-link {
 .design-mock__dialog-body {
 	display: grid;
 	grid-template-rows: auto minmax(0, 1fr);
-	gap: 0.75rem;
+	gap: 8px;
 	height: 100%;
 }
+/* Owner 2026-10-24: the preview itself is the content — one compact bar
+   carries the honesty note and the controls, everything else is stage. */
+.design-mock--dialog-only { margin: 0; display: contents; }
+.design-mock__dialog .design-mock__bar { flex-wrap: wrap; gap: 8px; align-items: center; }
+.design-mock__dialog .design-mock__close { min-width: 44px; min-height: 44px; justify-content: center; }
+
 .design-mock__dialog .design-mock__stage {
 	min-height: 0;
 	height: 100%;
@@ -8450,6 +8456,189 @@ mark {
 	color: var(--color-danger);
 }
 
+/* Build activity → Files & commands (Option 2, owner 2026-10-25): an honest
+   summary banner over a count ring, then two stacked cards (Files, Commands).
+   A non-technical builder reads WHAT was built, with a one-line purpose per
+   file; the exact command feed stays, folded of its ls/pwd noise. */
+.build-activity-view {
+	display: flex;
+	flex-direction: column;
+	gap: 0.85rem;
+	min-width: 0;
+}
+.build-activity-banner {
+	display: flex;
+	align-items: center;
+	gap: 0.85rem;
+	padding: 0.85rem 1rem;
+	border: 1px solid var(--color-line-soft);
+	border-radius: 10px;
+	background: var(--card-gradient);
+}
+.build-activity-ring {
+	flex: none;
+	width: 46px;
+	height: 46px;
+	border-radius: 50%;
+	display: grid;
+	place-items: center;
+	/* a full ring (ok) or a three-quarter ring (something needs attention) */
+	background: conic-gradient(var(--color-ok) 0 100%, var(--color-line-soft) 0);
+}
+.build-activity-banner[data-tone='warn'] .build-activity-ring {
+	background: conic-gradient(var(--color-warn) 0 78%, var(--color-line-soft) 0);
+}
+.build-activity-ring > span {
+	width: 36px;
+	height: 36px;
+	border-radius: 50%;
+	background: var(--color-panel);
+	display: grid;
+	place-items: center;
+	font-size: 0.95rem;
+	font-weight: 700;
+	color: var(--color-bright);
+}
+.build-activity-banner h3 {
+	margin: 0 0 0.15rem;
+	font-size: 0.95rem;
+	font-weight: 600;
+	line-height: 1.35;
+	color: var(--color-bright);
+}
+.build-activity-banner p {
+	margin: 0;
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+	line-height: 1.5;
+}
+/* The two cards: a raised surface each, never nested in another card. */
+.build-activity-card {
+	background: var(--color-panel);
+	border: 1px solid var(--color-line-soft);
+	border-radius: 10px;
+	padding: 0.85rem 1rem;
+	min-width: 0;
+}
+.build-activity-card-head {
+	display: flex;
+	align-items: baseline;
+	gap: 0.5rem;
+	margin: 0 0 0.6rem;
+	font-size: var(--r-meta);
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--color-muted);
+}
+.build-activity-card-sub {
+	font-weight: 400;
+	text-transform: none;
+	letter-spacing: 0;
+	color: var(--color-muted);
+}
+.build-activity-card-n {
+	margin-left: auto;
+	font-family: var(--font-mono);
+	font-weight: 400;
+	color: var(--color-muted);
+}
+.build-activity-note {
+	margin: 0 0 0.5rem;
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+	line-height: 1.5;
+}
+.build-activity-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+}
+.build-activity-list li {
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr) auto;
+	column-gap: 0.7rem;
+	align-items: center;
+	padding: 0.55rem 0;
+	border-bottom: 1px solid var(--color-line-soft);
+	min-width: 0;
+}
+.build-activity-list li:last-child {
+	border-bottom: 0;
+}
+.build-activity-mark {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	flex: none;
+	color: var(--color-muted);
+}
+.build-activity-mark svg {
+	width: 16px;
+	height: 16px;
+}
+.build-activity-list li[data-area='test'] .build-activity-mark {
+	color: var(--color-ok);
+}
+.build-activity-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	flex: none;
+	margin: 0 5px;
+	background: var(--color-line-soft);
+}
+.build-activity-list li[data-outcome='ok'] .build-activity-dot {
+	background: var(--color-ok);
+}
+.build-activity-list li[data-outcome='failed'] .build-activity-dot {
+	background: var(--color-danger);
+}
+.build-activity-body {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+}
+.build-activity-mono {
+	font-family: var(--font-mono);
+	font-size: var(--r-meta);
+	color: var(--color-bright);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.build-activity-why {
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.build-activity-meta {
+	flex: none;
+	font-size: var(--r-meta);
+	font-family: var(--font-mono);
+	color: var(--color-muted);
+	white-space: nowrap;
+	align-self: center;
+}
+.build-activity-trivial {
+	margin-top: 0.5rem;
+	font-size: var(--r-meta);
+	color: var(--color-muted);
+}
+.build-activity-trivial > summary {
+	cursor: pointer;
+	min-height: 32px;
+	align-content: center;
+	color: var(--color-muted);
+}
+
 /* Power-user drill-down: files + commands, two columns on wide screens. */
 .build-detail {
 	display: grid;
@@ -8676,8 +8865,10 @@ mark {
 }
 .project-card-foot-meta {
 	min-width: 0;
-	display: grid;
-	gap: 0.2rem;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px 10px;
 }
 .project-card-updated {
 	font-size: 11px;
@@ -8708,7 +8899,7 @@ mark {
 .project-card-contest {
 	display: flex;
 	align-items: center;
-	flex-wrap: wrap;
+	flex-wrap: nowrap;
 	gap: 0.35rem;
 	margin: 0;
 	font-size: 12.5px;
@@ -9137,7 +9328,22 @@ mark {
 .compact-card-panel[data-panel-tone="caution"] { background:color-mix(in srgb, var(--color-warn, #c28b34) 7%, var(--color-panel)); }
 /* Deadline countdown (mockup `cc-countdown`): a big days-left number beside the
  * readable date, on an accent-tinted panel. Amber via the card's deadline tone. */
+/* Owner 2026-10-25: the capped build feed ends with one quiet "N more" line. */
+.compact-card-feed-more { margin: 6px 0 0; font-size: 12.5px; color: var(--color-muted); }
 .compact-card-countdown { display:flex; align-items:center; gap:22px; margin-top:18px; padding:18px; border-radius:10px; background:color-mix(in srgb, var(--card-accent, var(--color-action)) 8%, var(--color-panel)); }
+/* Owner 2026-10-25: less shell on phones — the card's own padding and its
+   interior rows tighten together so the content, not the frame, fills the
+   screen. Touch targets stay >= 44px. */
+@media (max-width: 760px) {
+  .decision-card.caddie-card { padding: 14px; border-radius: 12px; }
+  .decision-card.caddie-card h3 { margin: 6px 0 2px; }
+  .decision-card.caddie-card .summary { margin: 0 0 4px; }
+  .decision-card.caddie-card .compact-card-head { margin-bottom: 2px; }
+  .compact-card-countdown { margin-top: 10px; padding: 10px 12px; gap: 12px; }
+  .compact-card-when { padding-left: 10px; }
+  .decision-card.caddie-card .actions { margin-top: 10px; gap: 8px; }
+  .decision-card.caddie-card .compact-card-foot { margin-top: 10px; }
+}
 .compact-card-days { display:flex; flex-direction:column; align-items:center; min-width:58px; font-size:12px; color:var(--card-accent, var(--color-action)); }
 .compact-card-days b { font-size:42px; font-weight:600; line-height:1.1; letter-spacing:-.06em; }
 .compact-card-when { min-width:0; border-left:1px solid color-mix(in srgb, var(--card-accent, var(--color-action)) 25%, transparent); padding-left:19px; }
@@ -9550,7 +9756,13 @@ mark {
 .project-card-tile { width:36px; height:36px; border-radius:11px; }
 .project-card .project-card-pill { border:0; background:none; box-shadow:none; padding:4px 0; border-radius:0; white-space:normal; justify-content:flex-end; font-size:12px; line-height:1.4; max-width:48%; text-align:right; }
 .project-card-purpose { font-size:14px; line-height:1.55; margin:0; -webkit-line-clamp:2; }
-.project-card-contest { font-size:12px; line-height:1.4; margin:0; }
+.project-card-contest { font-size:12px; line-height:1.4; margin:0; flex: 1 1 auto; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.project-card-contest .project-card-due { margin-left: auto; }
+.project-card-contest:not(:has(.project-card-due)) .project-card-updated { margin-left: auto; }
+.project-card-contest-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Owner 2026-10-25: "Updated N ago" folds into the contest row, right after
+   the due pill — one footer line, not two. */
+.project-card-updated { white-space: nowrap; }
 .project-card-detail { font-size:13px; line-height:1.5; color:var(--color-muted); margin:0; }
 .project-card-foot { margin:2px -18px -18px; padding:12px 18px; border-top:1px solid var(--color-line-soft); border-radius:0 0 13px 13px; background:var(--color-raised); gap:12px; }
 .project-card-foot .btn-key { min-height:38px; font-size:13px; padding:7px 14px; background:transparent; color:var(--color-action); border:1px solid color-mix(in srgb, var(--color-action) 45%, var(--color-line)); box-shadow:none; }
@@ -9607,7 +9819,9 @@ mark {
    so the outer content wrapper must NOT card too — two padded boxes doing one
    job steals ~26px of width on a phone. Flatten the wrapper whenever a plan
    review is inside it (directly, or inside the workspace's .project-workflow). */
-.focused-project-content:has(.plan-review) {
+.focused-project-content:has(.plan-review),
+.focused-project-content:has(> .project-workflow[data-phase='looks-review']),
+.focused-project-content:has(> .saved-design) {
 	border:0; background:none; border-radius:0; padding:0;
 }
 .focused-project-content > .project-workflow,
@@ -10516,14 +10730,65 @@ mark {
    paints with ITS OWN theme, which is the point of the feature. The approved
    mock lives at docs/reviews/2026-10-23-look-and-feel-picker. */
 .look-picker { margin-top: 4px; }
-.look-for { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 4px 0 0; font-size: 14px; color: var(--color-muted); }
+.look-for { display: grid; gap: 2px; margin: 4px 0 0; font-size: 14px; color: var(--color-muted); }
 .look-for b { color: var(--color-bright); font-weight: 600; }
-.look-for .look-for-change { min-height: 44px; display: inline-flex; align-items: center; }
+/* Owner 2026-10-24: "Change" sits opposite its label on one quiet row, not
+   dangling at the end of the audience sentence. */
+.look-for-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.look-for-label { font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.look-for .look-for-change { min-height: 44px; display: inline-flex; align-items: center; padding: 0 2px; border: 0; background: none; color: var(--color-action); font-size: 13px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.look-for .look-for-change:hover:enabled { text-decoration-thickness: 2px; }
+
+/* Owner 2026-10-24: one heading row on the looks step — the status badge sits
+   opposite "Choose a look" instead of stacking a second header above it. */
+[data-phase='looks-review'].project-workflow { position: relative; }
+[data-phase='looks-review'] .compact-card-head { position: absolute; top: 12px; right: 14px; }
+[data-phase='looks-review'] .compact-card-kicker { display: none; }
+[data-phase='looks-review'] .workflow-heading { margin-top: 2px; }
+/* Owner 2026-10-24 (padding/nesting): the looks step dissolves the card-in-card —
+   the option is not its own padded bordered surface inside the project card;
+   only the preview itself gets a thin frame. */
+.look-option { position: relative; display: flex; flex-direction: column; border: 0; background: none; border-radius: 0; padding: 0; gap: 8px; color: var(--color-bright); cursor: pointer; min-width: 0; }
+.look-option:has(input:checked) { border-color: transparent; box-shadow: none; }
+.look-app-wrap { border: 1px solid var(--color-line); border-radius: 12px; overflow: hidden; }
+.look-open-full:focus-visible { outline-offset: -4px; border-radius: 12px; }
+.look-text { padding: 0 2px; }
+[data-phase='looks-review'].project-workflow.caddie-card { padding: 14px; }
+/* Owner (second pass): on a phone the card chrome is GONE on this step and
+   the preview fills the page container exactly — no card padding, no extra
+   insets, and the vertical rhythm is tightened (the 16px page gutter is the
+   only horizontal space). */
+@media (max-width: 760px) {
+  [data-phase='looks-review'].project-workflow.caddie-card { padding: 0; border: 0; background: none; box-shadow: none; }
+  [data-phase='looks-review'] .compact-card-head { top: 4px; right: 0; }
+  /* Owner (third pass): one heading line, not two — the kicker row goes. */
+  [data-phase='looks-review'] .workflow-heading { margin: 0 0 2px; }
+  [data-phase='looks-review'] .workflow-heading .kicker { display: none; }
+  [data-phase='looks-review'] .workflow-heading h3 { margin: 0; font-size: 19px; }
+  [data-phase='looks-review'] .look-picker { display: grid; gap: 8px; }
+  [data-phase='looks-review'] .look-for { margin-top: 0; }
+  .look-switch { margin: 0; padding: 2px; }
+  .look-options { margin-top: 0; }
+  .look-app-wrap { border-radius: 0; border-inline: 0; }
+  .look-text { padding: 0; margin-top: 0; }
+  .look-next { margin-top: 0; gap: 8px; }
+}
 
 .look-options { border: 0; margin: 20px 0 0; padding: 0; min-width: 0; }
-.look-track { position: relative; display: grid; grid-template-columns: repeat(var(--look-count, 3), minmax(0, 1fr)); gap: 22px 16px; }
-.look-switch { display: none; }
-.look-option { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 12px; border: 1px solid var(--color-line); border-radius: 16px; background: var(--color-panel); color: var(--color-bright); cursor: pointer; min-width: 0; }
+/* Owner 2026-10-24: one full-width look at a time at EVERY width — the tabs
+   above say there is more than one, the track scrolls between them, and a
+   card never shares its row with a neighbour's edge. */
+.look-track { position: relative; display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+.look-track::-webkit-scrollbar { display: none; }
+.look-option { flex: 0 0 100%; scroll-snap-align: start; }
+.look-switch { display: flex; gap: 4px; margin: 16px 0 0; padding: 4px; border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-panel); }
+.look-switch button { flex: 1; min-height: 44px; padding: 0 6px; border: 0; border-radius: 10px; background: transparent; color: var(--color-muted); font: inherit; font-size: 13px; font-weight: 600; }
+.look-switch button[aria-pressed="true"] { background: var(--color-raised); color: var(--color-bright); box-shadow: inset 0 0 0 1px var(--color-action); }
+.look-app-wrap { position: relative; display: block; min-width: 0; }
+.look-open-full { position: absolute; inset: 0; border: 0; padding: 0; background: transparent; color: var(--color-bright); cursor: zoom-in; display: flex; align-items: flex-start; justify-content: flex-end; }
+.look-open-full svg { opacity: 0; margin: 8px; transition: opacity .12s ease; }
+.look-option:hover .look-open-full svg, .look-open-full:focus-visible svg { opacity: .9; }
+.look-open-full:focus-visible { outline: 2px solid var(--color-action); outline-offset: -2px; border-radius: 10px; }
 .look-option input { position: absolute; opacity: 0; pointer-events: none; }
 .look-option:has(input:checked) { border-color: var(--color-action); box-shadow: 0 0 0 1px var(--color-action); }
 .look-option:has(input:focus-visible) { outline: 2px solid var(--color-action); outline-offset: 3px; }
@@ -10551,19 +10816,27 @@ mark {
 .look-next label span { font-weight: 400; color: var(--color-muted); }
 .look-next textarea { font: inherit; font-size: 15px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--color-line); background: var(--color-raised); color: var(--color-bright); resize: vertical; }
 .look-next .state-detail { margin: 0; }
+.look-use { justify-self: start; }
+.look-quiet { margin-top: 0; }
 
+/* Owner 2026-10-25: inspection one-liners collapse into one quiet row. */
+.build-detail-trivial { margin-top: 10px; }
+.build-detail-trivial > summary { min-height: 44px; align-content: center; cursor: pointer; font-size: 12.5px; color: var(--color-muted); }
+.build-detail-trivial > summary:hover { color: var(--color-bright); }
+
+/* Owner 2026-10-25: the blocked card leads plain; the raw coordinator report
+   lives behind this quiet disclosure. */
+.state-detail-report { margin-top: 10px; }
+.state-detail-report > summary { min-height: 44px; align-content: center; cursor: pointer; font-weight: 600; color: var(--color-muted); }
+.state-detail-report > summary:hover { color: var(--color-bright); }
+.state-detail-report[open] > summary { margin-bottom: 6px; }
+.state-detail-report { overflow-wrap: anywhere; font-size: 12.5px; }
+
+/* Owner 2026-10-25: ONLY the due chip moves to the row's right edge on
+   phones — the trophy icon and contest name keep their inline left flow. */
 @media (max-width: 760px) {
-  .look-switch { display: flex; gap: 4px; margin: 16px 0 0; padding: 4px; border: 1px solid var(--color-line); border-radius: 14px; background: var(--color-panel); }
-  .look-switch button { flex: 1; min-height: 44px; padding: 0 6px; border: 0; border-radius: 10px; background: transparent; color: var(--color-muted); font: inherit; font-size: 13px; font-weight: 600; }
-  .look-switch button[aria-pressed="true"] { background: var(--color-raised); color: var(--color-bright); box-shadow: inset 0 0 0 1px var(--color-action); }
   .look-options { margin-top: 0; }
-  .look-track { display: flex; grid-template-columns: none; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-padding-inline: 16px; margin: 0 -16px; padding: 18px 16px 6px; scrollbar-width: none; }
-  .look-track::-webkit-scrollbar { display: none; }
-  .look-option { flex: 0 0 84%; scroll-snap-align: start; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .look-track { scroll-behavior: auto; }
+  .look-use { justify-self: stretch; }
 }
 
 /* Notification preferences (Settings → Notifications): Email / Push per kind. */

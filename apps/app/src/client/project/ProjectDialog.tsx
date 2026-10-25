@@ -47,7 +47,7 @@ export function ProjectDialog(props: {
           <Icon name="x" title="" />
         </button>
       </div>
-      {props.open ? props.children : null}
+      {props.open ? <div className="project-dialog-body">{props.children}</div> : null}
     </dialog>
   );
 }

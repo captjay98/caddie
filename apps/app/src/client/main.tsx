@@ -1,11 +1,12 @@
 // FIRST, before routes.tsx creates the router: a link shared into Caddie
 // leaves the address and waits in sessionStorage (share-target.ts).
 import './share-capture.ts';
-import { StrictMode } from 'react';
+import { Profiler, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from '@tanstack/react-router';
 import { router } from './routes.tsx';
+import { AgentSessionsProvider } from './conversation/agent-keeper.tsx';
 import { registerServiceWorker } from './pwa.ts';
 import { applyTheme, browserStorage, readStoredTheme } from './theme.ts';
 // Same self-hosted faces the landing uses (site/src/pages/index.astro) — the
@@ -22,6 +23,8 @@ import '@caddie/ui/tokens.css';
 import '@caddie/ui/markdown.css';
 import '@caddie/ui/mascot.css';
 import './workspace.css';
+import './polish.css';
+import './project-review.css';
 
 /**
  * Workspace SPA entry. P00 proved composition under /app; P06 replaces the
@@ -51,10 +54,22 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
 	<StrictMode>
 		<QueryClientProvider client={queryClient}>
-			<RouterProvider router={router} />
+			<AgentSessionsProvider>
+			{import.meta.env.DEV && new URL(window.location.href).searchParams.get('measure') === '1'
+          ? <Profiler id="workspace" onRender={(_id, phase, duration) => { if (duration >= 16) console.info('[caddie:render] ' + JSON.stringify({ phase, durationMs: Math.round(duration * 10) / 10, path: window.location.pathname })); }}><RouterProvider router={router} /></Profiler>
+          : <RouterProvider router={router} />}
+			</AgentSessionsProvider>
 		</QueryClientProvider>
 	</StrictMode>,
 );
 
 // Installed-app support (pwa.ts): the built app under /app only.
 registerServiceWorker();
+
+// Local-only profiling is opt-in and never records composer content.
+if (import.meta.env.DEV && new URL(window.location.href).searchParams.get('measure') === '1') {
+  void import('./dev-performance.ts').then(({ installDevPerformance }) => {
+    const cleanup = installDevPerformance();
+    import.meta.hot?.dispose(cleanup);
+  });
+}

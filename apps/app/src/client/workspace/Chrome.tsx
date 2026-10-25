@@ -44,6 +44,7 @@
  * starts a paid run.
  */
 
+import { destinationSearch } from './navigation-search.ts';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { Link, useLocation, useNavigate, useSearch } from '@tanstack/react-router';
@@ -836,14 +837,16 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 								<span className="conv-head-left">
 									<Mascot mood={caddieMood} size={30} live />
 									<TalkingAbout conversationKind={conversationKind} label={conversationLabel} />
-									<CaddieStatus mood={caddieMood} />
+									<CaddieStatus mood={caddieMood} connecting={transport?.source.status === 'connecting'} />
 								</span>
 								<span className="conv-head-chips">
 									{!isDesktop ? (
 										<>
-											<Link to="/search" className="conv-chip" data-testid="conv-search" title="Search" search={withoutPane}>
+											{/* Owner 2026-10-25: mobile search opens the same quick-search
+											    overlay as the top bar — not a full-page navigation. */}
+											<button type="button" className="conv-chip" data-testid="conv-search" title="Search" onClick={openQuickSearch}>
 												<Icon name="search" title="Search" />
-											</Link>
+											</button>
 											<AccountMenu accountOpen={accountOpen} setAccountOpen={setAccountOpen} displayName={displayName.data ?? null} />
 										</>
 									) : null}
@@ -1004,14 +1007,13 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	);
 }
 
-const keepSearch = (prev: Record<string, unknown>) => ({ ...prev });
+const keepSearch = (prev: Record<string, unknown>) => destinationSearch(prev, prev.pane === 'channel' || prev.pane === 'brief' ? prev.pane : undefined);
 
 /** Destination navigation strips the mobile pane flag (audit F04): a chat
  *  pane open on one surface must never conceal the destination the user
  *  explicitly navigated to. Project selection is preserved. */
 const withoutPane = (prev: Record<string, unknown>) => {
-	const { pane: _pane, ...rest } = prev;
-	return rest;
+	return destinationSearch(prev);
 };
 
 /** The desktop/tablet floating navigation capsule: wordmark + the three global
@@ -1256,10 +1258,8 @@ function MobileNav(props: {
 	// channel pane is open; the Brief tab owns the default's left content.
 	const chatOpen = props.conversationOpen && props.conversationKind !== 'none';
 	const briefActive = props.nav === 'brief' && !chatOpen;
-	const disabled = props.live || props.conversationKind === 'none' || props.resolving;
-	const disabledReason = props.live
-		? 'A run is working — wait for it to settle.'
-		: props.resolving
+	const disabled = props.conversationKind === 'none' || props.resolving;
+	const disabledReason = props.resolving
 			? 'Connecting your assistant…'
 			: props.conversationKind === 'none'
 				? 'No conversation here.'
@@ -1272,6 +1272,7 @@ function MobileNav(props: {
 					<Composer
 						onSend={props.sendText}
 						disabled={disabled}
+                        busy={props.live}
 						disabledReason={disabledReason}
 						value={channel.composerText}
 						onValueChange={channel.setComposerText}
@@ -1291,7 +1292,7 @@ function MobileNav(props: {
 					className="tab-btn"
 					data-testid="tab-chat-mobile"
 					aria-current={chatOpen ? 'page' : undefined}
-					search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'channel' as const })}
+					search={(prev: Record<string, unknown>) => destinationSearch(prev, 'channel')}
 				>
 					<Mascot mood={chrome.caddieMood} size={22} live />
 					Caddie
@@ -1301,7 +1302,7 @@ function MobileNav(props: {
 					className="tab-btn"
 					data-testid="tab-brief-mobile"
 					aria-current={briefActive ? 'page' : undefined}
-					search={(prev: Record<string, unknown>) => ({ ...prev, pane: 'brief' as const })}
+					search={(prev: Record<string, unknown>) => destinationSearch(prev, 'brief')}
 				>
 					<Icon name="doc" title="" />
 					Brief
@@ -1433,7 +1434,7 @@ function TalkingAbout(props: { conversationKind: ConversationKind; label: string
  * signal driven by the same caddieMood the mascot uses. 'thinking' = a live
  * transport (working), 'needs' = something waits for your OK, else ready.
  */
-function CaddieStatus(props: { mood: MascotMood }): ReactElement {
+function CaddieStatus(props: { mood: MascotMood; connecting?: boolean }): ReactElement {
 	const STATUS: Partial<Record<MascotMood, { tone: string; label: string }>> = {
 		thinking: { tone: 'working', label: 'Working…' },
 		building: { tone: 'working', label: 'Building…' },
@@ -1441,7 +1442,7 @@ function CaddieStatus(props: { mood: MascotMood }): ReactElement {
 		stuck: { tone: 'needs', label: 'Stuck' },
 		ready: { tone: 'ready', label: 'Ready' },
 	};
-	const s = STATUS[props.mood] ?? STATUS.ready!;
+	const s = props.connecting ? {tone:'connecting',label:'Connecting…'} : STATUS[props.mood] ?? STATUS.ready!;
 	return (
 		<span className="caddie-status" data-tone={s.tone} data-testid="caddie-status">
 			<span className="caddie-status-dot" aria-hidden="true" />

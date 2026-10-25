@@ -1,0 +1,205 @@
+/* Shared interaction foundations. Keep surface layouts in their owning styles;
+   these rules unify controls and the spaces between them without boxing every
+   section or animating restored transcript content. Imported after workspace. */
+:root {
+	--space-control: 8px;
+	--space-card: 24px;
+	--space-section: 32px;
+	--control-height: 48px;
+	--target-min: 44px;
+	--motion-feedback: 140ms;
+	--motion-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+:is(.btn-key, .btn-ghost) {
+	box-sizing: border-box;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-control);
+	text-align: center;
+	line-height: 1.35;
+	border-radius: 13px;
+	transition: background-color var(--motion-feedback) var(--motion-ease),
+		border-color var(--motion-feedback) var(--motion-ease),
+		color var(--motion-feedback) var(--motion-ease);
+}
+
+:is(.btn-key, .btn-ghost) > svg {
+	flex-shrink: 0;
+}
+
+/* The compact card actions keep their density on desktop, while standard
+   forms and decisions use the same comfortable control height. */
+:is(.commit-panel, .project-dialog, .settings-panel, .plan-decision-footer,
+	.look-next, .build-status-actions) :is(.btn-key, .btn-ghost) {
+	min-height: var(--control-height);
+}
+
+:is(.row-actions, .plan-change-actions, .build-status-actions) {
+	gap: var(--space-control);
+}
+
+:is(.commit-panel, .project-dialog, .settings-panel) .input:not(
+	[type='checkbox'], [type='radio'], [type='range'], [type='color']
+) {
+	box-sizing: border-box;
+	min-height: var(--control-height);
+	max-width: 100%;
+	font-size: 16px;
+	border-radius: 13px;
+}
+
+:is(.commit-panel, .project-dialog, .settings-panel) textarea.input {
+	line-height: 1.5;
+}
+
+/* A clearly visible keyboard ring, without flashing rings on pointer taps. */
+:is(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+	outline: 2px solid var(--color-action);
+	outline-offset: 3px;
+}
+
+/* Match the established state grammar instead of introducing another card. */
+.state-panel:not(.state-panel-flat) {
+	padding: var(--space-card);
+}
+.state-panel > .kicker {
+	margin-top: 0;
+}
+.state-panel > .state-detail {
+	max-width: 65ch;
+	line-height: 1.6;
+}
+.state-panel > :is(.btn-key, .btn-ghost) {
+	margin-top: 16px;
+}
+.teaching-empty {
+	gap: 12px;
+	padding: var(--space-section) 16px;
+}
+.teaching-empty-detail {
+	max-width: 48ch;
+	font-size: 14px;
+	line-height: 1.6;
+}
+
+/* Existing native and commit dialogs: consistent readable interiors and
+   scroll containment, including when the mobile keyboard reduces the view. */
+.commit-panel {
+	box-sizing: border-box;
+	max-height: calc(100dvh - 32px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding: var(--space-card);
+	border-radius: 18px;
+}
+.project-dialog-head {
+	padding-inline: var(--space-card);
+}
+.project-dialog-head h2 {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.project-info-body,
+.plan-detail-content {
+	padding-inline: var(--space-card);
+}
+
+/* Only user-opened dialogs animate. No route, card or history selectors here:
+   reconnecting or polling must not replay a result entrance. */
+@media (prefers-reduced-motion: no-preference) {
+	.project-dialog[open],
+	.modal-backdrop > .commit-panel {
+		animation: caddie-dialog-open 160ms var(--motion-ease) both;
+	}
+	@keyframes caddie-dialog-open {
+		from { opacity: 0; transform: translateY(6px); }
+		to { opacity: 1; transform: translateY(0); }
+	}
+}
+
+@media (max-width: 560px) {
+	:root {
+		--space-card: 16px;
+		--space-section: 24px;
+	}
+	/* Surface-scoped overrides win older 38px card/footer rules. Metadata
+       pills and non-interactive badges deliberately remain compact. */
+	:is(.caddie-card, .project-card-foot, .brief-teach, .state-inline)
+		:is(.btn-key, .btn-ghost, .detail-toggle) {
+		min-height: var(--target-min);
+	}
+	.state-inline-retry,
+	.explore-quick-prompt {
+		min-height: var(--target-min);
+	}
+	.project-dialog {
+		max-height: calc(100dvh - 32px - var(--safe-top, 0px) - var(--safe-bottom, 0px));
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root { --motion-feedback: 0ms; }
+	.project-dialog[open],
+	.modal-backdrop > .commit-panel {
+		animation: none;
+	}
+	/* The shared mascot already has its own reduced-motion rules. These
+       loading bars also need a quiet, static alternative. */
+	.state-skeleton span {
+		animation: none;
+	}
+}
+
+/* Only IDs observed after initial history catch-up receive this attribute.
+   Loading a history page or reconnecting must never replay entrances. */
+@media (prefers-reduced-motion: no-preference) {
+ .msg[data-arriving='true'], .draft-row[data-state='sending'] {
+  animation: caddie-message-arrival 160ms var(--motion-ease) both;
+ }
+ .channel-activity-dot { animation: caddie-work-pulse 1.6s ease-in-out infinite; }
+ @keyframes caddie-message-arrival {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+ }
+ @keyframes caddie-work-pulse { 50% { opacity: .4; } }
+}
+.channel-history-note {
+ display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+ gap: 8px; color: var(--color-muted); font-size: 13px; padding-block: 12px;
+}
+.channel-history-note button { min-height: 44px; }
+.message-read-more { display: flex; margin-top: 12px; min-height: 44px; }
+.composer-send { transition: background-color var(--motion-feedback), transform var(--motion-feedback); }
+.composer-send:not(:disabled):active { transform: translateY(1px); }
+/* A narrow desktop split should behave like a narrow page, too. */
+.page-col { container: caddie-page / inline-size; }
+@container caddie-page (max-width: 440px) {
+ .project-card-foot { align-items: stretch; gap: 12px; }
+ .project-card-foot .row-actions { width: 100%; }
+ .project-card-foot :is(.btn-key,.btn-ghost) { width: 100%; min-height: 44px; }
+ .project-card-meta { min-width: 0; overflow-wrap: anywhere; }
+}
+
+/* Historical decisions preserve the exact document without making it the default view. */
+.decision-record { min-width: 0; max-width: 100%; padding: 24px; overflow-wrap: anywhere; }
+.decision-record-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.decision-record-heading > div { min-width: 0; }
+.decision-record-heading .kicker { margin: 0 0 4px; }
+.decision-record > details { min-width: 0; border-top: 1px solid var(--color-line); padding-top: 12px; }
+.decision-record summary { min-height: 44px; cursor: pointer; align-content: center; font-weight: 600; }
+.decision-record .md-body { min-width: 0; overflow-wrap: anywhere; }
+.decision-record pre, .decision-record table { display: block; max-width: 100%; overflow-x: auto; }
+.decision-record img { max-width: 100%; height: auto; }
+@media (max-width: 720px) {
+  .r-section-head > .disc-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .r-section-head > .disc-actions > :is(button, a) { width: 100%; min-width: 0; justify-content: center; text-align: center; white-space: normal; }
+  .decision-record { padding: 20px; }
+}
+
+/* Internal review switch: one project step, two readable views. */
+.plan-design-switch { display: flex; gap: 4px; padding: 4px; margin-block: 0 20px; width: fit-content; border-radius: 13px; background: var(--color-panel); border: 1px solid var(--color-line); }
+.plan-design-switch button { min-height: 44px; padding: 8px 24px; border: 0; border-radius: 9px; background: transparent; color: inherit; cursor: pointer; }
+.plan-design-switch button[aria-pressed="true"] { background: var(--color-action); color: var(--color-ink); }
+@media (max-width: 600px) { .plan-design-switch { width: 100%; } .plan-design-switch button { flex: 1; } }

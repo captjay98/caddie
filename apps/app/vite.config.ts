@@ -4,6 +4,9 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  // Prebundle the patched SDK and its React consumer together. This also
+  // invalidates stale dev bundles after the checkpoint-resume patch changed.
+  optimizeDeps: { include: ["@flue/sdk", "@flue/react"] },
   plugins: [
     flue(),
     react(),

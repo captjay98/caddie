@@ -1,3 +1,4 @@
+import type { planReviewState } from '../planning/plan-decision.ts';
 import type { DecisionCard, ProjectExperience } from '@caddie/contracts';
 import type { ProjectStepId, StepStatus } from './ProjectTabs.tsx';
 
@@ -20,12 +21,13 @@ export interface ProjectCardState {
  * yet" while Caddie is building. Returns null when the project has no workflow
  * (version 0); the caller then falls back to its Brief-card summary.
  */
-export function projectCardFromExperience(experience: ProjectExperience): ProjectCardState | null {
+export function projectCardFromExperience(experience: ProjectExperience, review?: ReturnType<typeof planReviewState>): ProjectCardState | null {
 	if (experience.version === 0) return null;
 	switch (experience.stage) {
 		case 'planning':
 			return { label: 'Writing the plan', tone: 'action', working: true, detail: 'Caddie is drafting a plan for you to review. Nothing is built before you approve it.', action: { label: 'Continue with Caddie', target: 'chat' } };
 		case 'review':
+			if (review) return { label: review.label, tone: 'warn', working: false, detail: review.detail, action: { label: review.action, target: 'plan' } };
 			return { label: 'Plan ready', tone: 'warn', working: false, detail: 'A plan is ready. Review it before anything is built.', action: { label: 'Review plan', target: 'plan' } };
 		case 'looks':
 			return { label: 'Preparing looks', tone: 'action', working: true, detail: 'Caddie is preparing a few looks for your app. You pick one before the screens are designed.', action: { label: 'Continue with Caddie', target: 'chat' } };
@@ -131,6 +133,7 @@ export function workflowSteps(
 	phase: WorkflowPhase | null,
 	opts?: {
 		personal?: boolean;
+		reviewLabel?: string;
 		checkReady?: { verified: number; total: number } | null;
 		/**
 		 * Whether the plan was approved, from the project status (the same
@@ -148,7 +151,7 @@ export function workflowSteps(
 	// build that paused after approval), so it claims "Approved" only when the
 	// project status says the plan was approved.
 	if (phase === 'planning') steps.plan = { text: 'Caddie is drafting it', tone: 'neutral' };
-	else if (phase === 'review') steps.plan = { text: 'Ready to review', tone: 'needs' };
+	else if (phase === 'review') steps.plan = { text: opts?.reviewLabel && opts.reviewLabel !== 'Plan ready' ? opts.reviewLabel : 'Ready to review', tone: 'needs' };
     else if (phase === 'looks') steps.plan = { text: 'Caddie is preparing looks', tone: 'neutral' };
     else if (phase === 'looks-review') steps.plan = { text: 'Choose a look', tone: 'needs' };
     else if (phase === 'design') steps.plan = { text: 'Caddie is designing the screens', tone: 'neutral' };

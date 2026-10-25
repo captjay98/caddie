@@ -1,3 +1,4 @@
+import { planReviewState } from '../planning/plan-decision.ts';
 import { buildPresentation } from '../project/build-presentation.ts';
 import type { ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -19,7 +20,7 @@ export function ProjectChatSummary({ projectId, name }: {
 }): ReactElement | null {
 	const chrome = useWorkspaceChrome();
 	const hidden = chrome.homeProject?.id === projectId;
-	// The Plan tab (/design-review) already renders the FULL workflow card. When
+	// The Plan workspace (/project and /design-review) already renders the FULL workflow card. When
 	// the chat is split BESIDE that tab for this same project, this summary is
 	// pure duplication — hide it there only. Everywhere else it earns its place:
 	// the Build/Check/Submit tabs (the page shows build/evidence/submission, not
@@ -34,19 +35,19 @@ export function ProjectChatSummary({ projectId, name }: {
 	// the Plan-tab page no longer owns that state, so the chat summary still
 	// carries it. We therefore compute the phase first and only suppress the
 	// summary beside the Plan tab for a phase the page itself renders.
-	const besideOwnPlanTab =
-		chrome.isDesktop &&
-		search.pane !== 'channel' &&
-		path === '/design-review' &&
-		chrome.conversation.kind === 'project' &&
-		chrome.conversation.projectId === projectId &&
-		search.project === projectId;
 	const state = useQuery({
 		...workflowQueryOptions(chrome.actorId, projectId),
 		enabled: Boolean(chrome.actorId && !hidden),
 	});
 	const snapshot = state.data;
 	const workflow = snapshot?.workflow;
+	const besideOwnPlanTab =
+		chrome.isDesktop &&
+		search.pane !== 'channel' &&
+		(path === '/design-review' || path === '/project') &&
+		chrome.conversation.kind === 'project' &&
+		chrome.conversation.projectId === projectId &&
+		search.project === projectId;
 	const hasBuild = workflow && ['building', 'blocked', 'ready'].includes(workflow.phase);
 	const activity = useBuildActivity({ actorId: chrome.actorId }, !hidden && hasBuild ? projectId : null);
 	// The Plan-tab page renders the full workflow card only for the pre-build
@@ -91,12 +92,14 @@ export function ProjectChatSummary({ projectId, name }: {
 		destination = '/runs';
 	} else if (workflow) {
 		switch (workflow.phase) {
-			case 'review':
-				headline = 'Your plan is ready to review';
-				summary = 'See the features, scope and checks before you approve this plan.';
-				status = 'Needs you';
-				action = 'Review plan';
+			case 'review': {
+				const review = planReviewState(snapshot?.plan, snapshot?.approval);
+				headline = review.headline;
+				summary = review.detail;
+				status = review.label === 'Plan ready' ? 'Needs you' : review.label;
+				action = review.action;
 				break;
+			}
 			case 'looks':
 				headline = 'Caddie is preparing looks for your app';
 				summary = 'The plan is approved. Next you pick how the app should look.';

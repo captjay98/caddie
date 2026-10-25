@@ -3,8 +3,6 @@ import type { ReactElement } from 'react';
 import type { DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { SignInScreen } from '../sign-in.tsx';
 import { Mascot } from '@caddie/ui/Mascot';
-import { formatTimeAgo } from '@caddie/ui/time';
-import { StaleChip } from '../states.tsx';
 import { briefHeaderState } from './brief-header.ts';
 import { AccountBriefV2 } from '../brief/DecisionCard.tsx';
 import { useDecisionCardAction } from '../brief/actions.ts';
@@ -89,13 +87,9 @@ function BriefBody(): ReactElement {
 			</header>
 
 			<section className="home-panel" data-testid="brief-lane-panel">
-				{brief.data ? <div className="brief-feed-toolbar" data-testid="brief-feed-toolbar">
-					<div className="home-head-meta">
-						<span className="home-head-updates" data-testid="brief-count">{unseenCount > 0 ? <><span className="home-head-new-dot" aria-hidden="true" />{unseenCount} new update{unseenCount === 1 ? '' : 's'}</> : 'All updates read'}</span>
-						{brief.data.asOf ? <span className="brief-head-asof" data-testid="brief-asof">Updated {formatTimeAgo(brief.data.asOf)}</span> : null}
-						<StaleChip stale={brief.isFetching} />
-					</div>
-					<button type="button" className="brief-head-markread" data-testid="brief-mark-all-read" onClick={markAllRead} disabled={unseenCount === 0 || markRead.isPending}>{markRead.isPending ? 'Marking read…' : unseenCount > 0 ? 'Mark all read' : 'All read'}</button>
+				{brief.data && unseenCount > 0 ? <div className="brief-feed-toolbar" data-testid="brief-feed-toolbar">
+					<span className="home-head-updates" data-testid="brief-count"><span className="home-head-new-dot" aria-hidden="true" />{unseenCount} new update{unseenCount === 1 ? '' : 's'}</span>
+					<button type="button" className="brief-head-markread" data-testid="brief-mark-all-read" onClick={markAllRead} disabled={markRead.isPending}>{markRead.isPending ? 'Marking read…' : 'Mark all read'}</button>
 				</div> : null}
 				{markRead.error ? <p className="state-detail" role="alert">Couldn’t mark these updates read. Try again.</p> : null}
 				<AccountBriefV2

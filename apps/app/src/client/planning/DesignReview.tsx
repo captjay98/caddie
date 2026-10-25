@@ -6,6 +6,7 @@ import { Link } from "@tanstack/react-router";
 import type { ApprovalRecord, DesignOverview } from "@caddie/contracts";
 import { ProjectExperienceSchema } from "@caddie/contracts";
 import { PlanReview } from "./PlanReview.tsx";
+import { approvalForRevision, approvalExpired } from "./plan-decision.ts";
 import type { ReactElement, ReactNode } from "react";
 import { formatTimeAgo } from "@caddie/ui/time";
 import { postJson } from "../api.ts";
@@ -227,15 +228,8 @@ export function DesignReview(props: {
   }
 
   const latest = props.planRevisions[0]!;
-  const persisted =
-    props.approval?.resourceId === latest.id &&
-    props.approval.revisionHash === latest.bodyHash
-      ? props.approval
-      : null;
-  const expiresAt = persisted ? new Date(persisted.expiresAt).getTime() : null;
-  const expired =
-    expiresAt !== null &&
-    (!Number.isFinite(expiresAt) || expiresAt <= Date.now());
+  const persisted = approvalForRevision(latest, props.approval);
+  const expired = approvalExpired(persisted);
   const latestRecord = persisted
     ? !expired &&
       (persisted.status === "approved" || persisted.status === "rejected")
@@ -286,7 +280,7 @@ export function DesignReview(props: {
 
   const decisionControls = <>
         <p className="page-lede" data-testid="approve-meaning">
-          {latestRecord ? APPROVE_MEANING : 'Next, Caddie prepares the screens for you to review. Building starts only after you approve the design.'}
+          {effectiveRecord ? APPROVE_MEANING : 'Next, Caddie prepares the screens for you to review. Building starts only after you approve the design.'}
         </p>
         <div className="row-actions">
           {follow ? (
@@ -298,7 +292,7 @@ export function DesignReview(props: {
             >
               {follow.action}
             </Link>
-          ) : latestRecord && props.onContinue ? (
+          ) : effectiveRecord && props.onContinue ? (
             <button
               type="button"
               className="btn-key"
@@ -307,7 +301,7 @@ export function DesignReview(props: {
               Continue with Caddie
             </button>
           ) : null}
-          {!latestRecord ? (
+          {!effectiveRecord ? (
             <>
               <button
                 type="button"
@@ -402,12 +396,12 @@ export function DesignReview(props: {
             says it, so a badge appears only for an unusual state. */}
         <div className="plan-decision-head">
           <div className="project-caddie-heading"><Mascot mood={approved ? "done" : "needs"} size={48} /><h2 className="ev-title">Plan version {latest.revision}</h2></div>
-          {latestRecord ? (
+          {effectiveRecord ? (
             <span
               className="badge"
               data-tone={follow ? follow.tone : approved ? "ok" : "danger"}
               data-testid="design-review-outcome"
-              data-decision={latestRecord.decision}
+              data-decision={effectiveRecord.decision}
             >
               {follow ? follow.badge : approved ? "Plan approved" : "Changes requested"}{" "}
               · version {latest.revision}
@@ -619,14 +613,14 @@ export function DesignReview(props: {
           <p className="state-detail">This revision carries no plan text.</p>
         ) : (
           <div className="plan-body" data-testid="plan-body-content">
-            <PlanReview body={latest.body} projectName={props.projectName} revisionHash={latest.bodyHash} context={props.howItWorks} history={versionHistory} decision={!latestRecord ? decisionControls : undefined} />
+            <PlanReview body={latest.body} projectName={props.projectName} revisionHash={latest.bodyHash} context={props.howItWorks} history={versionHistory} decision={!effectiveRecord ? decisionControls : undefined} />
           </div>
         )}
 
       </details>
       )}
 
-      {!viewed && latestRecord ? <section className="plan-decision-footer" data-testid="plan-decision-actions">
+      {!viewed && effectiveRecord ? <section className="plan-decision-footer" data-testid="plan-decision-actions">
         <h3>Your recorded decision</h3>
         {decisionControls}
       </section> : null}

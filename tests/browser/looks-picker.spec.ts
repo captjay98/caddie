@@ -18,8 +18,8 @@ import { expect, test, type BrowserContext } from '@playwright/test';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APP_DIR = join(REPO_ROOT, 'apps', 'app');
 const WORKER_BUNDLE = join(APP_DIR, 'dist', 'caddie_app', 'index.js');
-const PORT = 4173;
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = process.env.CADDIE_BROWSER_BASE ?? 'http://127.0.0.1:4173';
+const PORT = Number(new URL(BASE).port || 4173);
 const LOG = `/tmp/caddie-looks-browser-preview-${process.pid}.log`;
 
 let preview: ChildProcess | null = null;
@@ -97,7 +97,7 @@ const SCREEN =
 	'```html-mock Today\n<main style="background:var(--bg);color:var(--text);font-family:var(--font-body);padding:16px"><h1>Today in your sheds</h1><p style="color:var(--muted)">Broilers · day 21</p><button style="background:var(--primary);color:var(--on-primary);border-radius:var(--radius);padding:10px 14px;border:0">Hold to speak</button></main>\n```';
 const LOOKS_BODY = ['Three starting looks for the app.', '```caddie-looks', JSON.stringify(LOOKS_SET, null, 2), '```', SCREEN].join('\n');
 
-async function stub(context: BrowserContext) {
+async function stub(context: BrowserContext, looksBody = LOOKS_BODY) {
 	const ok = (body: unknown) => (r: { fulfill(o: Record<string, unknown>): unknown }) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
 	await context.route('**/api/auth/status', ok({ authenticated: true }));
 	await context.route('**/api/onboarding', ok({ completedAt: NOW }));
@@ -115,7 +115,7 @@ async function stub(context: BrowserContext) {
 					workflow: { phase: 'looks-review', conversationId: 'conv-1', projectId: 'proj-a', planId: 'plan-1' },
 					approval: { id: 'apr-1', status: 'approved' },
 					plan: { id: 'plan-1', revision: 1, body: '# Plan' },
-					looks: { id: 'looks-1', revision: 1, body: LOOKS_BODY },
+					looks: { id: 'looks-1', revision: 1, body: looksBody },
 					design: null,
 					designApproval: null,
 			  }
@@ -125,22 +125,30 @@ async function stub(context: BrowserContext) {
 }
 
 test.describe('Look-and-feel picker', () => {
-	test('desktop: three looks side by side, the recommended one picked and its button', async ({ browser }) => {
+	test('desktop: one full-width look at a time, the tabs choose (owner 2026-10-24)', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 		await stub(context);
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/design-review?project=proj-a`);
 		const picker = page.getByTestId('looks-picker');
 		await expect(picker).toBeVisible();
-		await expect(page.getByTestId('looks-option-field')).toBeVisible();
-		await expect(page.getByTestId('looks-option-calm')).toBeVisible();
-		await expect(page.getByTestId('looks-option-warm')).toBeVisible();
+		// The tabs are the navigator at every width, and the chosen look fills
+		// the track — no neighbours sharing the row.
+		await expect(page.getByTestId('looks-tabs')).toBeVisible();
+		const track = await page.locator('.look-track').boundingBox();
+		const field = await page.getByTestId('looks-option-field').boundingBox();
+		expect(Math.round(field!.width)).toBeGreaterThanOrEqual(Math.round(track!.width) - 2);
 		await expect(page.getByTestId('looks-use')).toHaveText('Use Field-ready');
 		await expect(picker.getByText('poultry farmers, mostly on their phones in the sheds')).toBeVisible();
+		// A tab click scrolls the next look in, full width too.
+		await page.getByTestId('looks-tab-warm').click();
+		await expect(page.getByTestId('looks-use')).toHaveText('Use Warm and bold');
+		const warm = await page.getByTestId('looks-option-warm').boundingBox();
+		expect(Math.round(warm!.width)).toBeGreaterThanOrEqual(Math.round(track!.width) - 2);
 		await context.close();
 	});
 
-	test('phone: name tabs, and the look in view drives the button label', async ({ browser }) => {
+	test('phone: keyboard-operable choices and the look in view drive the button label', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 390, height: 780 } });
 		await stub(context);
 		const page = await context.newPage();
@@ -150,6 +158,76 @@ test.describe('Look-and-feel picker', () => {
 		await page.getByTestId('looks-tab-warm').click();
 		await expect(page.getByTestId('looks-use')).toHaveText('Use Warm and bold');
 		await expect(page.getByTestId('looks-tab-warm')).toHaveAttribute('aria-pressed', 'true');
+		await page.getByTestId('looks-tab-warm').press('Home');
+		await expect(page.getByTestId('looks-tab-field')).toBeFocused();
+		await expect(page.getByTestId('looks-use')).toHaveText('Use Field-ready');
+		await page.getByTestId('looks-tab-field').press('ArrowRight');
+		await expect(page.getByTestId('looks-tab-calm')).toBeFocused();
+		await expect(page.getByTestId('looks-use')).toHaveText('Use Calm and clear');
+		await context.close();
+	});
+
+	test('phone: the chosen look fills the width and the note hides behind its toggle', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 780 } });
+		await stub(context);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/design-review?project=proj-a`);
+		// The chosen look fills the track; the others sit beyond the scroll edge.
+		const picker = await page.getByTestId('looks-picker').boundingBox();
+		const field = await page.getByTestId('looks-option-field').boundingBox();
+		expect(field, 'chosen option has a box').not.toBeNull();
+		expect(Math.round(field!.width), 'chosen look fills the picker width').toBeGreaterThanOrEqual(Math.round(picker!.width) - 4);
+		const warm = await page.getByTestId('looks-option-warm').boundingBox();
+		expect(Math.round(warm!.x), 'next look starts offscreen').toBeGreaterThanOrEqual(Math.round(field!.x + field!.width) - 2);
+		// The change note is collapsed until asked for, and a typed note stays.
+		await expect(page.getByTestId('looks-note')).toHaveCount(0);
+		await page.getByTestId('looks-note-toggle').click();
+		await page.getByTestId('looks-note').fill('warmer, like the logo green');
+		await page.getByTestId('looks-note-toggle').click();
+		await expect(page.getByTestId('looks-note')).toBeVisible();
+		await expect(page.getByTestId('looks-note')).toHaveValue('warmer, like the logo green');
+		// Clicking the preview opens the full-size dialog directly.
+		await page.getByRole('button', { name: 'Open Field-ready full size' }).click();
+		await expect(page.getByTestId('design-mock-dialog')).toBeVisible();
+		await expect(page.getByTestId('design-mock-full-frame').locator('iframe')).toHaveAttribute('sandbox', '');
+		await page.keyboard.press('Escape');
+		await expect(page.getByTestId('design-mock-dialog')).not.toBeVisible();
+		await context.close();
+	});
+
+	test('each look previews its own composition and keeps the legacy shared fallback', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+		const custom = { ...LOOKS_SET, looks: LOOKS_SET.looks.map((look, i) => i === 0 ? {
+			...look, screen: { title: 'Task first', html: '<main><h1>Record a shed observation</h1></main>' },
+		} : look) };
+		const body = ['```caddie-looks', JSON.stringify(custom), '```', SCREEN].join('\n');
+		await stub(context, body);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/design-review?project=proj-a`);
+		await expect(page.getByTestId('looks-option-field').locator('iframe')).toHaveAttribute('srcdoc', /Record a shed observation/);
+		await expect(page.getByTestId('looks-option-calm').locator('iframe')).toHaveAttribute('srcdoc', /Today in your sheds/);
+		await context.close();
+	});
+
+	test('clicking a look preview opens it full-size; no second preview below the options', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 780 } });
+		await stub(context);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/design-review?project=proj-a`);
+		// The inline inspect panel is gone — the overlay is the only preview.
+		await expect(page.getByTestId('design-mock-preview')).toHaveCount(0);
+		await page.getByRole('button', { name: 'Open Field-ready full size' }).click();
+		await expect(page.getByTestId('design-mock-dialog')).toBeVisible();
+		await expect(page.getByTestId('design-mock-full-frame').locator('iframe')).toHaveAttribute('sandbox', '');
+		await expect(page.getByTestId('design-mock-full-frame').frameLocator('iframe').getByRole('heading', { name: 'Today in your sheds' })).toBeVisible();
+		// The x (right of the device toggle) closes; so does Escape.
+		await page.getByTestId('design-mock-close').click();
+		await expect(page.getByTestId('design-mock-dialog')).not.toBeVisible();
+		await page.getByRole('button', { name: 'Open Field-ready full size' }).click();
+		await expect(page.getByTestId('design-mock-dialog')).toBeVisible();
+		await page.getByTestId('design-mock-full-desktop').click();
+		await page.keyboard.press('Escape');
+		await expect(page.getByTestId('design-mock-dialog')).not.toBeVisible();
 		await context.close();
 	});
 
@@ -184,6 +262,9 @@ test.describe('Look-and-feel picker', () => {
 			await expect(page.getByTestId('looks-picker')).toBeVisible();
 			await page.waitForTimeout(400);
 			await page.screenshot({ path: join(dir!, `looks-picker-${name}.png`), fullPage: name === 'desktop' });
+			await page.getByRole('button', { name: 'Open Field-ready full size' }).click();
+			await expect(page.getByTestId('design-mock-full-frame').frameLocator('iframe').getByRole('heading', { name: 'Today in your sheds' })).toBeVisible();
+			await page.screenshot({ path: join(dir!, `looks-full-${name}.png`) });
 			await context.close();
 		}
 	});

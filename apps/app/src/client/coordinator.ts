@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useFlueAgent } from '@flue/react';
 import { createFlueClient } from '@flue/sdk';
 import type { InputAttachment, RunBindingRecord } from '@caddie/contracts';
 import { postJson } from './api.ts';
 import { toAttachedFileText, toDeliveredImages } from './conversation/image-attachments.ts';
 import { useRunBindings, type ActorScope } from './queries.ts';
 import { standbySource, type ChannelSource } from './conversation/channel-store.ts';
+import { useSharedAgent } from './conversation/agent-keeper.tsx';
 
 /**
  * The coordinator run transport — the P05 wiring the channel-store header
@@ -59,9 +59,12 @@ export function useCoordinatorTransport(
 	}, [actor.actorId, projectId]);
 	const run = sessionRun ?? bindings.data?.runBindings?.[0] ?? null;
 
-	const agent = useFlueAgent({
-		url: run ? `/agents/coordinator/${encodeURIComponent(run.conversationId)}` : undefined,
-	});
+	// One shared session per conversation (agent-keeper): the chrome transport
+	// and the project transcript adopt the same warm session instead of each
+	// mount replaying the whole conversation stream.
+	const agent = useSharedAgent(
+		run ? `/agents/coordinator/${encodeURIComponent(run.conversationId)}` : undefined,
+	);
 
 	const sendAttempt = useCallback(
 		async (

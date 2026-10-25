@@ -411,8 +411,12 @@ test('design review shows each mocked screen at phone and desktop width, script-
 	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
 	await expect(card).toHaveAttribute('data-phase', 'design-review');
 	await expect(card.getByRole('heading', { name: 'Your design is ready' })).toBeVisible();
-	// The prose renders without the raw mock fences.
+	// Design notes stay optional and omit the raw mock fences.
+	await card.getByRole('button',{name:'Design details',exact:true}).click();
+	const designNotes=page.getByRole('dialog',{name:'Design details'});
+	await designNotes.getByText('Read the saved specification',{exact:true}).click();
 	await expect(card.getByTestId('workflow-design-brief').getByRole('heading', { name: 'Accessibility' })).toBeVisible();
+	await designNotes.getByRole('button',{name:'Close design details'}).click();
 	await expect(card).not.toContainText('html-mock');
 
 	const preview = card.getByTestId('design-mock-preview');
@@ -466,7 +470,7 @@ test('design review shows each mocked screen at phone and desktop width, script-
 	// On a phone-sized screen the phone mock still fits without overflow.
 	await page.setViewportSize({ width: 390, height: 844 });
 	await preview.getByTestId('design-mock-phone').click();
-	await preview.getByTestId('design-mock-screen-0').click();
+	await preview.getByRole('combobox',{name:'Screen',exact:true}).selectOption('0');
 	await expect.poll(async () => {
 		const narrow = await preview.getByTestId('design-mock-frame').boundingBox();
 		return narrow && narrow.x >= 0 ? narrow.x + narrow.width : Infinity;
@@ -512,7 +516,7 @@ test('a finished build shows each feature and rolls back to a save point in two 
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	await card.getByText('What Caddie checked', { exact: true }).click();
 	const features = card.getByTestId('build-features');
-	await expect(features.getByRole('heading')).toContainText('2 of 2 built and checked');
+	await expect(features.getByRole('heading')).toContainText('2 of 2 checked');
 	await expect(card.getByTestId('build-feature-log-feed')).toContainText('Built and checked');
 	await expect(card.getByTestId('rollback-view-dashboard')).toHaveCount(0);
 	await card.getByTestId('rollback-log-feed').click();
@@ -1063,6 +1067,9 @@ async function nestedCards(root: import('@playwright/test').Locator): Promise<st
 		const found: string[] = [];
 		for (const el of Array.from(card.querySelectorAll('*'))) {
 			if (el.closest('button, a, input, textarea, select, summary, iframe, [role="button"]')) continue;
+			// A modal in the top layer is not card nesting (owner 2026-10-25:
+			// the Build activity dialog is deliberately a boxed surface).
+			if (el.closest('dialog[open]')) continue;
 			const s = getComputedStyle(el);
 			if (!/^(block|flex|grid|list-item)$/.test(s.display)) continue;
 			const boxed = (['Top', 'Right', 'Bottom', 'Left'] as const).every(
@@ -1107,7 +1114,8 @@ test('the build card has one status panel with unframed feature and technical ro
 	await expect(card.getByTestId('build-stages')).toBeHidden();
 	await expect(card.getByTestId('build-features')).toBeVisible();
 	await expect(card.getByTestId('build-files')).toBeHidden();
-    await card.getByRole('button', { name: 'View build details', exact: true }).click();
+    await card.getByRole('button', { name: 'Build activity', exact: true }).click();
+    await page.getByRole('navigation',{name:'Build activity views'}).getByRole('button',{name:'Files & commands'}).click();
     await expect(card.getByTestId('build-files')).toBeVisible();
 	// Evidence only: CADDIE_SHOTS=<dir> saves the card, desktop and 390px wide.
 	const dir = process.env.CADDIE_SHOTS;
@@ -1130,7 +1138,9 @@ test('Stop build is one request (the server stops the running turn) and retains 
   const fx = await fixture(context, { phase: 'building' });
   await page.goto('/app/project?project=proj-workflow');
   await page.getByRole('button', { name: 'Stop build', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Needs attention' })).toBeVisible();
+  // Owner 2026-10-25: the heading that duplicated the badge is gone — the
+  // badge itself carries the status.
+  await expect(page.getByTestId('project-workflow').getByText('Needs attention', { exact: true })).toBeVisible();
   await expect(page.getByTestId('project-workflow')).toContainText('Your plan and files are retained');
   // A user stop is a stopped BUILD (same rule as the server projection), never "the plan needs another pass".
   await expect(page.getByTestId('project-workflow').getByRole('button', { name: 'Retry build' })).toBeVisible();
@@ -1149,7 +1159,8 @@ test('check history uses readable summaries and keeps raw recorded results behin
   ] });
   await page.goto('/app/project?project=proj-workflow');
   const history = page.getByTestId('build-history');
-  await history.locator(':scope > summary').click();
+  await page.getByRole('button',{name:'Build activity',exact:true}).click();
+  await page.getByRole('navigation',{name:'Build activity views'}).getByRole('button',{name:'Attempts',exact:true}).click();
   await expect(history.getByTestId('build-history-item')).toHaveCount(2);
   await expect(history).toContainText("Tried a fix — The app's own tests: 7 of 9 passed.");
   await expect(history.locator('pre')).toBeHidden();
@@ -1490,7 +1501,7 @@ test('Check and Submit show Caddie without claiming readiness and build history 
   if(process.env.CADDIE_SHOTS) await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-submit-${width}.png`});
  }
  await page.goto(`${BASE}/app/runs?project=proj-workflow`);
- await page.getByTestId('project-build-resources').locator(':scope > summary').click();
+ await page.getByTestId('project-build-resources').getByRole('button').click();
  const row=page.getByTestId('run-row');
  await expect(row).toContainText('Build request recorded');
  await expect(row).toContainText('Its result is not confirmed here.');

@@ -1,12 +1,14 @@
-import { useRef, useState, type ReactElement } from "react";
+import { ProjectDialog } from "./ProjectDialog.tsx";
+import { useState, type ReactElement } from "react";
 import { Mascot } from "@caddie/ui/Mascot";
-import { Icon } from "../icons.tsx";
+import { Icon, type IconName } from "../icons.tsx";
 import { BuildFeatureList, hasFeatureList } from "./FeatureChecklist.tsx";
 import { ModuleProgress } from "./ModuleProgress.tsx";
 import { buildPresentation } from "./build-presentation.ts";
 import {
   useBuildActivity,
   type BuildTimelineView,
+  type TimelineFileArea,
   type TimelineStageView,
 } from "../queries.ts";
 
@@ -32,7 +34,8 @@ export function BuildProgress(props: {
   const [stopping, setStopping] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const technical = useRef<HTMLDetailsElement>(null);
+  const [technicalOpen, setTechnicalOpen] = useState(false);
+  const [detailTab, setDetailTab] = useState<"checks" | "activity" | "history">("checks");
   const data = activity.data;
   if (!data?.timeline)
     return (
@@ -132,6 +135,25 @@ export function BuildProgress(props: {
             </div>
           </div>
         ) : null}
+      {hasFeatureList(data.features ?? []) ? (
+        <BuildFeatureList
+          projectId={props.projectId}
+          features={data.features}
+          compact
+          stale={view.quiet}
+        />
+      ) : t.scope.length ? (
+        <div className="build-scope" data-testid="build-scope">
+          <span className="build-scope-head">What’s being built</span>
+          <div className="build-scope-chips">
+            {t.scope.map((item, index) => (
+              <span key={index} className="build-scope-chip">
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
         <div className="build-status-actions">
           {view.quiet ? (
             <button
@@ -147,12 +169,9 @@ export function BuildProgress(props: {
             <button
               type="button"
               className="btn-ghost"
-              onClick={() => {
-                if (technical.current)
-                  technical.current.open = !technical.current.open;
-              }}
+              onClick={() => setTechnicalOpen(true)}
             >
-              View build details
+              Build activity
             </button>
           )}
           {data.phase === "building" && props.onStop ? (
@@ -180,11 +199,7 @@ export function BuildProgress(props: {
             </button>
           ) : null}
         </div>
-        {data.phase === "building" && props.onStop ? (
-          <p className="build-stop-note">
-            Stopping retains your plan and saved files.
-          </p>
-        ) : null}
+        {view.quiet ? <button type="button" className="build-text-action" onClick={() => setTechnicalOpen(true)}>Build activity</button> : null}
         {feedback ? (
           <p className="state-detail" role="status">
             {feedback}
@@ -205,28 +220,13 @@ export function BuildProgress(props: {
         </p>
       </section>
       <ModuleProgress projectId={props.projectId} />
-      {hasFeatureList(data.features ?? []) ? (
-        <BuildFeatureList
-          projectId={props.projectId}
-          features={data.features}
-          stale={view.quiet}
-        />
-      ) : t.scope.length ? (
-        <div className="build-scope" data-testid="build-scope">
-          <span className="build-scope-head">What’s being built</span>
-          <div className="build-scope-chips">
-            {t.scope.map((item, index) => (
-              <span key={index} className="build-scope-chip">
-                {item}
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      <details className="build-technical" ref={technical}>
-        <summary>
-          Build details <span>checks, files &amp; commands</span>
-        </summary>
+      <ProjectDialog open={technicalOpen} onClose={() => setTechnicalOpen(false)} title="Build activity" wide>
+        <nav className="review-subnav" aria-label="Build activity views">
+          <button type="button" aria-pressed={detailTab === 'checks'} onClick={() => setDetailTab('checks')}>Checks</button>
+          <button type="button" aria-pressed={detailTab === 'activity'} onClick={() => setDetailTab('activity')}>Files &amp; commands</button>
+          {data.rounds.length ? <button type="button" aria-pressed={detailTab === 'history'} onClick={() => setDetailTab('history')}>Attempts</button> : null}
+        </nav>
+        {detailTab === 'checks' ? <div className="build-checks-view">
         <ol
           className="build-stages"
           aria-label="Build stages"
@@ -245,12 +245,8 @@ export function BuildProgress(props: {
                 </span>
                 <span className="build-stage-label">{stage.label}</span>
               </span>
-              <span className="build-stage-detail">
-                {stage.detail ??
-                  (stage.durationMs !== null
-                    ? formatDuration(stage.durationMs)
-                    : "—")}
-              </span>
+              <span className="build-stage-state">{stage.state === 'done' ? 'Done' : stage.state === 'active' ? 'In progress' : stage.state === 'failed' ? 'Needs attention' : 'Not reported'}</span>
+              {stage.detail ? <p className="build-stage-detail">{stage.detail}</p> : null}
             </li>
           ))}
         </ol>
@@ -276,63 +272,116 @@ export function BuildProgress(props: {
             ))}
           </ul>
         ) : null}
-        <div className="build-detail" data-testid="build-detail">
-          {t.files.length ? (
-            <div className="build-detail-card" data-testid="build-files">
-              <div className="build-detail-head">
-                Files written · {t.files.length}
-                <span className="build-detail-sub">
-                  {" "}
-                  {fileAreaBreakdown(t.fileAreas)}
-                </span>
+        </div> : null}
+        {detailTab === 'activity' ? <div className="build-activity-view" data-testid="build-detail">
+          {!t.files.length && !t.commands.length ? <p className="build-detail-empty">No file or command activity has been reported yet.</p> : (() => {
+            // Owner 2026-10-25: inspection one-liners (ls/pwd/echo…) are not
+            // signal — folded into one quiet row; meaningful commands (tests,
+            // builds, installs, migrations, anything that failed) stay as rows.
+            const TRIVIAL = /^\s*(ls|pwd|echo|cat|head|tail|wc|find|which|env)(\s|$|&&|;|\|)/;
+            const meaningful = t.commands.filter((c) => !(c.outcome === "ok" && TRIVIAL.test(c.command)));
+            const trivial = t.commands.filter((c) => c.outcome === "ok" && TRIVIAL.test(c.command));
+            const anyFailed = t.commands.some((c) => c.outcome === "failed");
+            return <>
+            {/* Summary banner: one honest headline over a count ring. The ring
+                is full (ok) only when nothing a command reported failed. */}
+            <div
+              className="build-activity-banner"
+              data-testid="build-activity-summary"
+              data-tone={anyFailed ? "warn" : "ok"}
+            >
+              <span className="build-activity-ring" aria-hidden="true">
+                <span>{t.files.length}</span>
+              </span>
+              <div>
+                <h3>
+                  {t.files.length} file{t.files.length === 1 ? "" : "s"} written
+                  {t.commands.length ? ` · ${t.commands.length} command${t.commands.length === 1 ? "" : "s"}` : ""}
+                  {t.commands.length ? (anyFailed ? ", one needs attention" : ", all ran ok") : ""}
+                </h3>
+                <p>{activitySummaryLine(t.fileAreas, anyFailed)}</p>
               </div>
-              <ul className="build-detail-list">
-                {t.files.map((file) => (
-                  <li key={file.path} data-area={file.area}>
-                    <span className="build-detail-mono">{file.path}</span>
-                    <span className="build-detail-meta">
-                      {file.writes > 1 ? `×${file.writes} · ` : ""}
-                      {file.bytes !== null
-                        ? formatBytes(file.bytes)
-                        : ""} · {new Date(file.lastAt).toLocaleString()}
-                      {file.role ? ` · ${file.role}` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
             </div>
-          ) : null}
-          {t.commands.length ? (
-            <div className="build-detail-card" data-testid="build-commands">
-              <div className="build-detail-head">Commands · newest first</div>
-              <p className="state-detail">
-                Command output and file diffs are not included in this activity
-                feed. Exact recorded results are retained in Check history when
-                available.
-              </p>
-              <ul className="build-detail-list">
-                {t.commands.map((command, index) => (
-                  <li key={index} data-outcome={command.outcome}>
-                    <span className="build-detail-mono">{command.command}</span>
-                    <span className="build-detail-meta">
-                      {command.outcome} ·{" "}
-                      {command.exitCode !== null
-                        ? `exit ${command.exitCode} · `
-                        : ""}
-                      {formatDuration(command.durationMs)} ·{" "}
-                      {new Date(command.at).toLocaleString()}
-                      {command.role ? ` · ${command.role}` : ""}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </div>
-      </details>
-      {data.rounds.length ? (
-        <details className="build-history" data-testid="build-history">
-          <summary>Check history · {data.rounds.length} attempts</summary>
+            {t.files.length ? (
+              <div className="build-activity-card" data-testid="build-files">
+                <h4 className="build-activity-card-head">
+                  Files
+                  <span className="build-activity-card-sub">{fileAreaBreakdown(t.fileAreas)}</span>
+                  <span className="build-activity-card-n">{t.files.length}</span>
+                </h4>
+                <ul className="build-activity-list">
+                  {t.files.map((file) => (
+                    <li key={file.path} data-area={file.area}>
+                      <span className="build-activity-mark" aria-hidden="true">
+                        <Icon name={fileIcon(file.area)} title="" />
+                      </span>
+                      <span className="build-activity-body">
+                        <span className="build-activity-mono">{file.path.replace(/^src\//, "")}</span>
+                        <span className="build-activity-why">{filePurpose(file)}</span>
+                      </span>
+                      <span className="build-activity-meta">
+                        {file.bytes !== null ? formatBytes(file.bytes) : ""}
+                        {file.writes > 1 ? ` · ×${file.writes}` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {t.commands.length ? (
+              <div className="build-activity-card" data-testid="build-commands">
+                <h4 className="build-activity-card-head">
+                  Commands
+                  <span className="build-activity-card-sub">newest first</span>
+                  <span className="build-activity-card-n">{t.commands.length}</span>
+                </h4>
+                <p className="build-activity-note">
+                  Command output and file diffs are not shown here. Exact recorded
+                  results are kept in Check history when available.
+                </p>
+                <ul className="build-activity-list">
+                  {meaningful.map((command, index) => (
+                    <li key={index} data-outcome={command.outcome}>
+                      <span className="build-activity-dot" aria-hidden="true" />
+                      <span className="build-activity-body">
+                        <span className="build-activity-mono">{command.command}</span>
+                      </span>
+                      <span className="build-activity-meta">
+                        {command.outcome}
+                        {command.exitCode !== null ? ` · exit ${command.exitCode}` : ""}
+                        {" · "}{formatDuration(command.durationMs)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {trivial.length ? (
+                  <details className="build-activity-trivial" data-testid="build-commands-trivial">
+                    <summary>
+                      {trivial.length} workspace check{trivial.length === 1 ? "" : "s"} (ls, pwd…) · all ok
+                    </summary>
+                    <ul className="build-activity-list">
+                      {trivial.map((command, index) => (
+                        <li key={index} data-outcome={command.outcome}>
+                          <span className="build-activity-dot" aria-hidden="true" />
+                          <span className="build-activity-body">
+                            <span className="build-activity-mono">{command.command}</span>
+                          </span>
+                          <span className="build-activity-meta">
+                            {formatDuration(command.durationMs)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+              </div>
+            ) : null}
+            </>;
+          })()}
+        </div> : null}
+      {detailTab === 'history' && data.rounds.length ? (
+        <section className="build-history" data-testid="build-history">
+          <h3>Check attempts</h3>
           <p className="state-detail">
             These are check attempts, not completed features. Most recent first.
           </p>
@@ -367,7 +416,7 @@ export function BuildProgress(props: {
               </li>
             ))}
           </ul>
-        </details>
+        </section>
       ) : null}
       {props.latest ? (
         <details className="build-latest" data-testid="build-latest">
@@ -375,11 +424,7 @@ export function BuildProgress(props: {
           <p className="build-latest-text">{props.latest}</p>
         </details>
       ) : null}
-      {data.phase === "building" ? (
-        <p className="build-preview-note">
-          Your preview appears after the required checks pass.
-        </p>
-      ) : null}
+      </ProjectDialog>
     </section>
   );
 }
@@ -408,6 +453,75 @@ function fileAreaBreakdown(areas: BuildTimelineView["fileAreas"]): string {
     .filter((k) => areas[k] > 0)
     .map((k) => `${areas[k]} ${areas[k] === 1 ? names[k][0] : names[k][1]}`);
   return parts.length ? `(${parts.join(" · ")})` : "";
+}
+
+/** The file-type glyph for a row — one of the shared Icon set (no emoji). */
+function fileIcon(area: TimelineFileArea): IconName {
+  switch (area) {
+    case "test":
+      return "check";
+    case "style":
+      return "image";
+    case "server":
+      return "box";
+    case "config":
+      return "box";
+    case "app":
+    default:
+      return "file";
+  }
+}
+
+/** A plain-language "what this file is for", from its tracked area/role —
+ *  never a guess about contents. Non-technical readers see the purpose, not
+ *  the path. */
+function filePurpose(file: {
+  area: BuildTimelineView["files"][number]["area"];
+  path: string;
+  role: string | null;
+}): string {
+  const name = file.path.toLowerCase();
+  if (name.endsWith(".sql") || name.includes("migration"))
+    return "A database table the app needs";
+  switch (file.area) {
+    case "app":
+      return "Part of the app you see and use";
+    case "server":
+      return "The backend that stores and serves data";
+    case "test":
+      return "A check that proves a feature works";
+    case "style":
+      return "How the app looks";
+    case "config":
+      return "A setup file for the build";
+    default:
+      return file.role ?? "Part of your app";
+  }
+}
+
+/** One honest sentence under the summary ring, led by where the work landed. */
+function activitySummaryLine(
+  areas: BuildTimelineView["fileAreas"],
+  anyFailed: boolean,
+): string {
+  const order: (keyof typeof areas)[] = ["app", "server", "test", "style", "config"];
+  const nouns: Record<keyof typeof areas, string> = {
+    app: "app screens",
+    server: "the backend",
+    test: "tests",
+    style: "styling",
+    config: "setup",
+  };
+  const present = order.filter((k) => areas[k] > 0).map((k) => nouns[k]);
+  const where =
+    present.length === 0
+      ? "Caddie recorded no file writes yet"
+      : present.length === 1
+        ? `Work landed in ${present[0]}`
+        : `Work spans ${present.slice(0, -1).join(", ")} and ${present[present.length - 1]}`;
+  return anyFailed
+    ? `${where}. One command reported a problem — see Checks.`
+    : `${where}. No commands failed.`;
 }
 
 /** "40 s", "4 min", "1 h 05 min" — the client mirror of the model's formatter. */

@@ -782,7 +782,7 @@ test('a long conversation keeps reading position, draft and mobile input through
  await context.route('**/agents/coordinator/**', route=> { const url=new URL(route.request().url());return route.fulfill(url.searchParams.get('view')==='updates'?{contentType:'text/event-stream',body:`event: control\ndata: {"streamNextOffset":"${offset}","upToDate":true}\n\n`}:{contentType:'application/json',headers:{'stream-next-offset':offset,'stream-up-to-date':'true'},body:JSON.stringify({v:1,conversationId:'history-conversation',offset,messages,settlements:[]})}); });
  const page=await context.newPage(); await openProjectPage(page);
  const transcript=page.getByTestId('channel-transcript');
- await expect(page.getByTestId('msg-user')).toHaveCount(80);
+ await expect(page.getByTestId('msg-user')).toHaveCount(20);
  await transcript.evaluate(el=>{el.scrollTop=0;});
  await expect(page.getByRole('button',{name:'Back to latest'})).toBeVisible();
  await page.getByTestId('composer-input').fill('Unsent scope change');

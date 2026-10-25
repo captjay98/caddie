@@ -56,7 +56,10 @@ describe("part 2c — the call sites wire the app theme", () => {
 
   test("the design-review card parses the brief's theme and passes it", () => {
     const src = readFileSync(join(import.meta.dir, "..", "apps", "app", "src", "client", "conversation", "ProjectWorkflow.tsx"), "utf8");
-    expect(src).toContain("parseAppTheme(state.data.design.body)");
-    expect(src).toContain("theme={appTheme}");
+    // Saved designs now share DesignBriefPreview, including earlier revisions.
+    // The theme must follow the selected revision rather than the live workflow.
+    expect(src).toContain("parseAppTheme(selected.body)");
+    expect(src).toContain("const theme = parsed.ok ? parsed.theme : null");
+    expect(src).toContain("<DesignMockPreview mocks={mocks} theme={theme}");
   });
 });

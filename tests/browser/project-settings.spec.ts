@@ -19,8 +19,8 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APP_DIR = join(REPO_ROOT, 'apps', 'app');
 const WORKER_BUNDLE = join(APP_DIR, 'dist', 'caddie_app', 'index.js');
-const PORT = 4173;
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = process.env.CADDIE_BROWSER_BASE ?? process.env.CADDIE_TEST_BASE_URL ?? 'http://127.0.0.1:4173';
+const PORT = Number(new URL(BASE).port || 4173);
 const LOG = `/tmp/caddie-u08-browser-preview-${process.pid}.log`;
 
 let preview: ChildProcess | null = null;
@@ -55,6 +55,7 @@ async function ready(timeoutMs: number): Promise<string | undefined> {
 }
 
 test.beforeAll(async () => {
+	if (process.env.CADDIE_TEST_BASE_URL) return;
 	if (!existsSync(WORKER_BUNDLE)) {
 		throw new Error('Composed build missing — run `bun run build` before tests/browser/project-settings.spec.ts');
 	}
@@ -152,6 +153,61 @@ test.describe('Project settings (U08)', () => {
 		await expect(page.getByTestId('ps-knows')).toBeVisible();
 		await page.getByTestId('ps-tab-archive').click();
 		await expect(page.getByTestId('ps-archive')).toBeVisible();
+		await context.close();
+	});
+
+	for (const width of [320, 390, 412]) {
+		test(`mobile ${width}: grouped settings list opens one section with a clear back action`, async ({ browser }) => {
+			const context = await browser.newContext({ viewport: { width, height: 915 } });
+			await stubAccount(context);
+			const page = await context.newPage();
+			await page.goto(`${BASE}/app/project/settings?project=proj-a`);
+			await expect(page.getByTestId('ps-tabs')).toBeVisible();
+			await expect(page.getByTestId('ps-general')).not.toBeVisible();
+			const rows = page.getByTestId('ps-tabs').getByRole('button');
+			expect(await rows.count()).toBe(5);
+			for (const row of await rows.all()) expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+			await page.getByTestId('ps-tab-general').click();
+			await expect(page.getByTestId('ps-general')).toBeVisible();
+			await expect(page.getByTestId('ps-tabs')).not.toBeVisible();
+			await page.getByTestId('ps-section-back').click();
+			await expect(page.getByTestId('ps-tabs')).toBeVisible();
+			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+			await context.close();
+		});
+	}
+
+	test('section hash is authoritative on entry and browser back/forward', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 915 } });
+		await stubAccount(context);
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project/settings?project=proj-a#routines`);
+		await expect(page.getByTestId('ps-routines')).toBeVisible();
+		await page.getByTestId('ps-section-back').click();
+		await page.getByTestId('ps-tab-code').click();
+		await expect(page.getByTestId('ps-code')).toBeVisible();
+		await page.goBack();
+		await expect(page.getByTestId('ps-tabs')).toBeVisible();
+		await page.goBack();
+		await expect(page.getByTestId('ps-routines')).toBeVisible();
+		await page.goForward();
+		await expect(page.getByTestId('ps-tabs')).toBeVisible();
+		await context.close();
+	});
+
+	test('mobile section navigation preserves an unsaved repository form', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 915 } });
+		await stubAccount(context);
+		await context.route('**/api/github/installations**', (route) => json(route, 200, { installations: [] }));
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/project/settings?project=proj-a#code`);
+		await page.getByTestId('ps-code-create').click();
+		await page.getByTestId('ps-repo-name').fill('my-unsaved-repo');
+		await page.getByTestId('ps-section-back').click();
+		await page.getByTestId('ps-tab-general').click();
+		await page.getByTestId('ps-section-back').click();
+		await page.getByTestId('ps-tab-code').click();
+		await expect(page.getByTestId('ps-repo-name')).toHaveValue('my-unsaved-repo');
 		await context.close();
 	});
 

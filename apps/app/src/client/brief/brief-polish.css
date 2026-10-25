@@ -1,0 +1,49 @@
+/* Brief feed controls belong to the feed, without a second status header. */
+.home-panel .brief-feed-toolbar {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 16px;
+ margin: 0 0 12px;
+ padding: 0;
+ min-height: 44px;
+ color: var(--color-muted);
+ font-size: 13px;
+}
+.brief-feed-toolbar .brief-head-markread {
+ min-height: 44px;
+ flex: 0 0 auto;
+ padding: 8px 0 8px 12px;
+}
+.brief-done { min-width: 0; margin-top: 20px; }
+.brief-done > summary {
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 16px;
+ min-height: 48px;
+ padding: 12px 0;
+ list-style: none;
+ cursor: pointer;
+ border-top: 1px solid var(--color-line);
+ color: var(--color-muted);
+ font-size: 14px;
+ font-weight: 600;
+}
+.brief-done > summary::-webkit-details-marker { display: none; }
+.brief-done > summary::marker { content: ''; }
+.brief-done > summary > svg { width: 16px; height: 16px; flex: 0 0 auto; transition: transform 160ms ease; }
+.brief-done[open] > summary > svg { transform: rotate(180deg); }
+.brief-done > summary:hover { color: var(--color-bright); }
+.brief-done > summary:focus-visible { outline: 2px solid var(--color-action); outline-offset: 4px; border-radius: 8px; }
+.brief-done > ul { margin: 8px 0 16px; }
+.brief-done .decision-card--record { min-width: 0; }
+.brief-done .decision-card--record .summary { margin-bottom: 20px; }
+.brief-done .decision-card--record .compact-card-head { flex-wrap: wrap; }
+.brief-done .decision-card--record .compact-card-kicker { flex-wrap: wrap; min-width: 0; }
+.brief-done .decision-card--record h3,
+.brief-done .decision-card--record .summary { overflow-wrap: anywhere; }
+.brief-done .decision-history { display: grid; gap: 12px; }
+@media (prefers-reduced-motion: reduce) {
+ .brief-done > summary > svg { transition: none; }
+}

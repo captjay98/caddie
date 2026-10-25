@@ -26,6 +26,13 @@ export interface ChannelSource {
 	error: Error | undefined;
 	failedSends: ReadonlyArray<{ id: string; message: string; error: Error }>;
 	settlements: readonly FlueConversationSettlement[];
+	/** Native bounded-history pagination; absent on legacy fixture sources. */
+	hasOlder?: boolean;
+	olderPending?: boolean;
+	olderError?: Error;
+	loadOlder?: () => Promise<void>;
+	/** Re-read history without sending a message or restarting project work. */
+	refresh?: () => void;
 }
 
 /** P06 standby source: no transport yet, so the channel shows honest standby. */

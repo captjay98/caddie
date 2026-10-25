@@ -1,25 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import type { Look, LooksSet } from "@caddie/contracts";
 import { themeToCssVars } from "@caddie/contracts";
 import { Icon } from "../icons.tsx";
-import { mockDocument } from "../artifacts/DesignMockPreview.tsx";
+import { DesignMockPreview, mockDocument } from "../artifacts/DesignMockPreview.tsx";
 
 /**
  * Look-and-feel picker — the step between the approved plan and the design.
  * Caddie proposes 2-3 looks; the owner picks ONE and the designer draws every
  * screen in it.
  *
- * The approved mock (docs/reviews/2026-10-23-look-and-feel-picker):
- *  - desktop: the looks side by side; phone: a scroll-snap strip with name
- *    tabs, one look at a time with the next peeking in;
- *  - the look IN VIEW is the choice — the tab's aria-pressed, the radio and the
+ *  - desktop: the looks side by side; phone: the name tabs choose, and the
+ *    chosen look fills the available width (owner 2026-10-24: the tabs already
+ *    say there is more than one — no peeking carousel strip);
+ *  - the chosen look is the choice — the tab's aria-pressed, the radio and the
  *    "Use <name>" button all follow it;
  *  - "Designed for <audience>" with a Change link (sends `more` with the note
- *    "Designed for: …"), an optional note box, and "Show other looks".
+ *    "Designed for: …"), one quiet caption row ("appearance only" + Inspect),
+ *    and a collapsed "Anything to change?" note so the default path is one
+ *    decision: Use.
  *
- * Each look's preview is the SAME shared key screen (the set's one html-mock)
- * painted in that look's theme, so the owner compares like for like. The frame
+ * Each look can provide its own composition for the same user task. Older
+ * proposals fall back to the shared key screen painted in each theme. The frame
  * is the same locked-down, script-free sandbox DesignMockPreview uses — the
  * only thing injected is the look's theme tokens.
  */
@@ -40,27 +42,34 @@ function Swatches({ look }: { look: Look }): ReactElement {
   );
 }
 
-function LookPreview({ look, screenHtml }: { look: Look; screenHtml: string }): ReactElement {
+function LookPreview({ look, screenHtml, onOpen }: { look: Look; screenHtml: string; onOpen: () => void }): ReactElement {
   const doc = useMemo(() => {
     if (new TextEncoder().encode(screenHtml).byteLength > PREVIEW_LIMIT) return "";
     return mockDocument(screenHtml, themeToCssVars(look));
   }, [look, screenHtml]);
-  if (!doc)
-    return (
-      <div className="look-app look-app--empty" aria-hidden="true">
-        This screen is too large to preview here.
-      </div>
-    );
   return (
-    <iframe
-      className="look-app"
-      title={`Preview: ${look.name}`}
-      sandbox=""
-      referrerPolicy="no-referrer"
-      srcDoc={doc}
-      aria-hidden="true"
-      tabIndex={-1}
-    />
+    <span className="look-app-wrap">
+      {doc ? (
+        <iframe
+          className="look-app"
+          title={`Preview: ${look.name}`}
+          sandbox=""
+          referrerPolicy="no-referrer"
+          srcDoc={doc}
+          aria-hidden="true"
+          tabIndex={-1}
+        />
+      ) : (
+        <span className="look-app look-app--empty" aria-hidden="true">
+          This screen is too large to preview here.
+        </span>
+      )}
+      {/* Owner 2026-10-24: clicking the preview opens it full-size — no
+          scrolling below to the Inspect panel first. */}
+      <button type="button" className="look-open-full" onClick={onOpen} aria-label={`Open ${look.name} full size`}>
+        <Icon name="expand" title="" />
+      </button>
+    </span>
   );
 }
 
@@ -80,22 +89,33 @@ export function LooksPicker(props: {
   );
   const [active, setActive] = useState(recommendedIndex);
   const [note, setNote] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [fullRequest, setFullRequest] = useState(0);
+  const pickerId = useId();
   const track = useRef<HTMLDivElement>(null);
   const index = Math.min(active, looks.length - 1);
   const chosen = looks[index]!;
   const prefersReduced =
     typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const screenHtml = set.screen.html;
+  const chosenScreen = chosen.screen ?? set.screen;
+  // A typed note never hides behind the collapsed toggle.
+  const noteVisible = noteOpen || note.trim().length > 0;
 
-  // A tab click (phone) slides the strip to that look; the scroll handler keeps
-  // `active` in sync when the owner swipes instead. On desktop the strip is a
-  // grid, so clicking a card's radio is what selects it.
+  // The track shows one full-width card at a time at every size (owner
+  // 2026-10-24): a tab click scrolls to that look, and scrolling the track
+  // keeps `active` in sync when the owner swipes instead. A programmatic
+  // goTo suppresses that sync while its smooth scroll flies — mid-flight
+  // edge sampling would re-latch the wrong card over the tab's own choice.
+  const programmaticScroll = useRef(false);
   function goTo(i: number) {
     setActive(i);
     const strip = track.current;
-    if (!strip || getComputedStyle(strip).display !== "flex") return;
+    if (!strip) return;
     const card = strip.children[i] as HTMLElement | undefined;
-    if (card) strip.scrollTo({ left: card.offsetLeft - 16, behavior: prefersReduced ? "auto" : "smooth" });
+    if (!card) return;
+    programmaticScroll.current = true;
+    strip.scrollTo({ left: card.offsetLeft, behavior: prefersReduced ? "auto" : "smooth" });
+    setTimeout(() => { programmaticScroll.current = false; }, prefersReduced ? 50 : 450);
   }
 
   useEffect(() => {
@@ -105,8 +125,8 @@ export function LooksPicker(props: {
     const onScroll = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        if (getComputedStyle(strip).display !== "flex") return;
-        const edge = strip.getBoundingClientRect().left + 16;
+        if (programmaticScroll.current) return;
+        const edge = strip.getBoundingClientRect().left;
         let best = 0;
         let bestGap = Infinity;
         for (let i = 0; i < strip.children.length; i++) {
@@ -128,28 +148,42 @@ export function LooksPicker(props: {
 
   return (
     <div className="look-picker" data-testid="looks-picker">
-      <p className="look-for">
-        <span>Designed for</span> <b>{set.audience}</b>{" "}
-        <button
-          type="button"
-          className="r-link look-for-change"
-          data-testid="looks-change-audience"
-          disabled={props.busy}
-          onClick={() => props.onMore(`Designed for: ${set.audience} — change this to: `)}
-        >
-          Change
-        </button>
-      </p>
+      <div className="look-for">
+        <span className="look-for-head">
+          <span className="look-for-label">Designed for</span>
+          <button
+            type="button"
+            className="look-for-change"
+            data-testid="looks-change-audience"
+            disabled={props.busy}
+            onClick={() => props.onMore(`Designed for: ${set.audience} — change this to: `)}
+          >
+            Change
+          </button>
+        </span>
+        <b>{set.audience}</b>
+      </div>
 
-      {/* Phone-only name tabs; the look in view is the choice. */}
-      <div className="look-switch" role="tablist" aria-label="Looks" data-testid="looks-tabs">
+      {/* Name tabs choose at every width; the track below shows one
+          full-width card at a time and scrolls between them. */}
+      <div className="look-switch" role="group" aria-label="Choose a look" data-testid="looks-tabs">
         {looks.map((look, i) => (
           <button
             key={look.id}
             type="button"
-            role="tab"
             aria-pressed={i === index}
+            disabled={props.busy}
+            tabIndex={i === index ? 0 : -1}
             data-testid={`looks-tab-${look.id}`}
+            onKeyDown={(event) => {
+              const next = event.key === "Home" ? 0 : event.key === "End" ? looks.length - 1 :
+                event.key === "ArrowRight" ? (index + 1) % looks.length :
+                event.key === "ArrowLeft" ? (index - 1 + looks.length) % looks.length : null;
+              if (next === null) return;
+              event.preventDefault();
+              setActive(next);
+              (event.currentTarget.parentElement?.children[next] as HTMLElement | undefined)?.focus();
+            }}
             onClick={() => goTo(i)}
           >
             {look.name}
@@ -164,15 +198,24 @@ export function LooksPicker(props: {
             <label className="look-option" key={look.id} data-testid={`looks-option-${look.id}`}>
               <input
                 type="radio"
-                name="look"
+                name={`${pickerId}-look`}
+                disabled={props.busy}
                 value={look.id}
+                aria-label={`Choose ${look.name}`}
                 checked={i === index}
                 onChange={() => setActive(i)}
               />
               <span className="look-selected">
                 <Icon name="check" title="" /> Selected
               </span>
-              <LookPreview look={look} screenHtml={screenHtml} />
+              <LookPreview
+                look={look}
+                screenHtml={(look.screen ?? set.screen).html}
+                onOpen={() => {
+                  setActive(i);
+                  setFullRequest((epoch) => epoch + 1);
+                }}
+              />
               <div className="look-text">
                 <p className="look-name">
                   {look.name}
@@ -190,29 +233,51 @@ export function LooksPicker(props: {
         </div>
       </fieldset>
 
+      {/* Owner 2026-10-24: clicking a preview opens it full-size — that is the
+          only expanded preview (no second panel below the options). The
+          request counter only grows: every click is a fresh open. */}
+      <DesignMockPreview
+        key={chosen.id}
+        mocks={[chosenScreen]}
+        theme={chosen}
+        dialogOnly
+        fullRequest={fullRequest}
+      />
+
       <div className="look-next">
-        <label htmlFor="look-note">
-          Anything to change?{" "}
-          <span>Optional. For example: &ldquo;the first one, but warmer&rdquo;, or &ldquo;use the green from our logo&rdquo;.</span>
-          <textarea
-            id="look-note"
-            data-testid="looks-note"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            maxLength={2000}
-            rows={2}
-          />
-        </label>
-        <p className="state-detail">Next, Caddie designs every screen in this look for you to review.</p>
-        <div className="row-actions">
+        {noteVisible ? (
+          <label htmlFor={`${pickerId}-note`} data-testid="looks-note-field">
+            Anything to change?{" "}
+            <span>Optional. For example: &ldquo;the first one, but warmer&rdquo;, or &ldquo;use the green from our logo&rdquo;.</span>
+            <textarea
+              id={`${pickerId}-note`}
+              data-testid="looks-note"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              maxLength={2000}
+              rows={2}
+            />
+          </label>
+        ) : null}
+        <button
+          type="button"
+          className="btn-key look-use"
+          data-testid="looks-use"
+          disabled={props.busy}
+          onClick={() => props.onChoose(chosen.id, note.trim())}
+        >
+          {props.busy ? "Saving…" : `Use ${chosen.name}`}
+        </button>
+        <div className="row-actions look-quiet">
           <button
             type="button"
-            className="btn-key"
-            data-testid="looks-use"
+            className="btn-ghost"
+            data-testid="looks-note-toggle"
+            aria-expanded={noteVisible}
             disabled={props.busy}
-            onClick={() => props.onChoose(chosen.id, note.trim())}
+            onClick={() => setNoteOpen(!noteVisible)}
           >
-            {props.busy ? "Saving…" : `Use ${chosen.name}`}
+            {noteVisible ? "Hide change note" : "Anything to change?"}
           </button>
           <button
             type="button"

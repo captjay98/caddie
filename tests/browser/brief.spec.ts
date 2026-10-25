@@ -31,8 +31,8 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APP_DIR = join(REPO_ROOT, 'apps', 'app');
 const WORKER_BUNDLE = join(APP_DIR, 'dist', 'caddie_app', 'index.js');
-const PORT = 4173;
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = process.env.CADDIE_BROWSER_BASE ?? 'http://127.0.0.1:4173';
+const PORT = Number(new URL(BASE).port || 4173);
 const LOG = `/tmp/caddie-brief-browser-${process.pid}.log`;
 
 let preview: ChildProcess | null = null;
@@ -397,11 +397,11 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 		// unseen count drops to zero. Read state is separate from resolution —
 		// no approval/schedule POSTs happen (the stub records none).
 		await expect(page.getByTestId('nav-brief-badge')).toHaveCount(0);
-		await expect(page.getByTestId('brief-count')).toHaveText('All updates read');
-		await expect(page.getByTestId('brief-count')).not.toContainText('unseen');
+		await expect(page.getByTestId('brief-count')).toHaveCount(0);
 		await expect(page.getByTestId('brief-head')).toHaveCount(1);
 		await expect(page.getByTestId('brief-head').getByTestId('brief-mark-all-read')).toHaveCount(0);
-		await expect(page.getByTestId('brief-lane-panel').getByTestId('brief-feed-toolbar')).toBeVisible();
+		await expect(page.getByTestId('brief-lane-panel').getByTestId('brief-feed-toolbar')).toHaveCount(0);
+		await expect(page.getByTestId('decision-card').filter({ visible: true })).toHaveCount(2);
 		await expect(page.getByTestId('brief-mascot').locator('svg')).toHaveAttribute('data-mood', 'needs');
 		await context.close();
 	});
@@ -602,7 +602,31 @@ test('Earlier keeps a resolved decision and opens its original revision without 
  await page.getByTestId('brief-done').getByText('Earlier · 1').click();
  await page.getByTestId('brief-done-item').getByRole('button', { name: 'View decision' }).click();
  await expect(page).toHaveURL(/approval=ap-1/);
+ await expect(page.getByTestId('decision-original-content')).not.toBeVisible();
+ await page.getByTestId('decision-history').locator('summary').filter({ hasText: /Read the original plan/ }).click();
  await expect(page.getByTestId('decision-original-content')).toContainText('Original approved scope');
+ await expect(page.getByTestId('decision-history')).not.toContainText('Newer unapproved scope');
+ await expect(page.getByTestId('decision-history').getByRole('button', { name: /Approve/ })).toHaveCount(0);
+ await context.close();
+});
+
+test('original decision stays readable at 320px with long specification text', async ({ browser }) => {
+ const context = await browser.newContext({ viewport: { width: 320, height: 640 } });
+ await stubAccount(context, { cards: [{ ...APPROVAL_A, status: 'handled', headline: 'Design approved', summary: 'Decision approved.', primaryAction: { label: 'View decision', kind: 'review', targetId: 'ap-1' } }] });
+ const original = { id: 'plan-original', projectId: 'proj-a', kind: 'prd', revision: 1, bodyHash: 'original-hash', body: '# Original approved scope\n\n' + 'unbroken-long-model-identifier'.repeat(60) + '\n\n' + 'Original scope includes readable journeys and constraints. '.repeat(40), createdBy: 'actor-test', createdAt: NOW };
+ const newer = { ...original, id: 'plan-newer', revision: 2, bodyHash: 'new-hash', body: '# Newer unapproved scope' };
+ await context.route('**/api/projects/proj-a/plan-docs', route => json(route, 200, { revisions: [newer, original] }));
+ await context.route('**/api/approvals/ap-1', route => json(route, 200, { approval: { id: 'ap-1', projectId: 'proj-a', action: 'design', resourceId: original.id, revisionHash: original.bodyHash, policyVersion: 'v1', intentHash: 'intent-original', status: 'approved', decidedBy: 'actor-test', expiresAt: '2999-01-01T00:00:00.000Z' } }));
+ const page = await context.newPage();
+ await page.goto(`${BASE}/app/?pane=brief`);
+ await page.getByTestId('brief-done').getByText('Earlier · 1').click();
+ await page.getByTestId('brief-done-item').getByRole('button', { name: 'View decision' }).click();
+ await expect(page).toHaveURL(/approval=ap-1/);
+ expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+ await expect(page.getByTestId('decision-original-content')).not.toBeVisible();
+ await page.getByTestId('decision-history').locator('summary').filter({ hasText: /Read the original plan/ }).click();
+ await expect(page.getByTestId('decision-original-content')).toContainText('Original approved scope');
+ expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
  await expect(page.getByTestId('decision-history')).not.toContainText('Newer unapproved scope');
  await expect(page.getByTestId('decision-history').getByRole('button', { name: /Approve/ })).toHaveCount(0);
  await context.close();
@@ -1136,8 +1160,11 @@ test('the card title always reserves exactly two lines — short and long titles
 		await page.goto(`${BASE}/app/?pane=brief`);
 		const build = page.getByTestId('decision-card').first();
 		await expect(build.getByTestId('card-build-current')).toHaveText('Now: offline recording');
-		await expect(build.getByTestId('card-build-feed-row')).toHaveCount(4);
-		await expect(build.getByTestId('card-build-feed-row').last()).toContainText('Waiting');
+		// Owner 2026-10-25: the feed is capped at two rows after the Now line,
+		// with one "N more" line into the Build tab (full inventory lives there).
+		await expect(build.getByTestId('card-build-feed-row')).toHaveCount(2);
+		await expect(build.getByTestId('card-build-feed-row').last()).toContainText('Built');
+		await expect(build.getByTestId('card-build-more')).toContainText('2 more features');
 		await expect(build.getByTestId('card-build-update')).toContainText('2 features built');
 		// A card where Caddie is working gets NO filled CTA: "View activity" is a
 		// bordered action and "Stop build" is text-only.
@@ -1291,7 +1318,7 @@ test('the card title always reserves exactly two lines — short and long titles
 		await context.close();
 	});
 
-	test('earlier card: a compact history record (mark, title, line, link, time)', async ({ browser }) => {
+	test('earlier card keeps the shared card frame, outcome and original decision action', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context, { cards: [{ ...APPROVAL_A, id: 'brf_approval_done', status: 'handled', headline: 'You approved the plan', summary: 'Daily logs, offline recording, and weekly summaries.', primaryAction: { label: 'View approved plan', kind: 'review', targetId: 'ap-done' }, key: 'proj-a:approval:ap-done' }] });
 		const page = await context.newPage();
@@ -1299,12 +1326,13 @@ test('the card title always reserves exactly two lines — short and long titles
 		// The earlier card lives in the folded "Earlier" section.
 		await page.getByTestId('brief-done').getByText('Earlier · 1').click();
 		const earlier = page.getByTestId('decision-card').filter({ hasText: 'You approved the plan' }).first();
-		await expect(earlier.locator('.compact-card-record')).toBeVisible();
-		await expect(earlier.locator('.compact-card-record time')).toBeVisible();
-		// The footer: N completed updates on the left, Read-only history right.
-		const foot = earlier.getByTestId('card-foot');
-		await expect(foot).toContainText('1 completed update');
-		await expect(foot).toContainText('Read-only history');
+		await expect(earlier.locator('.compact-card-head')).toBeVisible();
+		await expect(earlier.locator('h3')).toHaveText('You approved the plan');
+		await expect(earlier.locator('.summary')).toHaveText('Daily logs, offline recording, and weekly summaries.');
+		await expect(earlier.locator('.compact-card-badge')).toHaveText('Recorded');
+		await expect(earlier.getByTestId('card-primary-action')).toHaveText('View approved plan');
+		await expect(earlier.getByTestId('card-fresh')).toBeVisible();
+		await expect(earlier.getByTestId('card-foot')).toHaveCount(0);
 		await context.close();
 	});
 });

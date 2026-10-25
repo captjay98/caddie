@@ -54,4 +54,19 @@ describe("windowMessages", () => {
 		expect(shown).toHaveLength(120);
 		expect(hiddenCount).toBe(0);
 	});
+	test('earlier pages stay bounded and report newer history instead of mounting everything', () => {
+		const m = transcript(200);
+		const page = windowMessages(m as never, 40, false, 'u180');
+		expect(page.shown).toHaveLength(40);
+		expect(page.shown[0]?.id).toBe('u160');
+		expect(page.newerCount).toBe(40);
+	});
+	test('a huge single turn stays bounded and an older anchor does not move when new replies arrive', () => {
+		const m = [msg('question', 'user'), ...Array.from({ length: 200 }, (_, i) => msg(`reply-${i}`, 'assistant'))];
+		const page = windowMessages(m as never, 40, false, 'reply-100');
+		expect(page.shown).toHaveLength(40);
+		expect(page.shown.at(-1)?.id).toBe('reply-99');
+		const updated = windowMessages([...m, msg('new', 'assistant')] as never, 40, false, 'reply-100');
+		expect(updated.shown).toEqual(page.shown);
+	});
 });

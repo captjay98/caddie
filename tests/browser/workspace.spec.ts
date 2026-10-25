@@ -31,8 +31,8 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APP_DIR = join(REPO_ROOT, 'apps', 'app');
 const WORKER_BUNDLE = join(APP_DIR, 'dist', 'caddie_app', 'index.js');
-const PORT = 4173;
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = process.env.CADDIE_BROWSER_BASE ?? 'http://127.0.0.1:4173';
+const PORT = Number(new URL(BASE).port || 4173);
 const LOG = `/tmp/caddie-p06-browser-preview-${process.pid}.log`;
 
 let preview: ChildProcess | null = null;
@@ -348,7 +348,7 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await expect(page.getByTestId('project-tab-build')).toHaveAttribute('aria-current', 'page');
 		// v2 Build: past builds as sentences live under "Build history & files";
 		// open that section to reach them (its details fold; Files is a tab).
-		await page.getByTestId('project-build-resources').locator('summary').first().click();
+		await page.getByTestId('project-build-resources').getByRole('button').click();
 		await expect(page.getByTestId('run-row')).toHaveCount(1);
 		await expect(page.getByTestId('run-row')).toContainText('Build request recorded');
 		await page.getByTestId('run-detail-toggle').click();

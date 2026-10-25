@@ -1,5 +1,8 @@
-import { Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { workflowQueryOptions } from "../workflow-query.ts";
+import { planReviewState } from "../planning/plan-decision.ts";
+import { Link, useLocation } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { Icon } from "../icons.tsx";
 import { WORDS } from "../copy.ts";
@@ -9,7 +12,6 @@ import {
   useProfile,
   useProjectExperience,
   useProjectHackathon,
-  useWorkflowPhase,
 } from "../queries.ts";
 import { activeStep, workflowSteps } from "./project-status.ts";
 import { hackathonChips } from "./project-header.ts";
@@ -88,7 +90,9 @@ export function ProjectTabs(props: {
 }): ReactElement {
   const chrome = useWorkspaceChrome();
   const project = chrome.selectedProject;
-  const [infoOpen, setInfoOpen] = useState(false);
+  const location = useLocation();
+  const [infoOpen, setInfoOpen] = useState(location.hash === 'todo');
+  useEffect(() => { if (location.hash === 'todo') setInfoOpen(true); }, [location.hash]);
   const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
   const hackathon = useProjectHackathon(actor, project?.id ?? null);
   const profile = useProfile(actor);
@@ -102,7 +106,9 @@ export function ProjectTabs(props: {
   // did not pass its own. A page with richer data (e.g. Check's readiness
   // count) overrides by passing `steps` explicitly; both are real server
   // state, never a client guess.
-  const phase = useWorkflowPhase(actor, project?.id ?? null);
+  const workflow = useQuery(workflowQueryOptions(chrome.actorId, project?.id ?? null));
+  const phase = workflow.data?.workflow?.phase ?? null;
+  const reviewLabel = phase === "review" ? planReviewState(workflow.data?.plan, workflow.data?.approval).label : undefined;
   // Whether the plan was approved, from the project status (the same shared
   // query as the Now card): it tells a paused build from a stuck plan, which
   // the `blocked` phase alone cannot. Unknown while it loads or if it fails.
@@ -113,20 +119,21 @@ export function ProjectTabs(props: {
   const derivedSteps = useMemo(
     () =>
       project
-        ? workflowSteps(phase.data ?? null, {
+        ? workflowSteps(phase ?? null, {
             personal: isPersonal,
             planApproved,
+            reviewLabel,
           })
         : undefined,
-    [project, phase.data, isPersonal, planApproved],
+    [project, phase, isPersonal, planApproved, reviewLabel],
   );
   const activity = useBuildActivity(
     actor,
-    phase.data === "building" ? (project?.id ?? null) : null,
+    phase === "building" ? (project?.id ?? null) : null,
     false,
   );
   const quiet =
-    phase.data === "building" &&
+    phase === "building" &&
     Boolean(activity.data?.timeline?.quiet || activity.error);
   const steps = quiet
     ? {
@@ -138,7 +145,7 @@ export function ProjectTabs(props: {
       }
     : (props.steps ?? derivedSteps);
   const active = project
-    ? activeStep(phase.data ?? null, { planApproved })
+    ? activeStep(phase ?? null, { planApproved })
     : null;
   const activeIndex = active
     ? STEPS.findIndex((step) => step.id === active)
@@ -198,7 +205,7 @@ export function ProjectTabs(props: {
               data-testid={step.testid}
               data-active={isActive ? "true" : undefined}
               aria-current={isCurrent ? "page" : isActive ? "step" : undefined}
-              search={(prev: Record<string, unknown>) => ({ ...prev })}
+              search={(prev: Record<string, unknown>) => ({ ...(typeof prev.project === 'string' ? { project: prev.project } : {}), ...(prev.pane === 'channel' ? { pane: 'channel' as const } : {}) })}
             >
               <span className="step-top">
                 <span className="step-num" aria-hidden="true">
@@ -257,7 +264,7 @@ export function ProjectTabs(props: {
           to="/project"
           className="project-head-name"
           data-testid="project-head-name"
-          search={(prev: Record<string, unknown>) => ({ ...prev })}
+          search={(prev: Record<string, unknown>) => ({ ...(typeof prev.project === 'string' ? { project: prev.project } : {}), ...(prev.pane === 'channel' ? { pane: 'channel' as const } : {}) })}
         >
           {project.name}
         </Link>
@@ -275,7 +282,7 @@ export function ProjectTabs(props: {
           className="btn-ghost project-head-settings"
           data-testid="project-settings-gear"
           aria-label="Project settings"
-          search={(prev: Record<string, unknown>) => ({ ...prev })}
+          search={(prev: Record<string, unknown>) => ({ ...(typeof prev.project === 'string' ? { project: prev.project } : {}), ...(prev.pane === 'channel' ? { pane: 'channel' as const } : {}) })}
         >
           <Icon name="settings" title="" />
           <span>Settings</span>

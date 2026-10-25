@@ -52,8 +52,10 @@ function classifyMediaType(file: File): { ok: true; isImage: boolean; attachment
 
 export function Composer(props: {
 	onSend: (text: string, attachments: readonly InputAttachment[]) => void;
-	/** Transport busy (submitted/streaming) or no project selected. */
+	/** No usable conversation. Busy transport is separate: editing stays usable. */
 	disabled?: boolean;
+	/** Follow-ups use Flue's per-conversation queue, never abort the current work. */
+	busy?: boolean;
 	disabledReason?: string;
 	placeholder?: string;
 	/** Controlled text (audit F01): when provided, unsent typing is owned by
@@ -327,14 +329,14 @@ export function Composer(props: {
 					className="composer-send"
 					disabled={!canSend}
 					data-testid="composer-send"
-					aria-label={disabled ? 'Send — held' : 'Send message'}
-					title={props.disabledReason ?? 'Send message'}
+					aria-label={disabled ? 'Send — held' : props.busy ? 'Send follow-up' : 'Send message'}
+					title={props.disabledReason ?? (props.busy ? 'Send a follow-up — current work continues' : 'Send message')}
 				>
 					<Icon name="send" title="" />
 				</button>
 			</form>
 			<p className={props.draftNote ? 'composer-hint draft-note' : 'composer-hint'}>
-				{props.draftNote ?? 'Enter to send · Shift + Enter for a new line'}
+				{props.busy ? 'Follow-ups wait their turn. Current work continues.' : props.draftNote ?? 'Enter to send · Shift + Enter for a new line'}
 			</p>
 		</div>
 	);

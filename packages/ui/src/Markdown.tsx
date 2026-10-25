@@ -1,6 +1,6 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { memo } from 'react';
+import { createContext, memo, useContext, useMemo } from 'react';
 import type { ReactElement } from 'react';
 
 /**
@@ -17,10 +17,43 @@ import type { ReactElement } from 'react';
  */
 // Memoized: the transcript re-renders on every shell update; re-parsing
 // unchanged markdown blocks dominated route-change CPU (see execution ledger).
-export const Markdown = memo(function Markdown({ text }: { text: string }): ReactElement {
+/** Per-conversation LRU, never a global cache of private conversation text.
+ * ReactMarkdown's default export is a synchronous, hook-free parser in the
+ * pinned version. Preparing it creates elements, not DOM or network requests. */
+export function createMarkdownCache(maxEntries = 48, maxCharacters = 128_000) {
+	const entries = new Map<string, ReactElement>();
+	let characters = 0;
+	function render(text: string): ReactElement {
+		const hit = entries.get(text);
+		if (hit) { entries.delete(text); entries.set(text, hit); return hit; }
+		const result = ReactMarkdown({ children: text, remarkPlugins: [remarkGfm] });
+		if (text.length <= maxCharacters && maxEntries > 0) {
+			while (entries.size && (entries.size >= maxEntries || characters + text.length > maxCharacters)) {
+				const oldest = entries.keys().next().value!;
+				characters -= oldest.length; entries.delete(oldest);
+			}
+			entries.set(text, result); characters += text.length;
+		}
+		return result;
+	}
+	return {
+		render,
+		// Never spend an idle callback parsing a very large single reply.
+		prepare(text: string) { if (text.length <= Math.min(12_000, maxCharacters)) render(text); },
+		clear() { entries.clear(); characters = 0; },
+		get size() { return entries.size; },
+	};
+}
+export type MarkdownCache = ReturnType<typeof createMarkdownCache>;
+const Cache = createContext<MarkdownCache | null>(null);
+export const MarkdownCacheProvider = Cache.Provider;
+
+export const Markdown = memo(function Markdown({ text, cacheable = true }: { text: string; cacheable?: boolean }): ReactElement {
+	const cache = useContext(Cache);
+	const content = useMemo(() => cache && cacheable ? cache.render(text) : ReactMarkdown({ children: text, remarkPlugins: [remarkGfm] }), [cache, text, cacheable]);
 	return (
 		<div className="md-body">
-			<ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+			{content}
 		</div>
 	);
 });

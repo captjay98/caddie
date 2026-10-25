@@ -1,7 +1,8 @@
+import { ProjectDialog } from "./project/ProjectDialog.tsx";
 import { Mascot } from '@caddie/ui/Mascot';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { Link, useLocation, useNavigate, useSearch } from '@tanstack/react-router';
 import * as v from 'valibot';
 import { ProjectExperienceSchema, iconColor, iconLetter } from '@caddie/contracts';
 import type { ApprovalRecord, DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
@@ -18,6 +19,7 @@ import { EvidenceDrawer } from './evidence/Drawer.tsx';
 import { ArtifactViewer, type ViewerRevision } from './artifacts/Viewer.tsx';
 import { briefActionRoute } from './brief/navigate.ts';
 import { workflowQueryOptions } from './workflow-query.ts';
+import { planReviewState } from './planning/plan-decision.ts';
 import { DesignReview, HowYourAppWorks } from './planning/DesignReview.tsx';
 import { RepositoryPicker, type SelectedRepository } from './repositories/RepositoryPicker.tsx';
 import { RunInspector } from './runs/RunInspector.tsx';
@@ -42,12 +44,13 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchJson, readableFailure } from './api.ts';
 import { useWorkspaceChrome } from './workspace/Chrome.tsx';
 import { NowPanel } from './project/NowPanel.tsx';
-import { ProjectWorkflow } from './conversation/ProjectWorkflow.tsx';
+import { ProjectWorkflow, DesignBriefPreview } from './conversation/ProjectWorkflow.tsx';
 import { relativeUpdated } from './project/now-panel.ts';
 import { ProjectTabs } from './workspace/ProjectTabs.tsx';
 import { projectCardFromCopiedApp, projectCardFromExperience, projectStatus, type CopiedAppSummary } from './workspace/project-status.ts';
 import { deadlineText } from './workspace/project-header.ts';
 import { Icon } from './icons.tsx';
+import { plainBlockingSummary } from './plain-blocking.ts';
 
 /** A hackathon's deadline in words for its project card (plan 5.7); null when unknown. */
 function dueWords(hackathon: ProjectHackathonLine): string | null {
@@ -665,7 +668,6 @@ function ProjectCard(props: {
 	const experience = useProjectExperience(actor, props.project.id);
 	const { project, fallback } = props;
 	const parsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
-	const fromWorkflow = parsed?.success ? projectCardFromExperience(parsed.output) : null;
 	const hackathon = props.hackathon ?? null;
 
 	// The four project steps belong inside the project, not on every list card.
@@ -676,8 +678,13 @@ function ProjectCard(props: {
 	const noWorkflow = parsed?.success === true && parsed.output.version === 0;
 	const copied = useQuery({
 		...workflowQueryOptions(chrome.actorId, props.project.id),
-		enabled: Boolean(chrome.actorId) && noWorkflow,
+		enabled: Boolean(chrome.actorId) && (noWorkflow || (parsed?.success === true && parsed.output.stage === 'review')),
 	});
+	const review = copied.data?.workflow?.phase === 'review' ? planReviewState(copied.data.plan, copied.data.approval) : undefined;
+	let fromWorkflow = parsed?.success ? projectCardFromExperience(parsed.output, review) : null;
+	if (fromWorkflow && parsed?.success && parsed.output.stage === 'review' && !copied.data) {
+		fromWorkflow = { ...fromWorkflow, label: copied.isError ? 'Decision unavailable' : 'Checking plan', detail: copied.isError ? 'Open the plan to retry loading its latest decision.' : 'Checking the latest plan and decision.' };
+	}
 	const copiedApp = noWorkflow ? (copied.data?.importPreview ?? null) : null;
 	const card = fromWorkflow ?? (copiedApp ? projectCardFromCopiedApp(copiedApp) : null);
 	const purpose = project.description?.trim() || (project.contestUrl ? 'For the linked hackathon' : 'A personal project');
@@ -712,7 +719,7 @@ function ProjectCard(props: {
 			<p className="project-card-purpose" title={purpose}>
 				{purpose}
 			</p>
-			<p className="project-card-detail">{card ? card.detail : fallback.detail}</p>
+			<p className="project-card-detail">{plainBlockingSummary(card ? card.detail : fallback.detail) ?? (card ? card.detail : fallback.detail)}</p>
 			<div className="project-card-foot">
 				{/* Footer-left: the hackathon + deadline when the project has one,
 				    otherwise the "Updated N ago" line. */}
@@ -720,7 +727,7 @@ function ProjectCard(props: {
 					{hackathon ? (
 						<span className="project-card-contest" data-testid={`project-contest-${project.id}`}>
 							<Icon name="trophy" title="" />
-							{hackathon.title}
+							<span className="project-card-contest-name">{hackathon.title}</span>
 							{dueWords(hackathon) ? (
 								<>
 									{/* Visually the pill stands alone; read aloud it needs the pause. */}
@@ -728,9 +735,13 @@ function ProjectCard(props: {
 									<span className="project-card-due">{dueWords(hackathon)}</span>
 								</>
 							) : null}
+							{/* Owner 2026-10-25: "Updated N ago" folds into this row,
+							    right after the due pill — one footer line, not two. */}
+							<span className="project-card-updated">{updated ?? ''}</span>
 						</span>
-					) : null}
-					<span className="project-card-updated">{updated ?? ''}</span>
+					) : (
+						<span className="project-card-updated">{updated ?? ''}</span>
+					)}
 				</span>
 				{card ? (
 					card.action.target === 'plan' || (parsed?.success && parsed.output.stage === 'design_review') ? (
@@ -795,11 +806,18 @@ function FocusedProjectHome({ projectId }: { projectId: string }): ReactElement 
 	// where the project stands, above the four steps (the tappable step bar
 	// below). From the shared ProjectExperience — the same truth as the Projects
 	// card and the Now panel — so every surface tells one story.
-	const reviewingPlan = phase === 'review';
+	// A copied app stays tryable under the plan through every BEFORE_BUILD
+	// phase (ProjectWorkflow carries it), so the readable review surface only
+	// takes over review when there is no import whose card it would drop.
+	const reviewingPlan = ['review', 'looks', 'looks-review', 'design', 'design-review'].includes(phase ?? '') && !workflow.data?.importPreview;
 	const overview = parsed?.success && parsed.output.version > 0 ? projectCardFromExperience(parsed.output) : null;
 	return <>
-		<ProjectTabs current={step} context={reviewingPlan ? <ProjectSupportingDetails projectId={projectId} /> : null} />
-		{overview && phase !== 'review' && phase !== 'design-review' ? (
+		<ProjectTabs current={step} context={<ProjectSupportingDetails projectId={projectId} />} />
+		{/* The overview orients during work phases; during decision phases and a
+		    blocked build the workflow card already carries the status — and on
+		    blocked the overview would render the raw technical report (owner
+		    2026-10-25: pure duplication). */}
+		{overview && (!phase || !['review', 'looks', 'looks-review', 'design', 'design-review', 'building', 'blocked'].includes(phase)) ? (
 			<p className="project-overview-summary" data-testid="project-overview-summary" data-tone={overview.tone}>
 				{overview.working ? <span className="project-overview-live" aria-hidden="true" /> : null}
 				<b>{overview.label}.</b> {overview.detail}
@@ -809,8 +827,13 @@ function FocusedProjectHome({ projectId }: { projectId: string }): ReactElement 
 			{reviewingPlan ? <DesignReviewBody projectId={projectId} /> : workflow.data?.workflow || workflow.data?.importPreview ? <ProjectWorkflow projectId={projectId} presentation="workspace" />
 				: <section className="focused-project-empty project-caddie-empty"><Mascot mood="ready" size={56} /><div><h2>What would you like to build?</h2><p className="page-lede">Tell Caddie what this project should do. Your plan appears here before anything is built.</p><button type="button" className="btn-key" onClick={() => chrome.openProject(projectId, true)}>Continue with Caddie</button></div></section>}
 		</div>
-		{!reviewingPlan ? <ProjectSupportingDetails projectId={projectId} /> : null}
+
 	</>;
+}
+
+function ProjectStepHeader({ current }: { current: 'build' | 'check' | 'submission' }): ReactElement {
+ const chrome = useWorkspaceChrome();
+ return <ProjectTabs current={current} context={chrome.selectedProject ? <ProjectSupportingDetails projectId={chrome.selectedProject.id} /> : null} />;
 }
 
 /** Useful context stays reachable, without competing with the current step. */
@@ -819,14 +842,15 @@ function ProjectSupportingDetails({ projectId }: { projectId: string }): ReactEl
 	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
 	const brief = useBriefCards(actor, projectId);
 	const workflowBrief = useWorkflowBrief(actor, projectId);
-	const [tasksOpen, setTasksOpen] = useState(false);
+	const location = useLocation();
+	const [tasksOpen, setTasksOpen] = useState(location.hash === 'todo');
 	const experience = useProjectExperience(actor, projectId);
 	const parsed = experience.data ? v.safeParse(ProjectExperienceSchema, experience.data) : null;
 	const earlierPreview = parsed?.success && parsed.output.stage !== 'ready' ? parsed.output.preview?.id : null;
 	return <div className="project-supporting" data-testid="project-supporting-details">
 		{earlierPreview ? <button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/preview', { project: projectId, preview: earlierPreview, source: 'workflow' })}>Try the earlier saved app</button> : null}
 		<details><summary>Project brief</summary>{workflowBrief.data ? <Markdown text={workflowBrief.data} /> : <p className="state-detail">{workflowBrief.isPending ? 'Reading the brief…' : workflowBrief.error ? 'The brief could not be loaded. Try opening this section again after refreshing.' : chrome.selectedProject?.description || 'The brief appears after you plan with Caddie.'}</p>}</details>
-		<details data-testid="overview-todo" id="todo" onToggle={event => setTasksOpen(event.currentTarget.open)}><summary>To-dos</summary>{tasksOpen ? <Tasks projectId={projectId} embedded /> : null}</details>
+		<details data-testid="overview-todo" id="todo" open={tasksOpen} onToggle={event => setTasksOpen(event.currentTarget.open)}><summary>To-dos</summary>{tasksOpen ? <Tasks projectId={projectId} embedded /> : null}</details>
 		<details data-testid="overview-recent"><summary>Earlier decisions & updates</summary>
 			{brief.isPending ? <p className="state-detail">Reading the project’s updates…</p> : brief.error ? <StatePanel compact kind={failureKind(brief.error)} title="Couldn’t load the updates." detail={brief.error instanceof Error ? brief.error.message : undefined} onRetry={() => void brief.refetch()} /> :
 				(brief.data?.cards ?? []).length ? <ul className="fold-list">{brief.data!.cards.map(card => <li key={card.id}><button type="button" className="fold-row fold-row-link" onClick={() => { const route = onCardRoute(card, projectId); chrome.goProjectTab(route.to, route.search); }}><span className="fold-row-main"><span className="fold-row-title">{card.headline}</span>{card.summary ? <span className="fold-row-meta">{card.summary}</span> : null}</span><span className="fold-row-chevron" aria-hidden="true">›</span></button></li>)}</ul> : <p className="state-detail">Decisions and updates will be kept here.</p>}
@@ -861,6 +885,7 @@ export function DesignReviewPage(): ReactElement {
 }
 
 function DesignReviewBody(props: { projectId: string }): ReactElement {
+	const [selectedReview, setSelectedReview] = useState<'plan' | 'design' | null>(null);
 	const chrome = useWorkspaceChrome();
 	const search = useSearch({ strict: false }) as { approval?: string };
 	const historical = useQuery({
@@ -887,18 +912,25 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
         const record = historical.data?.approval;
         if (!record || record.projectId !== props.projectId) return <StatePanel kind="error" title="This decision does not belong to this project" />;
         const original = planDocs.data?.revisions.find(revision => revision.id === record.resourceId && revision.bodyHash === record.revisionHash);
-        return <section className="card-surface caddie-card decision-history" data-testid="decision-history">
-            <p className="kicker">Decision record · {record.status}</p><h1>This decision is kept on record</h1>
-            <p>This is the exact decision you opened. Reading it does not approve, restart or change anything.</p>
-            {original ? <div data-testid="decision-original-content"><h2>Original content · revision {original.revision}</h2><Markdown text={original.body} /></div> : <p role="status">The original content is not available here. Its identity is retained below; the latest plan has not been substituted.</p>}
-            <details><summary>Record details</summary><dl><dt>Decision</dt><dd>{record.id}</dd><dt>Action</dt><dd>{record.action}</dd><dt>Resource</dt><dd>{record.resourceId}</dd><dt>Revision</dt><dd>{record.revisionHash}</dd></dl></details>
+        return <section className="card-surface caddie-card decision-history decision-record" data-testid="decision-history">
+            <header className="decision-record-heading"><Mascot mood="ready" size={40} /><div><p className="kicker">{record.status === 'approved' ? 'Approved plan' : `Plan decision · ${record.status}`}</p><h1>{chrome.selectedProject?.name ?? 'Your project'}</h1></div></header>
+            <p>{record.status === 'approved' ? 'You approved this version of the plan.' : 'This earlier decision is saved with its original plan.'} {original ? `Version ${original.revision}.` : ''}</p>
+            {original ? <details className="decision-record-original"><summary>Read the original plan</summary><div data-testid="decision-original-content"><Markdown text={original.body} /></div></details> : <p role="status">The original plan is unavailable. Its record is saved below.</p>}
+            <details className="decision-record-metadata"><summary>Technical record</summary><dl><dt>Decision</dt><dd>{record.id}</dd><dt>Action</dt><dd>{record.action}</dd><dt>Resource</dt><dd>{record.resourceId}</dd><dt>Revision</dt><dd>{record.revisionHash}</dd></dl></details>
             <button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/design-review', { project: props.projectId })}>View current plan</button>
         </section>;
     }
 	const planEverApproved = ['approved', 'revoked', 'expired'].includes(fullWorkflow.data?.approval?.status ?? '');
-	if (buildPhase.data === 'looks' || buildPhase.data === 'looks-review' || buildPhase.data === 'design' || buildPhase.data === 'design-review' || (buildPhase.data === 'blocked' && !planEverApproved)) return <ProjectWorkflow projectId={props.projectId} presentation="workspace" />;
+	const designStage = ['looks', 'looks-review', 'design', 'design-review'].includes(buildPhase.data ?? '');
+    const currentView = selectedReview ?? (designStage ? 'design' : 'plan');
+    const switcher = designStage || fullWorkflow.data?.design ? <nav className="plan-design-switch" aria-label="Plan and design">
+        <button type="button" aria-pressed={currentView === 'plan'} onClick={() => setSelectedReview('plan')}>Plan</button>
+        <button type="button" aria-pressed={currentView === 'design'} onClick={() => setSelectedReview('design')}>Design</button>
+    </nav> : null;
+    if (!designStage && currentView === 'design' && fullWorkflow.data?.design) return <>{switcher}<section className="card-surface caddie-card saved-design">{/* Owner 2026-10-25: the Plan/Design switch already says where you are — the band was a third title. Kept for screen readers as the section label. */}<h2 className="sr-only">Saved design</h2><DesignBriefPreview projectId={props.projectId} design={fullWorkflow.data.design} looks={fullWorkflow.data.looks} readOnly /></section></>;
+    if ((designStage && currentView === 'design') || (buildPhase.data === 'blocked' && !planEverApproved)) return <>{switcher}<ProjectWorkflow projectId={props.projectId} presentation="workspace" /></>;
 	return (
-		<DesignReview
+        <>{switcher}<DesignReview
             key={`${chrome.actorId}:${props.projectId}:${latest?.id ?? 'empty'}`}
             approval={approval.data?.approval ?? null}
             approvalPending={Boolean(latest) && approval.isPending}
@@ -914,7 +946,7 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
 			isPending={planDocs.isPending}
 			error={planDocs.error}
 			retry={() => void planDocs.refetch()}
-		/>
+		/></>
 	);
 }
 
@@ -925,7 +957,7 @@ export function RunsPage(): ReactElement {
 		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col focused-project-page">
-					<ProjectTabs current="build" />
+					<ProjectStepHeader current="build" />
 					<ProjectGate skeleton={{ page: 'build', label: 'Reading your builds…' }}>{(projectId) => <RunsBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
@@ -948,6 +980,7 @@ function RunsBody(props: { projectId: string }): ReactElement {
 	const workflow = useQuery(workflowQueryOptions(chrome.actorId, props.projectId));
 	const artifactRevisions = useArtifactRevisions<ViewerRevision>(actor, props.projectId);
 	const [changeOpen, setChangeOpen] = useState(false);
+	const [recordsOpen, setRecordsOpen] = useState(false);
 	const [changeText, setChangeText] = useState('');
 	// Secondary history never blocks the independent live workflow controls.
 	// The Build step must NOT duplicate the Plan step. Before any build has run
@@ -982,9 +1015,10 @@ function RunsBody(props: { projectId: string }): ReactElement {
 				<div className="focused-project-content"><ProjectWorkflow projectId={props.projectId} presentation="workspace" /></div>
 			)}
 			{!workflow.isPending && !workflow.data?.workflow && !workflow.data?.importPreview ? <NowPanel projectId={props.projectId} fallback={<p className="state-detail">The build appears here after you approve a plan.</p>} /> : null}
-			{showHistory ? (
-			<details className="project-secondary" open={Boolean(search.tab)} data-testid="project-build-resources">
-			<summary><h2 className="fold-title">What Caddie has built</h2></summary>
+			{showHistory ? (<>
+            <div className="build-records-entry" data-testid="project-build-resources"><button type="button" className="build-text-action" onClick={() => setRecordsOpen(true)}>Build records &amp; files <Icon name="doc" title="" /></button></div>
+            <ProjectDialog open={recordsOpen || Boolean(search.tab)} onClose={() => { setRecordsOpen(false); if (search.tab) void navigate({to:'/runs',search:{project:props.projectId}}); }} title="Build records" wide>
+            <p className="state-detail">Previous build requests and saved files. For live progress, close this window and return to Build.</p>
 			{/* Builds or files: a two-way switch, not a second row of tabs
 			    under the step bar. */}
 			<div className="build-view-switch" role="tablist" aria-label="Build views" data-testid="build-tabs">
@@ -1028,16 +1062,11 @@ function RunsBody(props: { projectId: string }): ReactElement {
 					onAskChange={() => setChangeOpen(true)}
 				/>
 			)}
-			</details>
+            </ProjectDialog></>
 			) : null}
-			<ProjectSupportingDetails projectId={props.projectId} />
 			{changeOpen ? (
-				<div className="modal-backdrop" data-testid="change-request-backdrop" onMouseDown={() => setChangeOpen(false)}>
-					<div className="commit-panel card-surface" data-testid="change-request-window" onMouseDown={(e) => e.stopPropagation()}>
-						<p className="kicker" data-tone="action">
-							ASK FOR A CHANGE
-						</p>
-						<h3 className="state-title">What should change?</h3>
+				<ProjectDialog open={changeOpen} onClose={() => setChangeOpen(false)} title="What should change?">
+					<div data-testid="change-request-window">
 						<p className="state-detail">
 							Your request goes to this project's chat. Caddie answers there and drafts the plan update
 							if one is needed — nothing changes in the app until you approve the new plan.
@@ -1072,7 +1101,7 @@ function RunsBody(props: { projectId: string }): ReactElement {
 							</button>
 						</div>
 					</div>
-				</div>
+				</ProjectDialog>
 			) : null}
 		</div>
 	);
@@ -1083,7 +1112,7 @@ export function ArtifactsPage(): ReactElement {
 		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col focused-project-page">
-					<ProjectTabs current="build" />
+					<ProjectStepHeader current="build" />
 					<ProjectGate>{(projectId) => <ArtifactsBody projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
@@ -1111,7 +1140,7 @@ export function SchedulesPage(): ReactElement {
 		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col focused-project-page">
-					<ProjectTabs current="build" />
+					<ProjectStepHeader current="build" />
 					<ProjectGate>{(projectId) => <Schedules projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
@@ -1126,7 +1155,7 @@ export function TasksPage(): ReactElement {
 		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col focused-project-page">
-					<ProjectTabs current="build" />
+					<ProjectStepHeader current="build" />
 					<ProjectGate>{(projectId) => <Tasks projectId={projectId} />}</ProjectGate>
 				</div>
 			</div>
@@ -1154,7 +1183,7 @@ export function SubmissionPage(): ReactElement {
 		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col focused-project-page">
-					<ProjectTabs current="submission" />
+					<ProjectStepHeader current="submission" />
 					<ProjectGate>{(projectId) => <div className="focused-project-content" data-testid="project-submission"><SubmissionBody projectId={projectId} /></div>}</ProjectGate>
 					<ProjectGateSoft>
 						{(projectId) => (
@@ -1182,7 +1211,7 @@ export function EvidencePage(): ReactElement {
 		<>
 			<div className="shell-loading shell-page">
 				<div className="page-col focused-project-page">
-					<ProjectTabs current="check" />
+					<ProjectStepHeader current="check" />
 					<ProjectGate>{(projectId) => <CheckBody projectId={projectId} openScore={search.open === 'score'} focusClaimType={search.claim} />}</ProjectGate>
 				</div>
 			</div>
@@ -1357,7 +1386,6 @@ function CheckBody(props: { projectId: string; openScore: boolean; focusClaimTyp
 			    three deep (owner steering, 2026-10-15), so it renders directly. */}
 			<EvidenceDrawer projectId={props.projectId} focusClaimType={props.focusClaimType} />
 			</details>
-			<ProjectSupportingDetails projectId={props.projectId} />
 		</div>
 	);
 }
