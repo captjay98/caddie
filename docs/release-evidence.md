@@ -545,3 +545,17 @@ the plan-approval wording, and AI on photos only where app features are on
 | DO tags | v1, v2, v3, v4 |
 | Smoke receipt | `lr_17dbd769f6536d46` |
 | Hash match | index-BWPgXn7y.js == dist |
+
+## Production deploy (2026-10-25, bun run deploy)
+
+| Field | Value |
+| :--- | :--- |
+| URL | https://caddie.jamalibrahim.dev |
+| Version ID | `e82cf163-14e7-4bab-9ad9-0efb268722e4` |
+| Commit | `f76db95` |
+| Rollback ID | `5fd61664-1188-4e7c-afdd-505c22be4349` |
+| Gate | release-check + preflight, 13 steps OK |
+| Migrations applied | 0044_looks_phase.sql, 0045_notification_prefs.sql, 0046_model_call_usage.sql |
+| DO tags | v1, v2, v3, v4 |
+| Smoke receipt | `lr_e0f016f68cc3019c` |
+| Hash match | index-DmBnBDH3.js == dist |
