@@ -55,7 +55,7 @@ describe('VAPID JWT', () => {
 		const ok = await crypto.subtle.verify(
 			{ name: 'ECDSA', hash: 'SHA-256' },
 			verifyKey,
-			b64urlToBytes(sig!),
+			new Uint8Array(b64urlToBytes(sig!)),
 			new TextEncoder().encode(`${h}.${p}`),
 		);
 		expect(ok).toBe(true);
