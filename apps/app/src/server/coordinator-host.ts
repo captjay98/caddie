@@ -39,6 +39,8 @@ import {
 } from "./build-workflow.ts";
 import { stackCatalog } from "./stacks.ts";
 import { recordBuildActivity } from "./build-activity.ts";
+import { sha256Hex } from "./artifacts.ts";
+import { actionFingerprint, progressVerdict } from "./build-progress-policy.ts";
 import { checkServerStarts, type WorkerLoaderLike } from "./preview-runtime.ts";
 import { SCAFFOLD_FILES } from "../../../../stacks/react-hono/scaffold.ts";
 import { FLUTTER_SCAFFOLD_FILES } from "../../../../stacks/flutter/scaffold.ts";
@@ -129,13 +131,13 @@ async function recentActions(db: CoordinatorEnvironment["DB"], runId: string, li
   try {
     const result = await db
       .prepare(
-        `select "id","kind","subject","bytes" from "build_activity"
+        `select "id","kind","subject","bytes","contentHash" from "build_activity"
          where "runId" = ? and "kind" in ('command','file','check')
          order by "startedAt" desc, "id" desc limit ?`,
       )
       .bind(runId, limit)
       .all();
-    return result.results as { id: string; kind: string; subject: string; bytes: number | null }[];
+    return result.results as { id: string; kind: string; subject: string; bytes: number | null; contentHash: string | null }[];
   } catch (error) {
     if (NO_SUCH_TABLE(error)) return [];
     throw error;
@@ -741,17 +743,29 @@ export async function createCoordinatorContext(
     await setWorkflowBlocker(env.DB, scope, budgetMessage);
     throw new SandboxError(429, "BUILD_BUDGET_EXHAUSTED", budgetMessage);
   };
-  const guardAction = async (action: { kind: "command" | "file"; subject: string; bytes?: number }) => {
+  const guardAction = async (action: { kind: "command" | "file"; subject: string; bytes?: number; contentHash?: string }) => {
     await guardBudget();
     const recent = await recentActions(env.DB, runId, REPEATED_ACTION_LIMIT);
     const subject = action.subject.slice(0, 500);
+    // B03: compare CONTENT, not byte count. A file is the same only when its
+    // path AND content hash repeat; a command only when its subject repeats
+    // (its outcome is not known at guard time — this is a pre-dispatch guard).
+    const fingerprintOf = (row: { kind: string; subject: string; contentHash: string | null }) =>
+      actionFingerprint({
+        kind: row.kind === "file" ? "file" : "command",
+        subject: row.subject,
+        contentHash: row.contentHash ?? undefined,
+        outcome: "ok",
+      });
+    const nextFingerprint = actionFingerprint({
+      kind: action.kind,
+      subject,
+      contentHash: action.contentHash,
+      outcome: "ok",
+    });
     const repeated =
-      recent.length >= REPEATED_ACTION_LIMIT &&
-      recent.every((row) =>
-        row.kind === action.kind &&
-        row.subject === subject &&
-        (action.kind === "command" || row.bytes === (action.bytes ?? null)),
-      );
+      progressVerdict(recent.map(fingerprintOf), nextFingerprint, REPEATED_ACTION_LIMIT).kind ===
+      "no-progress";
     if (repeated)
       throw new SandboxError(
         409,
@@ -828,17 +842,19 @@ export async function createCoordinatorContext(
       await scaffold();
       const { driver, id } = await ensureSession();
       const bytes = new TextEncoder().encode(input.content);
-      await guardAction({ kind: "file", subject: input.path, bytes: bytes.length });
+      const contentHash = await sha256Hex(bytes);
+      await guardAction({ kind: "file", subject: input.path, bytes: bytes.length, contentHash });
       const writeStarted = new Date().toISOString();
       await driver.writeFile(
         id,
         input.path,
         bytesToBase64(bytes),
       );
-      // Path + size only — file contents never enter the activity ledger.
+      // Path + size + a content HASH (never the contents) so the repeat guard
+      // can tell a real change from an identical rewrite.
       await recordBuildActivity(env.DB, {
         projectId: scope.projectId, runId, kind: "file", subject: input.path,
-        outcome: "ok", bytes: bytes.length,
+        outcome: "ok", bytes: bytes.length, contentHash,
         startedAt: writeStarted, finishedAt: new Date().toISOString(),
       });
     },

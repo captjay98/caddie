@@ -151,6 +151,8 @@ async function world() {
     "0043_integration_lock.sql",
     // The choose-a-look step: the workflow's looks / looks-review phases.
     "0044_looks_phase.sql",
+    // B03: content hash on build_activity for the progress guard.
+    "0047_build_activity_content_hash.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -1988,6 +1990,13 @@ describe("builder action bounds", () => {
       const write = () => host.driver.writeFile({ sessionId: host.sessionId, path: "src/App.tsx", content: "same\n" });
       for (let i = 1; i <= REPEATED_ACTION_LIMIT; i++) await write();
       await expect(write()).rejects.toThrow("same content");
+      // B03: an equal-LENGTH but DIFFERENT-content write to the same path is
+      // real iteration, not a repeat — the guard must compare content, not the
+      // byte COUNT. "aaaa\n" and "bbbb\n" are the same length; the fourth must
+      // be allowed through after three identical ones.
+      const sameLen = (content: string) => host.driver.writeFile({ sessionId: host.sessionId, path: "src/Equal.tsx", content });
+      for (let i = 1; i <= REPEATED_ACTION_LIMIT; i++) await sameLen("aaaa\n");
+      await sameLen("bbbb\n"); // same length, different content → must NOT throw
       // Refusals are per call; the build itself keeps going.
       expect((await readWorkflow(w.db, item.scope))?.phase).toBe("building");
     } finally { await stub.stop(); w.sqlite.close(); }

@@ -88,6 +88,10 @@ export interface BuildActivityInput {
 	/** Command output, used ONLY to parse test counts; it is not stored. */
 	readonly output?: string;
 	readonly bytes?: number | null;
+	/** B03: sha256 hex of a file write's exact bytes — a HASH, never the
+	 *  contents. Lets the repeat guard tell a real change from an identical
+	 *  rewrite. Omitted for commands/checks. */
+	readonly contentHash?: string | null;
 	readonly startedAt: string;
 	readonly finishedAt: string;
 	/**
@@ -115,8 +119,8 @@ export async function recordBuildActivity(db: D1Database, input: BuildActivityIn
 		await db
 			.prepare(
 				`insert or ignore into "build_activity"
-				 ("id","projectId","runId","kind","role","subject","outcome","exitCode","testsPassed","testsFailed","bytes","startedAt","finishedAt","durationMs")
-				 values (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+				 ("id","projectId","runId","kind","role","subject","outcome","exitCode","testsPassed","testsFailed","bytes","contentHash","startedAt","finishedAt","durationMs")
+				 values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			)
 			.bind(
 				id,
@@ -130,6 +134,7 @@ export async function recordBuildActivity(db: D1Database, input: BuildActivityIn
 				counts?.passed ?? null,
 				counts?.failed ?? null,
 				input.bytes ?? null,
+				input.contentHash ?? null,
 				input.startedAt,
 				input.finishedAt,
 				durationMs,
