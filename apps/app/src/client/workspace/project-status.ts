@@ -261,3 +261,19 @@ export function journeyFromExperience(experience: ProjectExperience, opts: { per
 			return steps(['done', 'Approved'], ['done', 'Ready to try'], ['now', 'Ready when you are']);
 	}
 }
+
+/** The build header's one-line status for a nontechnical user, derived from
+ * AUTHORITATIVE state. 'Ready to try' requires an actual preview (previewId),
+ * never the 'ready' phase row alone — a withdrawn or never-set preview must not
+ * read as ready (B07.1). Every other branch mirrors the phase. */
+export function workflowHeaderStatus(
+	workflow: { phase: WorkflowPhase; previewId: string | null },
+	opts: { designFailed?: boolean; repairing?: boolean },
+): string {
+	if (workflow.phase === 'design' && opts.designFailed) return 'Design needs attention';
+	if (opts.repairing) return 'I’m on it';
+	if (workflow.phase === 'ready') return workflow.previewId ? 'Ready to try' : 'In progress';
+	if (workflow.phase === 'review' || workflow.phase === 'design-review') return 'Needs you';
+	if (workflow.phase === 'blocked') return 'Needs attention';
+	return 'In progress';
+}

@@ -10,6 +10,7 @@ import { Markdown } from "@caddie/ui/Markdown";
 import type { PlanDocRevision, ApprovalRecord } from "@caddie/contracts";
 import { parseAppTheme, parseLooks } from "@caddie/contracts";
 import type { BuildWorkflow, WorkflowPhase } from "../../server/build-workflow.ts";
+import { workflowHeaderStatus } from "../workspace/project-status.ts";
 import { fetchJson, postJson } from "../api.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
 import { useProjectRepo, useSourceSave, useBuildActivity, usePlanDocRevisions, type ProjectRepoView, type SourceSaveView } from "../queries.ts";
@@ -280,7 +281,7 @@ function ProjectWorkspace({
   const design: CardDesign = workflow.phase === 'ready' ? 'preview' : workflow.phase === 'building' ? repairing ? 'repair' : 'build' : workflow.phase === 'blocked' ? 'update' : 'plan';
   // The status text the header badge shows, and the phase title — kept apart so
   // the title only renders when it adds something the badge does not.
-  const headerStatus = workflow.phase === 'design' && designStatus.kind === 'failed' ? 'Design needs attention' : repairing ? 'I’m on it' : workflow.phase === 'ready' ? 'Ready to try' : workflow.phase === 'review' || workflow.phase === 'design-review' ? 'Needs you' : workflow.phase === 'blocked' ? 'Needs attention' : 'In progress';
+  const headerStatus = workflowHeaderStatus({ phase: workflow.phase, previewId: workflow.previewId }, { designFailed: workflow.phase === 'design' && designStatus.kind === 'failed', repairing });
   const phaseTitle = workflow.phase === 'design' && designStatus.kind === 'failed' ? 'Design needs attention' : planningBlocked ? 'Plan needs another pass' : LABEL[workflow.phase];
   return (
     <section

@@ -60,3 +60,33 @@ describe('Projects card for a project that only has a copied app', () => {
   expect(projectCardFromCopiedApp({ status: 'failed', origin: 'github', message })).toMatchObject({ label: 'Code copied', tone: 'warn', detail: message, action: { target: 'chat' } });
  });
 });
+
+import { workflowHeaderStatus } from '../apps/app/src/client/workspace/project-status.ts';
+
+// B07.1 — no surface claims Ready solely from an old workflow row. The header
+// derived its status from workflow.phase alone, so a 'ready' row whose preview
+// was withdrawn (previewId null) still told a nontechnical user "Ready to try"
+// when there was nothing to try. The status must be tied to real evidence.
+describe('B07.1 — header status is tied to authoritative state, not the phase row alone', () => {
+  test("a ready phase WITH a preview reads 'Ready to try'", () => {
+    expect(workflowHeaderStatus({ phase: 'ready', previewId: 'pv1' }, {})).toBe('Ready to try');
+  });
+  test("a ready phase with NO preview never reads 'Ready to try'", () => {
+    const status = workflowHeaderStatus({ phase: 'ready', previewId: null }, {});
+    expect(status).not.toBe('Ready to try');
+    expect(status).toBe('In progress');
+  });
+  test('review and design-review read as needing the user', () => {
+    expect(workflowHeaderStatus({ phase: 'review', previewId: null }, {})).toBe('Needs you');
+    expect(workflowHeaderStatus({ phase: 'design-review', previewId: null }, {})).toBe('Needs you');
+  });
+  test('a blocked phase reads as needing attention', () => {
+    expect(workflowHeaderStatus({ phase: 'blocked', previewId: null }, {})).toBe('Needs attention');
+  });
+  test('a failed design reads as design needing attention', () => {
+    expect(workflowHeaderStatus({ phase: 'design', previewId: null }, { designFailed: true })).toBe('Design needs attention');
+  });
+  test("active repair reads as I'm on it, over the plain phase", () => {
+    expect(workflowHeaderStatus({ phase: 'building', previewId: null }, { repairing: true })).toBe('I’m on it');
+  });
+});
