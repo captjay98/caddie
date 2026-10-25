@@ -1,0 +1,225 @@
+{
+  "checkedAt": "2026-10-25T17:44:06.007929+00:00",
+  "scope": "Read-only upstream source review; not an execution benchmark",
+  "caddieHead": "95fb269d1cf2ab328b78de448c3b852a9cb5bd81",
+  "caddieWorkingTree": "dirty; includes work from multiple sessions",
+  "repositories": [
+    {
+      "repository": "earendil-works/pi",
+      "url": "https://github.com/earendil-works/pi",
+      "branch": "main",
+      "starsAtCheck": 117755,
+      "license": "MIT",
+      "archived": false
+    },
+    {
+      "repository": "OpenHands/software-agent-sdk",
+      "url": "https://github.com/OpenHands/software-agent-sdk",
+      "branch": "main",
+      "starsAtCheck": 1303,
+      "license": "MIT",
+      "archived": false
+    },
+    {
+      "repository": "anomalyco/opencode",
+      "url": "https://github.com/anomalyco/opencode",
+      "branch": "dev",
+      "starsAtCheck": 221468,
+      "license": "MIT",
+      "archived": false
+    },
+    {
+      "repository": "cline/cline",
+      "url": "https://github.com/cline/cline",
+      "branch": "main",
+      "starsAtCheck": 70854,
+      "license": "Apache-2.0",
+      "archived": false
+    },
+    {
+      "repository": "RooCodeInc/Roo-Code",
+      "url": "https://github.com/RooCodeInc/Roo-Code",
+      "branch": "main",
+      "starsAtCheck": 24263,
+      "license": "Apache-2.0",
+      "archived": true
+    },
+    {
+      "repository": "aaif-goose/goose",
+      "url": "https://github.com/aaif-goose/goose",
+      "branch": "main",
+      "starsAtCheck": 55696,
+      "license": "Apache-2.0",
+      "archived": false
+    },
+    {
+      "repository": "continuedev/continue",
+      "url": "https://github.com/continuedev/continue",
+      "branch": "main",
+      "starsAtCheck": 36320,
+      "license": "Apache-2.0",
+      "archived": false
+    },
+    {
+      "repository": "openai/codex",
+      "url": "https://github.com/openai/codex",
+      "branch": "main",
+      "starsAtCheck": 130875,
+      "license": "Apache-2.0",
+      "archived": false
+    },
+    {
+      "repository": "Aider-AI/aider",
+      "url": "https://github.com/Aider-AI/aider",
+      "branch": "main",
+      "starsAtCheck": 49748,
+      "license": "Apache-2.0",
+      "archived": false
+    },
+    {
+      "repository": "SWE-agent/SWE-agent",
+      "url": "https://github.com/SWE-agent/SWE-agent",
+      "branch": "main",
+      "starsAtCheck": 20635,
+      "license": "MIT",
+      "archived": false
+    },
+    {
+      "repository": "google-gemini/gemini-cli",
+      "url": "https://github.com/google-gemini/gemini-cli",
+      "branch": "main",
+      "starsAtCheck": 108379,
+      "license": "Apache-2.0",
+      "archived": false
+    },
+    {
+      "repository": "QwenLM/qwen-code",
+      "url": "https://github.com/QwenLM/qwen-code",
+      "branch": "main",
+      "starsAtCheck": 28712,
+      "license": "Apache-2.0",
+      "archived": false
+    }
+  ],
+  "sources": [
+    {
+      "repo": "earendil-works/pi",
+      "path": "packages/agent/src/agent-loop.ts",
+      "url": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/agent/src/agent-loop.ts",
+      "sha256": "9d7589b5071ea3b8b3e3c624f9cfc09a976ebf7436024a58213837de4645167d",
+      "bytes": 29889
+    },
+    {
+      "repo": "earendil-works/pi",
+      "path": "packages/coding-agent/src/core/agent-session.ts",
+      "url": "https://raw.githubusercontent.com/earendil-works/pi/main/packages/coding-agent/src/core/agent-session.ts",
+      "sha256": "e0a6e3e7b662afff9763a6297e0bb600da75e8eff4df443912f2e215bdc6a8e2",
+      "bytes": 164117
+    },
+    {
+      "repo": "OpenHands/software-agent-sdk",
+      "path": "openhands-sdk/openhands/sdk/conversation/stuck_detector.py",
+      "url": "https://raw.githubusercontent.com/OpenHands/software-agent-sdk/main/openhands-sdk/openhands/sdk/conversation/stuck_detector.py",
+      "sha256": "3bf25f2d722404398e4744ae188f575f628463732b3606a8da6049fb8ff0039e",
+      "bytes": 14399
+    },
+    {
+      "repo": "OpenHands/software-agent-sdk",
+      "path": "openhands-sdk/openhands/sdk/conversation/state.py",
+      "url": "https://raw.githubusercontent.com/OpenHands/software-agent-sdk/main/openhands-sdk/openhands/sdk/conversation/state.py",
+      "sha256": "de9f098bb37adf6622879c875a7a856f51bb2bdd937f088d19835e569c346228",
+      "bytes": 32560
+    },
+    {
+      "repo": "anomalyco/opencode",
+      "path": "specs/v2/session.md",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/dev/specs/v2/session.md",
+      "sha256": "5538351af3543ed5642a96ab30a6702ede847141c7f4defbecede7c0d7f92c17",
+      "bytes": 15187
+    },
+    {
+      "repo": "anomalyco/opencode",
+      "path": "packages/core/src/session/runner/retry.ts",
+      "url": "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/core/src/session/runner/retry.ts",
+      "sha256": "7d810092f26a00672b41b6279227a81ab58785dec0d5d031b4de5d68532f8df6",
+      "bytes": 2798
+    },
+    {
+      "repo": "cline/cline",
+      "path": "docs/core-workflows/checkpoints.mdx",
+      "url": "https://raw.githubusercontent.com/cline/cline/main/docs/core-workflows/checkpoints.mdx",
+      "sha256": "a7da9a10d10456f40460a1f7d038b4fe2e223a7448bf5e45e8f791807c6cb4f6",
+      "bytes": 5267
+    },
+    {
+      "repo": "cline/cline",
+      "path": "sdk/packages/core/src/session/checkpoint-restore.ts",
+      "url": "https://raw.githubusercontent.com/cline/cline/main/sdk/packages/core/src/session/checkpoint-restore.ts",
+      "sha256": "a1aa2fa03033b464380c068924056c647325ed6753134bd57a56348a5a9dfe03",
+      "bytes": 14190
+    },
+    {
+      "repo": "RooCodeInc/Roo-Code",
+      "path": "src/core/checkpoints/index.ts",
+      "url": "https://raw.githubusercontent.com/RooCodeInc/Roo-Code/main/src/core/checkpoints/index.ts",
+      "sha256": "00380e7e5ba4373a542daeddc659b57c4282bffb82adc6d11fac47d8d2507087",
+      "bytes": 11586
+    },
+    {
+      "repo": "aaif-goose/goose",
+      "path": "crates/goose/src/agents/state_machine/ops_retry.rs",
+      "url": "https://raw.githubusercontent.com/aaif-goose/goose/main/crates/goose/src/agents/state_machine/ops_retry.rs",
+      "sha256": "5c1720b73ffe07ce3dd90c727a9b371ca77d993782b65ed647ad442080a3165e",
+      "bytes": 10008
+    },
+    {
+      "repo": "continuedev/continue",
+      "path": "core/llm/utils/retry.ts",
+      "url": "https://raw.githubusercontent.com/continuedev/continue/main/core/llm/utils/retry.ts",
+      "sha256": "db17315ab1629921753bcbeb15193d4334b58b8a4b05b483d47d33cba467ab23",
+      "bytes": 13295
+    },
+    {
+      "repo": "openai/codex",
+      "path": "codex-rs/core/src/responses_retry.rs",
+      "url": "https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/responses_retry.rs",
+      "sha256": "43014063e0c709ad56458cd317e4c582e0b8e679576a6e4a6e56f7ecbadff6e4",
+      "bytes": 7582
+    },
+    {
+      "repo": "Aider-AI/aider",
+      "path": "aider/coders/base_coder.py",
+      "url": "https://raw.githubusercontent.com/Aider-AI/aider/main/aider/coders/base_coder.py",
+      "sha256": "04a7b38c4f1d2b1684ac958f40bcd81a28b00139eae88afed59d2c970bef1ee1",
+      "bytes": 86302
+    },
+    {
+      "repo": "SWE-agent/SWE-agent",
+      "path": "sweagent/agent/agents.py",
+      "url": "https://raw.githubusercontent.com/SWE-agent/SWE-agent/main/sweagent/agent/agents.py",
+      "sha256": "d6cdf7ac66a6509ceba08e3541b856f0734acf79f9a485ed8a6e2c72f0d211a8",
+      "bytes": 55804
+    },
+    {
+      "repo": "google-gemini/gemini-cli",
+      "path": "packages/core/src/services/loopDetectionService.ts",
+      "url": "https://raw.githubusercontent.com/google-gemini/gemini-cli/main/packages/core/src/services/loopDetectionService.ts",
+      "sha256": "f45c4eb345d2bba3b0920eb0858316e563cc1f2274f2883e5bea85efa7ce361a",
+      "bytes": 26752
+    },
+    {
+      "repo": "QwenLM/qwen-code",
+      "path": "packages/core/src/agents/workflow-checkpoint.ts",
+      "url": "https://raw.githubusercontent.com/QwenLM/qwen-code/main/packages/core/src/agents/workflow-checkpoint.ts",
+      "sha256": "bd291e61fafa9117c1a3a01a7d0caa75245bb410f7cc323baa1b583e3c75b228",
+      "bytes": 16737
+    },
+    {
+      "repo": "QwenLM/qwen-code",
+      "path": "packages/core/src/core/agent-loop.ts",
+      "url": "https://raw.githubusercontent.com/QwenLM/qwen-code/main/packages/core/src/core/agent-loop.ts",
+      "sha256": "814c29705b94dc1fb3c33843517d8818a0ab1bfd769356d820b29f20cc775f3b",
+      "bytes": 19353
+    }
+  ]
+}

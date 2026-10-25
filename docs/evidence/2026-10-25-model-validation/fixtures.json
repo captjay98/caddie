@@ -1,0 +1,10 @@
+{
+  "repairPrompt": "Repair this JavaScript function. Return JSON {\"code\":\"function applyEvents(initial, events) { ... }\"}. Pure function only; no imports, I/O, dynamic code or external libraries. Keep API. initial is an integer balance in kobo; events have id:string, amountMinor:integer, synced:boolean. Apply each synced event exactly once by id, keep unsynced IDs in queued in first-seen order without duplicates, let a later synced occurrence supersede its queued copy. Negative integer amounts valid. Reject fractional/nonfinite amounts via throwing Error, including unsynced events. Do not mutate inputs. Return {balanceMinor, applied, queued} with ID arrays in first applied / first remaining queued order. Reject invalid initial integer. Current buggy function: function applyEvents(initial, events) { let balance=initial; for (const e of events) balance += e.amountMinor/100; return {balanceMinor:balance, applied:events.map(e=>e.id),queued:[]}; }",
+  "planBad": "User intent: farmers take a photo of a sick bird, get cautious guidance, record a treatment offline, sync later, with worker access limited to their farm. Draft: build a desktop-only online form. AI actually receives text descriptions only; advertise photo diagnosis. Every user can query all farms. All writes require connectivity. Done when the developer's own tests say pass. User must configure API keys and debug errors. The design is approved automatically by the author.",
+  "schemaCase": {
+    "country": "Nigeria",
+    "deadline": "2026-10-23T19:00:00Z",
+    "localZone": "Africa/Lagos",
+    "expiredAt": "2026-10-24T08:00:00Z"
+  }
+}

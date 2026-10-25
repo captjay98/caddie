@@ -1,0 +1,50 @@
+[
+  {
+    "kind": "good",
+    "width": 390,
+    "height": 844,
+    "filename": "good-390.png",
+    "sha256": "61934306ebf08adf5b4ee7b499511ab250b95172746aac615ca02b233795d5aa",
+    "horizontalOverflow": false
+  },
+  {
+    "kind": "good",
+    "width": 1440,
+    "height": 900,
+    "filename": "good-1440.png",
+    "sha256": "5327e9ebb54bdf8a61ca5bb252635e8366672d0895bc2ad114a84571396459bb",
+    "horizontalOverflow": false
+  },
+  {
+    "kind": "broken",
+    "width": 390,
+    "height": 844,
+    "filename": "broken-390.png",
+    "sha256": "cec54fb7fff2cdf2980021cfb2d6afdaf0cebd3969c7126747c95997f6955f60",
+    "horizontalOverflow": true
+  },
+  {
+    "kind": "broken",
+    "width": 1440,
+    "height": 900,
+    "filename": "broken-1440.png",
+    "sha256": "ab8ffd49d4a7358d096176ba446149c8b534f718311cfe7c3c3dfd23c2794cb5",
+    "horizontalOverflow": false
+  },
+  {
+    "kind": "blank",
+    "width": 390,
+    "height": 844,
+    "filename": "blank-390.png",
+    "sha256": "fb32313e11bc8ffbd5310a1660e630b64cedb4622f8462a5eae2d5464ac8279e",
+    "horizontalOverflow": false
+  },
+  {
+    "kind": "blank",
+    "width": 1440,
+    "height": 900,
+    "filename": "blank-1440.png",
+    "sha256": "99db2a93b06fa1bf617f5c495e02dcf6c0b76961108491217e2cf4fed8699d35",
+    "horizontalOverflow": false
+  }
+]

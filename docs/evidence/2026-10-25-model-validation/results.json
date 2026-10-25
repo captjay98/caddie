@@ -1,0 +1,924 @@
+{
+  "evidence": "LIVE VERIFIED provider calls; synthetic calibration cases; see per-case verdicts",
+  "checkedAt": "2026-10-25T19:13:27.274Z",
+  "physicalRequests": 23,
+  "reservedCeilingUsd": 1.6049496,
+  "budgetUsd": 3,
+  "maxPhysicalRequests": 24,
+  "maxTokens": 16384,
+  "reasoningEffort": "max",
+  "automaticRetries": 0,
+  "routes": [
+    {
+      "id": "nvidia/Nemotron-3.5-Super-VL",
+      "input": 0.3,
+      "output": 0.9,
+      "vision": true
+    },
+    {
+      "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "input": 0.3,
+      "output": 1.2,
+      "vision": true
+    },
+    {
+      "id": "zai-org/GLM-5.3",
+      "input": 1.4,
+      "output": 4.4,
+      "vision": false
+    }
+  ],
+  "results": [
+    {
+      "model": "nvidia/Nemotron-3.5-Super-VL",
+      "test": "pi-stream-tool-roundtrip",
+      "durationMs": 2590,
+      "verdict": "PASS",
+      "stopReason": "stop",
+      "tool": {
+        "name": "lookup_check",
+        "arguments": {
+          "checkpoint": "cp_482"
+        }
+      },
+      "answer": "The check for cp_482 did not pass; its nonce is receipt_e4af546d.",
+      "usage": [
+        {
+          "input": 322,
+          "output": 65,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 34,
+          "totalTokens": 387,
+          "cost": {
+            "input": 9.659999999999999e-05,
+            "output": 5.8500000000000006e-05,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.0001551
+          }
+        },
+        {
+          "input": 431,
+          "output": 70,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 44,
+          "totalTokens": 501,
+          "cost": {
+            "input": 0.0001293,
+            "output": 6.3e-05,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.0001923
+          }
+        }
+      ],
+      "adapter": "@earendil-works/pi-ai@0.87.1 completeSimple (streaming internally), existing compat flags",
+      "requestShape": {
+        "reasoning": "max",
+        "maxRetries": 0
+      }
+    },
+    {
+      "model": "nvidia/Nemotron-3.5-Super-VL",
+      "test": "strict-json-deadline",
+      "durationMs": 3099,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 849,
+        "prompt_tokens": 121,
+        "total_tokens": 970,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 693,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 0,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0008003999999999999,
+      "checks": {
+        "schemaValid": true,
+        "correct": true
+      },
+      "answer": {
+        "eligibilityMet": true,
+        "deadlinePassed": true,
+        "recommendStarting": false,
+        "localDeadline": "2026-10-23T20:00:00+01:00",
+        "explanation": "NG satisfies the checked entry rules, so legal eligibility is met. However, the deadline of 2026-10-23T19:00:00Z (20:00 WAT) occurred before the current time of 2026-10-24T08:00:00Z, so no remaining build time exists and starting is not recommended."
+      },
+      "promptHash": "e7cfbd1be93a2a6af1970237b809dbefeee7bacee28af0857afe957280fa2a48",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "nvidia/Nemotron-3.5-Super-VL",
+      "test": "checked-repair-kobo-dedupe-offline",
+      "durationMs": 13685,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 5308,
+        "prompt_tokens": 239,
+        "total_tokens": 5547,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 4955,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 0,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0048489,
+      "checks": {
+        "schemaValid": true,
+        "hostTestsPass": true
+      },
+      "answer": {
+        "code": "function applyEvents(initial, events) {\n  if (!Number.isInteger(initial)) {\n    throw new Error('initial must be an integer');\n  }\n\n  let balance = initial;\n  const applied = [];\n  const queued = [];\n  const appliedIds = new Set();\n  const queuedIds = new Set();\n\n  for (const e of events) {\n    if (!Number.isInteger(e.amountMinor)) {\n      throw new Error('amountMinor must be an integer');\n    }\n\n    if (e.synced) {\n      if (appliedIds.has(e.id)) {\n        continue;\n      }\n      if (queuedIds.has(e.id)) {\n        const idx = queued.indexOf(e.id);\n        if (idx !== -1) {\n          queued.splice(idx, 1);\n        }\n        queuedIds.delete(e.id);\n        balance += e.amountMinor;\n        applied.push(e.id);\n        appliedIds.add(e.id);\n      } else {\n        balance += e.amountMinor;\n        applied.push(e.id);\n        appliedIds.add(e.id);\n      }\n    } else {\n      if (queuedIds.has(e.id) || appliedIds.has(e.id)) {\n        continue;\n      }\n      queued.push(e.id);\n      queuedIds.add(e.id);\n    }\n  }\n\n  return { balanceMinor: balance, applied, queued };\n}"
+      },
+      "promptHash": "a335d06e08ece5ab8b34140ce130976058e44fd2a6e849cb1a0df75b79738069",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "nvidia/Nemotron-3.5-Super-VL",
+      "test": "independent-plan-blockers",
+      "durationMs": 2385,
+      "verdict": "FAILED",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 761,
+        "prompt_tokens": 148,
+        "total_tokens": 909,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 625,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 0,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0007293,
+      "checks": {
+        "schemaValid": true,
+        "blocksBadPlan": true,
+        "photoGapFound": true,
+        "offlineGapFound": true,
+        "tenantGapFound": true,
+        "approvalGapFound": false
+      },
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          "Replace the desktop-only online form with a mobile-capable interface that supports photo capture and offline treatment recording.",
+          "Implement genuine photo diagnosis or stop advertising it because the AI currently accepts only text descriptions.",
+          "Enforce farm-scoped access so workers can query only their own farm's data.",
+          "Add local storage with background sync so treatments can be recorded without connectivity and synced later.",
+          "Replace developer self-certification with independent acceptance testing and explicit pass criteria.",
+          "Remove manual API key configuration and user debugging by handling credentials and errors automatically."
+        ]
+      },
+      "promptHash": "9caae16bc2ca8cd93e6638f2300ffe3d85b26f32b81657e938031bc772078ee5",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "pi-stream-tool-roundtrip",
+      "durationMs": 2678,
+      "verdict": "PASS",
+      "stopReason": "stop",
+      "tool": {
+        "name": "lookup_check",
+        "arguments": {
+          "checkpoint": "cp_482"
+        }
+      },
+      "answer": "Checkpoint cp_482 returned nonce `receipt_aed4e7fc` and the check **did not pass** (`passed: false`).",
+      "usage": [
+        {
+          "input": 339,
+          "output": 51,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 390,
+          "cost": {
+            "input": 0.00010169999999999999,
+            "output": 6.12e-05,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.0001629
+          }
+        },
+        {
+          "input": 425,
+          "output": 51,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 17,
+          "totalTokens": 476,
+          "cost": {
+            "input": 0.00012749999999999998,
+            "output": 6.12e-05,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.00018869999999999998
+          }
+        }
+      ],
+      "adapter": "@earendil-works/pi-ai@0.87.1 completeSimple (streaming internally), existing compat flags",
+      "requestShape": {
+        "reasoning": "max",
+        "maxRetries": 0
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "strict-json-deadline",
+      "durationMs": 2212,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 605,
+        "prompt_tokens": 121,
+        "total_tokens": 726,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 490,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 0,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0007622999999999999,
+      "checks": {
+        "schemaValid": true,
+        "correct": true
+      },
+      "answer": {
+        "eligibilityMet": true,
+        "deadlinePassed": true,
+        "recommendStarting": false,
+        "localDeadline": "2026-10-23T20:00:00+01:00",
+        "explanation": "The entrant is legally eligible under the checked rules for Nigeria, but the deadline (2026-10-23T20:00:00+01:00 in Africa/Lagos) passed 13 hours before 2026-10-24T08:00:00Z, leaving no remaining build time; do not start."
+      },
+      "promptHash": "e7cfbd1be93a2a6af1970237b809dbefeee7bacee28af0857afe957280fa2a48",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "checked-repair-kobo-dedupe-offline",
+      "durationMs": 26961,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 8283,
+        "prompt_tokens": 249,
+        "total_tokens": 8532,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 7959,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 128,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0100143,
+      "checks": {
+        "schemaValid": true,
+        "hostTestsPass": true
+      },
+      "answer": {
+        "code": "function applyEvents(initial, events) {\n  if (!Number.isInteger(initial)) {\n    throw new Error('Invalid initial balance');\n  }\n  let balanceMinor = initial;\n  const applied = [];\n  const queued = [];\n  const appliedSet = new Set();\n  const queuedSet = new Set();\n  for (let i = 0; i < events.length; i++) {\n    const event = events[i];\n    const amountMinor = event.amountMinor;\n    if (!Number.isInteger(amountMinor)) {\n      throw new Error('Invalid amountMinor');\n    }\n    const id = event.id;\n    if (event.synced) {\n      if (!appliedSet.has(id)) {\n        if (queuedSet.has(id)) {\n          queuedSet.delete(id);\n        }\n        appliedSet.add(id);\n        applied.push(id);\n        balanceMinor += amountMinor;\n      }\n    } else {\n      if (!appliedSet.has(id) && !queuedSet.has(id)) {\n        queuedSet.add(id);\n        queued.push(id);\n      }\n    }\n  }\n  return {\n    balanceMinor: balanceMinor,\n    applied: applied,\n    queued: queued.filter(function (id) { return queuedSet.has(id); })\n  };\n}"
+      },
+      "promptHash": "a335d06e08ece5ab8b34140ce130976058e44fd2a6e849cb1a0df75b79738069",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "independent-plan-blockers",
+      "durationMs": 6760,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 1821,
+        "prompt_tokens": 162,
+        "total_tokens": 1983,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 1558,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 128,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0022337999999999998,
+      "checks": {
+        "schemaValid": true,
+        "blocksBadPlan": true,
+        "photoGapFound": true,
+        "offlineGapFound": true,
+        "tenantGapFound": true,
+        "approvalGapFound": true
+      },
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          "Replace the desktop-only online form with a mobile-first experience that supports photo capture and offline use by farmers.",
+          "Implement actual image-based AI processing or remove all photo-diagnosis claims and clearly disclose that only text descriptions are analyzed.",
+          "Enforce farm-scoped authorization so each worker can access only their assigned farm's records.",
+          "Add offline treatment recording with local storage, queued sync, retries, and conflict resolution so writes do not require connectivity.",
+          "Add veterinary safety guardrails that present guidance as cautious, disclose uncertainty, escalate red flags, and recommend professional advice.",
+          "Define measurable acceptance criteria and independent verification for photo capture, offline sync, isolation, and safety instead of relying on developer tests.",
+          "Remove user-managed API keys and debugging duties by handling secrets server-side and providing clear recoverable error messages.",
+          "Replace automatic author approval with documented independent review and sign-off by product, security, and domain stakeholders.",
+          "Specify privacy and security controls for photos and farm records, including consent, retention, encryption, and audit logging.",
+          "Define sync status and conflict-resolution rules for offline treatment records, including duplicate prevention and user-visible state."
+        ]
+      },
+      "promptHash": "9caae16bc2ca8cd93e6638f2300ffe3d85b26f32b81657e938031bc772078ee5",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3",
+      "test": "pi-stream-tool-roundtrip",
+      "durationMs": 1627,
+      "verdict": "PASS",
+      "stopReason": "stop",
+      "tool": {
+        "name": "lookup_check",
+        "arguments": {
+          "checkpoint": "cp_482"
+        }
+      },
+      "answer": "Checkpoint cp_482 did not pass; its receipt nonce is receipt_1dfb9f83.",
+      "usage": [
+        {
+          "input": 204,
+          "output": 15,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 1,
+          "totalTokens": 219,
+          "cost": {
+            "input": 0.0002856,
+            "output": 6.6e-05,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.0003516
+          }
+        },
+        {
+          "input": 54,
+          "output": 24,
+          "cacheRead": 192,
+          "cacheWrite": 0,
+          "reasoning": 1,
+          "totalTokens": 270,
+          "cost": {
+            "input": 7.56e-05,
+            "output": 0.0001056,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.0001812
+          }
+        }
+      ],
+      "adapter": "@earendil-works/pi-ai@0.87.1 completeSimple (streaming internally), existing compat flags",
+      "requestShape": {
+        "reasoning": "max",
+        "maxRetries": 0
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3",
+      "test": "strict-json-deadline",
+      "durationMs": 3020,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 1051,
+        "prompt_tokens": 98,
+        "total_tokens": 1149,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 850,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": null,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 98,
+        "reasoning_tokens": 850
+      },
+      "estimatedUsd": 0.0047616,
+      "checks": {
+        "schemaValid": true,
+        "correct": true
+      },
+      "answer": {
+        "eligibilityMet": true,
+        "deadlinePassed": true,
+        "recommendStarting": false,
+        "localDeadline": "2026-10-23T20:00:00+01:00",
+        "explanation": "Legal eligibility is a separate matter from remaining build time. Nigeria (NG) satisfies the checked entry rules, so eligibilityMet is true on legal grounds. However, the deadline 2026-10-23T19:00:00Z converts to 2026-10-23T20:00:00+01:00 in Africa/Lagos (WAT, UTC+1, no DST), and the current time 2026-10-24T08:00:00Z (= 2026-10-24T09:00:00+01:00 local) is 13 hours past that deadline. With zero remaining build time, starting is not recommended even though the entrant is legally eligible."
+      },
+      "promptHash": "e7cfbd1be93a2a6af1970237b809dbefeee7bacee28af0857afe957280fa2a48",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3",
+      "test": "checked-repair-kobo-dedupe-offline",
+      "durationMs": 44401,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 13727,
+        "prompt_tokens": 214,
+        "total_tokens": 13941,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 13411,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": null,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 214,
+        "reasoning_tokens": 13411
+      },
+      "estimatedUsd": 0.0606984,
+      "checks": {
+        "schemaValid": true,
+        "hostTestsPass": true
+      },
+      "answer": {
+        "code": "function applyEvents(initial, events) {\n  if (!Number.isInteger(initial)) {\n    throw new Error('initial must be an integer');\n  }\n  if (!Array.isArray(events)) {\n    throw new Error('events must be an array');\n  }\n  let balanceMinor = initial;\n  const applied = [];\n  const appliedSeen = new Set();\n  const queuedOrder = [];\n  const queuedSeen = new Set();\n  for (const event of events) {\n    if (event === null || typeof event !== 'object') {\n      throw new Error('each event must be an object');\n    }\n    if (!Number.isInteger(event.amountMinor)) {\n      throw new Error('amountMinor must be an integer');\n    }\n    const id = event.id;\n    if (appliedSeen.has(id)) {\n      continue;\n    }\n    if (event.synced) {\n      queuedSeen.delete(id);\n      appliedSeen.add(id);\n      applied.push(id);\n      balanceMinor += event.amountMinor;\n    } else if (!queuedSeen.has(id)) {\n      queuedSeen.add(id);\n      queuedOrder.push(id);\n    }\n  }\n  return {\n    balanceMinor: balanceMinor,\n    applied: applied,\n    queued: queuedOrder.filter((id) => queuedSeen.has(id))\n  };\n}"
+      },
+      "promptHash": "a335d06e08ece5ab8b34140ce130976058e44fd2a6e849cb1a0df75b79738069",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3",
+      "test": "independent-plan-blockers",
+      "durationMs": 6526,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 1931,
+        "prompt_tokens": 143,
+        "total_tokens": 2074,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 1728,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": null,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 143,
+        "reasoning_tokens": 1728
+      },
+      "estimatedUsd": 0.008696600000000002,
+      "checks": {
+        "schemaValid": true,
+        "blocksBadPlan": true,
+        "photoGapFound": true,
+        "offlineGapFound": true,
+        "tenantGapFound": true,
+        "approvalGapFound": true
+      },
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          "Replace the desktop-only online form with a mobile-capable app that supports camera photo capture in the field.",
+          "Remove the photo-diagnosis claim until the AI actually receives photos, since it currently processes text descriptions only.",
+          "Implement per-farm access controls so each user can only query their own farm's data, not all farms.",
+          "Add a local offline data store with deferred sync so treatment records can be written without connectivity and uploaded later.",
+          "Define sync behavior including conflict handling for offline-recorded treatments.",
+          "Replace the developer's self-passed tests with acceptance criteria tied to each stated user goal and verified independently.",
+          "Eliminate the requirement for users to configure API keys and debug errors by managing credentials internally and surfacing clear in-app error handling.",
+          "Replace automatic author self-approval with an independent design review before sign-off.",
+          "Add cautious-guidance safeguards such as uncertainty disclaimers and prompts to consult a veterinarian for serious symptoms."
+        ]
+      },
+      "promptHash": "9caae16bc2ca8cd93e6638f2300ffe3d85b26f32b81657e938031bc772078ee5",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "sound-plan-negative-control",
+      "durationMs": 4470,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 793,
+        "prompt_tokens": 246,
+        "total_tokens": 1039,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 641,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 128,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0010253999999999999,
+      "checks": {
+        "schemaValid": true,
+        "acceptsSoundPlan": true
+      },
+      "answer": {
+        "verdict": "pass",
+        "findings": [
+          "Scope is explicit and consistent with a single-owner offline farm notebook; exclusions are clearly stated.",
+          "Host checks cover offline reload persistence, reconnect exactly-once sync, second-account isolation, and visible primary action on phone/desktop.",
+          "Safe retry and event IDs are included to avoid duplicates; queued/synced labels and readable recovery errors are specified.",
+          "The recordkeeping-only veterinary limitation is visible before approval, and scope/design approvals are required before build.",
+          "Technical specification is optional, hosting/costs are already provisioned, and no check-passing claims are made without host receipts.",
+          "No blocking gaps or unresolved product decisions found for this first-version plan."
+        ]
+      },
+      "promptHash": "89f8df37498d79964298b860b52f7208c892cc2f29f0bc87a4f109cb33fd4403",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3",
+      "test": "sound-plan-negative-control",
+      "durationMs": 14158,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 4237,
+        "prompt_tokens": 223,
+        "total_tokens": 4460,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 3975,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": null,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 223,
+        "reasoning_tokens": 3975
+      },
+      "estimatedUsd": 0.018955000000000003,
+      "checks": {
+        "schemaValid": true,
+        "acceptsSoundPlan": true
+      },
+      "answer": {
+        "verdict": "pass",
+        "findings": [
+          "Scope matches intent: single-owner offline bird-observation recordkeeping with reconnect sync; no inclusions drift into the explicitly excluded areas (photo diagnosis, multiworker roles, lending, medication recommendations).",
+          "The four host checks cover the highest-risk included behaviors: offline reload durability, exactly-once sync backed by event-ID idempotent retry, owner scoping verified by a second-account read attempt, and primary-action visibility on phone and desktop.",
+          "Verification posture is correct: no pass claims are made ahead of host receipts.",
+          "Approval staging is clear \u2014 user approves scope first, then a rendered design; technical specification remaining optional is acceptable for a first version.",
+          "Hosting and allowed costs are pre-provisioned by platform; no new spending requested.",
+          "The 'recordkeeping, not veterinary advice' limitation is surfaced before approval, consistent with the exclusions.",
+          "Non-blocking note: readable errors / Caddie-owned recovery is included but has no dedicated host check; acceptable given recovery is platform-owned and no pass claim is made for it.",
+          "Non-blocking note: 'primary action' is not named (implicitly recording an observation); confirm it matches during rendered-design approval."
+        ]
+      },
+      "promptHash": "89f8df37498d79964298b860b52f7208c892cc2f29f0bc87a4f109cb33fd4403",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "nvidia/Nemotron-3.5-Super-VL",
+      "test": "vision-good-phone-desktop",
+      "durationMs": 4890,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 1273,
+        "prompt_tokens": 1776,
+        "total_tokens": 3049,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 1255,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 0,
+          "multimodal_tokens": {
+            "image": 1660
+          }
+        }
+      },
+      "estimatedUsd": 0.0016785,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true
+      },
+      "answer": {
+        "verdict": "pass",
+        "findings": []
+      },
+      "promptHash": "938ee3e41944a2cf65a8d514ff23755f0d48e089f03678747313dbbe45af8817",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "nvidia/Nemotron-3.5-Super-VL",
+      "test": "vision-broken-phone-desktop",
+      "durationMs": 2988,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 917,
+        "prompt_tokens": 1776,
+        "total_tokens": 2693,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 806,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 0,
+          "multimodal_tokens": {
+            "image": 1660
+          }
+        }
+      },
+      "estimatedUsd": 0.0013580999999999999,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true,
+        "concreteVisualIssue": true
+      },
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          "Phone subtext is clipped at the right edge ('sync when y...')",
+          "Heading 'Your farm today' and supporting text use very light gray on near-white, failing readable contrast on both screens",
+          "Card details (e.g., '400 birds \u00b7 Week 4', last record timestamps) are nearly illegible due to low contrast",
+          "No clear action buttons or CTAs are visible on either screen"
+        ]
+      },
+      "promptHash": "3096e0c824222854c64564bd1016b81fcbe4b0e937be942b3a3451160a0769b8",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "nvidia/Nemotron-3.5-Super-VL",
+      "test": "vision-blank-phone-desktop",
+      "durationMs": 1749,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 399,
+        "prompt_tokens": 1776,
+        "total_tokens": 2175,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 340,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 0,
+          "multimodal_tokens": {
+            "image": 1660
+          }
+        }
+      },
+      "estimatedUsd": 0.0008918999999999999,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true
+      },
+      "answer": {
+        "verdict": "unavailable",
+        "findings": [
+          "Both image 1 (phone) and image 2 (desktop) are completely blank white screens with no visible UI elements, text, actions, contrast, or layouts to evaluate."
+        ]
+      },
+      "promptHash": "0ec59acd35e8c042fe4776902742cfb1bda1340ee1dd846aed6da48d697ed11e",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "vision-good-phone-desktop",
+      "durationMs": 17748,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 3981,
+        "prompt_tokens": 1148,
+        "total_tokens": 5129,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 3968,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 1024,
+          "multimodal_tokens": {
+            "image": 1027
+          }
+        }
+      },
+      "estimatedUsd": 0.0051216,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true
+      },
+      "answer": {
+        "verdict": "pass",
+        "findings": []
+      },
+      "promptHash": "938ee3e41944a2cf65a8d514ff23755f0d48e089f03678747313dbbe45af8817",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "vision-broken-phone-desktop",
+      "durationMs": 15638,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 4657,
+        "prompt_tokens": 1148,
+        "total_tokens": 5805,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 4502,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 1024,
+          "multimodal_tokens": {
+            "image": 1027
+          }
+        }
+      },
+      "estimatedUsd": 0.005932799999999999,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true,
+        "concreteVisualIssue": true
+      },
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          "Both screens: heading, subtitle, card labels, and card details use extremely low-contrast near-white text on a near-white background, making them unreadable.",
+          "Phone: only the FARMHAND wordmark is clearly legible; the subtitle appears cut off at the right edge, and no clear actions or controls are visible.",
+          "Desktop: FARMHAND and 'Saved on this device' are legible, but the page title, subtitle, and both card contents are washed out and unreadable.",
+          "Card outlines are too faint to define usable interactive areas, leaving both screens looking mostly empty despite content being present."
+        ]
+      },
+      "promptHash": "3096e0c824222854c64564bd1016b81fcbe4b0e937be942b3a3451160a0769b8",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "vision-blank-phone-desktop",
+      "durationMs": 1869,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 243,
+        "prompt_tokens": 1148,
+        "total_tokens": 1391,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 169,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 1024,
+          "multimodal_tokens": {
+            "image": 1027
+          }
+        }
+      },
+      "estimatedUsd": 0.000636,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true
+      },
+      "answer": {
+        "verdict": "unavailable",
+        "findings": [
+          "Phone screenshot is entirely blank white; no app UI, text, controls, or actions are visible.",
+          "Desktop screenshot is entirely blank white; no layout, text, controls, or actions are visible.",
+          "Readable contrast, visible actions, clipping, and professional layout cannot be assessed from blank images."
+        ]
+      },
+      "promptHash": "0ec59acd35e8c042fe4776902742cfb1bda1340ee1dd846aed6da48d697ed11e",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    }
+  ],
+  "summary": {
+    "cases": 20,
+    "passed": 19,
+    "failed": 1,
+    "reportedTokens": 63815,
+    "estimatedUsdAtCatalogListPrices": 0.1303767,
+    "billingNote": "Estimate from provider-reported usage and catalog rates, not an invoice; no discount assumed for raw calls."
+  }
+}
