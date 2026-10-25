@@ -17,6 +17,9 @@
 		"allowImportingTsExtensions": true,
 		"verbatimModuleSyntax": true,
 		"paths": {
+			"@flue/sdk": [
+				"./apps/app/node_modules/@flue/sdk"
+			],
 			"@caddie/contracts": [
 				"./packages/contracts/src/index.ts"
 			],
