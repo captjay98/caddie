@@ -14,7 +14,7 @@ import {
 } from '../apps/app/test-support/spend-harness.ts';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import { migratedDatabase } from './fixtures/sqlite-d1.ts';
-import { createBuildPayer, MICROS_PER_UNIT, spendSnapshot } from '../apps/app/src/server/build-spend.ts';
+import { blockBuildByPayer, createBuildPayer, MICROS_PER_UNIT, spendSnapshot } from '../apps/app/src/server/build-spend.ts';
 import {
 	_resetPayerRegistry,
 	makeSpendInstrumentation,
@@ -328,6 +328,46 @@ describe('Part A — spend instrument wiring (real agents, real D1)', () => {
 		await seedWorkflowPayer(db, 'conv_build_stale', 'build:stale:new');
 		const ctx = { instanceId: 'conv_build_stale', conversationId: 'conv_flue_internal' } as FlueExecutionContext;
 		expect(await resolveTurnPayer(db, ctx)).toBe('build:stale:new');
+	});
+
+	test('a refused call on a retried build blocks THAT build with a plain reason — never a silent "building"', async () => {
+		// The silent-stuck half of the same incident: the refusal blocked the
+		// build whose spendPayerId was the (stale) refused payer — no row had it,
+		// so nothing was blocked and the build sat at "building" with no work.
+		const NEW = 'build:conv_build_block:new';
+		// Both at their limit: before the fix the refusal fired against the stale
+		// payer, blockBuildByPayer matched no row, and the build stayed "building".
+		await createBuildPayer(db, 'build:conv_build_block:old', 1_000);
+		await createBuildPayer(db, NEW, 1_000); // the current attempt is at its limit
+		registerBuildPayer('conv_build_block', 'build:conv_build_block:old');
+		await seedWorkflowPayer(db, 'conv_build_block', NEW);
+		const inst = makeSpendInstrumentation({ db, setBlocker: (payerId, message) => blockBuildByPayer(db, payerId, message) });
+		booted = await bootRaw({ instrumentation: inst, script: [{ text: 'never', input: 10, output: 5 }] });
+
+		const c = init(Coordinator, { id: 'conv_build_block' });
+		await expect(c.read(await c.dispatch('go'))).rejects.toBeInstanceOf(AgentRunError);
+		expect(booted.sp.callCount()).toBe(0);
+		const row = (
+			await db.prepare('select "phase","detail" from build_workflows where "conversationId" = ?').bind('conv_build_block').all<{ phase: string; detail: string | null }>()
+		).results[0];
+		expect(row?.phase).toBe('blocked');
+		expect(row?.detail).toContain('spending limit');
+		expect(row?.detail).toContain('saved');
+	});
+
+	test('a retry with a fresh payer runs even when the stale registered payer is exhausted', async () => {
+		const NEW = 'build:conv_build_retry:new';
+		await createBuildPayer(db, 'build:conv_build_retry:old', 1_000); // exhausted earlier attempt
+		await createBuildPayer(db, NEW, 5 * MICROS_PER_UNIT); // the retry's fresh $5
+		registerBuildPayer('conv_build_retry', 'build:conv_build_retry:old');
+		await seedWorkflowPayer(db, 'conv_build_retry', NEW);
+		booted = await bootRaw({ instrumentation: makeSpendInstrumentation({ db }), script: [{ text: 'working', input: 10, output: 5 }] });
+
+		const c = init(Coordinator, { id: 'conv_build_retry' });
+		await c.read(await c.dispatch('go'));
+		expect(booted.sp.callCount()).toBe(1);
+		const all = (await db.prepare('select "payerId" from "build_spend_reservations"').all<{ payerId: string }>()).results;
+		expect(all.map((r) => r.payerId)).toEqual([NEW]);
 	});
 });
 
