@@ -3251,3 +3251,53 @@ describe("part P: a module builder's repair limit and working copy are its own",
     }
   });
 });
+
+describe("B02 §A — the absolute build deadline (the 103-min hang, host-side)", () => {
+  // The stall watchdog only checks IDLE time (BUILD_STALL_MS = 20 min). A build
+  // that keeps emitting a little activity — or a single delegate that pings
+  // while hanging for 103 min — resets the idle clock and runs forever. The
+  // absolute deadline (admission + BUILD_ABSOLUTE_MS) must pause it even when
+  // it is NOT idle. Anchored on run_bindings.createdAt (the build's admission),
+  // no new migration. Uses persistedBuildDeadline from build-deadlines.ts.
+  test("a build past its absolute deadline is paused even with recent activity", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      w.sqlite
+        .prepare("update build_workflows set phase = 'building', updatedAt = ? where projectId = ?")
+        .run(new Date().toISOString(), item.project.id);
+      // Admission 90 min ago → past the 60-min absolute deadline.
+      const admittedAt = new Date(Date.now() - 90 * 60_000).toISOString();
+      w.sqlite
+        .prepare("update run_bindings set createdAt = ? where runId = ?")
+        .run(admittedAt, item.workflow.runId);
+      // Recent activity: idle is ~0, so the 20-min idle watchdog alone would NOT pause it.
+      const paused = await reconcileStalledBuild(w.db, item.project.id, Date.now());
+      expect(paused).toBe(true);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
+      expect((await readWorkflow(w.db, item.scope))?.detail).toContain("saved");
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a build inside its absolute deadline with recent activity stays building", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      w.sqlite
+        .prepare("update build_workflows set phase = 'building', updatedAt = ? where projectId = ?")
+        .run(new Date().toISOString(), item.project.id);
+      // Admitted 5 min ago, well inside the 60-min deadline, recent activity.
+      const admittedAt = new Date(Date.now() - 5 * 60_000).toISOString();
+      w.sqlite
+        .prepare("update run_bindings set createdAt = ? where runId = ?")
+        .run(admittedAt, item.workflow.runId);
+      const paused = await reconcileStalledBuild(w.db, item.project.id, Date.now());
+      expect(paused).toBe(false);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("building");
+    } finally {
+      w.sqlite.close();
+    }
+  });
+});

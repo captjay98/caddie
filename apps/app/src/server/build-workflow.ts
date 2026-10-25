@@ -18,6 +18,7 @@ import {
 } from "./scope.ts";
 import { createRun, isRunPaused, lookupRunByConversation } from "./runs.ts";
 import { createNotification, createAndDeliverNotification, type DeliveryContext } from "./notifications.ts";
+import { persistedBuildDeadline } from "./build-deadlines.ts";
 import { admitJudgeBuildStart, admitJudgeMessage, judgeProjectCap, judgeProjectRefusal, judgeProjectRoom } from "./judge-limits.ts";
 import {
   getProject,
@@ -915,6 +916,32 @@ async function notifyBuildPaused(db: D1Database, projectId: string, detail: stri
  */
 export const BUILD_STALL_MS = 20 * 60_000;
 
+/**
+ * The absolute build deadline, matched to the submission bound
+ * (COORDINATOR_DURABILITY.timeoutMs = 60 min). Unlike the idle watchdog this
+ * fires even while a build is still emitting activity, so a long-running or
+ * intermittently-pinging delegate cannot outlive the admitted hour.
+ */
+export const BUILD_ABSOLUTE_MS = 60 * 60_000;
+
+/**
+ * The build's admission time, anchored on run_bindings.createdAt (1:1 with the
+ * runId, so no new column). Null when there is no binding yet (pre-build),
+ * which means no absolute deadline is enforced before admission.
+ */
+async function buildAdmittedAt(db: D1Database, runId: string): Promise<number | null> {
+  try {
+    const found = await rows(db, 'select "createdAt" as "t" from "run_bindings" where "runId" = ?', runId);
+    const t = found[0]?.t;
+    if (!t) return null;
+    const ms = Date.parse(String(t));
+    return Number.isFinite(ms) ? ms : null;
+  } catch (error) {
+    if (String(error).includes("no such table")) return null;
+    throw error;
+  }
+}
+
 /** Newest evidence the build is moving: workflow write, sandbox action or repair round. */
 async function lastBuildProgressAt(db: D1Database, workflow: BuildWorkflow): Promise<number> {
   const times = [Date.parse(workflow.updatedAt)];
@@ -951,9 +978,19 @@ export async function reconcileStalledBuild(
   const workflow = (found[0] ?? null) as unknown as BuildWorkflow | null;
   if (!workflow || workflow.phase !== "building") return false;
   const idleMs = nowMs - (await lastBuildProgressAt(db, workflow));
-  if (idleMs < BUILD_STALL_MS) return false;
+  // The absolute build deadline, anchored on the build's admission
+  // (run_bindings.createdAt — 1:1 with runId, no new column). A build that
+  // keeps emitting a little activity resets the idle clock but must still stop
+  // at its admitted deadline (the 103-min delegate hang that pinged while
+  // hanging). Idle OR absolute-deadline-exhausted pauses it.
+  const admittedAt = await buildAdmittedAt(db, workflow.runId);
+  const deadline = admittedAt === null ? null : persistedBuildDeadline(admittedAt, BUILD_ABSOLUTE_MS);
+  const deadlineExhausted = deadline !== null && deadline.expiredAt(nowMs);
+  if (idleMs < BUILD_STALL_MS && !deadlineExhausted) return false;
   const minutes = Math.floor(idleMs / 60_000);
-  const detail = `Caddie stopped making progress on the build for ${minutes} minutes, so it was paused. Your plan and files are saved. Press Retry to continue from here.`;
+  const detail = deadlineExhausted
+    ? `This build reached its time limit, so it was paused. Your plan and files are saved. Press Retry to continue from here.`
+    : `Caddie stopped making progress on the build for ${minutes} minutes, so it was paused. Your plan and files are saved. Press Retry to continue from here.`;
   // Conditional on the row we read: a concurrent stop, retry or publish wins.
   const result = await db
     .prepare(
