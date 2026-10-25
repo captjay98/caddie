@@ -324,3 +324,37 @@ than re-implement what holds.
   approved states against one built render would false-flag every non-home
   state. Recorded as browser-spec scope (`tests/browser/visual-fidelity.spec.ts`)
   rather than shipped as a wire that would make the gate lie.
+
+## B07 — close-out (2026-10-25)
+
+Truthful progress + release gate. The surfaces already carried honest copy in
+places; the work was to lock the invariants and fix the real gaps found.
+
+- **B07.1 — header tied to authoritative state (`9f2079e`).** The build header
+  read "Ready to try" from `workflow.phase === 'ready'` alone, so a ready row
+  whose preview was withdrawn (`previewId` null) still told a nontechnical user
+  the app was ready. New pure `workflowHeaderStatus` gates "Ready to try" on an
+  actual `previewId`; a ready phase with no preview reads "In progress". Every
+  other branch unchanged. 15/0, mutation-proven, typecheck clean.
+- **B07.2 — failure text is truthful, never asks the user to debug (`c085e82`).**
+  Pure `buildFailureMessageOk` locks every user-facing build-failure message:
+  it must say what is SAVED, give a NEXT step, and carry no debug/secret jargon
+  (stack trace, exit code, stderr, token, …). The corpus test over the real
+  blocker strings SURFACED a genuine gap — the visual-repair blocker named what
+  was saved but not what happens next — now fixed to end "…The app is not ready
+  to try yet." 6/0, mutation-proven.
+- **B07.3 — resilience under fault (browser-spec, documented).** Refresh,
+  reconnect, long history, project-switching and mobile checks live in
+  `tests/browser/{focused-project-chat,chat-responsiveness,project-workflow}.spec.ts`
+  (100 lines matching reload/reconnect/refresh/mobile/viewport/overflow/offline).
+  These are the B07.3 checks; running them live needs a composed build + browser
+  and is browser-harness scope — documented as existing coverage, not faked. The
+  earlier overflow/layout fixes in `BuildProgress.tsx` / `workspace.css` /
+  `project-review.css` are preserved.
+- **B07.4 — release gate.** Root `bun run typecheck` clean; all affected unit
+  suites green (project-status, visual-fidelity, build-failure-message,
+  feature-acceptance, build-resume-context = 42/0; build-workflow 107/0 from
+  B05). The composed `bun run build` was DEFERRED under sustained host
+  memory-pressure/load (8–22/core across cycles) — forcing a full Astro+Vite
+  build on a thrashing host proves nothing; to be run on a calm host as the
+  final integration confirmation. Recorded honestly, not claimed.
