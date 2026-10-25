@@ -241,3 +241,41 @@ Commits `7df8512` (pure `feature-acceptance.ts`) + `db376a4` (wiring).
 LOCAL VERIFIED, mutation-proven; full build-workflow + feature-acceptance 105/0.
 
 
+## B05 — close-out (2026-10-25)
+
+Commits: pure `build-resume-context.ts` (`restoreCompatibility`) + wiring
+`20c7201`.
+
+- On a cold restart `openWorkingCopy` rebuilds scope + run and re-opens the
+  saved working copy. A Restore pointer (`build_sandbox_sessions`) carries the
+  image saved at rollback time; the reopen used `override.image` with no
+  comparison to the image the run now expects, so a recipe/image bump between
+  sessions silently rebuilt on a stale base.
+- `restoreCompatibility({expectedStack, restoredStack, expectedCheckpointRef,
+  availableCheckpointRef, expectedRecipeVersion?, restoredRecipeVersion?})`
+  refuses effects on a stack mismatch, a missing/moved verified checkpoint, or
+  a known recipe-version drift; an absent recipe version (legacy run) is not a
+  blocker, and a first feature with no checkpoint is compatible.
+- **Wired at `openWorkingCopy`**, before the `workingCopyAvailable` reopen,
+  whenever an override pointer exists: `!ok` → `SandboxError(409,
+  RESTORE_INCOMPATIBLE)` with the actionable reason, instead of building on the
+  wrong environment.
+- **Honest scope:** in-process one run maps to one stack maps to one image
+  family, so the stack dimension is construction-safe (wiring it would be dead
+  code). The live edge the guard actually defends is cross-session image /
+  recipe drift behind a Restore pointer.
+
+LOCAL VERIFIED, mutation-proven. Pure unit `build-resume-context.test.ts` 7/0;
+wiring `working-copy-restore.test.ts` RED (silently reopened on the stale
+image) → green; forcing the guard off re-reopens stale and the test goes red.
+Typecheck clean.
+
+---
+
+### Session close-out (2026-10-25) — B00–B05 shipped
+
+B00–B05 of the build-reliability plan are complete, each test-first and
+mutation-proven. B06 (device-capture visual fidelity + folded craft-skills),
+B07 (truthful progress + release gate), B08 (benchmark — paid, gated) remain
+and were deliberately NOT opened near the patrol-budget cap rather than left
+half-done.
