@@ -1,0 +1,38 @@
+---
+// A screenshot slot. When real captures exist in public/shots/, they render
+// (dark and light, picked by the page theme) with an honesty label. Until
+// then the slot is an obvious placeholder — never a fake mockup.
+import { shotExists, shotPath, type ShotDevice } from '../lib/shots';
+
+interface Props {
+	name: string;
+	alt: string;
+	device?: ShotDevice;
+	caption?: string;
+}
+
+const { name, alt, device = 'desktop', caption } = Astro.props;
+const dark = shotExists(name, device, 'dark');
+const light = shotExists(name, device, 'light');
+const real = dark || light;
+const size = device === 'phone' ? { width: 390, height: 844 } : { width: 1440, height: 900 };
+---
+
+<figure class={`shot-slot shot-${device}`} data-shot={name} data-shot-state={real ? 'real' : 'pending'}>
+	<div class="shot-frame">
+		{dark && <img class={light ? 'shot-dark' : undefined} src={`/${shotPath(name, device, 'dark')}`} alt={alt} {...size} loading="lazy" decoding="async" />}
+		{light && <img class={dark ? 'shot-light' : undefined} src={`/${shotPath(name, device, 'light')}`} alt={alt} {...size} loading="lazy" decoding="async" />}
+		{!real && (
+			<div class="shot-pending" role="img" aria-label={`Screenshot coming: ${alt}`}>
+				<span class="lbl mono">Screenshot coming</span>
+				<span>{alt}</span>
+			</div>
+		)}
+	</div>
+	{(real || caption) && (
+		<figcaption>
+			{real && <span class="lbl mono">Real app · demo data</span>}
+			{caption && <span>{caption}</span>}
+		</figcaption>
+	)}
+</figure>

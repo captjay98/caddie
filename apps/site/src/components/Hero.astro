@@ -1,65 +1,32 @@
 ---
+import Shot from './Shot.astro';
 const appHref = import.meta.env.DEV ? 'http://localhost:5176/app/' : '/app/';
-// Pit-board hero — PORT of the reference Caddie landing structure
-// (Landing.tsx hero + .pb styles), content updated for the fresh product.
-// The device composition is clearly-labelled illustrative markup: no real
-// captures of the fresh build exist yet (plan amendment: hero art is
-// illustrative until real fresh-workspace captures exist).
+// First-timer hero (2026-10-25 redo): says what you get and that you don't
+// need to code. The art is real app screenshots (Shot slots), not mockups.
 ---
 
 <section class="hero" aria-labelledby="pb-hero-h">
 	<div class="hero-l">
-		<p class="eyebrow"><span class="rule" aria-hidden="true"></span><span class="lbl mono">an evidence-backed build assistant</span></p>
-		<h1 id="pb-hero-h" class="h1">It carries the build.<br />You swing.</h1>
+		<p class="eyebrow"><span class="live-dot" aria-hidden="true"></span><span class="lbl mono">Build apps by talking · no coding</span></p>
+		<h1 id="pb-hero-h" class="h1">You have an idea.<br />Caddie builds the app.</h1>
 		<p class="lede">
-			Builds rarely die from bad code. They die from fine print nobody read,
-			scope that ate the weekend, and a delivery nobody can verify. Caddie
-			works all three so the hours you have go into the build.
+			Tell Caddie what you want to make, in your own words. It plans it with
+			you, builds it, checks that it really works, and gives you a link to
+			share. You don't need to know how to code.
 		</p>
 		<div class="hero-cta">
-			<a class="btn btn-key" href="mailto:captjay98@gmail.com?subject=Caddie%20access%20request">Request access</a>
-			<a class="btn btn-line" href={appHref}>Sign in</a>
+			<a class="btn btn-key" href={appHref}>Start building</a>
+			<a class="btn btn-line" href={appHref}>Judging? Use your access code</a>
 		</div>
+		<p class="hero-note">
+			Invite-only during the hackathon. Judges: the access code is in the
+			Devpost testing instructions.
+		</p>
 	</div>
 	<div class="hero-r">
-		<div class="devices">
-			<div class="shot">
-				<div class="bar" aria-hidden="true"><i></i><i></i><i></i><span class="host mono">illustrative · the v2 workspace</span></div>
-				<div class="shot-body">
-					<div class="frag">
-						<p class="frag-k"><span style=`color: var(--pb-warn)`>clock · deadline</span><span class="pill" style=`background: var(--pb-tint-warn); color: var(--pb-warn)`>locked</span></p>
-						<h4>Submit by Oct 26 · 5pm EDT — video is the artifact</h4>
-						<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Your time</span><span class="ar" style=`color: var(--pb-warn)`>→</span><span class="v">Sun 26 Oct, 10:00</span></p>
-						<p class="mrow"><span class="k">Review</span><span class="ar" style=`color: var(--pb-warn)`>→</span><span class="v">Oct 22</span></p>
-						<p class="fresh">· updated 3h ago</p>
-					</div>
-					<div class="frag">
-						<p class="frag-k"><span style=`color: var(--pb-ok)`>verdict · fit</span><span class="pill" style=`background: var(--pb-tint-ok); color: var(--pb-ok)`>strong fit</span></p>
-						<h4>Eligible, and it fits your week</h4>
-						<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Stack</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">React + Hono</span></p>
-						<p class="mrow"><span class="k">Evidence</span><span class="ar" style=`color: var(--pb-ok)`>→</span><span class="v">3 claims, all cited</span></p>
-						<p class="fresh">· updated 6h ago</p>
-					</div>
-				</div>
-			</div>
-			<div class="mobile-shot" role="img" aria-label="Illustrative phone composition: blocked-rules and quiet-watch cards in one column">
-				<div class="shot-body">
-					<div class="frag">
-						<p class="frag-k"><span style=`color: var(--pb-danger)`>fault · rules</span><span class="pill" style=`background: var(--pb-tint-danger); color: var(--pb-danger)`>blocked</span></p>
-						<h4>No deadline parsed yet</h4>
-						<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Meaning</span><span class="ar" style=`color: var(--pb-danger)`>→</span><span class="v">unknown, not "no deadline"</span></p>
-					</div>
-					<div class="frag">
-						<p class="frag-k"><span>watch · rules</span><span class="pill">quiet</span></p>
-						<h4>Nothing moved since yesterday</h4>
-						<p class="mrow" style="margin-top: 0.5rem;"><span class="k">Last check</span><span class="ar">→</span><span class="v">18:40 · clean</span></p>
-					</div>
-				</div>
-			</div>
+		<div class="hero-shots">
+			<Shot name="hero" device="desktop" alt="Caddie turning a plain-language idea into a plan" />
+			<Shot name="hero" device="phone" alt="An app Caddie built, open on a phone" />
 		</div>
-		<p class="devices-cap">
-			Illustrative composition of the planned workspace — not a live capture.
-			The fresh build proves itself in the open before the screenshots are real.
-		</p>
 	</div>
 </section>
