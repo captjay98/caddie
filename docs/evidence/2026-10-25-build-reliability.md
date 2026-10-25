@@ -256,19 +256,29 @@ Commits: pure `build-resume-context.ts` (`restoreCompatibility`) + wiring
   refuses effects on a stack mismatch, a missing/moved verified checkpoint, or
   a known recipe-version drift; an absent recipe version (legacy run) is not a
   blocker, and a first feature with no checkpoint is compatible.
-- **Wired at `openWorkingCopy`**, before the `workingCopyAvailable` reopen,
-  whenever an override pointer exists: `!ok` → `SandboxError(409,
-  RESTORE_INCOMPATIBLE)` with the actionable reason, instead of building on the
-  wrong environment.
+- **Wired at `openWorkingCopy`** — then REVERTED (`git revert 20c7201`). The
+  wiring used `override.image != ctx.baseImage` as the drift signal, but that
+  inequality is the NORMAL rollback case: a rollback deliberately reopens on a
+  prior save-point image, which differs from the current `baseImage` by design.
+  The guard therefore rejected 5 legitimate restore/rollback/parts flows with
+  `RESTORE_INCOMPATIBLE`. Image alone cannot distinguish a deliberate rollback
+  from stale-recipe drift — that needs a recipe/stack version recorded on the
+  `build_sandbox_sessions` pointer, which does not exist today. Caught by the
+  full build-workflow suite before it could ship; reverted rather than weaken
+  the test or break rollback.
+- **FOLLOW-UP:** add a `recipeVersion` (and/or stack) column to
+  `build_sandbox_sessions`, populate it at save time, then wire
+  `restoreCompatibility` safely — it can then tell a same-recipe rollback
+  (allowed) from a cross-recipe drift (refused). The pure guard already
+  implements that decision; only the pointer identity is missing.
 - **Honest scope:** in-process one run maps to one stack maps to one image
-  family, so the stack dimension is construction-safe (wiring it would be dead
-  code). The live edge the guard actually defends is cross-session image /
-  recipe drift behind a Restore pointer.
+  family, so the stack dimension is construction-safe. The pure
+  `restoreCompatibility` unit + its 7/0 test REMAIN committed as the
+  enforcement point once the pointer records recipe identity.
 
-LOCAL VERIFIED, mutation-proven. Pure unit `build-resume-context.test.ts` 7/0;
-wiring `working-copy-restore.test.ts` RED (silently reopened on the stale
-image) → green; forcing the guard off re-reopens stale and the test goes red.
-Typecheck clean.
+B05 landed as PURE-GUARD-ONLY. Pure unit LOCAL VERIFIED, mutation-proven
+(`build-resume-context.test.ts` 7/0); wiring reverted; build-workflow back to
+107/0.
 
 ---
 
