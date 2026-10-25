@@ -18,7 +18,7 @@ import {
 } from "./scope.ts";
 import { createRun, isRunPaused, lookupRunByConversation } from "./runs.ts";
 import { createNotification, createAndDeliverNotification, type DeliveryContext } from "./notifications.ts";
-import { persistedBuildDeadline } from "./build-deadlines.ts";
+import { buildAttemptAdmittedAt, persistedBuildDeadline } from "./build-deadlines.ts";
 import { admitJudgeBuildStart, admitJudgeMessage, judgeProjectCap, judgeProjectRefusal, judgeProjectRoom } from "./judge-limits.ts";
 import {
   getProject,
@@ -75,6 +75,8 @@ export interface BuildWorkflow {
   pendingBody: string | null;
   detail: string | null;
   updatedAt: string;
+  /** This build attempt's payer id (build:<runId>:<startMs>); rewritten on retry. Anchors the absolute deadline. */
+  spendPayerId?: string | null;
   /** The highest 'looks' revision when the plan was approved; only newer proposals count (0044). */
   looksBaseline?: number | null;
   /** The highest 'design' revision when the look was chosen; only newer briefs count (0044). */
@@ -925,21 +927,25 @@ export const BUILD_STALL_MS = 20 * 60_000;
 export const BUILD_ABSOLUTE_MS = 60 * 60_000;
 
 /**
- * The build's admission time, anchored on run_bindings.createdAt (1:1 with the
- * runId, so no new column). Null when there is no binding yet (pre-build),
- * which means no absolute deadline is enforced before admission.
+ * The current build ATTEMPT's admission time. Anchored on the workflow's
+ * spendPayerId (`build:<runId>:<startMs>`), which a retry rewrites, so a retry
+ * gets a fresh absolute-deadline window; falls back to run_bindings.createdAt
+ * when no payer id is set yet. Anchoring on createdAt alone was a bug — it
+ * never resets, so a retry of a run older than the allowance re-paused at once.
  */
-async function buildAdmittedAt(db: D1Database, runId: string): Promise<number | null> {
+async function buildAdmittedAt(db: D1Database, runId: string, spendPayerId?: string | null): Promise<number | null> {
+  let bindingCreatedAt: number | null = null;
   try {
     const found = await rows(db, 'select "createdAt" as "t" from "run_bindings" where "runId" = ?', runId);
     const t = found[0]?.t;
-    if (!t) return null;
-    const ms = Date.parse(String(t));
-    return Number.isFinite(ms) ? ms : null;
+    if (t) {
+      const ms = Date.parse(String(t));
+      bindingCreatedAt = Number.isFinite(ms) ? ms : null;
+    }
   } catch (error) {
-    if (String(error).includes("no such table")) return null;
-    throw error;
+    if (!String(error).includes("no such table")) throw error;
   }
+  return buildAttemptAdmittedAt(spendPayerId, bindingCreatedAt);
 }
 
 /** Newest evidence the build is moving: workflow write, sandbox action or repair round. */
@@ -978,12 +984,14 @@ export async function reconcileStalledBuild(
   const workflow = (found[0] ?? null) as unknown as BuildWorkflow | null;
   if (!workflow || workflow.phase !== "building") return false;
   const idleMs = nowMs - (await lastBuildProgressAt(db, workflow));
-  // The absolute build deadline, anchored on the build's admission
-  // (run_bindings.createdAt — 1:1 with runId, no new column). A build that
-  // keeps emitting a little activity resets the idle clock but must still stop
-  // at its admitted deadline (the 103-min delegate hang that pinged while
-  // hanging). Idle OR absolute-deadline-exhausted pauses it.
-  const admittedAt = await buildAdmittedAt(db, workflow.runId);
+  // The absolute build deadline, anchored on the CURRENT attempt's admission
+  // (the spendPayerId timestamp, which a retry rewrites — so a retry gets a
+  // fresh hour, while a crash-restart reusing the same payer keeps the original
+  // and cannot silently win a fresh hour). A build that keeps emitting a little
+  // activity resets the idle clock but must still stop at its admitted deadline
+  // (the 103-min delegate hang that pinged while hanging). Idle OR
+  // absolute-deadline-exhausted pauses it.
+  const admittedAt = await buildAdmittedAt(db, workflow.runId, workflow.spendPayerId);
   const deadline = admittedAt === null ? null : persistedBuildDeadline(admittedAt, BUILD_ABSOLUTE_MS);
   const deadlineExhausted = deadline !== null && deadline.expiredAt(nowMs);
   if (idleMs < BUILD_STALL_MS && !deadlineExhausted) return false;

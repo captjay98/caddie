@@ -98,3 +98,32 @@ describe("F2 — layered deadline policy (fake clock)", () => {
     expect(afterRestart.expiredAt(admittedAt + totalAllowanceMs - 1)).toBe(false);
   });
 });
+
+import { buildAttemptAdmittedAt } from '../apps/app/src/server/build-deadlines.ts';
+
+// Regression: the absolute build deadline must anchor on the CURRENT attempt's
+// payer id (which a retry rewrites), not run_bindings.createdAt (which never
+// resets) — otherwise a retry of any run older than the allowance re-pauses
+// instantly and can never start. (Farmhand, run created 2 days before a retry.)
+describe('buildAttemptAdmittedAt — per-attempt deadline anchor', () => {
+	const RUN_BIRTH = Date.parse('2026-10-23T10:03:25.252Z');
+	const RETRY_START = 1792966299035; // the :<ms> suffix of a retry's payer id
+
+	test('uses the payer-id attempt timestamp, not the run birth', () => {
+		const at = buildAttemptAdmittedAt(`build:run_x:${RETRY_START}`, RUN_BIRTH);
+		expect(at).toBe(RETRY_START);
+		expect(at).not.toBe(RUN_BIRTH);
+	});
+	test('a 60-min absolute deadline from the retry start is in the FUTURE relative to that start', () => {
+		const at = buildAttemptAdmittedAt(`build:run_x:${RETRY_START}`, RUN_BIRTH)!;
+		const deadline = at + 60 * 60_000;
+		expect(deadline).toBeGreaterThan(RETRY_START); // the retry gets a real hour, not an expired one
+	});
+	test('falls back to the run binding time when no payer id is present', () => {
+		expect(buildAttemptAdmittedAt(null, RUN_BIRTH)).toBe(RUN_BIRTH);
+		expect(buildAttemptAdmittedAt('build:run_x:notanumber', RUN_BIRTH)).toBe(RUN_BIRTH);
+	});
+	test('returns null only when neither source is available', () => {
+		expect(buildAttemptAdmittedAt(null, null)).toBe(null);
+	});
+});

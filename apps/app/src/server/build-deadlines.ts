@@ -104,3 +104,28 @@ export function persistedBuildDeadline(
 		expiredAt: (t: number) => t > deadlineAt,
 	};
 }
+
+/**
+ * The absolute-deadline anchor for the CURRENT build attempt.
+ *
+ * A build's payer id is `build:<runId>:<startMs>` (build-spend.ts), rewritten
+ * on every retry (openBuildSpendPayer reset=true) — so its trailing timestamp
+ * is this ATTEMPT's start, not the run's birth. The absolute deadline must
+ * anchor here: a retry is a new build with a fresh payer and budget and so
+ * deserves a fresh hour, while a crash-restart (which reuses the same payer id)
+ * keeps the original admission and cannot silently win a fresh hour (B02 §A.3).
+ *
+ * Anchoring on run_bindings.createdAt instead was a bug: it never resets, so a
+ * retry of any run older than the allowance re-paused instantly and could never
+ * start. Falls back to `bindingCreatedAt` only when no payer id is parseable.
+ */
+export function buildAttemptAdmittedAt(spendPayerId: string | null | undefined, bindingCreatedAt: number | null): number | null {
+	if (spendPayerId) {
+		const match = /^build:.+:(\d{10,})$/.exec(spendPayerId);
+		if (match) {
+			const ms = Number(match[1]);
+			if (Number.isFinite(ms) && ms > 0) return ms;
+		}
+	}
+	return bindingCreatedAt;
+}

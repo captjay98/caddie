@@ -3307,8 +3307,14 @@ describe("B02 §A — the absolute build deadline (the 103-min hang, host-side)"
       w.sqlite
         .prepare("update build_workflows set phase = 'building', updatedAt = ? where projectId = ?")
         .run(new Date().toISOString(), item.project.id);
-      // Admission 90 min ago → past the 60-min absolute deadline.
-      const admittedAt = new Date(Date.now() - 90 * 60_000).toISOString();
+      // Admission 90 min ago → past the 60-min absolute deadline. The anchor is
+      // the current attempt's payer id (build:<runId>:<startMs>); createdAt is
+      // only the fallback. Set BOTH to 90 min ago so the attempt reads as old.
+      const admittedMs = Date.now() - 90 * 60_000;
+      const admittedAt = new Date(admittedMs).toISOString();
+      w.sqlite
+        .prepare("update build_workflows set spendPayerId = ? where projectId = ?")
+        .run(`build:${item.workflow.runId}:${admittedMs}`, item.project.id);
       w.sqlite
         .prepare("update run_bindings set createdAt = ? where runId = ?")
         .run(admittedAt, item.workflow.runId);
