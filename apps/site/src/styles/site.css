@@ -6,6 +6,12 @@
 
 @import "@caddie/ui/tokens.css";
 
+/* The page itself: no default 8px body margin, and the theme background painted
+   edge to edge (also behind overscroll) — otherwise a white frame shows. */
+html { background: #090b10; }
+:root[data-theme='light'] { background: #f6f8fc; }
+body { margin: 0; }
+
 .pb {
 	--pb-fg: var(--color-bright);
 	--pb-bg: var(--color-ink);
@@ -41,8 +47,8 @@
 /* type */
 .pb .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: 0.08em; text-transform: uppercase; }
 .pb .lbl { font-size: var(--r-label); color: var(--pb-quiet); font-weight: 500; }
-.pb .h1 { font-size: clamp(2.5rem, 5.6vw, 5rem); line-height: 1.05; letter-spacing: -0.035em; font-weight: 600; margin: 0; }
-.pb .h2 { font-size: clamp(1.625rem, 2.6vw, 2.25rem); line-height: 1.1; letter-spacing: -0.026em; font-weight: 600; margin: 0; }
+.pb .h1 { font-size: clamp(2.375rem, 4.4vw, 4rem); line-height: 1.06; letter-spacing: -0.035em; font-weight: 600; margin: 0; text-wrap: balance; }
+.pb .h2 { font-size: clamp(1.625rem, 2.6vw, 2.25rem); line-height: 1.1; letter-spacing: -0.026em; font-weight: 600; margin: 0; text-wrap: balance; }
 .pb h3 { margin: 0; font-size: 1.125rem; font-weight: 600; letter-spacing: -0.015em; line-height: 1.3; }
 .pb .lede { color: var(--pb-muted); font-size: 1.0625rem; line-height: 1.6; max-width: 58ch; }
 
@@ -132,10 +138,6 @@
 .pb .foot-links a { font-size: 0.8125rem; color: var(--pb-quiet); }
 .pb .foot-links a:hover { color: var(--pb-fg); }
 
-/* mobile CTA bar */
-.pb .mbar { position: fixed; inset-inline: 0; bottom: 0; display: none; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; background: color-mix(in srgb, var(--pb-bg) 96%, var(--pb-fg)); border-top: var(--pb-rail); z-index: 40; }
-.pb .mbar span { flex: 1; min-width: 0; font-size: 0.8125rem; color: var(--pb-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
 /* theme toggle */
 .pb .theme-toggle { align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; background: transparent; color: var(--pb-fg); cursor: pointer; font-size: 1rem; border-radius: 8px; }
 .pb .theme-toggle:hover { background: color-mix(in srgb, var(--pb-fg) 8%, transparent); }
@@ -168,8 +170,6 @@
 }
 @media (max-width: 640px) {
 	.pb { --pb-gutter: 16px; }
-	.pb .mbar { display: flex; }
-	body:has(.pb) { padding-bottom: 60px; }
 	.pb .band { padding-block: 56px; }
 	.pb .steps { gap: 3rem; }
 	.pb .promises, .pb .tech { grid-template-columns: 1fr; }

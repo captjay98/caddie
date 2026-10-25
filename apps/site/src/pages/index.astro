@@ -291,11 +291,6 @@ const promises = [
 					</nav>
 				</div>
 			</footer>
-
-			<div class="mbar">
-				<span>Build an app without code</span>
-				<a class="btn btn-line" href={appHref} style="padding: 0.4375rem 0.75rem; font-size: 0.75rem;">Sign in</a>
-			</div>
 		</div>
 		<script is:inline>
 			// Theme toggle: label names the theme it switches TO; saves only on an
@@ -317,17 +312,6 @@ const promises = [
 						try { localStorage.setItem('caddie-theme', next); } catch (e) {}
 						label();
 					});
-				}
-				// Mobile bar hides while the closing card is visible (v2 §4).
-				var mbar = document.querySelector('.mbar');
-				var closing = document.getElementById('pb-start');
-				if (mbar && closing && 'IntersectionObserver' in window) {
-					new IntersectionObserver(
-						function (entries) {
-							mbar.style.display = entries[0].isIntersecting ? 'none' : '';
-						},
-						{ threshold: 0.15 }
-					).observe(closing);
 				}
 			})();
 		</script>
