@@ -748,7 +748,7 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 										{theme === 'dark' ? <Icon name="sun" title="Switch to light theme" /> : <Icon name="moon" title="Switch to dark theme" />}
 									</button>
 									<a href={import.meta.env.DEV ? 'http://localhost:4321/' : '/'} className="capsule-tab" data-testid="back-to-landing">
-										<Icon name="arrowLeft" title="back to the landing page" /> Landing
+										<Icon name="arrowLeft" title="back to the home page" /> Home
 									</a>
 								</header>
 							)}

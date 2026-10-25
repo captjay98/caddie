@@ -212,19 +212,24 @@ test.describe('P01 sign-in panel (composed build)', () => {
 	});
 });
 
-test.describe('one sign-in everywhere (plan 5.2)', () => {
+test.describe('one sign-in everywhere (plan 5.2; calm redo 2026-10-25)', () => {
 	// Live finding (2026-10-20): signed out, Caddie first showed a plain sign-in
 	// column; only some pages had the split sign-in with Caddie beside the form.
+	// Redo (2026-10-25): the split's marketing half made the page busy, worst on
+	// a phone where the buttons sat two-thirds down. Now one calm centered column.
 	for (const path of ['/app/', '/app/projects', '/app/onboarding']) {
-		test(`signed out, ${path} shows the split sign-in, filling the page`, async ({ page }) => {
+		test(`signed out, ${path} shows the one calm sign-in, filling the page`, async ({ page }) => {
 			await page.setViewportSize({ width: 1440, height: 900 });
 			await page.goto(`${BASE}${path}`);
 			const screen = page.getByTestId('sign-in-gate');
 			await expect(screen).toBeVisible();
-			await expect(screen).toHaveClass(/signin-split/);
-			await expect(screen.locator('.signin-hero')).toBeVisible();
-			await expect(screen.getByRole('heading', { name: 'Sign in to Caddie' })).toBeVisible();
+			await expect(screen).toHaveClass(/signin-screen/);
+			await expect(screen.getByRole('heading', { name: 'Sign in to start building' })).toBeVisible();
 			await expect(screen.getByTestId('sign-in-panel')).toBeVisible();
+			// One heading, no marketing panel, never "free to start" (it is invite-only).
+			await expect(screen.getByRole('heading')).toHaveCount(1);
+			await expect(screen).not.toContainText(/free to start/i);
+			await expect(screen.getByTestId('sign-in-access-note')).toContainText('invite-only');
 			// One sign-in on the page, and never the old plain column.
 			await expect(page.getByTestId('sign-in-panel')).toHaveCount(1);
 			await expect(page.locator('.signin-view')).toHaveCount(0);
@@ -234,13 +239,17 @@ test.describe('one sign-in everywhere (plan 5.2)', () => {
 		});
 	}
 
-	test('on a phone the same sign-in is the form alone', async ({ page }) => {
+	test('on a phone the buttons are in the first screen, not below a marketing panel', async ({ page }) => {
 		await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto(`${BASE}/app/`);
 		const screen = page.getByTestId('sign-in-gate');
-		await expect(screen).toHaveClass(/signin-split/);
+		await expect(screen).toHaveClass(/signin-screen/);
 		await expect(screen.getByTestId('sign-in-panel')).toBeVisible();
-		await expect(screen.locator('.signin-hero')).toBeHidden();
+		const google = await page.getByTestId('sign-in-google').boundingBox();
+		// The first provider button sits in the upper part of the screen.
+		expect((google?.y ?? 9999) + (google?.height ?? 0)).toBeLessThan(844 * 0.6);
+		// No horizontal overflow on a phone.
+		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 		if (process.env.SIGNIN_SHOTS) await page.screenshot({ path: `${process.env.SIGNIN_SHOTS}/sign-in-app-phone.png` });
 	});
 });

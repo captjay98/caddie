@@ -389,21 +389,19 @@ a.btn-ghost.topbar-nav-link {
 
 /* --- first-run voice (reference: today.ai brief cards, hacksteward wizard,
    the reference caddie's voice) ------------------------------------------- */
-
-/* Sign-in: one job — identify Caddie and get the user in. The two provider
-   buttons sit frameless (no card around buttons that already have borders);
-   one reassurance line closes it.
-
-   The ONE sign-in screen (SignInScreen, plan 5.2): brand/mascot hero on the
-   left, the form column on the right. The hero is static by necessity — a
-   signed-out screen has no live Caddie activity to show. Stacks a compact
-   hero above the form on narrow screens. It fills the main column (flex),
+/* Sign-in (2026-10-25 redo): one calm, centered column on every screen —
+   a small mascot, one heading, one line saying what Caddie is, the two
+   provider buttons, the judge door as a quiet text link, and one honest
+   access line. No marketing panel, no pill tags: the landing page sells,
+   this page only lets you in. It fills the main column under the header,
    or the whole viewport as a chrome-free page (.signin-page). */
-.signin-split {
+.signin-screen {
 	flex: 1;
 	min-height: 100%;
 	display: grid;
-	grid-template-columns: 1.05fr 1fr;
+	place-items: center;
+	padding: clamp(2rem, 8vh, 5rem) 1.5rem calc(2rem + var(--safe-bottom));
+	background: var(--horizon), var(--color-ink);
 }
 .signin-page {
 	display: flex;
@@ -417,190 +415,48 @@ a.btn-ghost.topbar-nav-link {
 .shell-main[data-signed-out='true'] {
 	padding: 0;
 }
-.signin-hero {
-	position: relative;
-	overflow: hidden;
-	display: flex;
-	flex-direction: column;
-	padding: clamp(2rem, 4vw, 3rem);
-	border-right: 1px solid var(--color-line);
-	background: var(--horizon), var(--card-gradient);
-	color: var(--color-bright);
+.signin-screen .signin-col {
+	width: min(380px, 100%);
+	gap: 1.75rem;
 }
-.signin-hero-grid {
-	position: absolute;
-	inset: 0;
-	pointer-events: none;
-	opacity: 0.5;
-	background-image:
-		linear-gradient(var(--color-line-soft) 1px, transparent 1px),
-		linear-gradient(90deg, var(--color-line-soft) 1px, transparent 1px);
-	background-size: 34px 34px;
-	-webkit-mask-image: radial-gradient(600px 400px at 30% 20%, #000, transparent 75%);
-	mask-image: radial-gradient(600px 400px at 30% 20%, #000, transparent 75%);
+.signin-screen .signin-brand {
+	gap: 0.75rem;
 }
-.signin-hero-brand {
-	position: relative;
-	margin: 0;
-	font-family: var(--font-mono);
-	font-size: 12px;
-	letter-spacing: 0.16em;
-	color: var(--color-action);
+.signin-screen .signin-title {
+	font-size: clamp(1.5rem, 5.5vw, 1.75rem);
+	max-width: 18ch;
+	text-wrap: balance;
 }
-.signin-hero-center {
-	position: relative;
-	margin: auto 0;
-	display: grid;
-	gap: 1.25rem;
-	max-width: 34ch;
+.signin-screen .signin-lede {
+	font-size: 1rem;
+	text-wrap: balance;
 }
-.signin-hero-copy {
-	display: grid;
-	gap: 0.6rem;
-}
-.signin-hero-title {
-	margin: 0;
-	font-size: clamp(1.4rem, 2.4vw, 1.75rem);
-	font-weight: 650;
-	letter-spacing: -0.025em;
-	line-height: 1.15;
-}
-.signin-hero-lede {
-	margin: 0;
-	color: var(--color-muted);
-	font-size: 0.95rem;
-	line-height: 1.6;
-}
-.signin-hero-chips {
-	list-style: none;
-	margin: 0.2rem 0 0;
-	padding: 0;
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: 0.5rem;
-}
-.signin-hero-chips li {
-	text-align: center;
-	font-family: var(--font-mono);
-	font-size: var(--r-label);
-	color: var(--color-muted);
-	border: 1px solid var(--color-line);
-	background: var(--color-raised);
-	padding: 0.35rem 0.65rem;
-	border-radius: 999px;
-}
-.signin-hero-foot {
-	position: relative;
-	margin: 0;
-	color: var(--color-muted);
-	font-size: 11px;
-	line-height: 1.5;
-}
-.signin-form {
-	display: grid;
-	place-items: center;
-	padding: 3rem 1.5rem;
-	background: var(--color-panel);
-}
-.signin-form .signin-col {
-	justify-items: start;
-	text-align: left;
-}
-.signin-form .signin-brand {
-	justify-items: start;
-}
-.signin-form .signin-lede,
-.signin-form .signin-note {
-	margin-inline: 0;
-	text-align: left;
-}
+/* On a phone the column sits high, so the providers are in the first screen. */
 @media (max-width: 720px) {
-	.signin-split {
-		flex: none;
-		grid-template-columns: 1fr;
-		grid-template-rows: repeat(2, 1fr);
-		height: max-content;
-	}
-	.signin-hero {
-		align-items: center;
-		justify-content: center;
-		min-height: 0;
-		padding: 1.25rem 1.5rem;
-		border-right: 0;
-		border-bottom: 1px solid var(--color-line);
-		text-align: center;
-	}
-	.signin-hero-brand,
-	.signin-hero-foot {
-		display: none;
-	}
-	.signin-hero-center {
-		width: 100%;
-		max-width: 38ch;
-		margin: 0;
-		gap: 0.75rem;
-		justify-items: center;
-	}
-	.signin-hero-center > .mascot {
-		width: 56px;
-		height: 56px;
-	}
-	.signin-hero-copy {
-		gap: 0.4rem;
-		justify-items: center;
-	}
-	.signin-hero-title {
-		max-width: 24ch;
-		font-size: clamp(1.15rem, 5vw, 1.45rem);
-		text-wrap: balance;
-	}
-	.signin-hero-lede {
-		font-size: 0.8rem;
-		line-height: 1.5;
-	}
-	.signin-hero-chips {
-		width: 100%;
-		max-width: 320px;
-		margin: 0;
-		gap: 0.4rem;
-	}
-	.signin-form {
-		align-items: center;
-		padding: 1.5rem 1.5rem calc(1.5rem + var(--safe-bottom));
-	}
-	.signin-form .signin-col {
-		gap: 1.1rem;
-	}
-	.signin-form .signin-brand {
-		gap: 0.6rem;
-	}
-	.signin-form .signin-col,
-	.signin-form .signin-brand {
-		justify-items: center;
-		text-align: center;
-	}
-	.signin-form .signin-lede,
-	.signin-form .signin-note {
-		margin-inline: auto;
-		text-align: center;
+	.signin-screen {
+		place-items: start center;
+		padding-top: clamp(2.5rem, 11vh, 6rem);
 	}
 }
-@media (max-width: 720px) and (max-height: 700px) {
-	.signin-hero {
-		min-height: 0;
-		padding-block: 1rem;
-	}
-	.signin-hero-center {
-		gap: 0.5rem;
-	}
-	.signin-hero-center > .mascot {
-		width: 44px;
-		height: 44px;
-	}
-	.signin-form {
-		padding-block: 1.25rem;
-		padding-bottom: calc(1.25rem + var(--safe-bottom));
-	}
+/* The judge door is a quiet one-line link under the providers, not a third
+   button competing with them. */
+.signin-screen .judge-link {
+	justify-self: center;
+	width: auto;
+	min-height: 44px;
+	padding: 0.5rem 0.25rem;
+	border-color: transparent;
+	background: transparent;
+	color: var(--color-muted);
+	font-size: 0.875rem;
+	font-weight: 500;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	white-space: normal;
+}
+.signin-screen .judge-link:hover {
+	background: transparent;
+	color: var(--color-bright);
 }
 
 .signin-col {
