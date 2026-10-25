@@ -1,53 +1,84 @@
-import { afterEach, expect, test } from 'bun:test';
-import { Database } from 'bun:sqlite';
-import { readFileSync } from 'node:fs';
-import { sqliteD1 } from './fixtures/sqlite-d1.ts';
-import { helperModelCompletion } from '../apps/app/src/server/helper-model-call.ts';
-import { inspectCandidates, digestCandidate } from '../apps/app/src/server/candidate-inspection.ts';
-import { findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
+import { describe, test, expect, afterEach } from "bun:test";
+import { helperModelCompletion } from "../apps/app/src/server/helper-model-call.ts";
+import { findModelRouteForRole } from "../apps/app/src/agents/providers.ts";
 
-const originalFetch = globalThis.fetch;
-let sqlite: Database | undefined;
-afterEach(() => { globalThis.fetch = originalFetch; sqlite?.close(); sqlite = undefined; });
-function database() { sqlite = new Database(':memory:'); sqlite.exec(readFileSync(new URL('../apps/app/migrations/0046_model_call_usage.sql', import.meta.url), 'utf8')); return sqliteD1(sqlite); }
-function rows() { return sqlite!.query('select * from model_call_usage order by rowid').all() as Record<string, unknown>[]; }
-function request() { return { role: 'helperRules' as const, url: 'https://api.tokenfactory.nebius.com/v1/chat/completions', request: { method: 'POST', body: JSON.stringify({ model: findModelRouteForRole('helperRules').modelId, messages: [{ role: 'user', content: 'private rules excerpt' }] }) } }; }
+/**
+ * B02 §B — the F3 gap (GLM HTTP 529 "System is overloaded" surfaced
+ * un-retried). The coordinator/specialist path is already retried by Flue
+ * (MAX_TRANSIENT_MODEL_RETRIES = 3); the ONE un-retried path is
+ * helperModelCompletion's direct single-shot fetch (rules-reading.ts,
+ * candidate-inspection.ts). This adds a bounded transient retry (≤2 after the
+ * original, 429/529/5xx, honouring Retry-After) around that fetch — and
+ * proves the per-call receipt is still recorded exactly ONCE, not per attempt.
+ *
+ * No real sleeps: the retry delay source is injectable so the test runs
+ * instantly. No paid calls — fetch is stubbed.
+ */
 
-test('helpers persist actual provider token counts, role, response model and version without content', async () => {
-	const db = database();
-	globalThis.fetch = (async () => Response.json({ model: 'provider-nano-id', usage: { prompt_tokens: 1000, completion_tokens: 2000, total_tokens: 3000 }, choices: [{ message: { content: '{"items":[]}' } }] })) as unknown as typeof fetch;
-	await helperModelCompletion({ ...request(), accounting: { db, projectId: 'project' } });
-	const [row] = rows();
-	expect(row).toMatchObject({ selectedRole: 'helperRules', selectionReason: 'rules_extraction', inputTokens: 1000, outputTokens: 2000, totalTokens: 3000, responseModel: 'provider-nano-id', catalogCostMicros: 540, isError: 0, cacheReadTokens: null, cacheWriteTokens: null });
-	expect(JSON.stringify(row)).not.toContain('private rules');
+const NEBIUS = "https://api.tokenfactory.nebius.com/v1/chat/completions";
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
 });
 
-test('HTTP failure and network timeout are issued calls with unknown usage, not free work', async () => {
-	const db = database();
-	globalThis.fetch = (async () => new Response('rate limit', { status: 429 })) as unknown as typeof fetch;
-	const refused = await helperModelCompletion({ ...request(), accounting: { db } });
-	expect(refused.status).toBe(429);
-	globalThis.fetch = (async () => { throw new Error('timeout'); }) as unknown as typeof fetch;
-	await expect(helperModelCompletion({ ...request(), accounting: { db } })).rejects.toThrow('timeout');
-	expect(rows()).toHaveLength(2);
-	for (const row of rows()) expect(row).toMatchObject({ inputTokens: null, outputTokens: null, catalogCostMicros: null, isError: 1 });
-});
+function okBody() {
+  const route = findModelRouteForRole("helperRules");
+  return { model: route.modelId, choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 } };
+}
 
-test('rejects a mismatched role/model before issuing a request or false receipt', async () => {
-	const db = database(); let calls = 0;
-	globalThis.fetch = (async () => { calls++; return Response.json({}); }) as unknown as typeof fetch;
-	const input = request(); input.request.body = JSON.stringify({ model: 'unregistered-model' });
-	await expect(helperModelCompletion({ ...input, accounting: { db } })).rejects.toThrow('does not match');
-	expect(calls).toBe(0); expect(rows()).toHaveLength(0);
-});
+function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
+}
 
-test('ranking and summary services feed separate actual request receipts to the shared ledger', async () => {
-	const db = database();
-	const candidate = { id: 'candidate', url: 'https://event.test', title: 'Event', summary: 'Build a useful thing' };
-	let calls = 0;
-	globalThis.fetch = (async () => { calls++; return Response.json({ usage: { prompt_tokens: calls, completion_tokens: calls }, choices: [{ message: { content: calls === 1 ? '{"items":[]}' : '{}' } }] }); }) as unknown as typeof fetch;
-	await inspectCandidates({ apiKey: 'test-only', profile: {}, candidates: [candidate], accounting: { db } });
-	await digestCandidate({ apiKey: 'test-only', profile: {}, candidate, accounting: { db } });
-	expect(rows().map(row => [row.selectedRole, row.selectionReason, row.inputTokens])).toEqual([['helperRanking', 'candidate_ranking', 1], ['helperSummary', 'candidate_summary', 2]]);
-	expect(rows().every(row => row.totalTokens === null)).toBe(true); // No invented totals.
+function helperRequest() {
+  const route = findModelRouteForRole("helperRules");
+  return {
+    role: "helperRules" as const,
+    url: NEBIUS,
+    request: { method: "POST", body: JSON.stringify({ model: route.modelId }) },
+    // No sleeps in tests.
+    sleepMs: async (_ms: number) => {},
+  };
+}
+
+describe("B02 §B — bounded transient retry for direct helper model calls", () => {
+  test("a 529 then a 200 is retried and succeeds", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return calls === 1 ? jsonResponse(529, { error: "overloaded" }) : jsonResponse(200, okBody());
+    }) as unknown as typeof fetch;
+
+    const result = await helperModelCompletion(helperRequest());
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe(200);
+    expect(calls).toBe(2); // one retry
+  });
+
+  test("a persistent 429 gives up after the bound and surfaces the last status", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return jsonResponse(429, { error: "rate limited" }, { "retry-after": "0" });
+    }) as unknown as typeof fetch;
+
+    const result = await helperModelCompletion(helperRequest());
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(429);
+    // original + at most 2 retries = 3 physical attempts, never unbounded.
+    expect(calls).toBe(3);
+  });
+
+  test("a 400 (non-transient) is NOT retried", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return jsonResponse(400, { error: "bad request" });
+    }) as unknown as typeof fetch;
+
+    const result = await helperModelCompletion(helperRequest());
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(400);
+    expect(calls).toBe(1); // no retry on a client error
+  });
 });

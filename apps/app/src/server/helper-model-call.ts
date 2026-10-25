@@ -12,6 +12,32 @@ const REASON: Record<HelperRole, string> = { helperRules: 'rules_extraction', he
 function object(value: unknown): Record<string, unknown> { return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}; }
 function count(value: unknown): number | null { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null; }
 
+/**
+ * B02 §B — transient-retry policy for the DIRECT helper fetch. The
+ * coordinator/specialist path is already retried by Flue
+ * (MAX_TRANSIENT_MODEL_RETRIES = 3); this is the one un-retried path, so it
+ * gets its OWN bounded policy — never a second wrapper around Flue's.
+ */
+const HELPER_MAX_RETRIES = 2; // physical retries AFTER the original request
+const HELPER_MAX_RETRY_DELAY_MS = 10_000;
+
+/** 429 (rate limit), 408/409 and any 5xx (incl. 529 overloaded) are transient. */
+export function isTransientHelperStatus(status: number): boolean {
+	return status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+/** Retry-After (seconds or HTTP-date), bounded; falls back to a small backoff. */
+export function helperRetryDelayMs(headers: Headers, attempt: number, maxDelayMs = HELPER_MAX_RETRY_DELAY_MS): number {
+	const header = headers.get('retry-after');
+	if (header) {
+		const seconds = Number.parseFloat(header);
+		const ms = Number.isNaN(seconds) ? Date.parse(header) - Date.now() : seconds * 1000;
+		if (Number.isFinite(ms) && ms >= 0) return Math.min(ms, maxDelayMs);
+	}
+	// Exponential-ish default backoff, bounded.
+	return Math.min(200 * 2 ** attempt, maxDelayMs);
+}
+
 /** Same response contract as the helpers need, parsed exactly once. Network or
  * successful-response JSON failures still record an issued call with unknown
  * usage before rethrowing to the existing fail-soft caller.
@@ -21,20 +47,35 @@ export async function helperModelCompletion(input: {
 	accounting?: HelperAccounting;
 	url: string;
 	request: RequestInit;
+	/** Injectable sleep so tests run without real delays. */
+	sleepMs?: (ms: number) => Promise<void>;
 }): Promise<{ ok: boolean; status: number; body: unknown }> {
 	const route = findModelRouteForRole(input.role);
 	// The receipt describes the issued wire request, not merely the role label.
 	const requested = typeof input.request.body === 'string' ? object(JSON.parse(input.request.body)) : {};
 	if (requested.model !== route.modelId || new URL(input.url).origin !== 'https://api.tokenfactory.nebius.com') throw new Error('Helper model request does not match its registered route');
+	const sleep = input.sleepMs ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 	const started = Date.now();
 	let response: Response | undefined;
 	let body: unknown;
 	let failed = false;
 	try {
-		response = await fetch(input.url, input.request);
-		failed = !response.ok;
-		try { body = await response.json(); } catch (error) { if (response.ok) throw error; }
-		return { ok: response.ok, status: response.status, body };
+		// One original request plus at most HELPER_MAX_RETRIES transient retries.
+		// A 429/529/5xx is retried with a bounded Retry-After delay; a client
+		// error (4xx except 408/409/429) or a success returns immediately. The
+		// accounting receipt is recorded ONCE (the finally), for the final
+		// attempt — retries never multiply the receipt.
+		for (let attempt = 0; ; attempt++) {
+			response = await fetch(input.url, input.request);
+			failed = !response.ok;
+			try { body = await response.json(); } catch (error) { if (response.ok) throw error; }
+			if (response.ok || attempt >= HELPER_MAX_RETRIES || !isTransientHelperStatus(response.status)) {
+				return { ok: response.ok, status: response.status, body };
+			}
+			const delayMs = helperRetryDelayMs(response.headers, attempt);
+			body = undefined; // the retried attempt's body replaces this
+			await sleep(delayMs);
+		}
 	} catch (error) { failed = true; throw error; }
 	finally {
 		if (input.accounting) {
