@@ -1473,7 +1473,7 @@ export async function createCoordinatorContext(
         const differences = visual.viewports.flatMap((view) => view.differences.filter((difference) => difference.severity === "blocking").map((difference) => `${view.viewport.name}: ${difference.message}`)).join("; ");
         await recordRepairRound(env.DB, scope, workflow.runId, { issue: "visual-fidelity", operationKey: visualKey, round: "repair_attempt", outcome: "failed", detail: differences.slice(0, 2000) });
         const paused = (await workflowRepairPause(env.DB, workflow.runId, pauseScope)).paused;
-        if (paused) await setWorkflowBlocker(env.DB, scope, "The app still doesn't match the design you approved after three attempts. Your plan and files are saved.");
+        if (paused) await setWorkflowBlocker(env.DB, scope, "The app still doesn't match the design you approved after three attempts. Your plan and files are saved. The app is not ready to try yet.");
         return { passed: false, paused, receipts: [...receipts, { check: "visual-fidelity", passed: false, exitCode: 1, stdout: "", stderr: differences, operationKey: visualKey }], next: `Repair these appearance differences without changing the approved scope, then run verify_build again: ${differences}` };
       }
     }
