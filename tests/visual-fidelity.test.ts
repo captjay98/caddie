@@ -77,3 +77,32 @@ describe('host-owned built versus approved appearance gate', () => {
     await expect(reviewVisualFidelity({ ...await input(), port: adapter, signal: abort.signal })).rejects.toThrow();
   });
 });
+
+import { approvedAppearanceDocuments } from '../apps/app/src/server/visual-fidelity.ts';
+import { lookThemeBlock } from '@caddie/contracts';
+
+// B06.3 — the visual gate must cover failure/recovery states, not only the
+// happy-path first screen. The design body may carry one titled html-mock per
+// screen OR STATE (contracts: "Today · empty"); the gate should compare each,
+// so an app whose error/empty state is broken cannot pass on a good home screen.
+describe('B06.3 — approved appearance covers every designed state, not only the first', () => {
+  const FIELD = {
+    id: 'field', name: 'Field-ready', why: 'Readable in sun.',
+    colors: { bg: '#F7F5EF', surface: '#FFFFFF', text: '#1B1F1A', muted: '#5A6157', primary: '#1F7A3A', onPrimary: '#FFFFFF', border: '#D9D6CC', ok: '#1F7A3A', warn: '#9A4A00', danger: '#B42318' },
+    fonts: { heading: 'system-ui, sans-serif', body: 'system-ui, sans-serif' },
+    radius: 10, density: 'roomy',
+  };
+  const body = () =>
+    `# Approved design\n\n${lookThemeBlock(FIELD as never)}\n\n` +
+    '```html-mock Today\n<main><h1>Today</h1></main>\n```\n\n' +
+    '```html-mock Today · empty\n<main><p>No entries yet</p></main>\n```\n';
+
+  test('returns one document per designed state, each carrying its own markup', () => {
+    const docs = approvedAppearanceDocuments(body());
+    expect(docs.length).toBe(2);
+    expect(docs[0]!.title).toBe('Today');
+    expect(docs[0]!.document).toContain('<h1>Today</h1>');
+    expect(docs[1]!.title).toBe('Today · empty');
+    expect(docs[1]!.document).toContain('No entries yet');
+  });
+});

@@ -97,14 +97,24 @@ export async function reviewVisualFidelity(input: {
   }
 }
 
-/** Compare the approved key screen, never a later unapproved revision. More
- * journeys need independently mapped routes/fixtures; this is appearance only.
- */
+/** Compare the approved key screen (the first designed state). Kept for
+ * callers that want only the home screen; multi-state review uses
+ * approvedAppearanceDocuments. */
 export function approvedAppearanceDocument(body: string): string | null {
-  const screen = splitDesignMocks(body).mocks[0];
+  return approvedAppearanceDocuments(body)[0]?.document ?? null;
+}
+
+/** Every designed state the gate should compare, not only the happy path: the
+ * designer embeds one titled ```html-mock block per screen OR state (e.g.
+ * "Today · empty", "Add entry · error"), so a broken error/empty state cannot
+ * pass behind a good home screen (B06.3). Capped to bound capture cost. */
+export const MAX_APPEARANCE_STATES = 4;
+export function approvedAppearanceDocuments(body: string): Array<{ title: string; document: string }> {
   const theme = parseAppTheme(body);
-  if (!screen || !theme.ok) return null;
+  if (!theme.ok) return [];
   const csp = "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; script-src 'none'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
-  return '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
-    `<meta http-equiv="Content-Security-Policy" content="${csp}"><style>:root{${themeToCssVars(theme.theme)}}*,*::before,*::after{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--text);font-family:var(--font-body);font-size:14px;line-height:1.45}</style></head><body>${screen.html}</body></html>`;
+  const shell = (html: string) =>
+    '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    `<meta http-equiv="Content-Security-Policy" content="${csp}"><style>:root{${themeToCssVars(theme.theme)}}*,*::before,*::after{box-sizing:border-box}html,body{margin:0}body{background:var(--bg);color:var(--text);font-family:var(--font-body);font-size:14px;line-height:1.45}</style></head><body>${html}</body></html>`;
+  return splitDesignMocks(body).mocks.slice(0, MAX_APPEARANCE_STATES).map((mock) => ({ title: mock.title, document: shell(mock.html) }));
 }
