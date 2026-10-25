@@ -1,0 +1,158 @@
+# Build reliability — evidence ledger
+
+Living evidence record for the build-reliability wave (execution plan
+`docs/plans/2026-10-25-build-reliability-execution.md`). Each packet appends its
+own section. Classify every row: LOCAL VERIFIED · LIVE VERIFIED · SIMULATED ·
+DOCUMENTATION ONLY · BLOCKED · FAILED.
+
+## B00 — Baseline (2026-10-25)
+
+### Checkout / runtime identity — LOCAL VERIFIED
+
+| Fact | Value |
+|---|---|
+| HEAD | `f76db95068c72b08c9b29e0922806cdff7da534e` (branch `main`) |
+| Working tree | clean (0 changes) at capture |
+| bun | 1.3.14 |
+| node | v26.3.0 |
+| `@flue/sdk` | 2.2.2 (pinned; patched `patches/@flue%2Fsdk@2.2.2.patch`) |
+| `@earendil-works/pi-ai` | 0.87.1 |
+| Migration head | `0046_model_call_usage.sql` → **B01+ new migrations start at 0047** |
+
+### Baseline regression suites — LOCAL VERIFIED
+
+`bun test tests/build-workflow.test.ts tests/workflow-dispatch.test.ts tests/sandbox-durability.test.ts tests/build-spend.test.ts`
+
+**136 pass / 0 fail · 929 assertions · 4.27 s.** No pre-existing red in the B00
+scope. The resume-aware repair-window fix (R00) is independently re-verified:
+`tests/build-workflow.test.ts:1446` ("retry preserves evidence, is idempotent,
+and allows only three new failures") and `:2094` ("resuming a feature opens a
+fresh new-test repair window without deleting earlier failures"), both using
+`workflowRepairPause(db, runId)` (resume-aware), not the lifetime per-issue
+count.
+
+## Pinned failure boundaries (from the incident report, located in HEAD)
+
+The research report's three failure classes, traced to concrete code so B01 can
+reproduce each at its real boundary (not a model-usage duration alone).
+
+### F1 — Reasoning starved the output cap (FIXED, re-confirm in B01)
+- **Symptom:** delegates returned "(task completed with no text)"; five
+  `model_call_usage` rows cut at exactly 8,192 output tokens; no test files
+  written → `finish_feature` behaviour-tests gate failed.
+- **Boundary:** per-route `maxTokens` in `apps/app/src/agents/providers.ts`
+  (`createProvider` → `models[].maxTokens`, line ~460) vs the `reasoning: true`
+  + `max` reasoning effort policy (`providers.ts:331`). Output cap must leave
+  room for tool arguments after reasoning.
+- **Status:** caps already raised (Super VL/Ultra 8192→32768, Lightning
+  4096→8192). B01 must keep an empty-result/finish-reason test so a future cap
+  regression is caught; do NOT lower caps to satisfy a timer (plan B02 A.2).
+
+### F2 — A delegate hung 103 min (6,189,040 ms) then errored — OPEN, headline bug
+- **Symptom:** one `model_call_usage` row `0/0 tokens, isError=1,
+  durationMs=6189040`. Nothing bounds a single delegated specialist's
+  wall-clock.
+- **Boundary:**
+  - `apps/app/src/agents/specialists.ts` — delegate definitions pass an
+    `AbortSignal` into `verifyBuild`/`runChecks` (lines 77, 79) but there is
+    **no wall-clock deadline on the delegate `task()` itself**.
+  - `apps/app/src/agents/coordinator.ts:711-712` — the ONLY current bound is
+    Flue's submission `timeoutMs` ("Flue aborts and settles a submission past
+    timeoutMs; the app's stall watchdog reports it"), via
+    `Coordinator.durability = COORDINATOR_DURABILITY`.
+  - `apps/app/src/server/build-workflow.ts:916` — `BUILD_STALL_MS = 20 * 60_000`
+    (20 min); `reconcileStalledBuild` (`:944`, idle check `:954`) is the
+    fallback, driven by the cron sweep in `apps/app/src/cloudflare.ts:55`
+    (`sweepStalledBuilds`).
+- **Gap:** the submission timeout is not observed by an application hook
+  (`COORDINATOR_DURABILITY`); the 20-min watchdog is a coarse fallback, not a
+  per-request / per-stream-idle / per-specialist deadline. B02 §A adds the
+  layered deadlines; B01 reproduces the hang with a fake clock.
+
+### F3 — Transient provider errors surface un-retried — OPEN
+- **Symptom:** a coordinator chat call errored in 46 ms (`isError=1, 0/0`); a
+  GLM probe got HTTP 529 "System is overloaded" needing manual retries.
+- **Boundary:** `apps/app/src/agents/providers.ts` `createProvider({...})`
+  (line ~442) sets `id/baseUrl/auth/models/api` but **no retry/backoff config**;
+  grep for `maxRetries|retry|backoff|429|529|Retry-After` in `providers.ts`
+  returns zero matches. The installed pi-ai adapter's effective retry config
+  must be established in B01 before claiming "zero retries" (plan reconciliation
+  note), then B02 §B wires ONE coordinated transient-retry policy (≤2 retries
+  after the original, respect Retry-After within the deadline).
+
+## Scenario → test index (B01 will create/extend these)
+
+| Scenario (fault) | Class | Target test file | Status |
+|---|---|---|---|
+| Interrupted edit / check mid-operation | F2-adj | `tests/build-fault-recovery.test.ts` (new) | pending B01 |
+| Duplicate delivery after remote accept | inv.1 | `tests/build-fault-recovery.test.ts` | pending B01 |
+| Late completion after Stop | inv.4 | `tests/build-fault-recovery.test.ts` | pending B01 |
+| Lost / unknown receipt | inv.2 | `tests/build-fault-recovery.test.ts` | pending B01 |
+| Provider 429/529 rate limit | F3 | `tests/providers.test.ts` (extend) | pending B01/B02 |
+| Exhausted quota / budget | inv.4 | `tests/build-spend.test.ts` (extend) | pending B01 |
+| HTTP request never resolves (fake clock) | F2 | `tests/build-deadlines.test.ts` (new) | pending B02 |
+| Stream stalls after starting (idle) | F2 | `tests/build-deadlines.test.ts` | pending B02 |
+| Specialist never settles | F2 | `tests/build-deadlines.test.ts` | pending B02 |
+| Delayed command cancellation | inv.4 | `tests/build-deadlines.test.ts` | pending B02 |
+| Output-cap truncation | F1 | `tests/build-empty-result.test.ts` (new) | pending B02 |
+| Empty answer after successful tools | F1 | `tests/build-empty-result.test.ts` | pending B02 |
+| Empty no-progress answer | F1 | `tests/build-empty-result.test.ts` | pending B02 |
+| Restart during verification | B05 | `tests/sandbox-durability.test.ts` (extend) | pending B01 |
+| Repair-window: 3 post-resume failures | R00 | `tests/build-workflow.test.ts:1446/:2094` | **LOCAL VERIFIED** |
+
+## Farmhand read-only state — LOCAL VERIFIED (2026-10-25)
+
+No CURRENT Farmhand build row exists in this checkout to read. `apps/app/.wrangler`
+holds only old/backup dev state — `state.bak-20261014-122714/` (2026-10-14) and
+`state/integration-20261020/` (2026-10-20) — not a live build from the 2026-10-25
+incident. Read-only listing only; nothing resumed, stopped or modified. The
+authoritative incident evidence therefore remains the research report's
+`model_call_usage` observations (F1/F2/F3 above), not a replayable local row.
+
+## B01 fault seams already present in the harness — LOCAL VERIFIED
+
+`tests/fixtures/sandbox-stub.ts` already exposes the deterministic injection
+points B01 wraps into named scenarios (reuse, do not reinvent):
+- `setBehavior(match, { delayMs, exitCode, stdout, stderr, writes })` — per-command
+  outcome + latency + files written (the "interrupted edit / slow op" seam).
+- `chaos.resetNextDispatch` — a lost dispatch response: the instance still runs
+  remotely and commits an image we never learn (the honest divergence = lost
+  receipt, inv.2).
+- `chaos.ignoreCancel` — a cancel the remote ignores (late-effect-after-Stop seam,
+  inv.4), see `sandbox-stub.ts:488`.
+- `loseImage(uuid)` / `loseBuiltImages()` — image eviction after a long pause
+  (restart-during-verification seam, B05).
+
+B01 adds `tests/support/build-faults.ts` as named scenario builders over these,
+plus fake-clock helpers for the F2 deadline cases (no real waits).
+
+## F3 — pi-ai effective retry config — LOCAL VERIFIED (2026-10-25)
+
+Read from the installed source (`node_modules/.bun/@earendil-works+pi-ai@0.87.1
++877b9547232df586/.../pi-ai/dist/`). **Corrects the incident report's
+"single-shot / zero retries, add a wrapper" framing.**
+
+- The `openai-completions` chat path Caddie uses (`api/openai-completions.js:197`)
+  wraps the request in `retryProviderRequest(...)` and calls the OpenAI SDK with
+  `maxRetries: 0` (line 195) — delegating retry to pi-ai's own wrapper.
+- `utils/provider-retry.js`: the wrapper defaults **`maxRetries = options.maxRetries ?? 0`** (line 76). It retries 408/409/429/5xx only (`isRetryableProviderError`, lines 17-20), honours `retry-after-ms` then `retry-after` headers (lines 30-40), caps delay at `DEFAULT_MAX_RETRY_DELAY_MS = 60_000` (line 1), and is abortable via `options.signal`.
+- Caddie's `apps/app/src/agents/providers.ts` `createProvider({...})` passes **no `maxRetries` / `maxRetryDelayMs`** → the effective retry count is **0**.
+
+**Conclusion:** the transient-retry machinery is fully present and
+spec-correct (429/5xx + Retry-After + bounded delay + abort). It is simply
+**unconfigured** (0 retries). So B02 §B is a CONFIG wiring task — thread
+`maxRetries` (≤2) and `maxRetryDelayMs` through the per-role model options and
+coordinate with the absolute deadline — **not** a new retry loop. Do NOT stack a
+second independent retry wrapper around this one (plan B02 §B.1).
+
+## B00 — COMPLETE
+
+Baseline green (136/0), runtime identity captured, F1/F2/F3 pinned to code,
+F3 retry config settled from source, Farmhand confirmed reference-only. No
+source edits, no commits in B00. Proceed to B01.
+
+## Notes
+- No paid inference in B00. The 23-request model preflight is separate,
+  already-authorized evidence in `docs/evidence/2026-10-25-model-validation/`.
+- Local fault tests (B01/B02) use fake clocks and controlled adapters — never
+  real multi-minute waits or paid calls.
