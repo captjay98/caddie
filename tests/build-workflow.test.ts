@@ -3301,3 +3301,49 @@ describe("B02 §A — the absolute build deadline (the 103-min hang, host-side)"
     }
   });
 });
+
+describe("B02 §D — late effects cannot advance a stopped build (inv.4 lock)", () => {
+  // The shared fence both finishFeature and verifyBuild call first:
+  // requireBuildApproval throws when the live phase is no longer 'building'.
+  // A Stop / stall-pause that moved the build to 'blocked' therefore fences a
+  // late finish_feature or verify_build — the orchestration re-reads the live
+  // phase, it does not act on a stale in-flight settlement. These lock that.
+  test("a finish/verify after a Stop is refused — BUILD_NOT_APPROVED (phase fence)", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      w.sqlite
+        .prepare("update build_workflows set phase = 'building', updatedAt = ? where projectId = ?")
+        .run(new Date().toISOString(), item.project.id);
+      // While 'building', the fence lets work through.
+      expect((await requireBuildApproval(w.db, item.scope)).plan.id).toBe(item.plan.id);
+      // A Stop moves it to 'blocked'. A late finish/verify now hits the fence.
+      await stopWorkflow(w.db, item.scope);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
+      await rejectsCode(requireBuildApproval(w.db, item.scope), "BUILD_NOT_APPROVED");
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a stall-pause fences a late finish/verify the same way", async () => {
+    const w = await world();
+    try {
+      const item = await approved(w);
+      w.sqlite
+        .prepare("update build_workflows set phase = 'building', updatedAt = ? where projectId = ?")
+        .run(new Date(Date.now() - 90 * 60_000).toISOString(), item.project.id);
+      // Past the absolute deadline → the watchdog pauses it to 'blocked'.
+      const admittedAt = new Date(Date.now() - 90 * 60_000).toISOString();
+      w.sqlite.prepare("update run_bindings set createdAt = ? where runId = ?").run(admittedAt, item.workflow.runId);
+      expect(await reconcileStalledBuild(w.db, item.project.id, Date.now())).toBe(true);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
+      // No preview was published by the stopped build.
+      expect(w.count("workflow_outputs")).toBe(0);
+      // And a late finish/verify is refused.
+      await rejectsCode(requireBuildApproval(w.db, item.scope), "BUILD_NOT_APPROVED");
+    } finally {
+      w.sqlite.close();
+    }
+  });
+});
