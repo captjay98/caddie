@@ -52,3 +52,37 @@ describe('B08 — the frozen task set is well-formed', () => {
 		}
 	});
 });
+
+import { runBenchmark, type RunOutcome } from '../scripts/benchmark-build.ts';
+
+// B08 — the execution path exists but cannot spend without authorization + an
+// injected executor, and never overspends the budget. A FAKE executor stands
+// in for a model client; no live/paid call is made in these tests.
+describe('B08 — runBenchmark is gated and budget-bounded', () => {
+	const fake = (costPerRun: number) => async (task: { id: string }): Promise<RunOutcome> => ({ taskId: task.id, ok: true, costUsd: costPerRun, detail: 'fake' });
+
+	test('refuses with no spend authorization (even with an executor)', async () => {
+		const r = await runBenchmark(tasks.tasks, {}, fake(1));
+		expect(r.stopped).toBe('refused');
+		expect(r.executed.length).toBe(0);
+		expect(r.spentUsd).toBe(0);
+	});
+	test('refuses when authorized but no executor is injected', async () => {
+		const r = await runBenchmark(tasks.tasks, { allowSpend: true, budgetUsd: 100 });
+		expect(r.stopped).toBe('refused');
+		expect(r.spentUsd).toBe(0);
+	});
+	test('stops before overspending the budget', async () => {
+		// budget $5, est $2/run → only 2 full runs fit before the 3rd is refused
+		const r = await runBenchmark(tasks.tasks, { allowSpend: true, budgetUsd: 5, estPerRunUsd: 2, repeats: 1 }, fake(2));
+		expect(r.stopped).toBe('budget-exhausted');
+		expect(r.spentUsd).toBeLessThanOrEqual(5);
+		expect(r.executed.length).toBe(2);
+	});
+	test('completes within budget using the injected (fake) executor', async () => {
+		const r = await runBenchmark(tasks.tasks, { allowSpend: true, budgetUsd: 1000, estPerRunUsd: 1, repeats: 1 }, fake(1));
+		expect(r.stopped).toBe('completed');
+		expect(r.executed.length).toBe(tasks.tasks.length);
+		expect(r.spentUsd).toBe(tasks.tasks.length);
+	});
+});
