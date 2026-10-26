@@ -27,3 +27,18 @@ test('onboarding is durable, actor-scoped, and completion is idempotent', async 
   await expect(completeOnboarding(db, 'missing')).rejects.toThrow();
  } finally { sqlite.close(); }
 });
+
+import { onboardingDestination } from '../apps/app/src/client/onboarding/destination.ts';
+
+test('onboarding hand-off: the idea start never forces the mobile chat-only view', () => {
+	// The bug: 'idea' handed off to ?start=idea&pane=channel, forcing the
+	// chat-only full view on desktop too, so the split (start panel + chat) was
+	// lost. The fix: 'idea' carries only ?start=idea; the shell picks the layout
+	// from the viewport.
+	const idea = onboardingDestination('idea');
+	expect(idea).toBe('/app/?start=idea');
+	expect(idea).not.toContain('pane=channel');
+
+	expect(onboardingDestination('hackathon')).toBe('/app/discover');
+	expect(onboardingDestination('explore')).toBe('/app/');
+});

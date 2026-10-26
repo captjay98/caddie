@@ -5648,11 +5648,13 @@ a.btn-ghost.topbar-nav-link {
 	padding: 2.2rem 1.2rem 1.6rem;
 }
 
-/* The simpler "new project" prompt reuses the old welcome look. */
+/* The simpler "new project" prompt reuses the old welcome look. In the
+   conversation column it is the first child, above the transcript, so it needs
+   the same clearance the transcript has or the floating head overlaps it. */
 .project-start-panel {
 	display: grid;
 	gap: 0.6rem;
-	margin: 0 0.6rem 0.4rem;
+	margin: 3.2rem 0.6rem 0.4rem;
 	padding: 0.9rem;
 }
 

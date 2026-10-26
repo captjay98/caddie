@@ -10,6 +10,7 @@ import { WorkspaceChrome, type WorkspaceNavId } from './workspace/Chrome.tsx';
 import { Shell } from './workspace/Shell.tsx';
 import { Settings } from './settings/Settings.tsx';
 import { WelcomeIntro, type StartingPoint } from './onboarding/Start.tsx';
+import { onboardingDestination } from './onboarding/destination.ts';
 import { OnboardingProfile } from './onboarding/Profile.tsx';
 import { ProjectSettingsPage } from './settings/ProjectSettings.tsx';
 import { Mascot } from '@caddie/ui/Mascot';
@@ -83,7 +84,7 @@ function OnboardingFlow(): ReactElement {
    // Onboarding hands straight off to the app — there is no interstitial start
    // screen. Restore a saved same-origin destination if the gate captured one;
    // otherwise follow the chosen starting point.
-   let target = startingPoint === 'hackathon' ? '/app/discover' : startingPoint === 'idea' ? '/app/?start=idea&pane=channel' : '/app/';
+   let target = onboardingDestination(startingPoint);
    if (destination) {
     const url = new URL(destination, window.location.origin);
     if (url.origin === window.location.origin && url.pathname.startsWith('/app/') &&

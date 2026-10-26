@@ -262,6 +262,44 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await context.close();
 	});
 
+	// Walkthrough finding (2026-10-26): finishing onboarding with "I have an
+	// idea" redirected to ?start=idea&pane=channel, forcing the chat-only full
+	// view on EVERY viewport — so on a computer the judge landed on bare chat,
+	// not the split (Brief on the left, the conversation with the "What would
+	// you like to build?" start prompt on the right). pane=channel is mobile
+	// semantics; desktop must keep the split. A second finding: the start prompt
+	// sat flush at y=0, tucked under the floating conversation head — it must
+	// clear it.
+	test('start=idea lands on the split on a computer, start prompt clear of the head', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+		await stubAccount(context, { current: DATA });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?start=idea`);
+		// The split is open, not the full-screen chat.
+		await expect(page.getByTestId('app-split')).toHaveAttribute('data-conv-state', 'open');
+		// Brief on the left, the conversation (with the start prompt) on the right.
+		await expect(page.getByTestId('brief-screen')).toBeVisible();
+		const panel = page.getByTestId('project-start-panel');
+		await expect(panel).toBeVisible();
+		await expect(panel).toContainText('What would you like to build?');
+		await expect(page.getByTestId('conversation-panel')).toBeVisible();
+		// The start prompt clears the floating conversation head (not tucked under it).
+		const head = page.locator('.conv-head-float');
+		const panelTop = (await panel.boundingBox())?.y ?? 0;
+		const headBottom = ((await head.boundingBox())?.y ?? 0) + ((await head.boundingBox())?.height ?? 0);
+		expect(panelTop).toBeGreaterThanOrEqual(headBottom - 1);
+		await context.close();
+	});
+
+	test('start=idea on a phone lands on the conversation (its chat tab)', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await stubAccount(context, { current: DATA });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?start=idea`);
+		await expect(page.getByTestId('conversation-panel')).toBeVisible();
+		await context.close();
+	});
+
 	test('Projects lists real builds and excludes the Home account scope', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubAccount(context, { current: DATA });
