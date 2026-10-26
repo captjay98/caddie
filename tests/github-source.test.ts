@@ -145,6 +145,7 @@ beforeAll(async () => {
 		'0033_judge_accounts.sql',
 		'0040_team_mode.sql',
 		'0044_looks_phase.sql',
+		'0048_repair_escalation.sql',
 	]) {
 		const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), 'utf8');
 		for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);

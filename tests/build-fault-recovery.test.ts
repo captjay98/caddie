@@ -70,6 +70,7 @@ function freshDb(): D1Database {
     "0003_artifacts.sql",
     "0005_runs.sql",
     "0018_build_workflow.sql",
+    "0048_repair_escalation.sql",
   ]) {
     sqlite.exec(readFileSync(`apps/app/migrations/${migration}`, "utf8"));
   }

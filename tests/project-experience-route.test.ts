@@ -54,7 +54,7 @@ async function world() {
     "0008_profile.sql", "0017_profile_preferences.sql", "0011_home_project.sql",
     "0015_plan_decisions.sql", "0018_build_workflow.sql", "0024_design_phase.sql",
     // build_workflows' team-mode columns, then the look step's phases.
-    "0033_judge_accounts.sql", "0040_team_mode.sql", "0044_looks_phase.sql",
+    "0033_judge_accounts.sql", "0040_team_mode.sql", "0044_looks_phase.sql", "0048_repair_escalation.sql",
   ]) {
     sqlite.exec(readFileSync(new URL(`../apps/app/migrations/${m}`, import.meta.url), "utf8"));
   }

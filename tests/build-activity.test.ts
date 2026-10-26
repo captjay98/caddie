@@ -20,6 +20,7 @@ import { recordRepairRound } from "../apps/app/src/server/runs.ts";
 import { buildActivity, recordBuildActivity } from "../apps/app/src/server/build-activity.ts";
 import { projectExperience, projectStatusForActor } from "../apps/app/src/server/project-experience.ts";
 import { splitSqlStatements } from "./fixtures/controls-harness.ts";
+import { allMigrationPaths } from "./fixtures/migrations.ts";
 
 /**
  * LOCAL VERIFIED (R06 build-progress): the honest build-activity projection
@@ -60,27 +61,11 @@ function d1Adapter(sqlite: Database): D1Database {
 async function world() {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys=ON");
-  for (const migration of [
-    "0001_product.sql",
-    "0002_controls.sql",
-    "0003_artifacts.sql",
-    "0005_runs.sql",
-    "0008_profile.sql",
-    "0017_profile_preferences.sql",
-    "0011_home_project.sql",
-    "0015_plan_decisions.sql",
-    "0018_build_workflow.sql",
-    "0022_build_activity.sql",
-    "0024_design_phase.sql",
-    // A build start opens its spending limit (judge status, team-mode tables).
-    "0033_judge_accounts.sql",
-    "0040_team_mode.sql",
-    // The choose-a-look step's phases.
-    "0044_looks_phase.sql",
-    "0047_build_activity_content_hash.sql",
-  ]) {
-    const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), "utf8");
-    for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);
+  // Apply the full committed migration set (drift-proof): the repair ladder is
+  // always-on now, so this fixture must carry build_features, repair tables and
+  // notifications that a paused build touches. Hand-listing drifted and missed them.
+  for (const path of allMigrationPaths()) {
+    for (const statement of splitSqlStatements(readFileSync(path, "utf8"))) sqlite.exec(statement);
   }
   sqlite
     .prepare("insert into user (id,name,email,emailVerified,createdAt,updatedAt) values (?,?,?,0,?,?)")
