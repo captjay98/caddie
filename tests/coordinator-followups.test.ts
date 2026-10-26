@@ -191,6 +191,13 @@ describe('coordinator design-save recovery', () => {
 		expect(specialistSource).toContain('return only after the host confirms SAVED');
 	});
 
+	test('the product specialist is told to consider a landing / intro surface', () => {
+		// A non-technical owner will not ask for a landing page; the product
+		// specialist must weigh one in, especially for judged/public apps.
+		expect(specialistSource).toContain('CONSIDER a landing / intro surface');
+		expect(specialistSource).toContain('Say explicitly in the PRD whether you included one and why');
+	});
+
 	test('a turn that settles in design with no saved brief is nudged, then blocked', () => {
 		expect(coordinatorSource).toContain('state.phase === "design"');
 		expect(coordinatorSource).toContain('type: "design_incomplete"');
