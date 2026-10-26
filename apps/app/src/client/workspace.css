@@ -471,14 +471,16 @@ a.btn-ghost.topbar-nav-link {
 	background: transparent;
 	color: var(--color-muted);
 	font-size: 0.875rem;
-	font-weight: 500;
-	text-decoration: underline;
-	text-underline-offset: 3px;
+	font-weight: 400;
+	letter-spacing: -0.006em;
+	text-decoration: none;
 	white-space: normal;
 }
 .signin-screen .judge-link:hover {
 	background: transparent;
 	color: var(--color-bright);
+	text-decoration: underline;
+	text-underline-offset: 3px;
 }
 
 .signin-col {
