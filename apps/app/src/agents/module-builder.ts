@@ -41,6 +41,7 @@ import {
   useInitialData,
   useInstruction,
   useModel,
+  usePersistentState,
   useSubagent,
   useTool,
 } from "@flue/runtime";
@@ -81,6 +82,7 @@ export function ModuleBuilder({ id }: AgentProps) {
   // model on their useSubagent definitions (buildSpecialistDeclarations).
   useModel(findModelRouteForRole("build").specifier);
 
+  const [repairModelRouteId,setRepairModelRouteId]=usePersistentState<string|undefined>('repair-model-route-v1',undefined);
   const seed = useInitialData<ModuleBuilderInitialDataT>();
   const env = getCloudflareContext().env as unknown as CoordinatorEnvironment;
 
@@ -127,6 +129,7 @@ export function ModuleBuilder({ id }: AgentProps) {
     if (!id) return;
     const payerId = await payerForInstance(env.DB, id).catch(() => null);
     if (payerId) registerBuildPayerForInstance(id, payerId);
+    setRepairModelRouteId((await resolve()).repairModelRouteId);
   });
 
   // The module-scoped build tools. These are the SAME host tools the
@@ -141,7 +144,8 @@ export function ModuleBuilder({ id }: AgentProps) {
     input: v.object({}),
     async run() {
       const host = await resolve();
-      return { output: JSON.stringify(await host.buildNextFeature()) };
+      const result=await host.buildNextFeature();setRepairModelRouteId((await resolve()).repairModelRouteId);
+      return { output: JSON.stringify(result) };
     },
   });
   useTool({
@@ -151,7 +155,8 @@ export function ModuleBuilder({ id }: AgentProps) {
     input: v.object({ featureId: v.pipe(v.string(), v.minLength(1), v.maxLength(48)) }),
     async run(ctx) {
       const host = await resolve();
-      return { output: JSON.stringify(await host.finishFeature(ctx.data.featureId, ctx.toolCallId, ctx.signal)) };
+      const result=await host.finishFeature(ctx.data.featureId, ctx.toolCallId, ctx.signal);setRepairModelRouteId((await resolve()).repairModelRouteId);
+      return { output: JSON.stringify(result) };
     },
   });
   useTool({
@@ -212,6 +217,7 @@ export function ModuleBuilder({ id }: AgentProps) {
     writeFile: async (input) => (await resolve()).driver.writeFile(input),
   };
   const moduleContext: SpecialistBuildContext = {
+    repairModelRouteId,
     teamMode: true,
     bigApps: true,
     stackId: "react-hono",
@@ -246,6 +252,7 @@ export function ModuleBuilder({ id }: AgentProps) {
 
   for (const declaration of buildSpecialistDeclarations(moduleContext)) useSubagent(declaration);
 
+  useInstruction('REPAIR_ROUTE_CHANGED is an internal model hand-off: call build_next_feature and delegate the current feature again with its refreshed model. A technical or empty delegate result is not a user task.');
   useInstruction(
     `You are the builder for ONE module of a big app: ${seed?.moduleId ?? "a module"}. Build ONLY this module's features, in the order build_next_feature gives them, backend then frontend. For each feature: call build_next_feature, delegate exactly that feature with its doneWhen checks to the implementation specialist, build it to match the approved design brief, get run_checks green, then call finish_feature. ${FEATURE_DELEGATION_RULE} Keep every change inside this module's own area (its server and screens folders) — the host refuses a feature that changed files outside it. When every feature of this module has passed, call finish_module to join the part into the app. If it answers with failing checks, fix them in this part's own folders, get run_checks green, and call finish_module again; if it answers joined, waiting, or finished without this part, end your turn. Do not build another module's features and do not run verify_build. If a real prerequisite is missing, call report_blocker and stop — a stopped module does not stop the others.`,
   );

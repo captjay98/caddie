@@ -2069,6 +2069,18 @@ describe("host-driven feature loop", () => {
   const feature = (w: Awaited<ReturnType<typeof world>>, id: string) =>
     w.sqlite.query("select * from build_features where featureId = ?").get(id) as Record<string, unknown>;
 
+  test("a model cannot hand a technical check failure back to the owner while repair routes remain",async()=>{
+    const w=await world();const stub=new SandboxStub({expectedToken:'local-feature-token'});stub.seedImage('tag:feature:1');await stub.start();
+    try{const item=await featureBuild(w);w.sqlite.prepare("update build_workflows set repairPolicyVersion='repair-v1' where projectId=?").run(item.project.id);const payer=(await readWorkflow(w.db,item.scope))!.spendPayerId;
+      await recordRepairRound(w.db,item.scope,item.workflow.runId,{admissionId:payer??undefined,issue:'log-feed:tests',round:'repair_attempt',outcome:'failed',operationKey:'real-failure'});
+      const host=await resolveCoordinatorContext(env(w,stub),item.workflow.conversationId);
+      await rejectsCode(host.blockBuild('Ask the owner to fix the test'),'REPAIR_AVAILABLE');expect((await readWorkflow(w.db,item.scope))?.phase).toBe('building');
+      // A host-observed nonprogress limit is still terminal; model tools cannot
+      // supply this trusted source (their schema contains only the reason).
+      await host.blockBuild('The bounded continuation limit was exhausted. Saved work is retained.','nonprogress');expect((await readWorkflow(w.db,item.scope))?.phase).toBe('blocked');
+    }finally{await stub.stop();w.sqlite.close();}
+  });
+
   test("repair admission selects pinned models through fresh host contexts without resetting the payer", async () => {
     const w=await world(); const stub=new SandboxStub({expectedToken:'local-feature-token'}); stub.seedImage('tag:feature:1');
     try {

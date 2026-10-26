@@ -43,11 +43,11 @@ During verification, the fresh Worker launch caught an import placed before Flue
 - Root/app typecheck: LOCAL VERIFIED, exit 0.
 - `bun run verify:packet REL26`: LOCAL VERIFIED, all 27 mapped checks passed.
 - Actual acceptance executor: LOCAL VERIFIED, 6 passed / 0 failed.
-- `bun run test`: LOCAL VERIFIED, **2,783 passed / 0 failed**, 244 files, exit 0 (204.03 seconds).
+- `bun run test`: LOCAL VERIFIED, **2,786 passed / 0 failed**, 244 files, exit 0 (243.14 seconds).
 - Additional final image-fence/runtime/presentation checks: LOCAL VERIFIED, **106 passed / 0 failed**, exit 0.
 - `bun run build`: LOCAL VERIFIED, exit 0; composed bundle **8dbd0c25afa9**, 104 SPA assets + 99 landing assets, zero collisions.
 - Fresh-bundle desktop/mobile browser regressions: LOCAL VERIFIED, **117 passed / 1 pre-existing skipped / 0 failed**, exit 0 (1.7 minutes). Covers focused chat, looks, workflow, design/build team screens, responsiveness and actual visual capture.
-- Local Vite now prebundles the dynamically discovered Worker dependencies before entrypoint inspection; the dev server starts without the missing optimized-chunk loop. Browser fixtures honor the selected base URL and inspect optional design notes through the actual review controls.
+- Local Vite now prebundles the principal dynamically discovered Worker dependencies before entrypoint inspection; the dev server warms its cache and serves the real project retry. Browser fixtures honor the selected base URL and inspect optional design notes through the actual review controls.
 - Separate fresh local DB: LOCAL VERIFIED, migrations through **0055**, `pragma integrity_check` = `ok`, zero projects, zero paid calls, existing DB retained. Persistence: `apps/app/.wrangler/reliability-fresh-1793010893`.
 - Pre-0054 consistent SQLite backup: `/var/folders/dr/3jwr3dxn0j7g1tjd05h2wjhm0000gn/T/caddie-before-0054-dn7eht_0`.
 - Controlled Farmhand retry: pending final results.
@@ -64,3 +64,13 @@ Temporary logs: `/tmp/caddie-rel26-final.log`, `/tmp/caddie-acceptance-real.log`
 - Draft visual review uses a different vision-capable model from its actual author. Pixel comparison is intentionally conservative and can request repair for intentional layout differences; changed scope/design must return through review.
 - Formal paid comparisons remain authorization-gated. The 12-task benchmark and estimator are prepared locally; no comparative completion score is claimed.
 - Rollback: disable new policy admission, retain all receipts and append-only migrations, and restore the prior application commit. Never erase approvals, checkpoints or the preserved DB to make a retry pass.
+
+## Controlled retry: defect found and corrected
+
+Implementation checkpoint: `7e581d4 feat(build): verify candidates in isolated browser runtimes`. The first controlled retry admitted `repair-v1` with the original plan/design and unchanged $5 cap. Real sandbox writes/commands/checks resumed on feature 3; the first two verified checkpoints were retained. It then exposed a live gap: an open specialist kept its original model across checked failures, and the coordinator prematurely handed the technical mismatch to the owner at three failures. It did not falsely publish an app.
+
+The correction fences every leaf model call against the current persisted episode. When the route changes, the old delegate ends before another provider call; the coordinator refreshes its host context and starts a new delegate. A model-facing blocker cannot make a failed technical check the owner's job while repair routes remain. Host-owned nonprogress, real missing inputs, exhausted limits and uncertain effects remain terminal. Module builders refresh declarations too; their deadlines, Stop checks and timeout counters are scoped to their own feature set/session under the shared admission.
+
+`tests/task-deadlines-runtime.test.ts` now drives **Super → DeepSeek → GLM** through real Flue task boundaries, with scripted (SIMULATED) model replies, four checked failures, exactly eleven physical scripted calls, and one unchanged payer. Both stale delegate calls are intercepted before transport. Real Flue runtime behavior is LOCAL VERIFIED; this test is not a paid-model coding benchmark. Final scoped timeout/routing packet: **7 passed / 0 failed**, including one module's timeout not adopting another module's live writer.
+
+First controlled retry liability: **513,283 micros ($0.513283)** across twenty reservations/calls, counting unknown reservations conservatively. The next local retry is capped at **$4.48**, so combined admitted trial liability remains below $5. The lower `SPEND_LIMIT_CAP_USD` is a local ignored configuration value; it is not a production policy increase. Original approvals, data, checkpoints and earlier receipts remain intact.

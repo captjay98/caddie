@@ -339,7 +339,13 @@ export async function createCoordinatorContext(
   };
 
   /** report_blocker: stop this module honestly, else block the build. */
-  const blockOrStop = async (reason: string): Promise<void> => {
+  const blockOrStop = async (reason: string, nonProgress=false): Promise<void> => {
+    const repair=await repairState(env.DB,runId,moduleScope?.features);
+    if(!nonProgress&&repair&&!repair.paused&&repair.failures>0) {
+      const requested=(await env.DB.prepare("select count(*) n from app_secrets where projectId=? and status='requested'").bind(scope.projectId).all<{n:number}>()).results[0]?.n??0;
+      if(!requested)throw new ScopeError(409,'REPAIR_AVAILABLE','Caddie still has an internal repair allowance. Call build_next_feature to refresh the host-selected model, then delegate the current feature again. A failed or empty technical hand-off is not a user task; do not ask the owner to debug it.');
+    }
+
     if (moduleId !== undefined && moduleBuildSeq !== undefined) {
       await stopModule(env.DB, scope, { buildSeq: moduleBuildSeq, moduleId });
       await continueAfterPartStop();
@@ -1803,7 +1809,7 @@ export async function createCoordinatorContext(
         detail: state.workflow!.detail,
       };
     },
-    blockBuild: (reason) => blockOrStop(reason),
+    blockBuild: (reason, source) => blockOrStop(reason, source==='nonprogress'),
     requestApproval: async (input) => {
       // Agent-facing REQUEST bridge: create a PENDING server approval only.
       // There is no decision parameter here — the user decides through the

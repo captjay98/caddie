@@ -149,7 +149,7 @@ export interface CoordinatorHostContext extends SpecialistBuildContext {
    * only on a part builder's (module-scoped) host.
    */
   finishModuleBuild?: (operationKey: string, signal?: AbortSignal) => Promise<unknown>;
-  blockBuild: (reason: string) => Promise<void>;
+  blockBuild: (reason: string, source?: 'nonprogress') => Promise<void>;
   /**
    * Team mode (part B): record one architecture-review round. The host closure
    * performs the project-scoped insert into architecture_reviews. Absent when
@@ -605,7 +605,8 @@ export function Coordinator({ id }: AgentProps) {
     if (state.phase === "looks") {
       const focus = `looks:${state.planId ?? "none"}`;
       const used = focus === looksContinuationFocus ? looksContinuations : 0;
-      if (used >= 2) {
+      const continuationLimit=authority.repairModelRouteId?8:2;
+    if (used >= continuationLimit) {
         await authority.blockBuild(
           "The looks were not saved. Ask Caddie to continue with the look options; the approved PRD is retained.",
         );
@@ -628,7 +629,8 @@ export function Coordinator({ id }: AgentProps) {
     if (state.phase === "design") {
       const focus = `design:${state.planId ?? "none"}`;
       const used = focus === designContinuationFocus ? designContinuations : 0;
-      if (used >= 2) {
+      const continuationLimit=authority.repairModelRouteId?8:2;
+    if (used >= continuationLimit) {
         await authority.blockBuild(
           "The design brief was not saved. Ask Caddie to continue design; the approved PRD is retained.",
         );
@@ -655,11 +657,13 @@ export function Coordinator({ id }: AgentProps) {
     if (progress?.waitingOnParts) return;
     const focus = progress?.current ? `feature:${progress.current.id}` : "verify";
     const used = focus === continuationFocus ? continuations : 0;
-    if (used >= 2) {
+    const continuationLimit=authority.repairModelRouteId?8:2;
+    if (used >= continuationLimit) {
       await authority.blockBuild(
         progress?.current
           ? `Caddie could not finish “${progress.current.title}” (feature ${progress.current.position} of ${progress.total}). The features before it are saved; retry to continue from this one.`
-          : "The build did not produce passing checks and a preview. Continue with Caddie to diagnose it.",
+          : "The build did not produce passing checks and a preview. Your plan and saved work are retained.",
+        "nonprogress",
       );
       return;
     }
@@ -702,7 +706,7 @@ export function Coordinator({ id }: AgentProps) {
     useInstruction("LOOKS STEP: after the PRD is approved the project enters the 'looks' phase FIRST — before design, and the user has NOT approved a build. Do NOT scaffold, build or write a design brief yet. Propose how the app could look: call write_plan_note kind:'looks' with a valid caddie-looks block — 2-3 CLEARLY different looks (no two sharing both background and primary colour), each a full caddie-theme theme with a short slug id and a human name, exactly one marked recommended, plus 'audience' (who the app is for, taken from the PRD's who-it's-for line) and the same user task, using per-look screen compositions when useful or one shared html-mock fallback. " + LOOKS_BLOCK_GUIDE + " Save it and STOP for the owner to choose. If the host confirms SAVED and the phase moves to 'looks-review', say the look options are ready; until then say Caddie is still preparing them. Only after the owner chooses a look does the phase become 'design'; the chosen look's theme is then given to you for the design brief — do not re-decide colours.");
     useInstruction(PROTOTYPE_GUIDE);
     useInstruction(ACCEPTANCE_JOURNEY_GUIDE);
-    useInstruction('If a specialist task times out, call build_next_feature to refresh the host recovery context and model route. Continue the same feature only while the host allows it. Never open another admission or ask the owner to debug a timeout. Pending writes must be reconciled by their original operation keys before another writer.');
+    useInstruction('If a specialist returns REPAIR_ROUTE_CHANGED or a technical task fails/returns empty during a build, call build_next_feature and delegate the current feature again with the refreshed host-selected model. Never treat that internal hand-off as a user blocker. If a specialist task times out, call build_next_feature to refresh the host recovery context and model route. Continue the same feature only while the host allows it. Never open another admission or ask the owner to debug a timeout. Pending writes must be reconciled by their original operation keys before another writer.');
     useInstruction("DESIGN STEP: after the owner CHOOSES A LOOK the project enters the 'design' phase — the user has NOT approved a build yet. Do NOT scaffold or build. The chosen look is given to you as a caddie-theme block; the design brief MUST carry that exact theme block (same background, primary and tokens) — do not pick new colours. Delegate the designer (or author it yourself with write_plan_note kind:'design', same planRevision) to produce ONE design brief: the screen inventory; each key screen's layout and components; the token/component choices and the interaction pattern for each input; and the empty, loading and error state for anything that loads or saves; plus the chosen look's caddie-theme block and one titled ```html-mock block per key screen and state (static markup styled only with the chosen theme's tokens) so the user can see it. If the designer returns text without a SAVED: confirmation, do NOT stop and do NOT re-delegate the same hand-off: call write_plan_note yourself with kind:'design', the same planRevision, the full brief AND the chosen caddie-theme block. Save it and STOP for the authenticated design review. Only after the design review approves does the phase become 'building' and the feature loop begins. The design brief is NOT the PRD and carries no caddie-features block. Never paste a mockup or any HTML into a reply: the card draws the brief's mockups; direct users to the project’s Design view for the reviewed screens. Raw draft markup belongs only in the optional original-response inspector.");
     // Team mode (part B/C): the design document also carries the
     // caddie-architecture block v2, so there is one approval and one revision

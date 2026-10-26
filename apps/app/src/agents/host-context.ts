@@ -133,7 +133,7 @@ export function scopedCoordinatorContext(
       if (!host.requestAppKey) throw new Error("App keys are not available here.");
       return host.requestAppKey(input);
     },
-    blockBuild: async (reason) => (await resolve()).blockBuild(reason),
+    blockBuild: async (reason, source) => (await resolve()).blockBuild(reason,source),
     requestApproval: async (input) => (await resolve()).requestApproval(input),
     readPlanNote: async (kind) => (await resolve()).readPlanNote(kind),
     writePlanNote: async (input) => (await resolve()).writePlanNote(input),

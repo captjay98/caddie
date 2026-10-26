@@ -30,3 +30,22 @@ test('the production coordinator retains Flue’s first-statement agent directiv
  const source=readFileSync(new URL('../apps/app/src/agents/coordinator.ts',import.meta.url),'utf8');
  expect(source.trimStart().startsWith('"use agent";')).toBe(true);
 });
+test('open delegates hand off after two checked failures: Super to DeepSeek to GLM, under one payer',async()=>{
+ const {checkLiveRepairRouting}=await import('../apps/app/test-support/repair-routing-harness.ts');
+ const sqlite=new Database(':memory:');const db=sqliteD1(sqlite);const payer=`build:p:${Date.now()}`;
+ sqlite.exec("create table projects(id text primary key);insert into projects values('p');create table build_workflows(conversationId text,projectId text,runId text,planId text,spendPayerId text,phase text);create table build_features(runId text,planId text,featureId text,status text,position integer);insert into build_features values('r','plan','f','building',1);");
+ sqlite.prepare('insert into build_workflows values(?,?,?,?,?,?)').run('live-repair-routing','p','r','plan',payer,'building');
+ for(const name of ['0048_repair_escalation.sql','0053_task_deadlines.sql'])sqlite.exec(readFileSync(new URL('../apps/app/migrations/'+name,import.meta.url),'utf8'));
+ sqlite.exec("update build_workflows set repairPolicyVersion='repair-v1'");
+ try{const result=await checkLiveRepairRouting(db,'r',payer);expect(result.failures).toBe(4);expect(result.physicalCalls).toBe(11);expect(result.calls).toContain('deepseek-ai/DeepSeek-V4.1-Flash-1017');expect(result.calls).toContain('zai-org/GLM-5.3');expect((sqlite.query('select spendPayerId from build_workflows').get() as any).spendPayerId).toBe(payer);}finally{sqlite.close();}
+},15000);
+test('module delegate deadlines resolve the shared admission and its own feature scope; a stopped module is fenced',async()=>{
+ const sqlite=new Database(':memory:');const db=sqliteD1(sqlite);const payer=`build:p:${Date.now()}`;
+ const block=JSON.parse(readFileSync(new URL('./fixtures/architecture/farm-block.json',import.meta.url),'utf8'));
+ const route=block.routes.find((route:any)=>route.feature&&route.module!=='core');expect(route).toBeTruthy();const instance=`p:1:${route.module}`;
+ sqlite.exec("create table projects(id text primary key);insert into projects values('p');create table build_workflows(conversationId text,projectId text,runId text,planId text,approvedDesignRevisionId text,spendPayerId text,phase text);create table build_features(runId text,planId text,featureId text,status text,position integer);create table build_modules(projectId text,buildSeq integer,moduleId text,status text,payerId text);create table plan_doc_revisions(id text,projectId text,body text);");
+ sqlite.prepare('insert into build_workflows values(?,?,?,?,?,?,?)').run('root','p','r','plan','design',payer,'building');sqlite.prepare('insert into build_modules values(?,?,?,?,?)').run('p',1,route.module,'building',payer);sqlite.prepare('insert into build_features values(?,?,?,?,?)').run('r','plan',route.feature,'building',1);sqlite.prepare('insert into plan_doc_revisions values(?,?,?)').run('design','p','```caddie-architecture\n'+JSON.stringify(block)+'\n```');
+ for(const name of ['0048_repair_escalation.sql','0053_task_deadlines.sql'])sqlite.exec(readFileSync(new URL('../apps/app/migrations/'+name,import.meta.url),'utf8'));sqlite.exec("update build_workflows set repairPolicyVersion='repair-v1'");
+ const instrument=makeTaskDeadlineInstrumentation({resolve:()=>db});const ctx={instanceId:instance,conversationId:'module-child',submissionId:'s'};
+ try{await instrument.interceptor!({type:'task',taskId:'module-task'},ctx,async()=>{expect(currentBuildTask()?.runId).toBe('r');expect(currentBuildTask()?.featureIds).toContain(route.feature);sqlite.exec("update build_modules set status='stopped'");await expect(instrument.interceptor!({type:'model',turnId:'late'},ctx,async()=>true)).rejects.toThrow('BUILD_STOPPED');});}finally{sqlite.close();}
+});
