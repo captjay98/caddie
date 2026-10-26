@@ -7,6 +7,16 @@ export default defineConfig({
   // Prebundle the patched SDK and its React consumer together. This also
   // invalidates stale dev bundles after the checkpoint-resume patch changed.
   optimizeDeps: { include: ["@flue/sdk", "@flue/react"] },
+  // Flue discovers the Worker entry dynamically. Prebundle its complete server
+  // import graph before entrypoint inspection; late discoveries otherwise
+  // replace chunks while Workerd is still importing their previous names.
+  environments: { caddie_app: { optimizeDeps: { include: [
+    '@flue/runtime', '@flue/runtime/cloudflare', '@flue/runtime/routing',
+    '@flue/runtime/internal', '@flue/runtime/cloudflare/internal',
+    '@flue/runtime/cloudflare/workers-ai', '@earendil-works/pi-ai',
+    '@earendil-works/pi-ai/api/openai-completions.lazy',
+    'better-auth', 'better-auth/plugins', 'hono',
+  ] } } },
   plugins: [
     flue(),
     react(),

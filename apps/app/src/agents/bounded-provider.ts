@@ -1,3 +1,4 @@
+import { currentBuildTask } from '../server/task-deadline-context.ts';
 import type { ProviderStreams, StreamOptions, SimpleStreamOptions } from '@earendil-works/pi-ai';
 import { DEADLINE_POLICY } from '../server/build-deadlines.ts';
 
@@ -8,11 +9,12 @@ import { DEADLINE_POLICY } from '../server/build-deadlines.ts';
 export function boundedProvider(base: ProviderStreams, policy: { requestMs: number; streamIdleMs: number } = DEADLINE_POLICY): ProviderStreams {
   const wrap = <T extends StreamOptions>(options: T | undefined) => {
     const controller = new AbortController();
-    const parent = options?.signal;
+    const task=currentBuildTask();
+    const parent = task?AbortSignal.any([...(options?.signal?[options.signal]:[]),task.signal]):options?.signal;
     const cancel = () => controller.abort(parent?.reason);
     parent?.addEventListener('abort', cancel, { once: true });
     if (parent?.aborted) cancel();
-    const hard = setTimeout(() => controller.abort(new Error('MODEL_REQUEST_DEADLINE')), policy.requestMs);
+    const hard = setTimeout(() => controller.abort(new Error('MODEL_REQUEST_DEADLINE')), Math.max(1,Math.min(policy.requestMs,(task?.deadlineAt??Infinity)-Date.now())));
     let idle: ReturnType<typeof setTimeout> | undefined;
     let cancelBody: (() => void) | undefined;
     const cleanup = () => { clearTimeout(hard); clearTimeout(idle); parent?.removeEventListener('abort', cancel); if (cancelBody) controller.signal.removeEventListener('abort', cancelBody); };

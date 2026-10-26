@@ -17,6 +17,7 @@ export async function openLocalVisualFidelity(options: { directory: string; brow
   const directory = resolve(options.directory);
   await mkdir(directory, { recursive: true });
   const images = new Map<string, { bytes: Buffer; overflow: boolean; errors: string[] }>();
+  const remember=(artifact:string,value:{bytes:Buffer;overflow:boolean;errors:string[]})=>{images.delete(artifact);images.set(artifact,value);let bytes=0;for(const entry of images.values())bytes+=entry.bytes.length;while(images.size>128||bytes>96*1024*1024){const oldest=images.keys().next().value;if(!oldest)break;bytes-=images.get(oldest)!.bytes.length;images.delete(oldest);}};
   const port: FidelityPort = {
     async capture(input) {
       input.signal?.throwIfAborted();
@@ -52,7 +53,7 @@ export async function openLocalVisualFidelity(options: { directory: string; brow
         const sha256 = await documentHashBytes(bytes);
         const artifact = resolve(directory, `${sha256}.png`);
         await writeFile(artifact, bytes);
-        images.set(artifact, { bytes, overflow, errors });
+        remember(artifact, { bytes, overflow, errors });
         input.signal?.throwIfAborted();
         return { artifact, sha256, documentHash: input.documentHash, width: input.viewport.width, height: input.viewport.height, capturedAt: new Date().toISOString() };
       } finally {
@@ -92,7 +93,10 @@ export async function openLocalVisualFidelity(options: { directory: string; brow
       } finally { await context.close(); }
     },
   };
-  return { port, close: async () => { images.clear(); if (owned) await browser.close(); } };
+  return { port, async adoptCapture(value: {capture:VisualCapture;bytes:Buffer;overflow:boolean;errors:string[]}) {
+    if(await documentHashBytes(value.bytes)!==value.capture.sha256 || value.bytes.readUInt32BE(16)!==value.capture.width || value.bytes.readUInt32BE(20)!==value.capture.height)throw new Error('Invalid navigated PNG');
+    remember(value.capture.artifact,{bytes:value.bytes,overflow:value.overflow,errors:value.errors});return value.capture;
+  }, close: async () => { images.clear(); if (owned) await browser.close(); } };
 }
 async function documentHashBytes(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new Uint8Array(bytes))), (byte) => byte.toString(16).padStart(2, '0')).join('');

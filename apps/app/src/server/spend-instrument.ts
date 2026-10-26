@@ -1,3 +1,4 @@
+import { qualityAdmission, qualityEnabled } from './artifact-quality.ts';
 /**
  * Part A — the Flue `instrument()` wiring for the spending limit (plan §A).
  *
@@ -134,6 +135,14 @@ export async function resolveTurnPayer(db: D1Database, ctx: FlueExecutionContext
 	// build was refused at its limit forever (Farmhand, 2026-10-25).
 	const keys = [instanceId, conversationId].filter((key) => key.length > 0);
 	if (keys.length > 0) {
+    const preparation = (await db.prepare(`select projectId,phase from build_workflows where conversationId in (${keys.map(()=>'?').join(',')}) limit 1`)
+      .bind(...keys).all<{projectId:string;phase:string}>()).results[0];
+    if(preparation && ['planning','looks','design'].includes(preparation.phase) && await qualityEnabled(db,preparation.projectId)) {
+      const stage=preparation.phase==='planning'?'prd':preparation.phase as 'looks'|'design';
+      const admitted=await qualityAdmission(db,preparation.projectId,stage);
+      if(admitted)return admitted.payerId;
+    }
+
 		const row = (
 			await db
 				.prepare(
@@ -253,17 +262,8 @@ export function makeSpendInstrumentation(config: SpendInstrumentConfig): FlueIns
 				return;
 			}
 			if (event.type === 'turn') {
-				// Settle or release from the leaf turn's own usage. FINDING #5
-				// (review 2026-10-23): `isError` is DIAGNOSTIC, not proof that no
-				// paid work happened — Flue's own observability guide says nested
-				// errors do not necessarily fail the work, and a turn can carry real
-				// `usage` even when `isError` is set (the model ran, then something
-				// downstream failed). So the decision is driven by whether usage is
-				// KNOWN, not by isError: settle the real cost whenever usage is
-				// reported, and release only when no usage arrived at all (the call
-				// was refused/aborted before any billable work). This keeps the
-				// liability on an issued call with real cost instead of refunding it.
-				// Fire-and-forget: the turn event is observe-only and must not throw.
+        // An error or missing usage is not proof that the provider did no work.
+        // Retain the worst-case reservation until actual usage is known.
 				const turnId = event.turnId;
 				requestCharsByTurn.delete(turnId);
 				routeModelByTurn.delete(turnId);
@@ -271,17 +271,14 @@ export function makeSpendInstrumentation(config: SpendInstrumentConfig): FlueIns
 				if (!resolved) return;
 				const { db } = resolved;
 				const usage = event.response?.usage;
-				const micros = usage ? settleMicrosFromCost(usage.cost.total) : 0;
-				if (micros > 0) {
-					// Real billable cost is known — settle it, whether or not the
-					// turn is flagged isError. This closes the refund hole: an
-					// errored turn that still ran the model keeps its liability.
-					void settle(db, turnId, micros).catch(() => {});
-				} else {
-					// No billable cost known (no usage, or a zero-cost aborted/
-					// refused turn) — hand the worst-case estimate back.
-					void release(db, turnId).catch(() => {});
-				}
+        const knownCost=usage && Number.isFinite(usage.cost.total) && usage.cost.total>=0;
+        const micros=knownCost?settleMicrosFromCost(usage.cost.total):null;
+        if(micros!==null && micros>0) void settle(db,turnId,micros).catch(()=>{});
+        else if(knownCost && !event.isError && usage.input===0 && usage.output===0)
+          void release(db,turnId).catch(()=>{});
+        // No usage, or an errored zero-initialized SDK usage object, stays
+        // reserved. A later receipt can settle it; it is never reported free.
+
 			}
 		},
 
@@ -326,7 +323,7 @@ export function makeSpendInstrumentation(config: SpendInstrumentConfig): FlueIns
 			if (result.outcome === 'refused') {
 				// spend_enforcement=off: record the refusal intent but never block —
 				// release any row and pass through (plan §A step 7, kill switch).
-				if (enforcement === 'off') return next();
+				if (enforcement === 'off' && !payerId.startsWith('preparation:')) return next();
 				const limitMicros = (await payerLimitMicros(db, payerId)) ?? 0;
 				const error = new SpendLimitError(payerId, limitMicros);
 				if (config.setBlocker) {

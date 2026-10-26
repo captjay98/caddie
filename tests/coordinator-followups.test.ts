@@ -147,7 +147,7 @@ describe('coordinator plan-save honesty (FarmLog AI rewrite fix)', () => {
 	test('the project coordinator can save a PRD revision directly, not only via delegates', () => {
 		expect(coordinatorSource).toContain('makeWritePlanNote');
 		expect(coordinatorSource).toContain('makeReadProjectContext');
-		expect(coordinatorSource).toContain('useTool(makeWritePlanNote({ writePlanNote: savePlanNote }));');
+		expect(coordinatorSource).toContain('useTool(makeWritePlanNote({ writePlanNote: savePlanNote, authorRouteId: modelRoute.id }));');
 		expect(coordinatorSource).toContain('useTool(makeReadProjectContext({ readPlanNote: context.readPlanNote }));');
 	});
 

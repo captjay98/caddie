@@ -24,6 +24,7 @@ function numberOrNull(value: unknown, integer = false): number | null {
 }
 
 export interface ModelCallRecord {
+  finishReason?: string | null; providerFinishReason?: string | null; outputKind?: string;
 	turnId: string; instanceId: string | null; conversationId: string | null; submissionId: string | null;
 	agentName: string | null; purpose: string; providerId: string; requestedModel: string; responseModel: string | null;
 	routeId: string | null; pricingVersion: string | null; currency: string | null;
@@ -39,7 +40,11 @@ export function modelCallRecord(event: Turn, selection?: Selection): ModelCallRe
 	const usage = event.response.usage;
 	const cost = numberOrNull(usage?.cost?.total);
 	const costMicros = cost === null ? null : Math.ceil(cost * 1_000_000);
+  const finish = (value: unknown) => typeof value==='string' && /^[a-zA-Z0-9_.:-]{1,80}$/.test(value) ? value : null;
+  const content=event.response.output?.content??[];
+  const outputKind=content.some(part=>part.type==='text'&&part.text.trim())?'text':content.some(part=>part.type==='toolCall')?'tool-only':'empty';
 	return {
+    finishReason:finish(event.response.finishReason),providerFinishReason:finish(event.response.providerFinishReason),outputKind,
 		turnId: event.turnId, instanceId: event.instanceId ?? null, conversationId: event.conversationId ?? null,
 		submissionId: event.submissionId ?? null, agentName: event.agentName ?? null, purpose: event.purpose,
 		providerId: event.request.providerId, requestedModel: event.request.requestedModel, responseModel: event.response.responseModel ?? null,

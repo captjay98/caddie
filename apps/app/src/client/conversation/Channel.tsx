@@ -245,7 +245,7 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 		// R04 hygiene: strip reasoning tags / raw svg / serialization fragments /
 		// empty placeholder chains that leak INSIDE a text part before Markdown;
 		// a design mockup in it is drawn in the preview frame (plan 4.5).
-		return <ReplyText text={part.text} streaming={part.state === 'streaming'} />;
+		return <ReplyText text={part.text} streaming={part.state === 'streaming'} guardedArtifacts />;
 	}
 		if (part.type === 'reasoning') {
 			// Internal reasoning stays out of the transcript; activity is shown separately.

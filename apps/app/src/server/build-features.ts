@@ -150,13 +150,15 @@ export async function recordFeatureAttempt(db: D1Database, row: BuildFeatureRow,
 export async function recordFeaturePassed(
 	db: D1Database,
 	row: BuildFeatureRow,
-	result: { checkpointRef: string; testsPassed: number },
+	result: { checkpointRef: string; testsPassed: number; admissionId:string|null; designId:string|null },
 ): Promise<void> {
 	const stamp = now();
-	await db
-		.prepare('update "build_features" set "status" = \'passed\', "checkpointRef" = ?, "testsPassed" = ?, "passedAt" = ?, "updatedAt" = ? where "projectId" = ? and "planId" = ? and "featureId" = ?')
-		.bind(result.checkpointRef, result.testsPassed, stamp, stamp, row.projectId, row.planId, row.featureId)
-		.run();
+  const updated=await db.prepare(`update build_features set status='passed',checkpointRef=?,testsPassed=?,passedAt=?,updatedAt=?
+    where projectId=? and planId=? and featureId=? and status<>'passed'
+    and exists(select 1 from build_workflows w where w.projectId=build_features.projectId and w.planId=build_features.planId
+      and w.phase='building' and w.spendPayerId is ? and w.approvedDesignRevisionId is ?)`)
+    .bind(result.checkpointRef,result.testsPassed,stamp,stamp,row.projectId,row.planId,row.featureId,result.admissionId,result.designId).run() as {meta?:{changes?:number}};
+  if(Number(updated.meta?.changes??0)!==1)throw new ScopeError(409,'STALE_BUILD','This feature result belongs to a stopped or changed build.');
   await db.prepare("update build_repair_issues set state='completed',updatedAt=? where runId=? and planId=? and featureId=? and state='active'")
     .bind(stamp,row.runId,row.planId,row.featureId).run();
 }

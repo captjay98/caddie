@@ -22,8 +22,8 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APP_DIR = join(REPO_ROOT, 'apps', 'app');
 const WORKER_BUNDLE = join(APP_DIR, 'dist', 'caddie_app', 'index.js');
-const PORT = 4173;
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = process.env.CADDIE_BROWSER_BASE ?? process.env.CADDIE_TEST_BASE_URL ?? 'http://127.0.0.1:4173';
+const PORT = Number(new URL(BASE).port || 80);
 const LOG = `/tmp/caddie-team-screens-1-${process.pid}.log`;
 
 let preview: ChildProcess | null = null;
@@ -216,11 +216,14 @@ test.describe('How your app works at the design decision (plan section 7, screen
 		await expect(panel).toHaveAttribute('data-approved', 'false');
 		await expect(panel.getByTestId('how-app-kicker')).toHaveText('Before you approve');
 		await expect(panel.getByTestId('how-app-section-saves')).toContainText('A note you wrote');
-		// The design's prose renders; its machine-readable block does not.
+		// Technical prose is optional; inspect it without exposing the machine block.
+		await card.getByRole('button', { name: 'Design details', exact: true }).click();
+		await page.getByText('Read the saved specification', { exact: true }).click();
 		const brief = card.getByTestId('workflow-design-brief');
 		await expect(brief.getByRole('heading', { name: 'Accessibility' })).toBeVisible();
 		await expect(card).not.toContainText('caddie-architecture');
 		await expect(card).not.toContainText('"modules"');
+		await page.getByRole('dialog', { name: 'Design details' }).getByRole('button', { name: 'Close design details', exact: true }).click();
 		// A clean safety review: approving is open.
 		await expect(card.getByTestId('workflow-approve-design')).toBeEnabled();
 		await expect(card.getByTestId('workflow-approve-hold')).toHaveCount(0);
@@ -266,7 +269,10 @@ test.describe('How your app works at the design decision (plan section 7, screen
 		await page.goto(`${BASE}/app/design-review?project=proj-a`);
 
 		const card = page.getByTestId('project-workflow');
+		await card.getByRole('button', { name: 'Design details', exact: true }).click();
+		await page.getByText('Read the saved specification', { exact: true }).click();
 		await expect(card.getByTestId('workflow-design-brief')).toBeVisible();
+		await page.getByRole('dialog', { name: 'Design details' }).getByRole('button', { name: 'Close design details', exact: true }).click();
 		await expect(card.getByTestId('how-app-works')).toHaveCount(0);
 		await expect(card.getByTestId('workflow-approve-design')).toBeEnabled();
 		await context.close();

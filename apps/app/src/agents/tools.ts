@@ -145,7 +145,8 @@ export function makeReadProjectContext(deps: {
 
 /** Plan-note write: appends an immutable revision note via the caller hook. */
 export function makeWritePlanNote(deps: {
-	writePlanNote: (input: { kind: string; body: string; planRevision: string }) => Promise<void>;
+  authorRouteId?: string;
+	writePlanNote: (input: { kind: string; body: string; planRevision: string; authorRouteId?: string; signal?: AbortSignal }) => Promise<void>;
 }) {
 	return defineTool({
 		name: 'write_plan_note',
@@ -157,6 +158,8 @@ export function makeWritePlanNote(deps: {
 				kind: ctx.data.kind,
 				body: ctx.data.body,
 				planRevision: ctx.data.planRevision,
+        authorRouteId: deps.authorRouteId,
+        signal: ctx.signal,
 			});
 			return { output: `SAVED: plan note ${ctx.data.kind} recorded by the host as a new immutable revision.` };
 		},

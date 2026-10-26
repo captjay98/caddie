@@ -1,3 +1,4 @@
+import { isDraftArtifact } from './draft-artifact.ts';
 import { useDeferredValue, useMemo, useState, useTransition } from 'react';
 import type { ReactElement } from 'react';
 import { splitChatMocks } from '@caddie/contracts';
@@ -43,11 +44,20 @@ function ReplyProse({ text, streaming }: { text: string; streaming: boolean }): 
 	</>;
 }
 
-export function ReplyText({ text, streaming = false }: { text: string; streaming?: boolean }): ReactElement | null {
+export function ReplyText({ text, streaming = false, guardedArtifacts = false }: { text: string; streaming?: boolean; guardedArtifacts?: boolean }): ReactElement | null {
 	// Keystrokes and navigation take priority over parsing each streamed token.
 	const deferred = useDeferredValue(text);
 	const displayed = streaming ? deferred : text;
 	const split = useMemo(() => splitChatMocks(displayed, { complete: !streaming }), [displayed, streaming]);
+  const [inspectDraft,setInspectDraft]=useState(false);
+  if(guardedArtifacts && (split.mocks.length>0 || split.drawing || isDraftArtifact(displayed))) {
+    return <div className="draft-artifact-reference">
+      <p className="state-detail">{streaming?'Caddie is preparing a draft…':'The project card shows the version ready for review.'}</p>
+      {!streaming?<details className="tool-banner" onToggle={event=>setInspectDraft(event.currentTarget.open)}>
+        <summary>Original draft response</summary>{inspectDraft?<pre className="artifact-source-inspector" style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',maxHeight:400,overflow:'auto'}}>{text}</pre>:null}
+      </details>:null}
+    </div>;
+  }
 	const before = cleanAssistantText(split.before);
 	const after = cleanAssistantText(split.after);
 	if (!before && !after && split.mocks.length === 0 && !split.drawing) return null;

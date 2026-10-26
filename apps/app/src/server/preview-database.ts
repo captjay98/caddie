@@ -53,3 +53,19 @@ export class PreviewDatabaseGateway extends WorkerEntrypoint<PreviewDatabaseEnv,
 		return previewDatabaseFor(this.env, this.ctx.props.projectId).execScript(script);
 	}
 }
+
+/** Acceptance-only platform: real app auth codes in the isolated check DB.
+ * No mail, external AI or user secrets are exposed. AI behavior needs a
+ * separate authorized live integration check; this binding never fabricates it. */
+export class AcceptancePlatform extends WorkerEntrypoint<PreviewDatabaseEnv,{projectId:string}> {
+ async signInCode(input:unknown) {
+  const request=input as {email?:string;code?:string};
+  if(!/^[ab]@acceptance\.test$/.test(request.email??'')||!/^\d{6}$/.test(request.code??''))return {ok:false,reason:'invalid_request',message:'Only isolated acceptance users are allowed.'};
+  const database=previewDatabaseFor(this.env,this.ctx.props.projectId);
+  await database.execScript('create table if not exists _caddie_acceptance_codes(email text primary key,code text not null)');
+  await database.query([{sql:'insert into _caddie_acceptance_codes(email,code) values(?,?) on conflict(email) do update set code=excluded.code',params:[request.email,request.code],mode:'all'}],true);
+  return {ok:true};
+ }
+ async ai(){return {ok:false,reason:'unavailable',message:'AI is not simulated by independent local acceptance.'};}
+ async email(){return {ok:false,reason:'unavailable',message:'Email delivery is not simulated by independent local acceptance.'};}
+}

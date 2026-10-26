@@ -1,3 +1,4 @@
+import { admitQualityProject } from './artifact-quality.ts';
 import { repairState, REPAIR_POLICY_VERSION } from './repair-escalation.ts';
 import { designCompletenessIssue } from "../shared/design-completeness.ts";
 import { createHash } from "node:crypto";
@@ -78,6 +79,7 @@ export interface BuildWorkflow {
   updatedAt: string;
   /** This build attempt's payer id (build:<runId>:<startMs>); rewritten on retry. Anchors the absolute deadline. */
   spendPayerId?: string | null;
+  approvedDesignRevisionId?: string | null;
   /** The highest 'looks' revision when the plan was approved; only newer proposals count (0044). */
   looksBaseline?: number | null;
   /** The highest 'design' revision when the look was chosen; only newer briefs count (0044). */
@@ -302,6 +304,7 @@ export async function startProjectFromChat(
       throw judgeProjectRefusal(cap);
   }
   const target = await projectScopeForUser(db, scope.actorId, projectId);
+  if (!existing[0]) await admitQualityProject(db, projectId, limits);
   return {
     project: await getProject(db, target),
     workflow: (await readWorkflow(db, target))!,
@@ -346,6 +349,7 @@ export async function ensureWorkflow(
       now(),
     )
     .run();
+  await admitQualityProject(db, scope.projectId, env);
   return (await readWorkflow(db, scope))!;
 }
 export const planIntent = (projectId: string, plan: PlanDocRevision) => ({
@@ -1180,7 +1184,7 @@ async function storeBundleManifest(db: D1Database, bundle: BuildBundleInput, pag
 export async function storeBuildOutput(
   db: D1Database,
   scope: Scope,
-  input: { html: string; image: string; planId: string; runId: string; bundle?: BuildBundleInput },
+  input: { html: string; image: string; planId: string; runId: string; bundle?: BuildBundleInput; admissionId?:string|null; designId?:string|null },
 ) {
   const { workflow, plan } = await requireBuildApproval(db, scope);
   if (plan.id !== input.planId || workflow.runId !== input.runId)
@@ -1189,6 +1193,8 @@ export async function storeBuildOutput(
       "STALE_CHECK",
       "Checks no longer match the current plan.",
     );
+  if(('admissionId' in input && workflow.spendPayerId!==input.admissionId) || ('designId' in input && workflow.approvedDesignRevisionId!==input.designId))
+    throw new ScopeError(409,'STALE_BUILD','This output belongs to an earlier build attempt or design.');
   const { id, contentHash, manifestSha256 } = await prepareOutput(db, scope.projectId, plan.id, input);
   const android = input.bundle?.android ?? null;
   await db.batch([
@@ -1211,7 +1217,8 @@ export async function storeBuildOutput(
     db
       .prepare(
         `update build_workflows set phase = ?,previewId = ?,detail = null,updatedAt = ?
-   where projectId = ? and planId = ? and phase = 'building'
+   where projectId = ? and planId = ? and phase = 'building' and spendPayerId is ? and approvedDesignRevisionId is ?
+   and (approvedDesignRevisionId is null or exists(select 1 from approvals a join plan_doc_revisions d on d.id=a.resourceId where a.projectId=build_workflows.projectId and d.id=build_workflows.approvedDesignRevisionId and a.action='design' and a.policyVersion='v1' and a.status='approved' and a.revisionHash=d.bodyHash and a.decidedBy=? and a.expiresAt>=?))
    and planId = (select id from plan_doc_revisions where projectId = ? and kind = 'prd' order by revision desc limit 1)
    and exists(select 1 from approvals where projectId = ? and action = 'design' and resourceId = ? and revisionHash = ? and policyVersion = 'v1' and status = 'approved' and decidedBy = ? and expiresAt >= ?)
    and exists(select 1 from workspace_memberships where workspaceId = ? and userId = ?)`,
@@ -1222,6 +1229,10 @@ export async function storeBuildOutput(
         now(),
         scope.projectId,
         plan.id,
+        workflow.spendPayerId??null,
+        workflow.approvedDesignRevisionId??null,
+        scope.actorId,
+        now(),
         scope.projectId,
         scope.projectId,
         plan.id,

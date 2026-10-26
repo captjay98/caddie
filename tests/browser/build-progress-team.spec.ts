@@ -23,8 +23,8 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const APP_DIR = join(REPO_ROOT, 'apps', 'app');
 const WORKER_BUNDLE = join(APP_DIR, 'dist', 'caddie_app', 'index.js');
-const PORT = 4173;
-const BASE = `http://127.0.0.1:${PORT}`;
+const BASE = process.env.CADDIE_BROWSER_BASE ?? process.env.CADDIE_TEST_BASE_URL ?? 'http://127.0.0.1:4173';
+const PORT = Number(new URL(BASE).port || 80);
 const LOG = `/tmp/caddie-team-screens-2-${process.pid}.log`;
 
 let preview: ChildProcess | null = null;
@@ -172,7 +172,7 @@ test.describe('Build progress — small and big apps (plan section 7, screen 2)'
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/runs?project=proj-a`);
 		await expect(page.getByTestId('build-progress')).toBeVisible();
-		await page.getByRole('button', { name: 'View build details', exact: true }).click();
+		await page.getByRole('button', { name: 'Build activity', exact: true }).click();
 		await expect(page.getByTestId('build-stages')).toContainText('Write the app');
 		await expect(page.getByTestId('build-stages')).toContainText('Run its own tests');
 		// A small app has no parts board.

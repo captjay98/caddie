@@ -1,6 +1,21 @@
+import {parseAcceptanceJourneys} from '@caddie/contracts';
+import {openAcceptanceCandidate,closeAcceptanceCandidate} from './acceptance-candidate.ts';
+import {configuredBrowserChecks,serviceFidelity} from './browser-check-service.ts';
+import { currentBuildTask, effectiveBuildSignal } from './task-deadline-context.ts';
+import { runIndependentAcceptance, serviceIndependentAcceptance, type IndependentAcceptancePort } from './independent-acceptance.ts';
+import { parseLooks, lookThemeBlock } from '@caddie/contracts';
+import { qualityEnabled } from './artifact-quality.ts';
+import { findModelRouteForRole } from '../agents/providers.ts';
+import { reviewArtifactCandidate } from './artifact-quality.ts';
+import { nebiusQualityReviewer } from './artifact-quality-model.ts';
+import { configuredDesignCapture, type DesignReviewCapturePort } from './design-review-capture.ts';
+import { buildResumeContext } from './build-resume-context.ts';
+import { assertBuildEnvironment } from './build-environment.ts';
+import { recipe as webRecipe } from '../../../../stacks/react-hono/recipe.ts';
+import { recipe as flutterRecipe } from '../../../../stacks/flutter/recipe.ts';
 import { buildAttemptAdmittedAt } from './build-deadlines.ts';
 import { repairState } from './repair-escalation.ts';
-import { approvedAppearanceDocument, documentHash, reviewVisualFidelity, type FidelityPort } from "./visual-fidelity.ts";
+import { approvedAppearanceDocuments, documentHash, reviewVisualStateInventory, type FidelityPort } from "./visual-fidelity.ts";
 import type { AuthEnv } from "./auth.ts";
 import type { ArchitectureBlock, RunBindingRecord } from "@caddie/contracts";
 import type { CoordinatorHostContext } from "../agents/coordinator.ts";
@@ -75,6 +90,7 @@ import { requestAppSecret } from "./app-secrets.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, isShellTestCommand } from "../agents/permissions.ts";
 import { FEATURE_DELEGATION_RULE } from "../agents/delegation.ts";
 import {
+  featuresForPlan,
   type BuildFeatureRow,
   currentFeature,
   ensureBuildFeatures,
@@ -159,6 +175,10 @@ export interface CoordinatorEnvironment {
   TAVILY_API_KEY?: string;
   /** Nebius model key — powers AI fit inspection of discovery candidates (fail-soft when unset). */
   NEBIUS_API_KEY?: string;
+  FEATURE_ACCEPTANCE?: {fetch:(request:Request)=>Promise<Response>};
+  DESIGN_CAPTURE?: {fetch:(request:Request)=>Promise<Response>};
+  DESIGN_CAPTURE_URL?: string;
+  DESIGN_CAPTURE_TOKEN?: string;
   CONTREE_BASE_URL?: string;
   CONTREE_API_TOKEN?: string;
   CONTREE_PROJECT_ID?: string;
@@ -177,6 +197,9 @@ export interface CoordinatorEnvironment {
 export interface CoordinatorHostDeps {
   /** Host-owned browser capture/comparison. Never exposed as an agent tool. */
   visualFidelity?: FidelityPort;
+  designReviewCapture?: DesignReviewCapturePort;
+  independentAcceptance?: IndependentAcceptancePort;
+  qualityReviewer?: import('./artifact-quality.ts').QualityReviewer;
   dispatchModuleBuilder?: DispatchModuleBuilder;
   /**
    * Big apps (part P step 3): tell the coordinator that every part is joined,
@@ -571,6 +594,7 @@ export async function createCoordinatorContext(
     // ride along (nothing without app features), so a builder can't drop them.
     const files = { ...appFeatureFiles(block, { appFeatures }), ...writeContractFiles(block, bigApps ? "big" : "small", features) };
     const { driver, id } = session ?? (await ensureSession());
+    await assertAdmissionActive();
     await driver.uploadFiles(
       id,
       Object.entries(files).map(([path, text]) => ({
@@ -641,6 +665,10 @@ export async function createCoordinatorContext(
         "SANDBOX_NOT_CONFIGURED",
         "The build sandbox is not configured. Planning remains available.",
       );
+    }
+    if (await repairState(env.DB, runId, moduleScope?.features)) {
+      await assertBuildEnvironment(env.DB,{runId,projectId:scope.projectId,stackId:stack,
+        recipeVersion:(stack === 'flutter' ? flutterRecipe : webRecipe).version,baseImage:runtime.image});
     }
     driver ??= buildSandboxFromEnv(env)!;
     // Team mode (part P, gap 1): a MODULE builder's copy is its OWN. It opens
@@ -715,6 +743,7 @@ export async function createCoordinatorContext(
       const { driver, id } = await ensureSession();
       if (await driver.pathExists(id, `${root}/package.json`)) return;
       const setupStarted = new Date().toISOString();
+      await assertAdmissionActive();
       await driver.uploadFiles(
         id,
         Object.entries(scaffoldFiles).map(([path, text]) => ({
@@ -741,9 +770,12 @@ export async function createCoordinatorContext(
   // lenient, never refuse wrongly.
   const budgetMessage =
     `Caddie used this build's ${BUILD_ACTION_BUDGET}-step budget without getting the checks to pass, so the build was paused. Your plan and files are saved. Retry to continue with a fresh budget.`;
-  const assertAdmissionActive = async (expected?: { planId: string | null; spendPayerId?: string | null }) => {
+  const assertAdmissionActive = async (expected?: { planId: string | null; spendPayerId?: string | null; approvedDesignRevisionId?:string|null }) => {
+    currentBuildTask()?.signal.throwIfAborted();
     const { workflow } = await requireBuildApproval(env.DB, scope, pauseScope);
-    if (expected && (workflow.planId !== expected.planId || workflow.spendPayerId !== expected.spendPayerId))
+    const taskAdmission=currentBuildTask()?.admissionId;
+    if(taskAdmission && taskAdmission!==workflow.spendPayerId)throw new ScopeError(409,'STALE_BUILD','This task belongs to an earlier build attempt.');
+    if (expected && (workflow.planId !== expected.planId || workflow.spendPayerId !== expected.spendPayerId || workflow.approvedDesignRevisionId !== expected.approvedDesignRevisionId))
       throw new ScopeError(409, 'STALE_BUILD', 'This result belongs to an earlier build attempt. Saved work is retained.');
     const admitted = buildAttemptAdmittedAt(workflow.spendPayerId, null);
     if (admitted !== null && Date.now() >= admitted + 60 * 60_000) {
@@ -804,6 +836,7 @@ export async function createCoordinatorContext(
   };
   const deps: SandboxToolDeps = {
     execute: async (input) => {
+      input={...input,signal:effectiveBuildSignal(input.signal)};
       input.signal?.throwIfAborted();
       // Tests run ONLY through run_checks: a shell test run escaped the repair
       // counter (FarmLog AI: `bun test … | head -14` recorded head's exit 0).
@@ -896,6 +929,7 @@ export async function createCoordinatorContext(
      */
     opts?: { session?: { driver: SandboxDriver; id: string }; contractFeatures?: readonly string[] },
   ) => {
+    signal=effectiveBuildSignal(signal);
     signal?.throwIfAborted();
     if (mode === "join" && !opts?.session) throw new Error("A join is checked in its own join copy.");
     const approvalScope = mode === "join" ? NEVER_PAUSED : pauseScope;
@@ -1123,6 +1157,7 @@ export async function createCoordinatorContext(
    * attempt on this feature (the 3-strike pause applies per feature).
    */
   const finishFeature = async (featureId: string, attempt: string, signal?: AbortSignal) => {
+    signal=effectiveBuildSignal(signal);
     signal?.throwIfAborted();
     const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     const rows = scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan));
@@ -1154,11 +1189,43 @@ export async function createCoordinatorContext(
     const baseline = testsBaseline(rows);
     // Historical failures are not acceptance evidence: an unrelated bundle fix
     // (or deleting a failing test) must never unlock a new feature.
+    let independentCriteriaPassed=false;
+    if(await qualityEnabled(env.DB,scope.projectId)) {
+      const workflow=outcome.workflow;
+      await assertAdmissionActive(workflow);
+      const designId=String((workflow as unknown as {approvedDesignRevisionId?:string}).approvedDesignRevisionId??'');
+      const design=(await env.DB.prepare('select body from plan_doc_revisions where id=? and projectId=?').bind(designId,scope.projectId).all<{body:string}>()).results[0];
+      const journeys=parseAcceptanceJourneys(design?.body??'',featuresForPlan(plan.body).flatMap(row=>row.doneWhen.map(text=>({featureId:row.id,text}))));
+      const identity={projectId:scope.projectId,runId,admissionId:workflow.spendPayerId??'',planId:plan.id,designId,featureId,checkedImage:outcome.endImage};
+      const app=await readBuiltApp(outcome.driver,outcome.id,root);
+      const candidate=await openAcceptanceCandidate(env.DB,scope,identity,{document:previewDocument(app),server:app.server,migrations:app.migrations},env.BETTER_AUTH_URL??'');
+      const browserService=configuredBrowserChecks(env);
+      let independent:Awaited<ReturnType<typeof runIndependentAcceptance>>;
+      try {independent=await runIndependentAcceptance(env.DB,{
+        identity:{projectId:scope.projectId,runId,admissionId:workflow.spendPayerId??'',planId:plan.id,
+          designId:String((workflow as unknown as {approvedDesignRevisionId?:string}).approvedDesignRevisionId??''),featureId,checkedImage:outcome.endImage},
+        criteria:rows.filter(row=>row.status==='passed'||row.featureId===featureId).flatMap(row=>row.doneWhen.map(text=>({featureId:row.featureId,text}))),
+        operationKey:`criteria:${runId}:${plan.id}:${featureId}:${attempt}`,signal,runtime:candidate,journeys,
+        port:hostDeps.independentAcceptance??(env.FEATURE_ACCEPTANCE?serviceIndependentAcceptance(env.FEATURE_ACCEPTANCE):browserService?serviceIndependentAcceptance(browserService):undefined),
+      });}finally{await closeAcceptanceCandidate(env.DB,candidate.id);}
+      await assertAdmissionActive(workflow);
+      if(independent.status!=='passed') {
+        const unavailable=independent.status==='not-checked';
+        if(unavailable)await pauseOrStop('Caddie could not complete the independent app checks. Your plan and saved files are retained. The app is not ready to try yet.');
+        else await recordRepairRound(env.DB,scope,runId,{admissionId:workflow.spendPayerId??undefined,issue:`${featureId}:independent-criteria`,round:'repair_attempt',outcome:'failed',operationKey:`criteria:${runId}:${plan.id}:${featureId}:${attempt}`});
+        const paused=unavailable||(await workflowRepairPause(env.DB,runId,pauseScope)).paused;
+        if(paused&&!unavailable)await pauseOrStop('Caddie could not get the approved feature checks passing within this build’s allowance. Your plan and saved files are retained.');
+        await recordFeatureAttempt(env.DB,current,paused);
+        return {passed:false,paused,next:unavailable?'Independent runtime checks are unavailable; do not claim this feature is built.':'Repair the failed independent criteria without changing the approved scope.'};
+      }
+      independentCriteriaPassed=true;
+    }
     const acceptance = acceptanceVerdict({
       checksPassed: true,
       passing,
       baseline,
       priorFailingCheckNowGreen: false,
+      independentCriteriaPassed,
     });
     if (acceptance.kind === "reject") {
       await recordRepairRound(env.DB, scope, runId, {
@@ -1183,6 +1250,7 @@ export async function createCoordinatorContext(
       };
     }
     const { checkpointRef } = await outcome.driver.checkpoint(outcome.id);
+    if(checkpointRef!==outcome.endImage)throw new ScopeError(409,'STALE_BUILD','Files changed after this feature was checked. Run the checks again.');
     // Team mode (part D): the part boundary is checked on the NEW committed
     // image — a change OUTSIDE the builder's area (by a write tool OR a script)
     // is refused and counts as a failed try, so the save point only ever
@@ -1214,7 +1282,8 @@ export async function createCoordinatorContext(
     }
     signal?.throwIfAborted();
     await assertAdmissionActive(outcome.workflow);
-    await recordFeaturePassed(env.DB, current, { checkpointRef, testsPassed: passing });
+    if((await outcome.driver.checkpoint(outcome.id)).checkpointRef!==outcome.endImage)throw new ScopeError(409,'STALE_BUILD','Files changed while preparing this feature checkpoint.');
+    await recordFeaturePassed(env.DB, current, { checkpointRef, testsPassed: passing,admissionId:outcome.workflow.spendPayerId??null,designId:outcome.workflow.approvedDesignRevisionId??null });
     const after = currentFeature(scopeToModule(await listBuildFeatures(env.DB, scope.projectId, plan.id)));
     // Big apps (part P step 2): the foundation module's last feature is saved,
     // so this save point is the foundation every other module starts from.
@@ -1465,14 +1534,29 @@ export async function createCoordinatorContext(
         .bind(scope.projectId, approvedDesignId).all<{ id: string; body: string; bodyHash: string }>()).results?.[0];
       const builtDocument = built.kind === "flutter" ? built.page : previewDocument({ js: built.js, css: built.css });
       const visualKey = `verify:${runId}:${plan.id}:${attempt}:visual-fidelity`;
-      const visual = await reviewVisualFidelity({
+      let visualPort=hostDeps.visualFidelity;
+      let visualCandidate:Awaited<ReturnType<typeof openAcceptanceCandidate>>|undefined;
+      const browserService=configuredBrowserChecks(env);
+      if(!visualPort&&browserService&&design&&await qualityEnabled(env.DB,scope.projectId)) {
+        const journeys=parseAcceptanceJourneys(design.body,featuresForPlan(plan.body).flatMap(row=>row.doneWhen.map(text=>({featureId:row.id,text}))));
+        visualCandidate=await openAcceptanceCandidate(env.DB,scope,{projectId:scope.projectId,runId,admissionId:workflow.spendPayerId??'',planId:plan.id,designId:approvedDesignId,featureId:'final',checkedImage},
+          {document:builtDocument,server,migrations},env.BETTER_AUTH_URL??'');
+        visualPort=serviceFidelity(browserService,visualCandidate,journeys);
+      }
+      let visual:Awaited<ReturnType<typeof reviewVisualStateInventory>>;
+      try {visual = await reviewVisualStateInventory({
         identity: { projectId: scope.projectId, planRevisionId: plan.id, designRevisionId: approvedDesignId, designHash: design?.bodyHash ?? "", buildImage: checkedImage, builtDocumentHash: await documentHash(builtDocument) },
-        approvedDocument: design ? approvedAppearanceDocument(design.body) : null,
-        builtDocument, operationKey: visualKey, port: hostDeps.visualFidelity, ...(signal ? { signal } : {}),
+        approvedStates: design ? approvedAppearanceDocuments(design.body) : [],
+        builtDocument, operationKey: visualKey, port: visualPort, ...(signal ? { signal } : {}),
       });
+      }finally{if(visualCandidate)await closeAcceptanceCandidate(env.DB,visualCandidate.id);}
       if ((await driver.checkpoint(id)).checkpointRef !== checkedImage)
         throw new ScopeError(409, "STALE_BUILD", "Files changed during the appearance check. Run checks again.");
       await recordVerification(env.DB, scope, workflow.runId, { check: "visual-fidelity", passed: visual.status === "passed", evidence: JSON.stringify(visual), planRevision: plan.id });
+      if(visual.status==='not-checked' && await qualityEnabled(env.DB,scope.projectId)) {
+        await setWorkflowBlocker(env.DB,scope,'Caddie could not finish checking every screen against your approved design. Your plan and saved files are retained. The app is not ready to try yet.');
+        return {passed:false,paused:true,receipts,next:'Complete the host-owned screen/state checks; do not claim visual verification or publish this draft.'};
+      }
       if (visual.status === "needs-repair") {
         const differences = visual.viewports.flatMap((view) => view.differences.filter((difference) => difference.severity === "blocking").map((difference) => `${view.viewport.name}: ${difference.message}`)).join("; ");
         await recordRepairRound(env.DB, scope, workflow.runId, { admissionId: workflow.spendPayerId ?? undefined, issue: "visual-fidelity", operationKey: visualKey, round: "repair_attempt", outcome: "failed", detail: differences.slice(0, 2000) });
@@ -1509,6 +1593,7 @@ export async function createCoordinatorContext(
     signal?.throwIfAborted();
     await assertAdmissionActive(workflow);
     const output = await storeBuildOutput(env.DB, scope, {
+      admissionId:workflow.spendPayerId??null,designId:workflow.approvedDesignRevisionId??null,
       html,
       image: outputImage,
       planId: plan.id,
@@ -1572,6 +1657,7 @@ export async function createCoordinatorContext(
   };
   const tools = paidDiscoveryTools(env, scope);
   return {
+    resumeContext: (await buildResumeContext(env.DB, runId)) ?? undefined,
     repairModelRouteId: (await repairState(env.DB, runId, moduleScope?.features))?.routeId ?? undefined,
     driver: deps,
     sessionId,
@@ -1791,6 +1877,28 @@ export async function createCoordinatorContext(
         const looksError = looksSaveError(input.body);
         if (looksError)
           throw new Error(`LOOKS_INVALID: not saved — ${looksError}. ${LOOKS_BLOCK_GUIDE}`);
+      }
+      if ((input.kind==='prd'||input.kind==='looks'||input.kind==='design') && await qualityEnabled(env.DB,scope.projectId)) {
+        if(input.kind==='design') {
+          const workflow=await readWorkflow(env.DB,scope);
+          const plan=(await env.DB.prepare('select body from plan_doc_revisions where id=? and projectId=?').bind(workflow?.planId??'',scope.projectId).all<{body:string}>()).results[0];
+          parseAcceptanceJourneys(input.body,featuresForPlan(plan?.body??'').flatMap(row=>row.doneWhen.map(text=>({featureId:row.id,text}))));
+        }
+        const states=input.kind==='design'?approvedAppearanceDocuments(input.body).map((item,index)=>({id:`state-${index+1}`,document:item.document})):undefined;
+        // Look options each carry their own layout and theme, all of which must
+        // be captured. A text-only reviewer cannot approve visual design.
+        let lookStates: Array<{id:string;document:string}>|undefined;
+        if(input.kind==='looks') {
+          const parsed=parseLooks(input.body);
+          if(parsed.ok) lookStates=parsed.set.looks.flatMap(look=>{
+            const brief=[lookThemeBlock(look),'',`\`\`\`html-mock ${look.id}`,(look.screen??parsed.set.screen).html,'\`\`\`'].join('\n');
+            return approvedAppearanceDocuments(brief).map(item=>({id:look.id,document:item.document}));
+          });
+        }
+        await reviewArtifactCandidate(env.DB,{projectId:scope.projectId,kind:input.kind,body:input.body,
+          authorRouteId:input.authorRouteId??findModelRouteForRole('chat').id,
+          reviewer:hostDeps.qualityReviewer??nebiusQualityReviewer(env.DB,env.NEBIUS_API_KEY??''),states:lookStates??states,
+          capture:hostDeps.designReviewCapture??configuredDesignCapture(env),signal:input.signal});
       }
       const revision = await createPlanDocRevision(env.DB, scope, {
         kind: input.kind as "prd",

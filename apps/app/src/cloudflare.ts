@@ -30,7 +30,7 @@ import { advanceImportPreviews, importPreviewDepsFromEnv, type ImportPreviewEnv 
 // Backend previews (docs/plans/2026-10-17-publish): the per-project preview
 // database and the RPC gateway an app's preview isolate reaches it through,
 // and the outbound gate every fetch the preview's server makes goes through.
-export { PreviewDatabase, PreviewDatabaseGateway } from './server/preview-database.ts';
+export { PreviewDatabase, PreviewDatabaseGateway, AcceptancePlatform } from './server/preview-database.ts';
 export { PreviewOutbound } from './server/preview-outbound.ts';
 export { AppPlatform, PublishedAppPlatform } from './server/app-platform.ts';
 

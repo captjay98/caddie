@@ -1,3 +1,8 @@
+import {recoverTimedOutTask} from './server/task-recovery.ts';
+import {buildSandboxFromEnv} from './server/build-sandbox.ts';
+import { createAcceptanceRuntimeRouter } from './server/routes/acceptance-runtime.ts';
+import type { D1Database } from './server/auth.ts';
+import { makeTaskDeadlineInstrumentation } from './server/task-deadlines.ts';
 import { createAgentRouter } from '@flue/runtime/routing';
 import { instrument } from '@flue/runtime';
 import { getCloudflareContext } from '@flue/runtime/cloudflare';
@@ -120,6 +125,14 @@ instrument(
 );
 
 // Per-leaf observations retain actual route/usage independently of a run's initial model.
+instrument(makeTaskDeadlineInstrumentation({
+ resolve:()=>{try{return (getCloudflareContext().env as unknown as {DB:D1Database}).DB;}catch{return null;}},
+ onTimeout:async(db,input)=>{
+  const env=getCloudflareContext().env as unknown as import('./server/build-sandbox.ts').BuildSandboxEnv;
+  const driver=buildSandboxFromEnv(env);
+  await recoverTimedOutTask(db,input,driver?key=>driver.reconcileOperation(key):undefined);
+ },
+}));
 instrument(makeModelCallInstrumentation({
  resolve: () => {
   const env = getCloudflareContext().env as unknown as { DB?: AuthEnv['DB'] };
@@ -141,6 +154,7 @@ api.route('/', createBuildWorkflowRouter(() => app, moduleBuilderDispatcher));
 api.route('/', createProfileRouter());
 api.route('/', createArtifactsRouter());
 api.route('/', createPreviewsRouter());
+api.route('/', createAcceptanceRuntimeRouter());
 api.route('/', createTasksRouter());
 api.route('/', createGithubRouter());
 api.route('/', createDiscoveryRouter());

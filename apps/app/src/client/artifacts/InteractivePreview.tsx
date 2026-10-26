@@ -26,28 +26,8 @@ function storageKey(actorId: string, projectId: string): string {
  * The app's cookies while the preview is open (the frame has no cookie store
  * of its own). Name -> value only; an expired or Max-Age=0 cookie is removed.
  */
-export function updateCookieJar(jar: Map<string, string>, headers: Array<[string, string]>): void {
-  for (const [name, value] of headers) {
-    if (name.toLowerCase() !== "set-cookie") continue;
-    const [pair = "", ...attributes] = value.split(";");
-    const at = pair.indexOf("=");
-    if (at <= 0) continue;
-    const cookieName = pair.slice(0, at).trim();
-    const expired = attributes.some((attribute) => {
-      const [key = "", raw = ""] = attribute.split("=");
-      const lower = key.trim().toLowerCase();
-      if (lower === "max-age") return Number(raw.trim()) <= 0;
-      if (lower === "expires") return Date.parse(raw.trim()) <= Date.now();
-      return false;
-    });
-    if (expired) jar.delete(cookieName);
-    else jar.set(cookieName, pair.slice(at + 1).trim());
-  }
-}
-
-export function cookieHeader(jar: Map<string, string>): string | null {
-  return jar.size === 0 ? null : [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
-}
+export { updateCookieJar, cookieHeader } from '../../shared/preview-cookies.ts';
+import { updateCookieJar, cookieHeader } from '../../shared/preview-cookies.ts';
 
 interface RelayRequest {
   method: string;

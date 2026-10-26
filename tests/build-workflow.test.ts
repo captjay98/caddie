@@ -1,5 +1,6 @@
+import {SandboxDriver} from '../apps/app/src/server/adapters/sandbox.ts';
 import { putLarge } from "../apps/app/src/server/large-content.ts";
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, spyOn } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -154,6 +155,7 @@ async function world() {
     // B03: content hash on build_activity for the progress guard.
     "0047_build_activity_content_hash.sql",
     "0048_repair_escalation.sql",
+    "0049_build_environment.sql",
   ]) {
     const ddl = readFileSync(
       new URL(`../apps/app/migrations/${migration}`, import.meta.url),
@@ -1415,6 +1417,21 @@ describe("approved output and preview identity", () => {
     }
   });
 
+  test("a new admission or revoked design immediately before publication cannot publish the old result",async()=>{
+    for(const change of ['payer','design'] as const) {
+      const w=await world();try {
+        const item=await approved(w);
+        w.hooks.beforeBatch=()=>{
+          w.hooks.beforeBatch=null;
+          if(change==='payer')w.sqlite.prepare('update build_workflows set spendPayerId=? where projectId=?').run('new-admission',item.project.id);
+          else w.sqlite.prepare("update approvals set status='revoked' where resourceId=?").run(item.design.id);
+        };
+        await expect(storeBuildOutput(w.db,item.scope,{html:'<html>Checked older work</html>',image:'checked-old-image',planId:item.plan.id,runId:item.workflow.runId})).rejects.toBeInstanceOf(ScopeError);
+        expect((await readWorkflow(w.db,item.scope))?.phase).not.toBe('ready');
+      }finally{w.sqlite.close();}
+    }
+  });
+
   test("an old preview stays inspectable as history but never indicates a new plan is ready", async () => {
     const w = await world();
     try {
@@ -2061,6 +2078,7 @@ describe("host-driven feature loop", () => {
       const payer=(await readWorkflow(w.db,item.scope))?.spendPayerId;
       for(let i=0;i<6;i++) {
         const fresh=await resolveCoordinatorContext(env(w,stub),item.workflow.conversationId);
+        expect(fresh.resumeContext).toContain('log-feed');
         expect(fresh.repairModelRouteId).toBe(['nemotron-3.5-super-vl','nemotron-3.5-super-vl','deepseek-v4.1-flash-1017','deepseek-v4.1-flash-1017','glm-5.3','glm-5.3'][i]);
         await recordRepairRound(w.db,item.scope,item.workflow.runId,{issue:'log-feed:test-'+i,round:'repair_attempt',outcome:'failed',operationKey:'repair-'+i,admissionId:payer ?? undefined});
       }
@@ -2068,6 +2086,14 @@ describe("host-driven feature loop", () => {
       expect((await readWorkflow(w.db,item.scope))?.spendPayerId).toBe(payer);
       expect(w.count('workflow_resumes')).toBe(0);
     } finally {await stub.stop();w.sqlite.close();}
+  });
+
+  test("a writer changing the checkpoint after feature checks cannot receive a verified feature",async()=>{
+    const w=await world();const stub=new SandboxStub({expectedToken:'local-feature-token'});stub.seedImage('tag:feature:1');stub.setBehavior('bun run test',{stdout:'1 pass\n0 fail'});await stub.start();
+    const original=SandboxDriver.prototype.checkpoint;let checkpoints=0;
+    const wrapped=spyOn(SandboxDriver.prototype,'checkpoint').mockImplementation(async function(this:SandboxDriver,id:string){const result=await original.call(this,id);checkpoints++;return checkpoints>=2?{...result,checkpointRef:'a-concurrent-unchecked-image'}:result;});
+    try{const item=await featureBuild(w);const host=await resolveCoordinatorContext(env(w,stub),item.workflow.conversationId);await host.buildNextFeature();await rejectsCode(host.finishFeature('log-feed','late-image'),'STALE_BUILD');expect(feature(w,'log-feed').status).not.toBe('passed');}
+    finally{wrapped.mockRestore();await stub.stop();w.sqlite.close();}
   });
 
   test("builds features in plan order, needs new passing tests per feature, and saves a checkpoint for each", async () => {

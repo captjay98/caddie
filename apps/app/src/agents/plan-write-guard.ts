@@ -1,4 +1,4 @@
-interface PlanNote { kind: string; body: string; planRevision: string }
+interface PlanNote { kind: string; body: string; planRevision: string; authorRouteId?: string; signal?: AbortSignal }
 
 /** One repair budget shared by direct and delegated writes. The coordinator
  * supplies persisted counters; the last valid revision is never overwritten. */

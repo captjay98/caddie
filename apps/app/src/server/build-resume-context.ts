@@ -66,3 +66,32 @@ export function restoreCompatibility(input: RestoreCompatibilityInput): RestoreC
 		};
 	return { ok: true };
 }
+
+import type { D1Database } from './auth.ts';
+/** Host-owned recovery context. No file bodies, credentials or private reasoning.
+ * Queries are bounded; this is derived from durable authority, not a model summary.
+ */
+export async function buildResumeContext(db:D1Database,runId:string):Promise<string|null> {
+ let workflow:Record<string,unknown>|undefined;
+ try {workflow=(await db.prepare('select * from build_workflows where runId=?').bind(runId).all<Record<string,unknown>>()).results[0];}
+ catch(error){if(String(error).includes('no such table: build_workflows'))return null;throw error;}
+ if(!workflow || workflow.repairPolicyVersion!=='repair-v1') return null;
+ const features=(await db.prepare('select featureId,position,title,doneWhen,status,checkpointRef from build_features where runId=? and planId=? order by position limit 40')
+  .bind(runId,workflow.planId).all<Record<string,unknown>>()).results;
+ const pending=(await db.prepare("select operationKey,provider,status,receiptId from external_operations where runId=? and status not in ('succeeded','failed','cancelled') order by createdAt desc limit 12")
+  .bind(runId).all()).results;
+ const failures=(await db.prepare("select issue,detail from run_rounds where runId=? and outcome='failed' order by rowid desc limit 3")
+  .bind(runId).all<{issue:string;detail:string|null}>()).results.map(row=>({issue:row.issue,detail:row.detail?.slice(0,500)}));
+ const budget=(await db.prepare(`select l.limitMicros,coalesce(sum(case when r.status='settled' then r.settledMicros when r.status='reserved' then r.reservedMicros else 0 end),0) as committedMicros
+  from build_spend_limits l left join build_spend_reservations r on l.payerId=r.payerId where l.payerId=? group by l.payerId`)
+  .bind(workflow.spendPayerId).all()).results[0] ?? null;
+ const current=features.find(row=>row.status!=='passed');
+ const capsule={version:1,runId,projectId:workflow.projectId,planId:workflow.planId,approvedDesignId:workflow.approvedDesignRevisionId,
+  admissionId:workflow.spendPayerId,phase:workflow.phase,currentFeature:current??null,
+  savedFeatures:features.filter(row=>row.status==='passed').map(row=>({featureId:row.featureId,checkpointRef:row.checkpointRef})),
+  pendingEffects:pending,failures,budget,
+  instruction:'Read the approved plan and design for scope. Continue only the current feature. Reconcile pending effects by their existing operation key before retrying. Do not reset the admission, counters or spending allowance.'};
+ let encoded=JSON.stringify(capsule);
+ if(encoded.length>16_000)encoded=JSON.stringify({...capsule,currentFeature:current?{featureId:current.featureId,title:String(current.title).slice(0,200),scope:'Read the approved plan for the full criteria'}:null,savedFeatures:capsule.savedFeatures.slice(-6),pendingEffects:pending.slice(0,4),failures:failures.slice(0,1)});
+ return encoded;
+}

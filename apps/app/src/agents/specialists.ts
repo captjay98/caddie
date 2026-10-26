@@ -1,3 +1,4 @@
+import {ACCEPTANCE_JOURNEY_GUIDE} from '@caddie/contracts';
 import { SPECIALIST_ROLES, ROLE_TOOL_POLICY, type SpecialistRole } from './permissions.ts';
 import { PACKAGED_SKILLS, type PackagedSkillName } from './skills.ts';
 import {
@@ -44,6 +45,7 @@ import { RECIPES } from '../../../../stacks/react-hono/recipe.ts';
 
 export interface SpecialistBuildContext {
   repairModelRouteId?: string;
+  resumeContext?: string;
   /** Full current request; delegation summaries must not drop user feedback. */
   currentRequest?: string;
   /** The run's kind of app: 'flutter' for an Android app (Track 3), else a web app. */
@@ -87,7 +89,7 @@ export interface SpecialistBuildContext {
 	/** Reads the latest plan note body of a kind (durable, from D1). */
 	readPlanNote: (kind: string) => Promise<string | null>;
 	/** Appends a plan note revision (durable, from D1). */
-	writePlanNote: (input: { kind: string; body: string; planRevision: string }) => Promise<void>;
+	writePlanNote: (input: { kind: string; body: string; planRevision: string; authorRouteId?: string; signal?: AbortSignal }) => Promise<void>;
 	/** Records a repair round in the ledger (durable, from D1). */
 	delegateRepair: (input: { issue: string; round: string; toRole: string; task: string }) => Promise<void>;
 	/** Appends a verification record (durable, from D1). */
@@ -196,7 +198,7 @@ export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> =
 	designer:
 		'You design the interface and interaction boundary. Read the current code from the sandbox for context, but express decisions as plan notes; implementation belongs to build roles. ' +
 		'LOOKS come first. After the PRD is approved, before any design brief, the project enters the LOOKS step: propose how the app could look with write_plan_note kind:\'looks\' — 2-3 CLEARLY different looks, each a full caddie-theme theme with a slug id and a human name, one marked recommended, plus the audience (from the PRD) and the same user task. EVERY look carries its OWN screen mock of that task with a DIFFERENT structure — different information hierarchy and navigation pattern (e.g. list-first vs card-stack vs tabs vs stepper), never two looks as the same layout recoloured, and never a toy screen: each mock is a real product key screen with real data, ~10-15 elements and one primary action. ' + LOOKS_BLOCK_GUIDE + ' Save it and STOP for the owner to choose; a description in your reply is NOT a saved set. ' +
-		PROTOTYPE_GUIDE + ' ' + 'After the owner CHOOSES a look the project enters the DESIGN step: you are given that look as a caddie-theme block. Author ONE design brief and save it with write_plan_note kind:\'design\' (same planRevision), then STOP for the design review — never build or scaffold. A description of the brief in your reply is NOT a saved brief: return only after the host confirms SAVED. The brief MUST carry the chosen look\'s caddie-theme block unchanged (do not re-pick colours) and covers: a SCREEN INVENTORY (every screen the app needs); for each key screen its LAYOUT (the regions and what sits where, described so a builder can lay it out) and the key COMPONENTS; the TOKEN/COMPONENT choices (which theme tokens, which shared components, the interaction pattern for each input — a form, a segmented picker, a list); and the EMPTY, LOADING and ERROR state for anything that loads or saves. Style every html-mock only with the chosen theme\'s tokens. Keep it concrete, not a restatement of the PRD. Where the PRD leaves a visual choice open, pick a sensible default and label it \'assumption:\'.',
+		PROTOTYPE_GUIDE + ' ' + ACCEPTANCE_JOURNEY_GUIDE + ' ' + 'After the owner CHOOSES a look the project enters the DESIGN step: you are given that look as a caddie-theme block. Author ONE design brief and save it with write_plan_note kind:\'design\' (same planRevision), then STOP for the design review — never build or scaffold. A description of the brief in your reply is NOT a saved brief: return only after the host confirms SAVED. The brief MUST carry the chosen look\'s caddie-theme block unchanged (do not re-pick colours) and covers: a SCREEN INVENTORY (every screen the app needs); for each key screen its LAYOUT (the regions and what sits where, described so a builder can lay it out) and the key COMPONENTS; the TOKEN/COMPONENT choices (which theme tokens, which shared components, the interaction pattern for each input — a form, a segmented picker, a list); and the EMPTY, LOADING and ERROR state for anything that loads or saves. Style every html-mock only with the chosen theme\'s tokens. Keep it concrete, not a restatement of the PRD. Where the PRD leaves a visual choice open, pick a sensible default and label it \'assumption:\'.',
 	'tech-lead':
 		'You own the plan of record. Delegate build and repair work with precise tasks, review results honestly, and keep the last good checkpoint visible. Never claim success without machine-checked evidence. ' +
 		'Before approving a plan, test it as a judge would: can the demo path happen with real input in three minutes, is the named integration core rather than decoration, and which mock would embarrass the demo? Push the product specialist to fix that before review. ' +
@@ -291,7 +293,9 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 	// mount loop only needs name -> definition.
 	const toolFor: Record<string, ToolDefinition> = {
 		read_project_context: makeReadProjectContext({ readPlanNote: context.readPlanNote }),
-		write_plan_note: makeWritePlanNote({ writePlanNote: context.writePlanNote }),
+		write_plan_note: makeWritePlanNote({ writePlanNote: context.writePlanNote,
+      authorRouteId: (specialistModelRole(SPECIALIST_CATALOG.find(row=>row.role===role)!)==='build' && context.repairModelRouteId
+        ? findModelRoute(context.repairModelRouteId) : findModelRouteForRole(specialistModelRole(SPECIALIST_CATALOG.find(row=>row.role===role)!))).id }),
 		sandbox_exec: makeSandboxExec({ driver: context.driver, sessionId: context.sessionId, runId: context.runId, ...(partGuard ? { partGuard } : {}) }),
 		read_sandbox_file: makeReadSandboxFile({ driver: context.driver, sessionId: context.sessionId }),
 		write_sandbox_file: makeWriteSandboxFile({ driver: context.driver, sessionId: context.sessionId, ...(partGuard ? { partGuard } : {}) }),

@@ -35,3 +35,24 @@ describe("B04 — feature acceptance policy", () => {
 test('a prior red bundle or a deleted failing test cannot prove a new feature', () => {
  expect(acceptanceVerdict({checksPassed:true,passing:1,baseline:1,priorFailingCheckNowGreen:true}).kind).toBe('reject');
 });
+
+import {qualityWorld} from './fixtures/artifact-quality-cases.ts';
+import {createPlanDocRevision} from '../apps/app/src/server/projects.ts';
+import {ensureBuildFeatures,recordFeaturePassed} from '../apps/app/src/server/build-features.ts';
+import type {D1Database} from '../apps/app/src/server/auth.ts';
+test('Stop immediately before the feature UPDATE is fenced by the mutation itself',async()=>{
+ const w=await qualityWorld(false);try {
+  const plan=await createPlanDocRevision(w.db,w.scope,{kind:'prd',body:'# Farm log'});
+  const [feature]=await ensureBuildFeatures(w.db,w.scope,w.workflow.runId,plan);
+  w.sqlite.prepare("update build_workflows set phase='building',planId=?,spendPayerId='payer'").run(plan.id);
+  const intercepted={...w.db,prepare(sql:string){
+   const statement=w.db.prepare(sql);
+   return {...statement,bind(...args:unknown[]){const bound=statement.bind(...args);return {...bound,run(){
+    if(sql.startsWith('update build_features'))w.sqlite.exec("update build_workflows set phase='blocked'");
+    return bound.run();
+   }};}};
+  }} as D1Database;
+  await expect(recordFeaturePassed(intercepted,feature!,{checkpointRef:'checked',testsPassed:1,admissionId:'payer',designId:null})).rejects.toThrow('stopped or changed');
+  expect(w.sqlite.query('select status from build_features').get()).toEqual({status:'pending'});
+ }finally{w.sqlite.close();}
+});

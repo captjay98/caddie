@@ -159,9 +159,9 @@ describe("a design mock that lands in a chat reply is drawn, never printed as HT
 describe("mockups have one way onto the screen (plan 4.5)", () => {
   const read = (path: string) => readFileSync(new URL(`../apps/app/src/${path}`, import.meta.url), "utf8");
 
-  test("chat replies and the build card's latest update draw their mockups", () => {
-    expect(read("client/conversation/Channel.tsx")).toMatch(/<ReplyText text=\{part\.text\} streaming=\{part\.state === 'streaming'\} \/>/);
-    expect(read("client/conversation/ProjectWorkflow.tsx")).toMatch(/<ReplyText key=\{i\} text=\{p\.text\} streaming=\{p\.state === "streaming"\} \/>/);
+  test("chat replies and the latest update guard raw drafts behind the original-response inspector", () => {
+    expect(read("client/conversation/Channel.tsx")).toMatch(/<ReplyText text=\{part\.text\} streaming=\{part\.state === 'streaming'\} guardedArtifacts \/>/);
+    expect(read("client/conversation/ProjectWorkflow.tsx")).toMatch(/<ReplyText key=\{i\} text=\{p\.text\} streaming=\{p\.state === "streaming"\} guardedArtifacts \/>/);
   });
 
   test("Caddie keeps mockups in the design brief and never pastes HTML into a reply", () => {

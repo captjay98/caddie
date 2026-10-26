@@ -570,7 +570,7 @@ function ProjectWorkspace({
         </>
       ) : null}
       {workflow.detail || workflow.phase === "blocked" ? (
-        <p className="state-detail" role="status">
+        <div className="state-detail" role="status">
           {(() => {
             const detail = workflow.detail;
             // Human-written details (a user stop, short pointers) read as-is.
@@ -594,7 +594,7 @@ function ProjectWorkspace({
               </>
             );
           })()}
-        </p>
+        </div>
       ) : null}
       {workflow.phase === "blocked" ? (
         <div className="row-actions">
@@ -659,7 +659,7 @@ function ProjectWorkspace({
           {latestMessage.parts
             .filter((p) => p.type === "text")
             .map((p, i) =>
-              p.type === "text" ? <ReplyText key={i} text={p.text} streaming={p.state === "streaming"} /> : null,
+              p.type === "text" ? <ReplyText key={i} text={p.text} streaming={p.state === "streaming"} guardedArtifacts /> : null,
             )}
         </details>
       ) : null}

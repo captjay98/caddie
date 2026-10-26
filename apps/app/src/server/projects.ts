@@ -103,6 +103,7 @@ async function insertOrConflict(
 	try {
 		await db.prepare(sql).bind(...params).run();
 	} catch (error) {
+		if (String(error).includes('artifact_quality_required')) throw new ScopeError(409,'ARTIFACT_REVIEW_REQUIRED','This draft has not passed its independent review, or its dependencies changed.');
 		if (String(error).includes('UNIQUE constraint failed')) {
 			throw new ScopeError(409, conflictCode, `conflict: ${String(error)}`);
 		}

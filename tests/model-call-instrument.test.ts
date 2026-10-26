@@ -23,6 +23,7 @@ describe('model call leaf accounting', () => {
 		sqlite = new Database(':memory:');
 		// Read the committed append-only schema, never maintain a divergent test schema.
 		sqlite.exec(readFileSync(new URL('../apps/app/migrations/0046_model_call_usage.sql', import.meta.url), 'utf8'));
+    sqlite.exec(readFileSync(new URL('../apps/app/migrations/0051_model_completion_metadata.sql', import.meta.url), 'utf8'));
 		return sqliteD1(sqlite);
 	}
 	test('one project switches between Ultra ideation and Super status with real Flue calls and no run-label guess', async () => {
@@ -69,4 +70,11 @@ describe('model call leaf accounting', () => {
 		expect(coordinatorModelSelection({ isHome: false, ideationTurnsLeft: 2, request: 'continue building' })).toEqual({ role: 'chat', reason: 'execution_request' });
 		expect(coordinatorModelSelection({ isHome: false, ideationTurnsLeft: 2, hasImage: true })).toEqual({ role: 'vision', reason: 'image_attachment' });
 	});
+});
+
+
+test('completion metadata keeps actual stop reasons and tool-only output without storing thought text',()=>{
+ const result=modelCallRecord(event({response:{finishReason:'maxTokens',providerFinishReason:'length',output:{role:'assistant',content:[{type:'thinking',thinking:'private thought'},{type:'toolCall',id:'call',name:'write_file',arguments:{}}]}}} as unknown as Partial<Turn>));
+ expect(result.finishReason).toBe('maxTokens');expect(result.providerFinishReason).toBe('length');expect(result.outputKind).toBe('tool-only');
+ expect(JSON.stringify(result)).not.toContain('private thought');
 });

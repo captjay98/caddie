@@ -145,7 +145,7 @@ describe('Part A — spend instrument wiring (real agents, real D1)', () => {
 		expect((await spendSnapshot(db, PAYER)).reservedMicros).toBe(0);
 	});
 
-	test('a turn that errors releases its reservation (release path)', async () => {
+	test('a turn that errors without usage retains its unknown liability', async () => {
 		await createBuildPayer(db, PAYER, 5 * MICROS_PER_UNIT);
 		// Script a provider error so the turn settles with isError: true but AFTER
 		// the reserve (the reserve happens in the interceptor before next(); the
@@ -164,8 +164,8 @@ describe('Part A — spend instrument wiring (real agents, real D1)', () => {
 		const rows = (await db.prepare('select "status" from "build_spend_reservations"').all<{ status: string }>()).results;
 		// A reservation was made then released (nothing settled, nothing still open).
 		expect(rows.length).toBe(1);
-		expect(rows[0].status).toBe('released');
-		expect((await spendSnapshot(db, PAYER)).reservedMicros).toBe(0);
+		expect(rows[0].status).toBe('reserved');
+		expect((await spendSnapshot(db, PAYER)).reservedMicros).toBeGreaterThan(0);
 	});
 
 	// FINDING #5 (review 2026-10-23): isError is diagnostic, not proof no paid

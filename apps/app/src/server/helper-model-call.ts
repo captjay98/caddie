@@ -1,3 +1,4 @@
+import { classifyBuildFailure } from './build-recovery.ts';
 /** Bounded direct helper calls, with one receipt per issued physical request.
  * Unknown usage remains NULL; observation failures cannot change the real result.
  */
@@ -13,7 +14,7 @@ const HELPER_MAX_RETRIES = 2;
 const HELPER_MAX_RETRY_DELAY_MS = 10_000;
 function object(value: unknown): Record<string, unknown> { return value !== null && typeof value === 'object' ? value as Record<string, unknown> : {}; }
 function count(value: unknown): number | null { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null; }
-export function isTransientHelperStatus(status: number): boolean { return status === 408 || status === 409 || status === 429 || (status >= 500 && status <= 599); }
+export function isTransientHelperStatus(status: number): boolean { return classifyBuildFailure({status,readOnly:true}).action==='retry-same-operation'; }
 
 /** A server-provided minimum wait is never clamped into an earlier retry. */
 export function helperRetryDelayMs(headers: Headers, attempt: number, maxDelayMs = HELPER_MAX_RETRY_DELAY_MS): number {
@@ -29,10 +30,11 @@ export function helperRetryDelayMs(headers: Headers, attempt: number, maxDelayMs
 }
 function terminalProviderError(body: unknown): boolean {
  const error = object(object(body).error);
- return ['insufficient_quota','quota_exhausted','budget_exhausted','budget_denied','invalid_api_key','permission_denied'].includes(String(error.code ?? error.type ?? ''));
+ const result=classifyBuildFailure({code:String(error.code??error.type??''),readOnly:true});
+ return result.kind==='budget-exhausted'||result.kind==='needs-user';
 }
 function transientTransport(error: unknown): boolean {
- return error instanceof TypeError || (error instanceof Error && /socket|network|connection|fetch failed/i.test(error.message));
+ return classifyBuildFailure({transportError:error,readOnly:true}).action==='retry-same-operation';
 }
 function withSignal<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T> {
  signal.throwIfAborted();
