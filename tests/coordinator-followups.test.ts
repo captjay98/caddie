@@ -177,8 +177,11 @@ describe('coordinator plan-save honesty (FarmLog AI rewrite fix)', () => {
 describe('coordinator design-save recovery', () => {
 	const specialistSource = readFileSync(new URL('../apps/app/src/agents/specialists.ts', import.meta.url), 'utf8');
 
-	test('the DESIGN STEP says to author directly when a delegate returns no SAVED:', () => {
-		expect(coordinatorSource).toContain('If the designer returns text without a SAVED: confirmation');
+	test('the DESIGN STEP delegates to the designer first, authoring inline only as a fallback', () => {
+		// Delegate-first is the fix for the coordinator doing design itself on
+		// its own chat model instead of the purpose-built designer (glm-5.3-flash).
+		expect(coordinatorSource).toContain('DELEGATE the designer specialist to produce the design brief — do not write it yourself on the first pass');
+		expect(coordinatorSource).toContain('If — and only if — the designer returns text WITHOUT a SAVED: confirmation');
 		expect(coordinatorSource).toContain('do NOT stop and do NOT re-delegate the same hand-off');
 		expect(coordinatorSource).toContain("call write_plan_note yourself with kind:'design'");
 	});
