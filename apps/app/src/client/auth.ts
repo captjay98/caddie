@@ -1,5 +1,5 @@
 import { createAuthClient } from 'better-auth/client';
-import { createElement, useCallback, useEffect, useState, type ReactElement } from 'react';
+import { createElement, useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 
 /**
  * P01 client identity: sign-in panel for the Caddie SPA.
@@ -172,6 +172,7 @@ function judgeField(props: {
 	type?: string;
 	autoComplete?: string;
 	hint?: string;
+	autoFocus?: boolean;
 }): ReactElement {
 	return createElement(
 		'label',
@@ -183,6 +184,8 @@ function judgeField(props: {
 			'data-testid': props.testId,
 			type: props.type ?? 'text',
 			autoComplete: props.autoComplete,
+			// Only after the person opened or switched the form, never on page load.
+			autoFocus: props.autoFocus,
 			value: props.value,
 			// Not a hard `minLength`: the server owns the password rule and its
 			// plain sentence is what a too-short password must show.
@@ -194,14 +197,17 @@ function judgeField(props: {
 
 /**
  * The judge door, added beside the providers. Collapsed it is one quiet link
- * ("Judging the hackathon? Use your access code"); open it offers the
- * first-visit form (access code + judge name + password) and, for someone who
- * judged before, name + password. Access is read once from
+ * ("Judging the hackathon? Use your access code"). Opened it is its own
+ * titled form — the providers step aside (the panel hides them on
+ * `onOpenChange`) so a judge sees one thing to do: "Judge access" (access
+ * code + judge name + password, "Start judging") or, for someone who judged
+ * before, "Welcome back" (name + password, "Sign in"). "Other ways to sign in"
+ * closes it and returns focus to the door. Access is read once from
  * `GET /api/judge/access`; an unknown or failed read is treated as CLOSED and
  * no judge option is shown — an older build without the endpoint must not
  * surface a control that cannot work.
  */
-export function JudgeAccessBlock(props: { callbackURL: string }): ReactElement | null {
+export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (open: boolean) => void }): ReactElement | null {
 	const [access, setAccess] = useState<JudgeAccess | null>(null);
 	const [open, setOpen] = useState(false);
 	const [mode, setMode] = useState<'start' | 'sign-in'>('start');
@@ -210,6 +216,20 @@ export function JudgeAccessBlock(props: { callbackURL: string }): ReactElement |
 	const [password, setPassword] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const doorRef = useRef<HTMLButtonElement | null>(null);
+	const [focusDoor, setFocusDoor] = useState(false);
+	const { onOpenChange } = props;
+
+	useEffect(() => {
+		onOpenChange?.(open);
+	}, [open, onOpenChange]);
+
+	useEffect(() => {
+		if (!open && focusDoor) {
+			doorRef.current?.focus();
+			setFocusDoor(false);
+		}
+	}, [open, focusDoor]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -269,6 +289,7 @@ export function JudgeAccessBlock(props: { callbackURL: string }): ReactElement |
 			'button',
 			{
 				type: 'button',
+				ref: doorRef,
 				className: 'btn-ghost judge-link',
 				'data-testid': 'judge-link',
 				onClick: () => {
@@ -292,12 +313,12 @@ export function JudgeAccessBlock(props: { callbackURL: string }): ReactElement |
 						void signInAsJudge();
 					},
 				},
-				judgeField({ testId: 'judge-name', label: 'Judge name', value: name, onChange: setName, autoComplete: 'username' }),
+				judgeField({ testId: 'judge-name', label: 'Judge name', value: name, onChange: setName, autoComplete: 'username', autoFocus: true }),
 				judgeField({ testId: 'judge-password', label: 'Password', value: password, onChange: setPassword, type: 'password', autoComplete: 'current-password' }),
 				createElement(
 					'button',
 					{ key: 'submit', type: 'submit', className: 'btn-key', 'data-testid': 'judge-sign-in', disabled: busy },
-					busy ? 'Signing in…' : 'Sign in as a judge',
+					busy ? 'Signing in…' : 'Sign in',
 				),
 			)
 		: createElement(
@@ -311,7 +332,7 @@ export function JudgeAccessBlock(props: { callbackURL: string }): ReactElement |
 						void startJudging();
 					},
 				},
-				judgeField({ testId: 'judge-code', label: 'Access code', value: code, onChange: setCode, autoComplete: 'off' }),
+				judgeField({ testId: 'judge-code', label: 'Access code', value: code, onChange: setCode, autoComplete: 'off', autoFocus: true }),
 				judgeField({ testId: 'judge-name', label: 'Judge name', value: name, onChange: setName, autoComplete: 'username', hint: 'Letters, numbers and dashes.' }),
 				judgeField({ testId: 'judge-password', label: 'Password', value: password, onChange: setPassword, type: 'password', autoComplete: 'new-password', hint: 'At least 10 characters.' }),
 				createElement(
@@ -321,19 +342,29 @@ export function JudgeAccessBlock(props: { callbackURL: string }): ReactElement |
 				),
 			);
 
+	const title = showingSignIn ? 'Welcome back' : 'Judge access';
+	const lede = !canStart
+		? 'New judge places aren’t open right now. Sign in if you already have a judge account.'
+		: showingSignIn
+			? 'Sign in with the judge name and password you chose.'
+			: 'Enter the access code from the hackathon, then choose a judge name and password so you can come back later.';
+
 	return createElement(
 		'div',
 		{
 			'data-testid': 'judge-panel',
-			style: { display: 'grid', gap: '0.6rem', marginTop: '1rem', textAlign: 'left' },
+			style: { display: 'grid', gap: '0.6rem', textAlign: 'left' },
 		},
-		!canStart
-			? createElement(
-					'p',
-					{ key: 'closed', className: 'sign-in-unavailable-note', 'data-testid': 'judge-closed' },
-					'New judge places aren’t open right now. Sign in if you already have a judge account.',
-				)
-			: null,
+		createElement(
+			'div',
+			{ key: 'head', className: 'judge-panel-head' },
+			createElement('h2', { key: 'title', className: 'judge-panel-title' }, title),
+			createElement(
+				'p',
+				{ key: 'lede', className: 'judge-panel-lede', 'data-testid': canStart ? 'judge-panel-lede' : 'judge-closed' },
+				lede,
+			),
+		),
 		form,
 		error
 			? createElement(
@@ -355,7 +386,7 @@ export function JudgeAccessBlock(props: { callbackURL: string }): ReactElement |
 							setError(null);
 						},
 					},
-					'Sign in as a judge',
+					'Judged here before? Sign in instead',
 				)
 			: null,
 		canStart && showingSignIn
@@ -374,6 +405,21 @@ export function JudgeAccessBlock(props: { callbackURL: string }): ReactElement |
 					'First time judging? Use your access code',
 				)
 			: null,
+		createElement(
+			'button',
+			{
+				key: 'back',
+				type: 'button',
+				className: 'btn-ghost judge-link',
+				'data-testid': 'judge-back',
+				onClick: () => {
+					setOpen(false);
+					setFocusDoor(true);
+					setError(null);
+				},
+			},
+			'Other ways to sign in',
+		),
 	);
 }
 
@@ -397,6 +443,8 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 	const [error, setError] = useState<{ provider: SocialProvider; view: SignInErrorView } | null>(null);
 	const [callbackError, setCallbackError] = useState<SignInErrorView | null>(null);
 	const [availability, setAvailability] = useState<{ google: boolean; github: boolean } | null>(null);
+	// While the judge form is open the providers step aside: one thing to do.
+	const [judgeOpen, setJudgeOpen] = useState(false);
 
 	// Read an OAuth-callback error returned as ?error=<code> (e.g. the invite
 	// gate). Render it as a styled notice, then strip the params from the URL so
@@ -488,7 +536,9 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 	return createElement(
 		'section',
 		{ 'data-testid': 'sign-in-panel', 'aria-label': 'Sign in' },
-		neitherConfigured
+		judgeOpen
+			? null
+			: neitherConfigured
 			? createElement(
 					'p',
 					{
@@ -538,7 +588,7 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 								),
 					);
 				}),
-		callbackError
+		!judgeOpen && callbackError
 			? createElement(
 					'div',
 					{
@@ -551,7 +601,7 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 					createElement('span', null, ` ${callbackError.detail}`),
 				)
 			: null,
-		error
+		!judgeOpen && error
 			? createElement(
 					'div',
 					{
@@ -590,6 +640,6 @@ export function SignInPanel(props: SignInPanelProps = {}): ReactElement {
 		// The judge door (S06) sits quietly beside the providers. It reads its
 		// own availability and renders nothing when judge access is off or
 		// unknown — including on an older build with no /api/judge/access.
-		createElement(JudgeAccessBlock, { key: 'judge', callbackURL }),
+		createElement(JudgeAccessBlock, { key: 'judge', callbackURL, onOpenChange: setJudgeOpen }),
 	);
 }

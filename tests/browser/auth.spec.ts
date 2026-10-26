@@ -252,4 +252,40 @@ test.describe('one sign-in everywhere (plan 5.2; calm redo 2026-10-25)', () => {
 		expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 		if (process.env.SIGNIN_SHOTS) await page.screenshot({ path: `${process.env.SIGNIN_SHOTS}/sign-in-app-phone.png` });
 	});
+
+	// Walkthrough finding (2026-10-26): balanced wrapping split the subtitle as
+	// "Build an app from your / idea — no coding needed." It reads as one line
+	// on a computer and, when it must wrap, breaks only at the dash.
+	test('the subtitle is one line on a computer and breaks only at the dash on a phone', async ({ page }) => {
+		const cases = [
+			{ width: 1440, height: 900, lines: ['Build an app from your idea — no coding needed.'] },
+			{ width: 390, height: 844, lines: ['Build an app from your idea —', 'no coding needed.'] },
+		];
+		for (const c of cases) {
+			await page.setViewportSize({ width: c.width, height: c.height });
+			await page.goto(`${BASE}/app/`);
+			const lede = page.getByTestId('sign-in-gate').locator('.signin-lede');
+			await expect(lede).toBeVisible();
+			// Rendered lines, read from each character's box (independent of markup).
+			const lines = await lede.evaluate((el) => {
+				const rows: { top: number; text: string }[] = [];
+				const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+				for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+					const text = node.textContent ?? '';
+					for (let i = 0; i < text.length; i++) {
+						const range = document.createRange();
+						range.setStart(node, i);
+						range.setEnd(node, i + 1);
+						const rect = range.getClientRects()[0];
+						if (!rect) continue;
+						const row = rows.find((r) => Math.abs(r.top - rect.top) < 4);
+						if (row) row.text += text[i];
+						else rows.push({ top: rect.top, text: text[i] });
+					}
+				}
+				return rows.sort((a, b) => a.top - b.top).map((r) => r.text.replace(/\s+/g, ' ').trim());
+			});
+			expect(lines, `${c.width}px`).toEqual(c.lines);
+		}
+	});
 });

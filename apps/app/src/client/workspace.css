@@ -429,7 +429,29 @@ a.btn-ghost.topbar-nav-link {
 }
 .signin-screen .signin-lede {
 	font-size: 1rem;
-	text-wrap: balance;
+	max-width: none;
+}
+.signin-screen .signin-nobreak {
+	white-space: nowrap;
+}
+/* Opened, the judge door is its own titled form (the providers step aside). */
+.signin-screen .judge-panel-head {
+	display: grid;
+	gap: 0.35rem;
+	margin-bottom: 0.4rem;
+}
+.signin-screen .judge-panel-title {
+	margin: 0;
+	font-size: 1.125rem;
+	font-weight: 640;
+	letter-spacing: -0.01em;
+	color: var(--color-bright);
+}
+.signin-screen .judge-panel-lede {
+	margin: 0;
+	color: var(--color-muted);
+	font-size: 0.875rem;
+	line-height: 1.5;
 }
 /* On a phone the column sits high, so the providers are in the first screen. */
 @media (max-width: 720px) {

@@ -212,6 +212,38 @@ for (const vp of VIEWPORTS) {
 			}
 		});
 
+		// Walkthrough finding (2026-10-26): opened, the judge fields appeared
+		// untitled under the Google/GitHub buttons, which still looked like the
+		// main choice, and "Start judging" sat beside an unexplained "Sign in as
+		// a judge". Opened now: a titled judge form, the providers step aside,
+		// one primary action, and the returning door says what it is for.
+		test('opening the judge door shows one titled judge form; the providers step aside and come back', async ({ browser }) => {
+			const { context, page } = await newPage(browser);
+			await stubProviders(context);
+			await stubSignedOut(context);
+			await stubJudgeAccess(context, { open: true, canStart: true });
+			await page.goto(`${BASE}/app/`);
+			await page.getByTestId('judge-link').click();
+			const panel = page.getByTestId('judge-panel');
+			await expect(panel.getByRole('heading', { name: 'Judge access' })).toBeVisible();
+			await expect(page.getByTestId('sign-in-google')).toHaveCount(0);
+			await expect(page.getByTestId('sign-in-github')).toHaveCount(0);
+			await expect(page.getByTestId('judge-code')).toBeFocused();
+			await expect(panel.getByRole('button', { name: 'Start judging' })).toBeVisible();
+			await expect(page.getByTestId('judge-returning-link')).toHaveText('Judged here before? Sign in instead');
+			// Returning judge: its own title, a plain "Sign in", focus on the name.
+			await page.getByTestId('judge-returning-link').click();
+			await expect(panel.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+			await expect(page.getByTestId('judge-sign-in')).toHaveText('Sign in');
+			await expect(page.getByTestId('judge-name')).toBeFocused();
+			// Backing out restores the providers and returns focus to the door.
+			await page.getByTestId('judge-back').click();
+			await expect(page.getByTestId('sign-in-google')).toBeVisible();
+			await expect(page.getByTestId('judge-panel')).toHaveCount(0);
+			await expect(page.getByTestId('judge-link')).toBeFocused();
+			await context.close();
+		});
+
 		test('a first visit with a short password shows the server’s plain error', async ({ browser }) => {
 			const { context, page } = await newPage(browser);
 			await stubProviders(context);

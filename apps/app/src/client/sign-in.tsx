@@ -19,7 +19,11 @@ export function SignInScreen({ callbackURL = '/app/' }: { callbackURL?: string }
 				<div className="signin-brand">
 					<Mascot mood="ready" size={56} live />
 					<h1 className="signin-title">Sign in to start building</h1>
-					<p className="signin-lede">Build an app from your idea — no coding needed.</p>
+					{/* Two unbreakable phrases: when it must wrap, it breaks at the dash. */}
+					<p className="signin-lede">
+						<span className="signin-nobreak">Build an app from your idea&nbsp;—</span>{' '}
+						<span className="signin-nobreak">no coding needed.</span>
+					</p>
 				</div>
 				<div className="signin-card">
 					<SignInPanel callbackURL={callbackURL} />
