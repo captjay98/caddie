@@ -807,10 +807,20 @@ describe("plan review and durable build approval", () => {
     }
   });
 
-  test("three actual failed repair rounds pause the approved run", async () => {
+  test("the repair ladder pauses the approved run only after six failed attempts, not three", async () => {
     const w = await world();
     try {
       const item = await approved(w);
+      // The repair ladder (always-on repair-v1) escalates across models and
+      // allows SIX checked failures (two per model) before pausing — not the
+      // old three-attempt weak fallback. Three failures must NOT pause yet.
+      for (let i = 0; i < 3; i++)
+        await recordRepairRound(w.db, item.scope, item.workflow.runId, {
+          issue: "build failure",
+          round: "repair_attempt",
+          outcome: "failed",
+        });
+      expect((await workflowRepairPause(w.db, item.workflow.runId)).paused).toBe(false);
       for (let i = 0; i < 3; i++)
         await recordRepairRound(w.db, item.scope, item.workflow.runId, {
           issue: "build failure",
@@ -1463,10 +1473,11 @@ describe("approved output and preview identity", () => {
 });
 
 describe("explicit build recovery and existing project handoff", () => {
-  test("retry preserves evidence, is idempotent, and allows only three new failures", async () => {
+  test("retry preserves evidence, is idempotent, and opens a fresh repair window", async () => {
     const w = await world();
     try {
       const item = await approved(w);
+      // Three failures under the first admission do not exhaust the ladder (6).
       for (let i = 0; i < 3; i++)
         await recordRepairRound(w.db, item.scope, item.workflow.runId, {
           issue: "build",
@@ -1476,6 +1487,7 @@ describe("explicit build recovery and existing project handoff", () => {
       await setWorkflowBlocker(w.db, item.scope, "Three failed checks");
       const retry = await retryWorkflow(w.db, item.scope, "recovery-test-1");
       expect(retry.workflow?.phase).toBe("building");
+      // Retry opens a new payer/admission, so the repair window is fresh.
       expect(
         (await workflowRepairPause(w.db, item.workflow.runId)).paused,
       ).toBe(false);
@@ -1486,14 +1498,23 @@ describe("explicit build recovery and existing project handoff", () => {
           ?.pendingKey,
       ).toBeNull();
       expect(w.count("workflow_resumes")).toBe(1);
-      for (let i = 0; i < 3; i++)
+      // The fresh window allows its own full six attempts before pausing.
+      for (let i = 0; i < 5; i++)
         await recordRepairRound(w.db, item.scope, item.workflow.runId, {
           issue: "build",
           round: "repair_attempt",
           outcome: "failed",
         });
+      expect(
+        (await workflowRepairPause(w.db, item.workflow.runId)).paused,
+      ).toBe(false);
+      await recordRepairRound(w.db, item.scope, item.workflow.runId, {
+          issue: "build",
+          round: "repair_attempt",
+          outcome: "failed",
+        });
       await rejectsCode(requireBuildApproval(w.db, item.scope), "RUN_PAUSED");
-      expect(w.count("run_rounds")).toBe(6);
+      expect(w.count("run_rounds")).toBe(9);
     } finally {
       w.sqlite.close();
     }
@@ -1735,7 +1756,7 @@ describe("app keys during a build", () => {
 });
 
 describe("specialist repair boundaries", () => {
-  test("shell test runs are refused; failed run_checks count once per receipt and stop the next effect after three attempts", async () => {
+  test("shell test runs are refused; failed run_checks count once per receipt and stop the next effect after six attempts", async () => {
     const w = await world();
     const stub = new SandboxStub({ expectedToken: "local-repair-token" });
     stub.seedImage("tag:repair:1");
@@ -1763,7 +1784,13 @@ describe("specialist repair boundaries", () => {
       expect(w.count("run_rounds", "outcome='failed'")).toBe(1);
       await host.runChecks!("failure-two");
       await host.runChecks!("failure-three");
-      expect(w.count("run_rounds", "outcome='failed'")).toBe(3);
+      await host.runChecks!("failure-four");
+      await host.runChecks!("failure-five");
+      expect(w.count("run_rounds", "outcome='failed'")).toBe(5);
+      // Five failures do not yet pause — the ladder allows six (two per model).
+      expect((await workflowRepairPause(w.db, item.workflow.runId)).paused).toBe(false);
+      await host.runChecks!("failure-six");
+      expect(w.count("run_rounds", "outcome='failed'")).toBe(6);
       expect((await workflowRepairPause(w.db, item.workflow.runId)).paused).toBe(true);
       expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
       expect((await readWorkflow(w.db, item.scope))?.detail).toContain("saved");
@@ -1774,8 +1801,8 @@ describe("specialist repair boundaries", () => {
       expect(w.count("workflow_outputs")).toBe(0);
       await retryWorkflow(w.db, item.scope, "explicit-bounded-retry");
       expect((await workflowRepairPause(w.db, item.workflow.runId)).paused).toBe(false);
-      await host.runChecks!("failure-four");
-      expect(w.count("run_rounds", "outcome='failed'")).toBe(4);
+      await host.runChecks!("failure-seven");
+      expect(w.count("run_rounds", "outcome='failed'")).toBe(7);
       expect((await readWorkflow(w.db, item.scope))?.phase).toBe("building");
     } finally { await stub.stop(); w.sqlite.close(); }
   });
@@ -2069,6 +2096,17 @@ describe("host-driven feature loop", () => {
   const feature = (w: Awaited<ReturnType<typeof world>>, id: string) =>
     w.sqlite.query("select * from build_features where featureId = ?").get(id) as Record<string, unknown>;
 
+  test("the repair ladder is admitted by default — no CADDIE_REPAIR_POLICY env needed",async()=>{
+    // Reliability is not opt-in: a build opened with NO policy env var must
+    // still be stamped repair-v1, so every build gets the escalating ladder
+    // instead of the weak single-model fallback. world()/featureBuild pass no
+    // CADDIE_REPAIR_POLICY, so this exercises the real default path.
+    const w=await world();
+    try{const item=await featureBuild(w);
+      expect((await readWorkflow(w.db,item.scope))?.repairPolicyVersion).toBe('repair-v1');
+    }finally{w.sqlite.close();}
+  });
+
   test("a model cannot hand a technical check failure back to the owner while repair routes remain",async()=>{
     const w=await world();const stub=new SandboxStub({expectedToken:'local-feature-token'});stub.seedImage('tag:feature:1');await stub.start();
     try{const item=await featureBuild(w);w.sqlite.prepare("update build_workflows set repairPolicyVersion='repair-v1' where projectId=?").run(item.project.id);const payer=(await readWorkflow(w.db,item.scope))!.spendPayerId;
@@ -2200,18 +2238,18 @@ describe("host-driven feature loop", () => {
       await host.finishFeature("log-feed", "checkpoint-first");
       const saved = feature(w, "log-feed").checkpointRef;
       await host.buildNextFeature();
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      for (let attempt = 1; attempt <= 6; attempt++) {
         const result = await host.finishFeature("view-dashboard", `before-resume-${attempt}`) as { paused: boolean };
-        expect(result.paused).toBe(attempt === 3);
+        expect(result.paused).toBe(attempt === 6);
       }
       await retryWorkflow(w.db, item.scope, "resume-new-test-window");
       const resumed = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
       await resumed.buildNextFeature();
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      for (let attempt = 1; attempt <= 6; attempt++) {
         const result = await resumed.finishFeature("view-dashboard", `after-resume-${attempt}`) as { paused: boolean };
-        expect(result.paused).toBe(attempt === 3);
+        expect(result.paused).toBe(attempt === 6);
       }
-      expect(w.count("run_rounds", "issue = 'view-dashboard:new-tests' and outcome = 'failed'")).toBe(6);
+      expect(w.count("run_rounds", "issue = 'view-dashboard:new-tests' and outcome = 'failed'")).toBe(12);
       expect(feature(w, "log-feed").checkpointRef).toBe(saved);
     } finally { await stub.stop(); w.sqlite.close(); }
   });
@@ -2269,17 +2307,17 @@ describe("host-driven feature loop", () => {
       stub.setBehavior("bun run build", { stdout: "built", writes: { [`${root}/dist/main.js`]: 'console.log("feed")' } });
       // A newer draft must never replace the design the owner approved.
       await createPlanDocRevision(w.db, item.scope, { kind: "design", body: "# Unapproved replacement" });
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      for (let attempt = 1; attempt <= 6; attempt++) {
         const outcome = await host.verifyBuild(`visual-${attempt}`) as { passed: boolean; paused: boolean; next: string };
         expect(outcome.passed).toBe(false);
-        expect(outcome.paused).toBe(attempt === 3);
+        expect(outcome.paused).toBe(attempt === 6);
         expect(outcome.next).toContain("Log feed action is missing");
       }
       expect(new Set(capturedDesigns)).toEqual(new Set([item.design.id]));
       expect(w.count("workflow_outputs")).toBe(0);
       expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
-      expect(w.count("run_rounds", "issue = 'visual-fidelity' and outcome = 'failed'")).toBe(3);
-      expect(w.count("run_verifications", "\"check\" = 'visual-fidelity' and passed = 0")).toBe(3);
+      expect(w.count("run_rounds", "issue = 'visual-fidelity' and outcome = 'failed'")).toBe(6);
+      expect(w.count("run_verifications", "\"check\" = 'visual-fidelity' and passed = 0")).toBe(6);
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 
@@ -3299,24 +3337,23 @@ describe("part P: a module builder's repair limit and working copy are its own",
     return { w, stub, item, root, host, moduleStatus, slots };
   }
 
-  test("a module that spends its three tries stops only itself; the other module keeps building", async () => {
+  test("a module that spends its six tries stops only itself; the other module keeps building", async () => {
     const m = await modulesWorld();
     try {
       const feed = await m.host("feed");
-      for (const attempt of ["feed-1", "feed-2", "feed-3"]) {
+      for (const attempt of ["feed-1", "feed-2", "feed-3", "feed-4", "feed-5", "feed-6"]) {
         const outcome = (await feed.runChecks!(attempt)) as { passed: boolean };
         expect(outcome.passed).toBe(false);
       }
-      // MUTATION: send the module's repair pause to the build-wide blocker,
-      // and the phase flips to blocked while feed stays building. (failModule
-      // stores 'stopped', the same status as a manual stop, by design.)
+      // feed spent its own six-attempt repair window: it stops ITSELF (the
+      // module's repair pause -> the build-wide blocker), while feed's slot
+      // frees and the project phase stays building for the other module.
       expect(await m.moduleStatus("feed")).toBe("stopped");
       expect(m.slots()).toBe(1); // feed's slot is free; tasks still holds its own
       expect((await readWorkflow(m.w.db, m.item.scope))?.phase).toBe("building");
 
       // The other module is not refused: its first failure is its own first
-      // try. MUTATION: count every issue in the run (the old rule), and this
-      // call is refused with RUN_PAUSED because of feed's spent tries.
+      // try, counted against tasks' own window — not feed's spent tries.
       const tasks = await m.host("tasks");
       const first = (await tasks.runChecks!("tasks-1")) as { passed: boolean; paused: boolean };
       expect(first.passed).toBe(false);
@@ -3324,7 +3361,7 @@ describe("part P: a module builder's repair limit and working copy are its own",
       expect(await m.moduleStatus("tasks")).toBe("building");
       expect((await readWorkflow(m.w.db, m.item.scope))?.phase).toBe("building");
       // feed's own spent tries still count for feed.
-      await rejectsCode(feed.runChecks!("feed-4"), "RUN_PAUSED");
+      await rejectsCode(feed.runChecks!("feed-7"), "RUN_PAUSED");
     } finally {
       m.w.sqlite.close();
       await m.stub.stop();

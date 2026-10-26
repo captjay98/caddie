@@ -79,6 +79,8 @@ export interface BuildWorkflow {
   updatedAt: string;
   /** This build attempt's payer id (build:<runId>:<startMs>); rewritten on retry. Anchors the absolute deadline. */
   spendPayerId?: string | null;
+  /** 'repair-v1' once the build is admitted to the escalating repair ladder (always stamped at build open). */
+  repairPolicyVersion?: string | null;
   approvedDesignRevisionId?: string | null;
   /** The highest 'looks' revision when the plan was approved; only newer proposals count (0044). */
   looksBaseline?: number | null;
@@ -138,10 +140,14 @@ async function openBuildSpendPayer(
     .bind(payerId, now(), scope.projectId)
     .run();
   // Policy is stamped only at a new, operator-enabled admission. A replay/model switch never resets it.
-  if ((opts.env as { CADDIE_REPAIR_POLICY?: string } | undefined)?.CADDIE_REPAIR_POLICY === REPAIR_POLICY_VERSION) {
-    await db.prepare('update build_workflows set repairPolicyVersion=? where projectId=? and spendPayerId=?')
-      .bind(REPAIR_POLICY_VERSION, scope.projectId, payerId).run();
-  }
+  // The repair ladder is default-and-only: every admission is stamped repair-v1
+  // so a build always gets the escalating multi-model ladder, never the weak
+  // single-model fallback. (Previously gated behind CADDIE_REPAIR_POLICY, which
+  // left reliability opt-in and silently off — the cause of a judge build
+  // giving up at 3/4 instead of escalating. A replay/model switch never resets
+  // it: the stamp is bound to this payer and only set once.)
+  await db.prepare('update build_workflows set repairPolicyVersion=? where projectId=? and spendPayerId=?')
+    .bind(REPAIR_POLICY_VERSION, scope.projectId, payerId).run();
   // The stored value wins (a replay keeps the first payer); read it back so the
   // registry always maps to the payer actually on the row.
   const stored = (
