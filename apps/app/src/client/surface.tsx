@@ -1338,7 +1338,10 @@ function CheckBody(props: { projectId: string; openScore: boolean; focusClaimTyp
 					</section>
 				)}
 			</div>
-			<details className="project-secondary" open={props.openScore || Boolean(props.focusClaimType)} data-testid="project-entry-checks"><summary>{personal ? 'Project evidence' : 'Submission readiness, rules & judging'}</summary>
+			{/* Owner 2026-10-30: the hand-in list, the judging rubric and the
+			    sources repeat the Submit tab and buried the Build tab in text.
+			    They stay reachable only from a direct link (a score or claim). */}
+			{props.openScore || props.focusClaimType ? <details className="project-secondary" open data-testid="project-entry-checks"><summary>{personal ? 'Project evidence' : 'Submission readiness, rules & judging'}</summary>
 			{/* N of M ready (§4): from the real checklist, never an estimate. */}
 			<section className="card-surface settings-panel" data-testid="check-readiness">
 				{loadError ? (
@@ -1400,7 +1403,7 @@ function CheckBody(props: { projectId: string; openScore: boolean; focusClaimTyp
 			    own header and sections — wrapping it in another fold made cards
 			    three deep (owner steering, 2026-10-15), so it renders directly. */}
 			<EvidenceDrawer projectId={props.projectId} focusClaimType={props.focusClaimType} />
-			</details>
+			</details> : null}
 		</div>
 	);
 }
