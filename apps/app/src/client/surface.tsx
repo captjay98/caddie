@@ -1203,13 +1203,13 @@ export function SubmissionPage(): ReactElement {
 					<ProjectGateSoft>
 						{(projectId) => (
 							<nav className="submission-related" data-testid="submission-related" aria-label="Related surfaces">
-								<Link to="/evidence" className="related-card card-surface" data-testid="submission-evidence-link" search={{ project: projectId }}>
-									<b>See what Caddie checked</b>
-									<span>The rules it read and the proof behind every line of the checklist.</span>
+								<Link to="/evidence" className="related-card card-surface" data-testid="submission-evidence-link" search={{ project: projectId, open: 'score' }}>
+									<b>The rules Caddie read</b>
+									<span>Each line of your list, with the contest page it came from.</span>
 								</Link>
 								<Link to="/judge" className="related-card card-surface" data-testid="submission-judge-link" search={{ project: projectId }}>
-									<b>What judges look for</b>
-									<span>Caddie's honest read of each criterion — never a predicted score.</span>
+									<b>How judges score</b>
+									<span>The contest’s judging criteria and what your project shows for each.</span>
 								</Link>
 							</nav>
 						)}

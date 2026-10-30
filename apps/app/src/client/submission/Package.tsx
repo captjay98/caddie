@@ -300,15 +300,18 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string; 
 		<section aria-label="Submission package" className="submission-panel" data-testid="submission-package">
 			<div className="r-section-head">
 				<div>
-					<div className="project-caddie-heading"><Mascot mood={detail?.confirmations.length ? 'done' : 'ready'} size={48} /><h2 className="ev-title">Prepare your submission</h2></div>
-					<p className="page-lede">Get the pieces of your submission ready here. You’ll submit them on the contest site.</p>
+					<div className="project-caddie-heading"><Mascot mood={detail?.confirmations.length ? 'done' : 'ready'} size={48} /><h2 className="ev-title">Get ready to submit</h2></div>
+					<p className="page-lede">Caddie reads the contest’s rules and lists what to hand in. You submit on the contest site.</p>
 				</div>
 				<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
 					{busy ? 'Loading…' : 'Refresh'}
 				</button>
 			</div>
 
-			{props.deadline ? (
+			{/* The project header already counts down to the deadline (owner
+			    2026-10-30: "Ends today" repeated "Closes in 2 h"). Shown only
+			    once there is a list to finish against it. */}
+			{props.deadline && record !== null ? (
 				<p className="submission-deadline" data-testid="submission-deadline">
 					<Icon name="clock" title="" /> <span>{props.deadline}</span>
 				</p>
@@ -344,10 +347,11 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string; 
 
 			{record === null ? (
 				<div className="submission-empty">
-					<h3 className="state-title">Start the hand-in checklist</h3>
+					<h3 className="state-title">What you’ll hand in</h3>
 					<p className="state-detail">
-						One line for each thing the rules ask for — a demo video, a code link, a licence — with the
-						rule that asks for it. Caddie only uses rules it has read; nothing is assumed.
+						Most contests ask for a link to the app, a short demo video, the code and a write-up. Caddie
+						makes the list from this contest’s own rules, one line per thing they ask for, with the rule
+						beside it.
 					</p>
 					<label className="stack-toggle">
 						<input
@@ -356,12 +360,12 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string; 
 							checked={reuseRequired}
 							onChange={(event) => setReuseRequired(event.target.checked)}
 						/>{' '}
-						The rules ask me to say what I reused (work made before the contest)
+						I used code or designs I made before the contest
 					</label>
-					<p className="state-detail">If you tick this, you confirm that statement yourself before the checklist can be exported.</p>
+					<p className="state-detail">Many contests ask you to say so. If you tick this, the list adds a line for it.</p>
 					<div>
 						<button type="button" className="btn-key" onClick={() => void createPackage()} disabled={busy}>
-							{busy ? 'Starting…' : 'Start the checklist'}
+							{busy ? 'Making your list…' : 'Make my hand-in list'}
 						</button>
 					</div>
 				</div>

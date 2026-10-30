@@ -462,12 +462,12 @@ test.describe('P13 judge + submission surfaces (composed build, stubbed /api)', 
 
 		await page.goto(`${BASE}/app/submission?project=proj-a`);
 		await expect(page.locator('section[aria-label="Submission package"]')).toBeVisible();
-		await expect(page.getByText('Start the hand-in checklist')).toBeVisible();
+		await expect(page.getByText('What you’ll hand in')).toBeVisible();
 
 		// Create with the reuse disclosure flagged; the real REST shape is
 		// POST /api/projects/:projectId/submission/packages { reuseRequired }.
-		await page.getByText('The rules ask me to say what I reused (work made before the contest)').click();
-		await page.getByRole('button', { name: 'Start the checklist' }).click();
+		await page.getByText('I used code or designs I made before the contest').click();
+		await page.getByRole('button', { name: 'Make my hand-in list' }).click();
 		expect(state.created).not.toBeNull();
 		expect(new URL(state.created!.url).pathname).toBe('/api/projects/proj-a/submission/packages');
 		expect(state.created!.body).toEqual({ reuseRequired: true });

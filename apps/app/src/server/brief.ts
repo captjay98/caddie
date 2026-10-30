@@ -462,12 +462,17 @@ async function hackathonDeadlineCard(db: D1Database, scope: Scope, nowIso: strin
 	} catch (error) {
 		console.error('brief: deadline submission steps failed:', error);
 	}
+	// Caddie never submits for you, so it cannot know you did; it can know the
+	// hand-in list is complete (owner 2026-10-30: the card kept saying "still
+	// needs a final pass").
+	const listDone = Boolean(steps && steps.length > 0 && steps.every((step) => step.done));
+	const unconfirmed = hackathon.deadlineUtc ? '' : ' Caddie hasn’t confirmed the closing time — confirm the exact time on the contest site.';
 	return [{
 		id: newCardId('hackathon-deadline', scope.projectId),
 		projectId: scope.projectId,
 		kind: 'deadline',
-		headline: 'Leave time to tell the story',
-		summary: hackathon.deadlineUtc ? 'The app is one part of the submission. Your demo and project write-up still need a final pass.' : 'The app is one part of the submission. Your demo and project write-up still need a final pass. Caddie hasn’t confirmed the closing time — confirm the exact time on the contest site.',
+		headline: listDone ? 'Your hand-in list is complete' : 'Leave time to tell the story',
+		summary: (listDone ? 'Everything on the list is checked. Submit it on the contest site before it closes.' : 'The app is one part of the submission. Your demo and project write-up still need a final pass.') + unconfirmed,
 		evidenceIds: hackathon.deadlineClaimId ? [hackathon.deadlineClaimId] : [],
 		status: hackathon.ended ? 'handled' : 'needs-you',
 		updatedAt: nowIso,
