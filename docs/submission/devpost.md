@@ -327,10 +327,11 @@ the three names and passwords outside the repository.)
 > 2. On the sign-in page, click **"Judging the hackathon? Sign in here"**.
 > 3. Enter the judge name `<JUDGE NAME>` and the password `<JUDGE PASSWORD>`.
 >    No Google or GitHub account and no email are needed.
-> 4. **Projects** already holds the app built in the demo video,
->    **"<Name>"**. Open it to try the preview, or ask Caddie for a change. The
->    app signs in with an emailed code; the code arrives in the **test inbox**
->    on the Build tab (built apps don't send real email yet).
+> 4. **Projects** holds the project started in the demo video. Ask Caddie to
+>    carry it on, or start your own. A built app signs in with an emailed code;
+>    the code arrives in the **test inbox** on the Build tab (built apps don't
+>    send real email yet). The full build in the video was recorded on a local
+>    run of Caddie.
 > 5. Try the loop yourself: ask Caddie for a project idea, open **Discover** to
 >    see live hackathons and a contest's cited rules, then ask Caddie to plan a
 >    small app (at most 3 parts), approve the plan, pick a look, and the build

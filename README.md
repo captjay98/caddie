@@ -71,9 +71,9 @@ database (see the status table for the smoke result). You can also run Caddie
 - On the sign-in page choose **"Judging the hackathon? Sign in here"** and
   enter that name and password. No Google or GitHub account and no email are
   needed.
-- The app built in the demo video is already under **Projects**: open it, try
-  the preview, or ask Caddie for a change. You can also start a new app of your
-  own from an idea.
+- **Projects** holds the project started in the demo video: ask Caddie to
+  carry it on, or start a new app of your own from an idea. A build takes about
+  an hour. The full build shown in the video was recorded on a local run.
 - The account is shared by every judge, so you may see other judges' projects.
   It cannot publish apps.
 - **Two fresh judge accounts** (also in the testing instructions) have never
