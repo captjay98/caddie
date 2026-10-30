@@ -419,7 +419,9 @@ describe('P11 integration: discovery candidate routes are scope-checked and hone
 		const bobCandidates = await worker(jarBob, `/api/projects/${projBob}/discovery/candidates`);
 		expect(bobCandidates.status).toBe(200);
 		expect(((await bobCandidates.json()) as { candidates: unknown[] }).candidates).toHaveLength(0);
-	});
+		// The feed also asks the live sources; on a slow connection that alone
+		// passed 5 s (2026-10-30: Devpost answered in 7 s). The assertions stay.
+	}, 30_000);
 
 	test('the evaluated candidate list is conservative and the fit detail cites P10 claim ids', async () => {
 		const listRes = await worker(jarAlice, `/api/projects/${projAlice}/discovery/candidates?evaluate=1`);

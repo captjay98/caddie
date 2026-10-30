@@ -1,19 +1,28 @@
 # Caddie
 
-Caddie is an evidence-backed build assistant: it **finds** open hackathons from
-live sources, **plans** a project against the contest's real rules and your real
-hours, **builds** it through restricted specialists in an isolated sandbox,
-**proves** it with machine-checked receipts, and **prepares** a submission
-package — then stops and lets the human press Submit.
+Caddie is an evidence-backed build assistant for non-technical owners: it
+**finds** open hackathons from live sources, **plans** a project against the
+contest's real rules, **builds** it through restricted AI specialists in an
+isolated sandbox, **proves** every part with checks it runs itself in a real
+browser, and **prepares** the hand-in list — then stops and lets the human
+press Submit.
 
-It is built as a single Cloudflare Worker (Flue 2.2.2 agents on Durable
-Objects, D1, a React SPA under `/app`, and a static landing page at `/`).
+**Built on Nebius Token Factory and NVIDIA Nemotron.** Every model call goes
+through Nebius Token Factory's OpenAI-compatible API, and the generated code is
+installed, built and tested in Token Factory sandboxes. NVIDIA Nemotron runs
+Caddie's conversation, idea brainstorming, architecture review, rules reading,
+hackathon ranking and summaries, image understanding, and the AI inside every
+app Caddie builds: four Nemotron models in all (Ultra, Super-VL, Lightning
+and Nano) — see [Nebius Token Factory and NVIDIA
+Nemotron](#nebius-token-factory-and-nvidia-nemotron).
 
-This repository is the hackathon build of Caddie. Evidence labels used
-throughout this file follow the project's rule: **LOCAL VERIFIED**,
-**LIVE VERIFIED**, **SIMULATED**, **DOCUMENTATION ONLY**, **BLOCKED**,
-**FAILED**. A mocked or local-only pass is never LIVE VERIFIED, and a model's
-own account of its work is never evidence.
+The product itself is hosted as one Cloudflare Worker (Flue 2.2.2 agents on
+Durable Objects, D1, a React app under `/app`, and the landing page at `/`).
+
+Evidence labels used throughout this file follow the project's rule:
+**LOCAL VERIFIED**, **LIVE VERIFIED**, **SIMULATED**, **DOCUMENTATION ONLY**,
+**BLOCKED**, **FAILED**. A mocked or local-only pass is never LIVE VERIFIED, and
+a model's own account of its work is never evidence.
 
 ---
 
@@ -31,20 +40,19 @@ The loop is Find → Plan → Build → Prove → Ship.
 
 ### Screenshots
 
-These are **real, committed captures** from local browser acceptance runs
-(not mock-ups):
+Real captures from the **EggOps Nigeria** build of 2026-10-30 (an egg-farm app
+for Nigerian poultry farmers, planned, designed, built in 4 parts and checked
+end to end by Caddie). **LOCAL VERIFIED**: Caddie ran on this machine; its
+models and sandbox were the real Nebius Token Factory services.
 
-- Conversation / brief — desktop: `docs/reviews/screenshots-2026-10-09/desktop-brief-chat.png`
-- Welcome chat — mobile: `docs/reviews/screenshots-2026-10-09/mobile-chat-welcome.png`
-- Brief feed — tablet: `docs/reviews/screenshots-2026-10-09/tablet-brief-chat.png`
+| | |
+| :--- | :--- |
+| ![Build checks: the part being built and its loop](docs/screenshots/2026-10-30/build-checks.png) | ![Attempts, grouped by part](docs/screenshots/2026-10-30/build-attempts.png) |
+| Build → Checks: the current part, its write → own tests → Caddie's browser checks loop, every part's state | Build → Attempts: every round, grouped by part, in plain words |
+| ![Submit tab](docs/screenshots/2026-10-30/submit-tab.png) | |
+| Submit: what you'll hand in, from the contest's own rules | |
 
-![Conversation and brief, desktop](docs/reviews/screenshots-2026-10-09/desktop-brief-chat.png)
-
-They were produced by a local run of the browser specs
-(`scripts/screenshots-navigation.ts`); they are **LOCAL VERIFIED** and are
-labelled as such. The landing page's own product art and the workspace cards on
-it are **SIMULATED** illustrations and say so on the page — they are not live
-captures.
+The landing page (`apps/site/public/shots/`) uses captures from the same run.
 
 ---
 
@@ -52,82 +60,46 @@ captures.
 
 ### Demo URL
 
-**Live at `https://caddie.jamalibrahim.dev`.** Production deployment is a
-separate, owner-gated step (the plan's gate `G4`); it has happened, and the P17
-hosted acceptance smoke is **LIVE VERIFIED** against that origin — 5/5 PASS,
-`docs/live-receipts.json` receipt `lr_5bf0b08f5db1bbcb` (deploy 2026-10-22,
-commit `5f3574a`). You can also try Caddie [locally](#run-it-locally).
+**`https://caddie.jamalibrahim.dev`.** Redeployed on 2026-10-30 on a fresh
+database (see the status table for the smoke result). You can also run Caddie
+[locally](#run-it-locally).
 
-### Getting in (once the demo is live)
+### Getting in
 
-- **No Google or GitHub account needed.** Judges sign in with an **access code**,
-  a judge name and a password.
-- The access code is **in the Devpost testing instructions**, not in this
-  repository (and it never will be).
-- On the sign-in page, use the link **"Judging the hackathon? Use your access
-  code"** and enter the code, then pick a judge name and a password. Returning
-  judges sign in with their name and password.
-- **A finished app is waiting.** When the deployment names a demo project
-  (`JUDGE_EXAMPLE_PROJECT_ID`), every new judge account starts with a copy of
-  it under Projects, marked "(example)" and ready to try, so there is something
-  working to open in the first minute. Asking Caddie to change it builds on its
-  code like any project. (`apps/app/src/server/judge-example.ts`,
-  `tests/judge-example.test.ts`, **LOCAL VERIFIED**.)
+- **One shared judge account.** Its judge name and password are in the
+  **Devpost testing instructions**, never in this repository.
+- On the sign-in page choose **"Judging the hackathon? Sign in here"** and
+  enter that name and password. No Google or GitHub account and no email are
+  needed.
+- The app built in the demo video is already under **Projects**: open it, try
+  the preview, or ask Caddie for a change. You can also start a new app of your
+  own from an idea.
+- The account is shared by every judge, so you may see other judges' projects.
+  It cannot publish apps.
 
-### Judge limits (plain words)
+### Limits on the shared account (plain words)
 
-The hosted demo is capped so a few dozen judges cannot exhaust it:
-
-- **3 projects** per judge account (the automatic home conversation is not one,
-  and neither is the example below).
-- **3 build starts per 24 hours** per judge account. A build starts when the
-  design is approved, and retrying a stopped build is another start, so a full
-  build costs one and a build that needs a retry costs two. Approving a plan
-  only starts the design and does not count.
-- **300 Caddie messages per 24 hours** per judge account. Asking for changes to
-  a plan or a design, and resuming a stopped plan, each count as one, because
-  Caddie writes a new version in reply. Messages Caddie sends itself do not
-  count.
-- **20 discovery lookups per 24 hours** per judge account: every search that
-  reaches out and spends per call. That means "check the sources again", "check
-  this contest's eligibility", a search or page read Caddie runs in chat, and a
-  contest's AI summary the first time it is written. Opening the feed, a
-  contest's detail pane, its cited rules or an already-written summary costs
-  nothing and is not counted.
-- **At most 40 judge accounts** in total (the code's default when
-  `JUDGE_ACCESS_MAX_ACCOUNTS` is unset is `40` —
-  `apps/app/src/server/judge-access.ts`).
-- **Access closes on 2026-12-16** (the deployment's `JUDGE_ACCESS_UNTIL`).
-- Judge accounts cannot publish apps.
-
-These are the demo's configured limits. The 40-place cap is a code default as
-well; every per-account quota and the closing date come from the Worker's
-environment when set (`JUDGE_MAX_PROJECTS`, `JUDGE_MAX_BUILDS_PER_DAY`,
-`JUDGE_MAX_MESSAGES_PER_DAY`, `JUDGE_MAX_DISCOVERY_PER_DAY`,
-`JUDGE_ACCESS_MAX_ACCOUNTS`, `JUDGE_ACCESS_UNTIL`), and fall back to the numbers
-above. Setting any quota to **0** means *none*: that is how a judge who already
-has an account is stopped from spending, whereas `JUDGE_ACCESS_ENABLED=0` only
-stops new accounts being created. The gate and refusal paths are in
-`apps/app/src/server/judge-access.ts` and `apps/app/src/server/judge-limits.ts`;
-the quotas themselves are exercised in `tests/judge-limits.test.ts` and the
-gate, rate limits and refusals in `tests/judge-access.test.ts`
-(**LOCAL VERIFIED**).
+So one judge cannot use up the demo for the others, the shared account has, per
+rolling 24 hours: **30 build starts**, **1,000 Caddie messages** and **60 live
+hackathon searches**, and at most **20 projects**. A build starts when the
+design is approved; retrying a stopped build is another start. Model spending
+is also capped at **$30 a day** and **$15 per project**. These are the
+deployment's settings (`JUDGE_MAX_*`, `MODEL_SPEND_*`), enforced server-side in
+`apps/app/src/server/judge-limits.ts` and
+`apps/app/src/server/model-spend-guard.ts` (**LOCAL VERIFIED** in
+`tests/judge-limits.test.ts` and `tests/model-spend-guard.test.ts`).
 
 ### A two-minute path to try
 
-*The demo is deployed at `https://caddie.jamalibrahim.dev`.* You can also run it
-locally instead — see [Run it locally](#run-it-locally).
-
-1. Open the demo URL and click **"Judging the hackathon? Use your access code"**.
-   Enter the access code from the Devpost testing instructions, choose a judge
-   name and password, and sign in. (~20 seconds.)
-2. On the landing/home screen, ask Caddie for a project idea, or open **Find**
-   to see live hackathons ranked against a profile. Pick one and open its
-   detail pane to see the cited rules verdict. (~40 seconds.)
-3. Ask Caddie to plan a small project. Watch it produce a scope/PRD/spec and
-   stop at the review gate. Approve the plan. (~40 seconds.)
-4. Let it start the build and watch the feature loop: Caddie asks the host for
-   the current feature, delegates it, then runs the checks. (~20 seconds.)
+1. Sign in as above (~20 seconds).
+2. Open **Projects** → the demo app. **Preview** runs the real app; it signs in
+   with an emailed code, and the code arrives in the **test inbox** on the
+   Build tab (built apps don't send real email yet).
+3. **Build → Build activity** shows how each part was checked: the app's own
+   tests, then Caddie's browser checks on a brand-new account.
+4. Ask Caddie for an idea, or open **Discover** for live hackathons with their
+   cited rules. Ask Caddie to plan a small app (at most 3 parts), approve the
+   plan, pick a look, and the build starts. A build takes about an hour.
 
 You are looking for one thing above all: **every claim has a receipt**, and
 when something cannot be checked, Caddie says so instead of guessing.
