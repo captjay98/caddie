@@ -280,18 +280,6 @@ for (const vp of VIEWPORTS) {
 			await expect(page.getByTestId('judge-password')).toHaveAttribute('type', 'password');
 			await context.close();
 		});
-		test('a returning judge is told plainly that a password cannot be reset, with the way back', async ({ browser }) => {
-			const { context, page } = await newPage(browser);
-			await stubProviders(context);
-			await stubSignedOut(context);
-			await stubJudgeAccess(context, { open: true, canStart: true });
-			await page.goto(`${BASE}/app/`);
-			await page.getByTestId('judge-link').click();
-			await expect(page.getByTestId('judge-forgot')).toContainText('can’t be reset');
-			await page.getByTestId('judge-forgot-start').click();
-			await expect(page.getByTestId('judge-start-form')).toBeVisible();
-			await context.close();
-		});
 		test('a first visit with a short password shows the plain password rule', async ({ browser }) => {
 			const { context, page } = await newPage(browser);
 			await stubProviders(context);

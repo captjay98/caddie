@@ -526,27 +526,8 @@ export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (o
 				? 'A finished example app will be waiting in your Projects.'
 				: null;
 
-	// Judge accounts have no email, so a forgotten password cannot be reset.
-	// Say so where it is needed, and give the honest way back in.
-	const forgotNote =
-		showingSignIn && canStart
-			? createElement(
-					'p',
-					{ key: 'forgot', className: 'judge-forgot', 'data-testid': 'judge-forgot' },
-					'Forgot your password? It can’t be reset, but you can ',
-					createElement(
-						'button',
-						{
-							type: 'button',
-							className: 'judge-inline-link',
-							'data-testid': 'judge-forgot-start',
-							onClick: () => switchMode('start'),
-						},
-						'start again with a new name',
-					),
-					'.',
-				)
-			: null;
+	// No forgotten-password note (owner 2026-10-30): judges use the shared
+	// account or a ready-made fresh one from the Devpost testing instructions.
 
 	const modeSwitch = !canStart
 		? null
@@ -614,7 +595,7 @@ export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (o
 				: null,
 		),
 		form,
-		forgotNote,
+		
 		error
 			? createElement(
 					'div',
