@@ -6,7 +6,7 @@ import { StatePanel } from '../states.tsx';
 import { deadlineTime } from './deadline-time.ts';
 import { useSessionActor, useProfile } from '../queries.ts';
 import { mergeDetailFacts } from './detail-facts.ts';
-import type { MetaPart } from '../conversation/hackathon-format.ts';
+import { compactPrize, type MetaPart } from '../conversation/hackathon-format.ts';
 
 /**
  * Hackathon detail pane (feature: "a deeper detail view, not just the Devpost
@@ -48,6 +48,7 @@ interface CandidateDigest {
 	fitTracks?: readonly { name: string; why: string }[];
 }
 export interface CandidateDetailResponse {
+	deadlineEvidence?: {utc:string;sourceUrl:string;original:string} | null;
 	candidate: { id: string; url: string; title: string; summary: string };
 	eligibility: { verdict: 'eligible' | 'ineligible' | 'unknown' };
 	digest: CandidateDigest | null;
@@ -159,7 +160,10 @@ export function ContestDetailPane(props: {
 	});
 
 	const digest = data?.digest ?? digestQuery.data?.digest ?? null;
-	const keyDetails = mergeDetailFacts(props.metaParts ?? [], props.deadline, digest?.bullets ?? []);
+	const baseDetails = mergeDetailFacts(props.metaParts ?? [], props.deadline, digest?.bullets ?? []);
+	const listingDate = props.deadline?.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? 'Closing time not confirmed';
+	// Same words and numbers as the chat card: "Nov 12", "$67.5k" (review 2026-10-28).
+	const keyDetails = {...baseDetails, facts:baseDetails.facts.map(fact => fact.key === 'deadline' ? {...fact,value:data?.deadlineEvidence?.utc ?? listingDate} : fact.key === 'prize' ? {...fact,value:compactPrize(fact.value) ?? fact.value} : fact)};
 	const deadlineFact = keyDetails.facts.find(fact => fact.key === 'deadline');
 	const deadlineView = deadlineTime(deadlineFact?.value, profile.data?.profile?.timezone ?? undefined);
 	const digestLoading = Boolean(data?.digestPending) && !digest && (readingRules || digestQuery.isPending);
@@ -194,7 +198,13 @@ export function ContestDetailPane(props: {
                 <header className="cdp-head">
                     <div className="cdp-topbar">
                         <button ref={closeRef} type="button" className="btn-ghost cdp-close" onClick={onClose} data-testid="contest-detail-close" aria-label="Close detail"><Icon name="arrowLeft" title="" /> Back</button>
-                        {data ? <span className="cdp-header-verdict" data-verdict={deadlineView.closed ? 'ineligible' : data.eligibility.verdict}>{deadlineView.closed ? 'Closed' : data.eligibility.verdict === 'eligible' ? 'Eligible' : data.eligibility.verdict === 'ineligible' ? "Can't enter" : 'Entry unconfirmed'}</span> : null}
+                        {/* The same chip as the chat card, so "Eligible" reads as a verdict, not stray text. */}
+                        {data ? (() => {
+                            const state = deadlineView.closed ? 'closed' : data.eligibility.verdict === 'eligible' ? 'eligible' : data.eligibility.verdict === 'ineligible' ? 'ineligible' : 'unknown';
+                            const label = state === 'closed' ? 'Closed' : state === 'eligible' ? 'You can enter' : state === 'ineligible' ? "Can't enter" : 'Check the rules';
+                            const icon = state === 'eligible' ? 'check' : state === 'unknown' ? 'shield' : 'x';
+                            return <span className="hk-chip hk-chip-elig cdp-header-verdict" data-eligibility={state} data-verdict={state === 'closed' ? 'ineligible' : data.eligibility.verdict} data-testid="contest-detail-header-verdict"><Icon name={icon} title="" /> {label}</span>;
+                        })() : null}
                     </div>
                     <div className="cdp-head-main">
                         <h2 className="cdp-title">{detail.isPending ? 'Loading…' : data?.candidate.title ?? 'Hackathon'}</h2>
@@ -232,12 +242,11 @@ export function ContestDetailPane(props: {
 								<div className="cdp-digest" data-testid="contest-detail-digest">
 									<div className="cdp-digest-head">
 										<span className="cdp-digest-tag">The opportunity</span>
-										<span className="cdp-digest-ai" title="This is Caddie's plain-language summary. The exact official rules are quoted in Entry rules — they are the real source of truth.">
-											AI summary · verify in Entry rules
-										</span>
 									</div>
 									{digest.headline ? <p className="cdp-headline">{digest.headline}</p> : null}
 									{digest.about ? <p className="cdp-about" data-testid="contest-detail-about">{digest.about}</p> : null}
+									{/* One calm honesty line instead of several "verify" disclaimers (review 2026-10-28). */}
+									<p className="cdp-digest-ai" data-testid="contest-detail-honesty">I summarised this from the event page. Check the official rules before you submit.</p>
 
 								</div>
 							) : detail.isPending ? null : digestLoading ? (
@@ -247,12 +256,12 @@ export function ContestDetailPane(props: {
 									</div>
 									<p className="cdp-digest-progress">
 										<span className="channel-activity-dot" aria-hidden="true" />
-										{readingRules ? 'Caddie is reading the official rules page…' : 'Caddie is reading the event page…'}
+										{readingRules ? 'I’m reading the official rules…' : 'I’m reading the event page…'}
 									</p>
 									<p className="cdp-digest-progress-detail">
 										{readingRules
-											? 'Checking who can enter first. The summary of tracks, prizes and perks comes next.'
-											: 'Pulling out what you’d build, the tracks, prizes and perks. This usually takes about 30 seconds — you can inspect Entry rules while you wait.'}
+											? 'Checking who can enter first. What you’d build and the prizes come next.'
+											: 'Pulling out what you’d build, the tracks and the prizes. This usually takes about 30 seconds.'}
 									</p>
 								</div>
 							) : (
@@ -261,7 +270,7 @@ export function ContestDetailPane(props: {
 								</p>
 							)}
 
-                            {keyDetails.facts.length || keyDetails.notes.length ? <section className="cdp-key-details" data-testid="contest-detail-key-details"><h3>Key details</h3><dl>{keyDetails.facts.map(fact => <div key={fact.key}><dt>{fact.label}</dt><dd>{fact.key === 'deadline' && deadlineView.local ? <><strong data-testid="contest-deadline-local">{deadlineView.local} · Your time</strong><small className="cdp-deadline-source">As listed: {fact.value}</small>{deadlineView.closed ? <small>Submissions closed</small> : deadlineView.today ? <small>Closes today</small> : null}</> : <>{fact.value}{fact.key === 'deadline' ? <small className="cdp-deadline-source">Exact closing time and time zone not confirmed.</small> : null}</>}</dd></div>)}</dl>{keyDetails.notes.map((note,index) => <p key={index} className="cdp-key-note">{note}</p>)}</section> : null}
+                            {keyDetails.facts.length || keyDetails.notes.length ? <section className="cdp-key-details" data-testid="contest-detail-key-details"><h3>Key details</h3><dl>{keyDetails.facts.map(fact => <div key={fact.key}><dt>{fact.label}</dt><dd>{fact.key === 'deadline' && deadlineView.local ? <><strong data-testid="contest-deadline-local">{deadlineView.local} · Your time</strong><small className="cdp-deadline-source">As listed: {data?.deadlineEvidence?.original ?? fact.value}</small>{deadlineView.closed ? <small>Submissions closed</small> : deadlineView.today ? <small>Closes today</small> : null}</> : <>{fact.key === 'deadline' ? readableDate(fact.value) : fact.value}{fact.key === 'deadline' ? <small className="cdp-deadline-source">The closing time isn’t listed.</small> : null}</>}</dd></div>)}</dl>{keyDetails.notes.map((note,index) => <p key={index} className="cdp-key-note">{note}</p>)}</section> : null}
 							{sourceSummary && !composedSource ? <details className="cdp-summary-more" data-testid="contest-detail-source-summary"><summary>From the event listing</summary><p>{sourceSummary}</p></details> : null}
                             {props.overviewEvidence}
                             {digest ? <DigestSections digest={digest} section="overview" /> : null}
@@ -274,42 +283,33 @@ export function ContestDetailPane(props: {
                                 {digest ? <DigestSections digest={digest} section="prizes" officialPrizeLabels={(data?.officialPrizes ?? []).map(prize => prize.label)} /> : data?.officialPrizes?.length ? null : <p className="cdp-digest-gap">{digestLoading ? 'Reading prize details…' : 'No prize breakdown is available. Read the official event page.'}</p>}
                             </section>
                             <section role="tabpanel" id={`${tabId}-entry`} aria-labelledby={`${tabId}-entry-tab`} hidden={tab !== 'entry'}>
-                            {keyDetails.entryNotes.length ? <section className="cdp-entry-summary"><h3>Conditions to check</h3><p className="cdp-section-note">From Caddie's summary — verify against the quoted rules.</p>{keyDetails.entryNotes.map((note,index) => <p key={index}>{note.value}</p>)}</section> : null}
-                            {!canonicalCoversEntry ? props.entryEvidence : null}
-                            {props.rulesUrl ? <a className="cdp-rules-source" href={props.rulesUrl} target="_blank" rel="noopener noreferrer">Official entry rules <Icon name="link" title="" /></a> : null}
-
-							{/* Tier 2: verbatim rules grouped by kind. */}
+                            {/* ONE "Can you enter?" section (review 2026-10-28): the answer,
+                                anything else to check, then the rule it rests on. */}
 							{(data?.groups.length ?? 0) > 0 ? (
 								<div className="cdp-fine">
-									<h3 className="cdp-section-title">Entry requirements</h3>
-									<p className="cdp-entry-verdict" data-testid="contest-detail-verdict">{data?.eligibility.verdict === 'eligible' ? 'Your profile matches the requirements checked so far.' : data?.eligibility.verdict === 'ineligible' ? 'The checked rules exclude you from this event.' : 'Some entry requirements are still unconfirmed.'}</p>
-									<p className="cdp-fine-sub">{data?.groups.filter(group => group.kind !== 'fit').length} checked {data?.groups.filter(group => group.kind !== 'fit').length === 1 ? 'category' : 'categories'}. Only recorded requirements appear here; read the official rules for the full entry conditions.</p>
+									<h3 className="cdp-section-title">Can you enter?</h3>
+									<p className="cdp-entry-verdict" data-testid="contest-detail-verdict" data-verdict={data?.eligibility.verdict}>{data?.eligibility.verdict === 'eligible' ? 'Yes, from the rules I’ve read.' : data?.eligibility.verdict === 'ineligible' ? 'No. The rules below exclude you.' : 'Not sure yet. Check the rules below.'}</p>
+									{keyDetails.entryNotes.length ? <div className="cdp-entry-summary" data-testid="contest-detail-also-check"><p className="cdp-entry-also">Also check</p><ul>{keyDetails.entryNotes.map((note,index) => <li key={index}>{note.value}</li>)}</ul></div> : null}
+                                    {!canonicalCoversEntry ? props.entryEvidence : null}
+									{/* Flat list (owner 2026-10-28): a small label per kind of
+									    rule and the quote under it — no collapsible group, no
+									    count, no nested "How this was checked" fold. */}
 									{(data?.groups ?? []).map((group) => (
-										<details open key={group.kind} className="cdp-group" data-testid={`contest-detail-group-${group.kind}`}>
-											<summary className="cdp-group-sum">
-												<Icon name="chevronDown" title="Expand" className="cdp-group-chevron" />
-												<span className="cdp-group-label">{group.label}</span>
-												<span className="cdp-group-n">
-													{group.claims.length} {group.claims.length === 1 ? 'quote' : 'quotes'}
-												</span>
-											</summary>
-											<div className="cdp-claims">
-												{group.claims.map((claim) => (
-													<div key={claim.claimId} className="cdp-claim" data-verdict={claim.verdict}>
-														<blockquote className="cdp-quote">“{claim.quote}”</blockquote>
-														{claim.reason ? <details className="cdp-check-explanation"><summary>How this was checked</summary><p className="cdp-claim-reason">{claim.reason}</p></details> : null}
-													</div>
-												))}
-											</div>
-										</details>
+										<section key={group.kind} className="cdp-group-flat" data-testid={`contest-detail-group-${group.kind}`}>
+											<p className="cdp-group-label">{group.label}</p>
+											{group.claims.map((claim) => (
+												<p key={claim.claimId} className="cdp-quote-flat" data-verdict={claim.verdict}>“{claim.quote}”</p>
+											))}
+										</section>
 									))}
+                                    {props.rulesUrl ? <a className="cdp-rules-source" href={props.rulesUrl} target="_blank" rel="noopener noreferrer">Read the full rules <Icon name="link" title="" /></a> : null}
 								</div>
 							) : data ? (
 								<div className="cdp-unread" data-testid="contest-detail-unread">
-									<p className="cdp-unread-title">Rules not read yet</p>
+                                    {keyDetails.entryNotes.length ? <div className="cdp-entry-summary" data-testid="contest-detail-also-check"><p className="cdp-entry-also">From the event page</p><ul>{keyDetails.entryNotes.map((note,index) => <li key={index}>{note.value}</li>)}</ul></div> : null}
+									<p className="cdp-unread-title">I haven’t read the rules yet</p>
 									<p className="cdp-unread-body">
-										I haven&rsquo;t read this contest&rsquo;s official rules, so eligibility stays unknown — I never guess it. Run a
-										check and I&rsquo;ll read the rules page and quote what decides it.
+										I only say you can enter after reading the official rules. Want me to check now?
 									</p>
 									{props.onCheck ? (
 										<button
@@ -328,27 +328,45 @@ export function ContestDetailPane(props: {
 						</>
 				</div>
 
+				{/* The next step stays in Caddie (review 2026-10-28): planning a
+				    project is the primary action; the event page is a quiet link. */}
 				<footer className="cdp-foot">
-					{data ? (
-						<a className="btn-ghost" href={data.candidate.url} target="_blank" rel="noreferrer noopener" data-testid="contest-detail-devpost">
-							Official event page
-							<Icon name="link" title="Official event page" />
-						</a>
+					{props.onExplore ? (
+						<button type="button" className="btn-key cdp-plan" onClick={props.onExplore} disabled={props.busy} data-testid="contest-detail-plan">
+							Plan a project for this
+						</button>
 					) : null}
 					{props.onSave ? (
 						<button type="button" className="btn-ghost" onClick={props.onSave} disabled={props.busy}>
 							{props.saved ? 'Saved' : 'Save'}
 						</button>
 					) : null}
-					{props.onExplore ? (
-						<button type="button" className="btn-key" onClick={props.onExplore} disabled={props.busy}>
-							Find an idea
-						</button>
+					{data ? (
+						<a className="cdp-event-link" href={data.candidate.url} target="_blank" rel="noreferrer noopener" data-testid="contest-detail-devpost">
+							Event page
+							<Icon name="link" title="" />
+						</a>
 					) : null}
 				</footer>
 			</aside>
 		</div>
 	);
+}
+
+/** "Required" / "Allowed" from the summary, said the way a person would. */
+function trackDetail(detail: string): string {
+	const d = detail.trim().toLowerCase();
+	if (d === 'required') return 'Your project must include this';
+	if (d === 'allowed' || d === 'optional') return 'Optional';
+	return detail;
+}
+
+/** "2026-11-12" → "Nov 12, 2026"; anything else unchanged. */
+function readableDate(value: string): string {
+	const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+	if (!m) return value;
+	const date = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+	return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(date);
 }
 
 /**
@@ -373,8 +391,8 @@ function DigestSections({ digest, section, officialPrizeLabels = [] }: { digest:
 			{fit.length > 0 ? (
 				<section className="cdp-section cdp-section--fit" data-testid="contest-detail-fit">
 					<h4 className="cdp-section-title">
-						Good fit for you
-						<span className="cdp-section-note">Caddie's suggestion, from your profile</span>
+						Why it could suit you
+						<span className="cdp-section-note">My suggestion, from your profile</span>
 					</h4>
 					<ul className="cdp-list">
 						{fit.map((f) => (
@@ -393,7 +411,7 @@ function DigestSections({ digest, section, officialPrizeLabels = [] }: { digest:
 						{tracks.map((t) => (
 							<li key={t.name} className="cdp-item" data-fit={fitNames.has(t.name.toLowerCase()) ? 'true' : undefined}>
 								<span className="cdp-item-name">{t.name}</span>
-								{t.detail ? <span className="cdp-item-detail">{t.detail}</span> : null}
+								{t.detail ? <span className="cdp-item-detail">{trackDetail(t.detail)}</span> : null}
 							</li>
 						))}
 					</ul>

@@ -23,4 +23,8 @@ test('active work refreshes promptly and a settled workflow reduces idle traffic
   expect(workflowRefreshMs(snapshot)).toBe(['planning', 'design', 'building'].includes(phase) ? 2000 : 30_000);
  }
  expect(workflowRefreshMs(undefined)).toBe(30_000);
+ const preparing = { workflow: { phase: 'ready' }, change: { status: 'proposed', proposal: null } } as unknown as WorkflowSnapshot;
+ expect(workflowRefreshMs(preparing)).toBe(2000);
+ const proposed = { workflow: { phase: 'ready' }, change: { status: 'proposed', proposal: { summary: 'Ready' } } } as unknown as WorkflowSnapshot;
+ expect(workflowRefreshMs(proposed)).toBe(30_000);
 });

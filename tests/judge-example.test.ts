@@ -1,3 +1,4 @@
+import { fixtureLegacyQualityPolicy } from './fixtures/migrations.ts';
 import type { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Scope } from '@caddie/contracts';
@@ -94,6 +95,8 @@ describe('a finished example in every judge workspace (S07b)', () => {
 			sourceConversationId: homeRun.conversationId,
 		});
 		demo = await projectScopeForUser(db, 'owner', started.project.id);
+// Fixture models a project from before the default-on quality policy (see fixtureLegacyQualityPolicy).
+fixtureLegacyQualityPolicy(sqlite, demo.projectId);
 		runId = started.workflow.runId as string;
 		planId = (await createPlanDocRevision(db, demo, { kind: 'prd', body: '# Farm log\n\nLog feed.' })).id;
 		await workflowSnapshot(db, demo);

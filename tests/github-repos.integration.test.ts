@@ -19,6 +19,7 @@ import {
 	type StartedGithubFixtureWorker,
 } from './fixtures/github-harness.ts';
 import { GithubStub } from './fixtures/github-stub.ts';
+import { allMigrationPaths } from './fixtures/migrations.ts';
 
 /**
  * Guided GitHub step — repo CREATE + CONNECT + the project↔repo link, over a
@@ -91,8 +92,8 @@ async function makeProject(name: string): Promise<string> {
 }
 
 beforeAll(async () => {
-	for (const p of ['apps/app/migrations/0019_github_project_repo.sql']) {
-		if (!existsSync(join(REPO_ROOT, p))) throw new Error(`missing: ${p}`);
+	for (const p of allMigrationPaths()) {
+		if (!existsSync(p)) throw new Error(`missing: ${p}`);
 	}
 	const { publicKey, privateKey } = generateKeyPairSync('rsa', {
 		modulusLength: 2048,
@@ -135,13 +136,7 @@ beforeAll(async () => {
 		GITHUB_WEBHOOK_SECRET,
 		GITHUB_API_BASE_URL: stub.url,
 	});
-	await applyMigrations(WORKER_BASE, [
-		join(REPO_ROOT, 'apps/app/migrations/0001_product.sql'),
-		join(REPO_ROOT, 'apps/app/migrations/0002_controls.sql'),
-		join(REPO_ROOT, 'apps/app/migrations/0006_github.sql'),
-		join(REPO_ROOT, 'apps/app/migrations/0011_home_project.sql'),
-		join(REPO_ROOT, 'apps/app/migrations/0019_github_project_repo.sql'),
-	]);
+	await applyMigrations(WORKER_BASE, allMigrationPaths());
 
 	ALICE = await signIn(worker, idp, ALICE_EMAIL, 'alice-repos', 'Alice');
 	// Trusted test-only linked identity; both installation fixtures exercise

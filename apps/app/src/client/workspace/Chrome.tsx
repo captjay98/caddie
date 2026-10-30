@@ -52,8 +52,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
 import { authClient } from '../auth.ts';
 import { SignInScreen } from '../sign-in.tsx';
-import { NotificationsBell } from './NotificationsBell.tsx';
-import { Icon } from '../icons.tsx';
+import { Icon, type IconName } from '../icons.tsx';
+import { readProfileName, readStartingPoint, suggestFirstName, type StartingPoint } from '../onboarding/Start.tsx';
 import { Composer } from '../conversation/Composer.tsx';
 import { Channel } from '../conversation/Channel.tsx';
 import { useChannelStore, standbySource as STANDBY, type ChannelDraft } from '../conversation/channel-store.ts';
@@ -70,6 +70,7 @@ import { StatePanel, failureKind } from '../states.tsx';
 import { applyTheme, browserStorage, currentTheme, saveThemeChoice, type Palette, type ThemeChoice, type ThemeMode } from '../theme.ts';
 import {
 	useAccountBrief,
+	useUnreadNotifications,
 	useAuthStatus,
 	useHomeProject,
 	useMarkBriefRead,
@@ -323,7 +324,10 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	// notice in Chat, and the Brief surface itself.
 	const accountBrief = useAccountBrief(actorMemo);
 	const markBriefRead = useMarkBriefRead(actorMemo);
-	const unseenCount = accountBrief.data?.unseenCount ?? 0;
+	// The Brief is the one inbox: its badge counts unseen cards plus unread
+	// notifications (the bell they used to live in is gone, review 2026-10-28).
+	const unreadNotes = useUnreadNotifications(actorMemo);
+	const unseenCount = (accountBrief.data?.unseenCount ?? 0) + (unreadNotes.data?.length ?? 0);
 
 	const projectList: Project[] = projects.data?.projects ?? [];
 	const buildProjects = useMemo(() => projectList.filter((p) => p.kind !== 'home'), [projectList]);
@@ -346,7 +350,17 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 			: undefined) ??
 		(paramProject ? null : buildProjects[0] ?? null);
 	const projectMissing = Boolean(paramProject) && projectList.length > 0 && !selectedProject;
-	const effectiveProjectId = projectMissing ? null : (selectedProject?.id ?? null);
+	// A ?project= on a project route names the conversation this tab is about,
+	// so while the project LIST is still loading the URL is the authority: bind
+	// to it rather than starting on no conversation and retargeting a moment
+	// later (that flip destroyed and rebuilt the dock's status card mid-load —
+	// the largest layout shift on the Preview tab, owner 2026-10-27). A param the
+	// loaded list does not know is still `projectMissing`: no conversation, as
+	// before. Sending is unaffected — the run is still created lazily on the
+	// first send, and the server owns membership for this id.
+	const effectiveProjectId = projectMissing
+		? null
+		: (selectedProject?.id ?? (projectList.length === 0 && paramProject ? paramProject : null));
 
 	// Conversation scope — the safety-critical decision.
 	const conversationKind: ConversationKind =
@@ -416,7 +430,18 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	}, [viewportMode, tabletOpen]);
 
 	// The resizable width only applies to the desktop sized column.
+	// The Brief is "empty" once it has loaded with no open card.
+	const briefEmpty = accountBrief.isSuccess && !(accountBrief.data?.cards ?? []).some((card) => card.status !== 'handled');
 	const convWidth = useConvWidth(viewportMode === 'desktop');
+
+	// Tablet: with nothing in the Brief, open with the conversation showing
+	// instead of a blank page (once per session; closing it is respected).
+	const tabletAutoOpened = useRef(false);
+	useEffect(() => {
+		if (viewportMode !== 'tablet' || !briefEmpty || tabletAutoOpened.current) return;
+		tabletAutoOpened.current = true;
+		setTabletOpen(true);
+	}, [viewportMode, briefEmpty]);
 
 	const convVisible =
 		viewportMode === 'desktop' ? convOpen : viewportMode === 'tablet' ? tabletOpen : mobileConversation;
@@ -701,6 +726,23 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 	};
 
 	const panelState = chatFull ? 'full' : convVisible ? 'open' : 'closed';
+	function exitFullScreen() {
+		void navigate({ to: '.', search: (prev: Record<string, unknown>) => ({ ...prev, pane: undefined }) });
+	}
+	// Desktop full screen: Esc returns to the split view, like any full-screen
+	// view. Ignored while typing in a field or when a dialog/menu has focus.
+	useEffect(() => {
+		if (!chatFull || !isDesktop) return;
+		const onKey = (event: globalThis.KeyboardEvent) => {
+			if (event.key !== 'Escape' || event.defaultPrevented) return;
+			const target = event.target as HTMLElement | null;
+			if (target?.closest('textarea, input, select, [role="dialog"], [role="menu"]')) return;
+			exitFullScreen();
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [chatFull, isDesktop]);
 
 	return (
 		<WorkspaceChromeContext.Provider value={context}>
@@ -853,15 +895,15 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 									{chatFull && isDesktop ? (
 										<button
 											type="button"
-											className="conv-head-btn"
+											className="conv-head-btn conv-head-btn--label"
 											data-testid="conv-exit-full"
-											aria-label="Return to split view"
-											title="Return to split view"
-											onClick={() => {
-												void navigate({ to: '.', search: (prev: Record<string, unknown>) => ({ ...prev, pane: undefined }) });
-											}}
+											title="Exit full screen (Esc)"
+											onClick={exitFullScreen}
 										>
-											<Icon name="collapse" title="Return to split view" />
+											{/* A labelled way out (review 2026-10-28): an icon alone
+											    left non-technical users feeling stuck in full screen. */}
+											<Icon name="collapse" title="" />
+											<span>Exit full screen</span>
 										</button>
 									) : null}
 									{viewportMode === 'desktop' && convOpen && !chatFull ? (
@@ -949,6 +991,8 @@ export function WorkspaceChrome(props: WorkspaceChromeProps): ReactElement {
 										markWelcomeSeen();
 										void navigate({ to: '/repositories' });
 									}}
+									name={readProfileName() ?? (suggestFirstName(displayName.data ?? null) || null)}
+									startingPoint={readStartingPoint()}
 								/>
 							) : null}
 							<Channel
@@ -1032,13 +1076,16 @@ function NavCapsule(props: {
 	convOpen?: boolean;
 	onQuickSearch?: () => void;
 }): ReactElement {
-	const { theme, toggleTheme, toggleConvOverlay } = useWorkspaceChrome();
+	const { toggleConvOverlay } = useWorkspaceChrome();
+	// Owner review 2026-10-28 (non-technical first): no wordmark, no icon-only
+	// buttons. The three destinations sit centred over the centred content;
+	// only the account stays at the right. Theme lives in the account menu,
+	// search is Ctrl/Cmd+K (and the chat header on mobile), and the bell's
+	// notifications show in the Brief, whose tab carries their count.
 	return (
-		<nav className="nav-capsule" aria-label="Primary" data-testid="nav-capsule">
-			<Link to="/" className="capsule-wordmark" data-testid="wordmark" search={withoutPane}>
-				CADDIE<b>·</b>
-			</Link>
-			<span className="capsule-divider" aria-hidden="true" />
+		<nav className="nav-capsule nav-capsule--centred" aria-label="Primary" data-testid="nav-capsule">
+			<span className="capsule-spacer" aria-hidden="true" />
+			<span className="capsule-tabs">
 			{NAV.map((item) => (
 				<Link
 					key={item.id}
@@ -1055,7 +1102,8 @@ function NavCapsule(props: {
 					) : null}
 				</Link>
 			))}
-			<span className="capsule-spacer" />
+			</span>
+			<span className="capsule-spacer capsule-end">
 			{props.showConvToggle ? (
 				<button
 					type="button"
@@ -1070,28 +1118,8 @@ function NavCapsule(props: {
 					Caddie
 				</button>
 			) : null}
-			<button
-				type="button"
-				className="capsule-icon"
-				data-testid="nav-search"
-				title="Quick search (⌘K)"
-				aria-label="Quick search"
-				onClick={props.onQuickSearch}
-			>
-				<Icon name="search" title="Search" />
-			</button>
-			<NotificationsBell />
-			<button
-				type="button"
-				className="capsule-icon theme-toggle-btn"
-				title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-				aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-				data-testid="theme-toggle"
-				onClick={toggleTheme}
-			>
-				{theme === 'dark' ? <Icon name="sun" title="Switch to light theme" /> : <Icon name="moon" title="Switch to dark theme" />}
-			</button>
 			<AccountMenu accountOpen={props.accountOpen} setAccountOpen={props.setAccountOpen} displayName={props.displayName} />
+			</span>
 		</nav>
 	);
 }
@@ -1156,7 +1184,7 @@ function MobileHeader(props: {
 			{identity === 'Caddie' ? (
 				<Link to="/" className="mobile-header-brand" data-testid="wordmark" search={keepSearch}>
 					<Mascot mood={chrome.caddieMood} size={22} live />
-					Caddie<b>·</b>
+					Caddie
 				</Link>
 			) : (
 				<span className="mobile-header-title" data-testid="mobile-header-title">
@@ -1165,7 +1193,7 @@ function MobileHeader(props: {
 			)}
 			<span className="mobile-header-spacer" />
 			{action}
-			<NotificationsBell />
+			{/* No bell: the Brief tab is the one inbox and carries the count. */}
 			<AccountMenu accountOpen={props.accountOpen} setAccountOpen={props.setAccountOpen} displayName={props.displayName} />
 		</header>
 	);
@@ -1180,8 +1208,10 @@ function AccountMenu(props: {
 	setAccountOpen: (open: boolean) => void;
 	displayName: string | null;
 }): ReactElement {
-	const { signOut } = useWorkspaceChrome();
-	const email = useSessionEmail().data ?? null;
+	const { signOut, theme, toggleTheme } = useWorkspaceChrome();
+	const rawEmail = useSessionEmail().data ?? null;
+	// Judge accounts carry a synthetic internal address; never show it.
+	const email = rawEmail && /@judges\.caddie\.invalid$/i.test(rawEmail) ? 'Judge account' : rawEmail;
 	// The name the user gave Caddie in the welcome (v2 §4) is used everywhere
 	// the account name appears; the session name is the fallback.
 	const savedName = (() => {
@@ -1223,6 +1253,10 @@ function AccountMenu(props: {
 					<Link to="/settings" search={{} as Record<string, unknown>} role="menuitem" data-testid="account-settings" onClick={() => props.setAccountOpen(false)}>
 						<Icon name="settings" title="" /> Settings
 					</Link>
+					<button type="button" role="menuitem" data-testid="theme-toggle" onClick={toggleTheme}>
+						{theme === 'dark' ? <Icon name="sun" title="" /> : <Icon name="moon" title="" />}
+						{theme === 'dark' ? 'Light theme' : 'Dark theme'}
+					</button>
 					<div className="account-menu-sep" role="separator" />
 					<button type="button" role="menuitem" data-testid="sign-out" onClick={() => void signOut()}>
 						<Icon name="arrowLeft" title="Sign out" /> Sign out
@@ -1383,6 +1417,21 @@ function TalkingAbout(props: { conversationKind: ConversationKind; label: string
 		}
 	}
 
+	// With no projects there is nothing to switch to: a plain label, no menu
+	// (review 2026-10-28 — a one-item menu read as broken).
+	if (chrome.buildProjects.length === 0 && props.conversationKind !== 'project') {
+		return (
+			<span className="talking-about">
+				<span className="talking-about-btn talking-about-pill talking-about-static" data-testid="talking-about">
+					<span className="talking-about-kicker visually-hidden">Talking about</span>
+					<span className="talking-about-scope" data-testid="conv-context-label">
+						{props.label}
+					</span>
+				</span>
+			</span>
+		);
+	}
+
 	return (
 		<span
 			className="talking-about"
@@ -1396,7 +1445,7 @@ function TalkingAbout(props: { conversationKind: ConversationKind; label: string
 				data-testid="talking-about"
 				aria-haspopup="menu"
 				aria-expanded={open}
-				title="Switch what this chat is about — the project page you are on, or everything"
+				title="Switch between the general chat and a project's chat"
 				onClick={() => setOpen((value) => !value)}
 			>
 				<span className="talking-about-kicker visually-hidden">Talking about</span>
@@ -1407,9 +1456,9 @@ function TalkingAbout(props: { conversationKind: ConversationKind; label: string
 			</button>
 			{open ? (
 				<span className="talking-about-menu" role="menu" data-testid="talking-about-menu">
-					<span className="talking-about-note">Switches what this chat is about.</span>
+					<span className="talking-about-note">Talk about everything, or one project.</span>
 					<button type="button" role="menuitem" data-testid="scope-everything" aria-current={currentId === null ? 'true' : undefined} onClick={() => goScope(null)}>
-						<Icon name="chat" title="" /> Everything
+						<Icon name="chat" title="" /> {WORDS.everything}
 					</button>
 					{chrome.buildProjects.map((project) => (
 						<button
@@ -1434,15 +1483,17 @@ function TalkingAbout(props: { conversationKind: ConversationKind; label: string
  * signal driven by the same caddieMood the mascot uses. 'thinking' = a live
  * transport (working), 'needs' = something waits for your OK, else ready.
  */
-function CaddieStatus(props: { mood: MascotMood; connecting?: boolean }): ReactElement {
+function CaddieStatus(props: { mood: MascotMood; connecting?: boolean }): ReactElement | null {
+	// Shown only when there is something to say (review 2026-10-28): working,
+	// waiting on you, stuck or connecting. Idle "Ready" told a person nothing.
 	const STATUS: Partial<Record<MascotMood, { tone: string; label: string }>> = {
 		thinking: { tone: 'working', label: 'Working…' },
 		building: { tone: 'working', label: 'Building…' },
 		needs: { tone: 'needs', label: 'Needs you' },
 		stuck: { tone: 'needs', label: 'Stuck' },
-		ready: { tone: 'ready', label: 'Ready' },
 	};
-	const s = props.connecting ? {tone:'connecting',label:'Connecting…'} : STATUS[props.mood] ?? STATUS.ready!;
+	const s = props.connecting ? { tone: 'connecting', label: 'Connecting…' } : STATUS[props.mood];
+	if (!s) return null;
 	return (
 		<span className="caddie-status" data-tone={s.tone} data-testid="caddie-status">
 			<span className="caddie-status-dot" aria-hidden="true" />
@@ -1473,41 +1524,59 @@ function WelcomePanel(props: {
 	onFind: () => void;
 	onIdea: () => void;
 	onImport: () => void;
+	/** The person's chosen name, else their account first name. */
+	name: string | null;
+	/** What they picked on the first onboarding screen, if known. */
+	startingPoint: StartingPoint | null;
 }): ReactElement {
+	// Home continues the onboarding answer instead of asking it again
+	// (owner review 2026-10-28): the picked path leads, marked "Your pick".
+	const picked = props.startingPoint;
+	const hello = props.name ? `Hi ${props.name}. ` : '';
+	const title =
+		picked === 'idea'
+			? `${hello}Let’s turn your idea into an app`
+			: picked === 'explore'
+				? `${hello}Here are three ways to begin`
+				: `${hello}Let’s find a hackathon that fits you`;
+	const cards: { id: StartingPoint | 'import'; testId: string; icon: IconName; title: string; sub: string; onClick: () => void }[] = [
+		{ id: 'hackathon', testId: 'welcome-find', icon: 'target', title: 'Find my first hackathon', sub: 'I’ll match one to what you like and what you can do', onClick: props.onFind },
+		{ id: 'idea', testId: 'welcome-idea', icon: 'sparkCheck', title: 'Start from an idea', sub: 'Tell me what you want to make, and I’ll plan it with you', onClick: props.onIdea },
+		{ id: 'import', testId: 'welcome-import', icon: 'github', title: 'Continue existing code', sub: 'Already started? Bring your code and pick up where you left off', onClick: props.onImport },
+	];
+	const ordered = picked && picked !== 'explore' ? [...cards.filter((c) => c.id === picked), ...cards.filter((c) => c.id !== picked)] : cards;
 	return (
 		<section className="welcome-panel" data-testid="welcome-panel" aria-label="Start here">
 			<div className="welcome-intro">
 				<span className="welcome-mascot" aria-hidden="true">
 					<Mascot mood="ready" size={56} live />
 				</span>
-				<h3 className="state-title">Let's find a hackathon that fits you</h3>
-				<p className="state-detail">
-					Pick a starting point below, or just tell Caddie what you want. It reads the rules, drafts a
-					plan and builds it — you approve every step. Nothing builds until you say so.
-				</p>
+				<h3 className="state-title" data-testid="welcome-title">{title}</h3>
+				<p className="state-detail">Pick one, or just tell Caddie what you want. You approve every step.</p>
 			</div>
 			<div className="welcome-templates" role="group" aria-label="Starting points">
-				<button type="button" className="welcome-card" data-testid="welcome-find" onClick={props.onFind}>
-					<span className="welcome-card-icon">
-						<Icon name="target" title="" />
-					</span>
-					<span className="welcome-card-title">Find my first hackathon</span>
-					<span className="welcome-card-sub">Caddie matches one to your interests and skills</span>
-				</button>
-				<button type="button" className="welcome-card" data-testid="welcome-idea" onClick={props.onIdea}>
-					<span className="welcome-card-icon">
-						<Icon name="sparkCheck" title="" />
-					</span>
-					<span className="welcome-card-title">Start from an idea</span>
-					<span className="welcome-card-sub">Describe what you want to build — Caddie scopes it</span>
-				</button>
-				<button type="button" className="welcome-card" data-testid="welcome-import" onClick={props.onImport}>
-					<span className="welcome-card-icon">
-						<Icon name="github" title="" />
-					</span>
-					<span className="welcome-card-title">Continue existing code</span>
-					<span className="welcome-card-sub">Bring a repo and pick up where you left off</span>
-				</button>
+				{ordered.map((card) => {
+					const isPick = picked !== null && picked !== 'explore' && card.id === picked;
+					return (
+						<button
+							key={card.id}
+							type="button"
+							className="welcome-card"
+							data-testid={card.testId}
+							data-picked={isPick ? 'true' : undefined}
+							onClick={card.onClick}
+						>
+							<span className="welcome-card-icon">
+								<Icon name={card.icon} title="" />
+							</span>
+							<span className="welcome-card-title">
+								{card.title}
+								{isPick ? <span className="welcome-card-pick"> · Your pick</span> : null}
+							</span>
+							<span className="welcome-card-sub">{card.sub}</span>
+						</button>
+					);
+				})}
 			</div>
 		</section>
 	);

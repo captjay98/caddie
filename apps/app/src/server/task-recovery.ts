@@ -10,7 +10,11 @@ export async function recoverTimedOutTask(db:D1Database,input:{runId:string;proj
  const block=async(message:string)=>{await blockBuildByPayer(db,input.admissionId,message);return {action:'stop'};};
  const admitted=buildAttemptAdmittedAt(input.admissionId,null);
  if(admitted===null||Date.now()>=admitted+3600000)return block('This build reached its time allowance. Your plan and saved work are retained. The app is not ready yet.');
- const uncertain=(await db.prepare("select operationKey,status from external_operations where runId=? and status not in ('succeeded','failed','cancelled')").bind(input.runId).all<{operationKey:string;status:string}>()).results;
+ // Only an outside effect of THIS attempt can be duplicated by a new writer.
+ // A coordinator hand-off is a message, reconciled by the dispatch layer; a
+ // stale one from the looks step (2026-10-30 EggOps, 9 h old) paused a build
+ // whose builder had simply run past its 10-minute task limit.
+ const uncertain=(await db.prepare("select operationKey,status from external_operations where runId=? and provider<>'coordinator-dispatch' and createdAt>=? and status not in ('succeeded','failed','cancelled')").bind(input.runId,new Date(admitted).toISOString()).all<{operationKey:string;status:string}>()).results;
  if(uncertain.length)return block('Caddie is checking an interrupted operation before it can safely continue. Your plan and saved work are retained.');
  const records=(await db.prepare("select recordJson from sandbox_bindings where runId=? and kind='operation' and (? is null or sessionId=?) order by updatedAt desc limit 32").bind(input.runId,input.sessionId??null,input.sessionId??null).all<{recordJson:string}>()).results;
  for(const row of records) {

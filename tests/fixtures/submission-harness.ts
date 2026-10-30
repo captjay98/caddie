@@ -6,6 +6,7 @@ import {
 	type Jar,
 	type StubProvider,
 } from './controls-harness.ts';
+import { allMigrationPaths } from './migrations.ts';
 
 /**
  * P13 test-side harness: reuses the shared P03 harness primitives (free
@@ -19,20 +20,7 @@ import {
 const SUBMISSION_FIXTURE_ENTRY = join(import.meta.dir, 'submission.ts');
 
 export function submissionMigrationPaths(): string[] {
-	const root = join(import.meta.dir, '..', '..');
-	return [
-		join(root, 'apps', 'app', 'migrations', '0001_product.sql'),
-		join(root, 'apps', 'app', 'migrations', '0002_controls.sql'),
-		join(root, 'apps', 'app', 'migrations', '0004_evidence.sql'),
-		join(root, 'apps', 'app', 'migrations', '0005_runs.sql'),
-		join(root, 'apps', 'app', 'migrations', '0010_judge.sql'),
-		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
-		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
-		join(root, 'apps', 'app', 'migrations', '0009_discovery.sql'),
-		join(root, 'apps', 'app', 'migrations', '0013_discovery_saved.sql'),
-		join(root, 'apps', 'app', 'migrations', '0014_stack_notify.sql'),
-		join(root, 'apps', 'app', 'migrations', '0015_plan_decisions.sql'),
-	];
+	return allMigrationPaths();
 }
 
 function wranglerCliPath(repoRoot: string): string {

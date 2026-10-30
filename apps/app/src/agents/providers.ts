@@ -44,6 +44,14 @@ export interface ModelRoute {
 	inputPriceMinorUnits: number;
 	/** True output price per Mtok, minor units (provider cost accounting). */
 	outputPriceMinorUnits: number;
+	/**
+	 * Cached-input price per Mtok, minor units (may be fractional). Taken from
+	 * the Token Factory bill (owner, 2026-10-29: cost ÷ usage per cached line).
+	 * The old flat "input ÷ 10" under-counted Super VL's cached tokens by half,
+	 * and cached tokens were its biggest line ($13.47 of $58.84). Absent = the
+	 * full input price, which can only over-count.
+	 */
+	cacheReadPriceMinorUnits?: number;
 	currency: string;
 	/** Max input context the model accepts (tokens). */
 	contextWindow: number;
@@ -87,12 +95,14 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		id: 'deepseek-v4.1-flash-1017', specifier: 'nebius/deepseek-ai/DeepSeek-V4.1-Flash-1017', providerId: 'nebius',
 		modelId: 'deepseek-ai/DeepSeek-V4.1-Flash-1017', pricingVersion: '2026-10-25-repair-catalog',
 		unitPriceMinorUnits: 120, inputPriceMinorUnits: 30, outputPriceMinorUnits: 120,
+		cacheReadPriceMinorUnits: 0.64, // bill 2026-10-29: $0.08 / 12.56M cached
 		currency: 'usd', contextWindow: 1048576, maxTokens: 32768,
 	},
 	{
 		id: 'glm-5.3', specifier: 'nebius/zai-org/GLM-5.3', providerId: 'nebius',
 		modelId: 'zai-org/GLM-5.3', pricingVersion: '2026-10-25-repair-catalog',
 		unitPriceMinorUnits: 440, inputPriceMinorUnits: 140, outputPriceMinorUnits: 440,
+		cacheReadPriceMinorUnits: 26, // bill 2026-10-29: $0.59 / 2.27M cached
 		currency: 'usd', contextWindow: 1024000, maxTokens: 32768,
 	},
 	{
@@ -111,6 +121,7 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		unitPriceMinorUnits: 300, // output $3.00/Mtok (budget ceiling)
 		inputPriceMinorUnits: 100, // $1.00/Mtok
 		outputPriceMinorUnits: 300, // $3.00/Mtok
+		cacheReadPriceMinorUnits: 12, // bill 2026-10-29: $0.84 / 7.03M cached
 		currency: 'usd',
 		contextWindow: 1048576,
 		// Owner 2026-10-25: max reasoning effort (ROLE_THINKING) needs output
@@ -154,6 +165,7 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		unitPriceMinorUnits: 90, // output $0.90/Mtok (budget ceiling)
 		inputPriceMinorUnits: 30, // $0.30/Mtok
 		outputPriceMinorUnits: 90, // $0.90/Mtok
+		cacheReadPriceMinorUnits: 6, // bill 2026-10-29: $13.47 / 224.48M cached
 		currency: 'usd',
 		contextWindow: 1048576,
 		// Chat, vision and appSuper all share this route, so the cap has to
@@ -245,6 +257,7 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		unitPriceMinorUnits: 50, // output $0.50/Mtok (budget ceiling)
 		inputPriceMinorUnits: 15, // $0.15/Mtok
 		outputPriceMinorUnits: 50,
+		cacheReadPriceMinorUnits: 3, // bill 2026-10-29: $0.63 / 20.99M cached
 		currency: 'usd',
 		contextWindow: 1024000,
 		// A plan revision is ~3.5k reasoning tokens + the whole PRD inside the
@@ -253,6 +266,29 @@ export const MODEL_ROUTES: readonly ModelRoute[] = [
 		// six attempts, "task completed with no text"); at 16384 the same request
 		// finished with the call (8231 tokens, 18910-char PRD). 32768 leaves room
 		// for longer plans. This is a cap, not a spend: billing is per token used.
+		maxTokens: 32768,
+	},
+	{
+		// Owner routing decision 2026-10-27 (after the model-role comparison in
+		// docs/evidence/2026-10-27-model-role-comparison/): the design/look
+		// AUTHOR route. Catalog checked live 2026-10-27 (tokenfactory
+		// models_info): image2text (text+image in), function calling + reasoning,
+		// context up to 1M. Priced $0.15 in / $0.60 out per Mtok; the catalog's
+		// cached rate stays in the plan until a receipt shows cache accounting.
+		// The vendor's video claim is NOT carried: the provider listing checked
+		// here does not advertise video. Not in VISION_ROUTE_IDS — no Caddie
+		// flow sends it images today; widening that is a separate decision.
+		id: 'minimax-m3.1-flash',
+		specifier: 'nebius/MiniMaxAI/MiniMax-M3.1-Flash',
+		providerId: 'nebius',
+		modelId: 'MiniMaxAI/MiniMax-M3.1-Flash',
+		pricingVersion: '2026-10-27-nebius-catalog',
+		unitPriceMinorUnits: 60, inputPriceMinorUnits: 15, outputPriceMinorUnits: 60,
+		cacheReadPriceMinorUnits: 1.5, // bill 2026-10-29: $0.17 / 11.31M cached
+		currency: 'usd',
+		contextWindow: 1048576,
+		// Cap headroom rule (owner 2026-10-25): max reasoning effort needs a
+		// generous ceiling; the calibration probes ran 16384 cleanly.
 		maxTokens: 32768,
 	},
 ];
@@ -284,16 +320,44 @@ export const MODEL_ROLES = {
 	 *  role so planning can be re-routed in one line. Still GLM-5.3-Flash after
 	 *  the 2026-10-20 build re-route: that decision covered implementation, not
 	 *  the PRD/design, so planning keeps its 2026-10-15 owner route until a
-	 *  separate decision moves it. */
+	 *  separate decision moves it.
+	 *
+	 *  LEGACY as of the owner routing decision 2026-10-27: the product/PRD and
+	 *  design/look authors moved to the dedicated {@link planAuthor} and
+	 *  {@link designAuthor} roles below; `plan` remains for historic run
+	 *  bindings. Never delete this role. */
 	plan: 'glm-5.3-flash',
+	/** Owner routing decision 2026-10-27: the PLAN AUTHOR (product / PRD). The
+	 *  model-role comparison probes put DeepSeek-V4.1-Flash-1017 ahead on repo/
+	 *  terminal tasks at $0.30/$1.20; the author route is recorded per run via
+	 *  authorRouteId, and the independent plan reviewer ({@link planReviewer}
+	 *  via the quality gate) can never be the same route. */
+	planAuthor: 'deepseek-v4.1-flash-1017',
+	/** Owner routing decision 2026-10-27: the independent PLAN REVIEWER — full
+	 *  GLM-5.3 (text-only), used by artifact-quality for PRD reviews. Never
+	 *  route images here, and never let it review a plan it authored (the
+	 *  quality gate filters by authorRouteId). */
+	planReviewer: 'glm-5.3',
+	/** Owner routing decision 2026-10-27: the DESIGN / LOOK AUTHOR — MiniMax
+	 *  M3.1-Flash, registered above after the live catalog check. Its
+	 *  screenshot-review probe is not proof of design-authoring quality; the
+	 *  end-to-end quality gate decides. The independent DESIGN reviewer is
+	 *  deepseek-v4.1-flash-1017 with nemotron-3.5-super-vl as the eligible
+	 *  fallback (artifact-quality design ladder) — never MiniMax itself. */
+	designAuthor: 'minimax-m3.1-flash',
 	/** Implementation + QA specialists (frontend, backend, mobile, qa). Moved
 	 *  off GLM-5.3-Flash to Nemotron-3.5-Super-VL on 2026-10-20 (owner
 	 *  direction): the cheap Flash route produced small, fixture-shaped apps,
 	 *  so the coding/QA loop now runs on the 3.5-tier generalist. Super VL is
 	 *  $0.30/$0.90 per Mtok vs Flash's $0.15/$0.50 — roughly 2x/1.8x, paid only
 	 *  on build turns. Tool calling is live-verified on this route (G1 probe,
-	 *  2026-10-18) and the project RUN BINDING records this route. */
-	build: 'nemotron-3.5-super-vl',
+	 *  2026-10-18) and the project RUN BINDING records this route.
+	 *  Owner 2026-10-29: the builder moves to MiniMax-M3.1-Flash on 'low' —
+	 *  half Super VL's input price, a quarter of its cached price (cached
+	 *  context was Super VL's biggest bill line), and Super VL thought for
+	 *  7 and 5 minutes in single Farm Ops build calls. Earlier run bindings
+	 *  keep the route they recorded. */
+	build: 'minimax-m3.1-flash',
 	/** Cheap bounded helper calls (query shaping, summarization). LIBERATED AS
 	 *  AN EXPERIMENT ON 2026-10-20 (owner asked to try Nemotron-3.5-Lightning)
 	 *  and REVERTED AGAIN the same day: on the real rules prompt at temperature
@@ -351,19 +415,53 @@ export type ModelRole = keyof typeof MODEL_ROLES;
  * cost/latency tuning is a one-line change here, not a call-site hunt.
  */
 export const ROLE_THINKING: Record<ModelRole, ThinkingLevel> = {
-	chat: 'max',
-	ideation: 'max',
-	plan: 'max',
-	build: 'max',
-	helper: 'max',
-	helperRules: 'max',
-	helperRanking: 'max',
-	helperSummary: 'max',
-	app: 'max',
-	appSuper: 'max',
-	vision: 'max',
-	architect: 'max',
+	// Owner 2026-10-29 (context hygiene): medium everywhere. 'max' was the
+	// 2026-10-25 default; the LIVE probe that day showed MiniMax-M3.1-Flash at
+	// 'max' spending all 6,000 tokens thinking (75 s) and returning nothing,
+	// while 'medium' returned the full screen in 23 s. Every saved thinking
+	// token is also carried in the conversation into the next turn, so the
+	// lower level shrinks every later request too.
+	chat: 'medium',
+	ideation: 'medium',
+	plan: 'medium',
+	planAuthor: 'medium',
+	planReviewer: 'medium',
+	// The one exception, on live evidence: MiniMax-M3.1-Flash on the merged
+	// looks task (three screens + inventory + browser checks) spent its whole
+	// 32,768-token output on reasoning twice in a row at 'medium' and was cut
+	// off before writing a byte (Farm Ops, 2026-10-29 17:38Z and 17:53Z).
+	designAuthor: 'low',
+	// Same evidence for the builder: Nemotron-3.5-Super at 'medium' thought
+	// for 437 s and 306 s in single calls (32,768 and 31,602 output tokens,
+	// one cut off with nothing written) while its normal calls take 2-20 s
+	// (Farm Ops, 2026-10-29 18:22Z and 19:31Z).
+	build: 'low',
+	helper: 'medium',
+	helperRules: 'medium',
+	helperRanking: 'medium',
+	helperSummary: 'medium',
+	app: 'medium',
+	appSuper: 'medium',
+	vision: 'medium',
+	architect: 'medium',
 };
+
+/**
+ * Context hygiene (owner 2026-10-29: "collapse old tool output"). The routes
+ * advertise ~1M-token windows, so Flue's default threshold (window minus 20k)
+ * never fired and every coordinator turn carried its whole history — 265k-400k
+ * tokens per request (2026-10-28 spend rows). Compact once a conversation
+ * passes CONTEXT_BUDGET_TOKENS: older turns, including old tool output, are
+ * folded into a summary and the most recent KEEP_RECENT_TOKENS stay verbatim.
+ */
+// Owner 2026-10-29 bill: 280M Super VL input tokens (cached and not) were
+// $30 of $58.84 — every step of a turn re-sends the whole conversation, so the
+// conversation's size is the bill. Halved from 120k/30k.
+export const CONTEXT_BUDGET_TOKENS = 60_000;
+export const KEEP_RECENT_TOKENS = 20_000;
+export function compactionFor(route: { contextWindow: number }): { reserveTokens: number; keepRecentTokens: number } {
+	return { reserveTokens: Math.max(20_000, route.contextWindow - CONTEXT_BUDGET_TOKENS), keepRecentTokens: KEEP_RECENT_TOKENS };
+}
 
 /**
  * How many user turns a brainstorm keeps the deeper `ideation` model after it
@@ -471,8 +569,10 @@ export function registerNebiusProvider(): void {
 				cost: {
 					input: route.inputPriceMinorUnits / 100,
 					output: route.outputPriceMinorUnits / 100,
-					cacheRead: route.inputPriceMinorUnits / 100 / 10,
-					cacheWrite: route.inputPriceMinorUnits / 100 / 10,
+					cacheRead: (route.cacheReadPriceMinorUnits ?? route.inputPriceMinorUnits) / 100,
+					// Token Factory bills no separate cache-write line: written
+					// tokens are ordinary input.
+					cacheWrite: route.inputPriceMinorUnits / 100,
 				},
 				contextWindow: route.contextWindow,
 				maxTokens: route.maxTokens,

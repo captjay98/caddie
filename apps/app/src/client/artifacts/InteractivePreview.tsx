@@ -71,9 +71,11 @@ export function InteractivePreview(props: {
   peek?: boolean;
 }): ReactElement {
   const frame = useRef<HTMLIFrameElement>(null);
+  const nativeReset = useRef(false);
   const windowRef = useRef<HTMLDialogElement>(null);
   const expandRef = useRef<HTMLButtonElement>(null);
   const [expanded, setExpanded] = useState(false);
+  const [device, setDevice] = useState<'phone' | 'desktop'>('desktop');
   function toggleExpanded() {
     const dialog = windowRef.current;
     if (!dialog) return;
@@ -88,6 +90,7 @@ export function InteractivePreview(props: {
     document?: string;
     /** The frame's own URL: the document is served over https. */
     url?: string;
+    nativeStorage?: boolean;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [storageWarning, setStorageWarning] = useState(false);
@@ -103,6 +106,7 @@ export function InteractivePreview(props: {
     const nonce = crypto.randomUUID();
     const key = storageKey(props.actorId, props.projectId);
     let active = true;
+    let frameOrigin = 'null';
     setLoaded(null);
     setError(null);
     setStorageWarning(false);
@@ -110,7 +114,7 @@ export function InteractivePreview(props: {
     const jar = new Map<string, string>();
     let inFlight = 0;
     const answer = (id: unknown, payload: { response?: unknown; error?: string }) =>
-      frame.current?.contentWindow?.postMessage({ kind: FETCH_RESULT_KIND, nonce, id, ...payload }, "*");
+      frame.current?.contentWindow?.postMessage({ kind: FETCH_RESULT_KIND, nonce, id, ...payload }, frameOrigin === 'null' ? '*' : frameOrigin);
     const relay = async (id: unknown, raw: unknown) => {
       const request = appRequestUrl ? checkedRelayRequest(raw) : null;
       if (!request) return answer(id, { error: "The preview can only reach the app's own /api routes." });
@@ -146,7 +150,7 @@ export function InteractivePreview(props: {
         !active ||
         !frame.current ||
         event.source !== frame.current.contentWindow ||
-        event.origin !== "null"
+        event.origin !== frameOrigin
       )
         return;
       const message: unknown = event.data;
@@ -157,8 +161,13 @@ export function InteractivePreview(props: {
         storage?: unknown;
         id?: unknown;
         request?: unknown;
+        storageMigrated?: unknown;
       };
       if (envelope.nonce !== nonce) return;
+      if(frameOrigin!=='null'&&envelope.kind===BRIDGE_KIND&&envelope.storageMigrated===true) {
+        try{window.localStorage.removeItem(key);}catch{setStorageWarning(true);}
+        return;
+      }
       if (envelope.kind === FETCH_KIND) {
         void relay(envelope.id, envelope.request);
         return;
@@ -195,6 +204,22 @@ export function InteractivePreview(props: {
               : null;
 
         if (kind !== "flutter") {
+          const documentBase = contentUrl.replace(/\/content$/, "");
+          if (documentBase.includes('/workflow/preview/')) {
+            const response = await fetch(`${documentBase}/launch`, {
+              method: 'POST', credentials: 'same-origin',
+              headers: {'content-type':'application/json'}, body: JSON.stringify({nonce,storage:nativeReset.current?{}:seed}), signal:controller.signal,
+            });
+            if (!response.ok) throw new Error(accessError(response.status) ?? 'The isolated app preview could not be opened.');
+            const launch = await response.json() as {url:string;origin:string;resetUrl:string};
+            const url = new URL(nativeReset.current ? launch.resetUrl : launch.url);
+            if (url.origin !== launch.origin || url.origin === window.location.origin || !['http:','https:'].includes(url.protocol))
+              throw new Error('A separate preview origin is required.');
+            frameOrigin = launch.origin;
+            nativeReset.current = false;
+            if (active) setLoaded({scope,url:url.href,nativeStorage:true});
+            return;
+          }
           // The frame is loaded from Caddie's own https URL, not from a `srcdoc`
           // attribute: a srcdoc frame reports the protocol `about:`, and an app
           // that checks its own origin before it fetches then believes it is
@@ -203,7 +228,6 @@ export function InteractivePreview(props: {
           // still opaque. The frame document lives beside the content:
           // .../workflow/preview/<id> for a built app, .../artifact-revisions/<rev>
           // for an imported one.
-          const documentBase = contentUrl.replace(/\/content$/, "");
           const seeded = await fetch(`${documentBase}/seed`, {
             method: "POST",
             credentials: "same-origin",
@@ -270,7 +294,7 @@ export function InteractivePreview(props: {
         ref={frame}
         title="A live view of your app"
         name="caddie-preview-peek"
-        sandbox="allow-scripts allow-forms"
+        sandbox={loaded.nativeStorage ? 'allow-scripts allow-forms allow-same-origin' : 'allow-scripts allow-forms'}
         referrerPolicy="no-referrer"
         src={loaded.url}
         srcDoc={loaded.document}
@@ -296,9 +320,14 @@ export function InteractivePreview(props: {
     >
       <div className="preview-window-toolbar">
         <span className="kicker">Try your app</span>
-        <div className="row-actions"><button ref={expandRef} type="button" className="btn-ghost" onClick={toggleExpanded} data-testid="preview-expand">{expanded ? 'Close full screen' : 'Full screen'}</button>
+        <div className="row-actions"><div className="preview-device-switch" role="group" aria-label="Preview size"><button type="button" aria-pressed={device === 'phone'} onClick={() => setDevice('phone')}>Phone</button><button type="button" aria-pressed={device === 'desktop'} onClick={() => setDevice('desktop')}>Desktop</button></div><button ref={expandRef} type="button" className="btn-ghost" onClick={toggleExpanded} data-testid="preview-expand">{expanded ? 'Close full screen' : 'Full screen'}</button>
         {!props.standalone ? <a className="btn-key" data-testid="preview-open-page" href={`${window.location.pathname.startsWith('/app') ? '/app' : ''}/preview?${new URLSearchParams({ project: props.projectId, preview: props.artifactId, source: props.contentUrl?.includes('/workflow/preview/') ? 'workflow' : 'artifact' })}`}>Open app preview</a> : null}</div>
       </div>
+      {/* The stage already stands at the app's own height while the app
+          opens: the loading line is 17px and the frame it becomes is not, so
+          without this everything under the window jumped by ~400px the moment
+          the app arrived (owner 2026-10-27 on the Preview tab). */}
+      <div className={props.standalone ? "preview-stage preview-stage-standalone" : "preview-stage"}>
       {error ? (
         <div role="alert" className="row-error">
           <p>{error}</p>
@@ -315,21 +344,23 @@ export function InteractivePreview(props: {
           ref={frame}
           title="Your app preview"
           name="caddie-interactive-preview"
-          sandbox="allow-scripts allow-forms"
+          sandbox={loaded.nativeStorage ? 'allow-scripts allow-forms allow-same-origin' : 'allow-scripts allow-forms'}
           allow="geolocation"
           referrerPolicy="no-referrer"
           src={loaded.url}
           srcDoc={loaded.document}
           data-kind={kind}
+          data-device={device}
           style={
-            kind === "flutter"
-              ? { width: "min(100%, 400px)", height: 760, justifySelf: "center", border: 0, borderRadius: 28, background: "#fff", boxShadow: "0 0 0 10px var(--surface-2, #1f2430)" }
-              : { width: "100%", minHeight: 440, border: 0, borderRadius: 16, background: "#fff" }
+            kind === "flutter" || device === 'phone'
+              ? { width: "min(100%, 390px)", height: props.standalone ? "max(650px, calc(100dvh - 210px))" : 650, justifySelf: "center", border: 0, borderRadius: 20, background: "#fff" }
+              : { width: "100%", minHeight: props.standalone ? "max(520px, calc(100dvh - 210px))" : 440, border: 0, borderRadius: 16, background: "#fff" }
           }
         />
       ) : (
         <p role="status">Opening your app preview…</p>
       )}
+      </div>
       {storageWarning && (
         <p role="status">
           Changes work in this preview, but this browser could not save them for
@@ -362,7 +393,7 @@ export function InteractivePreview(props: {
             onClick={() => {
               setResetting(true);
               void props.onResetData!()
-                .then(() => setAttempt((value) => value + 1))
+                .then(() => { nativeReset.current = loaded?.nativeStorage === true; setAttempt((value) => value + 1); })
                 .catch(() => setError("The test data could not be reset. Try again."))
                 .finally(() => setResetting(false));
             }}

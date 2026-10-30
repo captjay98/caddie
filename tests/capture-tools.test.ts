@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import type { D1Database } from "../apps/app/src/server/auth.ts";
+import { applyFinalSchema } from "./fixtures/migrations.ts";
 import { getProfile, upsertProfile } from "../apps/app/src/server/profiles.ts";
 import { proposeMemoryFact, listMemoryFacts, memoryForInjection } from "../apps/app/src/server/memory.ts";
 
@@ -28,9 +29,7 @@ function d1(sqlite: Database): D1Database {
 async function world() {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys=ON");
-  for (const m of ["0001_product.sql", "0008_profile.sql", "0011_home_project.sql", "0014_memory.sql", "0017_profile_preferences.sql"]) {
-    try { sqlite.exec(readFileSync(new URL(`../apps/app/migrations/${m}`, import.meta.url), "utf8")); } catch { /* skip if absent */ }
-  }
+  applyFinalSchema(sqlite);
   for (const u of ["alice", "bob"]) sqlite.prepare("insert into user (id,name,email,emailVerified,createdAt,updatedAt) values (?,?,?,0,?,?)")
     .run(u, u, `${u}@example.com`, "2026-10-11T00:00:00.000Z", "2026-10-11T00:00:00.000Z");
   return { db: d1(sqlite), sqlite };

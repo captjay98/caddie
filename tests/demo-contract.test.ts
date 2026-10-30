@@ -7,6 +7,9 @@ import { parseDemoContract } from '../packages/contracts/src/demo-contract.ts';
  * tests pin the boundary the host enforces before a PRD revision is saved.
  */
 
+const INTEGRATION_LINE =
+	"**Real integration:** Caddie's AI (`c.env.CADDIE.ai` in `src/server.ts`, a deep answer) receives the note plus the animal's recent logs and returns ranked causes.";
+
 const CONTRACT = `## Demo contract
 
 **One-line pitch:** A farmer speaks a symptom and gets a grounded herd diagnosis in seconds.
@@ -14,7 +17,7 @@ const CONTRACT = `## Demo contract
 1. Say "cow 14 is limping and off feed" on the record screen.
 2. The AI returns three ranked causes with the evidence it used.
 3. Reload the page; the case is still in the herd timeline.
-**Real integration:** Caddie's AI (\`c.env.CADDIE.ai\` in \`src/server.ts\`, tier "super") receives the note plus the animal's recent logs and returns ranked causes.
+${INTEGRATION_LINE}
 **Mocks:** None.
 **Why this wins:** It turns a speech note into a triage decision a vet can check, instead of another CRUD log.`;
 
@@ -69,30 +72,41 @@ describe('demo contract', () => {
 
 	test('a mock cannot be the real integration', () => {
 		const result = parseDemoContract(
-			CONTRACT.replace(
-				'**Real integration:** Caddie\'s AI (`c.env.CADDIE.ai` in `src/server.ts`, tier "super") receives the note plus the animal\'s recent logs and returns ranked causes.',
-				'**Real integration:** A mock AI JSON file with canned diagnoses.',
-			),
+			CONTRACT.replace(INTEGRATION_LINE, '**Real integration:** A mock AI JSON file with canned diagnoses.'),
 		);
 		expect(result.ok).toBe(false);
 		if (result.ok) return;
 		expect(result.error).toContain('cannot be a mock');
 	});
 
-	test("Caddie's AI without a named tier is refused — the planner must pick fast or super", () => {
+	test("Caddie's AI with no plain-words depth is refused — the planner must say how hard it thinks", () => {
+		const result = parseDemoContract(CONTRACT.replace(', a deep answer)', ')'));
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.error).toContain('how hard that call thinks');
+		expect(result.error).toContain('(a deep answer)');
+		expect(result.error).toContain('(a quick answer)');
+	});
+
+	test('a tier in the demo contract is refused — the owner never reads Caddie\'s plumbing', () => {
+		const result = parseDemoContract(CONTRACT.replace(', a deep answer)', ', tier "super")'));
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.error).toContain('an AI tier or a depth setting');
+	});
+
+	test('a model name anywhere in the demo contract is refused', () => {
 		const result = parseDemoContract(
-			CONTRACT.replace('(`c.env.CADDIE.ai` in `src/server.ts`, tier "super")', '(`c.env.CADDIE.ai` in `src/server.ts`)'),
+			CONTRACT.replace('A farmer speaks a symptom', 'Nemotron 3.5 reads a symptom'),
 		);
 		expect(result.ok).toBe(false);
 		if (result.ok) return;
-		expect(result.error).toContain('no tier');
-		expect(result.error).toContain('"fast"');
-		expect(result.error).toContain('"super"');
+		expect(result.error).toContain('a model or provider name');
 	});
 
-	test('a "None" integration with a real reason passes without a tier', () => {
+	test('a "None" integration with a real reason passes without a depth statement', () => {
 		const localReal = CONTRACT.replace(
-			'**Real integration:** Caddie\'s AI (`c.env.CADDIE.ai` in `src/server.ts`, tier "super") receives the note plus the animal\'s recent logs and returns ranked causes.',
+			INTEGRATION_LINE,
 			'**Real integration:** None — SQLite persistence and local math carry the demo; no outside service does.',
 		);
 		const result = parseDemoContract(localReal);

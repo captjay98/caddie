@@ -1,163 +1,41 @@
 ---
 name: design
-description: Turn an approved PRD into a comprehensive, reviewable design brief with a visual mockup
+description: Turn an approved PRD into three looks, each drawn as the app's real first screen
 ---
+# Design skill (v2)
+The PRD is approved. The looks ARE the design: you propose three looks, each a
+full theme plus the app's real first screen drawn in it. The owner picks one
+and the build starts from that pick — there is no later "design the screens"
+step, so draw the first screen as it will ship.
 
-# Design skill (v1)
+## The job, in order
+1. Read the approved PRD (`read_project_context ["prd"]`): who uses the app,
+   where, its feature ids and every `doneWhen`.
+2. Pick the first screen — what a person sees on opening the app — and draw it
+   three structurally different ways (cards first, list first, one big
+   number…). Never the same layout recoloured.
+3. List every screen the app needs in `inventory`, each with the feature ids it
+   serves. Every feature appears at least once.
+4. Write ONE `caddie-checks` block: copy every approved `doneWhen` exactly and
+   give each one browser steps that end in an `expect`, plus one `states`
+   entry with the first screen's title. The build is held to these checks, and
+   its labels and button names become the app's real labels.
+5. Save with `write_plan_note kind:"looks"` and STOP.
 
-The PRD is approved. Your job is the DESIGN STEP: turn that PRD into one
-comprehensive design brief the user can review and approve BEFORE any code is
-written. A design brief is not "some notes about the UI" — it is the spec a
-builder lays out screens against, and it carries a VISUAL mockup so the user
-approves something they can SEE, not only read.
+## What a good first screen has
+- One clear headline or number, then the detail: an intentional type scale
+  (one size per level, three or four levels at most).
+- Real names and numbers from the plan, never filler.
+- An 8px spacing rhythm, at most two font weights, tabular numbers.
+- One primary button; tap targets of at least 44px.
+- Only the theme variables for colour, radius and fonts.
+- No emoji as icons: the build draws icons from Caddie's kit (caddie/icons.tsx),
+  so never put an emoji where an icon goes.
+- Fits a 390px phone and still looks right on a desktop.
 
-## Discipline
-
-- Keep the actual audience and selected screen composition in view. At the
-  proposal stage, Do NOT reach for the same look every time; in this design
-  stage, preserve the owner's chosen look and task hierarchy rather than
-  replacing them with a generic dashboard. Expand it into the remaining screens.
-- For a journey whose interaction needs review, include a small clearly labelled
-  sample interaction using script-free native HTML (details, labels, local
-  anchors and form controls). Explain which behavior is simulated. A design
-  preview never proves saving, sign-in, offline sync or integrations; those
-  require checks against the built app. Never relax the preview sandbox.
-
-- The LOOK is already chosen. Before this step, Caddie proposed 2-3 looks (a
-  `caddie-looks` set) and the owner picked one. You are handed that chosen look
-  as a ```caddie-theme block — do NOT re-decide colours, fonts or radius. Your
-  job is to lay the approved features out IN that look. If you were somehow not
-  handed a theme, stop and ask Caddie for the chosen look rather than inventing
-  one.
-- Carry the chosen look as ONE fenced ```caddie-theme JSON block in the brief,
-  UNCHANGED from what you were given: the colour roles (bg, surface, text,
-  muted, primary, onPrimary, border, ok, warn, danger, plus any tinted state
-  surfaces), two named system font stacks (no web fonts), a corner radius and a
-  density. Caddie validates it — hex colours and WCAG AA contrast — and REFUSES
-  a design save with no valid theme. Every mockup and the built app are painted
-  from this block, so it is not decoration.
-- Read the approved PRD first (the latest `prd` plan note) and the project's
-  design system. You are translating a settled PRD into screens, not reopening
-  product decisions. If the PRD is genuinely ambiguous about a screen, choose a
-  sensible default and label it `assumption:` — never stop to ask one question
-  at a time.
-- Save the brief through `write_plan_note` with `kind: "design"` and the
-  `planRevision` you were briefed on. Append a new revision; never edit history.
-- A design brief carries NO `caddie-features` block — that belongs to the PRD.
-  The design brief describes HOW the approved features look and behave.
-- After you save ONE design brief, STOP for review. Do not build. The build gate
-  stays closed until the design review is approved.
-
-## A design brief is COMPREHENSIVE — never drip-fed
-
-Write the whole thing the first time. Every brief MUST cover each section (write
-the heading even when short; say "none" rather than omitting one):
-
-1. **Screen inventory** — every screen/route the app has, each with its one-line
-   purpose and how the user reaches it. No vague "a few screens".
-2. **Key-screen layouts** — for each primary screen, the layout in words: the
-   regions top-to-bottom, what sits in each, the hierarchy (what is the one
-   primary action), and how it reflows on a narrow (≤390px) phone. Name the
-   real components, not "some cards".
-3. **Component & token choices** — the concrete components each screen uses and
-   the design-system tokens they paint with (color, spacing, radius, type
-   scale). Every surface names a background AND its text color together — never
-   a bare background. Name the input pattern for each field (a form, a
-   segmented picker, a searchable select, a tri-state radio) — not just "an
-   input".
-4. **Empty / loading / error states** — for ANYTHING that loads or saves, the
-   three states explicitly: what the empty state says and offers, what loading
-   shows, and the honest error with its recovery action. A screen with data is
-   not designed until its no-data and failure states are designed.
-5. **Interaction & motion** — the important transitions and when motion carries
-   meaning (ordered steps, change over time), plus the still default. Respect
-   reduced-motion.
-6. **Accessibility** — focus order, keyboard operability for every custom
-   control, labels, and contrast (text on its surface must be legible in the
-   app's own theme, light or dark — the theme block is contrast-checked, so keep
-   the mockups consistent with it). Call out anything that needs an aria role.
-
-## Craft rules (hold these, they are the point)
-
-- Product-grade, never toy: a key-screen mock carries real data (actual
-  numbers, names, times - never lorem or "Item 1"), roughly 10-15 elements,
-  at least one data or list region, and ONE obvious primary action. A heading
-  plus a button is not a designed screen; the owner judges the whole product
-  by these mocks.
-
-- Warmth over coldness: this is a tool for a solo nontechnical builder. Reassure,
-  don't lecture. No meta copy that explains the interface to itself.
-- Hierarchy: each view has ONE primary action, made obvious; everything else is
-  quieter. Use an intentional type scale (a few deliberate sizes, not ad-hoc
-  ones) and consistent spacing, both drawn from the app theme's density.
-- Use the app's inline-SVG icon kit (every app ships `caddie/icons.tsx`) — NEVER
-  an emoji — for glyphs.
-- No double padding, no box-in-box: one framed surface, not a card inside a card
-  inside a panel. No header/title duplication (one kicker + one page title).
-- Prefer segmented pickers and searchable fields over long dropdowns; short copy
-  on mobile.
-- Never render a section heading with nothing beneath it — show an honest state
-  with an inline action instead.
-
-## The visual mockup (what makes this step worth having)
-
-Reading a described layout is not the same as seeing it. Alongside the prose,
-include mockups the review card can render. The user switches between them with
-a screen picker and checks each at phone (390px) and desktop (1280px) width.
-
-- One `html-mock` fenced block PER SCREEN OR STATE, with the screen's name after
-  the info string. Mock the key screen, then its empty state and its error
-  state (and loading, if that screen loads data). At most 6 blocks:
-
-  ````
-  ```html-mock Today
-  <main>…the key screen, real structure…</main>
-  ```
-
-  ```html-mock Today · empty
-  <main>…the same screen with no data, and what it offers…</main>
-  ```
-
-  ```html-mock Add entry · error
-  <main>…the honest error and its recovery action…</main>
-  ```
-  ````
-
-- Style ONLY with the app theme's tokens, never a literal hex or `bg-white`. The
-  mockups are painted in the SAME theme the built app uses (your ```caddie-theme
-  block), so use the plain names and get the roles right:
-  - `var(--bg)` is the PAGE BACKGROUND, `var(--surface)` a card or raised surface.
-  - `var(--text)` is the main text; `var(--muted)` secondary text.
-  - `var(--border)` is borders and hairlines.
-  - `var(--primary)` fills the one primary action, with its label in
-    `var(--on-primary)`; `var(--ok)`, `var(--warn)`, `var(--danger)` mark states
-    (with a tinted state surface behind them when you defined one).
-  - `var(--radius)` is the corner radius; `var(--font-heading)` /
-    `var(--font-body)` the type.
-  Set every surface's background AND text colour together. The older Caddie
-  `--color-*` names still resolve (they are aliased to your app theme's values),
-  so existing mock snippets keep working — but write new mockups with the plain
-  names. The frame already paints the page background and body text, so a mock
-  only styles its own parts.
-- Static markup only: no `<script>`, no external assets or fonts, no network,
-  no `<form action>`. The frame runs no scripts at all. Interaction that CSS can
-  show is welcome: `:hover` and `:focus-visible` styles, `<details>`/`<summary>`
-  for expandable parts. Click-through between screens is the picker's job.
-- Lay each screen out fluidly (no fixed page width) so the same markup reads at
-  390px and at 1280px — the phone view is how the user checks your reflow.
-- Keep it focused: the screens and states that carry the product's feel. The
-  prose inventory covers every other screen.
-
-If a brief genuinely cannot carry a mockup yet (e.g. the design system has no
-token for something central), say so in one line under the Component section and
-proceed with the prose — do not invent a palette.
-
-### Try uncertain interactions before building
-
-When confirming, editing, navigation or a multi-step flow is genuinely uncertain,
-include one optional `caddie-prototype` JSON block alongside the static screens.
-It is a small sample journey in the chosen theme: 2–8 reachable screens, up to six
-plain text fields and four actions per screen. It never runs generated scripts,
-HTML, network requests, AI, persistence or offline synchronization. Do not claim
-that it proves those capabilities. Skip it for a straightforward settled flow.
-The exact schema/example is supplied by the host's prototype guide.
+## What the host checks for you
+The host refuses a save, with the exact fix, when: there are not exactly three
+looks; a look has no screen or the titles differ; a tag is self-closed or a
+colour is hard-coded; the inventory misses a feature; the checks miss a
+`doneWhen`; or, on the rendered screens, text contrast, tap sizes or sideways
+scrolling fail. Fix every listed problem in one pass and save again.

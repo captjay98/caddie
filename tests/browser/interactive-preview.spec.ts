@@ -139,15 +139,11 @@ test('storage bridge rejects the wrong window, wrong nonce and oversized records
 
 test('failed access has a visible retry; custom workflow content is fetched and download remains explicit', async ({ page }) => {
 	let reads = 0;
-	await page.route('**/api/projects/project-one/workflow/preview/output-one/seed', (route) => {
+	await stubFrameDocument(page,HTML);
+	await page.route('**/api/projects/project-one/workflow/preview/output-one/launch', async (route) => {
 		reads++;
-		return reads === 1
-			? route.fulfill({ status: 403, body: 'denied' })
-			: route.fulfill({ contentType: 'application/json', body: '{"seedRef":"seed-ref"}' });
-	});
-	await page.route('**/api/projects/project-one/workflow/preview/output-one/document*', (route) => {
-		const nonce = new URL(route.request().url()).searchParams.get('nonce') ?? '';
-		return route.fulfill({ contentType: 'text/html', body: previewFrameDocument(HTML, nonce, {}, true, 'web') });
+		if(reads===1)return route.fulfill({status:403,body:'denied'});
+		return route.fallback();
 	});
 	await page.goto(`${base}/?workflow=1`);
 	await expect(page.getByRole('alert')).toContainText('You do not have access');
@@ -204,18 +200,33 @@ async function stubArtifactFrameDocument(page: import('@playwright/test').Page, 
  * http(s) so the app sees the protocol it sees in production.
  */
 async function stubFrameDocument(page: import('@playwright/test').Page, appHtml: string, seed: Record<string, string> = {}) {
-	// The server keeps the seed it was given and hands it back inside the frame
-	// document, exactly like the real seed/document routes do.
-	let stored: Record<string, string> = { ...seed };
-	await page.route('**/api/projects/project-one/workflow/preview/output-one/seed', (route) => {
-		stored = (route.request().postDataJSON() as { storage?: Record<string, string> }).storage ?? {};
-		return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ seedRef: 'seed-ref' }) });
+	const origin='https://preview-check.invalid';
+	let stored={...seed};
+	await page.route('**/api/projects/project-one/workflow/preview/output-one/launch',route=>{
+		const nonce=route.request().postDataJSON().nonce;
+		stored={...seed,...route.request().postDataJSON().storage};
+		return route.fulfill({contentType:'application/json',body:JSON.stringify({origin,url:origin+'/document?nonce='+nonce,resetUrl:origin+'/clear?nonce='+nonce})});
 	});
-	await page.route('**/api/projects/project-one/workflow/preview/output-one/document*', (route) => {
+	await page.route(origin+'/**', (route) => {
 		const nonce = new URL(route.request().url()).searchParams.get('nonce') ?? '';
-		return route.fulfill({ contentType: 'text/html', body: previewFrameDocument(appHtml, nonce, stored, true, 'web') });
+		if(new URL(route.request().url()).pathname==='/clear')return route.fulfill({contentType:'text/html',headers:{'clear-site-data':'"storage"'},body:previewFrameDocument(appHtml,nonce,seed,true,'web',true).replace('<head>','<head><script>history.replaceState(null,"",'+JSON.stringify('/document?nonce='+nonce)+')</script>')});
+		return route.fulfill({ contentType: 'text/html', body: previewFrameDocument(appHtml, nonce, stored, true, 'web',true) });
 	});
 }
+
+test('workflow previews migrate old bridge records once and never overwrite native records',async({page})=>{
+	await stubFrameDocument(page,HTML);
+	await page.addInitScript(({origin,key})=>{if(location.origin===origin)localStorage.setItem(key,JSON.stringify({tasks:'["Legacy task"]'}));},{origin:base,key:storageKey('actor-one','project-one')});
+	await page.goto(`${base}/?workflow=1`);
+	const frame=page.frameLocator('iframe');
+	await expect(frame.getByRole('listitem')).toHaveText('Legacy task');
+	await expect.poll(()=>page.evaluate(key=>localStorage.getItem(key),storageKey('actor-one','project-one'))).toBeNull();
+	await frame.getByRole('textbox',{name:'New task'}).fill('Native task');await frame.getByRole('button',{name:'Add task'}).click();
+	await page.reload();await expect(frame.getByRole('listitem')).toHaveText(['Legacy task','Native task']);
+	const child=page.frames().find(f=>f.name()==='caddie-interactive-preview')!;
+	await child.evaluate(()=>{localStorage.clear();location.reload()});
+	await expect(frame.getByRole('heading')).toHaveText('My tasks');await expect(frame.getByRole('listitem')).toHaveCount(0);
+});
 
 test('an app that checks its own origin still reaches its server through the relay', async ({ page }) => {
 	// HerdVoice, 2026-10-22: the app asked "can I reach the API?" by testing

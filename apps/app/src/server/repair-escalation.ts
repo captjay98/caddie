@@ -2,10 +2,26 @@ import { createHash } from 'node:crypto';
 import type { D1Database } from './auth.ts';
 
 export const REPAIR_POLICY_VERSION = 'repair-v1';
-export const REPAIR_ROUTES = ['nemotron-3.5-super-vl', 'deepseek-v4.1-flash-1017', 'glm-5.3'] as const;
-export type RepairRoute = typeof REPAIR_ROUTES[number];
+/**
+ * The builder's model ladder: two failed checks on an issue move it one rung.
+ * Rung one IS the builder (every repair-policy build reads its model from
+ * here, so this, not MODEL_ROLES.build alone, is what a build runs on).
+ * Owner 2026-10-29: MiniMax-M3.1-Flash first, then DeepSeek.
+ * GLM-5.3 ($1.40 in / $4.40 out per Mtok) is off the ladder: a third repair
+ * round is the worst time to pay five times more per token.
+ * 2026-10-30 EggOps run: Super VL as the last code rung was the slowest and
+ * least effective — 10–35 s per call, 19 calls and no file written in six
+ * minutes, and an earlier round spent $0.27 breaking passing tests — while
+ * DeepSeek took the same feature from 0 to 3 of 4 host checks in five minutes.
+ * So the last rung is DeepSeek again; Super VL stays for issues that need
+ * image input (VISION_REPAIR_ROUTES).
+ */
+export const REPAIR_ROUTES = ['minimax-m3.1-flash', 'deepseek-v4.1-flash-1017', 'deepseek-v4.1-flash-1017'] as const;
+/** An issue that needs image input repairs only on routes that read images. */
+export const VISION_REPAIR_ROUTES = ['nemotron-3.5-super-vl', 'deepseek-v4.1-flash-1017'] as const;
+export type RepairRoute = typeof REPAIR_ROUTES[number] | typeof VISION_REPAIR_ROUTES[number];
 export function repairRoute(failures: number, requiresVision = false): RepairRoute | null {
-  const routes = requiresVision ? REPAIR_ROUTES.slice(0, 2) : REPAIR_ROUTES;
+  const routes: readonly RepairRoute[] = requiresVision ? VISION_REPAIR_ROUTES : REPAIR_ROUTES;
   if (!Number.isSafeInteger(failures) || failures < 0 || failures >= routes.length * 2) return null;
   return routes[Math.floor(failures / 2)]!;
 }

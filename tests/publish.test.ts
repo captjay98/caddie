@@ -1,3 +1,4 @@
+import { fixtureLegacyQualityPolicy } from './fixtures/migrations.ts';
 import { putLarge } from "../apps/app/src/server/large-content.ts";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import type { Database } from 'bun:sqlite';
@@ -106,6 +107,8 @@ describe('publish service', () => {
 			sourceConversationId: homeRun.conversationId,
 		});
 		const projectScope = await projectScopeForUser(db, 'alice', started.project.id);
+// Fixture models a project from before the default-on quality policy (see fixtureLegacyQualityPolicy).
+fixtureLegacyQualityPolicy(sqlite, projectScope.projectId);
 		const plan = await createPlanDocRevision(db, projectScope, { kind: 'prd', body: '# Farm log\n\nLog feed and see totals.' });
 		await workflowSnapshot(db, projectScope);
 		await decideWorkflow(db, projectScope, { planId: plan.id, decision: 'approved' });

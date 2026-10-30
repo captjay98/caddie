@@ -126,6 +126,38 @@ function callbackErrorView(code: string, description: string | null): SignInErro
 export interface JudgeAccess {
 	open: boolean;
 	canStart: boolean;
+	/** Whether this deployment copies a finished example project into new judge accounts. */
+	example?: boolean;
+}
+
+type JudgeFieldId = 'code' | 'name' | 'password';
+
+/**
+ * Checks the judge form before it is sent, in field order, so the first
+ * problem is the one shown and it sits under its own field. The sentences are
+ * the server's own (`judge-access.ts`), which stays the authority: anything
+ * that passes here is still checked there, and a server refusal is shown
+ * verbatim below the form.
+ */
+export function firstJudgeFieldProblem(
+	mode: 'start' | 'sign-in',
+	values: { code: string; name: string; password: string },
+): { field: JudgeFieldId; message: string } | null {
+	if (mode === 'start' && values.code.trim() === '') {
+		return { field: 'code', message: 'Enter your access code.' };
+	}
+	if (mode === 'sign-in') {
+		if (values.name.trim() === '') return { field: 'name', message: 'Enter your judge name.' };
+		if (values.password === '') return { field: 'password', message: 'Enter your password.' };
+		return null;
+	}
+	if (!/^[A-Za-z0-9-]{3,24}$/.test(values.name.trim())) {
+		return { field: 'name', message: 'Use letters, numbers and dashes for your judge name (3 to 24 characters).' };
+	}
+	if (values.password.length < 10) {
+		return { field: 'password', message: 'Use a password of at least 10 characters.' };
+	}
+	return null;
 }
 
 interface JudgeRefusalBody {
@@ -163,7 +195,11 @@ async function postJudge(path: string, payload: Record<string, string>): Promise
 	return { ok: false, message: message || 'That didn’t work. Please try again.' };
 }
 
-/** One labelled judge field. The label carries the hint so the field reads as one thing. */
+/**
+ * One labelled judge field. The hint and, when this field is the problem, the
+ * error sit directly under the input and are tied to it with
+ * `aria-describedby`, so a screen reader reads them with the field.
+ */
 function judgeField(props: {
 	testId: string;
 	label: string;
@@ -173,36 +209,78 @@ function judgeField(props: {
 	autoComplete?: string;
 	hint?: string;
 	autoFocus?: boolean;
+	error?: string | null;
+	inputRef?: (el: HTMLInputElement | null) => void;
+	/** Password fields only: a Show/Hide toggle. */
+	reveal?: { shown: boolean; onToggle: () => void };
 }): ReactElement {
+	const hintId = props.hint ? `${props.testId}-hint` : undefined;
+	const errorId = props.error ? `${props.testId}-error` : undefined;
+	const describedBy = [errorId, hintId].filter(Boolean).join(' ') || undefined;
+	const input = createElement('input', {
+		key: 'input',
+		ref: props.inputRef,
+		id: props.testId,
+		className: 'input',
+		'data-testid': props.testId,
+		type: props.reveal?.shown ? 'text' : (props.type ?? 'text'),
+		autoComplete: props.autoComplete,
+		// Names and codes are typed as-is; a phone must not capitalise them.
+		autoCapitalize: 'none',
+		autoCorrect: 'off',
+		spellCheck: false,
+		// Only after the person opened or switched the form, never on page load.
+		autoFocus: props.autoFocus,
+		value: props.value,
+		'aria-invalid': props.error ? true : undefined,
+		'aria-describedby': describedBy,
+		onChange: (event: { target: { value: string } }) => props.onChange(event.target.value),
+	});
 	return createElement(
-		'label',
-		{ key: props.testId, className: 'judge-field', style: { display: 'grid', gap: '0.25rem' } },
-		createElement('span', { key: 'label' }, props.label),
-		createElement('input', {
-			key: 'input',
-			className: 'input',
-			'data-testid': props.testId,
-			type: props.type ?? 'text',
-			autoComplete: props.autoComplete,
-			// Only after the person opened or switched the form, never on page load.
-			autoFocus: props.autoFocus,
-			value: props.value,
-			// Not a hard `minLength`: the server owns the password rule and its
-			// plain sentence is what a too-short password must show.
-			onChange: (event: { target: { value: string } }) => props.onChange(event.target.value),
-		}),
-		props.hint ? createElement('small', { key: 'hint', className: 'sign-in-unavailable-note' }, props.hint) : null,
+		'div',
+		{ key: props.testId, className: props.error ? 'judge-field is-invalid' : 'judge-field' },
+		createElement('label', { key: 'label', htmlFor: props.testId }, props.label),
+		props.reveal
+			? createElement(
+					'div',
+					{ key: 'wrap', className: 'judge-input-wrap' },
+					input,
+					createElement(
+						'button',
+						{
+							key: 'reveal',
+							type: 'button',
+							className: 'judge-reveal',
+							'data-testid': `${props.testId}-reveal`,
+							'aria-pressed': props.reveal.shown,
+							'aria-label': props.reveal.shown ? 'Hide password' : 'Show password',
+							onClick: props.reveal.onToggle,
+						},
+						props.reveal.shown ? 'Hide' : 'Show',
+					),
+				)
+			: input,
+		props.error
+			? createElement(
+					'p',
+					{ key: 'error', id: errorId, role: 'alert', className: 'judge-field-error', 'data-testid': 'judge-error' },
+					props.error,
+				)
+			: null,
+		props.hint ? createElement('small', { key: 'hint', id: hintId, className: 'sign-in-unavailable-note' }, props.hint) : null,
 	);
 }
 
 /**
  * The judge door, added beside the providers. Collapsed it is one quiet link
- * ("Judging the hackathon? Use your access code"). Opened it is its own
+ * ("Judging the hackathon? Sign in here"). Opened it is its own
  * titled form — the providers step aside (the panel hides them on
- * `onOpenChange`) so a judge sees one thing to do: "Judge access" (access
- * code + judge name + password, "Start judging") or, for someone who judged
- * before, "Welcome back" (name + password, "Sign in"). "Other ways to sign in"
- * closes it and returns focus to the door. Access is read once from
+ * `onOpenChange`) so a judge sees one thing to do: "Judge sign-in" (name +
+ * password, "Sign in"; the shared judge account from the Devpost testing
+ * instructions) or, behind a quiet link, "Judge access" (access code + judge
+ * name + password, "Start judging"). "← All sign-in options"
+ * sits at the top of the panel and closes it, returning focus to the door.
+ * Access is read once from
  * `GET /api/judge/access`; an unknown or failed read is treated as CLOSED and
  * no judge option is shown — an older build without the endpoint must not
  * surface a control that cannot work.
@@ -210,12 +288,19 @@ function judgeField(props: {
 export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (open: boolean) => void }): ReactElement | null {
 	const [access, setAccess] = useState<JudgeAccess | null>(null);
 	const [open, setOpen] = useState(false);
-	const [mode, setMode] = useState<'start' | 'sign-in'>('start');
+	// Sign-in first (owner 2026-10-30): judging runs on one shared judge
+	// account whose name and password are in the Devpost testing
+	// instructions; making a new judge with the access code is the quiet
+	// second option.
+	const [mode, setMode] = useState<'start' | 'sign-in'>('sign-in');
 	const [code, setCode] = useState('');
 	const [name, setName] = useState('');
 	const [password, setPassword] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [fieldError, setFieldError] = useState<{ field: JudgeFieldId; message: string } | null>(null);
+	const [passwordShown, setPasswordShown] = useState(false);
+	const fieldRefs = useRef<Partial<Record<JudgeFieldId, HTMLInputElement | null>>>({});
 	const doorRef = useRef<HTMLButtonElement | null>(null);
 	const [focusDoor, setFocusDoor] = useState(false);
 	const { onOpenChange } = props;
@@ -237,7 +322,7 @@ export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (o
 			.then((res) => (res.ok ? (res.json() as Promise<Partial<JudgeAccess>>) : null))
 			.then((body) => {
 				if (!cancelled && body) {
-					setAccess({ open: body.open === true, canStart: body.canStart === true });
+					setAccess({ open: body.open === true, canStart: body.canStart === true, example: body.example === true });
 				}
 			})
 			.catch(() => {
@@ -253,8 +338,35 @@ export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (o
 	const canStart = access.canStart === true;
 	const showingSignIn = !canStart || mode === 'sign-in';
 
+	/** Show the first field problem under its field and move focus there. */
+	function checkFields(formMode: 'start' | 'sign-in'): boolean {
+		const problem = firstJudgeFieldProblem(formMode, { code, name, password });
+		setFieldError(problem);
+		if (problem) {
+			setError(null);
+			fieldRefs.current[problem.field]?.focus();
+			return false;
+		}
+		return true;
+	}
+
+	/** Typing in the field that was wrong clears its error. */
+	function edit(field: JudgeFieldId, set: (value: string) => void): (value: string) => void {
+		return (value) => {
+			set(value);
+			if (fieldError?.field === field) setFieldError(null);
+		};
+	}
+
+	function switchMode(next: 'start' | 'sign-in') {
+		setMode(next);
+		setError(null);
+		setFieldError(null);
+	}
+
 	async function startJudging() {
 		if (busy) return;
+		if (!checkFields('start')) return;
 		setBusy(true);
 		setError(null);
 		const result = await postJudge('/api/judge/start', { code, name, password });
@@ -271,6 +383,7 @@ export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (o
 
 	async function signInAsJudge() {
 		if (busy) return;
+		if (!checkFields('sign-in')) return;
 		setBusy(true);
 		setError(null);
 		// The server maps a judge name to its synthetic address; the client never
@@ -290,14 +403,17 @@ export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (o
 			{
 				type: 'button',
 				ref: doorRef,
-				className: 'btn-ghost judge-link',
+				// A real (secondary) button, not grey text: during judging most
+				// visitors are judges, and Google/GitHub are invite-only.
+				className: 'btn-ghost judge-link judge-door',
 				'data-testid': 'judge-link',
 				onClick: () => {
 					setOpen(true);
 					setError(null);
+					setFieldError(null);
 				},
 			},
-			'Judging the hackathon? Use your access code',
+			'Judging the hackathon? Sign in here',
 		);
 	}
 
@@ -307,17 +423,40 @@ export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (o
 				{
 					key: 'sign-in',
 					'data-testid': 'judge-sign-in-form',
-					style: { display: 'grid', gap: '0.6rem' },
+					className: 'judge-access-form',
 					onSubmit: (event: { preventDefault: () => void }) => {
 						event.preventDefault();
 						void signInAsJudge();
 					},
 				},
-				judgeField({ testId: 'judge-name', label: 'Judge name', value: name, onChange: setName, autoComplete: 'username', autoFocus: true }),
-				judgeField({ testId: 'judge-password', label: 'Password', value: password, onChange: setPassword, type: 'password', autoComplete: 'current-password' }),
+				judgeField({
+					testId: 'judge-name',
+					label: 'Judge name',
+					value: name,
+					onChange: edit('name', setName),
+					autoComplete: 'username',
+					autoFocus: true,
+					error: fieldError?.field === 'name' ? fieldError.message : null,
+					inputRef: (el) => {
+						fieldRefs.current.name = el;
+					},
+				}),
+				judgeField({
+					testId: 'judge-password',
+					label: 'Password',
+					value: password,
+					onChange: edit('password', setPassword),
+					type: 'password',
+					autoComplete: 'current-password',
+					error: fieldError?.field === 'password' ? fieldError.message : null,
+					inputRef: (el) => {
+						fieldRefs.current.password = el;
+					},
+					reveal: { shown: passwordShown, onToggle: () => setPasswordShown((v) => !v) },
+				}),
 				createElement(
 					'button',
-					{ key: 'submit', type: 'submit', className: 'btn-key', 'data-testid': 'judge-sign-in', disabled: busy },
+					{ key: 'submit', type: 'submit', className: 'btn-key judge-access-submit', 'data-testid': 'judge-sign-in', disabled: busy },
 					busy ? 'Signing in…' : 'Sign in',
 				),
 			)
@@ -326,70 +465,92 @@ export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (o
 				{
 					key: 'start',
 					'data-testid': 'judge-start-form',
-					style: { display: 'grid', gap: '0.6rem' },
+					className: 'judge-access-form',
 					onSubmit: (event: { preventDefault: () => void }) => {
 						event.preventDefault();
 						void startJudging();
 					},
 				},
-				judgeField({ testId: 'judge-code', label: 'Access code', value: code, onChange: setCode, autoComplete: 'off', autoFocus: true }),
-				judgeField({ testId: 'judge-name', label: 'Judge name', value: name, onChange: setName, autoComplete: 'username', hint: 'Letters, numbers and dashes.' }),
-				judgeField({ testId: 'judge-password', label: 'Password', value: password, onChange: setPassword, type: 'password', autoComplete: 'new-password', hint: 'At least 10 characters.' }),
+				judgeField({
+					testId: 'judge-code',
+					label: 'Access code',
+					value: code,
+					onChange: edit('code', setCode),
+					autoComplete: 'off',
+					autoFocus: true,
+					hint: 'From the Devpost testing instructions.',
+					error: fieldError?.field === 'code' ? fieldError.message : null,
+					inputRef: (el) => {
+						fieldRefs.current.code = el;
+					},
+				}),
+				judgeField({
+					testId: 'judge-name',
+					label: 'Judge name',
+					value: name,
+					onChange: edit('name', setName),
+					autoComplete: 'username',
+					hint: '3–24 letters, numbers or dashes.',
+					error: fieldError?.field === 'name' ? fieldError.message : null,
+					inputRef: (el) => {
+						fieldRefs.current.name = el;
+					},
+				}),
+				judgeField({
+					testId: 'judge-password',
+					label: 'Password',
+					value: password,
+					onChange: edit('password', setPassword),
+					type: 'password',
+					autoComplete: 'new-password',
+					hint: 'At least 10 characters. It can’t be reset.',
+					error: fieldError?.field === 'password' ? fieldError.message : null,
+					inputRef: (el) => {
+						fieldRefs.current.password = el;
+					},
+					reveal: { shown: passwordShown, onToggle: () => setPasswordShown((v) => !v) },
+				}),
 				createElement(
 					'button',
-					{ key: 'submit', type: 'submit', className: 'btn-key', 'data-testid': 'judge-start', disabled: busy },
+					{ key: 'submit', type: 'submit', className: 'btn-key judge-access-submit', 'data-testid': 'judge-start', disabled: busy },
 					busy ? 'Starting…' : 'Start judging',
 				),
 			);
 
-	const title = showingSignIn ? 'Welcome back' : 'Judge access';
+	const title = showingSignIn ? 'Judge sign-in' : 'Judge access';
 	const lede = !canStart
 		? 'New judge places aren’t open right now. Sign in if you already have a judge account.'
 		: showingSignIn
-			? 'Sign in with the judge name and password you chose.'
-			: 'Enter the access code from the hackathon, then choose a judge name and password so you can come back later.';
+			? 'Use the judge name and password from the Devpost testing instructions.'
+			: access.example === true
+				? 'A finished example app will be waiting in your Projects.'
+				: null;
 
-	return createElement(
-		'div',
-		{
-			'data-testid': 'judge-panel',
-			style: { display: 'grid', gap: '0.6rem', textAlign: 'left' },
-		},
-		createElement(
-			'div',
-			{ key: 'head', className: 'judge-panel-head' },
-			createElement('h2', { key: 'title', className: 'judge-panel-title' }, title),
-			createElement(
-				'p',
-				{ key: 'lede', className: 'judge-panel-lede', 'data-testid': canStart ? 'judge-panel-lede' : 'judge-closed' },
-				lede,
-			),
-		),
-		form,
-		error
+	// Judge accounts have no email, so a forgotten password cannot be reset.
+	// Say so where it is needed, and give the honest way back in.
+	const forgotNote =
+		showingSignIn && canStart
 			? createElement(
-					'div',
-					{ key: 'error', role: 'alert', className: 'sign-in-error', 'data-testid': 'judge-error' },
-					error,
-				)
-			: null,
-		canStart && !showingSignIn
-			? createElement(
-					'button',
-					{
-						key: 'returning',
-						type: 'button',
-						className: 'btn-ghost judge-link',
-						'data-testid': 'judge-returning-link',
-						onClick: () => {
-							setMode('sign-in');
-							setError(null);
+					'p',
+					{ key: 'forgot', className: 'judge-forgot', 'data-testid': 'judge-forgot' },
+					'Forgot your password? It can’t be reset, but you can ',
+					createElement(
+						'button',
+						{
+							type: 'button',
+							className: 'judge-inline-link',
+							'data-testid': 'judge-forgot-start',
+							onClick: () => switchMode('start'),
 						},
-					},
-					'Judged here before? Sign in instead',
+						'start again with a new name',
+					),
+					'.',
 				)
-			: null,
-		canStart && showingSignIn
+			: null;
+
+	const modeSwitch = !canStart
+		? null
+		: showingSignIn
 			? createElement(
 					'button',
 					{
@@ -397,29 +558,71 @@ export function JudgeAccessBlock(props: { callbackURL: string; onOpenChange?: (o
 						type: 'button',
 						className: 'btn-ghost judge-link',
 						'data-testid': 'judge-new-link',
-						onClick: () => {
-							setMode('start');
-							setError(null);
-						},
+						onClick: () => switchMode('start'),
 					},
-					'First time judging? Use your access code',
+					'Have an access code instead? Make a judge account',
+				)
+			: createElement(
+					'button',
+					{
+						key: 'returning',
+						type: 'button',
+						className: 'btn-ghost judge-link',
+						'data-testid': 'judge-returning-link',
+						onClick: () => switchMode('sign-in'),
+					},
+					'Have a judge name and password? Sign in instead',
+				);
+
+	return createElement(
+		'div',
+		{
+			'data-testid': 'judge-panel',
+			className: 'judge-access-panel',
+		},
+		createElement(
+			'div',
+			{ key: 'top', className: 'judge-panel-top' },
+			createElement(
+				'button',
+				{
+					type: 'button',
+					className: 'btn-ghost judge-link',
+					'data-testid': 'judge-back',
+					onClick: () => {
+						setOpen(false);
+						setFocusDoor(true);
+						setError(null);
+						setFieldError(null);
+					},
+				},
+				'← All sign-in options',
+			),
+		),
+		createElement(
+			'div',
+			{ key: 'head', className: 'judge-panel-head' },
+			// Title only; a line under it appears only when it says something the
+			// fields don't (access closed, or an example app is waiting).
+			createElement('h2', { key: 'title', className: 'judge-panel-title' }, title),
+			lede
+				? createElement(
+						'p',
+						{ key: 'lede', className: 'judge-panel-lede', 'data-testid': canStart ? 'judge-panel-lede' : 'judge-closed' },
+						lede,
+					)
+				: null,
+		),
+		form,
+		forgotNote,
+		error
+			? createElement(
+					'div',
+					{ key: 'error', role: 'alert', className: 'sign-in-error', 'data-testid': 'judge-error' },
+					error,
 				)
 			: null,
-		createElement(
-			'button',
-			{
-				key: 'back',
-				type: 'button',
-				className: 'btn-ghost judge-link',
-				'data-testid': 'judge-back',
-				onClick: () => {
-					setOpen(false);
-					setFocusDoor(true);
-					setError(null);
-				},
-			},
-			'Other ways to sign in',
-		),
+		modeSwitch ? createElement('div', { key: 'foot', className: 'judge-panel-foot' }, modeSwitch) : null,
 	);
 }
 

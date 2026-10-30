@@ -217,6 +217,16 @@ export interface EligibilityDisplay {
  * `values` maps claimId → the claim's value (the evaluation carries the quote
  * and reason but not the raw value, e.g. the minimum age).
  */
+/** "NG" -> "Nigeria"; null when there is no usable code. */
+function countryLabel(code: string | null): string | null {
+	if (!code || !/^[A-Za-z]{2}$/.test(code)) return null;
+	try {
+		return new Intl.DisplayNames(['en'], { type: 'region' }).of(code.toUpperCase()) ?? code.toUpperCase();
+	} catch {
+		return code.toUpperCase();
+	}
+}
+
 export function describeEligibility(
 	evaluation: EligibilityEvaluation,
 	values: ReadonlyMap<string, string>,
@@ -232,7 +242,7 @@ export function describeEligibility(
 			blocking.claimType === 'eligibility.open_countries'
 				? `Only open to ${listed.slice(0, 4).join(', ')}${listed.length > 4 ? '…' : ''}`
 				: blocking.claimType === 'eligibility.restricted_countries' && country
-					? `Not open to residents of ${country.toUpperCase()}`
+					? `Not open to residents of ${countryLabel(country) ?? country.toUpperCase()}`
 					: 'Not eligible';
 		return { note, quote: blocking.quote, needsConfirm: false };
 	}
@@ -240,7 +250,16 @@ export function describeEligibility(
 		(r) => (r.claimType === 'eligibility.open_countries' || r.claimType === 'eligibility.restricted_countries') && r.verdict === 'eligible',
 	);
 	if (evaluation.verdict === 'eligible') {
-		return { note: 'You can enter', quote: (countryRule ?? rules[0]!).quote, needsConfirm: false };
+		// Say WHY in plain words (review 2026-10-28): a restricted-countries rule
+		// quoted alone read as if the excluded list were the reason you can enter.
+		const name = countryLabel(country);
+		const note =
+			countryRule?.claimType === 'eligibility.restricted_countries' && name
+				? `You can enter: ${name} is not on the list of excluded countries`
+				: countryRule?.claimType === 'eligibility.open_countries' && name
+					? `You can enter: the rules include ${name}`
+					: 'You can enter';
+		return { note, quote: (countryRule ?? rules[0]!).quote, needsConfirm: false };
 	}
 	// verdict 'unknown': is it ONLY profile-dependent attributes left?
 	const open = rules.filter((r) => r.verdict === 'unknown');
@@ -251,7 +270,7 @@ export function describeEligibility(
 		const age = open.find((r) => r.claimType === 'eligibility.min_age');
 		if (age) ask.push(`confirm you're ${values.get(age.claimId) ?? '18'}+`);
 		if (open.some((r) => r.claimType === 'eligibility.student_only')) ask.push('confirm you are a student');
-		const prefix = countryRule && country ? `Open to ${country.toUpperCase()} · ` : '';
+		const prefix = countryRule && country ? `Open to ${countryLabel(country) ?? country.toUpperCase()} · ` : '';
 		const text = `${prefix}${ask.join(' and ')}`;
 		return { note: text.charAt(0).toUpperCase() + text.slice(1), quote: (countryRule ?? age ?? open[0]!).quote, needsConfirm: true };
 	}

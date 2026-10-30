@@ -19,3 +19,8 @@ test('preview destinations preserve exact target and source; historical approval
  expect(briefActionRoute({...card,status:'handled'}).search.approval).toBe('a');
  expect(briefActionRoute({...card,id:'brf_workflow_repair_r',primaryAction:{kind:'inspect',label:'Activity',targetId:'r'}}).to).toBe('/runs');
 });
+test('contest deadline review opens submission while a schedule opens its schedule', () => {
+ const deadline = {...card, kind:'deadline' as const, primaryAction:{kind:'review' as const,label:'Review submission',targetId:'project/a'}};
+ expect(briefActionRoute({...deadline,id:'brf_hackathon-deadline_project/a'})).toEqual({to:'/submission',search:{project:'project/a'}});
+ expect(briefActionRoute({...deadline,id:'brf_schedule_1'})).toEqual({to:'/schedules',search:{project:'project/a'}});
+});

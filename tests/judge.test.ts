@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Scope } from '@caddie/contracts';
+import { allMigrationPaths } from './fixtures/migrations.ts';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import { addClaim } from '../apps/app/src/server/evidence/claims.ts';
 import { registerSource, captureSnapshot } from '../apps/app/src/server/evidence/sources.ts';
@@ -49,12 +50,7 @@ import {
  */
 
 const REPO_ROOT = join(import.meta.dir, '..');
-const MIGRATION_PATHS = [
-	join(REPO_ROOT, 'apps', 'app', 'migrations', '0001_product.sql'),
-	join(REPO_ROOT, 'apps', 'app', 'migrations', '0004_evidence.sql'),
-	join(REPO_ROOT, 'apps', 'app', 'migrations', '0005_runs.sql'),
-	join(REPO_ROOT, 'apps', 'app', 'migrations', '0010_judge.sql'),
-];
+const MIGRATION_PATHS = allMigrationPaths();
 
 // --- in-memory D1 (same wrap pattern as tests/evidence.test.ts) -----------------
 

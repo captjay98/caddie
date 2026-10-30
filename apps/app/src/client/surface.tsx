@@ -1,3 +1,4 @@
+import { pausedPreparation } from "../shared/preparation-stage.ts";
 import { ProjectDialog } from "./project/ProjectDialog.tsx";
 import { Mascot } from '@caddie/ui/Mascot';
 import { useEffect, useMemo, useState } from 'react';
@@ -8,6 +9,7 @@ import { ProjectExperienceSchema, iconColor, iconLetter } from '@caddie/contract
 import type { ApprovalRecord, DecisionCard as DecisionCardType, Project } from '@caddie/contracts';
 import { SignInScreen } from './sign-in.tsx';
 import { Markdown } from '@caddie/ui/Markdown';
+import { plainWordsForOwner } from './conversation/response-hygiene.ts';
 import { failureKind, PageSkeleton, StatePanel, type SkeletonPage } from './states.tsx';
 import { formatMinorUnits, formatNextRun } from './settings/settings-model.ts';
 import { DiscoveryResults, type DiscoveryCandidateRecord } from './discovery/Results.tsx';
@@ -168,7 +170,7 @@ export function DiscoverPage(): ReactElement {
 						<div>
 							<h1 className="page-title">Hackathons that fit you</h1>
 							<p className="page-lede">
-								Contests Caddie watches and ranks for fit. Nothing starts a build until you say so.
+									Hackathons matched to your interests, location and available time.
 							</p>
 						</div>
 					</div>
@@ -246,7 +248,15 @@ function DiscoverBody(): ReactElement {
 	if (chrome.homeProject) {
 		return (
 			<>
-				<DiscoveryResults projectId={chrome.homeProject.id} onExplore={onExplore} exploreBusy={exploreBusy} />
+				<DiscoveryResults
+				projectId={chrome.homeProject.id}
+				onExplore={onExplore}
+				exploreBusy={exploreBusy}
+				// Owner 2026-10-28 chat-first: the empty state's primary action
+				// hands off to the conversation with the ask pre-filled.
+				setComposerText={(text) => chrome.channel.setComposerText(text)}
+				openChat={() => void navigate({ to: '/', search: { pane: 'channel' } })}
+			/>
 				{commitFor ? (
 					<div className="modal-backdrop" data-testid="explore-commit-backdrop" onMouseDown={() => closeCommit()}>
 						<form
@@ -799,7 +809,9 @@ function FocusedProjectHome({ projectId }: { projectId: string }): ReactElement 
 	const stage = parsed?.success && parsed.output.version > 0 ? parsed.output.stage : null;
 	const phase = workflow.data?.workflow?.phase;
 	const planNotApproved = parsed?.success && parsed.output.plan?.approved === false;
-	const step = stage === 'planning_blocked' || (stage === 'stopped' && planNotApproved) ? 'plan' : stage === 'ready' || stage === 'repairing' || stage === 'checking' ? 'check'
+	// A paused look/screens step is still the Plan step: nothing was built.
+	const pausedBeforeBuild = Boolean(workflow.data?.workflow && pausedPreparation(workflow.data.workflow, !planNotApproved) && workflow.data.workflow.phase === 'blocked' && !planNotApproved);
+	const step = stage === 'planning_blocked' || (stage === 'stopped' && planNotApproved) || pausedBeforeBuild ? 'plan' : stage === 'ready' || stage === 'repairing' || stage === 'checking' ? 'check'
 		: stage === 'building' || stage === 'blocked' || stage === 'stopped' ? 'build'
 		: phase === 'building' || phase === 'blocked' ? 'build' : phase === 'ready' ? 'check' : 'plan';
 	// Option B Overview (owner 2026-10-23): a short plain-language summary of
@@ -809,7 +821,7 @@ function FocusedProjectHome({ projectId }: { projectId: string }): ReactElement 
 	// A copied app stays tryable under the plan through every BEFORE_BUILD
 	// phase (ProjectWorkflow carries it), so the readable review surface only
 	// takes over review when there is no import whose card it would drop.
-	const reviewingPlan = ['review', 'looks', 'looks-review', 'design', 'design-review'].includes(phase ?? '') && !workflow.data?.importPreview;
+	const reviewingPlan = (['review', 'looks', 'looks-review', 'design', 'design-review'].includes(phase ?? '') || pausedBeforeBuild) && !workflow.data?.importPreview;
 	const overview = parsed?.success && parsed.output.version > 0 ? projectCardFromExperience(parsed.output) : null;
 	return <>
 		<ProjectTabs current={step} context={<ProjectSupportingDetails projectId={projectId} />} />
@@ -817,7 +829,7 @@ function FocusedProjectHome({ projectId }: { projectId: string }): ReactElement 
 		    blocked build the workflow card already carries the status — and on
 		    blocked the overview would render the raw technical report (owner
 		    2026-10-25: pure duplication). */}
-		{overview && (!phase || !['review', 'looks', 'looks-review', 'design', 'design-review', 'building', 'blocked'].includes(phase)) ? (
+		{overview && (!phase || !['planning', 'review', 'looks', 'looks-review', 'design', 'design-review', 'building', 'blocked'].includes(phase)) ? (
 			<p className="project-overview-summary" data-testid="project-overview-summary" data-tone={overview.tone}>
 				{overview.working ? <span className="project-overview-live" aria-hidden="true" /> : null}
 				<b>{overview.label}.</b> {overview.detail}
@@ -849,7 +861,7 @@ function ProjectSupportingDetails({ projectId }: { projectId: string }): ReactEl
 	const earlierPreview = parsed?.success && parsed.output.stage !== 'ready' ? parsed.output.preview?.id : null;
 	return <div className="project-supporting" data-testid="project-supporting-details">
 		{earlierPreview ? <button type="button" className="btn-ghost" onClick={() => chrome.goProjectTab('/preview', { project: projectId, preview: earlierPreview, source: 'workflow' })}>Try the earlier saved app</button> : null}
-		<details><summary>Project brief</summary>{workflowBrief.data ? <Markdown text={workflowBrief.data} /> : <p className="state-detail">{workflowBrief.isPending ? 'Reading the brief…' : workflowBrief.error ? 'The brief could not be loaded. Try opening this section again after refreshing.' : chrome.selectedProject?.description || 'The brief appears after you plan with Caddie.'}</p>}</details>
+		<details><summary>Project brief</summary>{workflowBrief.data ? <Markdown text={plainWordsForOwner(workflowBrief.data)} /> : <p className="state-detail">{workflowBrief.isPending ? 'Reading the brief…' : workflowBrief.error ? 'The brief could not be loaded. Try opening this section again after refreshing.' : chrome.selectedProject?.description || 'The brief appears after you plan with Caddie.'}</p>}</details>
 		<details data-testid="overview-todo" id="todo" open={tasksOpen} onToggle={event => setTasksOpen(event.currentTarget.open)}><summary>To-dos</summary>{tasksOpen ? <Tasks projectId={projectId} embedded /> : null}</details>
 		<details data-testid="overview-recent"><summary>Earlier decisions & updates</summary>
 			{brief.isPending ? <p className="state-detail">Reading the project’s updates…</p> : brief.error ? <StatePanel compact kind={failureKind(brief.error)} title="Couldn’t load the updates." detail={brief.error instanceof Error ? brief.error.message : undefined} onRetry={() => void brief.refetch()} /> :
@@ -921,7 +933,8 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
         </section>;
     }
 	const planEverApproved = ['approved', 'revoked', 'expired'].includes(fullWorkflow.data?.approval?.status ?? '');
-	const designStage = ['looks', 'looks-review', 'design', 'design-review'].includes(buildPhase.data ?? '');
+	const pausedBeforeBuild = Boolean(fullWorkflow.data?.workflow && pausedPreparation(fullWorkflow.data.workflow, planEverApproved) && planEverApproved);
+	const designStage = ['looks', 'looks-review', 'design', 'design-review'].includes(buildPhase.data ?? '') || pausedBeforeBuild;
     const currentView = selectedReview ?? (designStage ? 'design' : 'plan');
     const switcher = designStage || fullWorkflow.data?.design ? <nav className="plan-design-switch" aria-label="Plan and design">
         <button type="button" aria-pressed={currentView === 'plan'} onClick={() => setSelectedReview('plan')}>Plan</button>
@@ -939,9 +952,11 @@ function DesignReviewBody(props: { projectId: string }): ReactElement {
             onDecisionSaved={() => { void approval.refetch(); chrome.refreshAll(); }}
             onContinue={() => chrome.openProject(props.projectId, true)}
             buildPhase={buildPhase.data ?? null}
+            pausedBeforeBuild={pausedBeforeBuild}
             howItWorks={<HowYourAppWorks projectId={props.projectId} />}
 			projectName={chrome.selectedProject?.name}
 			projectId={props.projectId}
+			planStages={fullWorkflow.data?.planStages ?? null}
 			planRevisions={revisions}
 			isPending={planDocs.isPending}
 			error={planDocs.error}

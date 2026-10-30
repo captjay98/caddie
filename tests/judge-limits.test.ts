@@ -1,3 +1,4 @@
+import { fixtureLegacyQualityPolicy } from './fixtures/migrations.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { Database as BunDatabase } from 'bun:sqlite';
 import type { AuthEnv, D1Database } from '../apps/app/src/server/auth.ts';
@@ -126,6 +127,8 @@ async function buildWorld() {
 		sourceConversationId: homeRun.conversationId,
 	});
 	const scope = await projectScopeForUser(world.db, JUDGE_ID, started.project.id);
+// Fixture models a project from before the default-on quality policy (see fixtureLegacyQualityPolicy).
+fixtureLegacyQualityPolicy(world.sqlite, scope.projectId);
 	const plan = await createPlanDocRevision(world.db, scope, { kind: 'prd', body: '# Todo app\n\nAdd, complete and persist tasks.' });
 	await workflowSnapshot(world.db, scope);
 	return { ...world, home, homeScope, homeRun, scope, plan };
@@ -181,7 +184,11 @@ async function guardWorld(options: { judge?: boolean; limits?: Record<string, st
 	await createRun(real, scope, { modelRouteId: 'nemotron-3-super', payerId: user.id, conversationId });
 
 	const app = conversationGuard();
-	app.post('/coordinator/:conversationId', (c) => c.json({ ok: true }));
+	app.post('/coordinator/:conversationId', (c) =>
+		c.req.header(INTERNAL_DISPATCH_HEADER)
+			? c.json({ submissionId: 'sub_judge_fixture' }, 202)
+			: c.json({ ok: true }),
+	);
 	app.get('/coordinator/:conversationId', (c) => c.json({ ok: true }));
 	app.post('/coordinator/:conversationId/abort', (c) => c.json({ ok: true }));
 
@@ -553,6 +560,7 @@ describe('judge limits: build starts', () => {
 			env,
 		);
 		const scope = await projectScopeForUser(db, OWNER, started.project.id);
+		fixtureLegacyQualityPolicy(local, scope.projectId);
 		const plan = await createPlanDocRevision(db, scope, { kind: 'prd', body: '# Five' });
 		await workflowSnapshot(db, scope);
 		await decideWorkflow(db, scope, { planId: plan.id, decision: 'approved' }, env);
@@ -942,11 +950,25 @@ describe('the conversation guard offers a stated lasting preference to remember 
 
 		// A message the server dispatched itself is not the person speaking.
 		const signature = await internalDispatchSignature(SECRET, world.conversationId);
-		expect((await send('Never use emojis.', { [INTERNAL_DISPATCH_HEADER]: signature })).status).toBe(200);
+		expect((await send('Never use emojis.', { [INTERNAL_DISPATCH_HEADER]: signature })).status).toBe(202);
 		expect(facts()).toHaveLength(1);
 
 		// Memory that cannot be written never blocks the message.
 		sqlite.exec('drop table "memory_facts"');
 		expect((await send('From now on keep replies short.')).status).toBe(200);
 	});
+});
+
+test('an explicit different-project request is refused before admission in project chat', async () => {
+ const w=await guardWorld({judge:true});
+ try {
+  const before=await countJudgeUsage(w.db,w.user.id,'message');
+  const response=await w.app.request(`${ORIGIN}/coordinator/${w.conversationId}`,{
+   method:'POST',headers:{cookie:w.cookie,'content-type':'application/json'},
+   body:JSON.stringify({kind:'user',body:'Please start a new project for farmers',idempotencyKey:'scope-separation-test'}),
+  },w.env);
+  expect(response.status).toBe(409);
+  expect(await response.text()).toContain('NEW_PROJECT_IN_PROJECT_CHAT');
+  expect(await countJudgeUsage(w.db,w.user.id,'message')).toBe(before);
+ } finally {w.sqlite.close();}
 });

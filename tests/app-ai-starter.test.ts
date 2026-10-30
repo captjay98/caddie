@@ -49,6 +49,8 @@ describe('starter caddie/ai.ts types (part M)', () => {
 		expect(aiSource).toContain('CaddieAiImageMime');
 		// The photo recipe is spelled out: super tier, readFile, the limits.
 		expect(aiSource).toContain('readFile()');
+		expect(aiSource).toContain('caddie/files.ts is optional');
+		expect(aiSource).toContain('do not claim photo analysis');
 		expect(aiSource).toContain('at most 4 photos per call, each under 1.5 MB, JPEG/PNG/WebP only');
 	});
 

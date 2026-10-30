@@ -2,14 +2,14 @@ import { ProjectDialog } from "./ProjectDialog.tsx";
 import { useState, type ReactElement } from "react";
 import { Mascot } from "@caddie/ui/Mascot";
 import { Icon, type IconName } from "../icons.tsx";
-import { BuildFeatureList, hasFeatureList } from "./FeatureChecklist.tsx";
+import { BuildFeatureList, featureName, hasFeatureList } from "./FeatureChecklist.tsx";
 import { ModuleProgress } from "./ModuleProgress.tsx";
+import { BuildAttemptsView, BuildChecksView } from "./BuildChecksViews.tsx";
 import { buildPresentation } from "./build-presentation.ts";
 import {
   useBuildActivity,
   type BuildTimelineView,
   type TimelineFileArea,
-  type TimelineStageView,
 } from "../queries.ts";
 
 /** One observed status, readable features, and optional exact activity evidence. */
@@ -63,6 +63,12 @@ export function BuildProgress(props: {
     return null;
   const t = data.timeline;
   const view = buildPresentation(data, Boolean(activity.error));
+  // Owner 2026-10-30: the panel said "Fixing a check that failed.", then "A
+  // check failed. Its fix has not been confirmed yet.", then "Working on …".
+  // While it runs, ONE headline names the part and whether it is being fixed.
+  const currentPart = data.phase === "building" ? (data.features ?? []).find((feature) => feature.status === "building") : undefined;
+  const partName = currentPart ? featureName(currentPart) : null;
+  const title = !view.quiet && data.phase === "building" && partName ? `${view.repairing ? "Fixing" : "Building"} “${partName}”` : view.title;
   async function refresh() {
     setRefreshing(true);
     setFeedback(null);
@@ -102,21 +108,26 @@ export function BuildProgress(props: {
             size={46}
             live={!view.quiet && data.phase === "building"}
           />
-          <div>
+          {/* With no summary line, the title itself is the live status. */}
+          <div aria-live={view.summary ? undefined : "polite"}>
             <p className="build-status-label">{view.label}</p>
-            <h2>{view.title}</h2>
+            <h2>{title}</h2>
           </div>
         </div>
-        <p
-          className="build-summary"
-          role="status"
-          aria-live="polite"
-          data-testid="build-summary"
-          data-quiet={view.quiet ? "true" : undefined}
-        >
-          {view.summary}
-        </p>
-        {t.tests || view.repairing ? (
+        {view.summary ? (
+          <p
+            className="build-summary"
+            role="status"
+            aria-live="polite"
+            data-testid="build-summary"
+            data-quiet={view.quiet ? "true" : undefined}
+          >
+            {view.summary}
+          </p>
+        ) : null}
+        {/* Only when Caddie has gone quiet does the last result add anything;
+            while it works, the headline already says building or fixing. */}
+        {t.tests && view.quiet ? (
           <div className="build-last-result" data-testid="build-last-result">
             <Icon name="info" title="" />
             <div>
@@ -141,6 +152,7 @@ export function BuildProgress(props: {
           features={data.features}
           compact
           stale={view.quiet}
+          hideCurrent={title !== view.title}
         />
       ) : t.scope.length ? (
         <div className="build-scope" data-testid="build-scope">
@@ -211,11 +223,13 @@ export function BuildProgress(props: {
           </p>
         ) : null}
         <p className="build-status-time" data-testid="build-timing">
-          {t.elapsedMs !== null ? (
-            <>Started {formatDuration(t.elapsedMs)} ago</>
-          ) : null}
+          {/* "Started 9 h 17 min ago" counted from the first build start across
+              every retry and the night's sleep (owner 2026-10-30); the last
+              activity is the part that tells you it is alive. */}
           {t.idleMs !== null ? (
-            <> · Last activity {formatDuration(t.idleMs)} ago</>
+            <>Last activity {formatDuration(t.idleMs)} ago</>
+          ) : t.elapsedMs !== null ? (
+            <>Started {formatDuration(t.elapsedMs)} ago</>
           ) : null}
         </p>
       </section>
@@ -226,53 +240,7 @@ export function BuildProgress(props: {
           <button type="button" aria-pressed={detailTab === 'activity'} onClick={() => setDetailTab('activity')}>Files &amp; commands</button>
           {data.rounds.length ? <button type="button" aria-pressed={detailTab === 'history'} onClick={() => setDetailTab('history')}>Attempts</button> : null}
         </nav>
-        {detailTab === 'checks' ? <div className="build-checks-view">
-        <ol
-          className="build-stages"
-          aria-label="Build stages"
-          data-testid="build-stages"
-        >
-          {t.stages.map((stage) => (
-            <li
-              key={stage.key}
-              className="build-stage"
-              data-state={stage.state}
-              data-testid={`build-stage-${stage.key}`}
-            >
-              <span className="build-stage-top">
-                <span className="build-stage-mark" aria-hidden="true">
-                  <StageMark state={stage.state} />
-                </span>
-                <span className="build-stage-label">{stage.label}</span>
-              </span>
-              <span className="build-stage-state">{stage.state === 'done' ? 'Done' : stage.state === 'active' ? 'In progress' : stage.state === 'failed' ? 'Needs attention' : 'Not reported'}</span>
-              {stage.detail ? <p className="build-stage-detail">{stage.detail}</p> : null}
-            </li>
-          ))}
-        </ol>
-        {t.tests ? (
-          <p className="state-detail">
-            Latest reported tests: {t.tests.passed} passed · {t.tests.failed}{" "}
-            failed · {new Date(t.tests.at).toLocaleString()}
-          </p>
-        ) : null}
-        {t.checks.length ? (
-          <ul className="build-check-results">
-            {t.checks.map((check, index) => (
-              <li key={`${check.name}-${index}`}>
-                <strong>
-                  {check.label}: {check.passed ? "Passed" : "Failed"}
-                </strong>
-                <code>{check.name}</code>
-                <span>
-                  {new Date(check.at).toLocaleString()} ·{" "}
-                  {formatDuration(check.durationMs)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        </div> : null}
+        {detailTab === 'checks' ? <BuildChecksView data={data} /> : null}
         {detailTab === 'activity' ? <div className="build-activity-view" data-testid="build-detail">
           {!t.files.length && !t.commands.length ? <p className="build-detail-empty">No file or command activity has been reported yet.</p> : (() => {
             // Owner 2026-10-25: inspection one-liners (ls/pwd/echo…) are not
@@ -283,12 +251,15 @@ export function BuildProgress(props: {
             const trivial = t.commands.filter((c) => c.outcome === "ok" && TRIVIAL.test(c.command));
             const anyFailed = t.commands.some((c) => c.outcome === "failed");
             return <>
-            {/* Summary banner: one honest headline over a count ring. The ring
-                is full (ok) only when nothing a command reported failed. */}
+            {/* Summary banner: one honest headline over a count ring. A command
+                the builder tried and dropped is ordinary trial and error, not
+                something for the owner to fix (owner 2026-10-30: "what still
+                needs attention?" while the build ran fine), so only the
+                checks, shown under Checks, set the tone. */}
             <div
               className="build-activity-banner"
               data-testid="build-activity-summary"
-              data-tone={anyFailed ? "warn" : "ok"}
+              data-tone="ok"
             >
               <span className="build-activity-ring" aria-hidden="true">
                 <span>{t.files.length}</span>
@@ -297,7 +268,7 @@ export function BuildProgress(props: {
                 <h3>
                   {t.files.length} file{t.files.length === 1 ? "" : "s"} written
                   {t.commands.length ? ` · ${t.commands.length} command${t.commands.length === 1 ? "" : "s"}` : ""}
-                  {t.commands.length ? (anyFailed ? ", one needs attention" : ", all ran ok") : ""}
+
                 </h3>
                 <p>{activitySummaryLine(t.fileAreas, anyFailed)}</p>
               </div>
@@ -379,45 +350,7 @@ export function BuildProgress(props: {
             </>;
           })()}
         </div> : null}
-      {detailTab === 'history' && data.rounds.length ? (
-        <section className="build-history" data-testid="build-history">
-          <h3>Check attempts</h3>
-          <p className="state-detail">
-            These are check attempts, not completed features. Most recent first.
-          </p>
-          <ul>
-            {[...data.rounds].reverse().map((round, index) => (
-              <li
-                key={`${round.issue}-${index}`}
-                data-outcome={round.outcome}
-                data-testid="build-history-item"
-              >
-                <span className="build-history-text">
-                  <b>{roundLabel(round.round)}</b>
-                  {round.detail ? (
-                    /^\s*[{[]/.test(round.detail) ? (
-                      <details>
-                        <summary>Exact recorded result</summary>
-                        <pre className="build-history-detail">
-                          {round.detail}
-                        </pre>
-                      </details>
-                    ) : (
-                      <span className="build-history-detail">
-                        {" "}
-                        — {round.detail}
-                      </span>
-                    )
-                  ) : null}
-                  <small className="build-recorded-at">
-                    {round.issue} · {new Date(round.at).toLocaleString()}
-                  </small>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      {detailTab === 'history' && data.rounds.length ? <BuildAttemptsView data={data} /> : null}
       {props.latest ? (
         <details className="build-latest" data-testid="build-latest">
           <summary>Latest message from Caddie</summary>
@@ -427,17 +360,6 @@ export function BuildProgress(props: {
       </ProjectDialog>
     </section>
   );
-}
-
-function StageMark({
-  state,
-}: {
-  state: TimelineStageView["state"];
-}): ReactElement {
-  if (state === "done") return <Icon name="check" title="done" />;
-  if (state === "failed") return <Icon name="alert" title="failed" />;
-  if (state === "active") return <span className="build-stage-spinner" />;
-  return <span className="build-stage-dot" />;
 }
 
 /** "14 app · 6 tests · 3 config" — only the non-zero areas, plural-aware. */
@@ -520,8 +442,8 @@ function activitySummaryLine(
         ? `Work landed in ${present[0]}`
         : `Work spans ${present.slice(0, -1).join(", ")} and ${present[present.length - 1]}`;
   return anyFailed
-    ? `${where}. One command reported a problem — see Checks.`
-    : `${where}. No commands failed.`;
+    ? `${where}. Some things Caddie tried along the way didn't work, which is normal; the checks decide what counts as done.`
+    : `${where}.`;
 }
 
 /** "40 s", "4 min", "1 h 05 min" — the client mirror of the model's formatter. */
@@ -542,22 +464,4 @@ export function formatBytes(bytes: number): string {
   const kb = bytes / 1024;
   if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
   return `${(kb / 1024).toFixed(1)} MB`;
-}
-
-/** Plain words for a run_rounds `round` kind. */
-function roundLabel(round: string): string {
-  switch (round) {
-    case "repair_attempt":
-      return "Tried a fix";
-    case "verification":
-      return "Ran a check";
-    case "diagnosis":
-      return "Looked into a problem";
-    case "transport_retry":
-      return "Retried after a hiccup";
-    case "framework_recovery":
-      return "Recovered and continued";
-    default:
-      return round;
-  }
 }

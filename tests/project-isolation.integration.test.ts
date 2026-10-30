@@ -5,6 +5,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import net from 'node:net';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { splitSqlStatements } from './fixtures/controls-harness.ts';
+import { allMigrationPaths, allMigrationSql } from './fixtures/migrations.ts';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { safeParse } from 'valibot';
@@ -48,7 +49,6 @@ import * as projectsService from '../apps/app/src/server/projects.ts';
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const FIXTURE_ENTRY = join(REPO_ROOT, 'tests', 'fixtures', 'projects.ts');
-const MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0001_product.sql');
 
 const ALICE_EMAIL = 'alice@example.com';
 const BOB_EMAIL = 'bob@example.com';
@@ -422,8 +422,8 @@ beforeAll(async () => {
 	if (!existsSync(FIXTURE_ENTRY)) {
 		throw new Error('fixture worker entry missing: tests/fixtures/projects.ts');
 	}
-	if (!existsSync(MIGRATION_PATH)) {
-		throw new Error('production migration missing: apps/app/migrations/0001_product.sql');
+	if (allMigrationPaths().length === 0) {
+		throw new Error('production migrations missing: apps/app/migrations/*.sql');
 	}
 	stub = new StubProvider();
 	const stubPort = await freePort();
@@ -588,10 +588,7 @@ describe('P02 slice 1: product data model on real D1', () => {
 	});
 
 	test('every product index on revision/run tables leads with projectId — no latest-per-user access path can return (audit defect #2)', () => {
-		const migration = readFileSync(MIGRATION_PATH, 'utf8');
-		// product section = everything after the identity DDL boundary marker
-		const productSection = migration.split('IDENTITY-DDL-BOUNDARY')[1] ?? '';
-		const indexStatements = productSection
+		const indexStatements = allMigrationSql()
 			.split('\n')
 			.filter((line) => /^\s*create (unique )?index\b/i.test(line))
 			.map((line) => line.trim().replace(/;$/, ''));

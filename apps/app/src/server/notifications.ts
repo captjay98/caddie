@@ -310,7 +310,13 @@ export async function listNotifications(
 	const rows = filter.unreadOnly
 		? await queryAll(
 				db,
-				'select * from "notifications" where "userId" = ? and "readAt" is null order by "createdAt" desc, "id" asc limit ?',
+				// A pause the project has since moved past (the owner tapped Try
+				// again, or it recovered) is no longer news: it would tell them to
+				// act on something already fixed (Poultry Farm Monitor, 2026-10-29).
+				`select * from "notifications" n where n."userId" = ? and n."readAt" is null
+				 and not (n."kind" = 'build_paused' and n."projectId" is not null
+				  and exists (select 1 from "build_workflows" w where w."projectId" = n."projectId" and w."phase" <> 'blocked'))
+				 order by n."createdAt" desc, n."id" asc limit ?`,
 				userId,
 				limit,
 			)
@@ -726,6 +732,8 @@ export interface ChannelPrefs {
  */
 export const DEFAULT_CHANNEL_PREFS: Readonly<Record<string, ChannelPrefs>> = {
 	build_paused: { email: true, push: true },
+	// The app finished: the owner may have walked away for an hour.
+	build_ready: { email: true, push: true },
 	task_reminder: { email: true, push: false },
 	sentinel_material_change: { email: true, push: false },
 	discovery_fit: { email: false, push: false },

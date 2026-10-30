@@ -87,6 +87,7 @@ export function Composer(props: {
 	// eating two button slots before the user has typed. The menu opens on
 	// click, closes on pick, on Escape, and on an outside click.
 	const [menuOpen, setMenuOpen] = useState(false);
+	const coarsePointer = typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
 	const menuRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
@@ -258,7 +259,7 @@ export function Composer(props: {
 						aria-label="Add to message"
 						aria-haspopup="menu"
 						aria-expanded={menuOpen}
-						title="Add — camera, media, or dictation"
+						title="Add a photo, a file or your voice"
 						data-testid="composer-tools-toggle"
 						onClick={() => setMenuOpen((open) => !open)}
 					>
@@ -283,6 +284,9 @@ export function Composer(props: {
 									<span>{speech.listening ? 'Stop dictation' : 'Dictate'}</span>
 								</button>
 							) : null}
+							{/* Camera only where it means something: a touch device. On a
+							    desktop it opened the same file picker as "Add a photo or file". */}
+							{coarsePointer ? (
 							<button
 								type="button"
 								role="menuitem"
@@ -294,8 +298,9 @@ export function Composer(props: {
 								}}
 							>
 								<Icon name="camera" title="" />
-								<span>Camera</span>
+								<span>Take a photo</span>
 							</button>
+							) : null}
 							<button
 								type="button"
 								role="menuitem"
@@ -307,7 +312,7 @@ export function Composer(props: {
 								}}
 							>
 								<Icon name="image" title="" />
-								<span>Upload media</span>
+								<span>Add a photo or file</span>
 							</button>
 						</div>
 					) : null}
@@ -335,9 +340,15 @@ export function Composer(props: {
 					<Icon name="send" title="" />
 				</button>
 			</form>
-			<p className={props.draftNote ? 'composer-hint draft-note' : 'composer-hint'}>
-				{props.busy ? 'Follow-ups wait their turn. Current work continues.' : props.draftNote ?? 'Enter to send · Shift + Enter for a new line'}
-			</p>
+			{/* Keyboard tip only once someone is typing (review 2026-10-28);
+			    busy/draft notes still show because they say something real. */}
+			{props.busy || props.draftNote || value.trim() !== '' ? (
+				<p className={props.draftNote ? 'composer-hint draft-note' : 'composer-hint'} data-testid="composer-hint">
+					{props.busy
+						? 'Follow-ups wait their turn. Current work continues.'
+						: props.draftNote ?? 'Press Enter to send. Shift + Enter adds a new line.'}
+				</p>
+			) : null}
 		</div>
 	);
 }

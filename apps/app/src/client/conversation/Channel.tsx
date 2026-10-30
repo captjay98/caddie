@@ -2,7 +2,7 @@ import { ProjectWorkflow } from './ProjectWorkflow.tsx';
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import type { ReactElement } from 'react';
 import type { FlueConversationMessage, FlueConversationPart } from '@flue/react';
-import { answerParts } from './answer-parts.ts';
+import { finalAnswerParts } from './answer-parts.ts';
 import { safeParse } from 'valibot';
 import { DecisionCardSchema, type DecisionCard as DecisionCardType } from '@caddie/contracts';
 import { HackathonResultsCardSchema } from '@caddie/contracts';
@@ -35,6 +35,23 @@ function ConversationDecisionCard({ card }: { card: DecisionCardType }): ReactEl
 import { attachedFileNames, stripAttachedFileText } from './image-attachments.ts';
 import { settlementNotice } from './settlement-notice.ts';
 import { quotaRefusalMessage } from './send-failure.ts';
+import { useQuery } from '@tanstack/react-query';
+import { useOptionalWorkspaceChrome } from '../workspace/Chrome.tsx';
+import { workflowQueryOptions } from '../workflow-query.ts';
+import { ownerWordsFromIntake } from '../../shared/plan-intake.ts';
+
+/** What a running turn is making, by project phase, in the owner's words. */
+const PHASE_ACTIVITY: Partial<Record<string, string>> = {
+	planning: 'Writing your plan',
+	looks: 'Drawing 3 looks',
+	design: 'Designing your screens',
+	// The build is paused: what runs now is Caddie answering, not more
+	// building (owner 2026-10-30: "Working on your project…" under a paused card).
+	blocked: 'Caddie is replying',
+	// True while it builds AND while it fixes a part (owner 2026-10-30:
+	// "Building your app…" under "Fixing “…”").
+	building: 'Caddie is working on your app',
+};
 
 /**
  * The Channel — typed conversation rendering (feature-ledger row C7).
@@ -159,9 +176,12 @@ function dayLabel(timestamp: string | undefined): string | null {
  */
 const TOOL_ACTION_LABELS: Record<string, { working: string; done: string }> = {
   read_project_context: { working: 'Reading your project', done: 'Read your project' },
-  write_plan_note: { working: 'Saving the design', done: 'Saved the design' },
-  designer: { working: 'Designing the screens', done: 'Designed the screens' },
-  delegate: { working: 'Working with a specialist', done: 'Consulted a specialist' },
+  // One tool saves the plan, the looks AND the design, so the label names none
+  // of them ("Saved the design" on a plan turn read as wrong, 2026-10-29).
+  write_plan_note: { working: 'Saving it for your review', done: 'Saved it for your review' },
+  designer: { working: 'Drawing your app', done: 'Drew your app' },
+  delegate: { working: 'Working on your project', done: 'Worked on your project' },
+  task: { working: 'Working on your project', done: 'Worked on your project' },
 	find_hackathons: { working: 'Searching for hackathons', done: 'Searched for hackathons' },
 	research: { working: 'Researching the web', done: 'Researched the web' },
 	hackathon_details: { working: 'Looking up that hackathon', done: 'Looked up that hackathon' },
@@ -172,7 +192,7 @@ const TOOL_ACTION_LABELS: Record<string, { working: string; done: string }> = {
 	update_profile: { working: 'Noting your preferences', done: 'Noted your preferences' },
 	remember: { working: 'Noting that', done: 'Noted for you to confirm' },
 	inspect_repository: { working: 'Looking at your code', done: 'Looked at your code' },
-	list_stacks: { working: 'Checking available stacks', done: 'Checked available stacks' },
+	list_stacks: { working: 'Checking what Caddie can build', done: 'Checked what Caddie can build' },
 	verify_build: { working: 'Verifying the build', done: 'Verified the build' },
 	request_approval: { working: 'Asking for your go-ahead', done: 'Asked for your go-ahead' },
 	report_blocker: { working: 'Noting what is blocking this', done: 'Noted what is blocking this' },
@@ -180,56 +200,99 @@ const TOOL_ACTION_LABELS: Record<string, { working: string; done: string }> = {
 
 function toolActionLabel(toolName: string, done: boolean): string {
 	const entry = TOOL_ACTION_LABELS[toolName];
-	if (!entry) return toolName.replace(/[_-]+/g, ' ').replace(/^./, char => char.toUpperCase());
+	// An unmapped tool never shows its internal name ("Task", "Read plan note").
+	if (!entry) return done ? 'Worked on your project' : 'Working on your project';
 	return done ? entry.done : entry.working;
 }
 
-function ToolBanner({ part }: { part: ToolPart }): ReactElement {
-	const done = part.state === 'output-available';
-	const failed = part.state === 'output-error';
-	// Human action label — never the raw tool id. Failure says a step didn't
-	// complete, still without naming the internal tool.
-	const label = failed ? `${toolActionLabel(part.toolName, false)} — didn't complete` : toolActionLabel(part.toolName, done);
-	return (
-		<p className="tool-banner tool-row" data-state={part.state} data-part-kind="call" data-testid="tool-banner">
-			<Icon
-				name={done ? 'check' : failed ? 'alert' : 'play'}
-				title={done ? 'done' : failed ? 'failed' : 'working'}
-			/>{' '}
-			{label}
-		</p>
-	);
+/** The plain progress sentences a tool reported while it ran (deduped, in order). */
+function progressSteps(parts: readonly FlueConversationPart[]): string[] {
+	const texts = parts
+		.filter((part) => part.type === 'data-discoveryProgress')
+		.map((part) => (part as { data?: { text?: unknown } }).data?.text)
+		.filter((text): text is string => typeof text === 'string' && text.trim() !== '');
+	return [...new Set(texts)];
 }
 
-function ToolStrip({ parts }: { parts: ToolPart[] }): ReactElement {
+/**
+ * The stages a finished tool recorded in its own output (find_hackathons
+ * returns `steps`). That output is saved with the message, unlike a live data
+ * part, which Flue updates in place while the tool runs.
+ */
+function recordedSteps(tools: readonly ToolPart[]): string[] {
+	const out: string[] = [];
+	for (const tool of tools) {
+		const raw = (tool as { output?: unknown }).output;
+		let value: unknown = raw;
+		if (typeof raw === 'string') {
+			try {
+				value = JSON.parse(raw);
+			} catch {
+				continue;
+			}
+		}
+		const steps = (value as { steps?: unknown } | null)?.steps;
+		if (Array.isArray(steps)) for (const step of steps) if (typeof step === 'string' && step.trim()) out.push(step);
+	}
+	return [...new Set(out)];
+}
+
+function ToolStrip({ parts, steps = [] }: { parts: ToolPart[]; steps?: readonly string[] }): ReactElement {
  const [open, setOpen] = useState(false);
 	const running = parts.some((part) => part.state === 'input-available');
-	const failed = parts.filter((part) => part.state === 'output-error').length;
 	const totalMs = parts.reduce((sum, part) => sum + (typeof part.durationMs === 'number' ? part.durationMs : 0), 0);
-	const secs = Math.round(totalMs / 100) / 10;
-	// Distinct human actions in this run (deduped, order-preserving) — the strip
-	// summary names WHAT Caddie did, not raw tool ids or a bare step count.
-	const actions = [...new Set(parts.map((p) => toolActionLabel(p.toolName, true)))];
-	const actionPhrase = actions.length === 0
-		? 'Worked'
-		: actions.length <= 2
-			? actions.join(' · ')
-			: `${actions.slice(0, 2).join(' · ')} +${actions.length - 2} more`;
+	// Owner 2026-10-30: a build turn showed "Read your project · Worked on your
+	// project +2 more · 16 didn't complete · 9793.2s" over 60 identical rows.
+	// One plain line with the time; the list groups repeats; a step Caddie
+	// stopped and redid is ordinary work, not a failure the owner must read.
+	const time = totalMs >= 1000 ? plainDuration(totalMs) : '';
+	const grouped = new Map<string, number>();
+	for (const part of parts) {
+		const label = toolActionLabel(part.toolName, true);
+		grouped.set(label, (grouped.get(label) ?? 0) + 1);
+	}
+	const actions = [...grouped.keys()];
+	const actionPhrase = actions.length === 0 ? 'Worked on your project' : actions.length === 1 ? actions[0]! : `${actions[0]} and more`;
 	const runningTool = parts.find(part => part.state === 'input-available');
 	const summary = running
 		? `${runningTool ? toolActionLabel(runningTool.toolName, false) : 'Working'}…`
-		: failed > 0
-			? `${actionPhrase} · ${failed} didn't complete${secs ? ` · ${secs}s` : ''}`
-			: `${actionPhrase}${secs ? ` · ${secs}s` : ''}`;
+		: `${actionPhrase}${time ? ` · ${time}` : ''}`;
 	return (
 		<details className="tool-strip" data-testid="tool-strip" onToggle={event => setOpen(event.currentTarget.open)}>
-			<summary role="button">{running ? "Working" : "Work summary"} · {actionPhrase}</summary>
-            {open ? <p className="state-detail">{summary}</p> : null}
-			{open ? parts.map((part, index) => (
-				<ToolBanner key={index} part={part} />
-			)) : null}
+			<summary role="button">{running ? `Working · ${summary}` : `What Caddie did${time ? ` · ${time}` : ''}`}</summary>
+            {/* What actually happened, in plain words. When a tool reported its
+                stages (the hackathon search does), those ARE the summary; the
+                bare action label would only repeat the heading. Caddie's
+                internal reasoning is never shown here. */}
+			{open && steps.length > 0 ? (
+				<ul className="tool-steps" data-testid="tool-steps">
+					{steps.map((step) => (
+						<li key={step} className="tool-banner tool-row" data-state="output-available">
+							<Icon name="check" title="done" /> {step}
+						</li>
+					))}
+				</ul>
+			) : null}
+			{open && steps.length === 0 ? (
+				<ul className="tool-steps" data-testid="tool-steps">
+					{[...grouped].map(([label, count]) => (
+						<li key={label} className="tool-banner tool-row" data-state="output-available">
+							<Icon name="check" title="done" /> {label}{count > 1 ? ` · ${count} times` : ''}
+						</li>
+					))}
+				</ul>
+			) : null}
 		</details>
 	);
+}
+
+/** "40 s", "4 min", "2 h 43 min": never raw seconds like "9793.2s". */
+function plainDuration(ms: number): string {
+	const seconds = Math.round(ms / 1000);
+	if (seconds < 60) return `${seconds} s`;
+	const minutes = Math.round(seconds / 60);
+	if (minutes < 60) return `${minutes} min`;
+	return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, '0')} min`;
 }
 
 function DataDisclosure({ part }: { part: FlueConversationPart }): ReactElement {
@@ -285,6 +348,11 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
   if(typeof data?.projectId !== 'string' || typeof data?.name !== 'string') return <p role="alert">The project card could not be loaded.</p>;
   return <ProjectWorkflow projectId={data.projectId} name={data.name} showTranscript={false}/>;
  }
+	if (part.type === 'data-discoveryProgress') {
+		// Search progress drives the live status line and the work summary;
+		// it is never a transcript block (else it fell to "Technical detail").
+		return null;
+	}
 	if (part.type === 'data-hackathonResults') {
 		const parsed = safeParse(HackathonResultsCardSchema, part.data);
 		if (!parsed.success) {
@@ -340,7 +408,7 @@ function AssistantPart({ part }: { part: FlueConversationPart }): ReactElement |
 /** Transcript rows with day dividers (Today / Yesterday / short date between
  *  day groups); per-message clocks live in title tooltips only. One row per
  *  TURN — a user message, or an assistant turn as one bubble. */
-function buildTranscriptRows(turns: ReturnType<typeof groupTurns>, arrivals: ReadonlySet<string>): ReactElement[] {
+function buildTranscriptRows(turns: ReturnType<typeof groupTurns>, arrivals: ReadonlySet<string>, ownProjectId: string | null = null): ReactElement[] {
 	const rows: ReactElement[] = [];
   // A handoff may mention the same project again. Keep one live workspace
   // at its latest mention so previews cannot diverge across duplicate frames.
@@ -363,6 +431,10 @@ function buildTranscriptRows(turns: ReturnType<typeof groupTurns>, arrivals: Rea
 	const keepPart = (part: FlueConversationPart) => {
 		if (part.type !== 'data-projectWorkflow') return true;
 		const data = part.data as { projectId?: unknown };
+		// In a project's own chat its card already sits at the end of the
+		// transcript; a second copy inside an old reply showed two cards for
+		// one project (owner 2026-10-29).
+		if (typeof data?.projectId === 'string' && data.projectId === ownProjectId) return false;
 		return typeof data?.projectId !== 'string' || latestCards.get(data.projectId) === part;
 	};
 	for (const turn of turns) {
@@ -399,8 +471,17 @@ function UserRow({ message, followsSameAuthor, arriving }: { message: FlueConver
 		.filter((part): part is Extract<FlueConversationPart, { type: 'text' }> => part.type === 'text')
 		.map((part) => part.text)
 		.join('\n');
-	const text = stripAttachedFileText(raw);
+	const text = ownerWordsFromIntake(stripAttachedFileText(raw));
 	const files = attachedFileNames(raw);
+	// The planning intake is Caddie's write-up of the request, not words the
+	// person typed: a "You" bubble with sentences they never said confused the
+	// owner. It stays readable, folded, as what the plan was made from.
+	if (text !== stripAttachedFileText(raw)) return (
+		<details className="intake-note" data-testid="msg-intake">
+			<summary>What Caddie is planning from</summary>
+			<p>{text}</p>
+		</details>
+	);
 	return (
 		<div className="msg user" data-arriving={arriving || undefined} data-testid="msg-user" data-seq={followsSameAuthor ? 'cont' : 'first'} title={fullTime(message.timestamp)}>
 			<span className="sr-only">You{clock ? ` at ${clock}` : ''}</span>
@@ -434,7 +515,9 @@ function AssistantTurn({ messages, followsSameAuthor, arriving }: { messages: Fl
 	// The answer: everything that is neither reasoning nor a tool call, in order
 	// (text, cards, files, data disclosures), with the pieces of one streamed
 	// answer joined (answer-parts.ts).
-	const answer = answerParts(messages);
+	// Only the words after the last tool call: narration between tool calls is
+	// Caddie's own process, not the reply (answer-parts.ts finalAnswerParts).
+	const answer = finalAnswerParts(messages);
 	const working = Boolean(actions?.live) && (thinking || tools.some(part => part.state === 'input-available'));
     const hasFolded = !working && tools.length > 0;
 	const hasAnswer = answer.some((part) => part.type !== 'text' || cleanAssistantText(part.text).trim().length > 0);
@@ -447,7 +530,7 @@ function AssistantTurn({ messages, followsSameAuthor, arriving }: { messages: Fl
     if (!hasAnswer && !hiddenProposal && (working || tools.length === 0)) return null;
 	const body = (
 		<>
-            {!working && tools.length > 0 ? <ToolStrip parts={tools} /> : null}
+            {!working && tools.length > 0 ? <ToolStrip parts={tools} steps={[...new Set([...recordedSteps(tools), ...progressSteps(allParts)])]} /> : null}
 			{hasAnswer ? (
 				<div className={hasFolded ? 'turn-answer has-folded' : 'turn-answer'}>
 					{answer.map((part, index) => (
@@ -633,7 +716,13 @@ export function Channel(props: {
 		props.onComposerTextChange?.(text);
 	};
 
-	useEffect(() => {
+	// Anchored in a LAYOUT effect, not a passive one: a first history page lands
+	// as one tall block of messages, and in the frame between that paint and the
+	// scroll the card under it sits at the bottom of an unscrolled transcript
+	// (measured: y 109 → 5898 → 354, a 0.23 layout shift on the Preview tab,
+	// owner 2026-10-27). Before paint, the first frame the eye sees is already
+	// the bottom of the conversation.
+	useLayoutEffect(() => {
 		const el = scrollRef.current;
 		if (el && pinnedToBottom.current && beforeMessage === null) el.scrollTop = el.scrollHeight;
 	}, [source.messages, props.drafts, source.status, beforeMessage]);
@@ -730,21 +819,39 @@ export function Channel(props: {
       knownMessages.current = ids;
       if (!added.size || beforeMessage !== null) return;
       setArrivals(added);
-      const timer = setTimeout(() => setArrivals(new Set()), 200);
-      return () => { clearTimeout(timer); setArrivals(new Set()); };
     }, [source.messages, source.historyReady, beforeMessage]);
+    useEffect(() => {
+      if (!arrivals.size) return;
+      const timer = setTimeout(() => setArrivals(new Set()), 200);
+      return () => clearTimeout(timer);
+    }, [arrivals]);
 	const transcriptRows = useMemo(
-		() => buildTranscriptRows(groupTurns(shownMessages), arrivals),
-		[shownMessages, arrivals],
+		() => buildTranscriptRows(groupTurns(shownMessages), arrivals, projectId),
+		[shownMessages, arrivals, projectId],
 	);
 	const admittedUserMessages = useMemo(
 		() => source.messages.filter((message) => message.role === 'user' && !String(message.id).startsWith('local:')).length,
 		[source.messages],
 	);
 
+	// The project card under the transcript already polls this; reading the same
+	// cache (never fetching here) lets the status line say WHAT is being made
+	// ("Writing your plan…") instead of a generic "thinking" plus a step count.
+	const chrome = useOptionalWorkspaceChrome();
+	const workflowPhase = useQuery({ ...workflowQueryOptions(chrome?.actorId ?? null, projectId), enabled: false }).data?.workflow?.phase;
+	const phaseActivity = workflowPhase ? PHASE_ACTIVITY[workflowPhase] : undefined;
 	const live = source.historyReady && (source.status === 'submitted' || source.status === 'streaming');
 	const latestSettlement = source.settlements.at(-1);
-	const settledFailed = !live && latestSettlement && latestSettlement.outcome !== 'completed' ? [latestSettlement] : [];
+	// A failed turn is only news while nothing has moved since. Once the
+	// project is being prepared again (a newer step is running), the red
+	// "Caddie hit a problem" line next to a working card contradicted it
+	// (Poultry Tracker, 2026-10-29).
+	// Only a step that has started SINCE the failure counts as moving on: hiding
+	// on the phase alone hid the very failure that stopped the design (2026-10-29).
+	const workflowUpdatedAt = useQuery({ ...workflowQueryOptions(chrome?.actorId ?? null, projectId), enabled: false }).data?.workflow?.updatedAt;
+	const failedAt = latestSettlement?.timestamp ? Date.parse(latestSettlement.timestamp) : NaN;
+	const projectMovedOn = Boolean(workflowUpdatedAt) && Number.isFinite(failedAt) && Date.parse(workflowUpdatedAt!) > failedAt + 1000;
+	const settledFailed = !live && !projectMovedOn && latestSettlement && latestSettlement.outcome !== 'completed' ? [latestSettlement] : [];
 
 	// Live activity (what Caddie is DOING, not just "working"): read the current
 	// turn's parts for the running tool-call count and the most recent tool name,
@@ -758,7 +865,10 @@ export function Channel(props: {
 		const latestTool = toolParts.at(-1);
 		const toolName = latestTool?.toolName ?? null;
 		const reasoning = lastAssistant.parts.some((p) => p.type === 'reasoning' && (p as { state?: string }).state === 'streaming');
-		return { toolCount: toolParts.length, toolName, reasoning };
+		// While the hackathon search runs, its latest real stage is the line.
+		const searching = toolParts.some((p) => p.toolName === 'find_hackathons' && p.state === 'input-available');
+		const stage = searching ? progressSteps(lastAssistant.parts).at(-1) ?? null : null;
+		return { toolName, reasoning, searching, stage };
 	}, [live, source.messages]);
 
 
@@ -837,7 +947,7 @@ export function Channel(props: {
 					)}
 
 				{settledFailed.map((settlement) => {
-					const notice = settlementNotice(settlement);
+					const notice = settlementNotice(settlement, { building: workflowPhase === 'building' });
 					return (
 						<p
 							key={settlement.submissionId}
@@ -858,24 +968,39 @@ export function Channel(props: {
 				{/* The model can propose a memory after admission, during its turn. */}
       {newerCount === 0 ? <MemoryOffers projectId={projectId} refreshKey={`${admittedUserMessages}:${source.settlements.length}`} /> : null}
 
-				{newerCount === 0 ? <ProjectWorkflow key={projectId} projectId={projectId} showTranscript={false}/> : null}
+				{/* The status card is the LAST thing in the transcript, so it sits exactly
+				    where the conversation above it ends. Painting it while the first
+				    history page is still on its way showed it once at the top of an empty
+				    pane, then pushed it below the transcript's clip and back in when the
+				    messages landed (the measured 0.27 layout shift, owner 2026-10-27).
+				    It now appears when the conversation has an answer — and at once when
+				    it clearly will not: an error or a slow load, which is exactly where
+				    the card earns its place (the recovery copy says project status is
+				    separate from your chat history). */}
+				{newerCount === 0 && (!waitingForHistory || source.error || slowHistory) ? <ProjectWorkflow key={projectId} projectId={projectId} showTranscript={false}/> : null}
 				{live && newerCount === 0 ? (
 					<div className="channel-activity" role="status" data-testid="channel-status">
 						<span className="channel-activity-dot" aria-hidden="true" />
 						<span className="channel-activity-label">
-							{liveActivity?.reasoning
-								? 'Caddie is thinking…'
-								: liveActivity?.toolName
-									? // Plain action ("Searching for hackathons…"), never the raw
-										// tool id; an unmapped tool reads "Working…".
-										`${toolActionLabel(liveActivity.toolName, false)}…`
-									: 'Caddie is working'}
+							{liveActivity?.searching
+								? `${liveActivity.stage ?? 'Looking through hackathons that are open right now'}…`
+								: phaseActivity
+									? `${phaseActivity}…`
+									: liveActivity?.reasoning
+										? 'Caddie is thinking…'
+										: liveActivity?.toolName
+											? // Plain action ("Searching for hackathons…"), never the raw
+												// tool id; an unmapped tool reads "Working…".
+												`${toolActionLabel(liveActivity.toolName, false)}…`
+											: 'Caddie is working…'}
 						</span>
-						{liveActivity && liveActivity.toolCount > 0 ? (
-							<span className="channel-activity-count">
-								{liveActivity.toolCount} {liveActivity.toolCount === 1 ? 'step' : 'steps'}
+						{liveActivity?.searching ? (
+							<span className="channel-activity-note" data-testid="channel-activity-note">
+								This usually takes about a minute.
 							</span>
 						) : null}
+						{/* No "N steps" count (owner 2026-10-29): a bare number told a
+						    non-technical person nothing about what was happening. */}
 					</div>
 				) : null}
 				{source.status === 'error' ? (
@@ -920,6 +1045,12 @@ export function Channel(props: {
 				autoCheckOnOpen
 				checking={checkingDetail}
 				onCheck={() => void checkDetailEligibility(detailCandidate.id)}
+				// The next step stays in Caddie: back to chat, brainstorming for this event.
+				onExplore={() => {
+					const title = detailCandidate.title;
+					setDetailCandidate(null);
+					props.onSend(`Let's plan a project for ${title}. Help me find a good idea for it.`, []);
+				}}
 			/>
 		) : null}
 		</HackathonDetailProvider>

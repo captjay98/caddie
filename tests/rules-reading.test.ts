@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bu
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import type { Scope } from '@caddie/contracts';
+import { applyFinalSchema } from './fixtures/migrations.ts';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import { discoverForActor } from '../apps/app/src/server/coordinator-context.ts';
 import { evaluateEligibility } from '../apps/app/src/server/eligibility.ts';
@@ -52,10 +53,7 @@ const OVERVIEW_PROSE = (title: string): string =>
 async function world() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec('PRAGMA foreign_keys=ON');
-	for (const name of ['0001_product.sql', '0004_evidence.sql', '0008_profile.sql', '0009_discovery.sql', '0011_home_project.sql', '0013_discovery_saved.sql', '0015_plan_decisions.sql', '0017_profile_preferences.sql']) {
-		sqlite.exec(readFileSync(new URL(`../apps/app/migrations/${name}`, import.meta.url), 'utf8'));
-	}
-	const db = {
+	applyFinalSchema(sqlite);	const db = {
 		prepare(sql: string) {
 			const stmt = sqlite.prepare(sql);
 			return { bind(...args: never[]) { return {
@@ -187,7 +185,7 @@ describe('readRulesForCandidates', () => {
 			stubNetwork(c);
 			const result = await readRulesForCandidates(db, scope, [{ id: 'a', url: AMAZON_URL, title: 'Amazon Developer Hackathon' }], KEYS);
 			expect(result.pagesRead).toBe(1);
-			expect(result.claimsAdded).toBe(1); // the real restriction
+			expect(result.claimsAdded).toBe(2); // the real restriction and the quoted submission deadline
 			expect(result.quotesRejected).toBe(1); // the invented Nigeria rule
 			expect(result.gaps).toEqual([]);
 			// Overview prose for this candidate is captured and returned for the digest.
@@ -209,11 +207,12 @@ describe('readRulesForCandidates', () => {
 			expect(overviewSnapshot!.content).not.toContain('IS NOT open to');
 			// Claim: exact snapshot substring, never the model's re-spaced text.
 			const claims = await listClaims(db, scope);
-			expect(claims).toHaveLength(1);
-			expect(claims[0]!.claimType).toBe('eligibility.restricted_countries');
-			expect(claims[0]!.value).toBe('BR,RU,CU,IR,KP');
-			expect(claims[0]!.extractionVersion).toBe(RULES_EXTRACTION_VERSION);
-			expect(snapshot!.content.includes(claims[0]!.quote)).toBe(true);
+			expect(claims).toHaveLength(2);
+			const restriction = claims.find(claim => claim.claimType === 'eligibility.restricted_countries')!;
+			expect(restriction.value).toBe('BR,RU,CU,IR,KP');
+			expect(restriction.extractionVersion).toBe(RULES_EXTRACTION_VERSION);
+			expect(snapshot!.content.includes(restriction.quote)).toBe(true);
+			expect(claims.find(claim => claim.claimType === 'requirement.submission_deadline')?.value).toBe('October 23, 2026 (12:00 pm Pacific Time)');
 			// The overview page never produces an eligibility claim.
 			expect(claims.every((cl) => cl.snapshotId !== overviewSnapshot!.id)).toBe(true);
 			expect(claims.some((cl) => cl.value.includes('NG'))).toBe(false);
@@ -295,7 +294,7 @@ describe('readRulesForCandidates', () => {
 			stubNetwork(counters());
 			const result = await readRulesForCandidates(db, scope, [{ id: 'a', url: AMAZON_URL, title: 'Amazon' }], { tavilyApiKey: 'tvly-test' });
 			expect(result.pagesRead).toBe(1);
-			expect(result.claimsAdded).toBe(0);
+			expect(result.claimsAdded).toBe(1);
 			expect(result.gaps.join(' ')).toContain('not analysed');
 		} finally { sqlite.close(); }
 	});
@@ -305,9 +304,9 @@ describe('readRulesForCandidates', () => {
 		try {
 			stubNetwork(counters(), { modelStatus: 500 });
 			const result = await readRulesForCandidates(db, scope, [{ id: 'a', url: AMAZON_URL, title: 'Amazon' }], KEYS);
-			expect(result.claimsAdded).toBe(0);
+			expect(result.claimsAdded).toBe(1);
 			expect(result.gaps.join(' ')).toContain('Amazon');
-			expect(await listClaims(db, scope)).toHaveLength(0);
+			expect((await listClaims(db, scope)).map(claim => claim.claimType)).toEqual(['requirement.submission_deadline']);
 		} finally { sqlite.close(); }
 	});
 
@@ -340,10 +339,14 @@ describe('discoverForActor — quoted rules decide eligibility', () => {
 			// Amazon: the quoted restriction list does not include NG → eligible.
 			expect(amazon.eligibility.verdict).toBe('eligible');
 			expect(amazon.eligibility.rules[0]!.quote).toContain('Brazil');
-			expect(amazon.eligibilityNote).toBe('You can enter');
+			expect(amazon.eligibilityNote).toBe('You can enter: Nigeria is not on the list of excluded countries');
 			expect(amazon.eligibilityQuote).toContain('Brazil');
 			expect(amazon.rulesUrl).toBe('https://amazonappdev2026.devpost.com/rules');
-			expect(result.gaps.join(' ')).toContain('official rules pages (via Tavily)');
+			// "How I checked" is plain words (no vendor names); the card gets the
+			// count of events whose rules were read.
+			expect(result.gaps.join(' ')).toContain('official rules');
+			expect(result.gaps.join(' ')).not.toContain('Tavily');
+			expect(result.rulesCheckedCount).toBeGreaterThan(0);
 			// US-only rules: NG is outside the quoted allowlist → ineligible. The
 			// feed's ladder is eligibility verdict FIRST (eligible → unknown →
 			// ineligible), so an ineligible event never outranks an eligible or
@@ -390,7 +393,7 @@ describe('discoverForActor — quoted rules decide eligibility', () => {
 			expect(paypal.eligibility.rules.find((r) => r.claimType === 'eligibility.min_age')!.basis).toBe('missing_profile_attribute');
 			expect(paypal.eligibility.verdict).toBe('unknown');
 			expect(paypal.eligibilityNeedsConfirm).toBe(true);
-			expect(paypal.eligibilityNote).toBe("Open to US · confirm you're 18+");
+			expect(paypal.eligibilityNote).toBe("Open to United States · confirm you're 18+");
 			expect(result.candidates.find((x) => x.url === AMAZON_URL)!.eligibility.verdict).toBe('eligible');
 		} finally { sqlite.close(); }
 	});

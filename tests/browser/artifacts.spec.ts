@@ -245,7 +245,7 @@ test.describe('P07 artifacts viewer + design review (composed build, stubbed /ap
 
 		// The plan body renders readably for the revision under review (F09),
 		// titled in the v2 plain words.
-		await expect(page.getByTestId('design-review-plan-body')).toContainText("What you're making — plan version 2");
+		await expect(page.getByTestId('design-review-decision-bar')).toContainText('Version 2');
 		await expect(page.getByTestId('plan-body-content')).toContainText('render a live chart');
 
 		// v2 (U06): both decisions act through confirmation windows.

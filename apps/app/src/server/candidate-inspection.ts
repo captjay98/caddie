@@ -87,6 +87,9 @@ const MAX_BATCH = 20;
 
 const EMPTY: ReadonlyMap<string, AiFitInspection> = new Map();
 
+/** "How I checked" line when the AI fit scoring could not run (plain words, review 2026-10-28). */
+export const FIT_UNAVAILABLE_GAP = 'I couldn’t score how well each event fits you this time, so they are in a simpler order.';
+
 function clampReason(raw: unknown): string {
 	if (typeof raw !== 'string') return '';
 	return raw.replace(/\s+/g, ' ').trim().slice(0, 160);
@@ -119,6 +122,7 @@ function buildMessages(profile: InspectionProfile, candidates: readonly Inspecta
 		'"weak" (little overlap), ' +
 		'"unknown" (the text is too thin to judge — USE THIS rather than guessing). ' +
 		'reason is ONE short user-facing sentence (no ids, no jargon) explaining the verdict from the actual text. ' +
+		'Write it TO the person, in the second person ("matches your interest in AI"), never about them ("their interests", "the user"). ' +
 		'confidence is a number 0..1. NEVER invent facts (dates, prizes, eligibility) not present in the text. ' +
 		'Output STRICT JSON ONLY, no prose, in the shape: ' +
 		'{"items":[{"i":0,"verdict":"strong","reason":"...","confidence":0.8}, ...]} — one object per input index.';
@@ -156,7 +160,7 @@ export async function inspectCandidates(input: InspectCandidatesInput): Promise<
 	const candidates = input.candidates.slice(0, MAX_BATCH);
 	if (candidates.length === 0) return { byId: EMPTY, gap: null };
 	if (!input.apiKey) {
-		return { byId: EMPTY, gap: 'AI fit inspection is unavailable: the model key is not configured — results are ranked by heuristics only.' };
+		return { byId: EMPTY, gap: FIT_UNAVAILABLE_GAP };
 	}
 	const route = findModelRouteForRole('helperRanking');
 	let content: string;
@@ -175,18 +179,18 @@ export async function inspectCandidates(input: InspectCandidatesInput): Promise<
 			throw new Error(cause instanceof Error ? cause.message : 'network error');
 		});
 		if (!res.ok) {
-			return { byId: EMPTY, gap: `AI fit inspection failed (status ${res.status}) — results are ranked by heuristics only.` };
+			return { byId: EMPTY, gap: FIT_UNAVAILABLE_GAP };
 		}
 		const body = res.body as { choices?: { message?: { content?: unknown } }[] };
 		const raw = body.choices?.[0]?.message?.content;
 		content = typeof raw === 'string' ? raw : '';
 	} catch {
-		return { byId: EMPTY, gap: 'AI fit inspection failed (request error) — results are ranked by heuristics only.' };
+		return { byId: EMPTY, gap: FIT_UNAVAILABLE_GAP };
 	}
 
 	const items = parseItems(content);
 	if (!items) {
-		return { byId: EMPTY, gap: 'AI fit inspection returned an unreadable response — results are ranked by heuristics only.' };
+		return { byId: EMPTY, gap: FIT_UNAVAILABLE_GAP };
 	}
 	const byId = new Map<string, AiFitInspection>();
 	for (const item of items) {
@@ -381,7 +385,7 @@ function buildDigestMessages(
 		'prizes: each listed prize line with its amount exactly as written (cash, hardware, or credit value). ' +
 		'perks: credits, free API/cloud access, hardware, mentorship or other support that is offered. ' +
 		'judging: the judging criteria, one short item each. ' +
-		'fit_tracks: up to 2 of the listed tracks that best suit the builder profile, each with a short "why" naming the profile fact it relies on; [] when the profile is empty or no track is listed. ' +
+		'fit_tracks: up to 2 of the listed tracks that best suit the builder profile, each with a short "why": ONE plain sentence written TO the person in the second person (e.g. "You said you like AI, and this track is all about it."), never a label like "relies on intermediate experience"; [] when the profile is empty or no track is listed. ' +
 		'watch_out: ONE caution to confirm before committing, or null. ' +
 		'Use [] or "" for anything the text does not state. NEVER invent tracks, prizes, amounts, dates, perks or eligibility. No prose outside the JSON.';
 	// The overview page (when read) is the richest material — prefer it, but keep

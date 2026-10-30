@@ -28,6 +28,7 @@ const APP_DIR = join(ROOT, 'apps', 'app');
 const NOW = new Date('2026-10-19T12:00:00Z');
 const DB_ID = '0b1c2d3e-4f50-4617-8293-a4b5c6d7e8f9';
 const HOST = 'caddie.example.com';
+const PREVIEW_HOST = 'previews.example.net';
 // The address this repo actually deploys to (apps/app/wrangler.jsonc).
 const COMMITTED_HOST = 'caddie.jamalibrahim.dev';
 
@@ -55,6 +56,10 @@ function goodValues(): Map<string, string> {
 	return new Map([
 		['BETTER_AUTH_SECRET', 'prod-secret-marker-0123456789abcdefghijkl'],
 		['BETTER_AUTH_URL', `https://${HOST}`],
+		['PREVIEW_BASE_URL', `https://${PREVIEW_HOST}`],
+		['PREVIEW_SIGNING_SECRET', 'prod-preview-signing-marker-0123456789abcdef'],
+		['DESIGN_CAPTURE_URL', 'https://capture.example.net'],
+		['DESIGN_CAPTURE_TOKEN', 'capture-token-marker-0123456789abcdef'],
 		['INVITE_ALLOWLIST', 'owner@example.com, helper@example.com'],
 		['OPERATOR_EMAILS', 'owner@example.com'],
 		['NEBIUS_API_KEY', 'prod-nebius-marker'],
@@ -84,6 +89,16 @@ async function check(values: Map<string, string>, local: Map<string, string> = L
 }
 
 describe('S10 preflight: the committed production environment', () => {
+	test('production fails closed when independent quality review or its capture service is absent', async () => {
+		// Owner 2026-10-27: the review gate itself is default-on in code (never
+		// env-gated); a deploy must carry its reviewer credential and capture service.
+		for (const key of ['NEBIUS_API_KEY', 'DESIGN_CAPTURE_URL', 'DESIGN_CAPTURE_TOKEN']) {
+			const values = goodValues(); values.delete(key);
+			expect(fails(await check(values)).some(detail => detail.includes(key))).toBe(true);
+		}
+		const insecure = goodValues(); insecure.set('DESIGN_CAPTURE_URL', 'http://capture.example.net');
+		expect(fails(await check(insecure)).some(detail => detail.includes('DESIGN_CAPTURE_URL'))).toBe(true);
+	});
 	test('restates every binding, and the committed owner inputs are real', () => {
 		const { findings, target } = checkProductionConfig(committedConfig(), APP_DIR);
 		expect(findings.some((f) => f.level === 'PASS' && f.detail.startsWith('env.production restates every binding'))).toBe(true);
@@ -258,6 +273,22 @@ describe('S10 preflight: the production values', () => {
 		values.set('BETTER_AUTH_URL', 'https://caddie-app.someone.workers.dev');
 		const workersDev: ProductionTarget = { ...TARGET, hosts: [], workersDev: true };
 		expect(fails(await check(values, LOCAL, workersDev))).toEqual([]);
+	});
+
+	test('PREVIEW_BASE_URL must be a bare https origin separate from Caddie, and the preview key must be long', async () => {
+		for (const [url, expected] of [
+			['http://previews.example.net', 'https:// origin'],
+			['https://previews.example.net/preview', 'bare origin'],
+			['https://caddie.example.com', 'separate domain'],
+			['https://preview.caddie.example.com', 'separate domain'],
+		] as const) {
+			const values = goodValues();
+			values.set('PREVIEW_BASE_URL', url);
+			expect(fails(await check(values)).join(' ')).toContain(expected);
+		}
+		const values = goodValues();
+		values.set('PREVIEW_SIGNING_SECRET', 'too-short');
+		expect(fails(await check(values)).join(' ')).toContain('PREVIEW_SIGNING_SECRET is shorter than 32 characters');
 	});
 
 	test('local values: the auth secret and the GitHub app must differ; the Google client and keys warn', async () => {

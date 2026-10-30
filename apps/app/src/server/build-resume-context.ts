@@ -81,7 +81,9 @@ export async function buildResumeContext(db:D1Database,runId:string):Promise<str
  const pending=(await db.prepare("select operationKey,provider,status,receiptId from external_operations where runId=? and status not in ('succeeded','failed','cancelled') order by createdAt desc limit 12")
   .bind(runId).all()).results;
  const failures=(await db.prepare("select issue,detail from run_rounds where runId=? and outcome='failed' order by rowid desc limit 3")
-  .bind(runId).all<{issue:string;detail:string|null}>()).results.map(row=>({issue:row.issue,detail:row.detail?.slice(0,500)}));
+  // The latest failure is what the resumed repair must fix, so it keeps up to
+  // 2000 chars (a whole independent-check brief); older ones stay short.
+  .bind(runId).all<{issue:string;detail:string|null}>()).results.map((row,index)=>({issue:row.issue,detail:row.detail?.slice(0,index===0?2000:500)}));
  const budget=(await db.prepare(`select l.limitMicros,coalesce(sum(case when r.status='settled' then r.settledMicros when r.status='reserved' then r.reservedMicros else 0 end),0) as committedMicros
   from build_spend_limits l left join build_spend_reservations r on l.payerId=r.payerId where l.payerId=? group by l.payerId`)
   .bind(workflow.spendPayerId).all()).results[0] ?? null;

@@ -11,6 +11,20 @@
 BETTER_AUTH_SECRET=
 # The production origin exactly, e.g. https://caddie.example.com (no trailing slash)
 BETTER_AUTH_URL=
+# Isolated app previews, on a domain of their own (never Caddie's host or a
+# subdomain of it), e.g. https://previews.example.net (no trailing slash).
+# Its wildcard subdomains must reach this Worker with a valid certificate;
+# see docs/runbooks/production-deploy.md ("Once", step 5). Without both preview
+# values, every web build pauses before it can be checked or marked ready.
+PREVIEW_BASE_URL=
+# Signs short-lived preview links (at least 32 characters): openssl rand -base64 32.
+# Must be its own value, not derived from BETTER_AUTH_SECRET.
+PREVIEW_SIGNING_SECRET=
+
+# Independent plan/design review: set the policy to quality-v1 and configure
+# a private capture service and token (or bind DESIGN_CAPTURE instead).
+DESIGN_CAPTURE_URL=
+DESIGN_CAPTURE_TOKEN=
 # Who may sign in with Google/GitHub: your address, comma-separated
 INVITE_ALLOWLIST=
 # Who may open /operator (each must also be in INVITE_ALLOWLIST)

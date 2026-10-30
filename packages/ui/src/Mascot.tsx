@@ -76,10 +76,15 @@ export function Mascot(props: { mood: MascotMood; size?: number; live?: boolean;
 				<circle cx="6.5" cy="8" r="2.1" />
 				<circle cx="12.5" cy="3" r="2.5" />
 			</g>
-			<g className="m-z" fontFamily="var(--font-mono, monospace)" fontWeight="600" fill="currentColor">
-				<text x="5" y="14" fontSize="9">z</text>
-				<text x="11" y="7" fontSize="7">z</text>
-			</g>
+			{/* Only a sleeping mascot draws its "z z": hidden glyphs were still
+			    text, so they leaked into copied text and page reads ("z z" above
+			    every plan, owner 2026-10-29). */}
+			{state === 'sleep' ? (
+				<g className="m-z" fontFamily="var(--font-mono, monospace)" fontWeight="600" fill="currentColor">
+					<text x="5" y="14" fontSize="9">z</text>
+					<text x="11" y="7" fontSize="7">z</text>
+				</g>
+			) : null}
 			<g className="m-all">
 				<g className="m-flag">
 					<path d="M43 18V4.5" stroke="var(--m-deep, #2f7ddd)" strokeWidth="2.6" strokeLinecap="round" fill="none" />

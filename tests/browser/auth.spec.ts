@@ -254,38 +254,38 @@ test.describe('one sign-in everywhere (plan 5.2; calm redo 2026-10-25)', () => {
 	});
 
 	// Walkthrough finding (2026-10-26): balanced wrapping split the subtitle as
-	// "Build an app from your / idea — no coding needed." It reads as one line
-	// on a computer and, when it must wrap, breaks only at the dash.
-	test('the subtitle is one line on a computer and breaks only at the dash on a phone', async ({ page }) => {
-		const cases = [
-			{ width: 1440, height: 900, lines: ['Build an app from your idea — no coding needed.'] },
-			{ width: 390, height: 844, lines: ['Build an app from your idea —', 'no coding needed.'] },
-		];
-		for (const c of cases) {
+	// "Build an app from your / idea — no coding needed." The subtitle was cut to
+	// one clause (owner 2026-10-28), so the invariant is now the plain one: it
+	// reads as a single line at phone and desktop width, never a widow.
+	test('the subtitle reads as one line at phone and desktop width', async ({ page }) => {
+		const text = 'Your idea, built and checked.';
+		for (const c of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
 			await page.setViewportSize({ width: c.width, height: c.height });
 			await page.goto(`${BASE}/app/`);
 			const lede = page.getByTestId('sign-in-gate').locator('.signin-lede');
 			await expect(lede).toBeVisible();
+			await expect(lede).toHaveText(text);
 			// Rendered lines, read from each character's box (independent of markup).
 			const lines = await lede.evaluate((el) => {
 				const rows: { top: number; text: string }[] = [];
 				const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
 				for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-					const text = node.textContent ?? '';
-					for (let i = 0; i < text.length; i++) {
+					const nodeText = node.textContent ?? '';
+					for (let i = 0; i < nodeText.length; i++) {
 						const range = document.createRange();
 						range.setStart(node, i);
 						range.setEnd(node, i + 1);
 						const rect = range.getClientRects()[0];
 						if (!rect) continue;
 						const row = rows.find((r) => Math.abs(r.top - rect.top) < 4);
-						if (row) row.text += text[i];
-						else rows.push({ top: rect.top, text: text[i] });
+						if (row) row.text += nodeText[i];
+						else rows.push({ top: rect.top, text: nodeText[i] });
 					}
 				}
 				return rows.sort((a, b) => a.top - b.top).map((r) => r.text.replace(/\s+/g, ' ').trim());
 			});
-			expect(lines, `${c.width}px`).toEqual(c.lines);
+			expect(lines, `${c.width}px wrapped the subtitle`).toHaveLength(1);
+			expect(lines[0], `${c.width}px lost or reordered text`).toBe(text);
 		}
 	});
 });

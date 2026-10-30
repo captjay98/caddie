@@ -288,7 +288,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string; 
 				...(detail.package.reuseRequired
 					? [{ id: 'reuse', label: 'Reuse disclosure confirmed', done: detail.package.reuseState === 'confirmed', hint: detail.package.reuseState === 'confirmed' ? undefined : 'You confirm this — a person, not Caddie.' }]
 					: []),
-				{ id: 'checks', label: checklistReady ? 'Every rule on record is met' : 'Rules on record are met', done: checklistReady, hint: checklistReady ? undefined : 'Some lines still need their proof.' },
+				{ id: 'checks', label: checklistReady ? 'Recorded requirements are met' : detail.checklist.length ? 'Check the contest requirements' : 'Contest requirements not checked yet', done: checklistReady, hint: checklistReady ? undefined : detail.checklist.length ? 'Some requirements still need evidence.' : 'Caddie has not recorded submission rules for this project.' },
 				{ id: 'export', label: 'Snapshot exported', done: detail.exports.length > 0, hint: detail.exports.length > 0 ? undefined : 'Export a snapshot before you record the hand-in.' },
 				{ id: 'video', label: 'Demo video link added', done: videoLink.trim().length > 0, hint: videoLink.trim().length > 0 ? undefined : 'Kept on this device — pasted into the portal by you.' },
 				{ id: 'submit', label: 'Recorded as submitted by you', done: detail.confirmations.length > 0, hint: detail.confirmations.length > 0 ? undefined : 'You submit on the contest site; this only records that you did.' },
@@ -301,10 +301,7 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string; 
 			<div className="r-section-head">
 				<div>
 					<div className="project-caddie-heading"><Mascot mood={detail?.confirmations.length ? 'done' : 'ready'} size={48} /><h2 className="ev-title">Prepare your submission</h2></div>
-					<p className="page-lede">
-						Caddie lists what the contest asks you to hand in and checks each item against the rules it
-						read. You submit on the contest site yourself — Caddie never submits for you.
-					</p>
+					<p className="page-lede">Get the pieces of your submission ready here. You’ll submit them on the contest site.</p>
 				</div>
 				<button type="button" className="btn-ghost" onClick={() => void load()} disabled={busy}>
 					{busy ? 'Loading…' : 'Refresh'}
@@ -370,88 +367,92 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string; 
 				</div>
 			) : (
 				<>
-					<div className="disc-head">
-						<strong>{record.title}</strong>
-						<span className="badge" data-tone={readinessTone(detail!.readiness.status)} data-testid="readiness-badge">
-							{READINESS_LABEL[detail!.readiness.status]}
-						</span>
-						<span className="disc-meta">
-							rules version <code>{record.requirementsVersion.slice(0, 14)}…</code>
-						</span>
-					</div>
-
-					{detail!.readiness.reasons.length > 0 ? (
-						<div role="status" className="disc-gaps" data-testid="readiness-reasons">
-							<strong>Readiness gaps</strong>
-							<ul>
-								{detail!.readiness.reasons.map((reason) => (
-									<li key={reason}>{reason}</li>
-								))}
-							</ul>
-						</div>
-					) : null}
-
-					<div className="row-actions submission-actions">
-						<button type="button" className="btn-ghost" onClick={() => void deriveChecklist()} disabled={busy}>
-							Re-derive checklist
-						</button>
-						{record.reuseState === 'unconfirmed' ? (
-							<button type="button" className="btn-ghost" onClick={() => void confirmReuse()} disabled={busy}>
-								Confirm reuse disclosure (human)
-							</button>
-						) : (
-							<span className="mono-id">
-								reuse disclosure confirmed{record.reuseConfirmedBy ? ` by ${record.reuseConfirmedBy}` : ''}
+					{/* Owner 2026-10-28: this tab was eight stacked sections. The
+					    hand-in checklist above is the surface; everything about how
+					    the checklist is derived, cited and exported folds here. */}
+					<details className="submission-technical" data-testid="submission-requirements-fold">
+						<summary>Requirements and checklist ({detail!.checklist.length}) — sourced rules, exports and technical detail</summary>
+						<div className="disc-head">
+							<strong>{record.title}</strong>
+							<span className="badge" data-tone={readinessTone(detail!.readiness.status)} data-testid="readiness-badge">
+								{READINESS_LABEL[detail!.readiness.status]}
 							</span>
-						)}
-						<button type="button" className="btn-key" onClick={() => void exportNow()} disabled={busy}>
-							Export snapshot
-						</button>
-						<button type="button" className="btn-ghost" onClick={() => void copyLatestExport()} disabled={busy || detail!.exports.length === 0}>
-							Copy latest export
-						</button>
-					</div>
+						</div>
 
-					<h3 className="ev-head">Checklist ({detail!.checklist.length})</h3>
-					{detail!.checklist.length === 0 ? (
-						<p className="state-detail">
-							No submission rules are on record for this project — the checklist stays empty. Nothing is
-							assumed about videos, repositories, licenses or hosting.
-						</p>
-					) : (
-						<ul className="disc-list">
-							{detail!.checklist.map((item) => {
-								const badge = STATUS_BADGE[item.status];
-								return (
-									<li key={item.id} className="disc-item">
-										<div className="disc-head">
-											<code>{item.kind}</code>
-											<span className="badge" data-tone={badge.tone}>
-												{badge.label}
-											</span>
-											<span className="disc-claim-line">{item.requirementText}</span>
-										</div>
-										<div className="disc-meta">
-											cited: <code>{item.citation.claimId}</code> — “{item.citation.quote}” ·{' '}
-											<a href={item.citation.url} rel="noreferrer noopener" target="_blank">
-												{item.citation.url}
-											</a>
-										</div>
-										{item.evidence.length > 0 ? (
-											<div className="disc-meta">
-												backed by: {item.evidence.map((ref) => (
-													<code key={ref.refId}>
-														{ref.refId} ({ref.basis})
-													</code>
-												))}
+						{detail!.readiness.reasons.length > 0 ? (
+							<div role="status" className="disc-gaps" data-testid="readiness-reasons">
+								<strong>Still to do</strong>
+								<ul>
+									{detail!.readiness.reasons.map((reason) => (
+										<li key={reason}>{reason}</li>
+									))}
+								</ul>
+							</div>
+						) : null}
+
+						<div className="row-actions submission-actions">
+							<button type="button" className="btn-ghost" onClick={() => void deriveChecklist()} disabled={busy}>
+								Update requirements
+							</button>
+							{record.reuseState === 'unconfirmed' ? (
+								<button type="button" className="btn-ghost" onClick={() => void confirmReuse()} disabled={busy}>
+									Confirm reuse disclosure
+								</button>
+							) : (
+								<span className="mono-id">
+									reuse disclosure confirmed{record.reuseConfirmedBy ? ` by ${record.reuseConfirmedBy}` : ''}
+								</span>
+							)}
+							<button type="button" className="btn-key" onClick={() => void exportNow()} disabled={busy}>
+								Export snapshot
+							</button>
+							<button type="button" className="btn-ghost" onClick={() => void copyLatestExport()} disabled={busy || detail!.exports.length === 0}>
+								Copy latest export
+							</button>
+						</div>
+
+						<h3 className="ev-head">Checklist ({detail!.checklist.length})</h3>
+						{detail!.checklist.length === 0 ? (
+							<p className="state-detail">
+								No submission rules are on record for this project — the checklist stays empty. Nothing is
+								assumed about videos, repositories, licenses or hosting.
+							</p>
+						) : (
+							<ul className="disc-list">
+								{detail!.checklist.map((item) => {
+									const badge = STATUS_BADGE[item.status];
+									return (
+										<li key={item.id} className="disc-item">
+											<div className="disc-head">
+												<code>{item.kind}</code>
+												<span className="badge" data-tone={badge.tone}>
+													{badge.label}
+												</span>
+												<span className="disc-claim-line">{item.requirementText}</span>
 											</div>
-										) : null}
-									</li>
-								);
-							})}
-						</ul>
-					)}
+											<div className="disc-meta">
+												cited: <code>{item.citation.claimId}</code> — “{item.citation.quote}” ·{' '}
+												<a href={item.citation.url} rel="noreferrer noopener" target="_blank">
+													{item.citation.url}
+												</a>
+											</div>
+											{item.evidence.length > 0 ? (
+												<div className="disc-meta">
+													backed by: {item.evidence.map((ref) => (
+														<code key={ref.refId}>
+															{ref.refId} ({ref.basis})
+														</code>
+													))}
+												</div>
+											) : null}
+										</li>
+									);
+								})}
+							</ul>
+						)}
 
+						<div className="submission-technical-inner">
+					<p>Rules version <code>{record.requirementsVersion.slice(0, 14)}…</code></p>
 					<h3 className="ev-head">Exports ({detail!.exports.length})</h3>
 					<ul className="disc-list">
 						{detail!.exports.map((export_) => (
@@ -466,6 +467,8 @@ export function SubmissionPackage(props: { projectId: string; apiBase?: string; 
 							</li>
 						))}
 					</ul>
+					</div>
+					</details>
 
 					<div className="row-actions">
 						<button type="button" className="btn-ghost" data-testid="video-link-open" onClick={() => setVideoOpen((value) => !value)}>

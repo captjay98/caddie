@@ -9,6 +9,7 @@ import {
 	signIn,
 	StubProvider,
 } from './controls-harness.ts';
+import { allMigrationPaths } from './migrations.ts';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -25,18 +26,7 @@ const PREVIEWS_FIXTURE_ENTRY = join(import.meta.dir, 'previews.ts');
 
 /** Migrations applied to the fixture D1, in production numbering order. */
 export function previewsMigrationPaths(): string[] {
-	const root = join(import.meta.dir, '..', '..');
-	return [
-		join(root, 'apps', 'app', 'migrations', '0001_product.sql'),
-		join(root, 'apps', 'app', 'migrations', '0002_controls.sql'),
-		join(root, 'apps', 'app', 'migrations', '0003_artifacts.sql'),
-		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
-		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
-		join(root, 'apps', 'app', 'migrations', '0009_discovery.sql'),
-		join(root, 'apps', 'app', 'migrations', '0013_discovery_saved.sql'),
-		join(root, 'apps', 'app', 'migrations', '0014_stack_notify.sql'),
-		join(root, 'apps', 'app', 'migrations', '0015_plan_decisions.sql'),
-	];
+	return allMigrationPaths();
 }
 
 function wranglerCliPath(repoRoot: string): string {

@@ -4,15 +4,15 @@
 automatically, and the owner submits.** It deliberately contains no access
 code — the code goes only into the Devpost form's testing-instructions field.
 
-Anything in angle brackets is a **placeholder that does not exist yet**. Do not
+Anything in angle brackets is an **unconfirmed submission value**. Do not
 replace a placeholder with an invented value.
 
 | Placeholder | What the owner must supply |
 | :--- | :--- |
-| `<REPO-URL>` | The public GitHub repository URL. **The repo does not exist yet** (D5/G3; no remote is configured). |
-| `<DEMO-URL>` | The hosted demo URL. **Deployed and live-verified:** production runs at `https://caddie.jamalibrahim.dev` (owner-gated deploy, S10/G4), and the P17 hosted acceptance smoke is **LIVE VERIFIED** there — `tests/live/release.spec.ts` 5/5 PASS, `docs/live-receipts.json` receipt `lr_5bf0b08f5db1bbcb` (deploy 2026-10-22, commit `5f3574a`). The owner still confirms the exact URL to paste into the Devpost form. |
+| `<REPO-URL>` | The confirmed public GitHub repository URL. A local origin is configured, but its public accessibility and suitability as the submission target are not established here. |
+| `<DEMO-URL>` | The hosted demo URL. An earlier acceptance smoke passed at `https://caddie.jamalibrahim.dev` on 22 October, commit `5f3574a` (receipt `lr_5bf0b08f5db1bbcb`). This is historical evidence, not proof that the current worktree is deployed or that the present judge journey works. |
 | `<VIDEO-URL>` | The YouTube URL of the uploaded demo video (public or unlisted). **Not recorded yet** — see `docs/submission/video-script.md`. |
-| the judge access code | Filled in **only** in the Devpost form's testing-instructions field, never in this repo. The placeholder for it lives solely in the testing-instructions template in §6. |
+| the shared judge name and password | Filled in **only** in the Devpost form's testing-instructions field, never in this repo. The placeholders live solely in the testing-instructions template in §6. |
 
 ---
 
@@ -50,8 +50,11 @@ model by role:
 | :--- | :--- | :--- | :--- |
 | `chat` / coordinator | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts` |
 | `ideation` (brainstorm) | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/coordinator.ts` (Home) |
-| `plan` (PRD, design) | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts` (planning specialists) |
-| `build` (coding + QA) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/specialists.ts`, `apps/app/src/server/build-workflow.ts` |
+| `plan` (tech-lead plan of record; legacy) | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts` |
+| `planAuthor` (product / PRD author) | `deepseek-v4.1-flash-1017` | `deepseek-ai/DeepSeek-V4.1-Flash-1017` | `apps/app/src/agents/specialists.ts` (product specialist) |
+| `planReviewer` (independent plan review) | `glm-5.3` | `zai-org/GLM-5.3` | `apps/app/src/server/artifact-quality.ts` |
+| `designAuthor` (looks / design brief author) | `minimax-m3.1-flash` | `MiniMaxAI/MiniMax-M3.1-Flash` | `apps/app/src/agents/specialists.ts` (designer specialist) |
+| `build` (coding + QA) | `minimax-m3.1-flash` | `MiniMaxAI/MiniMax-M3.1-Flash` | `apps/app/src/agents/specialists.ts`, `apps/app/src/server/build-workflow.ts` (repairs step up to DeepSeek; Super VL repairs only issues that need image input) |
 | `helper` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/rules-reading.ts`, `candidate-inspection.ts` |
 | `helperRules` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | Rules extraction |
 | `helperRanking` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | Opportunity ranking |
@@ -243,14 +246,12 @@ same table.)
 
 ## 5. Repo, demo and video URLs
 
-- **Repository:** `<REPO-URL>` — **does not exist yet.**
-- **Live demo:** `<DEMO-URL>` — **deployed and live-verified.** Production runs
-  at `https://caddie.jamalibrahim.dev` (owner-gated deploy, S10/G4);
-  `docs/release-evidence.md` records the hosted acceptance smoke (P17) as
-  **LIVE VERIFIED** (`tests/live/release.spec.ts` 5/5 PASS against that origin),
-  and `docs/live-receipts.json` holds the latest receipt `lr_5bf0b08f5db1bbcb`
-  (deploy 2026-10-22, commit `5f3574a`). The owner confirms the exact URL for
-  the Devpost form.
+- **Repository:** `<REPO-URL>` — confirm the intended public repository and
+  its contents before submitting; a configured local remote alone is not proof.
+- **Live demo:** `<DEMO-URL>` — an earlier hosted smoke passed on 22 October
+  at `https://caddie.jamalibrahim.dev`, commit `5f3574a`, receipt
+  `lr_5bf0b08f5db1bbcb`. Verify the deployed revision and a fresh authenticated
+  judge journey before treating the current implementation as live-verified.
 - **Video:** `<VIDEO-URL>` — **not recorded yet.** Upload to YouTube as public
   or unlisted. See `docs/submission/video-script.md`. If production is not
   ready, the video is recorded on a local build with live models and the live
@@ -264,42 +265,26 @@ Do not fill a placeholder with a guess. A wrong URL is worse than a missing one.
 ## 6. Testing instructions (template for the Devpost form)
 
 Paste the following into Devpost's testing-instructions field and replace the
-access-code placeholder (in step 3 below) with the real code **inside the form
-only**. Never put the code in the repository, the README, this file's body, a
-screenshot, or the video.
+judge name and password placeholders with the real ones **inside the form
+only**. Never put the password in the repository, the README, this file's body,
+a screenshot, or the video. (Owner 2026-10-30: one shared judge account, the
+same one the demo video was recorded with.)
 
 > **How to try Caddie**
 >
 > 1. Open the demo: `<DEMO-URL>`.
-> 2. On the sign-in page, click **"Judging the hackathon? Use your access
->    code."**
-> 3. Enter the access code: `<ACCESS CODE>`
-> 4. Choose a **judge name** (3–24 characters: letters, numbers and dashes) and
->    a **password** of at least 10 characters. No Google or GitHub account and
->    no email are needed. Returning judges sign in with the same name and
->    password.
-> 5. Try the loop: ask Caddie for a project idea, open **Find** to see live
->    hackathons ranked against a profile and open a contest's cited rules
->    verdict, then ask Caddie to plan a small project, approve the plan and
->    the design, and the build starts.
-> 6. Your **Projects** list already has a finished example app,
->    **"<Name> (example)"**. Open it to try it right away, or ask Caddie to
->    change it.
+> 2. On the sign-in page, click **"Judging the hackathon? Sign in here"**.
+> 3. Enter the judge name `<JUDGE NAME>` and the password `<JUDGE PASSWORD>`.
+>    No Google or GitHub account and no email are needed.
+> 4. **Projects** already holds the app built in the demo video,
+>    **"<Name>"**. Open it to try the preview, or ask Caddie for a change.
+> 5. Try the loop yourself: ask Caddie for a project idea, open **Find** to see
+>    live hackathons and a contest's cited rules, then ask Caddie to plan a
+>    small app, approve the plan and the design, and the build starts. A build
+>    takes about an hour.
 >
-> **Demo limits (so a few dozen judges can't exhaust it):** each judge account
-> may have **3 projects**, start **3 builds per 24 hours**, send **300 Caddie
-> messages per 24 hours**, and run **20 paid discovery lookups per 24 hours**
-> (each search that calls out live, from the Discover page or in chat; browsing
-> the feed and a contest's cited rules is free and uncounted). A build starts
-> when you approve the design, and retrying a stopped build is another start.
-> Asking for changes to a plan or a design counts as a message. There are
-> **at most 40 judge accounts** in total, and **judge access closes on
-> 2026-12-16**. Judge accounts cannot publish apps.
-
-**Step 6 (for the owner):** keep it only if production sets
-`JUDGE_EXAMPLE_PROJECT_ID` to one of your projects with a checked build, and
-put that project's name in place of `<Name>`. Without it, delete step 6: judges
-would find no example. Judges who started before it was set get none.
+> **Shared account:** every judge uses this one account, so you may see other
+> judges' projects. The account cannot publish apps.
 
 **Notes on these limits (not for the form, for the owner):** these are the
 defaults in code — `apps/app/src/server/judge-limits.ts` (3 projects / 3 builds /

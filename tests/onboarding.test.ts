@@ -2,13 +2,13 @@ import { test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
+import { applyFinalSchema } from './fixtures/migrations.ts';
 import { onboardingStatus, completeOnboarding } from '../apps/app/src/server/onboarding.ts';
 
 test('onboarding is durable, actor-scoped, and completion is idempotent', async () => {
  const sqlite = new Database(':memory:');
  sqlite.exec('PRAGMA foreign_keys=ON; CREATE TABLE user (id TEXT PRIMARY KEY); INSERT INTO user VALUES (\'alice\'), (\'bob\');');
- sqlite.exec(readFileSync(new URL('../apps/app/migrations/0016_onboarding.sql', import.meta.url), 'utf8'));
- sqlite.exec(readFileSync(new URL('../apps/app/migrations/0008_profile.sql', import.meta.url), 'utf8'));
+ applyFinalSchema(sqlite);
  const db = { prepare(sql: string) { return { bind(...args: any[]) { return {
   async all() { return { results: sqlite.prepare(sql).all(...args) }; },
   async run() { return sqlite.prepare(sql).run(...args); },
@@ -39,6 +39,8 @@ test('onboarding hand-off: the idea start never forces the mobile chat-only view
 	expect(idea).toBe('/app/?start=idea');
 	expect(idea).not.toContain('pane=channel');
 
-	expect(onboardingDestination('hackathon')).toBe('/app/discover');
+	// Owner 2026-10-28: chat is the primary mode — the hackathon start lands in
+	// the shell (Brief + conversation) instead of pushing Discover as a page.
+	expect(onboardingDestination('hackathon')).toBe('/app/');
 	expect(onboardingDestination('explore')).toBe('/app/');
 });

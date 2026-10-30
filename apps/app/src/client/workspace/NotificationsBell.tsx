@@ -35,6 +35,68 @@ export function NotificationsBell(): ReactElement {
 		}
 	};
 
+	return <NotificationsPopover open={open} setOpen={setOpen} notes={notes} count={count} pending={markRead.isPending} act={act} />;
+}
+
+/**
+ * The same notifications, inline in the Brief (owner review 2026-10-28): the
+ * Brief is the one inbox, so the top-bar bell is gone and what it used to
+ * hold ("a build tool is ready", reminders, source changes) shows here as a
+ * short "From Caddie" list. Nothing renders when there is nothing unread.
+ */
+export function BriefNotifications(): ReactElement | null {
+	const chrome = useWorkspaceChrome();
+	const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
+	const unread = useUnreadNotifications(actor);
+	const markRead = useMarkNotificationRead(actor);
+	const notes = unread.data ?? [];
+	if (notes.length === 0) return null;
+	const act = async (note: AppNotification) => {
+		try {
+			await markRead.mutateAsync(note.id);
+		} catch {
+			/* Still go where it points; the list keeps it until a read succeeds. */
+		}
+		// The project's chat holds the one-tap "Try again" card, whichever step paused.
+		if (note.kind === 'build_paused' && note.projectId) chrome.openProject(note.projectId, true);
+	};
+	return (
+		<section className="brief-notes" aria-label="From Caddie" data-testid="brief-notifications">
+			<h2 className="brief-notes-title">From Caddie</h2>
+			<ul className="notify-list">
+				{notes.map((note) => (
+					<li key={note.id} className="notify-item" data-testid="notification">
+						<b className="notify-title">{note.title}</b>
+						<span className="notify-body">{note.body}</span>
+						<span className="notify-meta">
+							<span className="notify-time">{formatTimeAgo(note.createdAt)}</span>
+							<button
+								type="button"
+								className="btn-ghost notify-open"
+								data-testid="notification-open"
+								disabled={markRead.isPending}
+								onClick={() => void act(note)}
+							>
+								{note.kind === 'build_paused' && note.projectId ? 'Open project' : 'Got it'}
+							</button>
+						</span>
+					</li>
+				))}
+			</ul>
+		</section>
+	);
+}
+
+function NotificationsPopover(props: {
+	open: boolean;
+	setOpen: (open: boolean) => void;
+	notes: readonly AppNotification[];
+	count: number;
+	pending: boolean;
+	act: (note: AppNotification) => Promise<void>;
+}): ReactElement {
+	const { open, setOpen, notes, count, act } = props;
+	const markRead = { isPending: props.pending };
 	return (
 		<div
 			className="account-menu notify-menu"

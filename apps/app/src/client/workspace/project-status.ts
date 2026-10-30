@@ -30,9 +30,9 @@ export function projectCardFromExperience(experience: ProjectExperience, review?
 			if (review) return { label: review.label, tone: 'warn', working: false, detail: review.detail, action: { label: review.action, target: 'plan' } };
 			return { label: 'Plan ready', tone: 'warn', working: false, detail: 'A plan is ready. Review it before anything is built.', action: { label: 'Review plan', target: 'plan' } };
 		case 'looks':
-			return { label: 'Preparing looks', tone: 'action', working: true, detail: 'Caddie is preparing a few looks for your app. You pick one before the screens are designed.', action: { label: 'Continue with Caddie', target: 'chat' } };
+			return { label: 'Drawing looks', tone: 'action', working: true, detail: 'Caddie is drawing 3 looks. Pick one and building starts.', action: { label: 'Continue with Caddie', target: 'chat' } };
 		case 'looks_review':
-			return { label: 'Choose a look', tone: 'warn', working: false, detail: 'Pick how your app should look. Caddie then designs every screen in it.', action: { label: 'Choose a look', target: 'plan' } };
+			return { label: 'Pick a look', tone: 'warn', working: false, detail: 'Each look is your app’s first screen. Picking one starts the build.', action: { label: 'See the looks', target: 'plan' } };
 		case 'design':
 			return { label: 'Designing', tone: 'action', working: true, detail: 'Caddie is designing the screens. You review the design before anything is built.', action: { label: 'Continue with Caddie', target: 'chat' } };
 		case 'design_review':
@@ -142,24 +142,27 @@ export function workflowSteps(
 		 * wording.
 		 */
 		planApproved?: boolean;
+		/** Paused at the looks/screens, before anything was built (shared/preparation-stage.ts). */
+		pausedBeforeBuild?: boolean;
 	},
 ): Partial<Record<ProjectStepId, StepStatus>> {
 	const steps: Partial<Record<ProjectStepId, StepStatus>> = {};
-	const pausedBuild = phase === 'blocked' && opts?.planApproved === true;
+	const pausedBuild = phase === 'blocked' && opts?.planApproved === true && !opts?.pausedBeforeBuild;
 	const stuckPlan = phase === 'blocked' && opts?.planApproved === false;
 	// Plan. `blocked` is ambiguous at the coarse-phase level (a stuck plan vs a
 	// build that paused after approval), so it claims "Approved" only when the
 	// project status says the plan was approved.
 	if (phase === 'planning') steps.plan = { text: 'Caddie is drafting it', tone: 'neutral' };
 	else if (phase === 'review') steps.plan = { text: opts?.reviewLabel && opts.reviewLabel !== 'Plan ready' ? opts.reviewLabel : 'Ready to review', tone: 'needs' };
-    else if (phase === 'looks') steps.plan = { text: 'Caddie is preparing looks', tone: 'neutral' };
-    else if (phase === 'looks-review') steps.plan = { text: 'Choose a look', tone: 'needs' };
+    else if (phase === 'looks') steps.plan = { text: 'Drawing 3 looks', tone: 'neutral' };
+    else if (phase === 'looks-review') steps.plan = { text: 'Pick a look', tone: 'needs' };
     else if (phase === 'design') steps.plan = { text: 'Caddie is designing the screens', tone: 'neutral' };
     else if (phase === 'design-review') steps.plan = { text: 'Design ready for you to review', tone: 'needs' };
+	else if (phase === 'blocked' && opts?.pausedBeforeBuild) steps.plan = { text: 'Looks need another try', tone: 'needs' };
 	else if (phase === 'blocked' && !pausedBuild) steps.plan = { text: 'Paused — check with Caddie', tone: 'needs' };
 	else if (phase) steps.plan = { text: 'Approved', tone: 'done' };
 	// Build
-	if (phase === 'planning' || phase === 'review' || phase === 'looks' || phase === 'looks-review' || phase === 'design' || phase === 'design-review' || stuckPlan) steps.build = { text: 'After you approve', tone: 'neutral' };
+	if (phase === 'planning' || phase === 'review' || phase === 'looks' || phase === 'looks-review' || phase === 'design' || phase === 'design-review' || stuckPlan || opts?.pausedBeforeBuild) steps.build = { text: 'After you approve', tone: 'neutral' };
 	else if (phase === 'building') steps.build = { text: 'Caddie is building it', tone: 'neutral' };
 	else if (phase === 'blocked') steps.build = { text: 'Needs your help', tone: 'needs' };
 	else if (phase === 'ready') steps.build = { text: 'Ready to try', tone: 'done' };
@@ -187,7 +190,8 @@ export function workflowSteps(
  * Caddie plans or waits for review, Build while building or blocked, Check
  * once the app is ready. Unknown phase (no workflow yet) → none highlighted.
  */
-export function activeStep(phase: WorkflowPhase | null, opts?: { planApproved?: boolean }): ProjectStepId | null {
+export function activeStep(phase: WorkflowPhase | null, opts?: { planApproved?: boolean; pausedBeforeBuild?: boolean }): ProjectStepId | null {
+	if (phase === 'blocked' && opts?.pausedBeforeBuild) return 'plan';
 	if (phase === 'planning' || phase === 'review' || phase === 'looks' || phase === 'looks-review' || phase === 'design' || phase === 'design-review') return 'plan';
 	// A plan that got stuck before approval is still at Plan (unknown: Build, as before).
 	if (phase === 'blocked' && opts?.planApproved === false) return 'plan';
@@ -239,9 +243,9 @@ export function journeyFromExperience(experience: ProjectExperience, opts: { per
 		case 'review':
 			return steps(['now', 'Ready to review'], waitBuild);
 		case 'looks':
-			return steps(['now', 'Caddie is preparing looks'], waitBuild);
+			return steps(['now', 'Drawing 3 looks'], waitBuild);
 		case 'looks_review':
-			return steps(['now', 'Choose a look'], waitBuild);
+			return steps(['now', 'Pick a look'], waitBuild);
 		case 'design':
 			return steps(['now', 'Caddie is designing the screens'], waitBuild);
 		case 'design_review':
@@ -273,7 +277,8 @@ export function workflowHeaderStatus(
 	if (workflow.phase === 'design' && opts.designFailed) return 'Design needs attention';
 	if (opts.repairing) return 'I’m on it';
 	if (workflow.phase === 'ready') return workflow.previewId ? 'Ready to try' : 'In progress';
-	if (workflow.phase === 'review' || workflow.phase === 'design-review') return 'Needs you';
+	// Choosing a look is the owner's move too ("In progress" sat above "Choose a look").
+	if (workflow.phase === 'review' || workflow.phase === 'looks-review' || workflow.phase === 'design-review') return 'Needs you';
 	if (workflow.phase === 'blocked') return 'Needs attention';
 	return 'In progress';
 }

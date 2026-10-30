@@ -43,7 +43,8 @@ export const WORDS = {
 	canYouEnter: 'Can you enter?',
 	/** The chat scope switch (§3.5). */
 	talkingAbout: 'Talking about',
-	everything: 'Everything',
+	// The account-level chat (review 2026-10-28: "General" is plain words).
+	everything: 'General',
 } as const;
 
 /** First names for greetings (U02 uses it for the composer placeholder). */

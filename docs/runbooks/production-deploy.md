@@ -26,7 +26,23 @@ Nothing was uploaded (execution ledger, S10 record).
    Without a domain, delete the `routes` line and set `"workers_dev": true`.
    The address is then `https://caddie-app.<your-subdomain>.workers.dev`.
    Commit the config change.
-5. **Sign-in apps for production.** Judges need neither; you need one.
+5. **Preview address (separate domain).** Every web build is opened on its own
+   preview origin before it can be checked or marked ready, so production
+   needs a second address that is not Caddie's host and not a subdomain of it
+   (Caddie's cookies must never reach a preview). Pick one:
+   - **Simplest:** a separate zone used only for previews, for example
+     `previews.example.net`. Its first-level wildcard
+     (`*.previews.example.net`) is covered by Cloudflare's Universal SSL, and
+     `p-<hash>.previews.example.net` is served by this Worker through a route
+     such as `[{ "pattern": "*.previews.example.net/*", "zone_name":
+     "previews.example.net" }]` in `env.production`. A wildcard route is used
+     here, not `custom_domain` (that form takes no wildcard).
+   - **Subdomain of another zone** (`*.preview.example.com`) needs a
+     certificate that covers it, since Universal SSL covers only
+     `*.example.com` — order one with Advanced Certificate Manager.
+   Then set `PREVIEW_BASE_URL` (step 7) to that origin and confirm one
+   wildcard host reaches the Worker before relying on previews.
+6. **Sign-in apps for production.** Judges need neither; you need one.
    - **Google:** a new OAuth client (Web application).
      - JavaScript origin: `https://<host>`.
      - Redirect URI: `https://<host>/api/auth/callback/google`.
@@ -35,14 +51,19 @@ Nothing was uploaded (execution ledger, S10 record).
    - **GitHub:** a new OAuth App with homepage `https://<host>` and callback
      `https://<host>/api/auth/callback/github`. A GitHub OAuth App has one
      callback URL, so the local app can't be reused.
-6. **Values:** `cp apps/app/.prod.vars.example apps/app/.prod.vars`, then fill
+7. **Values:** `cp apps/app/.prod.vars.example apps/app/.prod.vars`, then fill
    it in. The file is gitignored and says how to generate each secret.
-   `BETTER_AUTH_SECRET` and the judge code must be new; separate Nebius,
-   Tavily and sandbox keys are better.
-7. **Spend alerts outside Caddie:** a Nebius alert or limit, a Tavily credit
+   Set `CADDIE_QUALITY_POLICY=quality-v1` and configure the private design
+   capture service using `DESIGN_CAPTURE_URL` and `DESIGN_CAPTURE_TOKEN`, or
+   bind it as `DESIGN_CAPTURE`. Preflight checks configuration; verify a real
+   phone and desktop capture and an independent review before release.
+
+   `BETTER_AUTH_SECRET`, `PREVIEW_SIGNING_SECRET` and the judge code must be
+   new; separate Nebius, Tavily and sandbox keys are better.
+8. **Spend alerts outside Caddie:** a Nebius alert or limit, a Tavily credit
    alert, sandbox usage, and Cloudflare billing. Judge limits count actions,
    not dollars, and Caddie's own AI use has no dollar cap.
-8. **Sandbox:** confirm it stays available through 2026-12-15.
+9. **Sandbox:** confirm it stays available through 2026-12-15.
 
 ## Judge access: deploy without it first
 
@@ -179,6 +200,15 @@ spend at once, revoke the Nebius key in Nebius's console.
   `https://<host>/api/auth/callback/<google|github>`.
 - **Sign-in loops, or "invalid origin":** `BETTER_AUTH_URL` is not the address
   in the browser.
+- **A web build pauses at "Caddie could not prepare the isolated preview":**
+  `PREVIEW_BASE_URL` or `PREVIEW_SIGNING_SECRET` is missing, the secret is
+  under 32 characters, or the preview address is Caddie's host or a subdomain
+  of it. Nothing in the app is broken; set both values (see "Once", step 5).
+  `bun scripts/deploy-preflight.ts` names the exact problem.
+- **A preview link 404s or says it expired:** `p-<hash>.<preview host>` is not
+  reaching this Worker — the wildcard route, its zone or its certificate is
+  missing (see "Once", step 5). Links themselves last 10 minutes; reopen the
+  preview from the project.
 - **GitHub's Authorize button is disabled on the consent page** (chips like
   "Created less than a day ago", "Fewer than 10 GitHub users"): GitHub's
   trust gate for brand-new OAuth apps, not a Caddie fault — by then the

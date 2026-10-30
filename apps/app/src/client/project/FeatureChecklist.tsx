@@ -133,13 +133,12 @@ export function TryAgainButton(props: { projectId: string }): ReactElement | nul
  * back to on every finished feature that has later work after it. Rolling back
  * is two clicks: the first states exactly what will be undone.
  */
-export function BuildFeatureList(props: { projectId: string; features: readonly BuildFeatureView[]; stale?: boolean; compact?: boolean }): ReactElement {
+export function BuildFeatureList(props: { projectId: string; features: readonly BuildFeatureView[]; stale?: boolean; compact?: boolean; /** The panel headline already names the current part. */ hideCurrent?: boolean }): ReactElement {
 	const queryClient = useQueryClient();
 	const [confirming, setConfirming] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [listOpen, setListOpen] = useState(false);
-	const [implementationNames, setImplementationNames] = useState(false);
 	const done = props.features.filter((f) => f.status === 'passed').length;
 	const nextPending = props.features.find((f) => f.status === 'pending')?.id;
 
@@ -166,21 +165,21 @@ export function BuildFeatureList(props: { projectId: string; features: readonly 
   if (props.compact) {
     const current = props.features.find(feature => feature.status === 'building');
     return <section className="build-features build-feature-summary" data-testid="build-features" aria-label="Build progress">
-      <div className="build-feature-summary-head"><h4>{done} of {props.features.length} features checked</h4><button type="button" className="build-text-action" onClick={() => setListOpen(true)}>View feature checklist</button></div>
-      <progress max={props.features.length} value={done} aria-label="Features checked" />
-      {current ? <p className="build-current-feature"><span>{props.stale ? 'Last working on' : 'Working on'}</span>{current.doneWhen[0] ?? current.title.replace(/^\s*\d+[.)]\s*/, '')}</p> : <p className="build-current-feature">{done === props.features.length ? 'The planned features have passed their checks.' : 'Waiting for the next feature update.'}</p>}
-      <ProjectDialog open={listOpen} onClose={() => setListOpen(false)} title="Feature checklist" wide>
+      <div className="build-feature-summary-head"><h4>{done} of {props.features.length} parts done</h4><button type="button" className="build-text-action" onClick={() => setListOpen(true)}>See all parts</button></div>
+      <progress max={props.features.length} value={done} aria-label="Parts done" />
+      {props.hideCurrent ? null : current ? <p className="build-current-feature"><span>{props.stale ? 'Last working on' : 'Working on'}</span>{featureName(current)}</p> : <p className="build-current-feature">{done === props.features.length ? 'The planned features have passed their checks.' : 'Waiting for the next feature update.'}</p>}
+      <ProjectDialog open={listOpen} onClose={() => setListOpen(false)} title="Your app’s parts" wide>
         <BuildFeatureList projectId={props.projectId} features={props.features} stale={props.stale} />
       </ProjectDialog>
     </section>;
   }
 	return (
 		<section className="build-features" data-testid="build-features" aria-label="Features">
+			{/* Owner 2026-10-30: one short heading in normal case; the tick on each
+			    row already says what "checked" means. */}
 			<h4 className="build-features-head">
-				{done} of {props.features.length} checked
+				{done} of {props.features.length} parts built and checked
 			</h4>
-      <p className="feature-list-intro">Each item shows an action your app should support. A checkmark means Caddie’s checks passed for that feature.</p>
-      <button type="button" className="build-text-action" aria-pressed={implementationNames} onClick={() => setImplementationNames(!implementationNames)}>{implementationNames ? 'Hide implementation details' : 'Show implementation details'}</button>
 			<ol className="build-features-list">
 				{props.features.map((feature) => {
 					const later = props.features.filter((f) => f.position > feature.position && f.status !== 'pending').length;
@@ -190,21 +189,26 @@ export function BuildFeatureList(props: { projectId: string; features: readonly 
 								<FeatureMark status={feature.status} />
 							</span>
 							<span className="build-feature-body">
-								<span className="build-feature-title">
-									{(implementationNames ? feature.title : feature.doneWhen[0] ?? feature.title).replace(/^\s*\d+[.)]\s*/, '')}
-								</span>
+								<span className="build-feature-title">{featureName(feature)}</span>
 								<span className="build-feature-meta">{feature.status === 'passed' ? 'Built and checked' : feature.status === 'building' && props.stale ? 'Last reported: building' : feature.status === 'pending' ? feature.id === nextPending ? 'Next' : 'Waiting' : statusLine(feature)}</span>
-                                {feature.testsPassed !== null || feature.attempts > 0 ? <details className="build-feature-check-detail"><summary>Check details</summary><p>{statusLine(feature)}</p></details> : null}
+								{/* The checks are how Caddie tests the item, not what the owner reads first (owner 2026-10-30: "sounds like a test plan"). */}
+								{feature.doneWhen.length > 0 || feature.testsPassed !== null || feature.attempts > 0 ? (
+									<details className="build-feature-check-detail">
+										<summary>What Caddie checks</summary>
+										{feature.testsPassed !== null || feature.attempts > 0 ? <p>{statusLine(feature)}</p> : null}
+										{feature.doneWhen.length > 0 ? <ul className="build-feature-checks">{feature.doneWhen.map((check, index) => <li key={index}>{check}</li>)}</ul> : null}
+									</details>
+								) : null}
 							</span>
 							{feature.canRollBack && confirming !== feature.id ? (
 								<button
 									type="button"
-									className="btn-ghost build-feature-rollback"
+									className="build-text-action build-feature-rollback"
 									data-testid={`rollback-${feature.id}`}
 									disabled={busy}
 									onClick={() => setConfirming(feature.id)}
 								>
-									<Icon name="arrowLeft" title="" /> Roll back to here
+									Roll back to here
 								</button>
 							) : null}
 							{confirming === feature.id ? (
@@ -238,6 +242,11 @@ export function BuildFeatureList(props: { projectId: string; features: readonly 
 			) : null}
 		</section>
 	);
+}
+
+/** The item's plain name from the approved plan ("Start your farm and add your first flock"). */
+export function featureName(feature: Pick<BuildFeatureView, 'title'>): string {
+	return feature.title.replace(/^\s*\d+[.)]\s*/, '');
 }
 
 function FeatureMark({ status }: { status: BuildFeatureView['status'] }): ReactElement {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { answerParts } from '../apps/app/src/client/conversation/answer-parts.ts';
+import { answerParts, finalAnswerParts } from '../apps/app/src/client/conversation/answer-parts.ts';
 
 // Flue's message types, taken from the module under test (the root project
 // does not resolve @flue/react itself).
@@ -44,5 +44,21 @@ describe("one reply's answer", () => {
 
 	test('reasoning and tool calls are never part of the answer', () => {
 		expect(texts(answerParts([message([reasoning('…'), tool()])]))).toEqual([]);
+	});
+});
+
+// Poultry Tracker, 2026-10-29: the reply showed every interim note the model
+// wrote between tool calls ("I'll delegate the product specialist…").
+describe('the reply a person reads after a turn that used tools', () => {
+	test('only the words after the last tool call show; cards always show', () => {
+		const parts = finalAnswerParts([message([text("I'll delegate the product specialist."), tool(), text('The specialist was refused by the host.'), card(), tool(), text('Your plan is ready to review.')])]);
+		expect(texts(parts)).toEqual(['[data-projectProposal]', 'Your plan is ready to review.']);
+	});
+	test('a turn that ended on a tool call keeps its last sentence before it', () => {
+		const parts = finalAnswerParts([message([text('Let me check.'), tool(), text('Searching now.'), tool()])]);
+		expect(texts(parts)).toEqual(['Searching now.']);
+	});
+	test('a turn without tools is unchanged', () => {
+		expect(texts(finalAnswerParts([message([text('Hello.'), reasoning('…'), text(' How can I help?')])]))).toEqual(['Hello. How can I help?']);
 	});
 });

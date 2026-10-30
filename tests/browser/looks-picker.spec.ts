@@ -138,11 +138,11 @@ test.describe('Look-and-feel picker', () => {
 		const track = await page.locator('.look-track').boundingBox();
 		const field = await page.getByTestId('looks-option-field').boundingBox();
 		expect(Math.round(field!.width)).toBeGreaterThanOrEqual(Math.round(track!.width) - 2);
-		await expect(page.getByTestId('looks-use')).toHaveText('Use Field-ready');
+		await expect(page.getByTestId('looks-use')).toHaveText('Build with Field-ready');
 		await expect(picker.getByText('poultry farmers, mostly on their phones in the sheds')).toBeVisible();
 		// A tab click scrolls the next look in, full width too.
 		await page.getByTestId('looks-tab-warm').click();
-		await expect(page.getByTestId('looks-use')).toHaveText('Use Warm and bold');
+		await expect(page.getByTestId('looks-use')).toHaveText('Build with Warm and bold');
 		const warm = await page.getByTestId('looks-option-warm').boundingBox();
 		expect(Math.round(warm!.width)).toBeGreaterThanOrEqual(Math.round(track!.width) - 2);
 		await context.close();
@@ -156,14 +156,14 @@ test.describe('Look-and-feel picker', () => {
 		await expect(page.getByTestId('looks-picker')).toBeVisible();
 		await expect(page.getByTestId('looks-tabs')).toBeVisible();
 		await page.getByTestId('looks-tab-warm').click();
-		await expect(page.getByTestId('looks-use')).toHaveText('Use Warm and bold');
+		await expect(page.getByTestId('looks-use')).toHaveText('Build with Warm and bold');
 		await expect(page.getByTestId('looks-tab-warm')).toHaveAttribute('aria-pressed', 'true');
 		await page.getByTestId('looks-tab-warm').press('Home');
 		await expect(page.getByTestId('looks-tab-field')).toBeFocused();
-		await expect(page.getByTestId('looks-use')).toHaveText('Use Field-ready');
+		await expect(page.getByTestId('looks-use')).toHaveText('Build with Field-ready');
 		await page.getByTestId('looks-tab-field').press('ArrowRight');
 		await expect(page.getByTestId('looks-tab-calm')).toBeFocused();
-		await expect(page.getByTestId('looks-use')).toHaveText('Use Calm and clear');
+		await expect(page.getByTestId('looks-use')).toHaveText('Build with Calm and clear');
 		await context.close();
 	});
 

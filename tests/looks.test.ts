@@ -125,6 +125,20 @@ describe('a set of looks (caddie-looks)', () => {
 		expect(parseAppTheme(block).ok).toBe(true);
 	});
 
+	test('a screen written under the wrong key names the key instead of echoing the schema error', () => {
+		for (const key of ['screens', 'screenHtml', 'mock']) {
+			const parsed = parseLooks(body({ ...GOOD, looks: [{ ...FIELD, [key]: { title: 'Today', html: '<main>Today</main>' } }, CALM] }));
+			expect(parsed.ok).toBe(false);
+			if (parsed.ok) return;
+			expect(parsed.error).toContain('each look carries one "screen" object');
+		}
+		// An unrelated unknown key keeps the schema's own refusal.
+		const other = parseLooks(body({ ...GOOD, looks: [{ ...FIELD, palette: 'sunset' }, CALM] }));
+		expect(other.ok).toBe(false);
+		if (other.ok) return;
+		expect(other.error).not.toContain('each look carries one "screen" object');
+	});
+
 	test('independent schema and contrast errors are returned together before saving', () => {
 		const parsed = parseLooks(body({ ...GOOD, audience: '', looks: [
 			{ ...FIELD, radius: 90, density: 'spacious', colors: { ...FIELD.colors, muted: '#FFFFFF' } },

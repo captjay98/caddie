@@ -1,10 +1,11 @@
 import {expect,test} from 'bun:test';
 import {Database} from 'bun:sqlite';
 import {readFileSync} from 'node:fs';
+import {applyFinalSchema} from './fixtures/migrations.ts';
 import {sqliteD1} from './fixtures/sqlite-d1.ts';
 import {withBuildTaskDeadline} from '../apps/app/src/server/task-deadlines.ts';
 import {currentBuildTask,effectiveBuildSignal} from '../apps/app/src/server/task-deadline-context.ts';
-function world(){const sqlite=new Database(':memory:');sqlite.exec(readFileSync(new URL('../apps/app/migrations/0053_task_deadlines.sql',import.meta.url),'utf8'));return {sqlite,db:sqliteD1(sqlite)};}
+function world(){const sqlite=new Database(':memory:');applyFinalSchema(sqlite);return {sqlite,db:sqliteD1(sqlite)};}
 test('a hanging delegate settles and aborts the actual propagated signal',async()=>{
  const {sqlite,db}=world();try {
   let cancelled=false,expired=0;

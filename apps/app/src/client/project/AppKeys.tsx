@@ -67,7 +67,7 @@ export function AppKeys(props: { actorId: string; projectId: string; hasServer: 
 
   const list = keys.data?.keys ?? [];
   if (!props.hasServer && list.length === 0) return null;
-  const configured = keys.data?.configured ?? true;
+  const configured = keys.data?.configured === true;
   const needed = list.filter((key) => key.status === "requested").length;
 
   async function act(name: string, run: () => Promise<unknown>): Promise<boolean> {
@@ -121,7 +121,8 @@ export function AppKeys(props: { actorId: string; projectId: string; hasServer: 
           </button>
         </p>
       ) : null}
-      {!configured ? (
+      {keys.isPending ? <p className="state-detail" role="status">Checking connections…</p> : null}
+      {keys.data?.configured === false ? (
         <p className="state-detail" data-testid="app-keys-unavailable">
           Saving keys isn&rsquo;t set up on this Caddie server yet.
         </p>
@@ -135,8 +136,8 @@ export function AppKeys(props: { actorId: string; projectId: string; hasServer: 
                 <span className="app-keys-meta">
                   <code>{key.name}</code>
                   {key.status === "set" ? (
-                    <span className="badge" data-tone="ok">
-                      <Icon name="check" title="" /> Saved
+                    <span className="badge" data-tone="neutral">
+                      Saved · not tested
                     </span>
                   ) : (
                     <span className="badge" data-tone="warn">
@@ -221,7 +222,7 @@ export function AppKeys(props: { actorId: string; projectId: string; hasServer: 
           ))}
         </ul>
       ) : configured && keys.isSuccess ? (
-        <p className="state-detail app-keys-empty">This app doesn&rsquo;t need any keys yet.</p>
+        <p className="state-detail app-keys-empty">No keys requested yet.</p>
       ) : null}
       {configured && keys.isSuccess ? (
         adding ? (

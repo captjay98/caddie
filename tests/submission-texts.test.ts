@@ -85,11 +85,11 @@ describe('submission texts: the devpost model table matches MODEL_ROLES', () => 
 		});
 	}
 
-	test('the table carries the build role on Super VL, not GLM (the 2026-10-20 re-route)', () => {
+	test('the table carries the build role on MiniMax (the 2026-10-29 re-route)', () => {
 		const build = parsed.get('build');
 		expect(build).toBeDefined();
-		expect(build!.routeId).toBe('nemotron-3.5-super-vl');
-		expect(build!.modelId).toBe('nvidia/Nemotron-3.5-Super-VL');
+		expect(build!.routeId).toBe('minimax-m3.1-flash');
+		expect(build!.modelId).toBe('MiniMaxAI/MiniMax-M3.1-Flash');
 	});
 });
 

@@ -473,9 +473,10 @@ async function failedRoundsFor(
 	const rows = (
 		await db
 			.prepare(
-				'select "issue","detail" from "run_rounds" where "projectId" = ? and "runId" = ? and "round" = \'repair_attempt\' and "outcome" = \'failed\' and ("issue" = ? or "issue" like ?) order by "createdAt" desc, "id" desc',
+				'select "issue","detail" from "run_rounds" where "projectId" = ? and "runId" = ? and "round" = \'repair_attempt\' and "outcome" = \'failed\' and ("issue" = ? or substr("issue", 1, ?) = ?) order by "createdAt" desc, "id" desc',
 			)
-			.bind(scope.projectId, runId, `${featureId}:new-tests`, `${featureId}:%`)
+			// Prefix by substr, not LIKE: D1 refuses LIKE patterns over 50 bytes.
+			.bind(scope.projectId, runId, `${featureId}:new-tests`, featureId.length + 1, `${featureId}:`)
 			.all<{ issue: string; detail: string | null }>()
 	).results ?? [];
 	return rows.map((r) => ({ issue: String(r.issue), detail: r.detail == null ? null : String(r.detail) }));

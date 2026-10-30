@@ -19,19 +19,18 @@ export function SignInScreen({ callbackURL = '/app/' }: { callbackURL?: string }
 				<div className="signin-brand">
 					<Mascot mood="ready" size={56} live />
 					<h1 className="signin-title">Sign in to start building</h1>
-					{/* Two unbreakable phrases: when it must wrap, it breaks at the dash. */}
-					<p className="signin-lede">
-						<span className="signin-nobreak">Build an app from your idea&nbsp;—</span>{' '}
-						<span className="signin-nobreak">no coding needed.</span>
-					</p>
+					<p className="signin-lede">Your idea, built and checked.</p>
 				</div>
 				<div className="signin-card">
 					<SignInPanel callbackURL={callbackURL} />
 				</div>
-				<p className="signin-note" data-testid="sign-in-access-note">
-					Caddie is invite-only during the hackathon.
-				</p>
 			</div>
+			{/* The access line is a page footer, not part of the sign-in column:
+			    it belongs at the bottom edge, away from the buttons (owner
+			    2026-10-27). */}
+			<p className="signin-note" data-testid="sign-in-access-note">
+				Caddie is invite-only during the hackathon.
+			</p>
 		</div>
 	);
 }

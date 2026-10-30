@@ -3,10 +3,14 @@ import { isLikelyEventPage, isPastEvent, parseComposedSummary } from '../apps/ap
 import {
 	compactCount,
 	compactPrize,
+	deadline,
 	eligibilityView,
+	endsSoon,
 	platformName,
 	rowFacts,
 } from '../apps/app/src/client/conversation/hackathon-format.ts';
+import { daysLeft, FIRST_TIMER_MIN_DAYS } from '../apps/app/src/server/coordinator-context.ts';
+import { discoveryReply } from '../apps/app/src/agents/coordinator.ts';
 import type { HackathonCandidate } from '../packages/contracts/src/index.ts';
 
 /**
@@ -121,7 +125,39 @@ describe('display formatting shared by the chat card and Discover', () => {
 	test('eligibility wording never softens the verdict', () => {
 		expect(eligibilityView({ ...base, eligibility: 'eligible', eligibilityNote: 'You can enter', eligibilityQuote: 'q' })).toMatchObject({ state: 'eligible', short: 'Eligible', label: 'Your profile meets the checked entry rules', why: 'Why you can enter' });
 		expect(eligibilityView({ ...base, eligibilityNeedsConfirm: true, eligibilityNote: "Open to NG · confirm you're 13+" })).toMatchObject({ state: 'confirm', short: 'Confirm 13+' });
-		expect(eligibilityView(base)).toMatchObject({ state: 'unknown', short: 'Not checked', why: null });
+		expect(eligibilityView(base)).toMatchObject({ state: 'unknown', short: 'Check the rules', why: null });
 		expect(eligibilityView({ ...base, eligibility: 'ineligible', eligibilityNote: 'Only open to US' })).toMatchObject({ state: 'ineligible', label: 'Only open to US', short: "Can't enter" });
+	});
+});
+
+// Review 2026-10-28: a first build needs time, so the card says how close the
+// deadline is in plain words, and the reply beside the card claims nothing
+// about checking (the footer counts that from the rows).
+describe('deadline wording and the first-timer time-left signal', () => {
+	const at = (iso: string) => ({ ...base, deadline: iso, endsAt: iso });
+	// Noon local time on Oct 29 2026, so date-only deadlines compare by calendar day.
+	const now = new Date(2026, 9, 29, 12, 0, 0);
+	test('tomorrow / 2 days read as words; further dates stay a date', () => {
+		expect(deadline(at('2026-10-30'), now)).toBe('Tomorrow');
+		expect(deadline(at('2026-10-31'), now)).toBe('2 days');
+		expect(deadline(at('2026-11-12'), now)).toBe('Nov 12');
+	});
+	test('endsSoon is true only for today, tomorrow and the day after', () => {
+		expect(endsSoon(at('2026-10-30'), now)).toBe(true);
+		expect(endsSoon(at('2026-10-31'), now)).toBe(true);
+		expect(endsSoon(at('2026-11-01'), now)).toBe(false);
+		expect(endsSoon(base, now)).toBe(false);
+	});
+	test('the chat reply is fixed text with no count or checking claim', () => {
+		const reply = discoveryReply(8);
+		expect(reply).not.toMatch(/\d|all|checked|eligib/i);
+		expect(discoveryReply(0)).toContain('Nothing came back');
+	});
+	test('daysLeft (server ranking) counts whole days and is null when unknown', () => {
+		const serverNow = new Date('2026-10-29T12:00:00Z');
+		expect(daysLeft('2026-10-30', serverNow)).toBe(1);
+		expect(daysLeft('2026-11-12', serverNow)).toBe(14);
+		expect(daysLeft(null, serverNow)).toBeNull();
+		expect(FIRST_TIMER_MIN_DAYS).toBe(3);
 	});
 });

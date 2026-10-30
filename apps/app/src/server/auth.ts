@@ -41,6 +41,10 @@ export interface D1Database {
  * vars set in wrangler secrets / .dev.vars — never from provider model keys.
  */
 export interface AuthEnv {
+  /** Separate preview base domain. Local .localhost origins are derived;
+   * hosted preview origins must be explicitly configured. */
+  PREVIEW_BASE_URL?: string;
+  PREVIEW_SIGNING_SECRET?: string;
 	DB: D1Database;
 	/** Dedicated session/state signing secret. Required; no fallback. */
 	BETTER_AUTH_SECRET: string;

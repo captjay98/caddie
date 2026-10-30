@@ -164,7 +164,7 @@ describe("mockups have one way onto the screen (plan 4.5)", () => {
     expect(read("client/conversation/ProjectWorkflow.tsx")).toMatch(/<ReplyText key=\{i\} text=\{p\.text\} streaming=\{p\.state === "streaming"\} guardedArtifacts \/>/);
   });
 
-  test("Caddie keeps mockups in the design brief and never pastes HTML into a reply", () => {
-    expect(read("agents/coordinator.ts")).toContain("Never paste a mockup or any HTML into a reply: the card draws the brief's mockups");
+  test("Caddie keeps mockups on the project page and never pastes HTML into a reply", () => {
+    expect(read("agents/coordinator.ts")).toContain("Never paste HTML or a mockup into a reply; the project page shows the looks.");
   });
 });

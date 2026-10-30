@@ -6,6 +6,7 @@ import { evaluateCandidateEligibility, listCandidates, parseEventDates, UNVERIFI
 import { matchCandidateByTitle } from './coordinator-context.ts';
 import { getProfile } from './profiles.ts';
 import type { EligibilityVerdict } from './eligibility.ts';
+import { chooseContestDeadline, type DeadlineEvidence } from './contest-source-deadline.ts';
 
 /**
  * The hackathon a project is for, for the project page header (2026-10-15
@@ -28,6 +29,11 @@ export interface ProjectHackathon {
 	readonly track: string | null;
 	/** ISO date (YYYY-MM-DD) of the submission deadline, or null when unknown. */
 	readonly deadline: string | null;
+	/** Exact time only when a current, matching rules claim supports it. */
+	readonly deadlineUtc?: string;
+	readonly deadlineClaimId?: string;
+	readonly deadlineSourceUrl?: string;
+	readonly deadlineOriginal?: string;
 	/** Whole days from now until the deadline (0 on the day), null when unknown. */
 	readonly daysLeft: number | null;
 	readonly ended: boolean;
@@ -48,13 +54,15 @@ function sameEvent(a: string, b: string): boolean {
 	}
 }
 
-/** Days until the end of the deadline day (UTC), floored at 0. */
+/** Date-only values cannot establish a closing hour or time zone. */
 export function daysUntil(deadline: string, nowMs: number): { daysLeft: number; ended: boolean } {
 	const end = Date.parse(`${deadline}T23:59:59Z`);
 	if (!Number.isFinite(end)) return { daysLeft: 0, ended: false };
 	const remaining = end - nowMs;
-	if (remaining < 0) return { daysLeft: 0, ended: true };
-	return { daysLeft: Math.floor(remaining / DAY_MS), ended: false };
+	// Until the date is over even at UTC-12, it may still be open somewhere.
+	// This conservative bound is not an asserted closing time.
+	const datePassedEverywhere = nowMs >= end + 12 * 60 * 60_000 + 1000;
+	return { daysLeft: Math.max(0, Math.floor(remaining / DAY_MS)), ended: datePassedEverywhere };
 }
 
 export async function projectHackathon(db: D1Database, scope: Scope, nowMs = Date.now()): Promise<ProjectHackathon | null> {
@@ -85,8 +93,10 @@ export async function projectHackathon(db: D1Database, scope: Scope, nowMs = Dat
 			: (await ensureHomeProject(db, verified.actorId)).id;
 	const homeScope: Scope = { actorId: verified.actorId, workspaceId: verified.workspaceId, projectId: homeProjectId };
 	let stored: Awaited<ReturnType<typeof listCandidates>> = [];
+	let homeReadable = false;
 	try {
 		stored = await listCandidates(db, homeScope);
+		homeReadable = true;
 	} catch {
 		stored = []; // Home in another workspace or not a member: show the link only.
 	}
@@ -104,7 +114,26 @@ export async function projectHackathon(db: D1Database, scope: Scope, nowMs = Dat
 		? candidate.summary.slice(UNVERIFIED_OPEN_LABEL.length)
 		: candidate.summary;
 	const deadline = parseEventDates(summary).deadline;
-	const remaining = deadline ? daysUntil(deadline, nowMs) : null;
+	let exact = null;
+	let exactIsProjectClaim = false;
+	if (deadline && url) {
+		try {
+			const projectIds = homeReadable && homeProjectId !== verified.projectId ? [verified.projectId, homeProjectId] : [verified.projectId];
+			const result = await db.prepare(`select c.projectId,c.id,c.claimType,c.value,c.quote,c.status,c.snapshotId,
+			s.latestSnapshotId,s.canonicalUrl as sourceUrl,s.authority,s.lastOutcome,s.observedAt,p.content
+			from evidence_claims c join evidence_sources s on s.id=c.sourceId and s.projectId=c.projectId
+			join evidence_snapshots p on p.id=c.snapshotId and p.projectId=c.projectId and p.sourceId=s.id
+			where c.projectId in (${projectIds.map(() => '?').join(',')}) and c.claimType='requirement.submission_deadline' and c.status='active' limit 21`)
+			.bind(...projectIds).all<DeadlineEvidence & { projectId: string }>();
+			if ((result.results ?? []).length <= 20) exact = chooseContestDeadline(result.results ?? [], url, deadline, nowMs);
+			exactIsProjectClaim = Boolean(exact && (result.results ?? []).some(row => row.id === exact!.claimId && row.projectId === verified.projectId));
+		} catch (error) {
+			if (!String(error).includes('no such table')) throw error;
+		}
+	}
+	const remaining = deadline ? exact
+		? { daysLeft: Math.max(0, Math.floor((Date.parse(exact.utc) - nowMs) / DAY_MS)), ended: Date.parse(exact.utc) <= nowMs }
+		: daysUntil(deadline, nowMs) : null;
 	const profile = await getProfile(db, verified.actorId);
 	const evaluation = await evaluateCandidateEligibility(db, homeScope, candidate, { country: profile?.country ?? null });
 
@@ -113,6 +142,7 @@ export async function projectHackathon(db: D1Database, scope: Scope, nowMs = Dat
 		url: url ?? candidate.url,
 		track,
 		deadline,
+		...(exact ? { deadlineUtc: exact.utc, ...(exactIsProjectClaim ? { deadlineClaimId: exact.claimId } : {}), deadlineSourceUrl: exact.sourceUrl, deadlineOriginal: exact.original } : {}),
 		daysLeft: remaining?.daysLeft ?? null,
 		ended: remaining?.ended ?? false,
 		eligibility: evaluation.verdict,
@@ -167,10 +197,33 @@ export async function projectHackathonsForActor(
 	const home = await ensureHomeProject(db, actorId);
 	const homeProjectId = linked.map((item) => item.homeProjectId).find((id): id is string => typeof id === 'string') ?? home.id;
 	let stored: Awaited<ReturnType<typeof listCandidates>> = [];
+	let homeReadable = false;
 	try {
 		stored = await listCandidates(db, { actorId, workspaceId: home.workspaceId, projectId: homeProjectId });
+		homeReadable = true;
 	} catch {
 		stored = []; // Home in another workspace or not a member: titles only.
+	}
+	// One bounded read for all authorized projects: never turn a large or
+	// incomplete evidence set into a falsely certain deadline.
+	const evidenceByProject = new Map<string, DeadlineEvidence[]>();
+	if (linked.length <= 100) {
+		try {
+			const projectIds = [...linked.map(item => item.projectId), ...(homeReadable ? [homeProjectId] : [])];
+			const placeholders = projectIds.map(() => '?').join(',');
+			const evidence = await db.prepare(`select c.projectId,c.id,c.claimType,c.value,c.quote,c.status,c.snapshotId,
+				s.latestSnapshotId,s.canonicalUrl as sourceUrl,s.authority,s.lastOutcome,s.observedAt,p.content
+				from evidence_claims c join evidence_sources s on s.id=c.sourceId and s.projectId=c.projectId
+				join evidence_snapshots p on p.id=c.snapshotId and p.projectId=c.projectId and p.sourceId=s.id
+				where c.projectId in (${placeholders}) and c.claimType='requirement.submission_deadline' and c.status='active' limit 201`)
+				.bind(...projectIds).all<DeadlineEvidence & { projectId: string }>();
+			if ((evidence.results ?? []).length <= 200) for (const row of evidence.results ?? []) {
+				const group = evidenceByProject.get(row.projectId) ?? [];
+				group.push(row); evidenceByProject.set(row.projectId, group);
+			}
+		} catch (error) {
+			if (!String(error).includes('no such table')) throw error;
+		}
 	}
 
 	const lines: Record<string, ProjectHackathonLine> = {};
@@ -187,7 +240,11 @@ export async function projectHackathonsForActor(
 			? candidate.summary.slice(UNVERIFIED_OPEN_LABEL.length)
 			: candidate.summary;
 		const deadline = parseEventDates(summary).deadline;
-		const remaining = deadline ? daysUntil(deadline, nowMs) : null;
+		const evidence = [...(evidenceByProject.get(item.projectId) ?? []), ...(homeReadable ? evidenceByProject.get(homeProjectId) ?? [] : [])];
+		const exact = deadline && item.url && evidence.length <= 20 ? chooseContestDeadline(evidence, item.url, deadline, nowMs) : null;
+		const remaining = deadline ? exact
+			? { daysLeft: Math.max(0, Math.floor((Date.parse(exact.utc) - nowMs) / DAY_MS)), ended: Date.parse(exact.utc) <= nowMs }
+			: daysUntil(deadline, nowMs) : null;
 		lines[item.projectId] = {
 			title: item.title ?? candidate.title,
 			deadline,

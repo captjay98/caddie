@@ -15,8 +15,13 @@ import type { StartingPoint } from './Start.tsx';
  */
 export function onboardingDestination(startingPoint: StartingPoint): string {
 	switch (startingPoint) {
+		// Owner 2026-10-28: chat is the primary mode. Landing on Discover made
+		// a page the primary surface; instead the person lands in the shell
+		// (Brief beside the conversation on desktop, the conversation on
+		// mobile) and asks Caddie in chat to find hackathons. Discover stays
+		// reachable from the nav as the browsing surface.
 		case 'hackathon':
-			return '/app/discover';
+			return '/app/';
 		case 'idea':
 			return '/app/?start=idea';
 		default:

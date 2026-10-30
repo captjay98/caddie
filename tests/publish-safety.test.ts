@@ -1,3 +1,4 @@
+import { fixtureLegacyQualityPolicy } from './fixtures/migrations.ts';
 // Part G — publish safety for the exact output. Unit tests of the pure core
 // (apps/app/src/server/publish-safety.ts): the bundle key scan, the team-mode
 // receipt binding, and the kill switch. Each check has a mutation proof noted
@@ -248,6 +249,8 @@ describe('part G: the publish call site scans the saved key VALUES (deployOutput
 			sourceConversationId: homeRun.conversationId,
 		});
 		const projectScope = await projectScopeForUser(db, 'alice', started.project.id);
+// Fixture models a project from before the default-on quality policy (see fixtureLegacyQualityPolicy).
+fixtureLegacyQualityPolicy(sqlite, projectScope.projectId);
 		const plan = await createPlanDocRevision(db, projectScope, { kind: 'prd', body: '# Farm log\n\nLog feed.' });
 		await workflowSnapshot(db, projectScope);
 		await decideWorkflow(db, projectScope, { planId: plan.id, decision: 'approved' });

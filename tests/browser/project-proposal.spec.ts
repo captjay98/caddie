@@ -98,11 +98,8 @@ test('a proposal card shows the idea and creates nothing until "Start this proje
 	expect(state.posts).toEqual([]);
 
 	await card.getByTestId('proposal-start').click();
-	// Accepted history remains passive: no background workflow/conversation.
-	await expect(page.getByTestId('accepted-project-proposal')).toBeVisible();
-    expect(state.agentReads.every(id => id === 'conv-home-prop')).toBe(true);
-    expect(state.workflowReads.some(path => path.includes(CREATED.id))).toBe(false);
-    await page.getByTestId('accepted-project-proposal').getByRole('button', { name: 'Open project' }).click();
+	// Starting a project takes you into its own chat (owner 2026-10-29), where
+	// the plan is being written; the general chat keeps a passive card.
     await expect(page).toHaveURL(/project=proj-herdwatch/);
     await expect.poll(() => state.agentReads.includes('conv-herdwatch')).toBe(true);
 	expect(state.posts).toEqual(['accept']);

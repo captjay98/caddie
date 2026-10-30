@@ -4,6 +4,7 @@ import * as v from 'valibot';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchJson, postJson } from '../api.ts';
 import { useWorkspaceChrome } from '../workspace/Chrome.tsx';
+import { plainWordsForOwner } from './response-hygiene.ts';
 
 /**
  * The in-chat project PROPOSAL card. Caddie proposes; the user creates.
@@ -53,7 +54,15 @@ export function ProjectProposalCard({ data }: { data: ProjectProposalPayload }):
 		try {
 			const result = await postJson<{ proposal: ProposalView }>(`${base}/${kind}`, {});
 			queryClient.setQueryData(key, { proposal: result.proposal });
-			if (kind === 'accept') void queryClient.invalidateQueries({ queryKey: ['projects'] });
+			if (kind === 'accept') {
+				void queryClient.invalidateQueries({ queryKey: ['projects'] });
+				// Owner 2026-10-29: starting a project takes you into it. Left in
+				// the general chat, a first-time owner saw "start it whenever
+				// you're ready" while the plan was already being written in the
+				// project's own chat. The card stays behind with "Open project"
+				// for coming back.
+				if (result.proposal.projectId) chrome.openProject(result.proposal.projectId, true);
+			}
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : 'That didn’t go through — try again.');
 		} finally {
@@ -119,7 +128,7 @@ export function ProjectProposalCard({ data }: { data: ProjectProposalPayload }):
 				{p.firstStep ? (
 					<div>
 						<dt>Build first</dt>
-						<dd>{p.firstStep}</dd>
+						<dd>{plainWordsForOwner(p.firstStep)}</dd>
 					</div>
 				) : null}
 				{p.stackId === 'flutter' ? (

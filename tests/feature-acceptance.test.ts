@@ -37,11 +37,15 @@ test('a prior red bundle or a deleted failing test cannot prove a new feature', 
 });
 
 import {qualityWorld} from './fixtures/artifact-quality-cases.ts';
+import {reviewArtifactCandidate} from '../apps/app/src/server/artifact-quality.ts';
 import {createPlanDocRevision} from '../apps/app/src/server/projects.ts';
 import {ensureBuildFeatures,recordFeaturePassed} from '../apps/app/src/server/build-features.ts';
 import type {D1Database} from '../apps/app/src/server/auth.ts';
 test('Stop immediately before the feature UPDATE is fenced by the mutation itself',async()=>{
- const w=await qualityWorld(false);try {
+ const w=await qualityWorld();try {
+  // Default-on: the project is gate-active, so the fixture writes the plan the
+  // way the real pipeline does — reviewed first, then published.
+  await reviewArtifactCandidate(w.db,{projectId:w.project.id,kind:'prd',body:'# Farm log',authorRouteId:'glm-5.3-flash',reviewer:{async review(){return {verdict:'pass' as const,findings:[]};}}});
   const plan=await createPlanDocRevision(w.db,w.scope,{kind:'prd',body:'# Farm log'});
   const [feature]=await ensureBuildFeatures(w.db,w.scope,w.workflow.runId,plan);
   w.sqlite.prepare("update build_workflows set phase='building',planId=?,spendPayerId='payer'").run(plan.id);

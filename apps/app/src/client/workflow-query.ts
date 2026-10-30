@@ -1,7 +1,9 @@
 import { queryOptions } from '@tanstack/react-query';
 import type { ApprovalRecord, PlanDocRevision } from '@caddie/contracts';
-import type { BuildWorkflow } from '../server/build-workflow.ts';
+import type { BuildWorkflow, ReadyChange } from '../server/build-workflow.ts';
 import type { ImportPreviewView } from '../server/import-preview.ts';
+import type { PreparationProgress } from '../server/preparation-progress.ts';
+import type { PlanStages } from '../server/build-features.ts';
 import { fetchJson } from './api.ts';
 
 export interface WorkflowSnapshot {
@@ -21,11 +23,17 @@ export interface WorkflowSnapshot {
   * actionable retry instead of the endless "turning your request into a plan"
   * placeholder. Server: workflowSnapshot/planningDispatchStalled. */
  dispatchStalled?: boolean;
+ /** The project's open or most recent post-ready change (server: workflowSnapshot). */
+ change?: ReadyChange | null;
+ /** Plan/looks/screens: which stage, which pass, since when (server: preparation-progress.ts). */
+ preparationProgress?: PreparationProgress | null;
+ /** Staged builds: the first version and the "add after" ideas (server: build-features.ts planStages). */
+ planStages?: PlanStages | null;
 }
 
 export function workflowRefreshMs(snapshot: WorkflowSnapshot | undefined): number {
  const phase = snapshot?.workflow?.phase;
- return phase === 'planning' || phase === 'looks' || phase === 'design' || phase === 'building' || snapshot?.importPreview?.status === 'checking' ? 2000 : 30_000;
+ return phase === 'planning' || phase === 'looks' || phase === 'design' || phase === 'building' || snapshot?.importPreview?.status === 'checking' || (snapshot?.change?.status === 'proposed' && !snapshot.change.proposal) ? 2000 : 30_000;
 }
 
 /** One actor/project cache and refresh policy for every view of the workflow. */

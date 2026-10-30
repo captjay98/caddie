@@ -1,3 +1,4 @@
+import { fixtureLegacyQualityPolicy } from './fixtures/migrations.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Database } from 'bun:sqlite';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
@@ -75,6 +76,7 @@ describe('decideDesign team-mode architecture gate', () => {
 		projectId = project.id;
 		scope = await projectScopeForUser(db, 'owner-1', project.id);
 		await ensureWorkflow(db, scope, teamEnv); // stamps teamMode
+		fixtureLegacyQualityPolicy(sqlite, projectId); // pre-gate fixture project (direct plan writes)
 		const plan = await createPlanDocRevision(db, scope, { kind: 'prd', body: '# Notes\n\nAdd, see, change and delete notes.' });
 		await workflowSnapshot(db, scope); // planning -> review
 		await decideWorkflow(db, scope, { planId: plan.id, decision: 'approved' }); // review -> looks
@@ -204,6 +206,7 @@ describe('teamMode=0: the design gate behaves exactly as today', () => {
 		const project = await createProject(db, await workspaceScopeForUser(db, 'owner-1', ws.id), { workspaceId: ws.id, name: 'Plain', description: 'A plain app' });
 		const scope = await projectScopeForUser(db, 'owner-1', project.id);
 		await ensureWorkflow(db, scope, { TEAM_MODE: 'off' });
+		fixtureLegacyQualityPolicy(sqlite, project.id); // pre-gate fixture project (direct plan writes)
 		const plan = await createPlanDocRevision(db, scope, { kind: 'prd', body: '# Plain\n\nAdd and see items.' });
 		await workflowSnapshot(db, scope);
 		await decideWorkflow(db, scope, { planId: plan.id, decision: 'approved' });

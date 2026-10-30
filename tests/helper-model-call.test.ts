@@ -1,4 +1,5 @@
-import { describe, test, expect, afterEach } from "bun:test";
+import { describe, test, expect, afterEach, beforeEach } from "bun:test";
+import { _resetSeenSpendCaps } from "../apps/app/src/server/model-spend-guard.ts";
 import { helperModelCompletion } from "../apps/app/src/server/helper-model-call.ts";
 import { findModelRouteForRole } from "../apps/app/src/agents/providers.ts";
 
@@ -20,6 +21,8 @@ const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
+// Cap settings seen by earlier test files must not leak into these.
+beforeEach(() => _resetSeenSpendCaps());
 
 function okBody() {
   const route = findModelRouteForRole("helperRules");
@@ -30,16 +33,41 @@ function jsonResponse(status: number, body: unknown, headers: Record<string, str
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
 }
 
+/** A ledger with nothing spent yet: every query is empty, every write succeeds. */
+const emptyLedger = { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), run: async () => ({}) }) }) } as unknown as import("../apps/app/src/server/auth.ts").D1Database;
+
 function helperRequest() {
   const route = findModelRouteForRole("helperRules");
   return {
     role: "helperRules" as const,
+    accounting: { db: emptyLedger },
     url: NEBIUS,
     request: { method: "POST", body: JSON.stringify({ model: route.modelId }) },
     // No sleeps in tests.
     sleepMs: async (_ms: number) => {},
   };
 }
+
+describe("the spending ceiling covers helper calls (owner 2026-10-29)", () => {
+  test("a helper call with no ledger is refused before any request", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => { calls += 1; return jsonResponse(200, okBody()); }) as unknown as typeof fetch;
+    const { accounting: _dropped, ...unmetered } = helperRequest();
+    await expect(helperModelCompletion(unmetered)).rejects.toThrow("no spending ledger");
+    expect(calls).toBe(0);
+  });
+  test("a helper call past today's cap is refused before any request", async () => {
+    const { migratedDatabase } = await import("./fixtures/sqlite-d1.ts");
+    const { db, sqlite } = await migratedDatabase();
+    let calls = 0;
+    globalThis.fetch = (async () => { calls += 1; return jsonResponse(200, okBody()); }) as unknown as typeof fetch;
+    try {
+      sqlite.exec(`insert into model_call_usage (turnId,instanceId,purpose,providerId,requestedModel,selectionReason,isError,catalogCostMicros,createdAt) values ('spent','conv-x','agent','nebius','m','x',0,3000000,'${new Date().toISOString()}')`);
+      await expect(helperModelCompletion({ ...helperRequest(), accounting: { db } })).rejects.toThrow("MODEL_SPEND_CAP");
+      expect(calls).toBe(0);
+    } finally { sqlite.close(); }
+  });
+});
 
 describe("B02 §B — bounded transient retry for direct helper model calls", () => {
   test("a 529 then a 200 is retried and succeeds", async () => {

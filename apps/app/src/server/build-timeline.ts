@@ -279,6 +279,13 @@ export function buildTimeline(input: {
 	readonly planBody?: string | null;
 	/** The workflow's blocker text, used as the summary when blocked. */
 	readonly blockedDetail?: string | null;
+	/**
+	 * Other recorded work that is not a sandbox row: the workflow write (a
+	 * Retry rewrites it) and the newest model call. Right after Retry the card
+	 * said "No recent activity" because the last sandbox row was 52 min old
+	 * (Farm Ops, 2026-10-29).
+	 */
+	readonly lastWorkAt?: readonly (string | null | undefined)[];
 	readonly nowMs: number;
 }): BuildTimeline {
 	const rows = [...input.rows].sort((a, b) => ms(a.startedAt) - ms(b.startedAt));
@@ -291,7 +298,8 @@ export function buildTimeline(input: {
 	const elapsedMs = startedAt
 		? Math.max(0, (building ? nowMs : ms(lastActivityAt!)) - ms(startedAt))
 		: null;
-	const idleMs = building && lastActivityAt ? Math.max(0, nowMs - ms(lastActivityAt)) : null;
+	const newestWork = Math.max(lastActivityAt ? ms(lastActivityAt) : 0, ...(input.lastWorkAt ?? []).map((at) => (at ? ms(at) : 0)));
+	const idleMs = building && newestWork > 0 ? Math.max(0, nowMs - newestWork) : null;
 	const quiet = idleMs !== null && idleMs > QUIET_AFTER_MS;
 
 	// Files: one entry per path, most recent first.

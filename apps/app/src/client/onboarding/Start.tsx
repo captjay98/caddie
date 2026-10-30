@@ -20,6 +20,39 @@ export function suggestFirstName(full: string | null | undefined): string {
 	return cleaned.split(' ')[0] ?? '';
 }
 
+/** Storage key for the starting point picked on the first welcome screen. */
+export const STARTING_POINT_KEY = 'caddie:starting-point';
+
+/** Every onboarding screen, counted once: starting point, name, then the two profile steps. */
+export const ONBOARDING_STEP_COUNT = 4;
+
+/** The name the person gave Caddie, or null (private mode / skipped). */
+export function readProfileName(): string | null {
+	try {
+		const value = localStorage.getItem(PROFILE_NAME_KEY)?.trim();
+		return value ? value : null;
+	} catch {
+		return null;
+	}
+}
+
+export function saveStartingPoint(point: StartingPoint): void {
+	try {
+		localStorage.setItem(STARTING_POINT_KEY, point);
+	} catch {
+		// private mode: Home falls back to its default order
+	}
+}
+
+export function readStartingPoint(): StartingPoint | null {
+	try {
+		const value = localStorage.getItem(STARTING_POINT_KEY);
+		return value === 'hackathon' || value === 'idea' || value === 'explore' ? value : null;
+	} catch {
+		return null;
+	}
+}
+
 export function saveProfileName(name: string): void {
 	try {
 		const trimmed = name.trim().slice(0, 40);
@@ -62,21 +95,21 @@ export function WelcomeIntro(props: { onDone: (startingPoint: StartingPoint) => 
 	const [stage, setStage] = useState<'intro' | 'name'>('intro');
 	const suggested = suggestFirstName(sessionName);
 	const [name, setName] = useState('');
-	const [usernameHint, setUsernameHint] = useState(false);
 
 	useEffect(() => {
-		if (stage === 'name') {
-			setName(suggested);
-			setUsernameHint(suggested === '' && Boolean(sessionName));
-		}
-	}, [stage, suggested, sessionName]);
+		if (stage === 'name') setName(suggested);
+	}, [stage, suggested]);
+
+	// One plain note under the field. Caddie never explains why it left the
+	// field empty (owner review 2026-10-28): the question is enough.
+	const nameHint = suggested ? 'From your account. Change it if you like.' : 'Caddie greets you by this name.';
 
 	if (stage === 'intro') {
   return (
    <section className="card-surface start-card welcome-intro welcome-starting-point" data-testid="welcome-intro">
-    <p className="welcome-start-label">LET’S GET STARTED</p>
+    <p className="welcome-start-label" data-testid="onboarding-step">STEP 1 OF {ONBOARDING_STEP_COUNT} · LET’S GET STARTED</p>
     <header className="welcome-start-head">
-     <span className="welcome-start-mascot" aria-hidden="true"><Mascot mood="ready" size={80} live /></span>
+     <span className="welcome-start-mascot" aria-hidden="true"><Mascot mood="ready" size={64} live /></span>
      <h1 className="welcome-intro-hello">Hi, I’m Caddie.<br />What brings you here?</h1>
     </header>
     <p className="welcome-start-lede">Pick a starting point. You can change your mind anytime.</p>
@@ -86,7 +119,7 @@ export function WelcomeIntro(props: { onDone: (startingPoint: StartingPoint) => 
       <label className="welcome-start-choice" key={item.id} data-selected={startingPoint === item.id}>
        <input type="radio" name="starting-point" value={item.id} checked={startingPoint === item.id} onChange={() => setStartingPoint(item.id)} />
        <span className="welcome-start-icon" aria-hidden="true"><Icon name={item.icon} title="" /></span>
-       <span><strong>{item.title}</strong><small>{item.detail}</small></span>
+       <span className="welcome-start-copy"><strong>{item.title}</strong><small>{item.detail}</small></span>
       </label>
      ))}
     </fieldset>
@@ -106,20 +139,19 @@ export function WelcomeIntro(props: { onDone: (startingPoint: StartingPoint) => 
 			<section className="card-surface start-card welcome-intro welcome-starting-point welcome-name-step" data-testid="welcome-name">
                 <div className="welcome-name-top">
                     <button type="button" className="btn-ghost" aria-label="Back" onClick={() => setStage('intro')}>← Back</button>
-                    <p className="welcome-start-label">A LITTLE ABOUT YOU</p>
+                    <p className="welcome-start-label welcome-name-step-count" data-testid="onboarding-step">STEP 2 OF {ONBOARDING_STEP_COUNT}</p>
                 </div>
-                <header className="welcome-start-head">
-                    <span className="welcome-start-mascot" aria-hidden="true"><Mascot mood="listening" size={80} live /></span>
+                <header className="welcome-name-head">
+                    <span className="welcome-name-mascot" aria-hidden="true"><Mascot mood="listening" size={40} live /></span>
                     <h1 className="welcome-intro-hello">What should I call you?</h1>
                 </header>
-                <p className="welcome-start-lede">A first name or nickname is perfect. You can change it anytime.</p>
                 <form className="welcome-name-form" onSubmit={(event) => {
                     event.preventDefault();
                     saveProfileName(name);
+                    saveStartingPoint(startingPoint);
                     props.onDone(startingPoint);
                 }}>
 				<div className="welcome-name-ask">
-                    <label htmlFor="welcome-profile-name">Your name</label>
 					<input
 						id="welcome-profile-name"
 						className="input"
@@ -132,18 +164,9 @@ export function WelcomeIntro(props: { onDone: (startingPoint: StartingPoint) => 
 						maxLength={40}
 						onChange={(event) => setName(event.target.value)}
 					/>
-					{sessionName ? (
-						<p className="welcome-name-note" id="welcome-name-hint">From your account. Change it if you like.</p>
-					) : (
-						<p className="welcome-name-note" id="welcome-name-hint">Caddie greets you by this name.</p>
-					)}
-					{usernameHint ? (
-						<p className="welcome-name-note">
-							Your account name looks like a username, so I left this blank.
-						</p>
-					) : null}
+					<p className="welcome-name-note" id="welcome-name-hint">{nameHint}</p>
 				</div>
-				<div className="row-actions">
+				<div className="welcome-name-actions">
 					<button
 						type="submit"
 						className="btn-key welcome-primary"
@@ -157,6 +180,7 @@ export function WelcomeIntro(props: { onDone: (startingPoint: StartingPoint) => 
 						data-testid="welcome-name-skip"
 						onClick={() => {
 							saveProfileName('');
+							saveStartingPoint(startingPoint);
 							props.onDone(startingPoint);
 						}}
 					>

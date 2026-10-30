@@ -20,6 +20,7 @@ import type { DiscoveryEvaluatedList } from './discovery/Results.tsx';
 import type { WorkflowPhase } from './workspace/project-status.ts';
 import { fetchJson, postJson } from './api.ts';
 import { workflowQueryOptions } from './workflow-query.ts';
+import { deadlineRefreshInterval } from './discovery/deadline-time.ts';
 
 /**
  * TanStack Query hooks over the REAL P02 REST surface (projects, plan-docs,
@@ -400,6 +401,7 @@ export interface ProjectHackathonView {
 	readonly url: string | null;
 	readonly track: string | null;
 	readonly deadline: string | null;
+	readonly deadlineUtc?: string;
 	readonly daysLeft: number | null;
 	readonly ended: boolean;
 	readonly eligibility: 'eligible' | 'ineligible' | 'unknown';
@@ -414,6 +416,7 @@ export function useProjectHackathon(actor: ActorScope, projectId: string | null)
 			),
 		enabled: actor.actorId !== null && projectId !== null,
 		staleTime: 5 * 60_000,
+		refetchInterval: query => deadlineRefreshInterval(query.state.data?.hackathon?.deadlineUtc, query.state.data?.hackathon?.ended ?? false),
 	});
 }
 

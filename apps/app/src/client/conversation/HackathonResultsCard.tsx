@@ -10,6 +10,7 @@ import {
 	dateRange,
 	deadline,
 	eligibilityView,
+	endsSoon,
 	FORMAT_LABEL,
 	platformName,
 	rowFacts,
@@ -77,7 +78,7 @@ export function RuleQuote({ candidate, view }: { candidate: HackathonCandidate; 
 		<details className="hk-why" data-testid="hk-rule-quote">
 			<summary>{view.why}</summary>
 			<p className="hk-why-body">
-				{view.label}. The official rules say: <q>{quote}</q>{' '}
+				{view.label}. From the official rules: <q>{quote}</q>{' '}
 				{candidate.rulesUrl ? (
 					<a className="hk-rule-link" href={candidate.rulesUrl} target="_blank" rel="noreferrer">
 						Read the rules
@@ -100,23 +101,35 @@ export function EligibilityDisclosure({ candidate, view }: { candidate: Hackatho
 	if (!hasRule) {
 		return <EligibilityChip view={view} testId="hk-elig-chip" />;
 	}
+	// Review 2026-10-28: the reason in plain words first; the legal sentence it
+	// rests on is folded under "Show the rule" and shortened, with a link to the
+	// full rules. The chip carries a small caret instead of the word "why".
+	const short = quote!.length > RULE_PREVIEW ? `${quote!.slice(0, RULE_PREVIEW).replace(/\s+\S*$/, '')}…` : quote!;
 	return (
 		<details className="hk-elig-disclosure" data-testid="hk-rule-quote">
-			<summary className="hk-elig-summary" data-testid="hk-elig-chip-trigger">
-				<EligibilityChip view={view} testId="hk-elig-chip" />
-				<span className="hk-elig-why" data-testid="hk-elig-why">why</span>
+			<summary className="hk-elig-summary" data-testid="hk-elig-chip-trigger" aria-label={`${view.short}: show why`}>
+				<EligibilityChip view={view} compact testId="hk-elig-chip" />
+				<Icon name="chevronDown" title="" className="hk-elig-caret" />
 			</summary>
-			<p className="hk-why-body">
-				{view.label}. The official rules say: <q>{quote}</q>{' '}
-				{candidate.rulesUrl ? (
-					<a className="hk-rule-link" href={candidate.rulesUrl} target="_blank" rel="noreferrer">
-						Read the rules
-					</a>
-				) : null}
-			</p>
+			{/* Flat on purpose (owner 2026-10-28): no box, no second fold, no
+			    indented quote — every level costs width on a phone. */}
+			<div className="hk-why-body" data-testid="hk-why-body">
+				<p className="hk-why-reason">{view.label}.</p>
+				<p className="hk-why-quote">
+					“{short}”{' '}
+					{candidate.rulesUrl ? (
+						<a className="hk-rule-link" href={candidate.rulesUrl} target="_blank" rel="noreferrer">
+							Full rules
+						</a>
+					) : null}
+				</p>
+			</div>
 		</details>
 	);
 }
+
+/** How much of a rule's wording the card shows before "Read the full rules". */
+const RULE_PREVIEW = 160;
 
 /** AI fit as a stat value (short word) — folded into the number row, not a floating chip. */
 const AI_FIT_SHORT: Readonly<Record<'strong' | 'possible' | 'weak', string>> = {
@@ -129,20 +142,33 @@ function FeaturedCard({ candidate }: { candidate: HackathonCandidate }): ReactEl
 	const view = eligibilityView(candidate);
 	const detail = useHackathonDetail();
 	const fit = candidate.aiFit && candidate.aiFit !== 'unknown' ? AI_FIT_SHORT[candidate.aiFit] : null;
-	const reason = candidate.topPick ? candidate.aiFitReason?.trim() : '';
+	const rawReason = candidate.topPick ? candidate.aiFitReason?.trim() ?? '' : '';
+	// The model's sentence, shown as a sentence (it sometimes starts lowercase).
+	const reason = rawReason ? rawReason.charAt(0).toUpperCase() + rawReason.slice(1) : '';
 	const subtitle = [candidate.organizer, candidate.format ? FORMAT_LABEL[candidate.format] : null, dateRange(candidate)].filter(Boolean);
 	const prize = compactPrize(candidate.prize);
 	const end = deadline(candidate);
+	const soon = endsSoon(candidate);
 	// Full-width stat row: the real numbers plus AI fit as a 4th stat (only when
 	// the model actually scored it — an unscored event shows no fit stat, never
 	// a fabricated verdict). A missing prize / count / date is simply absent.
 	const stats = [
 		prize ? { value: prize, label: 'prizes', id: 'prize' } : null,
 		candidate.participants && candidate.participants > 0 ? { value: compactCount(candidate.participants), label: 'entered', id: 'participants' } : null,
-		end ? { value: end, label: 'deadline', id: 'deadline' } : null,
+		end ? { value: end, label: soon ? 'left to submit' : 'deadline', id: 'deadline' } : null,
 		fit ? { value: fit, label: 'fit', id: 'fit' } : null,
 	].filter((stat) => stat !== null);
-	const site = platformName(candidate.platform);
+	// Review 2026-10-28: no "Open on Devpost" button sending a first-timer away.
+	// The whole card opens the details (which links the event page and offers
+	// "Plan a project for this"). Clicks on the eligibility fold, or any link
+	// inside it, keep their own behaviour.
+	const openFromCard = detail
+		? (event: { target: EventTarget | null }) => {
+				const target = event.target as HTMLElement | null;
+				if (target?.closest('details, a, button')) return;
+				detail.openDetail(candidate);
+			}
+		: undefined;
 	return (
 		<article
 			className="hk-feature caddie-card"
@@ -151,8 +177,11 @@ function FeaturedCard({ candidate }: { candidate: HackathonCandidate }): ReactEl
 			data-eligibility={candidate.eligibility}
 			data-ai-fit={candidate.aiFit ?? 'unknown'}
 			data-top-pick={candidate.topPick ? 'true' : undefined}
+			data-openable={detail ? 'true' : undefined}
+			onClick={openFromCard}
 		>
-            <CardHeader design="opportunity" status={candidate.topPick ? 'Top pick' : 'Worth a look'} />
+            {/* One heading: "Found for you", plus "Top pick" only when it truly is one. */}
+            <CardHeader design="opportunity" status={candidate.topPick ? 'Top pick' : ''} />
 			{/* Match Brief: shared header, readable content, facts, then actions. */}
 			<div className="hk-feature-head">
 				<div className="hk-feature-ident">
@@ -190,16 +219,28 @@ function FeaturedCard({ candidate }: { candidate: HackathonCandidate }): ReactEl
 					{reason}
 				</p>
 			) : null}
+			{soon ? (
+				<p className="hk-soon-note" data-testid="hk-soon-note">
+					<Icon name="alert" title="" /> This one closes very soon. A first build usually needs more time.
+				</p>
+			) : null}
 				<div className="hk-feature-actions">
-					<EligibilityDisclosure candidate={candidate} view={{ ...view, label: view.short }} />
+					<EligibilityDisclosure candidate={candidate} view={view} />
 					{candidate.openStatusUnverified ? (
 						<span className="hk-chip hk-chip-unverified" data-testid="hk-unverified-chip">
 							<Icon name="alert" title="" /> Open status unverified
 						</span>
 					) : null}
-					<a className="hk-open btn-key" href={candidate.url} target="_blank" rel="noreferrer">
-						Open on {site ?? 'the event page'} <Icon name="link" title="" />
-					</a>
+					{detail ? (
+						<button type="button" className="hk-details-link" data-testid="hk-see-details" onClick={() => detail.openDetail(candidate)}>
+							See details <span aria-hidden="true">→</span>
+						</button>
+					) : (
+						// Outside a conversation there is no pane to open; link the event page.
+						<a className="hk-details-link" href={candidate.url} target="_blank" rel="noreferrer">
+							{platformName(candidate.platform) ?? 'Event page'} <Icon name="link" title="" />
+						</a>
+					)}
 				</div>
 		</article>
 	);
@@ -283,13 +324,25 @@ export function HackathonResultsCard({ card }: { card: HackathonResultsCard }): 
 	);
 }
 
-/** "Entry checked for Nigeria · How I checked" — the honest limitations, folded. */
+/**
+ * "Entry rules read for 3 of 8 · for Nigeria · How I checked". The count is
+ * the card's own (events with a verdict or a quoted rule), so the footer can
+ * never claim more checking than the rows show (review 2026-10-28).
+ */
 function HkFooter({ card }: { card: HackathonResultsCard }): ReactElement | null {
 	const country = countryName(card.profileCountry);
-	if (!country && card.gaps.length === 0) return null;
+	const total = card.candidates.length;
+	const checked = card.candidates.filter((c) => c.eligibility !== 'unknown' || Boolean(c.eligibilityQuote?.trim())).length;
+	if (!country && card.gaps.length === 0 && total === 0) return null;
+	const line =
+		total === 0
+			? null
+			: checked === total
+				? `Entry rules read for all ${total}${country ? ` · for ${country}` : ''}`
+				: `Entry rules read for ${checked} of ${total}${country ? ` · for ${country}` : ''}`;
 	return (
 		<div className="hk-foot">
-			{country ? <span className="hk-country-note">Entry checked for {country}</span> : null}
+			{line ? <span className="hk-country-note" data-testid="hk-checked-note">{line}</span> : null}
 			{card.gaps.length > 0 ? (
 				<details className="hk-gaps" data-testid="hk-gaps">
 					<summary>How I checked</summary>

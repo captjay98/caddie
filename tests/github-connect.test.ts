@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { Database } from 'bun:sqlite';
 import {
 	CONNECT_TTL_MS,
 	connectInstallUrl,
@@ -10,8 +11,7 @@ import {
 } from '../apps/app/src/server/github-connect.ts';
 import { GithubError } from '../apps/app/src/server/adapters/github.ts';
 import { ScopeError } from '../apps/app/src/server/scope.ts';
-import { Database } from 'bun:sqlite';
-import { readFileSync } from 'node:fs';
+import { applyFinalSchema } from './fixtures/migrations.ts';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import { bindInstallation } from '../apps/app/src/server/repositories.ts';
 import type { GithubRestClient } from '../apps/app/src/server/adapters/github.ts';
@@ -29,9 +29,7 @@ const REQUEST = { actorId: 'user-alice', workspaceId: 'ws-alice', returnTo: '/ap
 
 function bindingWorld(linkedId: string | null = '101', accountType = 'User', providerAccountId = '101') {
 	const sqlite = new Database(':memory:');
-	for (const migration of ['0001_product.sql', '0006_github.sql']) {
-		sqlite.exec(readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), 'utf8'));
-	}
+	applyFinalSchema(sqlite);
 	sqlite.exec(`insert into user values ('alice','Alice','alice@example.com',1,null,'now','now');
 	 insert into workspaces values ('ws','Alice','now'),('other-ws','Other','now');
 	 insert into workspace_memberships values ('m','ws','alice','owner','now'),('m2','other-ws','alice','owner','now');`);

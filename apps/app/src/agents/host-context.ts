@@ -113,7 +113,9 @@ export function scopedCoordinatorContext(
     startProject: async (input) => (await resolve()).startProject(input),
     proposeProject: async (input) => (await resolve()).proposeProject(input),
     listStacks: async () => (await resolve()).listStacks(),
-    discover: async (input) => (await resolve()).discover(input),
+    // Forward the hooks too: without them the live progress and the
+    // first-timer signal never reached the server (review 2026-10-28).
+    discover: async (input, hooks) => (await resolve()).discover(input, hooks),
     research: async (input) => (await resolve()).research(input),
     hackathonDetails: async (input) => (await resolve()).hackathonDetails(input),
     updateProfile: async (input) => (await resolve()).updateProfile(input),

@@ -8,9 +8,9 @@ import {
 	type Jar,
 	type StubProvider,
 } from './controls-harness.ts';
+import { allMigrationPaths } from './migrations.ts';
 import type { Scope } from '@caddie/contracts';
 import type { D1Database } from '../../apps/app/src/server/auth.ts';
-import { allMigrationPaths } from './migrations.ts';
 
 /**
  * P12 test-side harness: reuses the shared P03 harness primitives (free
@@ -41,14 +41,7 @@ export function schedulesMigrationPaths(): string[] {
 
 /** Migrations for the in-memory unit world: product + evidence + P12 tables. */
 export function schedulesUnitMigrationPaths(): string[] {
-	const root = join(import.meta.dir, '..', '..');
-	return [
-		join(root, 'apps', 'app', 'migrations', '0001_product.sql'),
-		join(root, 'apps', 'app', 'migrations', '0004_evidence.sql'),
-		join(root, 'apps', 'app', 'migrations', '0007_schedules.sql'),
-		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
-		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
-	];
+	return allMigrationPaths();
 }
 
 // --- in-memory D1 (D1Database-shaped; meta.changes like real workerd D1) ----------

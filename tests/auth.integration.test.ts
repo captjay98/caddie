@@ -5,6 +5,7 @@ import net from 'node:net';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { allMigrationSql } from './fixtures/migrations.ts';
 
 /**
  * P01 — Better Auth 1.7.10 on Cloudflare Workers + D1, executed against a real
@@ -819,27 +820,22 @@ describe('P01 slice 2: invite allowlist, provider-subject identity, sessions', (
 		expect(await res.json()).toEqual({ authenticated: false });
 	});
 
-	test('identity DDL in 0001_product.sql never drifts from the fixture', () => {
-		// The fixture and the production migration must stay byte-identical at
-		// the statement level: the fixture proves the migration's schema, so a
-		// divergence would make every test here lie about production D1. Only
-		// the identity section is compared — P02 appends product tables after
-		// the IDENTITY-DDL-BOUNDARY marker.
-		const migration = readFileSync(
-			join(import.meta.dir, '..', 'apps', 'app', 'migrations', '0001_product.sql'),
-			'utf8',
-		);
-		const fixture = readFileSync(
-			join(import.meta.dir, 'fixtures', 'auth-schema.sql'),
-			'utf8',
-		);
-		const identitySection = migration.split('IDENTITY-DDL-BOUNDARY')[0];
-		const statements = (sql: string) =>
-			sql
-				.split('\n')
-				.filter((line) => /^\s*(create|drop|alter)\b/i.test(line))
-				.map((line) => line.trim());
-		expect(statements(identitySection)).toEqual(statements(fixture));
+	test('identity DDL in the folded schema never drifts from the fixture', () => {
+		// The fixture and the production migration must stay identical at the
+		// statement level: the fixture proves the migration's schema, so a
+		// divergence would make every test here lie about production D1. The
+		// identity statements are compared by containment — the folded file
+		// (0001_foundation.sql) carries product tables after them.
+		const migration = allMigrationSql();
+		const fixture = readFileSync(join(import.meta.dir, 'fixtures', 'auth-schema.sql'), 'utf8');
+		const normalize = (line: string) => line.replace(/\s+/g, ' ').trim().toLowerCase();
+		const foldedLines = new Set(migration.split('\n').map(normalize));
+		const fixtureStatements = fixture
+			.split('\n')
+			.filter((line) => /^\s*(create|drop|alter)\b/i.test(line))
+			.map(normalize);
+		expect(fixtureStatements.length).toBeGreaterThan(0);
+		for (const statement of fixtureStatements) expect(foldedLines).toContain(statement);
 	});
 
 	test('the installed Better Auth needs no new identity tables or columns', async () => {

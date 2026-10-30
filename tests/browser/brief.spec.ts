@@ -122,7 +122,7 @@ interface BriefCard {
 	runId?: string;
 	key?: string;
 	seen?: boolean;
-	deadline?: { daysLeft: number; dateLabel: string; timeLabel: string; source?: string; localTimeLabel?: string; steps?: { title: string; detail?: string; done: boolean }[] };
+	deadline?: { daysLeft: number; dateLabel: string; timeLabel: string; source?: string; sourceUrl?: string; localTimeLabel?: string; steps?: { title: string; detail?: string; done: boolean }[] };
 	planItems?: { title: string; detail?: string }[];
 	fit?: { reasons: string[]; cautions: string[] };
 	checks?: { passed: number; items: string[]; version?: string };
@@ -359,7 +359,9 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 		await expect(page.getByTestId('brief-deadline-row')).toContainText('Weekly discovery sweep');
 
 		// Opening the brief marks NOTHING read — no read POSTs, badges stay.
-		await expect(page.getByTestId('brief-count')).toContainText('3 new updates');
+		// Read controls are in the Brief actions menu, not a separate feed strip.
+		await expect(page.getByTestId('brief-actions')).toHaveCount(1);
+		await expect(page.getByTestId('brief-feed-head')).toHaveCount(0);
 		expect(reads).toHaveLength(0);
 		await context.close();
 	});
@@ -391,18 +393,39 @@ test.describe('approved navigation — Brief default + Chat start (composed buil
 		await page.goto(`${BASE}/app/`);
 		await expect(page.getByTestId('nav-brief-badge')).toHaveText('2');
 
+		await page.getByLabel('Brief actions').click();
 		await page.getByTestId('brief-mark-all-read').click();
 		expect(reads.sort()).toEqual(['proj-a:approval:ap-1', 'proj-b:deadline:sch-1']);
 		// The refetched payload reflects the reads: the badge disappears and the
 		// unseen count drops to zero. Read state is separate from resolution —
 		// no approval/schedule POSTs happen (the stub records none).
 		await expect(page.getByTestId('nav-brief-badge')).toHaveCount(0);
-		await expect(page.getByTestId('brief-count')).toHaveCount(0);
+		// Once all updates are read, there is no redundant read action.
 		await expect(page.getByTestId('brief-head')).toHaveCount(1);
-		await expect(page.getByTestId('brief-head').getByTestId('brief-mark-all-read')).toHaveCount(0);
+		await expect(page.getByTestId('brief-actions')).toHaveCount(0);
+		// Regression: the removed interrupting strip never comes back.
 		await expect(page.getByTestId('brief-lane-panel').getByTestId('brief-feed-toolbar')).toHaveCount(0);
 		await expect(page.getByTestId('decision-card').filter({ visible: true })).toHaveCount(2);
 		await expect(page.getByTestId('brief-mascot').locator('svg')).toHaveAttribute('data-mood', 'needs');
+		await context.close();
+	});
+
+	for (const width of [320, 390, 412, 1440]) test(`Brief actions remain reachable without overflow at ${width}px`, async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width, height: 900 } });
+		const { reads } = await stubAccount(context, { cards: [APPROVAL_A, DEADLINE_B], unseenCount: 2 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const actions = page.getByLabel('Brief actions');
+		await expect(actions).toBeVisible();
+		await actions.focus();
+		await page.keyboard.press('Enter');
+		await expect(page.getByTestId('brief-mark-all-read')).toBeVisible();
+		await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		expect(reads).toHaveLength(0);
+		await page.screenshot({ path: `/tmp/caddie-brief-actions-${width}.png`, fullPage: true });
+		await page.keyboard.press('Escape');
+		await expect(page.getByTestId('brief-mark-all-read')).not.toBeVisible();
+		await expect(actions).toBeFocused();
 		await context.close();
 	});
 
@@ -1233,12 +1256,12 @@ test('the card title always reserves exactly two lines — short and long titles
 		});
 		// The card's own preview: the same seed + document endpoints the full
 		// preview uses, answering a tiny real page.
-		let seeded = 0;
-		await context.route('**/api/projects/proj-a/workflow/preview/prev-1/seed', (route) => {
-			seeded += 1;
-			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ seedRef: 'seed-1' }) });
+		let launched = 0;
+		await context.route('**/api/projects/proj-a/workflow/preview/prev-1/launch', (route) => {
+			launched += 1;
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ url: 'http://preview.test/document', resetUrl: 'http://preview.test/document', origin: 'http://preview.test' }) });
 		});
-		await context.route('**/api/projects/proj-a/workflow/preview/prev-1/document**', (route) =>
+		await context.route('http://preview.test/document', (route) =>
 			route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><body><h1>Hello from FarmLog</h1></body></html>' }),
 		);
 		const page = await context.newPage();
@@ -1250,9 +1273,9 @@ test('the card title always reserves exactly two lines — short and long titles
 		await expect(peek).toContainText('Live preview');
 		// The real app runs in the frame, loaded from THIS card's preview.
 		const frame = peek.getByTestId('peek-frame');
-		await expect(frame).toHaveAttribute('src', /\/workflow\/preview\/prev-1\/document\?/);
+		await expect(frame).toHaveAttribute('src', 'http://preview.test/document');
 		await expect(page.frameLocator('[data-testid="peek-frame"]').getByRole('heading', { name: 'Hello from FarmLog' })).toBeVisible();
-		expect(seeded).toBe(1);
+		expect(launched).toBeGreaterThan(0);
 		// Not clickable or focusable: "Try the app" is how a person opens it.
 		const viewport = peek.locator('.compact-card-peek-viewport');
 		await expect(viewport).toHaveAttribute('inert', '');
@@ -1267,7 +1290,7 @@ test('the card title always reserves exactly two lines — short and long titles
 			id: 'brf_hackathon-deadline_proj-a', projectId: 'proj-a', kind: 'deadline',
 			headline: 'Leave time to tell the story', summary: 'The app is one part of the submission.',
 			status: 'needs-you', primaryAction: { label: 'Review submission', kind: 'review', targetId: 'proj-a' },
-			deadline: { daysLeft: 3, dateLabel: 'Friday, 23 October', timeLabel: '17:00', source: 'Farm Innovation Challenge', localTimeLabel: '5:00 pm', steps: [
+			deadline: { daysLeft: 3, dateLabel: 'Friday, 23 October', timeLabel: '17:00', source: 'Farm Innovation Challenge', sourceUrl: 'https://contest.example/fic', localTimeLabel: '5:00 pm', steps: [
 				{ title: 'App preview ready', detail: 'Your current build has passed its checks.', done: true },
 				{ title: 'Demo video', detail: 'Not yet attached.', done: false },
 			] },
@@ -1281,6 +1304,9 @@ test('the card title always reserves exactly two lines — short and long titles
 		await expect(deadline.getByTestId('card-local-time')).toContainText('5:00 pm · Your local time');
 		await expect(deadline.getByTestId('card-countdown')).not.toContainText('17:00');
 		await expect(deadline.getByTestId('card-deadline-steps').locator('li')).toHaveCount(2);
+		await expect(deadline.getByRole('link', { name: 'Deadline source' })).toHaveAttribute('href', 'https://contest.example/fic');
+		await deadline.getByRole('button', { name: 'Review submission' }).click();
+		await expect(page).toHaveURL(/\/submission\?project=proj-a/);
 		await context.close();
 	});
 
@@ -1298,6 +1324,42 @@ test('the card title always reserves exactly two lines — short and long titles
 		await expect(sched.getByTestId('card-schedule')).toContainText('runs next');
 		await expect(sched.getByTestId('card-countdown')).toHaveCount(0);
 		await expect(sched.getByText('Deadline', { exact: true })).toHaveCount(0);
+		await context.close();
+	});
+
+	test('an unsafe deadline source never becomes a clickable link', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+		await stubAccount(context, { cards: [card({
+			id: 'brf_hackathon-deadline_proj-a', projectId: 'proj-a', kind: 'deadline',
+			headline: 'Prepare your submission', status: 'needs-you',
+			primaryAction: { label: 'Review submission', kind: 'review', targetId: 'proj-a' },
+			deadline: { daysLeft: 1, dateLabel: 'Friday', timeLabel: 'time not confirmed', sourceUrl: 'javascript:alert(1)' },
+		})], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const deadline = page.getByTestId('decision-card').first();
+		await expect(deadline.getByRole('link', { name: 'Deadline source' })).toHaveCount(0);
+		await expect(deadline.getByRole('button', { name: 'Details' })).toBeVisible();
+		await context.close();
+	});
+
+	test('the contest source and submission actions fit side by side on a narrow phone', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 320, height: 844 } });
+		await stubAccount(context, { cards: [card({
+			id: 'brf_hackathon-deadline_proj-a', projectId: 'proj-a', kind: 'deadline',
+			headline: 'Prepare your submission', status: 'needs-you',
+			primaryAction: { label: 'Review submission', kind: 'review', targetId: 'proj-a' },
+			deadline: { daysLeft: 1, dateLabel: 'Friday', timeLabel: 'time not confirmed', sourceUrl: 'https://contest.example/fic' },
+		})], unseenCount: 1 });
+		const page = await context.newPage();
+		await page.goto(`${BASE}/app/?pane=brief`);
+		const deadline = page.getByTestId('decision-card').first();
+		const review = await deadline.getByRole('button', { name: 'Review submission' }).boundingBox();
+		const source = await deadline.getByRole('link', { name: 'Deadline source' }).boundingBox();
+		expect(review).not.toBeNull(); expect(source).not.toBeNull();
+		expect(Math.abs(review!.y - source!.y)).toBeLessThan(2);
+		expect(source!.x + source!.width).toBeLessThanOrEqual(320);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 		await context.close();
 	});
 

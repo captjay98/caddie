@@ -1,3 +1,4 @@
+import { fixtureLegacyQualityPolicy } from './fixtures/migrations.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { Database } from 'bun:sqlite';
 import type { ExperienceAction, ExperienceStage, ProjectExperience, Scope } from '@caddie/contracts';
@@ -88,6 +89,8 @@ async function seedStoppedBuild(opts: {
 		sourceConversationId: homeRun.conversationId,
 	});
 	const scope = await projectScopeForUser(db, 'alice', started.project.id);
+// Fixture models a project from before the default-on quality policy (see fixtureLegacyQualityPolicy).
+fixtureLegacyQualityPolicy(sqlite, scope.projectId);
 	const plan = await createPlanDocRevision(db, scope, { kind: 'prd', body: '# Todo\n\nAdd and save tasks.' });
 	await workflowSnapshot(db, scope); // planning -> review
 	await decideWorkflow(db, scope, { planId: plan.id, decision: 'approved' }); // approved plan

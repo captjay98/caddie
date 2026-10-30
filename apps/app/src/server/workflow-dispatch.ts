@@ -79,6 +79,22 @@ function coordinatorRoomHeader(conversationId: string): Record<string, string> {
 export const REDELIVERY_AFTER_MS = 2 * 60_000;
 
 /**
+ * Whose words a dispatched message is.
+ *
+ * `owner`  — text that came from the person (the request they pressed Start /
+ *            Continue with). It belongs in their lane of the transcript.
+ * `control` — a step prompt Caddie wrote for itself ("The authenticated review
+ *            controls approved plan …", a looks or design hand-off). Flue
+ *            classifies a caller-defined signal as dispatch/control, so it
+ *            reaches the model as instructions without ever being rendered as
+ *            something the person typed (owner defect, 2026-10-28).
+ */
+export type DispatchVoice = 'owner' | 'control';
+
+/** The caller-defined signal type for Caddie's own workflow steps. */
+export const WORKFLOW_SIGNAL_TYPE = 'caddie.workflow';
+
+/**
  * How a message reaches the coordinator conversation. Injected so the HTTP /
  * runtime boundary stays at the Worker edge and this module is unit-testable
  * with a fake. The real implementation self-delivers to
@@ -89,13 +105,16 @@ export type CoordinatorDeliver = (input: {
 	conversationId: string;
 	body: string;
 	idempotencyKey: string;
-}) => Promise<{ delivered: boolean }>;
+	/** Defaults to `owner`: words typed by the person. */
+	voice?: DispatchVoice;
+}) => Promise<{ delivered: boolean; receiptId?: string }>;
 
 export interface DispatchResult {
-	/** 'dispatched' = this call handed it to the coordinator and got a 2xx;
-	 *  'noop' = a 2xx was already recorded, so only the slot was cleared;
+	/** 'dispatched' = this call handed it to the coordinator and recorded its
+	 *  durable Flue admission receipt; 'noop' = an earlier receipt was recorded,
+	 *  so only the slot was cleared;
 	 *  'in-flight' = another attempt is recent, so nothing was sent now;
-	 *  'reconcile' = this attempt got no 2xx (kept; retried after the lease),
+	 *  'reconcile' = this attempt got no valid admission receipt (kept; retried after the lease),
 	 *  or the operation was failed/cancelled and needs a person;
 	 *  'none' = nothing pending to dispatch. */
 	outcome: 'dispatched' | 'noop' | 'in-flight' | 'reconcile' | 'none';
@@ -139,6 +158,12 @@ export async function dispatchPendingWorkflow(
 	const body = workflow.pendingBody;
 	const conversationId = workflow.conversationId;
 	const now = options.now ?? Date.now();
+	// The intake is the one pending message that carries the person's own
+	// request into their new project, so it keeps the message lane. Every other
+	// pending body is a step prompt Caddie wrote for itself (after an approval,
+	// a look choice, a retry, a Home hand-off), and must not be rendered as the
+	// person's own words.
+	const voice: DispatchVoice = key.startsWith('intake:') ? 'owner' : 'control';
 
 	let existing = await getOperation(db, key);
 	if (!existing) {
@@ -174,9 +199,10 @@ export async function dispatchPendingWorkflow(
 	);
 	if (!claimed) return { outcome: 'in-flight', operationKey: key };
 
+	let delivery: { delivered: boolean; receiptId?: string };
 	try {
-		const result = await deliver({ conversationId, body, idempotencyKey: key });
-		if (!result.delivered) {
+		delivery = await deliver({ conversationId, body, idempotencyKey: key, voice });
+		if (!delivery.delivered) {
 			await markReconciliationRequired(db, key);
 			return { outcome: 'reconcile', operationKey: key };
 		}
@@ -185,9 +211,10 @@ export async function dispatchPendingWorkflow(
 		return { outcome: 'reconcile', operationKey: key };
 	}
 
-	// Accepted. Record the receipt (idempotent) and only then clear the pending
-	// slot. The receipt id is the key: one logical delivery, one settlement.
-	await recordReceipt(db, key, { receiptId: `delivered:${key}`, outcome: 'succeeded' });
+	// Accepted. Record Flue's durable submission id when the real adapter
+	// supplies it, and only then clear the pending slot. Test adapters may omit
+	// it; their synthetic receipt preserves the existing unit-test boundary.
+	await recordReceipt(db, key, { receiptId: delivery.receiptId ?? `delivered:${key}`, outcome: 'succeeded' });
 	await acknowledgeDispatch(db, scope, key);
 	return { outcome: 'dispatched', operationKey: key };
 }
@@ -256,7 +283,7 @@ export function workerSelfDeliver(
 	env: unknown,
 	executionCtx?: unknown,
 ): CoordinatorDeliver {
-	return async ({ conversationId, body, idempotencyKey }) => {
+	return async ({ conversationId, body, idempotencyKey, voice = 'owner' }) => {
 		const url = new URL(`/agents/coordinator/${encodeURIComponent(conversationId)}`, origin);
 		const headers: Record<string, string> = { 'content-type': 'application/json', ...coordinatorRoomHeader(conversationId) };
 		if (cookieHeader) headers['cookie'] = cookieHeader;
@@ -268,19 +295,35 @@ export function workerSelfDeliver(
 			new Request(url.href, {
 				method: 'POST',
 				headers,
-				// The Flue conversation route admits the DeliveredMessage FLAT, with
-				// send controls as siblings — exactly what @flue/sdk send() posts
-				// (`{ idempotencyKey, kind, body }`). A nested `{ message: {...} }`
-				// is not a message: it was rejected, parking every intake in
-				// reconciliation-required.
-				body: JSON.stringify({ idempotencyKey, kind: 'user', body }),
+				// The FLAT shape @flue/sdk send() posts (message fields + idempotencyKey
+				// siblings) — exactly what it sends (`{ idempotencyKey, kind, body }`).
+				// A nested `{ message: {...} }` is not a message: it was rejected,
+				// parking every intake in reconciliation-required.
+				//
+				// A control step is posted as a caller-defined SIGNAL, not as
+				// `kind:'user'`: Flue classifies an application signal as
+				// purpose 'dispatch' / display 'diagnostic', so the transcript shows
+				// Caddie's own instructions as Caddie's work instead of putting them
+				// in the person's bubble under "You at 16:37" (owner defect,
+				// 2026-10-28). The model still receives the text.
+				body: JSON.stringify(
+					voice === 'control'
+						? { idempotencyKey, kind: 'signal', type: WORKFLOW_SIGNAL_TYPE, tagName: 'workflow', body }
+						: { idempotencyKey, kind: 'user', body },
+				),
 			}),
 			env,
 			executionCtx,
 		);
-		// A 2xx means the DO admitted the submission; anything else is uncertain
-		// and must reconcile rather than silently drop.
-		return { delivered: response.ok };
+		// Flue's 202 admission response includes a durable submissionId. Keep it
+		// as the operation receipt so a later process can reattach with init().read
+		// instead of mistaking an HTTP success for the completed coordinator turn.
+		if (!response.ok) return { delivered: false };
+		const admission = await response.json().catch(() => null) as { submissionId?: unknown } | null;
+		if (!admission || typeof admission.submissionId !== 'string' || !admission.submissionId.trim()) {
+			return { delivered: false };
+		}
+		return { delivered: true, receiptId: admission.submissionId };
 	};
 }
 

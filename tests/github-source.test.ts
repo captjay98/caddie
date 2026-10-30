@@ -1,3 +1,4 @@
+import { allMigrationPaths } from './fixtures/migrations.ts';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { generateKeyPairSync } from 'node:crypto';
@@ -125,29 +126,8 @@ async function openSave(): Promise<{ number: number; headSha: string; intent: Ap
 beforeAll(async () => {
 	sqlite = new Database(':memory:');
 	sqlite.exec('PRAGMA foreign_keys=ON');
-	for (const migration of [
-		'0001_product.sql',
-		'0002_controls.sql',
-		'0003_artifacts.sql',
-		'0005_runs.sql',
-		'0006_github.sql',
-		'0008_profile.sql',
-		'0017_profile_preferences.sql',
-		'0011_home_project.sql',
-		'0015_plan_decisions.sql',
-		'0018_build_workflow.sql',
-		'0019_github_project_repo.sql',
-		'0022_build_activity.sql',
-		'0023_build_features.sql',
-		'0024_design_phase.sql',
-		'0025_github_source_saves.sql',
-		// build_workflows' team-mode columns, then the look step's phases.
-		'0033_judge_accounts.sql',
-		'0040_team_mode.sql',
-		'0044_looks_phase.sql',
-		'0048_repair_escalation.sql',
-	]) {
-		const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), 'utf8');
+	for (const path of allMigrationPaths()) {
+		const ddl = readFileSync(path, 'utf8');
 		for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);
 	}
 	sqlite

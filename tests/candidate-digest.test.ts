@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+// Every helper call is metered (owner 2026-10-29): an empty ledger, nothing spent yet.
+const METERED = { db: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), run: async () => ({}) }) }) } as never };
 import { digestCandidate, digestProfileFrom, normalizeDigest, type InspectableCandidate } from '../apps/app/src/server/candidate-inspection.ts';
 
 /**
@@ -37,7 +39,7 @@ const PROFILE = { country: 'NG', experienceLevel: 'senior', formatPreference: 'o
 
 describe('Stage 2 — digestCandidate (detail-pane Tier 1, stubbed fetch)', () => {
 	test('no key -> null digest + a visible gap, never throws', async () => {
-		const result = await digestCandidate({ profile: PROFILE, candidate: CANDIDATE });
+		const result = await digestCandidate({ accounting: METERED, profile: PROFILE, candidate: CANDIDATE });
 		expect(result.digest).toBeNull();
 		expect(result.gap).toBeTruthy();
 		expect(result.gap!.toLowerCase()).toContain('rules below');
@@ -51,7 +53,7 @@ describe('Stage 2 — digestCandidate (detail-pane Tier 1, stubbed fetch)', () =
 				watch_out: 'Confirm the submission needs a demo video before committing.',
 			}),
 		});
-		const result = await digestCandidate({ apiKey: 'k', profile: PROFILE, candidate: CANDIDATE, facts: ['eligibility verdict: eligible'] });
+		const result = await digestCandidate({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidate: CANDIDATE, facts: ['eligibility verdict: eligible'] });
 		expect(result.gap).toBeNull();
 		expect(result.digest).not.toBeNull();
 		expect(result.digest!.headline).toContain('AI-agents fit');
@@ -62,40 +64,40 @@ describe('Stage 2 — digestCandidate (detail-pane Tier 1, stubbed fetch)', () =
 
 	test('watch_out null -> digest with watchOut null', async () => {
 		stubModel({ content: JSON.stringify({ headline: 'Fine.', bullets: ['A → b'], watch_out: null }) });
-		const result = await digestCandidate({ apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
+		const result = await digestCandidate({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
 		expect(result.digest!.watchOut).toBeNull();
 	});
 
 	test('fenced JSON is tolerated', async () => {
 		stubModel({ content: '```json\n{"headline":"H","bullets":["A → b"],"watch_out":null}\n```' });
-		const result = await digestCandidate({ apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
+		const result = await digestCandidate({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
 		expect(result.digest!.headline).toBe('H');
 	});
 
 	test('non-2xx -> null + gap', async () => {
 		stubModel({ status: 500 });
-		const result = await digestCandidate({ apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
+		const result = await digestCandidate({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
 		expect(result.digest).toBeNull();
 		expect(result.gap).toContain('500');
 	});
 
 	test('network error -> null + gap', async () => {
 		stubModel({ throwNetwork: true });
-		const result = await digestCandidate({ apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
+		const result = await digestCandidate({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
 		expect(result.digest).toBeNull();
 		expect(result.gap!.toLowerCase()).toContain('request error');
 	});
 
 	test('unparseable reply -> null + gap', async () => {
 		stubModel({ content: 'sorry, I cannot help with that' });
-		const result = await digestCandidate({ apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
+		const result = await digestCandidate({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
 		expect(result.digest).toBeNull();
 		expect(result.gap).toBeTruthy();
 	});
 
 	test('empty digest (no headline, no bullets) -> null + gap, never a fabricated summary', async () => {
 		stubModel({ content: JSON.stringify({ headline: '', bullets: [], watch_out: null }) });
-		const result = await digestCandidate({ apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
+		const result = await digestCandidate({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
 		expect(result.digest).toBeNull();
 		expect(result.gap).toBeTruthy();
 	});
@@ -120,7 +122,7 @@ describe('digest v2 — about, tracks, prizes, perks, judging, fit (stubbed fetc
 				watch_out: null,
 			}),
 		});
-		const { digest, gap } = await digestCandidate({ apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
+		const { digest, gap } = await digestCandidate({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
 		expect(gap).toBeNull();
 		expect(digest!.about).toContain('sponsor cloud');
 		expect(digest!.tracks.map((t) => t.name)).toEqual(['Fire TV', 'Alexa+']);
@@ -132,7 +134,7 @@ describe('digest v2 — about, tracks, prizes, perks, judging, fit (stubbed fetc
 
 	test('a page that lists nothing -> empty sections, never invented', async () => {
 		stubModel({ content: JSON.stringify({ headline: 'A hackathon.', bullets: ['Format → online'] }) });
-		const { digest } = await digestCandidate({ apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
+		const { digest } = await digestCandidate({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidate: CANDIDATE });
 		expect(digest!.about).toBe('');
 		expect(digest!.tracks).toEqual([]);
 		expect(digest!.prizes).toEqual([]);
@@ -157,7 +159,7 @@ describe('digest v2 — about, tracks, prizes, perks, judging, fit (stubbed fetc
 			return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: '{"headline":"x"}' } }] }) } as Response;
 		}) as unknown as typeof fetch;
 		const overview = 'a'.repeat(9000) + 'PRIZE_MARKER' + 'b'.repeat(1000);
-		await digestCandidate({
+		await digestCandidate({ accounting: METERED,
 			apiKey: 'k',
 			profile: digestProfileFrom({ country: 'NG', skills: ['typescript'], stackIds: ['react'], freeTextInterests: ['voice'], weeklyHours: 10 }),
 			candidate: CANDIDATE,

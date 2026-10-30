@@ -1,15 +1,15 @@
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
-import {readFileSync} from 'node:fs';
+import {applyFinalSchema} from './fixtures/migrations.ts';
 import {sqliteD1} from './fixtures/sqlite-d1.ts';
 import {recoverTimedOutTask} from '../apps/app/src/server/task-recovery.ts';
 function world(){const sqlite=new Database(':memory:');const payer=`build:p:${Date.now()}`;
  sqlite.exec(`create table projects(id text primary key);insert into projects values('p');
  create table build_workflows(projectId text,runId text,planId text,spendPayerId text,phase text,detail text,updatedAt text);
  create table build_features(runId text,planId text,featureId text,status text,position integer);insert into build_features values('r','plan','f','building',1);
- create table external_operations(runId text,operationKey text,status text);create table sandbox_bindings(runId text,kind text,recordJson text,updatedAt text,sessionId text);`);
+ create table external_operations(runId text,operationKey text,status text,provider text not null default 'sandbox',createdAt text not null default '2999-01-01T00:00:00.000Z');create table sandbox_bindings(runId text,kind text,recordJson text,updatedAt text,sessionId text);`);
  sqlite.prepare('insert into build_workflows values(?,?,?,?,?,?,?)').run('p','r','plan',payer,'building',null,'now');
- sqlite.exec(readFileSync(new URL('../apps/app/migrations/0048_repair_escalation.sql',import.meta.url),'utf8'));sqlite.exec("update build_workflows set repairPolicyVersion='repair-v1'");
+ applyFinalSchema(sqlite);sqlite.exec("update build_workflows set repairPolicyVersion='repair-v1'");
  return {sqlite,db:sqliteD1(sqlite),input:{projectId:'p',runId:'r',admissionId:payer,taskKey:'one'}};}
 test('safe timeout escalates automatically inside one payer; replay does not add failures',async()=>{
  const {sqlite,db,input}=world();try{
@@ -29,9 +29,27 @@ test('ambiguous write reconciles the original operation; unknown blocks new writ
 
 test('module timeouts spend the owning feature episode and ignore another module’s live writer',async()=>{
  const {sqlite,db,input}=world();try{
-  sqlite.exec("insert into build_features values('r','plan','other','building',2)");
-  sqlite.prepare('insert into sandbox_bindings values(?,?,?,?,?)').run('r','operation',JSON.stringify({state:'dispatched',operationKey:'other-module'}),'now','module:r:other');
+  sqlite.exec("insert into build_features(runId,planId,featureId,status,position) values('r','plan','other','building',2)");
+  sqlite.prepare('insert into sandbox_bindings(runId,kind,recordJson,updatedAt,sessionId) values(?,?,?,?,?)').run('r','operation',JSON.stringify({state:'dispatched',operationKey:'other-module'}),'now','module:r:other');
   const result=await recoverTimedOutTask(db,{...input,featureIds:['other'],sessionId:'module:r:mine'});expect(result.action).toBe('retry-current-feature');
   expect((sqlite.query('select featureId from build_repair_issues').get() as any).featureId).toBe('other');
+ }finally{sqlite.close();}
+});
+// 2026-10-30 EggOps: the builder ran past its 10-minute task limit (one repair
+// try, as designed), but recovery paused the whole build on a coordinator
+// hand-off left over from the looks step nine hours earlier. Only an outside
+// effect of THIS attempt can be duplicated by a new writer.
+test('a stale coordinator hand-off from an earlier step never pauses the build',async()=>{
+ const {sqlite,db,input}=world();try{
+  sqlite.prepare("insert into external_operations(runId,operationKey,status,provider,createdAt) values('r','relooks:resume:old','reconciliation-required','coordinator-dispatch',?)").run(new Date(Date.now()-9*3_600_000).toISOString());
+  expect((await recoverTimedOutTask(db,input)).action).toBe('retry-current-feature');
+  expect((sqlite.query('select phase from build_workflows').get() as any).phase).toBe('building');
+ }finally{sqlite.close();}
+});
+test('an unsettled outside effect of this attempt still stops a second writer',async()=>{
+ const {sqlite,db,input}=world();try{
+  sqlite.prepare("insert into external_operations(runId,operationKey,status,provider,createdAt) values('r','publish:now','dispatched','cloudflare',?)").run(new Date().toISOString());
+  expect((await recoverTimedOutTask(db,input)).action).toBe('stop');
+  expect((sqlite.query('select phase,detail from build_workflows').get() as any).detail).toContain('interrupted operation');
  }finally{sqlite.close();}
 });

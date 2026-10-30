@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { SPECIALIST_AUTHORED } from '../apps/app/src/agents/coordinator.ts';
 
 /**
  * Guard for the hackathon follow-up routing in the coordinator prompt.
@@ -144,16 +145,20 @@ describe('coordinator ideation model + tightened rules', () => {
 const coordinatorSource = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
 
 describe('coordinator plan-save honesty (FarmLog AI rewrite fix)', () => {
-	test('the project coordinator can save a PRD revision directly, not only via delegates', () => {
+	// Owner 2026-10-29: the coordinator's chat model is too weak to author the
+	// plan, looks or design; only the specialists (on their chosen routes) do.
+	test('the coordinator cannot author a PRD, looks or design itself', () => {
 		expect(coordinatorSource).toContain('makeWritePlanNote');
-		expect(coordinatorSource).toContain('makeReadProjectContext');
-		expect(coordinatorSource).toContain('useTool(makeWritePlanNote({ writePlanNote: savePlanNote, authorRouteId: modelRoute.id }));');
+		expect(coordinatorSource).toContain('SPECIALIST_REQUIRED: not saved');
+		expect(SPECIALIST_AUTHORED).toEqual({ prd: 'the product specialist', looks: 'the designer', design: 'the designer' });
 		expect(coordinatorSource).toContain('useTool(makeReadProjectContext({ readPlanNote: context.readPlanNote }));');
 	});
 
-	test('the plan_incomplete nudge directs direct authoring, not another empty hand-off', () => {
+	test('the plan_incomplete nudge re-delegates with the findings, never an identical empty hand-off', () => {
 		expect(coordinatorSource).toContain('never re-delegate the same empty hand-off expecting a different result');
-		expect(coordinatorSource).toContain("call write_plan_note yourself with kind:'prd'");
+		expect(coordinatorSource).toContain('delegate the product specialist again with a COMPLETE task');
+		expect(coordinatorSource).toContain('You cannot save a PRD yourself.');
+		expect(coordinatorSource).not.toContain("call write_plan_note yourself with kind:'prd'");
 		expect(coordinatorSource).toContain("workflow phase is still 'planning', NOT 'review'");
 	});
 
@@ -177,20 +182,15 @@ describe('coordinator plan-save honesty (FarmLog AI rewrite fix)', () => {
 describe('coordinator design-save recovery', () => {
 	const specialistSource = readFileSync(new URL('../apps/app/src/agents/specialists.ts', import.meta.url), 'utf8');
 
-	test('the DESIGN STEP delegates to the designer first, authoring inline only as a fallback', () => {
-		// Delegate-first is the fix for the coordinator doing design itself on
-		// its own chat model instead of the purpose-built designer (glm-5.3-flash).
-		expect(coordinatorSource).toContain('DELEGATE the designer specialist to produce the design brief — do not write it yourself on the first pass');
-		expect(coordinatorSource).toContain('If — and only if — the designer returns text WITHOUT a SAVED: confirmation');
-		expect(coordinatorSource).toContain('do NOT stop and do NOT re-delegate the same hand-off');
-		expect(coordinatorSource).toContain("call write_plan_note yourself with kind:'design'");
+	test('the LOOKS STEP delegates to the designer, re-delegates with the fixes, never authors inline', () => {
+		expect(coordinatorSource).toContain('DELEGATE the designer to save ONE looks proposal');
+		expect(coordinatorSource).toContain('if the designer comes back without SAVED:, delegate it again with those fixes, never write the looks yourself');
+		expect(coordinatorSource).not.toContain("call write_plan_note yourself with kind:'design'");
 	});
-
-	test('the designer is told a description is not a saved brief', () => {
-		expect(specialistSource).toContain('A description of the brief in your reply is NOT a saved brief');
-		expect(specialistSource).toContain('return only after the host confirms SAVED');
+	test('the designer is told a description is not a save', () => {
+		expect(specialistSource).toContain('a description in your reply is not a save');
+		expect(specialistSource).toContain('return only after the host says SAVED');
 	});
-
 	test('the product specialist is told to consider a landing / intro surface', () => {
 		// A non-technical owner will not ask for a landing page; the product
 		// specialist must weigh one in, especially for judged/public apps.
@@ -202,8 +202,20 @@ describe('coordinator design-save recovery', () => {
 		expect(coordinatorSource).toContain('state.phase === "design"');
 		expect(coordinatorSource).toContain('type: "design_incomplete"');
 		expect(coordinatorSource).toContain("phase 'design-review'");
-		expect(coordinatorSource).toContain('The design brief was not saved.');
+		// Plain words for the owner (2026-10-29): no "design brief", no "PRD".
+		expect(coordinatorSource).toContain('Caddie couldn’t finish the screen designs this time.');
 		expect(coordinatorSource).toContain('setDesignContinuations(0)');
 		expect(coordinatorSource).toContain('setDesignContinuations(used + 1)');
+	});
+});
+
+describe('voice for non-technical owners (2026-10-29)', () => {
+	test('the voice rule is short, plain and the last instruction every turn sees', async () => {
+		const { VOICE_RULE } = await import('../apps/app/src/agents/coordinator.ts');
+		expect(VOICE_RULE).toContain('at most three short sentences, under 60 words');
+		expect(VOICE_RULE).toContain('Never use technical words');
+		const at = coordinatorSource.indexOf('useInstruction(VOICE_RULE);');
+		expect(at).toBeGreaterThan(0);
+		expect(coordinatorSource.indexOf('useInstruction(', at + 1)).toBe(-1);
 	});
 });

@@ -320,4 +320,9 @@ export async function blockBuildByPayer(db: D1Database, payerId: string, detail:
 		.prepare('update build_workflows set phase = ?, detail = ?, updatedAt = ? where "spendPayerId" = ?')
 		.bind('blocked', detail.slice(0, 2000), now(), payerId)
 		.run();
+	if (!payerId.startsWith('preparation:')) return;
+	await db.prepare(`update build_workflows set phase='blocked',detail=?,updatedAt=? where exists (
+    select 1 from quality_admissions a where a.payerId=? and a.projectId=build_workflows.projectId
+     and a.phase=build_workflows.phase and a.planId is build_workflows.planId and a.brief=build_workflows.brief
+  )`).bind(detail.slice(0,2000),now(),payerId).run();
 }

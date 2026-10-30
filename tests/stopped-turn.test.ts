@@ -73,3 +73,18 @@ describe('stopped mid-turn — outbound timeouts + plain failure notice', () => 
 		expect(settlementNotice({ outcome: 'failed', error: new Error('boom') }).kind).toBe('failed');
 	});
 });
+
+describe('a turn that fails during a build', () => {
+	// Owner 2026-10-30: the build's own turn died and the chat said "Send your
+	// message again" to someone who had sent nothing.
+	test('says the build was interrupted and how it continues, never "send your message again"', () => {
+		const notice = settlementNotice({ outcome: 'failed', error: { type: 'conversation_stream_store_failure' } }, { building: true });
+		expect(notice.title).toBe('The build was interrupted.');
+		expect(notice.detail).toContain('press Retry on the build card');
+		expect(notice.detail).not.toContain('Send your message again');
+	});
+	test('an owner Stop still reads as stopped, and outside a build nothing changes', () => {
+		expect(settlementNotice({ outcome: 'aborted', error: null }, { building: true }).kind).toBe('cancelled');
+		expect(settlementNotice({ outcome: 'failed', error: null }).title).toBe('Caddie hit a problem and could not finish that request.');
+	});
+});

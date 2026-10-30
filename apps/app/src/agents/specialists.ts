@@ -1,4 +1,4 @@
-import {ACCEPTANCE_JOURNEY_GUIDE} from '@caddie/contracts';
+import {ACCEPTANCE_JOURNEY_GUIDE, HASH_ROUTES_RULE, reviewChecklist, PRD_REVIEW_CRITERIA, PLATFORM_AI_FACT} from '@caddie/contracts';
 import { SPECIALIST_ROLES, ROLE_TOOL_POLICY, type SpecialistRole } from './permissions.ts';
 import { PACKAGED_SKILLS, type PackagedSkillName } from './skills.ts';
 import {
@@ -19,9 +19,9 @@ import {
 import type { Area, AreaRole } from '../server/part-manifests.ts';
 import type { ToolDefinition } from '@flue/runtime';
 import { useInstruction, useSkill, useSubagent, useTool } from '@flue/runtime';
-import { findModelRouteForRole, findModelRoute, ROLE_THINKING } from './providers.ts';
+import { findModelRouteForRole, findModelRoute, ROLE_THINKING, type ModelRole } from './providers.ts';
 import { FEATURE_DELEGATION_RULE } from './delegation.ts';
-import { DEMO_CONTRACT_GUIDE, FEATURE_BLOCK_GUIDE, LOOKS_BLOCK_GUIDE, PROTOTYPE_GUIDE } from '@caddie/contracts';
+import { DEMO_CONTRACT_GUIDE, FEATURE_BLOCK_GUIDE, FIRST_VERSION_MAX, ITEM_CHECKS_MAX, LOOKS_BLOCK_GUIDE } from '@caddie/contracts';
 import { CADDIE_SCRATCH_DIR } from '../server/source-export.ts';
 import { makeRecordArchitectureReview, type RecordReviewInput } from '../server/architecture-review.ts';
 import { RECIPES } from '../../../../stacks/react-hono/recipe.ts';
@@ -127,8 +127,11 @@ export const BUILD_RECIPE_INSTRUCTION =
 	'The starter app ALREADY has a working test setup: bunfig.toml preloads happy-dom (a browser DOM with window, document and localStorage) and Testing Library with jest-dom matchers and cleanup between tests. ' +
 	'Never create or edit bunfig.toml or anything under test/setup/ (writes there are refused), and never add jsdom, Vitest or Jest. ' +
 	'Write behavior tests as src/*.test.tsx using test/expect from bun:test and render/screen/fireEvent from @testing-library/react; test/examples/app.example.test.tsx shows the pattern but does not count. ' +
-	'Run tests ONLY with run_checks: it installs, runs `bun test src/` and builds exactly as the host verifies. Shell test commands are refused, and every failing run_checks counts toward the repair limit, so read the failure and fix its cause before running again. ' +
+	'Run tests ONLY with run_checks: it installs, runs `bun test src/` and builds exactly as the host verifies. Shell test commands are refused. Each run takes time, so read the failure and fix its cause before running again; the feature is only done when the coordinator hands it in and Caddie\'s own checks pass. ' +
 	`Put throwaway probes only in ${CADDIE_SCRATCH_DIR}/ (it is never saved or shown as an app file), never in the app root or src/. ` +
+	// 2026-10-30 EggOps: seven builder commands were `python3 …` edits that
+	// exited 127 (not installed) and were each retried another way.
+	'The sandbox has bun but no python3: change a file with write_sandbox_file (the whole file) or a short bun -e script, never python3. ' +
 	"When run_checks fails inside Caddie's own steps rather than in your app — the output names /tmp/caddie-…, says a package could not be unpacked, says the registry could not be reached, or says a tarball does not match bun.lock — that is Caddie's problem, not your code: say so in one plain sentence and stop that repair. Never read, copy or debug Caddie's scripts or a package's node_modules internals. " +
 	'Never delete assertions or replace component tests with copied logic. Use React 19 createRoot. ' +
 	'Every app also has a server, ready from the start: src/server.ts is a Hono app whose routes all live under /api (it already answers GET /api/health); call it from React with fetch("/api/..."). ' +
@@ -138,18 +141,21 @@ export const BUILD_RECIPE_INSTRUCTION =
 	'When the app needs a key for an outside service, call request_app_key (UPPER_SNAKE name, one plain sentence on what it lets the app do, the https page where the owner gets it) and call that service ONLY from src/server.ts with c.env.<NAME>; never put a key in browser code, in a file, in a test or in a log, and never ask for one in chat. Until the owner saves it, a route that needs it answers 503 with a plain sentence; tests use createTestEnv({ NAME: "test-value" }) and never call the real service. ' +
 	"The published page may only run its own scripts, fetch its own /api routes and post forms to itself (Caddie's security policy blocks the rest), so every call to an outside service — with or without a key — goes through src/server.ts; images, fonts and styles may still load from https URLs. " +
 	'Caddie keeps only dist/main.js and dist/main.css from the build, so a file the browser code loads at run time (a .wasm, a font, a data file) is never there: put its bytes in the bundle with import { embedBase64 } from "../caddie/embed.ts" with { type: "macro" } and embedBase64("node_modules/<package>/<file>") (the path is from the app folder), then decode them (for sql.js: initSqlJs({ wasmBinary: bytes })). ' +
-	'When a feature needs AI (summarise, suggest, answer, sort text), call c.env.CADDIE.ai({ messages: [{ role, content }], json? }) from src/server.ts: Caddie runs and pays for it, so there is no AI key — never request_app_key for one and never ask the owner for one. It returns { ok: true, text } or { ok: false, message }; when ok is false answer 503 with reply.message as it is. Leave tier out for everyday replies; use tier: "super" when a feature needs deeper reasoning. Call it when a person asks, not on every page load (each app has a monthly allowance), and test it with createTestEnv({ CADDIE: createTestAi("…") }) from test/setup/ai.ts; caddie/ai.ts shows the shapes. ' +
-	'When people need their own account (sign in, "my" lists, data only its owner sees), use Caddie\'s sign-in, never a password login of your own: call mountSignIn(app) once in src/server.ts and requireUser(c) in each route that needs someone signed in (store user.id on their rows), and in React use <SignIn /> and useUser() from caddie/sign-in.tsx. Caddie emails the 6-digit codes — no email service or key — and in the preview they show up in the project card\'s test inbox. Test those routes with signInForTest(app, env) from test/setup/auth.ts. ' +
+	'When a feature needs AI (summarise, suggest, answer, sort text), call c.env.CADDIE.ai({ messages: [{ role, content }], json? }) from src/server.ts: Caddie runs and pays for it, so there is no AI key — never request_app_key for one and never ask the owner for one. It returns { ok: true, text } or { ok: false, message }; when ok is false answer 503 with reply.message as it is. Leave tier out for everyday replies; use tier: "super" when a feature needs deeper reasoning — the plan marks that call with "(a deep answer)". Call it when a person asks, not on every page load (each app has a monthly allowance), and test it with createTestEnv({ CADDIE: createTestAi("…") }) from test/setup/ai.ts; caddie/ai.ts shows the shapes. ' +
+	'When people need their own account (sign in, "my" lists, data only its owner sees), use Caddie\'s sign-in, never a password login of your own: call mountSignIn(app) once in src/server.ts and requireUser(c) in each route that needs someone signed in (store user.id on their rows), and in React use <SignIn /> and useUser() from caddie/sign-in.tsx. Every screen that needs an account shows <SignIn /> right there while nobody is signed in (no redirect, no form of your own, labels unchanged): Caddie\'s own checks open that screen and sign in through it. Caddie emails the 6-digit codes — no email service or key — and in the preview they show up in the project card\'s test inbox. Test those routes with signInForTest(app, env) from test/setup/auth.ts. ' +
 	'During a build the coordinator hands you ONE feature with its doneWhen checks: build only that feature, keep earlier features working, and add at least one test in src/*.test.tsx for each doneWhen check (the host refuses to finish a feature that adds no new passing tests). ' +
 	'When the app has caddie/payments.ts (the plan takes payments, in TEST MODE: no money moves), call mountPayments(app, { currency, plans }) once in src/server.ts with the plan\'s currency and plans, start each locked route with const locked = await planAccess(c, ["<plan id>"]); if (locked) return locked;, and use the screens in caddie/Billing.tsx; test with the card 4242 4242 4242 4242 (paid) and 4000 0000 0000 0002 (declined). ' +
 	'When the app has caddie/files.ts (a record keeps a photo or file), call mountFiles(app) once in src/server.ts, upload from React with uploadFile(file) from caddie/upload.ts (it shrinks photos and sends them in parts), show one with fileUrl(id), and read one in a route with readFile(c, id). ' +
 	'Your app also runs inside the preview: a sandboxed frame whose origin is opaque and whose localStorage is a small proxy, with its own /api calls relayed to its server. So never gate a request on window.location.protocol, window.location.origin or window.location.hostname, and never read them to decide whether the server is reachable — the frame is not the address your app will have when it is published. Just call fetch("/api/...") and handle the failure; a request that fails is an offline app, not a reason to skip the call. ' +
+	// 2026-10-30 EggOps: a pathname router showed the welcome screen for every
+	// check (the frame's path is never "/farm"), so four checks failed for 30 min.
+	`${HASH_ROUTES_RULE} ` +
 	'The host creates the scaffold only after approval. Read the full brief, prd, spec and feedback. ' +
 	'Read the approved design brief too (read_project_context ["design"]): build each screen this feature touches to match it — its layout and regions, the named components, the interaction pattern for each input, and the empty, loading and error states — and follow its html-mock blocks, so the app looks the way the user approved rather than a default React layout. ' +
 	'Craft the look from the app theme, never ad hoc: colours, radius and fonts come ONLY from the theme variables in caddie/theme.css (var(--bg), var(--surface), var(--text), var(--muted), var(--primary), var(--on-primary), var(--border), var(--ok), var(--warn), var(--danger), var(--radius), var(--font-heading), var(--font-body)) — never a literal hex. Use the icon kit (import { Icon } from "../caddie/icons") for glyphs, never an emoji. ' +
 	'Layout and motion: use 100dvh (not 100vh) for full-height screens and honour safe-area insets on fixed top/bottom elements (env(safe-area-inset-*)); animate only transform and opacity, keep feedback under 200ms, and wrap motion in @media (prefers-reduced-motion: reduce) so it can be turned off. ' +
 	'States: show numbers with font-variant-numeric: tabular-nums; give every empty state one clear action; put an error next to the action that failed, not only at the top; and confirm a destructive action before it runs. ' +
-	'Accessibility: a visible label on every input, a visible focus ring on every control, an aria-label on every icon-only button, and touch targets at least 44x44px. Every layout must work from 320px wide up to desktop (one column on a phone, no fixed pixel widths that overflow). Do not assume a device class — let the design brief\'s audience drive how big and how dense the UI is. ' +
+	'Accessibility: a visible label on every input, a visible focus ring on every control, an aria-label on every icon-only button, and touch targets at least 44x44px. Every layout must work from 320px wide up to desktop (one column on a phone, no fixed pixel widths that overflow). On a laptop or desktop USE the width (owner 2026-10-30: EggOps shipped as a 520px column with empty space either side): the page container is at most about 1100px wide, never a phone-width cap (no max-width under 720px on the main container); from about 900px wide, put cards and lists in 2 or 3 columns or a main panel with a side panel; keep only reading text and forms narrow (about 40rem). Do not assume a device class — let the design brief\'s audience drive how big and how dense the UI is. ' +
 	'Plan before coding. Do not write a new PRD during an approved build without asking for a new review. QA calls verify_build and reports its real receipts, never a self-reported pass. ' +
 	RECIPES;
 
@@ -159,7 +165,8 @@ export const BUILD_RECIPE_INSTRUCTION =
  * proposals and project PRDs say the same thing.
  */
 export const PLATFORM_AI_RULE =
-	"PLATFORM AI: an app Caddie builds gets its AI from Caddie. Its server calls c.env.CADDIE.ai({ messages, json?, tier? }), which runs NVIDIA Nemotron on Nebius Token Factory and is paid by Caddie, so there is no AI key to ask for. Plan every AI feature (summarise, suggest, answer, sort or pull facts from text) on it. Two tiers: the demo's core-value call (the ranking, diagnosis or generation a judge watches and thinks about) runs on tier:\"super\" — deep reasoning, ~3.75x cost, a longer wait is fine there; everything else (background checks, parsing, short autocomplete, bulk work) runs on the default fast tier. Name the tier in the PRD's call path so the builder writes it. Never plan Ollama, a local or self-hosted model, a model download, or a third-party AI key (OpenAI, Anthropic, Gemini, Hugging Face).";
+	"PLATFORM AI: an app Caddie builds gets its AI from Caddie. Its server calls c.env.CADDIE.ai({ messages, json?, tier? }), which runs NVIDIA Nemotron on Nebius Token Factory and is paid by Caddie, so there is no AI key to ask for. Plan every AI feature (summarise, suggest, answer, sort or pull facts from text) on it. Two depths: the demo's core-value call (the ranking, diagnosis or generation a judge watches and thinks about) runs on tier:\"super\" — deep reasoning, ~3.75x cost, a longer wait is fine there; everything else (background checks, parsing, short autocomplete, bulk work) runs on the default fast tier. " +
+	"THE OWNER NEVER READS THIS PLUMBING: in a PRD, the app's AI is \"Caddie's AI\" and the only depth statement the owner sees is in their words — \"(a deep answer)\" for the call a judge watches, \"(a quick answer)\" for a small one. write_plan_note refuses a PRD that names a model, a provider, a tier or a cost. The tier itself belongs in the design's caddie-architecture block (ai[].tier), where the host checks it. Never plan Ollama, a local or self-hosted model, a model download, or a third-party AI key (OpenAI, Anthropic, Gemini, Hugging Face).";
 
 /**
  * The Flutter build recipe (Track 3): an Android app, also previewed in the
@@ -188,18 +195,41 @@ export function recipeInstructionFor(stackId: string | undefined): string {
 	return stackId === 'flutter' ? FLUTTER_RECIPE_INSTRUCTION : BUILD_RECIPE_INSTRUCTION;
 }
 
+/**
+ * How a builder spends its turn (owner 2026-10-29). Farm Ops listed the same
+ * directories three times, ran checks before writing any code, rewrote one
+ * file three times and thought for seven minutes in one call. Plan once,
+ * write once, check once.
+ */
+export const BUILD_WORK_ORDER =
+	'Work in this order: (1) look at the project files once and read the feature and the design once; (2) decide every file you will create or change; (3) write each file once, complete, in one write — keep each file under about 250 lines and split a big screen into components; (4) write the test for each doneWhen check; (5) only then run run_checks, and fix only what a failing check names. Do not list directories you were already shown, re-read a file you just wrote, or run checks before the code exists. Keep your thinking short: decide and write.';
+
 /** Role-specific instruction text (kept here so tests can audit it). */
 export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> = {
 	product:
 		'You shape the product: scope, PRD and acceptance intent. Work only from the brief and pinned evidence; cite sources. You have no execution tools — write plan notes instead of running commands. ' +
 		'Aim at a demo that wins, not a complete CRUD app: one deep integration that works in the preview beats five shallow screens, and a mock may support the demo but never carry it. Write the demo contract before the feature list, then make every feature move that demo forward. ' +
+		// Staged builds (owner 2026-10-30): the owner reads both lists on the
+		// plan card and adds the "later" items one at a time after the app works.
+		`Size the list to what was asked, then split it in two. Sort every item into one of three groups: (1) ASKED — what the owner named, in their own words; (2) NEEDED — what those cannot work without (setting up the first record, signing in, saving, the contest rule); (3) SUGGESTED — everything else that would help. Groups 1 and 2 are the first version: no "later" flag, at most ${FIRST_VERSION_MAX} items with at most ${ITEM_CHECKS_MAX} doneWhen checks each, the smallest app that does what they asked. When more than ${FIRST_VERSION_MAX} things are asked, keep the ${FIRST_VERSION_MAX} the demo cannot work without and mark the rest "later". Group 3 items carry "later": true, ordered by how much they would help, and name the earlier items they build on in "needs". A todo app may be 2 items and nothing later; a farm business app may be ${FIRST_VERSION_MAX} now and 9 later. Never pad either list. ` +
+		'Write every item title as something the owner does or sees, in plain words a farmer or shop owner reads at a glance ("Write down today\'s eggs", "See what you earned this week"), never system words like sync, dashboard, flagged or API. ' +
+		// Owner 2026-10-29: the same checklist, word for word, is what the
+		// independent plan reviewer judges (contracts PRD_REVIEW_CRITERIA).
+		'FIRST-PASS STANDARD (owner 2026-10-28): the independent reviewer must be able to PASS your first draft. Before saving, self-review the PRD against exactly the criteria the reviewer judges: ' +
+		reviewChecklist(PRD_REVIEW_CRITERIA) + ' ' + PLATFORM_AI_FACT + ' ' +
+		'A draft that fails any of these is not ready to save — fix it in the same authoring pass rather than round-tripping with the reviewer. ' +
 		'CONSIDER a landing / intro surface. A non-technical owner rarely thinks to ask for one, but an app a stranger (a judge, a first visitor) opens cold usually needs a short welcome screen or home section that says in one line what the app does, shows the one primary action to get started, and — for a hackathon or anything shown to judges — gives the demo its front door. Decide whether this app needs one: a public-facing or judged app almost always does; a private daily tool the owner already knows may not. When it helps, add a simple landing/home feature to the PRD (its own entry with a doneWhen check, built from the app\'s own theme — no separate marketing stack) rather than dropping the user straight onto a bare data screen. Say explicitly in the PRD whether you included one and why. ' +
 		'Decide where the data lives, in the PRD, and be concrete: anything the demo path reads or writes (a herd, a case, a report) must be stored by the app\'s SERVER in its own database with a table, so it survives a restart and is the same for every device; the device\'s own storage is a cache for speed and offline use, never the only copy. Say in the PRD where each kind of data is kept, so the builders do not have to guess. ' +
 		PLATFORM_AI_RULE,
+	// Owner 2026-10-29 ("slimmer prompts … one short prompt with an example"):
+	// every rule that used to be an incident paragraph here is now a machine
+	// check at save (looks.ts lookProposalIssues, design-audit.ts), and the
+	// refusal names the exact fix. What is left is the job and one example.
 	designer:
-		'You design the interface and interaction boundary. Read the current code from the sandbox for context, but express decisions as plan notes; implementation belongs to build roles. ' +
-		'LOOKS come first. After the PRD is approved, before any design brief, the project enters the LOOKS step: propose how the app could look with write_plan_note kind:\'looks\' — 2-3 CLEARLY different looks, each a full caddie-theme theme with a slug id and a human name, one marked recommended, plus the audience (from the PRD) and the same user task. EVERY look carries its OWN screen mock of that task with a DIFFERENT structure — different information hierarchy and navigation pattern (e.g. list-first vs card-stack vs tabs vs stepper), never two looks as the same layout recoloured, and never a toy screen: each mock is a real product key screen with real data, ~10-15 elements and one primary action. ' + LOOKS_BLOCK_GUIDE + ' Save it and STOP for the owner to choose; a description in your reply is NOT a saved set. ' +
-		PROTOTYPE_GUIDE + ' ' + ACCEPTANCE_JOURNEY_GUIDE + ' ' + 'After the owner CHOOSES a look the project enters the DESIGN step: you are given that look as a caddie-theme block. Author ONE design brief and save it with write_plan_note kind:\'design\' (same planRevision), then STOP for the design review — never build or scaffold. A description of the brief in your reply is NOT a saved brief: return only after the host confirms SAVED. The brief MUST carry the chosen look\'s caddie-theme block unchanged (do not re-pick colours) and covers: a SCREEN INVENTORY (every screen the app needs); for each key screen its LAYOUT (the regions and what sits where, described so a builder can lay it out) and the key COMPONENTS; the TOKEN/COMPONENT choices (which theme tokens, which shared components, the interaction pattern for each input — a form, a segmented picker, a list); and the EMPTY, LOADING and ERROR state for anything that loads or saves. Style every html-mock only with the chosen theme\'s tokens. Keep it concrete, not a restatement of the PRD. Where the PRD leaves a visual choice open, pick a sensible default and label it \'assumption:\'.',
+		'You design how the app looks. Read the approved PRD (read_project_context ["prd"]) and write ONE looks proposal with write_plan_note kind:\'looks\' (same planRevision), then STOP and return only after the host says SAVED — a description in your reply is not a save. ' +
+		'Aim for a screen a person would be glad to open: calm hierarchy, generous spacing, real numbers and names from the plan, and the one thing they came to do as the obvious button. ' +
+		LOOKS_BLOCK_GUIDE +
+		' Only if the host asks for a legacy design brief (kind:\'design\'): keep the chosen look\'s caddie-theme block unchanged, one titled html-mock per key screen, and ' + ACCEPTANCE_JOURNEY_GUIDE,
 	'tech-lead':
 		'You own the plan of record. Delegate build and repair work with precise tasks, review results honestly, and keep the last good checkpoint visible. Never claim success without machine-checked evidence. ' +
 		'Before approving a plan, test it as a judge would: can the demo path happen with real input in three minutes, is the named integration core rather than decoration, and which mock would embarrass the demo? Push the product specialist to fix that before review. ' +
@@ -207,9 +237,10 @@ export const SPECIALIST_INSTRUCTIONS: Readonly<Record<SpecialistRole, string>> =
 		PLATFORM_AI_RULE,
 	frontend:
 		'You implement client-side behavior in the sandbox (src/*.tsx, src/styles.css). Follow the plan of record and build each screen to MATCH THE APPROVED DESIGN: read it with read_project_context ["design"], lay out the regions and components the brief names, and build the empty, loading and error state for anything that loads or saves. ' +
-		'Take colours, radius and fonts ONLY from the app theme variables in caddie/theme.css (var(--bg), var(--surface), var(--text), var(--muted), var(--primary), var(--on-primary), var(--border), var(--ok), var(--warn), var(--danger), var(--radius), var(--font-heading), var(--font-body)) — never a literal hex — and use the icon kit (import { Icon } from "../caddie/icons"), never an emoji. Give every input a visible label, every control a visible focus ring, every icon-only button an aria-label, and every touch target at least 44px; use 100dvh not 100vh, animate only transform/opacity under 200ms behind prefers-reduced-motion, and make the layout work from 320px to desktop. Run the project checks with run_checks and report exact outcomes.',
+		'Take colours, radius and fonts ONLY from the app theme variables in caddie/theme.css (var(--bg), var(--surface), var(--text), var(--muted), var(--primary), var(--on-primary), var(--border), var(--ok), var(--warn), var(--danger), var(--radius), var(--font-heading), var(--font-body)) — never a literal hex — and use the icon kit (import { Icon } from "../caddie/icons"), never an emoji. Give every input a visible label, every control a visible focus ring, every icon-only button an aria-label, and every touch target at least 44px; use 100dvh not 100vh, animate only transform/opacity under 200ms behind prefers-reduced-motion, and make the layout work from 320px to desktop. ' + BUILD_WORK_ORDER + ' Run the project checks with run_checks and report exact outcomes.',
 	backend:
 		'You implement server-side behavior in the sandbox (src/server.ts, migrations/). Follow the plan of record; run the project checks with run_checks; report exact commands and outcomes. ' +
+		BUILD_WORK_ORDER + ' ' +
 		'Hono + D1 discipline: validate every input at the route and answer a bad request with a plain-language error body (never a raw stack); call requireUser(c) on any route that touches someone\'s own data and check the owner (store and compare user.id) so one person can never read or change another\'s records; keep money as integer minor units, never a float; and never put a secret, a key or a token in a response or a log. Create tables with a NEW migrations/NNNN_name.sql file and never edit an existing migration; use only Web APIs in src/server.ts (never Bun.* or Node fs/child_process/net), because the server runs on Cloudflare Workers.',
 	mobile:
 		'You implement and verify the mobile (Flutter) target in the sandbox (lib/*.dart). Follow the plan of record and build each screen to match the approved design (read it with read_project_context ["design"]). ' +
@@ -335,9 +366,6 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 			useInstruction(`A PRD must end with the feature list the user approves and the host builds one feature at a time. ${FEATURE_BLOCK_GUIDE}`);
 		}
 		if (descriptor.skills.includes('design')) {
-			useInstruction(
-				'The look comes first: after the PRD is approved you propose 2-3 looks (write_plan_note kind:"looks") and STOP for the owner to choose. Only after they choose does the design step begin, and you are given the chosen look as a caddie-theme block. You then author ONE design brief (write_plan_note kind:"design"), then STOP for review — never build. The brief carries NO caddie-features block, MUST carry the chosen look\'s caddie-theme block unchanged, covers every section the design skill lists, and includes one titled `html-mock` fenced block per key screen and state (the key screen, its empty state, its error state), static and styled only with the chosen theme\'s tokens, so the review card can show each one.',
-			);
 			// Team mode: the design document also carries the caddie-architecture
 			// block v2 (one approval, one revision hash); a big app plans its
 			// modules independently, core first.
@@ -347,7 +375,10 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
 			}
 		}
     if (context.currentRequest?.trim()) useInstruction(`Current user request, carried forward by the host: ${context.currentRequest}\nRespect the approved plan and your role permissions; this request does not bypass review or spending gates.`);
- useInstruction(recipeInstructionFor(context.stackId));
+		// The build recipe is for the roles that build or plan what is built
+		// (owner 2026-10-29: slimmer prompts). The designer never writes code,
+		// and the recipe was ~8 KB of every one of its calls.
+		if (role !== 'designer') useInstruction(recipeInstructionFor(context.stackId));
 		return specialistInstruction(role, context.teamMode === true);
 	};
 }
@@ -357,11 +388,22 @@ export function buildSpecialist(role: SpecialistRole, context: SpecialistBuildCo
  * Each delegate declares its own model (MODEL_ROLES in providers.ts is still
  * the one place that assigns models): the planners — the catalog entries that
  * carry the `planning` skill (product, designer, tech-lead) — run on the
- * `plan` role; implementation and QA run on the `build` role (both are
- * GLM-5.3-Flash today; providers.ts decides).
+ * `plan` role; implementation and QA run on the `build` role. Since the
+ * 2026-10-27 routing decision the planning roles are split per specialist
+ * (product and tech-lead → planAuthor, designer → designAuthor);
+ * providers.ts decides the routes.
  * Without an override a delegate would inherit the coordinator's chat turn.
  */
-export function specialistModelRole(descriptor: { skills: readonly string[] }): 'plan' | 'build' {
+export function specialistModelRole(descriptor: { role: SpecialistRole; skills: readonly string[] }): ModelRole {
+	// Owner routing decision 2026-10-27: the planning specialists no longer
+	// share one `plan` route. The product specialist authors the PRD on
+	// `planAuthor` (deepseek-v4.1-flash-1017); the designer authors looks and
+	// the design brief on `designAuthor` (minimax-m3.1-flash); the tech-lead
+	// uses the plan author route for new plan-of-record work. Historic route
+	// bindings remain unchanged. Implementation and
+	// QA stay on `build`.
+	if (descriptor.role === 'product' || descriptor.role === 'tech-lead') return 'planAuthor';
+	if (descriptor.role === 'designer') return 'designAuthor';
 	return descriptor.skills.includes('planning') ? 'plan' : 'build';
 }
 

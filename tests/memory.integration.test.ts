@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { allMigrationPaths, allMigrationSql } from './fixtures/migrations.ts';
 import type { AuthEnv } from '../apps/app/src/server/auth.ts';
 import {
 	ALICE_EMAIL,
@@ -46,7 +47,6 @@ import {
 
 const REPO_ROOT = join(import.meta.dir, '..');
 const FIXTURE_ENTRY = join(REPO_ROOT, 'tests', 'fixtures', 'profile.ts');
-const PROFILE_MIGRATION = join(REPO_ROOT, 'apps', 'app', 'migrations', '0008_profile.sql');
 
 // --- setup ---------------------------------------------------------------------
 
@@ -61,8 +61,8 @@ beforeAll(async () => {
 	if (!existsSync(FIXTURE_ENTRY)) {
 		throw new Error('fixture worker entry missing: tests/fixtures/profile.ts');
 	}
-	if (!existsSync(PROFILE_MIGRATION)) {
-		throw new Error('production migration missing: apps/app/migrations/0008_profile.sql');
+	if (allMigrationPaths().length === 0) {
+		throw new Error('production migrations missing: apps/app/migrations/*.sql');
 	}
 	stub = new StubProvider();
 	const stubPort = await freePort();
@@ -101,7 +101,7 @@ async function putProfile(jar: Jar, body: unknown): Promise<{ status: number; bo
 
 // --- slice 1: profile ------------------------------------------------------------
 
-describe('P14 slice 1: migration 0008 applies on real D1', () => {
+describe('P14 slice 1: the profile tables are in the folded schema', () => {
 	test('user_profiles and memory_facts tables exist after the migration', async () => {
 		const res = await d1Exec(WORKER_BASE, `select name from sqlite_master where type = 'table'`);
 		const tables = (res.results as { name: string }[]).map((r) => r.name);
@@ -114,10 +114,12 @@ describe('P14 slice 1: migration 0008 applies on real D1', () => {
 		}
 	});
 
-	test('the migration file is append-only numbered 0008 and contains both P14 tables', () => {
-		const ddl = readFileSync(PROFILE_MIGRATION, 'utf8');
-		expect(ddl.includes('create table "user_profiles"')).toBe(true);
-		expect(ddl.includes('create table "memory_facts"')).toBe(true);
+	test('the schema carries both P14 tables and never drops one', () => {
+		const ddl = allMigrationSql();
+		// Folded DDL comes back uppercase from sqlite_master, so match on the
+		// statement rather than its exact case.
+		expect(/create table "user_profiles"/i.test(ddl)).toBe(true);
+		expect(/create table "memory_facts"/i.test(ddl)).toBe(true);
 		// no destructive statements: rollback must never delete user data
 		expect(/drop\s+table/i.test(ddl)).toBe(false);
 	});

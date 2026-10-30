@@ -78,11 +78,11 @@ function ProjectSettingsBody(props: { projectId: string }): ReactElement {
 
 	if (!project) return <StatePanel kind="loading" title="Loading project settings…" />;
 
-	async function saveDescription(name: string, description: string): Promise<void> {
+	async function saveDescription(name: string, description: string, contestUrl: string): Promise<void> {
 		await fetchJson<{ project: Project }>(`/api/projects/${encodeURIComponent(props.projectId)}`, {
 			method: 'PATCH',
 			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify({ ...(name.trim() ? { name: name.trim() } : {}), description: description.trim() === '' ? null : description.trim() }),
+			body: JSON.stringify({ ...(name.trim() ? { name: name.trim() } : {}), description: description.trim() === '' ? null : description.trim(), contestUrl: contestUrl.trim() || null }),
 		});
 		void queryClient.invalidateQueries({ queryKey: ['projects', chrome.actorId] });
 	}
@@ -176,6 +176,11 @@ function ProjectSettingsBody(props: { projectId: string }): ReactElement {
 									Edit name or purpose
 								</button>
 							</div>
+							<div className="ps-field">
+								<span className="settings-field-label">Hackathon</span>
+								{project.contestUrl ? <a href={project.contestUrl} target="_blank" rel="noopener noreferrer">Open event page ↗</a> : <p className="state-detail">No event linked yet.</p>}
+								{!project.contestUrl ? <button type="button" className="btn-ghost" onClick={() => setEditOpen(true)}>Link an event</button> : null}
+							</div>
 						</section>
 					) : null}
 
@@ -217,7 +222,7 @@ function ProjectSettingsBody(props: { projectId: string }): ReactElement {
 				<EditDescriptionWindow
 					project={project}
 					onClose={() => setEditOpen(false)}
-					onSave={(name, description) => saveDescription(name, description)}
+					onSave={(name, description, contestUrl) => saveDescription(name, description, contestUrl)}
 				/>
 			) : null}
 			{archiveOpen ? (
@@ -232,19 +237,24 @@ function ProjectSettingsBody(props: { projectId: string }): ReactElement {
 function EditDescriptionWindow(props: {
 	project: Project;
 	onClose: () => void;
-	onSave: (name: string, description: string) => Promise<void>;
+	onSave: (name: string, description: string, contestUrl: string) => Promise<void>;
 }): ReactElement {
 	const [name, setName] = useState(props.project.name);
 	const [description, setDescription] = useState(props.project.description ?? '');
+	const [contestUrl, setContestUrl] = useState(props.project.contestUrl ?? '');
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const LIMIT = 200;
 
 	async function save() {
+		if (contestUrl.trim()) {
+			try { if (!['http:','https:'].includes(new URL(contestUrl.trim()).protocol)) throw new Error(); }
+			catch { setError('Enter the full event link, starting with https://.'); return; }
+		}
 		setBusy(true);
 		setError(null);
 		try {
-			await props.onSave(name, description);
+			await props.onSave(name, description, contestUrl);
 			props.onClose();
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : String(cause));
@@ -275,6 +285,9 @@ function EditDescriptionWindow(props: {
 					value={description}
 					onChange={(e) => setDescription(e.target.value)}
 				/>
+				<label className="kicker" htmlFor="ps-event">Hackathon link (optional)</label>
+				<input id="ps-event" className="input" type="url" readOnly={Boolean(props.project.contestUrl)} value={contestUrl} onChange={e => setContestUrl(e.target.value)} placeholder="https://your-event.devpost.com/" />
+				<p className="state-detail">Link an event here, then ask Caddie to check its rules against your plan. Linking it does not approve changes to your app.</p>
 				{error ? (
 					<div role="alert" className="sign-in-error" data-testid="edit-description-error">
 						<b>Could not save.</b>

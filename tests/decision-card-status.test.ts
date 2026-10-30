@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { statusLabel } from "../apps/app/src/client/brief/DecisionCard.tsx";
+import { headerBadge, statusLabel } from "../apps/app/src/client/brief/DecisionCard.tsx";
 import type { DecisionCard } from "@caddie/contracts";
 
 /**
@@ -50,3 +50,19 @@ describe("DecisionCard statusLabel — plain language, never raw status", () => 
 
  test('a handled hackathon deadline still reads its Deadline badge (mockup 5)', () => { expect(statusLabel(card({ kind: 'deadline', status: 'handled' }))).toBe('Deadline'); });
  test("a schedule-backed deadline card reads 'Scheduled', never a Deadline badge", () => { expect(statusLabel(card({ kind: 'deadline', status: 'handled', schedule: { name: 'Weekly check', nextRunLabel: 'Monday 08:00' } }))).toBe('Scheduled'); });
+
+describe("headerBadge — one status in the card header (owner 2026-10-30)", () => {
+  const live = (id: string, status: DecisionCard["status"], extra: Partial<DecisionCard> = {}) =>
+    card({ id: `brf_workflow_${id}_x`, kind: "result", status, primaryAction: { label: "View activity", kind: "inspect", targetId: "run" }, ...extra });
+  test("a build, a repair, a ready app and a found hackathon say it once, in the header label", () => {
+    expect(headerBadge(live("build", "changed"))).toBe("");
+    expect(headerBadge(live("repair", "changed"))).toBe("");
+    expect(headerBadge(card({ id: "brf_workflow_preview_x", kind: "result", status: "handled", primaryAction: { label: "Try the app", kind: "preview", targetId: "out" } }))).toBe("");
+    expect(headerBadge(card({ id: "brf_opportunity_x", kind: "change", status: "needs-you" }))).toBe("");
+  });
+  test("a decision, a deadline and a stopped build keep their badge", () => {
+    expect(headerBadge(card({ kind: "approval", status: "needs-you" }))).toBe("Needs you");
+    expect(headerBadge(card({ kind: "deadline", status: "needs-you" }))).toBe("Deadline");
+    expect(headerBadge(live("blocked", "blocked"))).toBe("Needs attention");
+  });
+});

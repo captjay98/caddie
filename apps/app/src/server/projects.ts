@@ -448,6 +448,10 @@ export async function updateProject(
 ): Promise<Project> {
 	const verified = await assertProjectScope(db, scope);
 	const parsed = parseOr400(ProjectUpdateInputSchema, patch);
+	if (parsed.contestUrl != null) {
+		try { if (!['https:', 'http:'].includes(new URL(parsed.contestUrl).protocol)) throw new Error(); }
+		catch { throw new ScopeError(400,'invalid_contest_url','Enter the full event link, starting with https://.'); }
+	}
 	const sets: string[] = [];
 	const params: unknown[] = [];
 	if (parsed.name !== undefined) {

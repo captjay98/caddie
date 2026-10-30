@@ -50,6 +50,64 @@ const MACHINERY = /\b(find_hackathons|create_project|propose_project|start_brain
 /** A self-addressed deliberation stance — hedged planning language, not an answer. */
 const DELIBERATION = /\b(we (?:need|should|must|could|can|will|'ll|'ve|have to)|let's|i (?:should|'ll|will|need to|can|could)|maybe|probably|perhaps|let me (?:call|think|check|use)|first,? we|then we|we'll (?:call|get|use|parse)|better to|we got|we can say|the user (?:wants|asked|explicitly|needs|said))\b/i;
 
+/**
+ * Caddie's plumbing rewritten in the owner's words. A non-technical builder is
+ * told their app can use AI — not which model runs it or how deep a call is
+ * (live finding, 2026-10-28: Street Food Share's replies said `tier: super` and
+ * `tier: fast` in the transcript). The raw text stays readable in the reply's
+ * "Original draft response" inspector; only the prose a person reads changes.
+ */
+const PLUMBING_PHRASES: readonly { pattern: RegExp; replace: () => string }[] = [
+	{ pattern: /\btier\s*[:=]?\s*["']?super["']?/gi, replace: () => 'a deep answer' },
+	{ pattern: /\btier\s*[:=]?\s*["']?fast["']?/gi, replace: () => 'a quick answer' },
+	{ pattern: /\b(?:the\s+|a\s+)?super\s+tier\b/gi, replace: () => 'the deeper AI' },
+	{ pattern: /\b(?:the\s+|a\s+)?fast\s+tier\b/gi, replace: () => 'the standard AI' },
+	{ pattern: /\bNVIDIA\s+Nemotron(?:\s+(?:3\.5|Super|Ultra|VL|Lightning|Nano|Plus))*\b/gi, replace: () => "Caddie's AI" },
+	{ pattern: /\bNemotron(?:\s+(?:3\.5|Super|Ultra|VL|Lightning|Nano|Plus))*\b/gi, replace: () => "Caddie's AI" },
+	{ pattern: /\b(?:Nebius\s+)?Token\s+Factory\b/gi, replace: () => 'the platform' },
+	// The service handle Caddie's own code uses. A builder reading it in a reply
+	// is being shown the wiring, not told their app can use AI.
+	{ pattern: /`?\bc\.env\.CADDIE\.ai\b`?/gi, replace: () => "Caddie's AI" },
+	// Caddie's own document and tool names (live reply 2026-10-29: "The PRD is
+	// approved… directly via write_plan_note… host-side allowance step").
+	{ pattern: /\bPRDs?\b/g, replace: () => 'plan' },
+	{ pattern: /`?\bwrite_plan_note\b`?/g, replace: () => 'saving' },
+	{ pattern: /\bdesign brief\b/gi, replace: () => 'screen designs' },
+	{ pattern: /\bhost[- ]side\s+/gi, replace: () => '' },
+	{ pattern: /\bthe host's\s+/gi, replace: () => '' },
+	{ pattern: /\b(?:looks |design )?payloads?\b/gi, replace: () => 'draft' },
+	{ pattern: /\bscaffold(?:ed|ing)?\b/gi, replace: () => 'set up' },
+	// Stack names in a card a non-technical owner reads (proposal "Build first",
+	// 2026-10-29: "Scaffold the React + Bun + Hono web app … stubbed anomaly check").
+	{ pattern: /\s*\bReact\s*\+\s*Bun\s*\+\s*Hono\b\s*/g, replace: () => ' ' },
+	{ pattern: /\bstubbed\s+/gi, replace: () => 'first ' },
+	{ pattern: /\banomaly (?:check|detection)\b/gi, replace: () => 'check for unusual days' },
+	// Anything still talking about tiers talks about depth.
+	{ pattern: /\btiers?\b/gi, replace: () => 'depth' },
+];
+
+function rewritePlumbing(input: string): { text: string; changed: boolean } {
+	let text = input;
+	let changed = false;
+	for (const { pattern, replace } of PLUMBING_PHRASES) {
+		const next = text.replace(pattern, replace);
+		if (next !== text) changed = true;
+		text = next;
+	}
+	return { text, changed };
+}
+
+/**
+ * The plumbing words only, with nothing removed — for a stored document the
+ * owner reads (a plan section, a design brief, a decision record). Those bodies
+ * predate the authoring gate, and their structure must survive: a PRD's data
+ * model is full of `{"type": …}` lines the reply sanitizer would delete. So
+ * documents get the vocabulary swap and never the stripping.
+ */
+export function plainWordsForOwner(input: string): string {
+	return rewritePlumbing(input).text.replace(/ {2,}/g, ' ').trim();
+}
+
 /** Split into sentences conservatively (keep delimiters attached). */
 function splitSentences(block: string): string[] {
 	// Split on sentence-ending punctuation followed by whitespace, OR newlines.
@@ -63,6 +121,22 @@ function isPlanningLeak(sentence: string): boolean {
 	// Must look like self-addressed deliberation AND reference the machinery /
 	// the user-as-third-party. Both signals required → ordinary prose survives.
 	return DELIBERATION.test(s) && MACHINERY.test(s);
+}
+
+/** First-person narration of Caddie's internal team or workflow phases. */
+const HANDOFF_STANCE = /\b(?:let me|i(?:'m| am| will|'ll)|i've|now i|next i)\b/i;
+const HANDOFF_SUBJECT = /\b(?:delegat\w*|hand(?:ing)? (?:this|it) (?:off|over)|specialists?|coordinator|subagents?|the designer|product specialist|PRD|(?:planning|looks|design|build) phase)\b/i;
+function isHandoffNarration(sentence: string): boolean {
+	const s = sentence.trim();
+	return s.length > 0 && s.length < 240 && HANDOFF_STANCE.test(s) && HANDOFF_SUBJECT.test(s);
+}
+
+/** Remove dropped sentences while keeping the remaining text's own line breaks. */
+function rejoinKept(text: string, sentences: readonly string[], kept: readonly string[]): string {
+	const drop = new Set(sentences.filter((sentence) => !kept.includes(sentence)));
+	let out = text;
+	for (const sentence of drop) out = out.replace(sentence, '');
+	return out.replace(/[ \t]+\n/g, '\n').replace(/\n[ \t]+/g, '\n').replace(/[ \t]{2,}/g, ' ');
 }
 
 /**
@@ -159,6 +233,13 @@ export function sanitizeAssistantText(input: string): SanitizeResult {
 			text = tool.text;
 		}
 	}
+	{
+		const plumbing = rewritePlumbing(text);
+		if (plumbing.changed) {
+			stripped.push('plumbing-vocabulary');
+			text = plumbing.text;
+		}
+	}
 
 	// Untagged planning leakage: strip the LEADING run of scratchpad sentences
 	// only. Walk sentences from the start; drop each that is a planning leak;
@@ -173,6 +254,19 @@ export function sanitizeAssistantText(input: string): SanitizeResult {
 		if (cut > 0 && cut < sentences.length) {
 			stripped.push('planning-leak');
 			text = sentences.slice(cut).join(' ').trim();
+		}
+	}
+
+	// Hand-off narration anywhere in the reply: Caddie talking about its own
+	// team ("Let me delegate the designer to author the look proposals", "I'm
+	// in the looks phase now", FarmLog/Poultry runs 2026-10-29). The person
+	// sees the project card for that; the sentence is plumbing.
+	{
+		const sentences = splitSentences(text);
+		const kept = sentences.filter((sentence) => !isHandoffNarration(sentence));
+		if (kept.length > 0 && kept.length < sentences.length) {
+			stripped.push('handoff-narration');
+			text = rejoinKept(text, sentences, kept);
 		}
 	}
 

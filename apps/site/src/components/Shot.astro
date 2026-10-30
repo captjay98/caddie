@@ -9,9 +9,11 @@ interface Props {
 	alt: string;
 	device?: ShotDevice;
 	caption?: string;
+	/** Above the fold (the hero): load at once, so it is not the slowest paint. */
+	eager?: boolean;
 }
 
-const { name, alt, device = 'desktop', caption } = Astro.props;
+const { name, alt, device = 'desktop', caption, eager = false } = Astro.props;
 const dark = shotExists(name, device, 'dark');
 const light = shotExists(name, device, 'light');
 const real = dark || light;
@@ -20,8 +22,8 @@ const size = device === 'phone' ? { width: 390, height: 844 } : { width: 1440, h
 
 <figure class={`shot-slot shot-${device}`} data-shot={name} data-shot-state={real ? 'real' : 'pending'}>
 	<div class="shot-frame">
-		{dark && <img class={light ? 'shot-dark' : undefined} src={`/${shotPath(name, device, 'dark')}`} alt={alt} {...size} loading="lazy" decoding="async" />}
-		{light && <img class={dark ? 'shot-light' : undefined} src={`/${shotPath(name, device, 'light')}`} alt={alt} {...size} loading="lazy" decoding="async" />}
+		{dark && <img class={light ? 'shot-dark' : undefined} src={`/${shotPath(name, device, 'dark')}`} alt={alt} {...size} loading={eager ? 'eager' : 'lazy'} decoding="async" />}
+		{light && <img class={dark ? 'shot-light' : undefined} src={`/${shotPath(name, device, 'light')}`} alt={alt} {...size} loading={eager ? 'eager' : 'lazy'} decoding="async" />}
 		{!real && (
 			<div class="shot-pending" role="img" aria-label={`Screenshot coming: ${alt}`}>
 				<span class="lbl mono">Screenshot coming</span>

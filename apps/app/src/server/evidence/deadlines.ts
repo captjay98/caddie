@@ -102,8 +102,8 @@ function tzOffsetMinutes(instant: Date, timeZone: string): number {
 	return (asUtc - instant.getTime()) / 60000;
 }
 
-/** UTC milliseconds for a wall-clock time in a zone (guess + refine). */
-function zonedWallTimeToUtcMs(
+/** UTC instants that actually map to this wall-clock time in the zone. */
+function zonedWallTimeCandidates(
 	year: number,
 	month: number,
 	day: number,
@@ -111,12 +111,14 @@ function zonedWallTimeToUtcMs(
 	minute: number,
 	second: number,
 	timeZone: string,
-): number {
+): number[] {
 	const wallAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
-	const offset1 = tzOffsetMinutes(new Date(wallAsUtc), timeZone);
-	const guess = wallAsUtc - offset1 * 60000;
-	const offset2 = tzOffsetMinutes(new Date(guess), timeZone);
-	return wallAsUtc - offset2 * 60000;
+	// Sample the offsets on both sides of a transition. A skipped local time
+	// maps to no instant; a repeated local hour maps to two. Neither is safe to
+	// turn into a single deadline unless the source supplies an offset.
+	const offsets = new Set([-48, 0, 48].map(hours => tzOffsetMinutes(new Date(wallAsUtc + hours * 3_600_000), timeZone)));
+	return [...new Set([...offsets].map(offset => wallAsUtc - offset * 60_000)
+		.filter(candidate => candidate + tzOffsetMinutes(new Date(candidate), timeZone) * 60_000 === wallAsUtc))].sort((a, b) => a - b);
 }
 
 function isRealCalendarDate(year: number, month: number, day: number): boolean {
@@ -218,7 +220,13 @@ export function normalizeDeadline(originalText: string, zoneName?: string | null
 		return ambiguous(originalText, statedZone, `second ${second} is out of range`);
 	}
 
-	const utcMs = zonedWallTimeToUtcMs(year, month, day, hour, minute, second, statedZone);
+	const candidates = zonedWallTimeCandidates(year, month, day, hour, minute, second, statedZone);
+	if (candidates.length !== 1) {
+		return ambiguous(originalText, statedZone, candidates.length === 0
+			? 'the local time does not exist because of a timezone transition'
+			: 'the local time occurs more than once; the source must specify an offset');
+	}
+	const utcMs = candidates[0]!;
 	return {
 		originalText,
 		zone: statedZone,
@@ -266,6 +274,10 @@ const ISO_INSTANT_SEARCH_RE =
 export function deadlineInstantKey(value: string): string | null {
 	const match = ISO_INSTANT_SEARCH_RE.exec(value);
 	if (!match) return null;
+	const year = Number(match[0].slice(0, 4));
+	const month = Number(match[0].slice(5, 7));
+	const day = Number(match[0].slice(8, 10));
+	if (!isRealCalendarDate(year, month, day)) return null;
 	const ms = Date.parse(match[0]);
 	return Number.isFinite(ms) ? String(ms) : null;
 }

@@ -5,6 +5,7 @@ import {beforeAll,afterAll,test,expect} from 'bun:test';
 import {mkdtempSync,writeFileSync,readFileSync,mkdirSync} from 'node:fs';
 import {join,dirname} from 'node:path';
 import {tmpdir} from 'node:os';
+import {createTableSql} from './fixtures/migrations.ts';
 import {openAcceptanceBrowser,type CandidateRuntime} from '../scripts/acceptance-browser.ts';
 import {openLocalVisualFidelity} from '../scripts/local-visual-fidelity.ts';
 import {notesAppHtml} from './fixtures/brief-run-notes-app.ts';
@@ -33,6 +34,16 @@ beforeAll(async()=>{
  runner=await openAcceptanceBrowser(join(dir,'evidence'));
 },120000);
 afterAll(async()=>{await runner?.close();processHandle?.kill();if(port)Bun.spawnSync(['pkill','-f',`acceptance-runtime.wrangler.json --port ${port} `]);});
+test('native preview smoke proves IndexedDB survives reload and rejects caught startup errors',async()=>{
+ expect((await runner.smoke(runtime('correct','<main>Records are ready<button>New record</button></main>'))).passed).toBe(true);
+ expect((await runner.smoke(runtime('correct',`<main>Couldn't open your records</main>`))).passed).toBe(false);
+ expect((await runner.smoke(runtime('correct',`<main>Opening records</main><script>throw new Error('Storage startup failed')</script>`))).passed).toBe(false);
+ expect((await runner.smoke(runtime('correct',''))).passed).toBe(false);
+ expect((await runner.smoke(runtime('correct','<main>Loading your records…</main>'))).passed).toBe(false);
+ expect((await runner.smoke(runtime('correct',`<main>Records<button>New record</button></main><script>setTimeout(()=>{throw new Error('Delayed startup failure')},600)</script>`))).passed).toBe(false);
+	// Six probes: five intentionally never reach a usable screen, and the
+	// startup check observes each for up to 6s before failing it.
+},60000);
 function runtime(mode='correct',document=notesAppHtml()):CandidateRuntime {
  let epoch=0;const prefix=crypto.randomUUID();
  // The actual server differs only by its deliberate defect. No mock success
@@ -54,6 +65,21 @@ test('fake saving, lost restart data, cross-user leakage and missing behavior ea
  expect((await check(runtime('leaky'),isolation)).checks[0]!.passed).toBe(false);
  expect((await check(runtime(),[{kind:'actor',user:'a'},{kind:'open',path:'/notes'},{kind:'expect',text:'Promised export',visible:true}])).checks[0]!.passed).toBe(false);
 },90000);
+// 2026-10-30 EggOps: the journey was "open / → press Start my farm → sign in as
+// A", but A was signed in on a fresh first screen with no sign-in, so every
+// check timed out on the Email field. A now taps the stranger's path first.
+function frontDoorApp(withStart:boolean):string {
+ const signedOut="if (!signedIn) { renderEmailStep(); return; }";const html=notesAppHtml();if(!html.includes(signedOut))throw new Error('fixture changed');
+ return html.replace(signedOut,`if (!signedIn) { if ((location.hash || '#/') === '#/start') { renderEmailStep(); return; } h('<section><h1>Front door</h1>${withStart?'<a href="#/start">Start</a>':''}</section>'); return; }`);
+}
+test('a person signs in where the journey has got to, and a screen with no sign-in says so plainly',async()=>{
+ const path:AcceptanceStep[]=[{kind:'open',path:'/'},{kind:'click',name:'Start'}];
+ const after:AcceptanceStep[]=[{kind:'open',path:'/notes'},{kind:'fill',label:'Note',value:'{{marker}}'},{kind:'click',name:'Save note'},{kind:'expect',text:'{{marker}}',visible:true}];
+ expect((await check(runtime('correct',frontDoorApp(true)),[...path,{kind:'actor',user:'a'},...after])).checks[0]!.passed).toBe(true);
+ const stuck=await check(runtime('correct',frontDoorApp(false)),[{kind:'open',path:'/'},{kind:'actor',user:'a'},...after]);
+ expect(stuck.checks[0]!.passed).toBe(false);
+ expect(stuck.checks[0]!.reason).toBe('Person A could not sign in: there was no field labelled "Email" (Caddie\'s sign-in) on the app\'s first screen or after opening "/".');
+},60000);
 test('state capture navigates to distinct screens; missing navigation fails and overflow is detected',async()=>{
  const rt=runtime();const viewport={name:'phone' as const,width:390 as const,height:844 as const};
  const home=await runner.captureState({runtime:rt,title:'Home',steps:[{kind:'actor',user:'a'},{kind:'expect',text:'Welcome',visible:true}],viewport});
@@ -79,7 +105,7 @@ test('actual loading, error and recovery states can be navigated on phone and de
 },45000);
 
 test('private service drives the production unpublished runtime; Stop revokes the capability immediately',async()=>{
- const statements=["create table projects(id text primary key,workspaceId text)","insert into projects values('p','w')","create table workspace_memberships(id text,userId text,workspaceId text)","insert into workspace_memberships values('m','u','w')","create table build_workflows(projectId text,runId text,phase text,planId text,spendPayerId text,approvedDesignRevisionId text)","insert into build_workflows values('p','r','building','plan','a','design')","create table plan_doc_revisions(id text,bodyHash text)","insert into plan_doc_revisions values('design','hash')","create table approvals(projectId text,resourceId text,action text,policyVersion text,status text,revisionHash text,decidedBy text,expiresAt text)","insert into approvals values('p','design','design','v1','approved','hash','u','2099-01-01T00:00:00.000Z')","create table large_content(sha256 text primary key,bytes integer,chunks integer,createdAt text)","create table large_content_chunks(sha256 text,idx integer,bytes blob,primary key(sha256,idx))",readFileSync(join(appDir,'migrations/0054_acceptance_candidates.sql'),'utf8')];
+ const statements=["create table projects(id text primary key,workspaceId text)","insert into projects values('p','w')","create table workspace_memberships(id text,userId text,workspaceId text)","insert into workspace_memberships values('m','u','w')","create table build_workflows(projectId text,runId text,phase text,planId text,spendPayerId text,approvedDesignRevisionId text)","insert into build_workflows values('p','r','building','plan','a','design')","create table plan_doc_revisions(id text,bodyHash text)","insert into plan_doc_revisions values('design','hash')","create table approvals(projectId text,resourceId text,action text,policyVersion text,status text,revisionHash text,decidedBy text,expiresAt text)","insert into approvals values('p','design','design','v1','approved','hash','u','2099-01-01T00:00:00.000Z')","create table large_content(sha256 text primary key,bytes integer,chunks integer,createdAt text)","create table large_content_chunks(sha256 text,idx integer,bytes blob,primary key(sha256,idx))",createTableSql('acceptance_candidates')];
  const initialized=await fetch(base+'/__test/init',{method:'POST',body:JSON.stringify({statements})});expect(initialized.ok).toBe(true);
  const response=await fetch(base+'/__test/candidate',{method:'POST',body:JSON.stringify({identity,bundle:{document:notesAppHtml().replaceAll('/api/auth/session','/api/auth/me'),server:source,migrations:[{name:'0000_auth.sql',sql:AUTH_FILES['migrations/0000_caddie_auth.sql']},{name:'0001_notes.sql',sql:'create table notes(owner text,body text);'}]}})});
  expect(response.ok).toBe(true);const candidate=await response.json() as any;

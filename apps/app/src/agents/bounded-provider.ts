@@ -2,6 +2,12 @@ import { currentBuildTask } from '../server/task-deadline-context.ts';
 import type { ProviderStreams, StreamOptions, SimpleStreamOptions } from '@earendil-works/pi-ai';
 import { DEADLINE_POLICY } from '../server/build-deadlines.ts';
 
+/** A connection that failed before the provider answered (never an HTTP error). */
+function droppedConnection(error: unknown): boolean {
+  if (!(error instanceof Error) || error.name === 'AbortError' || error.name === 'TimeoutError') return false;
+  return /network connection lost|connection (reset|closed|refused)|socket hang up|ECONNRESET|fetch failed/i.test(error.message);
+}
+
 /** Bounds the ACTUAL provider request and response body. SDK retries are disabled:
  * every Flue turn is one physical call and has one reservation/usage receipt.
  * Parent cancellation is inherited; response chunks reset idle time, never the hard deadline.
@@ -25,16 +31,41 @@ export function boundedProvider(base: ProviderStreams, policy: { requestMs: numb
     const fetcher = options?.fetch ?? globalThis.fetch;
     const guardedFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       controller.signal.throwIfAborted();
-      const response = await fetcher(input, { ...init, signal: controller.signal });
-      if (!response.body) return response;
-      const reader = response.body.getReader();
+      // One attempt = the request plus its FIRST body chunk. A connection that
+      // drops before the provider has sent a single byte of answer — workerd's
+      // "Network connection lost." on a pooled connection the provider already
+      // closed, either at connect or on the first read (Poultry Farm Monitor's
+      // designer call, 2026-10-29) — gets one fresh attempt inside the same hard
+      // deadline and reservation. Nothing has reached the model loop yet, so the
+      // retry is invisible. Cancellation, deadlines, HTTP errors and anything
+      // after the first chunk are never retried.
+      const attempt = async () => {
+        const response = await fetcher(input, { ...init, signal: controller.signal });
+        if (!response.body) return { response, reader: null, first: null };
+        const reader = response.body.getReader();
+        try { return { response, reader, first: await reader.read() }; }
+        catch (error) { void reader.cancel().catch(() => {}); throw error; }
+      };
+      let opened: Awaited<ReturnType<typeof attempt>>;
+      try {
+        opened = await attempt();
+      } catch (error) {
+        if (controller.signal.aborted || !droppedConnection(error)) throw error;
+        await new Promise(resolve => setTimeout(resolve, 250));
+        controller.signal.throwIfAborted();
+        opened = await attempt();
+      }
+      const { response, reader } = opened;
+      let pending: typeof opened.first = opened.first;
+      if (!reader) return response;
       cancelBody = () => { void reader.cancel(controller.signal.reason).catch(() => {}); };
       controller.signal.addEventListener('abort', cancelBody, { once: true });
       resetIdle();
       const body = new ReadableStream<Uint8Array>({
         async pull(output) {
           try {
-            const chunk = await reader.read();
+            const chunk = pending ?? await reader.read();
+            pending = null;
             if (chunk.done) { clearTimeout(idle); output.close(); return; }
             resetIdle(); output.enqueue(chunk.value);
           } catch (error) { clearTimeout(idle); output.error(error); }

@@ -80,3 +80,13 @@ test("the main overview is one excerpt and journeys omit the technical backbone"
     "Feed Runway",
   ]);
 });
+
+test("the overview is the plan's own summary, never a numbered step (EggOps Nigeria, 2026-10-30)", () => {
+  const sections = [
+    { heading: "What this is, in one paragraph", body: "EggOps is a phone-first web app for a small poultry farm. Every evening the farmer counts eggs." },
+    { heading: "What your app will do — the journeys", body: "**1. Set up the farm** (2 minutes)\nThe farmer types a name." },
+  ];
+  expect(planOverview("# EggOps Nigeria — product requirements", sections)).toBe("EggOps is a phone-first web app for a small poultry farm.");
+  // Only a journeys section: no fragment like "**1." is offered as a summary.
+  expect(planOverview("# EggOps", [sections[1]!])).toBeNull();
+});

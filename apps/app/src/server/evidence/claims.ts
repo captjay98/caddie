@@ -372,6 +372,7 @@ export interface ReconciliationClaim {
 	readonly capturedAt: string;
 	/** Lower wins; null = UNKNOWN authority (never outranks, never wins). */
 	readonly authorityRank: number | null;
+	readonly sourceUrl?: string;
 }
 
 export interface ConflictRecord {
@@ -498,7 +499,7 @@ export async function projectForReconciliation(
 	const rows = await queryAll(
 		db,
 		'select c."id" as claimId, c."projectId", c."claimType", c."value", c."confidence", ' +
-			'c."snapshotId", s."sourceId", s."capturedAt", src."authority" as authority ' +
+			'c."snapshotId", s."sourceId", s."capturedAt", src."authority" as authority, src."canonicalUrl" as sourceUrl ' +
 			'from "evidence_claims" c ' +
 			'join "evidence_snapshots" s on s."id" = c."snapshotId" and s."projectId" = c."projectId" ' +
 			'join "evidence_sources" src on src."id" = s."sourceId" and src."projectId" = c."projectId" ' +
@@ -516,6 +517,7 @@ export async function projectForReconciliation(
 			confidence: row['confidence'] == null ? null : Number(row['confidence']),
 			snapshotId: String(row['snapshotId']),
 			sourceId: String(row['sourceId']),
+			sourceUrl: String(row['sourceUrl'] ?? ''),
 			capturedAt: String(row['capturedAt']),
 			authorityRank: isSourceAuthority(authority) ? authorityRank(authority) : null,
 		};
@@ -543,14 +545,26 @@ export async function surveyClaims(
 	const projected = await projectForReconciliation(db, scope, options.claimType);
 	const byType = new Map<string, ReconciliationClaim[]>();
 	for (const claim of projected) {
-		const group = byType.get(claim.claimType) ?? [];
+		const key = `${claim.claimType}\n${eventEvidenceSubject(claim.claimType, claim.sourceUrl ?? '', claim.sourceId)}`;
+		const group = byType.get(key) ?? [];
 		group.push(claim);
-		byType.set(claim.claimType, group);
+		byType.set(key, group);
 	}
 	const surveys: ClaimTypeSurvey[] = [];
-	for (const [claimType, group] of [...byType.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+	for (const [, group] of [...byType.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
 		const result = await reconcileClaimsByAuthority(group, options.instantKey);
-		surveys.push({ claimType, winner: result.winner, conflict: result.conflict });
+		surveys.push({ claimType: group[0]!.claimType, winner: result.winner, conflict: result.conflict });
 	}
 	return surveys;
+}
+
+/** Discovery can read several contests into one project. They are different
+ * subjects, not contradictory sources for one event. Unknown subjects stay apart. */
+export function eventEvidenceSubject(type: string, sourceUrl: string, sourceId: string): string {
+	if (!type.startsWith('eligibility.') && !type.startsWith('requirement.')) return '';
+	try {
+		const url = new URL(sourceUrl);
+		if (url.hostname.endsWith('.devpost.com')) return url.origin;
+		return url.origin + url.pathname.replace(/\/(?:rules|faq|overview)\/?$/i, '').replace(/\/$/, '');
+	} catch { return sourceId; }
 }

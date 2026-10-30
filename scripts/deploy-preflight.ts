@@ -35,6 +35,8 @@ export interface Finding {
 export const REQUIRED_KEYS = [
 	'BETTER_AUTH_SECRET',
 	'BETTER_AUTH_URL',
+	'PREVIEW_BASE_URL',
+	'PREVIEW_SIGNING_SECRET',
 	'INVITE_ALLOWLIST',
 	'OPERATOR_EMAILS',
 	'NEBIUS_API_KEY',
@@ -85,6 +87,8 @@ export const OPTIONAL_KEYS = [
 	'GITHUB_APP_SLUG',
 	'GITHUB_WEBHOOK_SECRET',
 	'SPEND_LIMIT_CAP_USD',
+	'DESIGN_CAPTURE_URL',
+	'DESIGN_CAPTURE_TOKEN',
 ] as const;
 
 /** Test-only switches: in production they would stub sign-in or point Caddie at a fake service. */
@@ -217,6 +221,7 @@ export interface ProductionTarget {
 	readonly workersDev: boolean;
 	readonly d1DatabaseId: string | null;
 	readonly migrationsDir: string;
+	readonly designCaptureBinding?: boolean;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -296,7 +301,7 @@ export function checkProductionConfig(config: WorkerConfig, appDir: string): { f
 	if (prod.observability?.enabled === true) add('PASS', 'Workers Logs are on');
 	else add('WARN', 'Workers Logs are off: production errors would leave no logs');
 
-	return { findings, target: { hosts, workersDev, d1DatabaseId, migrationsDir } };
+	return { findings, target: { hosts, workersDev, d1DatabaseId, migrationsDir, ...((prod.services ?? []).some(service => service.binding === 'DESIGN_CAPTURE') ? { designCaptureBinding: true } : {}) } };
 }
 
 // --- the production values ----------------------------------------------------------
@@ -350,6 +355,18 @@ export async function checkProductionValues(values: ReadonlyMap<string, string>,
 	const missing = required.filter((key) => !has(key));
 	if (missing.length > 0) add('FAIL', `missing: ${missing.join(', ')}`);
 	else add('PASS', `all ${required.length} required values are set${ctx.ownerOnly ? ' for an owner-only deploy' : ''}`);
+	// The independent quality gate is default-on in code (owner 2026-10-27,
+	// never env-gated); what a deploy must carry is its reviewer credential and
+	// the design-capture service the visual reviews depend on.
+	if (!has('NEBIUS_API_KEY')) add('FAIL', 'NEBIUS_API_KEY must be set: the independent plan/design reviews call it');
+	if (!ctx.target.designCaptureBinding) {
+		if (!has('DESIGN_CAPTURE_URL')) add('FAIL', 'DESIGN_CAPTURE_URL is required without the DESIGN_CAPTURE service binding');
+		else {
+			const capture = httpsOrigin(value('DESIGN_CAPTURE_URL'));
+			if (!capture || capture.username || capture.password || capture.search || capture.hash) add('FAIL', 'DESIGN_CAPTURE_URL must be a private HTTPS service endpoint without credentials, query or fragment');
+		}
+		if (!has('DESIGN_CAPTURE_TOKEN')) add('FAIL', 'DESIGN_CAPTURE_TOKEN is required without the DESIGN_CAPTURE service binding');
+	}
 	if (ctx.ownerOnly) {
 		if (has('JUDGE_ACCESS_CODE')) add('FAIL', '--owner-only, but JUDGE_ACCESS_CODE is set: judge access would open; delete that line');
 		else add('PASS', 'judge access: off (owner-only deploy)');
@@ -380,6 +397,23 @@ export async function checkProductionValues(values: ReadonlyMap<string, string>,
 	}
 	if (has('BETTER_AUTH_SECRET') && value('BETTER_AUTH_SECRET').length < 32) {
 		add('FAIL', 'BETTER_AUTH_SECRET is shorter than 32 characters (use `openssl rand -base64 32`)');
+	}
+	// Isolated app previews: every web build is opened on a separate origin
+	// before it can be checked or marked ready (server/isolated-preview.ts).
+	// Without a distinct origin and its own key, production builds pause.
+	if (has('PREVIEW_BASE_URL')) {
+		const url = httpsOrigin(value('PREVIEW_BASE_URL'));
+		const bare = url && (url.pathname === '/' || url.pathname === '') && !url.search && !url.hash && !value('PREVIEW_BASE_URL').endsWith('/');
+		const host = url?.hostname.toLowerCase() ?? '';
+		const appHost = has('BETTER_AUTH_URL') ? (httpsOrigin(value('BETTER_AUTH_URL'))?.hostname.toLowerCase() ?? '') : '';
+		const overlaps = host !== '' && appHost !== '' && (host === appHost || host.endsWith(`.${appHost}`) || appHost.endsWith(`.${host}`));
+		if (!url) add('FAIL', 'PREVIEW_BASE_URL must be an https:// origin');
+		else if (!bare) add('FAIL', 'PREVIEW_BASE_URL must be the bare origin (no path and no trailing slash)');
+		else if (overlaps) add('FAIL', 'PREVIEW_BASE_URL must be a separate domain from BETTER_AUTH_URL, so Caddie cookies and sessions never reach a preview');
+		else add('PASS', 'PREVIEW_BASE_URL is a separate origin');
+	}
+	if (has('PREVIEW_SIGNING_SECRET') && value('PREVIEW_SIGNING_SECRET').length < 32) {
+		add('FAIL', 'PREVIEW_SIGNING_SECRET is shorter than 32 characters (use `openssl rand -base64 32`)');
 	}
 	for (const key of MUST_DIFFER_FROM_LOCAL) {
 		if (sameAsLocal(key)) add('FAIL', `${key} is the same as the local one; production needs its own`);

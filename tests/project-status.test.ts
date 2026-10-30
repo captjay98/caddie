@@ -79,6 +79,7 @@ describe('B07.1 — header status is tied to authoritative state, not the phase 
   test('review and design-review read as needing the user', () => {
     expect(workflowHeaderStatus({ phase: 'review', previewId: null }, {})).toBe('Needs you');
     expect(workflowHeaderStatus({ phase: 'design-review', previewId: null }, {})).toBe('Needs you');
+    expect(workflowHeaderStatus({ phase: 'looks-review', previewId: null }, {})).toBe('Needs you');
   });
   test('a blocked phase reads as needing attention', () => {
     expect(workflowHeaderStatus({ phase: 'blocked', previewId: null }, {})).toBe('Needs attention');

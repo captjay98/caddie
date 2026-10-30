@@ -3,6 +3,7 @@ import type { D1Database } from './auth.ts';
 import { findModelRouteForRole, type ModelRoute } from '../agents/providers.ts';
 import { timeoutSignal } from './http-timeouts.ts';
 import { assertProjectScope } from './scope.ts';
+import { assertModelSpendAllowed, ModelSpendCapError } from './model-spend-guard.ts';
 
 /**
  * AI inside apps (Publish programme stage 9). A generated app's server calls
@@ -263,6 +264,15 @@ export async function runAppAi(db: D1Database, deps: AppAiDeps, input: { project
 		.all()).results?.[0] as { n?: number } | undefined;
 	if (Number(recent?.n ?? 0) >= APP_AI_LIMITS.callsPerMinute[input.mode]) {
 		return fail('busy', 'Too many AI requests in the last minute. Try again shortly.');
+	}
+
+	// The account-wide daily ceiling covers apps too (model-spend-guard.ts);
+	// an app's own monthly allowance below still applies.
+	try {
+		await assertModelSpendAllowed(db, undefined, { nowMs: now.getTime() });
+	} catch (error) {
+		if (error instanceof ModelSpendCapError) return fail('limit_reached', 'AI in this app is paused for today. Try again tomorrow.');
+		throw error;
 	}
 
 	const route = findModelRouteForRole(read.tier === 'super' ? 'appSuper' : 'app');

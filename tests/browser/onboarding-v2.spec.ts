@@ -142,7 +142,7 @@ async function stubAccount(context: BrowserContext, userName: string | null) {
 /** Drive the profile wizard that now follows the welcome intro. */
 async function finishProfileWizard(page: import('@playwright/test').Page): Promise<void> {
 	await page.getByTestId('onboarding-profile').waitFor();
-	await page.getByLabel('Where do you live?').fill('Nigeria');
+	await page.getByLabel('Country').fill('Nigeria');
 	await page.getByTestId('onboarding-profile-continue').click();
 	await page.getByTestId('onboarding-experience').getByRole('radio', { name: 'A few apps' }).click();
 	await page.getByTestId('onboarding-format').getByRole('radio', { name: 'Either' }).click();
@@ -183,14 +183,16 @@ test.describe('Welcome intro (U09)', () => {
 		await context.close();
 	});
 
-	test('a username-only account name leaves the box empty with an honest note; Skip works', async ({ browser }) => {
+	test('a username-only account name leaves the box empty without explaining itself; Skip works', async ({ browser }) => {
 		const context = await browser.newContext();
 		await stubAccount(context, 'captjay98');
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/onboarding`);
 		await page.getByTestId('welcome-next').click();
 		await expect(page.getByTestId('welcome-name-input')).toHaveValue('');
-		await expect(page.getByTestId('welcome-name')).toContainText('looks like a username');
+		// Owner review 2026-10-28: the question is enough; Caddie does not narrate its logic.
+		await expect(page.getByTestId('welcome-name')).not.toContainText('looks like a username');
+		await expect(page.getByTestId('onboarding-step')).toHaveText('STEP 2 OF 4');
 		await page.getByTestId('welcome-name-skip').click();
 		// Skip also hands to the profile wizard, never straight past onboarding.
 		await expect(page.getByTestId('onboarding-profile')).toBeVisible();

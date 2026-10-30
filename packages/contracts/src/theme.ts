@@ -101,8 +101,12 @@ export type Density = (typeof DENSITIES)[number];
 export const AppThemeSchema = v.strictObject({
 	/** The look's name, e.g. "Field-ready". */
 	name: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(60)),
-	/** One plain sentence on why this look fits the app's audience. */
-	why: Plain,
+	/**
+	 * One plain sentence on why this look fits the app's audience. Up to 320
+	 * characters: a 224-character sentence used to cost a whole looks round
+	 * (EggOps Nigeria, 2026-10-30); the picker wraps it.
+	 */
+	why: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(320)),
 	colors: ThemeColorsSchema,
 	stateSurfaces: v.optional(v.pipe(v.array(StateSurfaceSchema), v.maxLength(8))),
 	fonts: v.strictObject({ heading: FontStack, body: FontStack }),

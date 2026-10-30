@@ -1,0 +1,1226 @@
+{
+  "evidence": "LIVE VERIFIED provider calls; synthetic calibration cases; see per-case verdicts",
+  "checkedAt": "2026-10-27T10:12:43.324Z",
+  "physicalRequests": 30,
+  "reservedCeilingUsd": 0.7668320000000003,
+  "budgetUsd": 3,
+  "maxPhysicalRequests": 32,
+  "maxTokens": 16384,
+  "reasoningEffort": "max",
+  "automaticRetries": 0,
+  "routes": [
+    {
+      "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "input": 0.3,
+      "output": 1.2,
+      "vision": true
+    },
+    {
+      "id": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "input": 0.15,
+      "output": 0.6,
+      "vision": true
+    },
+    {
+      "id": "zai-org/GLM-5.3-Flash",
+      "input": 0.15,
+      "output": 0.5,
+      "vision": true
+    }
+  ],
+  "results": [
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "pi-stream-tool-roundtrip",
+      "durationMs": 2511,
+      "verdict": "PASS",
+      "stopReason": "stop",
+      "tool": {
+        "name": "lookup_check",
+        "arguments": {
+          "checkpoint": "cp_482"
+        }
+      },
+      "answer": "Checkpoint cp_482 failed the check; its receipt nonce is receipt_e8e580ca.",
+      "usage": [
+        {
+          "input": 339,
+          "output": 80,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 37,
+          "totalTokens": 419,
+          "cost": {
+            "input": 0.00010169999999999999,
+            "output": 0.000096,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.00019769999999999998
+          }
+        },
+        {
+          "input": 453,
+          "output": 33,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 10,
+          "totalTokens": 486,
+          "cost": {
+            "input": 0.0001359,
+            "output": 0.0000396,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.00017549999999999998
+          }
+        }
+      ],
+      "adapter": "@earendil-works/pi-ai@0.87.1 completeSimple (streaming internally), existing compat flags",
+      "requestShape": {
+        "reasoning": "max",
+        "maxRetries": 0
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "strict-json-deadline",
+      "durationMs": 2664,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 596,
+        "prompt_tokens": 121,
+        "total_tokens": 717,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 461,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 0,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0007514999999999999,
+      "checks": {
+        "schemaValid": true,
+        "correct": true
+      },
+      "answer": {
+        "eligibilityMet": true,
+        "deadlinePassed": true,
+        "recommendStarting": false,
+        "localDeadline": "2026-10-23T20:00:00+01:00",
+        "explanation": "NG meets the checked entry rules, so legal eligibility is met. However, the deadline was 2026-10-23T19:00:00Z (2026-10-23T20:00:00+01:00 in Africa/Lagos), which has already passed as of 2026-10-24T08:00:00Z. There is no remaining build time, so starting is not recommended."
+      },
+      "promptHash": "e7cfbd1be93a2a6af1970237b809dbefeee7bacee28af0857afe957280fa2a48",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "checked-repair-kobo-dedupe-offline",
+      "durationMs": 31469,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 7655,
+        "prompt_tokens": 249,
+        "total_tokens": 7904,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 7385,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 128,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0092607,
+      "checks": {
+        "schemaValid": true,
+        "hostTestsPass": true
+      },
+      "answer": {
+        "code": "function applyEvents(initial, events) {\n  if (!Number.isInteger(initial)) throw new Error('Invalid initial');\n  let balanceMinor = initial;\n  const applied = [];\n  const queued = [];\n  const appliedSet = new Set();\n  const queuedSet = new Set();\n  for (const event of events) {\n    const amount = event.amountMinor;\n    if (!Number.isInteger(amount)) throw new Error('Invalid amountMinor');\n    const id = event.id;\n    if (event.synced) {\n      if (appliedSet.has(id)) continue;\n      appliedSet.add(id);\n      applied.push(id);\n      balanceMinor += amount;\n      if (queuedSet.has(id)) queuedSet.delete(id);\n    } else {\n      if (!appliedSet.has(id) && !queuedSet.has(id)) {\n        queuedSet.add(id);\n        queued.push(id);\n      }\n    }\n  }\n  return { balanceMinor: balanceMinor, applied: applied, queued: queued.filter(id => !appliedSet.has(id)) };\n}"
+      },
+      "promptHash": "a335d06e08ece5ab8b34140ce130976058e44fd2a6e849cb1a0df75b79738069",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "author-user-plan",
+      "durationMs": 19884,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 3672,
+        "prompt_tokens": 140,
+        "total_tokens": 3812,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 2904,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 128,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0044484,
+      "checks": {
+        "schemaValid": true,
+        "includesOffline": true,
+        "includesRecords": true,
+        "includesFeed": true,
+        "disclosesPhoto": true,
+        "disclosesSample": true,
+        "checksReconnect": true
+      },
+      "answer": {
+        "summary": "First version: a simple one-owner phone record book for a Nigerian poultry farmer. It works without internet for deaths, medications, feed remaining, and a sick-bird photo note. Saved records stay on the phone and can be sent to the online record later; on reconnect, sent items are marked copied and any unsent items stay pending for retry. It does not analyse photos, diagnose birds, give treatment advice, or provide verified veterinary contacts. No payments or sharing.",
+        "features": [
+          "One-owner record book with no sharing, invitations, staff accounts, or payment screens.",
+          "Offline forms to record mortality (date, number, note), medications (date, medicine name, amount/dose as typed, note), and feed remaining (date, feed type, amount left).",
+          "Simple history for each record type; feed screen shows the latest amount entered and earlier entries, without automatic stock calculation or forecasting.",
+          "Sick-bird note can attach one photo from the phone camera or gallery; the photo is only stored and shown with the note.",
+          "A clearly labelled 'Sample only - not checked' veterinary contact list; farmer can view or copy sample details, but the app gives no veterinary advice.",
+          "A 'waiting to send' count and a 'Send saved records' button; no internet is needed to create or view records.",
+          "On reconnect: the farmer taps 'Send saved records'; entries that send successfully show as sent in the online list, entries that fail remain waiting and can be retried, and photos send only when the connection allows."
+        ],
+        "limitations": [
+          "No image analysis, disease detection, diagnosis, or treatment suggestion is available or claimed; photos are only records the farmer can keep or show to a vet.",
+          "Veterinary contact details are sample data only, not real or verified; the farmer must confirm any contact independently.",
+          "One owner only; no multiple users, sharing, permissions, or payments.",
+          "Offline records exist only on that phone until sent; if the phone is lost, damaged, or app data is cleared before sending, unsent records may be lost.",
+          "Sending records needs internet and may be delayed or fail on weak networks; photos may take longer and may stay on the phone until they can be sent.",
+          "No automatic feed usage calculation, mortality alerts, medication advice, or guarantee of complete farm history beyond what the farmer enters."
+        ],
+        "checks": [
+          "Switch off the phone's internet, add two mortality records with date and note, close and reopen the app: both records appear and show as 'waiting to send'.",
+          "Still offline, add one medication record and enter feed remaining as 3 bags: both appear in their histories, and the feed screen shows 3 bags as the latest entered amount.",
+          "Still offline, create a sick-bird note and attach a photo: the note and photo appear in the phone record, and no diagnosis, health score, or treatment advice is shown.",
+          "Open the veterinary contact list: every contact is clearly marked 'Sample only - not checked', and no call or message is sent automatically.",
+          "Reconnect the internet and tap 'Send saved records': text records change from 'waiting to send' to sent and appear in the online list.",
+          "During sending, switch off the internet again: unsent records stay visible as 'waiting to send', and tapping 'Send saved records' after reconnecting retries them without creating duplicates.",
+          "Try to find sharing, invite, extra-user, or payment controls: none are present, and the record book remains usable by one owner only."
+        ]
+      },
+      "promptHash": "f7853df41216c0a5713750c533c89dba00427305f8253f76cc45ee3cc1bab0bf",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "independent-plan-blockers",
+      "durationMs": 16189,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 2111,
+        "prompt_tokens": 162,
+        "total_tokens": 2273,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 1884,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 128,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0025817999999999995,
+      "checks": {
+        "schemaValid": true,
+        "blocksBadPlan": true,
+        "photoGapFound": true,
+        "offlineGapFound": true,
+        "tenantGapFound": true,
+        "approvalGapFound": true
+      },
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          "Replace the desktop-only online form with a mobile-first experience that lets farmers capture or upload bird photos in the field.",
+          "Implement real photo ingestion and AI processing, or remove the photo-diagnosis claim and clearly label the service as text-only.",
+          "Add cautious guidance with explicit uncertainty, safety disclaimers, and escalation to a veterinarian for severe or ambiguous cases.",
+          "Enforce farm-scoped role-based authorization on every read and write so workers cannot query or modify other farms' data.",
+          "Implement offline-first treatment recording with local persistence, queued sync, retry, conflict resolution, and clear sync status instead of requiring connectivity for writes.",
+          "Replace developer-only test sign-off with independent acceptance tests covering photo capture, offline sync, authorization, and safety behavior.",
+          "Never require farmers to configure API keys or debug errors; provide managed configuration, user-friendly error messages, and support paths.",
+          "Require independent design, security, and privacy review instead of automatic author approval.",
+          "Define consent, retention, and access rules for bird photos and farm records before release."
+        ]
+      },
+      "promptHash": "9caae16bc2ca8cd93e6638f2300ffe3d85b26f32b81657e938031bc772078ee5",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "test": "pi-stream-tool-roundtrip",
+      "durationMs": 1681,
+      "verdict": "PASS",
+      "stopReason": "stop",
+      "tool": {
+        "name": "lookup_check",
+        "arguments": {
+          "checkpoint": "cp_482"
+        }
+      },
+      "answer": "Checkpoint `cp_482` has nonce `receipt_10eea110`; the check **failed** (`passed: false`).",
+      "usage": [
+        {
+          "input": 326,
+          "output": 37,
+          "cacheRead": 128,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 491,
+          "cost": {
+            "input": 0.000048899999999999996,
+            "output": 0.000022199999999999998,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.0000711
+          }
+        },
+        {
+          "input": 399,
+          "output": 30,
+          "cacheRead": 128,
+          "cacheWrite": 0,
+          "reasoning": 0,
+          "totalTokens": 557,
+          "cost": {
+            "input": 0.00005985,
+            "output": 0.000018,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.00007785
+          }
+        }
+      ],
+      "adapter": "@earendil-works/pi-ai@0.87.1 completeSimple (streaming internally), existing compat flags",
+      "requestShape": {
+        "reasoning": "max",
+        "maxRetries": 0
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "test": "strict-json-deadline",
+      "durationMs": 1648,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 153,
+        "prompt_tokens": 276,
+        "total_tokens": 429,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 128
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 148,
+        "reasoning_tokens": 0
+      },
+      "estimatedUsd": 0.00013319999999999999,
+      "checks": {
+        "schemaValid": true,
+        "correct": true
+      },
+      "answer": {
+        "eligibilityMet": true,
+        "deadlinePassed": true,
+        "recommendStarting": false,
+        "localDeadline": "2026-10-23T20:00:00+01:00",
+        "explanation": "Country NG meets the checked entry rules, so legal eligibility is satisfied. The deadline has passed: 2026-10-23T19:00:00Z was 13 hours before the check at 2026-10-24T08:00:00Z. In Africa/Lagos, the deadline was 2026-10-23 20:00 (UTC+01:00). Legal eligibility does not imply remaining build time, so starting is not recommended."
+      },
+      "promptHash": "e7cfbd1be93a2a6af1970237b809dbefeee7bacee28af0857afe957280fa2a48",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "test": "checked-repair-kobo-dedupe-offline",
+      "durationMs": 2893,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 296,
+        "prompt_tokens": 392,
+        "total_tokens": 688,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 128
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 264,
+        "reasoning_tokens": 0
+      },
+      "estimatedUsd": 0.00023639999999999997,
+      "checks": {
+        "schemaValid": true,
+        "hostTestsPass": true
+      },
+      "answer": {
+        "code": "function applyEvents(initial, events) {\n  if (!Number.isInteger(initial)) {\n    throw new Error(\"initial must be an integer\");\n  }\n\n  const appliedIds = new Set();\n  const queuedIds = new Set();\n  const applied = [];\n  const queued = [];\n  let balanceMinor = initial;\n\n  for (const event of events) {\n    const { id, amountMinor, synced } = event;\n\n    if (!Number.isInteger(amountMinor) || !Number.isFinite(amountMinor)) {\n      throw new Error(\"amountMinor must be a finite integer\");\n    }\n\n    if (appliedIds.has(id)) {\n      continue;\n    }\n\n    if (synced) {\n      if (queuedIds.has(id)) {\n        queuedIds.delete(id);\n        const index = queued.indexOf(id);\n        if (index !== -1) {\n          queued.splice(index, 1);\n        }\n      }\n\n      appliedIds.add(id);\n      applied.push(id);\n      balanceMinor += amountMinor;\n    } else if (!queuedIds.has(id)) {\n      queuedIds.add(id);\n      queued.push(id);\n    }\n  }\n\n  return { balanceMinor, applied, queued };\n}"
+      },
+      "promptHash": "a335d06e08ece5ab8b34140ce130976058e44fd2a6e849cb1a0df75b79738069",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "test": "author-user-plan",
+      "durationMs": 11954,
+      "verdict": "FAILED",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 829,
+        "prompt_tokens": 296,
+        "total_tokens": 1125,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 128
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 168,
+        "reasoning_tokens": 0
+      },
+      "estimatedUsd": 0.0005417999999999999,
+      "checks": {
+        "schemaValid": true,
+        "includesOffline": false,
+        "includesRecords": true,
+        "includesFeed": true,
+        "disclosesPhoto": true,
+        "disclosesSample": true,
+        "checksReconnect": false
+      },
+      "answer": {
+        "summary": "A simple offline-first mobile app for one Nigerian poultry farmer to log bird deaths and medication, check feed stock, and photograph sick birds for later review. Photos are stored for reference only; the app cannot identify diseases or analyze images. Veterinary contact details are placeholders and must be replaced by the farmer before use.",
+        "features": [
+          "Add a mortality record: enter the bird count, date, and a short reason such as 'unknown'. The entry is saved immediately on the phone and shown in the daily and total counts.",
+          "Add a medication record: enter the product name, amount or dose, date, and a note. The entry is saved immediately and appears in a medication list.",
+          "Update feed remaining: enter the number of bags or kilograms currently left, optionally update the date, and see the latest amount.",
+          "Take or attach a photo of a sick bird and add a short note. The photo is saved with the record, but no disease identification or health assessment is performed.",
+          "Browse records by day and search by medication or note.",
+          "Sync later: when the internet returns, save the app's own backup file to a chosen storage location. The farmer sends that file using email, WhatsApp, or another available channel. The app does not automatically contact a veterinarian or send records to a server.",
+          "Keep a visible 'not synced yet' or 'backup saved' marker and show the date and time of the latest backup."
+        ],
+        "limitations": [
+          "The app works without internet for entering and reviewing records. It does not automatically upload anything while offline.",
+          "There is no disease diagnosis, image analysis, treatment advice, or automatic alert based on bird photos.",
+          "The supplied veterinary contact information is sample data only. It must be replaced with real numbers and checked before relying on it.",
+          "There is no payment, subscription, multi-user access, or shared farm account.",
+          "Records and photos remain on the phone unless the farmer exports and sends a backup. Losing or resetting the phone may remove unsent records.",
+          "The backup file is intended for the farmer's own records; there is no claim that a veterinarian can open, receive, or act on it.",
+          "Feed tracking is a manually entered remaining amount, not a measurement from the app and not automatic inventory control."
+        ],
+        "checks": [
+          "Start with airplane mode on a new phone. Add one mortality, one medication, one feed update, and one bird photo; close and reopen the app and confirm all four remain available.",
+          "Enter a mortality of 3 birds. Confirm the daily count becomes 3 and the total across recorded days becomes 3.",
+          "Enter medication 'SampleMed', dose '1', and today's date. Confirm the entry is visible in the medication list and can be found by searching 'SampleMed'.",
+          "Set feed remaining to 25 kilograms, change it to 20 kilograms, and confirm the displayed latest amount is 20 kilograms with the update date.",
+          "Connect to the internet and create a backup file. Confirm the app identifies the file as a backup rather than claiming that records were sent to a veterinarian.",
+          "Send the backup file through a test email or WhatsApp message and open it on another device. Confirm that the sender's copy is stored where the farmer can find it.",
+          "Turn the internet off, add a record, and confirm it is marked 'not backed up yet'. Turn the internet on, create another backup, and confirm the new record is included while the earlier backup remains unchanged.",
+          "Open the supplied veterinary contact list and confirm it is clearly labelled 'sample only'. Replace each sample entry with a tested real contact, or remove the section if no contact is available.",
+          "Try to obtain a diagnosis from a sick-bird photo. Confirm the app provides no diagnosis, analysis, or treatment recommendation and only displays the photo and note.",
+          "Confirm no payment prompt, account registration, or shared-user setup is required."
+        ]
+      },
+      "promptHash": "f7853df41216c0a5713750c533c89dba00427305f8253f76cc45ee3cc1bab0bf",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "test": "independent-plan-blockers",
+      "durationMs": 4760,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 258,
+        "prompt_tokens": 318,
+        "total_tokens": 576,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 128
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 190,
+        "reasoning_tokens": 0
+      },
+      "estimatedUsd": 0.00020249999999999996,
+      "checks": {
+        "schemaValid": true,
+        "blocksBadPlan": true,
+        "photoGapFound": true,
+        "offlineGapFound": true,
+        "tenantGapFound": true,
+        "approvalGapFound": true
+      },
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          "Replace the desktop-only online form with a responsive mobile-first interface that supports camera capture, text description, and offline treatment records.",
+          "Implement genuine photo-based analysis by sending images to a vision-capable service, or clearly limit the feature to text-only guidance instead of advertising photo diagnosis.",
+          "Replace broad farm access with role-based authorization that grants each worker access only to records belonging to their assigned farm.",
+          "Add an offline-first local data store and queued synchronization so farmers can record treatments without connectivity and sync them later.",
+          "Provide curated, safety-reviewed guidance for sick birds with clear limitations and escalation advice rather than implying definitive diagnosis.",
+          "Use hosted or managed credentials and user-facing error handling so users are not required to configure API keys or debug technical failures.",
+          "Define objective acceptance criteria, including offline use, scoped access, photo handling, and synchronization, and validate them with independent tests rather than developer self-approval.",
+          "Require stakeholder or veterinary review of the guidance and safety messaging instead of automatically approving the design through the author.",
+          "Add privacy, consent, retention, and secure-deletion requirements for farmer records, uploaded images, and synchronized treatment data."
+        ]
+      },
+      "promptHash": "9caae16bc2ca8cd93e6638f2300ffe3d85b26f32b81657e938031bc772078ee5",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3-Flash",
+      "test": "pi-stream-tool-roundtrip",
+      "durationMs": 6728,
+      "verdict": "PASS",
+      "stopReason": "stop",
+      "tool": {
+        "name": "lookup_check",
+        "arguments": {
+          "checkpoint": "cp_482"
+        }
+      },
+      "answer": "Checkpoint cp_482 did not pass, and its receipt nonce is receipt_94cea8cb.",
+      "usage": [
+        {
+          "input": 204,
+          "output": 15,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 1,
+          "totalTokens": 219,
+          "cost": {
+            "input": 0.0000306,
+            "output": 0.000007499999999999999,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.0000381
+          }
+        },
+        {
+          "input": 244,
+          "output": 23,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "reasoning": 1,
+          "totalTokens": 267,
+          "cost": {
+            "input": 0.000036599999999999995,
+            "output": 0.0000115,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0.0000481
+          }
+        }
+      ],
+      "adapter": "@earendil-works/pi-ai@0.87.1 completeSimple (streaming internally), existing compat flags",
+      "requestShape": {
+        "reasoning": "max",
+        "maxRetries": 0
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3-Flash",
+      "test": "strict-json-deadline",
+      "durationMs": 6922,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 535,
+        "prompt_tokens": 98,
+        "total_tokens": 633,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 404,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": null,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 98,
+        "reasoning_tokens": 404
+      },
+      "estimatedUsd": 0.0002822,
+      "checks": {
+        "schemaValid": true,
+        "correct": true
+      },
+      "answer": {
+        "eligibilityMet": true,
+        "deadlinePassed": true,
+        "recommendStarting": false,
+        "localDeadline": "2026-10-23T20:00:00+01:00",
+        "explanation": "NG meets the checked entry rules, so legal eligibility is satisfied. However, the deadline was 2026-10-23T20:00:00+01:00 local time, which passed before 2026-10-24T09:00:00+01:00 local time; therefore there is no remaining build/submission time, so starting is not recommended."
+      },
+      "promptHash": "e7cfbd1be93a2a6af1970237b809dbefeee7bacee28af0857afe957280fa2a48",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3-Flash",
+      "test": "checked-repair-kobo-dedupe-offline",
+      "durationMs": 116502,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 7710,
+        "prompt_tokens": 214,
+        "total_tokens": 7924,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 7376,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": null,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 214,
+        "reasoning_tokens": 7376
+      },
+      "estimatedUsd": 0.0038871,
+      "checks": {
+        "schemaValid": true,
+        "hostTestsPass": true
+      },
+      "answer": {
+        "code": "function applyEvents(initial, events) {\n  if (!Number.isInteger(initial)) {\n    throw new Error('initial must be an integer');\n  }\n  if (!Array.isArray(events)) {\n    throw new Error('events must be an array');\n  }\n  var balance = initial;\n  var applied = [];\n  var queued = [];\n  var state = new Map();\n  for (var i = 0; i < events.length; i++) {\n    var e = events[i];\n    if (e === null || typeof e !== 'object') {\n      throw new Error('event must be an object');\n    }\n    var amount = e.amountMinor;\n    if (!Number.isInteger(amount)) {\n      throw new Error('amountMinor must be a finite integer');\n    }\n    var id = e.id;\n    var st = state.get(id);\n    if (e.synced) {\n      if (st === 'applied') {\n        continue;\n      }\n      if (st === 'queued') {\n        queued.splice(queued.indexOf(id), 1);\n      }\n      state.set(id, 'applied');\n      applied.push(id);\n      balance += amount;\n    } else if (st === undefined) {\n      state.set(id, 'queued');\n      queued.push(id);\n    }\n  }\n  return { balanceMinor: balance, applied: applied, queued: queued };\n}"
+      },
+      "promptHash": "a335d06e08ece5ab8b34140ce130976058e44fd2a6e849cb1a0df75b79738069",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3-Flash",
+      "test": "author-user-plan",
+      "durationMs": 64835,
+      "verdict": "FAILED",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 3992,
+        "prompt_tokens": 123,
+        "total_tokens": 4115,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 3243,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": null,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 123,
+        "reasoning_tokens": 3243
+      },
+      "estimatedUsd": 0.00201445,
+      "checks": {
+        "schemaValid": true,
+        "includesOffline": false,
+        "includesRecords": false,
+        "includesFeed": true,
+        "disclosesPhoto": true,
+        "disclosesSample": true,
+        "checksReconnect": false
+      },
+      "answer": {
+        "summary": "Version 1 is a simple phone tool for one Nigerian poultry farmer to log daily bird deaths and medicines, track how much feed is left, and save photos of sick birds. Everything works with no internet: entries are saved on the phone and marked 'waiting to send', then sent automatically when internet returns. Photos are kept only for viewing and sharing with a vet yourself — the app never diagnoses disease. The vet contacts included at first are samples only and must be replaced with the farmer's own.",
+        "features": [
+          "Record mortalities: pick the date, enter the number of birds, and add an optional reason.",
+          "Record medications: medicine name, date given, and a note on which birds or how much.",
+          "Track feed remaining: enter bags or kilograms left, update after use, and see a simple history of past entries.",
+          "Photograph a sick bird and attach it to a dated note; view or share the photo yourself (for example, send it to your vet).",
+          "Every action saves on the phone and works with no internet; unsent entries show 'waiting to send'.",
+          "On reconnect: unsent records are sent automatically, their status changes to 'sent', and nothing is recorded twice.",
+          "Vet contacts: a short list clearly marked SAMPLE, plus space to save your own vet's name and number with a button to call.",
+          "One owner only: records belong to a single person, and there are no payments or purchases anywhere."
+        ],
+        "limitations": [
+          "The app cannot analyze photos or tell you what is wrong with a bird. It only stores and displays pictures for you to share with a vet yourself.",
+          "The built-in vet contacts are sample data for demonstration only; they may not be real or correct, and the app does not verify any number you save.",
+          "One owner only: there is no way to share records with workers, family, or a second farm.",
+          "No payments: the app never asks for money and cannot buy feed, medicine, or services.",
+          "Feed levels are typed in by hand; the app does not weigh feed or update numbers by itself.",
+          "Records stay only on the phone until internet returns; if the phone is lost or broken first, unsent entries and photos can be lost.",
+          "Dates come from the phone's clock, so a wrong phone date creates wrong records."
+        ],
+        "checks": [
+          "With internet off, record 1 death, 1 medication, and a feed update; close and reopen the app — all three entries must still be there.",
+          "With internet off, photograph a sick bird and attach it to a note; reopen the note — the photo must display, and the app must NOT claim to identify any disease.",
+          "Open the vet list before editing: every contact must be visibly labeled SAMPLE. Then save your real vet's number and tap call — the phone must dial exactly the number you saved.",
+          "Turn internet back on: entries marked 'waiting to send' should change to 'sent' within a short time, and rechecking the records should show no duplicates.",
+          "Switch the phone fully off and on: records, photos, and feed numbers must all survive the restart.",
+          "Tap through every screen looking for any payment request (there must be none) and any promise to diagnose birds (there must be none).",
+          "Enter one feed amount today and a different one tomorrow; the history must show both entries in order.",
+          "Try to find any way to add a second user or share records — there should be none."
+        ]
+      },
+      "promptHash": "f7853df41216c0a5713750c533c89dba00427305f8253f76cc45ee3cc1bab0bf",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3-Flash",
+      "test": "independent-plan-blockers",
+      "durationMs": 349792,
+      "verdict": "UNAVAILABLE",
+      "error": "TimeoutError: The operation timed out."
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "sound-plan-negative-control",
+      "durationMs": 7234,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 1118,
+        "prompt_tokens": 246,
+        "total_tokens": 1364,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 1006,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 128,
+          "multimodal_tokens": null
+        }
+      },
+      "estimatedUsd": 0.0014153999999999998,
+      "checks": {
+        "schemaValid": true,
+        "acceptsSoundPlan": true
+      },
+      "answer": {
+        "verdict": "pass",
+        "findings": [
+          "Scope, exclusions, and single-owner offline-sync intent are clear and internally consistent.",
+          "Host checks cover offline persistence, reconnect exactly-once behavior, owner-scoped access, and primary-action visibility on phone/desktop.",
+          "Approval gates are explicit: user approves scope and rendered design before build; veterinary-advice limitation is visible.",
+          "No unresolved product decisions or premature claims of passing checks are present; verdict is limited to the first-version plan, not production readiness."
+        ]
+      },
+      "promptHash": "89f8df37498d79964298b860b52f7208c892cc2f29f0bc87a4f109cb33fd4403",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "test": "sound-plan-negative-control",
+      "durationMs": 89736,
+      "verdict": "UNAVAILABLE",
+      "error": "TypeError: The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()"
+    },
+    {
+      "model": "zai-org/GLM-5.3-Flash",
+      "test": "sound-plan-negative-control",
+      "durationMs": 33667,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 2239,
+        "prompt_tokens": 223,
+        "total_tokens": 2462,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 2047,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": null,
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 223,
+        "reasoning_tokens": 2047
+      },
+      "estimatedUsd": 0.00115295,
+      "checks": {
+        "schemaValid": true,
+        "acceptsSoundPlan": true
+      },
+      "answer": {
+        "verdict": "pass",
+        "findings": [
+          "Scope, exclusions, and intent are internally consistent; the recordkeeping-not-veterinary-advice limitation is visible before approval, which fits the excluded diagnosis/medication features.",
+          "Each core included behavior maps to a concrete host check: durable save (offline reload), event-ID dedupe (syncs exactly once), owner scoping (second account blocked), responsive form (primary action on phone/desktop). Readable errors with Caddie-owned recovery has no named check, acceptable at plan level.",
+          "Queued/synced label display is described but not directly asserted by a check; the sync-exactly-once check covers the underlying mechanism (non-blocking for v1).",
+          "Process constraints hold: no unresolved product decisions, no new spending request (hosting/costs pre-provisioned), no claims of passing checks before host receipts, and scope-approval then design-approval before build is coherent."
+        ]
+      },
+      "promptHash": "89f8df37498d79964298b860b52f7208c892cc2f29f0bc87a4f109cb33fd4403",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "vision-good-phone-desktop",
+      "durationMs": 12814,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 3846,
+        "prompt_tokens": 1148,
+        "total_tokens": 4994,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 3833,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 1024,
+          "multimodal_tokens": {
+            "image": 1027
+          }
+        }
+      },
+      "estimatedUsd": 0.0049596,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true
+      },
+      "answer": {
+        "verdict": "pass",
+        "findings": []
+      },
+      "promptHash": "938ee3e41944a2cf65a8d514ff23755f0d48e089f03678747313dbbe45af8817",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "vision-broken-phone-desktop",
+      "durationMs": 9653,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 2997,
+        "prompt_tokens": 1148,
+        "total_tokens": 4145,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 2851,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 1024,
+          "multimodal_tokens": {
+            "image": 1027
+          }
+        }
+      },
+      "estimatedUsd": 0.0039408,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true,
+        "concreteVisualIssue": true
+      },
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          "Phone: The title, subtitle, and card copy are extremely faint against the off-white background and are not readable.",
+          "Phone: The subtitle and the single card appear clipped at the right viewport edge; the card's right border/rounded corner is not visible.",
+          "Desktop: The title, subtitle, and both card bodies have very low contrast and are effectively illegible.",
+          "Desktop: Card contents/actions cannot be read, so the claim that all actions are visible is not supported.",
+          "Both: Key text and controls are illegible despite the brief claiming readable contrast and complete professional layouts."
+        ]
+      },
+      "promptHash": "3096e0c824222854c64564bd1016b81fcbe4b0e937be942b3a3451160a0769b8",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "test": "vision-blank-phone-desktop",
+      "durationMs": 1438,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 243,
+        "prompt_tokens": 1148,
+        "total_tokens": 1391,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 186,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 1024,
+          "multimodal_tokens": {
+            "image": 1027
+          }
+        }
+      },
+      "estimatedUsd": 0.000636,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true
+      },
+      "answer": {
+        "verdict": "unavailable",
+        "findings": [
+          "Phone screenshot is blank white with no visible app UI.",
+          "Desktop screenshot is blank white with no visible app UI.",
+          "Cannot assess contrast, action visibility, clipping, or layout completeness because no interface content is visible."
+        ]
+      },
+      "promptHash": "0ec59acd35e8c042fe4776902742cfb1bda1340ee1dd846aed6da48d697ed11e",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "test": "vision-good-phone-desktop",
+      "durationMs": 1397,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 17,
+        "prompt_tokens": 2430,
+        "total_tokens": 2447,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 128,
+          "image_tokens": 2150
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 2302,
+        "reasoning_tokens": 0
+      },
+      "estimatedUsd": 0.0003747,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true
+      },
+      "answer": {
+        "verdict": "pass",
+        "findings": []
+      },
+      "promptHash": "938ee3e41944a2cf65a8d514ff23755f0d48e089f03678747313dbbe45af8817",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "test": "vision-broken-phone-desktop",
+      "durationMs": 2169,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 142,
+        "prompt_tokens": 2430,
+        "total_tokens": 2572,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 256,
+          "image_tokens": 2150
+        },
+        "prompt_cache_hit_tokens": 256,
+        "prompt_cache_miss_tokens": 2174,
+        "reasoning_tokens": 0
+      },
+      "estimatedUsd": 0.0004497,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true,
+        "concreteVisualIssue": true
+      },
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          "Phone: the 'Your farm today' heading, intro copy, and card content are extremely low contrast and effectively unreadable.",
+          "Phone: the intro sentence and the right side of the entry card are cut off at the viewport edge.",
+          "Phone: the second 'Tasks remaining' card is absent, and no visible task action or submit control appears.",
+          "Desktop: the main heading, explanatory copy, and both cards' placeholder text are nearly invisible against white.",
+          "Desktop: the layout leaves most of the screen empty and provides no clearly visible save, submit, or navigation action."
+        ]
+      },
+      "promptHash": "3096e0c824222854c64564bd1016b81fcbe4b0e937be942b3a3451160a0769b8",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "test": "vision-blank-phone-desktop",
+      "durationMs": 1574,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 84,
+        "prompt_tokens": 2430,
+        "total_tokens": 2514,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 128,
+          "image_tokens": 2150
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 2302,
+        "reasoning_tokens": 0
+      },
+      "estimatedUsd": 0.0004149,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true
+      },
+      "answer": {
+        "verdict": "unavailable",
+        "findings": [
+          "Phone screenshot is blank; no app UI, text, controls, or layout are visible.",
+          "Desktop screenshot is blank; no app UI, text, controls, or layout are visible.",
+          "The brief's claims about contrast, visible actions, clipping, and professional layout cannot be verified from these images."
+        ]
+      },
+      "promptHash": "0ec59acd35e8c042fe4776902742cfb1bda1340ee1dd846aed6da48d697ed11e",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3-Flash",
+      "test": "vision-good-phone-desktop",
+      "durationMs": 23456,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 1397,
+        "prompt_tokens": 2255,
+        "total_tokens": 3652,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 1386,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "image_tokens": 2150
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2255,
+        "reasoning_tokens": 1386
+      },
+      "estimatedUsd": 0.00103675,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true
+      },
+      "answer": {
+        "verdict": "pass",
+        "findings": []
+      },
+      "promptHash": "938ee3e41944a2cf65a8d514ff23755f0d48e089f03678747313dbbe45af8817",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3-Flash",
+      "test": "vision-broken-phone-desktop",
+      "durationMs": 10917,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 638,
+        "prompt_tokens": 2255,
+        "total_tokens": 2893,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 448,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "image_tokens": 2150
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2255,
+        "reasoning_tokens": 448
+      },
+      "estimatedUsd": 0.00065725,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true,
+        "concreteVisualIssue": true
+      },
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          "Contrast failure: 'Your farm today' headline, subtitle, and card body text render in very light gray on white on BOTH screens — barely readable, contradicting 'readable contrast'",
+          "Phone clipping: subtitle text is cut off at the right viewport edge mid-sentence ('...sync when ')",
+          "Phone clipping: the 'Broiler cycle A' card overflows the right edge — its border and content are cut off by the viewport",
+          "No visible actions: neither screen shows any button, CTA, tab bar, or interactive element (no way to record water/feed from this view), contradicting 'all actions visible'",
+          "Desktop: page is mostly empty below the two cards — no primary action area or content, layout reads as incomplete",
+          "Only the FARMHAND logo and 'Saved on this device' label are clearly legible; everything else in the content area is too faint"
+        ]
+      },
+      "promptHash": "3096e0c824222854c64564bd1016b81fcbe4b0e937be942b3a3451160a0769b8",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    },
+    {
+      "model": "zai-org/GLM-5.3-Flash",
+      "test": "vision-blank-phone-desktop",
+      "durationMs": 4097,
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "usage": {
+        "completion_tokens": 196,
+        "prompt_tokens": 2255,
+        "total_tokens": 2451,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 77,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "image_tokens": 2150
+        },
+        "prompt_cache_hit_tokens": 0,
+        "prompt_cache_miss_tokens": 2255,
+        "reasoning_tokens": 77
+      },
+      "estimatedUsd": 0.00043625,
+      "checks": {
+        "schemaValid": true,
+        "expectedDecision": true
+      },
+      "answer": {
+        "verdict": "unavailable",
+        "findings": [
+          "Image 1 (phone): rendered frame is entirely blank/white — no UI elements, text, or actions visible to evaluate",
+          "Image 2 (desktop): rendered frame is entirely blank/white — no UI elements, text, or actions visible to evaluate",
+          "Author claims about contrast, action visibility, clipping, and layout cannot be verified against pixels; screenshots appear to have failed to render rather than showing a completed professional layout",
+          "Action: re-capture or re-export both screenshots and resubmit for review"
+        ]
+      },
+      "promptHash": "0ec59acd35e8c042fe4776902742cfb1bda1340ee1dd846aed6da48d697ed11e",
+      "requestShape": {
+        "responseFormat": "json_schema",
+        "strict": true
+      }
+    }
+  ]
+}

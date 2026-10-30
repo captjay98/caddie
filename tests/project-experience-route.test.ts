@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import type { D1Database } from "../apps/app/src/server/auth.ts";
+import { applyFinalSchema, fixtureLegacyQualityPolicy } from "./fixtures/migrations.ts";
 import { projectScopeForUser } from "../apps/app/src/server/scope.ts";
 import { ensureHomeProject, createPlanDocRevision } from "../apps/app/src/server/projects.ts";
 import { createRun } from "../apps/app/src/server/runs.ts";
@@ -49,15 +50,7 @@ function d1Adapter(sqlite: Database): D1Database {
 async function world() {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys=ON");
-  for (const m of [
-    "0001_product.sql", "0002_controls.sql", "0003_artifacts.sql", "0005_runs.sql",
-    "0008_profile.sql", "0017_profile_preferences.sql", "0011_home_project.sql",
-    "0015_plan_decisions.sql", "0018_build_workflow.sql", "0024_design_phase.sql",
-    // build_workflows' team-mode columns, then the look step's phases.
-    "0033_judge_accounts.sql", "0040_team_mode.sql", "0044_looks_phase.sql", "0048_repair_escalation.sql",
-  ]) {
-    sqlite.exec(readFileSync(new URL(`../apps/app/migrations/${m}`, import.meta.url), "utf8"));
-  }
+  applyFinalSchema(sqlite);
   sqlite.prepare("insert into user (id,name,email,emailVerified,createdAt,updatedAt) values (?,?,?,0,?,?)")
     .run("alice", "alice", "alice@example.com", "2026-10-11T00:00:00.000Z", "2026-10-11T00:00:00.000Z");
   const db = d1Adapter(sqlite);
@@ -71,6 +64,9 @@ async function world() {
       operationKey: "tool-create-one", sourceConversationId: homeRun.conversationId,
     });
     const scope = await projectScopeForUser(db, "alice", started.project.id);
+    // Pre-gate project: this fixture writes plan drafts directly, so its draft
+    // was never subject to quality-v1's review (see fixtureLegacyQualityPolicy).
+    fixtureLegacyQualityPolicy(sqlite, scope.projectId);
     const plan = await createPlanDocRevision(db, scope, { kind: "prd", body: "# Todo\n\nAdd/complete/delete/filter/persist." });
     await workflowSnapshot(db, scope);
     return { scope, plan };

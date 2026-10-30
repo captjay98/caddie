@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+// Every helper call is metered (owner 2026-10-29): an empty ledger, nothing spent yet.
+const METERED = { db: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), run: async () => ({}) }) }) } as never };
 import { inspectCandidates, type InspectableCandidate } from '../apps/app/src/server/candidate-inspection.ts';
 
 /**
@@ -41,14 +43,14 @@ const PROFILE = { country: 'NG', experienceLevel: 'senior', formatPreference: 'o
 
 describe('Stage 2 — inspectCandidates (batched AI fit, stubbed fetch)', () => {
 	test('no key -> empty map + a visible gap (heuristics-only), never throws', async () => {
-		const result = await inspectCandidates({ profile: PROFILE, candidates: CANDIDATES });
+		const result = await inspectCandidates({ accounting: METERED, profile: PROFILE, candidates: CANDIDATES });
 		expect(result.byId.size).toBe(0);
 		expect(result.gap).toBeTruthy();
-		expect(result.gap!.toLowerCase()).toContain('heuristics');
+		expect(result.gap!.toLowerCase()).toContain('simpler order');
 	});
 
 	test('empty candidate list -> empty map, NO gap (nothing to inspect is not an error)', async () => {
-		const result = await inspectCandidates({ apiKey: 'k', profile: PROFILE, candidates: [] });
+		const result = await inspectCandidates({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidates: [] });
 		expect(result.byId.size).toBe(0);
 		expect(result.gap).toBeNull();
 	});
@@ -62,7 +64,7 @@ describe('Stage 2 — inspectCandidates (batched AI fit, stubbed fetch)', () => 
 				],
 			}),
 		});
-		const result = await inspectCandidates({ apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
+		const result = await inspectCandidates({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
 		expect(result.gap).toBeNull();
 		expect(result.byId.get('c0')).toEqual({ verdict: 'strong', reason: 'Matches your AI-agents interest and TypeScript skill, and it is online.', confidence: 0.9 });
 		expect(result.byId.get('c1')!.verdict).toBe('weak');
@@ -70,14 +72,14 @@ describe('Stage 2 — inspectCandidates (batched AI fit, stubbed fetch)', () => 
 
 	test('a candidate the model OMITS stays absent (honest unknown at the read site)', async () => {
 		stubModel({ content: JSON.stringify({ items: [{ i: 0, verdict: 'possible', reason: 'Some overlap.', confidence: 0.5 }] }) });
-		const result = await inspectCandidates({ apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
+		const result = await inspectCandidates({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
 		expect(result.byId.has('c0')).toBe(true);
 		expect(result.byId.has('c1')).toBe(false); // not scored -> absent, not fabricated
 	});
 
 	test('an invented out-of-range index maps to nothing (dropped, never mis-assigned)', async () => {
 		stubModel({ content: JSON.stringify({ items: [{ i: 7, verdict: 'strong', reason: 'ghost', confidence: 1 }] }) });
-		const result = await inspectCandidates({ apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
+		const result = await inspectCandidates({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
 		expect(result.byId.size).toBe(0);
 	});
 
@@ -87,7 +89,7 @@ describe('Stage 2 — inspectCandidates (batched AI fit, stubbed fetch)', () => 
 				items: [{ i: 0, verdict: 'amazing', reason: 'x'.repeat(500), confidence: 9 }],
 			}),
 		});
-		const result = await inspectCandidates({ apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
+		const result = await inspectCandidates({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
 		const c0 = result.byId.get('c0')!;
 		expect(c0.verdict).toBe('unknown'); // 'amazing' is not a valid verdict
 		expect(c0.reason.length).toBeLessThanOrEqual(160);
@@ -96,27 +98,28 @@ describe('Stage 2 — inspectCandidates (batched AI fit, stubbed fetch)', () => 
 
 	test('tolerates a fenced ```json block around the object', async () => {
 		stubModel({ content: '```json\n{"items":[{"i":0,"verdict":"possible","reason":"ok","confidence":0.5}]}\n```' });
-		const result = await inspectCandidates({ apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
+		const result = await inspectCandidates({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
 		expect(result.byId.get('c0')!.verdict).toBe('possible');
 	});
 
 	test('non-2xx -> empty + gap (fail-soft)', async () => {
 		stubModel({ status: 503, content: '' });
-		const result = await inspectCandidates({ apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
+		const result = await inspectCandidates({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
 		expect(result.byId.size).toBe(0);
-		expect(result.gap).toContain('503');
+		// Plain words for the person (review 2026-10-28); the status code is not shown.
+		expect(result.gap).toContain('simpler order');
 	});
 
 	test('unparseable reply -> empty + gap (fail-soft)', async () => {
 		stubModel({ content: 'I am a reasoning model and I forgot to output JSON.' });
-		const result = await inspectCandidates({ apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
+		const result = await inspectCandidates({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
 		expect(result.byId.size).toBe(0);
 		expect(result.gap).toBeTruthy();
 	});
 
 	test('network throw -> empty + gap (fail-soft, never throws)', async () => {
 		stubModel({ throwNetwork: true });
-		const result = await inspectCandidates({ apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
+		const result = await inspectCandidates({ accounting: METERED, apiKey: 'k', profile: PROFILE, candidates: CANDIDATES });
 		expect(result.byId.size).toBe(0);
 		expect(result.gap).toBeTruthy();
 	});

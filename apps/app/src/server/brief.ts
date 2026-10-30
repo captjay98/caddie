@@ -12,8 +12,10 @@ import { listCandidates, computeFit } from './discovery.ts';
 import { listPreviews } from './previews.ts';
 import { listPackages, getReadiness, getPackage } from './submission.ts';
 import { projectHackathon } from './project-hackathon.ts';
+import { getProfile } from './profiles.ts';
 import { STOP_SENTINEL } from './project-experience.ts';
 import { readBuildBundle, readOutputManifest } from './build-workflow.ts';
+import { evidenceConflictCopy } from '../shared/evidence-copy.ts';
 
 /** Format an ISO timestamp as a date a person reads, in the schedule's own
  *  timezone, e.g. "Monday, 6 October 2026 at 08:00". Returns the raw string
@@ -42,7 +44,7 @@ function readableDate(iso: string, timezone: string): string {
 function plainCheck(issue: string): string {
 	const raw = issue.trim();
 	if (raw.length > 0 && raw.includes(' ') && !/\b[a-z0-9-]+:[a-z0-9-]+\b/i.test(raw)) return raw;
-	return 'A check did not pass yet. Caddie is adjusting the build and will run the checks again.';
+	return 'Caddie found a problem in this part and is fixing it before you see the app.';
 }
 
 /**
@@ -53,10 +55,12 @@ function plainCheck(issue: string): string {
  * unknown check returns null, so the card shows no panel and keeps its plain
  * summary.
  */
+// Owner 2026-10-30: Caddie's own internal checks (tests, the browser build,
+// installing) are not something the owner can picture or act on ("What needs
+// fixing: The app's own tests must all pass" under "73 of 75 passed"). They get
+// the plain fallback summary and no panel; only checks of what the person
+// will see and do keep a "What needs fixing" line.
 const REPAIR_EXPECTATIONS: Record<string, string> = {
-	'behavior-tests': "The app's own tests must all pass.",
-	'browser-bundle': 'The app must build for the browser.',
-	dependencies: "The app's parts must install cleanly.",
 	'part-boundary': 'Each builder changes only its own part of the app.',
 	'contract-create': 'Something you add must be saved.',
 	'contract-read': 'Save something, restart the app, and it must still be there.',
@@ -69,37 +73,6 @@ function repairExpectation(issue: string): string | null {
 	// issue is "<featureId>:<check>"; the check is the part after the last ":".
 	const check = issue.includes(':') ? issue.slice(issue.lastIndexOf(':') + 1).trim() : '';
 	return REPAIR_EXPECTATIONS[check] ?? null;
-}
-
-/**
- * The deadline countdown parts for a card (lane 14 step 2), computed from a
- * real timestamp in its own timezone: whole days left (floored, never
- * negative), the date a person reads ("Friday, 23 October"), and the time of
- * day ("17:00"). Returns null when the timestamp cannot be parsed, so the card
- * keeps its summary instead of showing "Invalid Date". `nowIso` is passed in
- * so the count is deterministic in tests.
- */
-export function deadlineParts(
-	iso: string,
-	timezone: string,
-	nowIso: string,
-): { daysLeft: number; dateLabel: string; timeLabel: string } | null {
-	const when = new Date(iso);
-	const now = new Date(nowIso);
-	if (Number.isNaN(when.getTime()) || Number.isNaN(now.getTime())) return null;
-	const tz = (opts: Intl.DateTimeFormatOptions): Intl.DateTimeFormat => {
-		try {
-			return new Intl.DateTimeFormat('en-GB', { ...opts, timeZone: timezone });
-		} catch {
-			return new Intl.DateTimeFormat('en-GB', { ...opts, timeZone: 'UTC' });
-		}
-	};
-	// Days left measured as whole calendar days between the two instants,
-	// floored and clamped at zero — a passed deadline reads "0 days left".
-	const daysLeft = Math.max(0, Math.floor((when.getTime() - now.getTime()) / 86_400_000));
-	const dateLabel = tz({ weekday: 'long', day: 'numeric', month: 'long' }).format(when);
-	const timeLabel = tz({ hour: '2-digit', minute: '2-digit', hour12: false }).format(when);
-	return { daysLeft, dateLabel, timeLabel };
 }
 
 /**
@@ -191,7 +164,7 @@ async function pendingApprovalCards(db: D1Database, scope: Scope, nowIso: string
 	const projectId = scope.projectId;
 	const rows = await queryAll(
 		db,
-		`select "id", "action", "resourceId", "revisionHash", "createdAt", "expiresAt", "status", "decidedAt"
+		`select "id", "action", "resourceId", "revisionHash", "createdAt", "expiresAt", "status", "decidedAt", (select kind from plan_doc_revisions p where p.id=approvals.resourceId and p.projectId=approvals.projectId) as artifactKind
 		   from "approvals"
 		  where "projectId" = ? and (
             ("status" = 'pending' and "expiresAt" > ?) or "id" in (
@@ -280,6 +253,7 @@ function approvalCard(row: Record<string, unknown>, projectId: string, nowIso: s
 		// approving does and what they decided, in plain words (the outcome word
 		// stays in the summary, so history always shows it).
 		const plan = approval.action === 'design';
+		const designDocument = row.artifactKind === 'design';
 		const PLAN_OUTCOME: Record<string, { headline: string; summary: string }> = {
 			approved: { headline: 'You approved the plan', summary: 'This plan was approved.' },
 			rejected: { headline: 'You turned the plan down', summary: 'This plan was rejected.' },
@@ -292,10 +266,10 @@ function approvalCard(row: Record<string, unknown>, projectId: string, nowIso: s
 			id: newCardId('approval', approval.id),
 			projectId: String(row.projectId ?? projectId),
 			kind: 'approval',
-			headline: pending ? (plan ? 'Your plan is ready to build' : copy.title) : plan ? planDecided.headline : `${copy.label.replace(/^Review /, '')} — ${outcome}`,
+			headline: pending ? (plan ? designDocument ? 'Your design is ready to review' : 'Your plan is ready to review' : copy.title) : plan ? planDecided.headline : `${copy.label.replace(/^Review /, '')} — ${outcome}`,
 			summary: pending
 				? plan
-					? 'Approve it and Caddie starts building. Nothing is published until you decide.'
+					? designDocument ? 'Approve this design and Caddie starts building your app.' : 'Review what your app will do. You’ll approve its design before building starts.'
 					: `Approving this authorises ${copy.authorises}`
 				: plan
 					? `${planDecided.summary} Open it to read the plan.`
@@ -303,7 +277,7 @@ function approvalCard(row: Record<string, unknown>, projectId: string, nowIso: s
 			evidenceIds: [],
 			status: pending ? 'needs-you' : 'handled',
 			updatedAt: pending ? approval.createdAt : approval.decidedAt ?? (outcome === 'expired' ? approval.expiresAt : approval.createdAt),
-			primaryAction: { label: pending ? copy.label : 'View decision', kind: 'review', targetId: approval.id },
+			primaryAction: { label: pending ? plan ? designDocument ? 'Review design' : 'Review plan' : copy.label : 'View decision', kind: 'review', targetId: approval.id },
 			// Carried off-contract so pendingApprovalCards can match the plan-doc
 			// revision; stripped before the card is returned.
 			_resourceId: approval.resourceId,
@@ -320,7 +294,7 @@ export async function approvalHistory(db: D1Database, actorId: string, before?: 
  const at = `coalesce(decidedAt, case when status = 'pending' then expiresAt else createdAt end)`;
  const args: unknown[] = [...projects.map(p => p.id), nowIso];
  if (before) args.push(before.at, before.at, before.id);
- const found = await queryAll(db, `select *, ${at} as historyAt from approvals where projectId in (${projects.map(() => '?').join(',')}) and (status != 'pending' or expiresAt <= ?) ${before ? `and (${at} < ? or (${at} = ? and id < ?))` : ''} order by historyAt desc, id desc limit 41`, ...args);
+ const found = await queryAll(db, `select *, (select kind from plan_doc_revisions p where p.id=approvals.resourceId and p.projectId=approvals.projectId) as artifactKind, ${at} as historyAt from approvals where projectId in (${projects.map(() => '?').join(',')}) and (status != 'pending' or expiresAt <= ?) ${before ? `and (${at} < ? or (${at} = ? and id < ?))` : ''} order by historyAt desc, id desc limit 41`, ...args);
  const page = found.slice(0, 40);
  const last = page.at(-1);
  return { cards: page.map(row => approvalCard(row, String(row.projectId), nowIso)), next: found.length > 40 && last ? { at: String(last.historyAt), id: String(last.id) } : null };
@@ -343,13 +317,11 @@ async function conflictCards(db: D1Database, scope: Scope): Promise<DecisionCard
 			id: newCardId('conflict', survey.conflict.conflictId),
 			projectId: scope.projectId,
 			kind: 'change',
-			headline: `${survey.claimType} readings disagree — both retained, neither chosen`,
-			summary:
-				'Sources of equal authority state different values, so the disagreement is kept as a retained conflict instead of being resolved. Nothing has been built on either reading.',
+			...evidenceConflictCopy(survey.claimType),
 			evidenceIds: [...survey.conflict.claimIds],
 			status: 'changed',
 			updatedAt: updatedAt === '' ? survey.conflict.conflictId : updatedAt,
-			primaryAction: { label: 'Read the conflict', kind: 'inspect', targetId: survey.claimType },
+			primaryAction: { label: 'Compare sources', kind: 'inspect', targetId: survey.claimType },
 		});
 	}
 	return cards;
@@ -440,30 +412,39 @@ async function scheduleCards(db: D1Database, scope: Scope, nowIso: string): Prom
  * The hackathon deadline card (lane 14 step 6): the REAL hackathon deadline
  * the project card already shows (projectHackathon — the accepted proposal's
  * event, or the project's contestUrl, with the deadline parsed from the stored
- * listing), never a schedule's nextRunAt. It carries the days-left countdown,
- * the deadline in the reader's own locale ("Your time → …"), and the
+ * listing), never a schedule's nextRunAt. The stored listing is date-only, so
+ * the card shows the date and a whole-day countdown and says plainly that the
+ * closing hour is unconfirmed — it never renders an invented clock time as
+ * if it were sourced (the 2026-10-27 "11:59 PM" freeze). It also carries the
  * submission steps from the project's real submission package checklist. No
  * hackathon, or no parseable deadline → no card (the project simply has none).
  */
 async function hackathonDeadlineCard(db: D1Database, scope: Scope, nowIso: string): Promise<DecisionCard[]> {
 	const hackathon = await projectHackathon(db, scope, Date.parse(nowIso) || Date.now());
 	if (!hackathon || !hackathon.deadline) return [];
-	// The deadline instant is the END of the deadline day (projectHackathon
-	// stores a YYYY-MM-DD). Render the countdown + date/time in UTC (the stored
-	// deadline has no timezone) and a reader-locale "Your time →" line.
-	const deadlineIso = `${hackathon.deadline}T23:59:59Z`;
-	const parts = deadlineParts(deadlineIso, 'UTC', nowIso);
-	if (!parts) return [];
-	const when = new Date(deadlineIso);
-	// The reader's own local time (TheCard "Your time →" line), from the host
-	// locale/timezone — deterministic enough for display, never a claim.
-	let localTimeLabel: string | undefined;
+	// A date-only listing establishes a calendar date, not an instant: format
+	// the bare date in UTC (a YYYY-MM-DD read as UTC midnight keeps its own
+	// calendar day) and leave the hour unknown. daysLeft is the documented
+	// end-of-deadline-day whole-day countdown from daysUntil — a countdown
+	// basis, never a displayed clock time.
+	const when = new Date(`${hackathon.deadline}T00:00:00.000Z`);
+	if (Number.isNaN(when.getTime())) return [];
+	let dateLabel: string;
 	try {
-		localTimeLabel = new Intl.DateTimeFormat('en-US', {
-			weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+		dateLabel = new Intl.DateTimeFormat('en-GB', {
+			weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC',
 		}).format(when);
 	} catch {
-		localTimeLabel = undefined;
+		return [];
+	}
+	let localTimeLabel: string | undefined;
+	if (hackathon.deadlineUtc) {
+		const profile = await getProfile(db, scope.actorId);
+		if (profile?.timezone) {
+			try {
+				localTimeLabel = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZoneName: 'short', timeZone: profile.timezone }).format(new Date(hackathon.deadlineUtc));
+			} catch { /* A missing or invalid profile zone is not a local-time claim. */ }
+		}
 	}
 	// The submission steps from the real checklist of the project's submission
 	// package, when one exists. A 'verified' item is done; everything else is
@@ -486,19 +467,29 @@ async function hackathonDeadlineCard(db: D1Database, scope: Scope, nowIso: strin
 		projectId: scope.projectId,
 		kind: 'deadline',
 		headline: 'Leave time to tell the story',
-		summary: 'The app is one part of the submission. Your demo and project write-up still need a final pass.',
-		evidenceIds: [],
+		summary: hackathon.deadlineUtc ? 'The app is one part of the submission. Your demo and project write-up still need a final pass.' : 'The app is one part of the submission. Your demo and project write-up still need a final pass. Caddie hasn’t confirmed the closing time — confirm the exact time on the contest site.',
+		evidenceIds: hackathon.deadlineClaimId ? [hackathon.deadlineClaimId] : [],
 		status: hackathon.ended ? 'handled' : 'needs-you',
 		updatedAt: nowIso,
 		primaryAction: { label: 'Review submission', kind: 'review', targetId: scope.projectId },
 		deadline: {
-			...parts,
-			source: hackathon.title,
+			daysLeft: hackathon.daysLeft ?? 0,
+			dateLabel,
+			timeLabel: hackathon.deadlineOriginal ?? 'time not confirmed',
 			...(localTimeLabel ? { localTimeLabel } : {}),
+			source: hackathon.title,
+			...((hackathon.deadlineSourceUrl ?? hackathon.url) && safeContestUrl((hackathon.deadlineSourceUrl ?? hackathon.url)!) ? { sourceUrl: (hackathon.deadlineSourceUrl ?? hackathon.url)! } : {}),
 			...(steps ? { steps } : {}),
 		},
 		...(hackathon.title ? { footer: { appName: hackathon.title, version: 'Submission' } } : {}),
 	} satisfies DecisionCard];
+}
+
+function safeContestUrl(value: string): boolean {
+	try {
+		const url = new URL(value);
+		return url.protocol === 'https:' && !url.username && !url.password;
+	} catch { return false; }
 }
 
 /** The project's brief: every live decision the project's own state demands. */
@@ -536,9 +527,16 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
 	checkAttempt = Number(c?.n ?? 1) + 1;
  }
  const appName = await projectAppName(db, scope.projectId);
+ // "Check attempt 60" counted every failed round of the whole run (owner
+ // 2026-10-30): a large number that only alarms. The footer names the app.
+ void checkAttempt;
  const footer = appName
-	? { appName, ...(ready && readyChecks?.version ? { version: `Version ${readyChecks.version}` } : repairing ? { version: `Check attempt ${checkAttempt}` } : {}) }
+	? { appName, ...(ready && readyChecks?.version ? { version: `Version ${readyChecks.version}` } : {}) }
 	: null;
+ // A live build card is as fresh as the build's newest action (owner
+ // 2026-10-30: "39m ago" on a build that was writing files every minute;
+ // workflow.updatedAt only moves on phase changes).
+ const updatedAt = phase === 'building' ? await latestBuildActivityAt(db, runId, String(workflow.updatedAt)) : String(workflow.updatedAt);
  // Step 2: the repair "What needs fixing" panel is a FIXED expectation keyed
  // from the failed check (run_rounds.issue). When the check is known, the card
  // body is the round's own plain sentence (run_rounds.detail) plus a fixed
@@ -570,9 +568,9 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
  return [{
   id: newCardId(`workflow_${ready ? 'preview' : repairing ? 'repair' : phase === 'blocked' ? 'blocked' : 'build'}`, targetId),
   projectId: scope.projectId, runId, kind: 'result',
-  headline: ready ? 'Your app is ready to try' : repairing ? 'One check needs another pass' : phase === 'blocked' ? 'Your build needs attention' : 'Your app is taking shape',
+  headline: ready ? 'Your app is ready to try' : repairing ? (repairFixing ? `Fixing “${repairFixing}”` : 'One check needs another pass') : phase === 'blocked' ? 'Your build needs attention' : 'Your app is taking shape',
   summary: ready ? 'Open the checked app preview. Your plan and build remain available.' : repairing ? (repairBody ?? plainCheck(repairIssue)) : String(workflow.detail ?? (phase === 'blocked' ? 'The build stopped. Your plan and saved files are retained.' : 'Caddie is implementing your approved plan and running the checks.')),
-  evidenceIds: [], status: ready ? 'handled' : phase === 'blocked' ? 'blocked' : 'changed', updatedAt: String(workflow.updatedAt),
+  evidenceIds: [], status: ready ? 'handled' : phase === 'blocked' ? 'blocked' : 'changed', updatedAt,
   primaryAction: { label: ready ? 'Try the app' : 'View activity', kind: ready ? 'preview' : 'inspect', targetId },
   ...(checks ? { checks } : {}),
   ...(peek ? { peek } : {}),
@@ -580,6 +578,26 @@ async function workflowCards(db: D1Database, scope: Scope): Promise<DecisionCard
   ...(repairExp ? { repair: { expectation: repairExp, ...(repairFixing ? { fixing: repairFixing } : {}) } } : {}),
   ...(footer ? { footer } : {}),
  }];
+}
+
+/** The newest of `fallback` and this run's latest build action / check round. */
+async function latestBuildActivityAt(db: D1Database, runId: string, fallback: string): Promise<string> {
+	try {
+		const [row] = await queryAll(
+			db,
+			`select max(at) as "at" from (
+			   select max("startedAt") as at from "build_activity" where "runId" = ?
+			   union all select max("createdAt") as at from "run_rounds" where "runId" = ?
+			 )`,
+			runId,
+			runId,
+		);
+		const at = row?.at;
+		return typeof at === 'string' && at > fallback ? at : fallback;
+	} catch (error) {
+		if (/no such (table|column)/i.test(String(error))) return fallback;
+		throw error;
+	}
 }
 
 /** The project's app name for a card footer (mockup `cc-bottom` left). The

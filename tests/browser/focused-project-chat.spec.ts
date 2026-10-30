@@ -13,18 +13,24 @@ test.beforeEach(async ({ page }) => {
 	page.on('pageerror', error => console.error('Focused workspace page error:', error.stack));
 });
 
-async function fixture(context: BrowserContext, phase: string, options: { repair?: boolean; copied?: boolean; reviewDecision?: 'approved' | 'rejected'; designBody?: string; designFailed?: boolean; savedLooks?: boolean } = {}) {
+async function fixture(context: BrowserContext, phase: string, options: { repair?: boolean; copied?: boolean; reviewDecision?: 'approved' | 'rejected'; designBody?: string; designFailed?: boolean; savedLooks?: boolean; readyProposal?: boolean } = {}) {
 	const writes: string[] = [];
 	const workflow = { projectId: PROJECT.id, runId: 'run-focused', conversationId: 'conv-focused', sourceConversationId: null, brief: PROJECT.description, phase, planId: 'plan-focused', previewId: phase === 'ready' ? 'output-exact' : null, pendingKey: null, pendingBody: null, detail: null, updatedAt: NOW };
 	const plan = { id: 'plan-focused', projectId: PROJECT.id, kind: 'prd', revision: 1, body: '# Pantry Pilot\n\nMeal plans from the ingredients you already have.', bodyHash: 'sha-plan-focused', createdAt: NOW };
 	const design = { ...plan, id: 'design-focused', kind: 'design', body: options.designBody ?? '# Pantry Pilot design\n\nPantry first, meal plan second, shopping list third.' };
 	const planApproval = { projectId: PROJECT.id, action: 'design', resourceId: plan.id, revisionHash: plan.bodyHash, policyVersion: 'v1', id: 'approval-focused', intentHash: 'intent-focused', decidedBy: 'actor-focused', status: 'approved', expiresAt: '2027-01-01T00:00:00.000Z' };
 	const approved = () => !['planning', 'review', 'blocked'].includes(workflow.phase);
+	// Post-ready change lifecycle (2026-10-27 plan P0-2): a proposed change on
+	// the ready app, mutated by the stubbed request/decision routes like the
+	// real server would.
+	type Change = { id: string; projectId: string; runId: string; baseOutputId: string; request: string; requestHash: string; status: string; outputId: string | null; failure: string | null; createdBy: string; decidedBy: string | null; createdAt: string; updatedAt: string; proposal?: { summary: string; affected: string[]; risks: string[]; checks: string[] } | null; proposalHash?: string | null };
+	let change: Change | null = options.readyProposal ? { id: 'chg-focused', projectId: PROJECT.id, runId: 'run-focused', baseOutputId: 'output-exact', request: 'Make the title clearer', requestHash: 'hash-focused', proposal: { summary: 'Clarify the home title', affected: ['Home screen'], risks: ['Existing saved data is unchanged'], checks: ['The title appears after reload'] }, proposalHash: 'proposal-focused', status: 'proposed', outputId: null, failure: null, createdBy: 'actor-focused', decidedBy: null, createdAt: NOW, updatedAt: NOW } : null;
 	const currentApproval = () => options.reviewDecision ? { ...planApproval, status: options.reviewDecision } : approved() ? planApproval : null;
 	const snapshot = () => ({
 		looks: options.savedLooks ? { ...plan, kind:'looks', id:'looks-focused', body:looksBody() } : null,
 		workflow: options.copied ? null : workflow, plan, approval: currentApproval(), design, designApproval: null,
 		importPreview: options.copied ? { status: 'ready', versionSeq: 1, origin: 'github', repoFullName: 'jay/pantry', outputId: 'copied-exact', hasServer: true, message: null } : null,
+		change,
 	});
 	await context.route('**/api/**', route => {
 		const request = route.request(), path = new URL(request.url()).pathname;
@@ -48,8 +54,20 @@ async function fixture(context: BrowserContext, phase: string, options: { repair
 			workflow.phase = 'building';
 			return json(route, snapshot());
 		}
+		if (path.endsWith('/workflow/change') && request.method() === 'POST') {
+			const body = request.postDataJSON() as { request?: string };
+			change = { id: 'chg-focused', projectId: PROJECT.id, runId: 'run-focused', baseOutputId: workflow.previewId ?? 'output-exact', request: String(body.request ?? ''), requestHash: 'hash-focused', status: 'proposed', outputId: null, failure: null, createdBy: 'actor-focused', decidedBy: null, createdAt: NOW, updatedAt: NOW };
+			return json(route, snapshot());
+		}
+		if (path.endsWith('/workflow/change/decision') && request.method() === 'POST') {
+			const body = request.postDataJSON() as { decision?: string };
+			if (change) change = { ...change, status: body.decision === 'approved' ? 'approved' : 'cancelled', decidedBy: 'actor-focused' };
+			return json(route, snapshot());
+		}
 		if (path.endsWith('/run-bindings')) return json(route, { runBindings: [{ runId: 'run-focused', projectId: PROJECT.id, conversationId: 'conv-focused', submissionId: 's', planRevision: 'r', stackId: 'react-hono', payerId: 'actor-focused', modelRouteId: 'route', pricingVersion: 'v1', createdBy: 'actor-focused', createdAt: NOW }] });
 		if (path.endsWith('/workflow')) return json(route, snapshot());
+		if (/\/workflow\/preview\/[^/]+\/launch$/.test(path)) return json(route, { url: 'http://preview.test/api/isolated-preview/document', resetUrl: 'http://preview.test/api/isolated-preview/document', origin: 'http://preview.test' });
+		if (path === '/api/isolated-preview/document') return route.fulfill({ contentType: 'text/html', body: '<h1>Pantry Pilot</h1><button>Make a meal plan</button>' });
 		if (/\/workflow\/preview\/[^/]+\/seed$/.test(path)) return json(route, { seedRef: 'seed-focused' });
 		if (/\/workflow\/preview\/[^/]+\/document$/.test(path)) return route.fulfill({
 			contentType: 'text/html', body: previewDocument('<h1>Pantry Pilot</h1><button>Make a meal plan</button>', new URL(request.url()).searchParams.get('nonce') ?? '', {}, Boolean(options.copied), 'web'),
@@ -82,25 +100,42 @@ for (const width of [390, 1440]) {
 		await page.goto('/app/project?project=proj-focused&pane=channel');
 		const summary = page.getByTestId('workflow-summary');
 		await expect(summary).toContainText('Pantry Pilot');
-		await expect(summary).toContainText('Caddie is building your app');
+		// One plain line: what Caddie is doing, to which part, and how far along.
+		await expect(summary.getByRole('heading')).toHaveText('Building “Make a shopping list”');
+		await expect(summary).toContainText('1 of 2 parts done.');
 		await page.screenshot({ path: `/tmp/caddie-focused-compact-chat-${width === 390 ? 'mobile' : 'desktop'}.png`, fullPage: true });
 		await expect(summary.locator('iframe')).toHaveCount(0);
 		await expect(summary.getByTestId('build-progress')).toHaveCount(0);
-		await summary.getByText('Feature progress', { exact: false }).click();
-		await expect(summary).toContainText('1 of 2 checked');
+		await summary.getByText('All parts', { exact: false }).click();
+		await expect(summary).toContainText('1 of 2 done');
 		await expect(summary).toContainText('Add pantry ingredients');
 		await summary.getByRole('button', { name: 'View build' }).click();
-		await expect(page).toHaveURL(/\/runs\?project=proj-focused/);
+		await expect(page).toHaveURL(/pane=channel/);
+	await expect(page.getByRole('dialog')).toBeVisible();
 		expect(writes).toEqual([]);
+	});
+	test(`preview switches size and opens its change dialog at ${width}px`, async ({ page, context }) => {
+		await page.setViewportSize({ width, height: 900 });
+		await fixture(context, 'ready');
+		await page.goto('/app/preview?project=proj-focused&preview=output-exact&source=workflow');
+		const preview = page.getByTestId('interactive-preview');
+		await expect(preview.locator('iframe')).toBeVisible();
+		await preview.getByRole('button', { name: 'Phone' }).click();
+		await expect(preview.locator('iframe')).toHaveAttribute('data-device', 'phone');
+		await preview.getByRole('button', { name: 'Desktop' }).click();
+		await expect(preview.locator('iframe')).toHaveAttribute('data-device', 'desktop');
+		await page.getByTestId('ask-for-change').click();
+		await expect(page.getByRole('dialog', { name: 'What would you like to change?' })).toBeVisible();
 	});
 }
 
 for (const [phase, label] of [['review', 'Review plan'], ['design-review', 'Review design']] as const) {
-	test(`${phase} in chat opens the Plan workspace without making a decision`, async ({ page, context }) => {
+	test(`${phase} in chat opens a review dialog without making a decision`, async ({ page, context }) => {
 		const writes = await fixture(context, phase);
 		await page.goto('/app/project?project=proj-focused&pane=channel');
 		await page.getByTestId('workflow-summary').getByRole('button', { name: label, exact: true }).click();
-		await expect(page).toHaveURL(/\/design-review\?project=proj-focused/);
+		await expect(page).toHaveURL(/pane=channel/);
+		await expect(page.getByRole('dialog').filter({has:page.getByTestId('project-workflow')})).toBeVisible();
 		expect(writes).toEqual([]);
 	});
 }
@@ -110,9 +145,12 @@ test('repair in chat names the issue and opens Check, without nesting build UI',
 	await page.goto('/app/project?project=proj-focused&pane=channel');
 	const summary = page.getByTestId('workflow-summary');
 	await expect(summary).toHaveAttribute('data-design', 'repair');
-	await expect(summary).toContainText('Caddie is fixing an issue it found');
+	// Fixing, not moving on — and which part (owner 2026-10-30).
+	await expect(summary.getByRole('heading')).toHaveText('Fixing “Make a shopping list”');
+	await expect(summary).toContainText('Caddie is fixing it before moving on');
 	await summary.getByRole('button', { name: 'View repair' }).click();
-	await expect(page).toHaveURL(/\/runs\?project=proj-focused/);
+	await expect(page).toHaveURL(/pane=channel/);
+	await expect(page.getByRole('dialog')).toBeVisible();
 });
 
 for (const copied of [false, true]) {
@@ -123,8 +161,8 @@ for (const copied of [false, true]) {
 		await expect(summary.locator('iframe')).toHaveCount(0);
 		await summary.getByRole('button', { name: 'Try your app' }).click();
 		await expect(page).toHaveURL(new RegExp(`/preview\\?project=proj-focused&preview=${copied ? 'copied-exact' : 'output-exact'}&source=workflow`));
-		// Existing preview bootstrapping stores only this exact output's local-data seed.
-		expect(writes.filter(path => !new RegExp(`/workflow/preview/${copied ? 'copied-exact' : 'output-exact'}/seed$`).test(path))).toEqual([]);
+		// Preview setup may launch the isolated origin; it must target only this exact output.
+		expect(writes.filter(path => !new RegExp(`/workflow/preview/${copied ? 'copied-exact' : 'output-exact'}/(launch|seed)$`).test(path))).toEqual([]);
 	});
 }
 
@@ -187,15 +225,70 @@ test('Plan workspace keeps the design review and its explicit build decision', a
 	expect(writes).toEqual(['/api/projects/proj-focused/workflow/design-decision']);
 });
 
-test('Check selects its own tab and contains the full app preview', async ({ page, context }) => {
+test('legacy Check links remain available under Build and contain the app preview', async ({ page, context }) => {
 	await fixture(context, 'ready');
 	await page.goto('/app/evidence?project=proj-focused');
-	await expect(page.getByTestId('project-tab-evidence')).toHaveAttribute('aria-current', 'page');
+	await expect(page.getByTestId('project-tab-build')).toHaveAttribute('aria-current', 'page');
 	const app = page.getByTestId('project-app-checks');
 	await expect(app.getByTestId('project-workflow')).toHaveAttribute('data-phase', 'ready');
 	await expect(app.locator('iframe')).toHaveCount(1);
 	await expect(app.frameLocator('iframe').getByRole('heading', { name: 'Pantry Pilot', exact: true })).toBeVisible();
 	await expect(page.getByTestId('channel').locator('iframe')).toHaveCount(0);
+});
+
+for (const width of [390, 1440]) {
+	test(`ready build takes a change request and reviews it at ${width}px`, async ({ page, context }) => {
+		await page.setViewportSize({ width, height: 900 });
+		const writes = await fixture(context, 'ready');
+		await page.goto('/app/runs?project=proj-focused');
+		await page.getByTestId('ask-for-change').click();
+		const dialog = page.getByRole('dialog', { name: 'What would you like to change?' });
+		await expect(dialog).toBeVisible();
+		const send = dialog.getByRole('button', { name: 'Send change request' });
+		await expect(send).toBeDisabled();
+		await dialog.getByLabel('Your change').fill('Make the title clearer');
+		await expect(send).toBeEnabled();
+		// The request is recorded for review — the app itself does not rebuild
+		// here, and the workspace moves to the conversation where Caddie's
+		// proposal arrives.
+		await send.click();
+		await expect(page).toHaveURL(/\/project\?project=proj-focused&pane=channel/);
+		console.log('PROBE-WRITES:', JSON.stringify(writes));
+		// Back on the build tab the change waits for review, with controls that
+		// decide it. Cancelling records the decision and nothing builds.
+		await page.goto('/app/runs?project=proj-focused');
+		await expect(page.getByTestId('ready-change')).toHaveAttribute('data-status', 'proposed');
+		await expect(page.getByTestId('ready-change')).toContainText('Make the title clearer');
+		await expect(page.getByTestId('approve-change')).toBeDisabled();
+		// Preview bootstrapping (launch/seed) is the isolated-preview surface's
+		// own writes; this test is about the change lifecycle only.
+		const lifecycle = writes.filter(path => !/\/workflow\/preview\/[^/]+\/(launch|seed)$/.test(path));
+		expect(lifecycle).toEqual(['/api/projects/proj-focused/workflow/change']);
+		await page.getByTestId('cancel-change').click();
+		await expect(page.getByTestId('ready-change')).toHaveAttribute('data-status', 'cancelled');
+		expect(writes.filter(path => !/\/workflow\/preview\/[^/]+\/(launch|seed)$/.test(path))).toEqual([
+			'/api/projects/proj-focused/workflow/change',
+			'/api/projects/proj-focused/workflow/change/decision',
+		]);
+		await page.getByRole('button', { name: 'Connections' }).click();
+		await expect(page.getByRole('dialog', { name: 'Connections' })).toBeVisible();
+	});
+}
+
+for (const width of [390, 1440]) test(`a saved change proposal shows its scope before approval at ${width}px`, async ({ page, context }) => {
+	await page.setViewportSize({ width, height: 900 });
+	await fixture(context, 'ready', { readyProposal: true });
+	let decision: Record<string, unknown> | null = null;
+	page.on('request', request => { if (request.url().endsWith('/workflow/change/decision')) decision = request.postDataJSON() as Record<string, unknown>; });
+	await page.goto('/app/runs?project=proj-focused');
+	const card = page.getByTestId('ready-change');
+	await expect(card).toContainText('Clarify the home title');
+	await expect(card).toContainText('Existing saved data is unchanged');
+	await expect(card).toContainText('The title appears after reload');
+	await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	await page.screenshot({ path: `/tmp/caddie-change-review-${width}.png`, fullPage: true });
+	await card.getByTestId('approve-change').click();
+	await expect.poll(() => decision).toMatchObject({ decision: 'approved', requestHash: 'hash-focused', proposalHash: 'proposal-focused' });
 });
 
 test('a copied app keeps its full preview in the project workspace', async ({ page, context }) => {
@@ -214,7 +307,7 @@ test('building Overview avoids a duplicate status strip and retains each of the 
 	// The build panel already owns status; avoid a duplicate strip above it.
 	await expect(page.getByTestId('project-overview-summary')).toHaveCount(0);
 	// One tap into each of the four steps (the step bar).
-	for (const testid of ['project-tab-plan', 'project-tab-build', 'project-tab-evidence', 'project-tab-submission']) {
+	for (const testid of ['project-tab-plan', 'project-tab-build', 'project-tab-submission', 'project-tab-preview']) {
 		await expect(page.getByTestId(testid)).toBeVisible();
 	}
 });
@@ -225,8 +318,9 @@ test('a blocked plan in chat opens Plan with its explicit Continue control', asy
 	const summary = page.getByTestId('workflow-summary');
 	await expect(summary).toContainText('The plan needs another pass');
 	await summary.getByRole('button', { name: 'Review plan', exact: true }).click();
-	await expect(page).toHaveURL(/\/design-review\?project=proj-focused/);
-	await expect(page.locator('.focused-project-content').getByRole('button', { name: 'Continue the plan', exact: true })).toBeVisible();
+	await expect(page).toHaveURL(/pane=channel/);
+		await expect(page.getByRole('dialog').filter({has:page.getByTestId('project-workflow')})).toBeVisible();
+	await expect(page.getByRole('dialog').getByRole('button', { name: 'Continue the plan', exact: true })).toBeVisible();
 	expect(writes).toEqual([]);
 });
 
@@ -276,9 +370,9 @@ for (const width of [390, 1440]) for (const decision of ['approved', 'rejected']
   const summary = page.getByTestId('workflow-summary');
   await expect(summary).toBeVisible();
   await expect(summary).toContainText(decision === 'approved' ? 'Your plan is ready to review' : 'You requested changes to this plan');
-  await expect(summary.getByText('Earlier · Plan decision')).toBeVisible();
-  await summary.getByText('Earlier · Plan decision').click();
-  await expect(summary.getByRole('button', { name: 'Read original decision' })).toBeVisible();
+  // Owner 2026-10-30: the "Earlier · Plan decision" row had no place on the
+  // card; the decision and its plan stay on the Plan tab.
+  await expect(summary.getByText('Earlier · Plan decision')).toHaveCount(0);
   await page.goto('/app/projects');
   await expect(page.getByTestId(`project-row-${PROJECT.id}`)).toContainText(decision === 'approved' ? 'Plan ready' : 'Changes requested');
   expect(writes).toEqual([]);
@@ -360,9 +454,18 @@ test('Build starts with one concise feature summary and opens the full checklist
  await page.setViewportSize({width:390,height:844});
  await page.goto('/app/runs?project=proj-focused');
  await expect(page.getByTestId('build-feature-pantry')).not.toBeVisible();
- await page.getByRole('button',{name:'View feature checklist',exact:true}).click();
- await expect(page.getByRole('dialog',{name:'Feature checklist'})).toContainText('Ingredients save');
- await expect(page.getByRole('dialog',{name:'Feature checklist'})).toContainText('List uses missing ingredients');
+ // The summary names the item the owner approved, not one of its checks.
+ await expect(page.locator('.build-current-feature')).toContainText('Make a shopping list');
+ await page.getByRole('button',{name:'See all parts',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Your app’s parts'});
+ // Plain item names lead (owner 2026-10-30: the checks read like a test plan);
+ // the checks wait behind "What Caddie checks".
+ await expect(dialog.getByTestId('build-feature-pantry').locator('.build-feature-title')).toHaveText('Add pantry ingredients');
+ await expect(dialog.getByTestId('build-feature-list').locator('.build-feature-title')).toHaveText('Make a shopping list');
+ await expect(dialog.getByText('Ingredients save', { exact: true })).toBeHidden();
+ await dialog.getByTestId('build-feature-pantry').getByText('What Caddie checks', { exact: true }).click();
+ await expect(dialog.getByText('Ingredients save', { exact: true })).toBeVisible();
+ await expect(dialog).toContainText('List uses missing ingredients');
 });
 
 test('the saved design remains accessible from Plan after building starts', async ({page,context}) => {
@@ -421,4 +524,21 @@ for(const width of [390,1440]) test(`build presents one coherent surface and str
  await page.getByRole('navigation',{name:'Build activity views'}).getByRole('button',{name:'Files & commands'}).click();
  await expect(page.getByRole('dialog',{name:'Build activity'})).toContainText('No file or command activity');
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
+test('shared chat history stays stable while opening and closing its review controls', async ({page,context})=>{
+ const errors:string[]=[];
+ page.on('pageerror',error=>errors.push(error.message));
+ page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
+ await fixture(context,'review');
+ await page.goto('/app/project?project=proj-focused&pane=channel');
+ const summary=page.getByTestId('workflow-summary');
+ for(let i=0;i<3;i++){
+  await summary.getByRole('button',{name:'Review plan',exact:true}).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(summary.getByRole('button',{name:'Review plan',exact:true})).toBeFocused();
+ }
+ expect(errors.filter(text=>/maximum update depth|too many re-renders/i.test(text))).toEqual([]);
 });

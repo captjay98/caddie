@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { applyFinalSchema } from './fixtures/migrations.ts';
 import {
 	ALL_TOOL_NAMES,
 	mentionsProtectedPath,
@@ -61,20 +62,10 @@ function d1(db: Database) {
 	};
 }
 
-function applyDdl(d1db: ReturnType<typeof d1>) {
-	// 0001 provides the P02 product tables the runs services build on;
-	// 0005 provides the run lifecycle tables. Identity tables from 0001 are
-	// unnecessary here (foreign keys are off in bun:sqlite by default).
-	for (const file of ['0001_product.sql', '0005_runs.sql']) {
-		const migration = readFileSync(
-			join(import.meta.dir, '..', 'apps', 'app', 'migrations', file),
-			'utf8',
-		);
-		for (const statement of migration.split(/;\s*(?:\n|$)/)) {
-			const trimmed = statement.trim();
-			if (trimmed) d1db.prepare(trimmed).run();
-		}
-	}
+function applyDdl(db: Database) {
+	// The runs services build on the product + run-lifecycle tables; the whole
+	// folded schema is applied (foreign keys stay off in bun:sqlite).
+	applyFinalSchema(db);
 }
 
 // ---- permission matrix -------------------------------------------------------
@@ -171,16 +162,22 @@ describe('P05 permission matrix', () => {
 		}
 	});
 
-	test('planners stay on the plan role; implementation and QA use the 3.5 build route', () => {
+	test('each planner runs its decided route; implementation and QA use the 3.5 build route', () => {
+		// Owner routing decision 2026-10-27: product authors the PRD on deepseek
+		// (planAuthor), the designer authors looks/design on MiniMax
+		// (designAuthor), the tech-lead uses the plan author route, and
+		// implementation/QA stay on Super VL. Historic bindings are retained.
 		const context = stubContext();
 		const declarations = buildSpecialistDeclarations(context);
 		expect(declarations.map((d) => d.name)).toEqual(SPECIALIST_CATALOG.map((d) => d.name));
-		const plan = findModelRouteForRole('plan');
 		const build = findModelRouteForRole('build');
-		expect(plan.id).toBe('glm-5.3-flash');
-		expect(build.id).toBe('nemotron-3.5-super-vl');
+		// Owner 2026-10-29: implementation and QA moved to MiniMax-M3.1-Flash.
+		expect(build.id).toBe('minimax-m3.1-flash');
 		const modelByName = Object.fromEntries(declarations.map((d) => [d.name, d.model]));
-		for (const name of ['product', 'designer', 'tech-lead']) expect(modelByName[name]).toBe(plan.specifier);
+		expect(modelByName['product']).toBe(findModelRouteForRole('planAuthor').specifier);
+		expect(modelByName['designer']).toBe(findModelRouteForRole('designAuthor').specifier);
+		expect(modelByName['tech-lead']).toBe(findModelRouteForRole('planAuthor').specifier);
+		expect(findModelRouteForRole('plan').id).toBe('glm-5.3-flash');
 		for (const name of ['frontend', 'backend', 'mobile', 'qa']) expect(modelByName[name]).toBe(build.specifier);
 		for (const declaration of declarations) expect(declaration.description.length).toBeGreaterThan(10);
 	});
@@ -457,7 +454,7 @@ describe('P05 run lifecycle', () => {
 		tmp = mkdtempSync(join(tmpdir(), 'p05-runs-'));
 		db = new Database(':memory:');
 		d1db = d1(db);
-		applyDdl(d1db);
+		applyDdl(db);
 		seedProject();
 		projectAId = 'proj_t';
 		aliceScope = { actorId: 'user_alice', workspaceId: 'ws_t', projectId: projectAId };
@@ -762,13 +759,17 @@ describe("plans use the app's built-in AI (plan 4.1)", () => {
 		for (const banned of ['Ollama', 'a local or self-hosted model', 'a third-party AI key']) expect(PLATFORM_AI_RULE).toContain(banned);
 	});
 
-	test('the rule names both supported tiers and when each applies', () => {
-		// Both tiers, with the demo's core call on the deep one — never the
+	test('the rule names both depths and keeps the plumbing out of the owner\'s PRD', () => {
+		// Both depths, with the demo's core call on the deep one — never the
 		// Lightning default by omission (tier guidance added after HerdVoice's
 		// planner left every call on the default tier, 2026-10-20).
 		expect(PLATFORM_AI_RULE).toContain('tier:"super"');
 		expect(PLATFORM_AI_RULE).toContain('default fast tier');
-		expect(PLATFORM_AI_RULE).toContain('Name the tier in the PRD');
+		// The owner reads "my app can use AI", never a tier (Street Food Share's
+		// PRD carried `tier` 18 times to a non-technical owner, 2026-10-28).
+		expect(PLATFORM_AI_RULE).toContain('(a deep answer)');
+		expect(PLATFORM_AI_RULE).toContain('refuses a PRD that names a model');
+		expect(PLATFORM_AI_RULE).not.toContain('Name the tier in the PRD');
 	});
 
 	test('the planners and the coordinator (Home proposals and project PRDs alike) are given it', () => {

@@ -19,9 +19,11 @@ export const FEATURE_BLOCK_INFO = 'caddie-features';
 
 export const MAX_PLAN_FEATURES = 12;
 
+const FeatureId = v.pipe(v.string(), v.regex(/^[a-z0-9][a-z0-9-]{0,47}$/, 'id must be a short lowercase slug like "daily-feed-log"'));
+
 export const PlanFeatureSchema = v.strictObject({
 	/** Stable slug, unique within the plan: `add-task`, `daily-feed-log`. */
-	id: v.pipe(v.string(), v.regex(/^[a-z0-9][a-z0-9-]{0,47}$/, 'id must be a short lowercase slug like "daily-feed-log"')),
+	id: FeatureId,
 	/** What the user gets, in their words. */
 	title: v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(120)),
 	/** Observable behaviors that prove it works; each becomes at least one test. */
@@ -30,6 +32,14 @@ export const PlanFeatureSchema = v.strictObject({
 		v.minLength(1, 'each feature needs at least one "doneWhen" check'),
 		v.maxLength(6),
 	),
+	/**
+	 * Staged builds (owner 2026-10-30): true for an idea the owner can add
+	 * after the first version, one at a time. Absent means it is in the first
+	 * version. The whole list is approved together; this only orders it.
+	 */
+	later: v.optional(v.boolean()),
+	/** Earlier items this one cannot work without ("needs your flocks first"). */
+	needs: v.optional(v.pipe(v.array(FeatureId), v.maxLength(4))),
 });
 
 export type PlanFeature = v.InferOutput<typeof PlanFeatureSchema>;
@@ -39,15 +49,116 @@ export const PlanFeatureListSchema = v.pipe(
 	v.minLength(1, 'the list needs at least one feature'),
 	v.maxLength(MAX_PLAN_FEATURES, `at most ${MAX_PLAN_FEATURES} features`),
 	v.check((list) => new Set(list.map((f) => f.id)).size === list.length, 'feature ids must be unique'),
+	v.check((list) => list.some((f) => !f.later), 'at least one feature must be in the first version (leave "later" off it)'),
+	// "needs" names only items EARLIER in the list (so there is never a loop),
+	// and a first-version item never needs an idea for later.
+	v.check(
+		(list) => list.every((f, index) => (f.needs ?? []).every((id) => list.slice(0, index).some((earlier) => earlier.id === id))),
+		'"needs" may only name items listed before it',
+	),
+	v.check(
+		(list) => list.every((f) => f.later || (f.needs ?? []).every((id) => !list.find((other) => other.id === id)?.later)),
+		'a first-version item cannot need an item marked "later"',
+	),
 );
+
+/**
+ * The most items a first version may hold; the rest are added one at a time.
+ * Owner 2026-10-30: 3, not 6. EggOps ran 4 parts x 4 checks = 16 browser
+ * checks and most of its repair spend went on the last part; a smaller first
+ * version reaches a working preview sooner and each later item is one "Add
+ * this" away.
+ */
+export const FIRST_VERSION_MAX = 3;
+/** The most doneWhen checks one item may carry (each is a test and a browser check). */
+export const ITEM_CHECKS_MAX = 3;
 
 /** The exact format the planner must follow (shown in instructions and refusals). */
 export const FEATURE_BLOCK_GUIDE =
-	'End the PRD with ONE fenced code block whose info string is caddie-features, holding a JSON array of 1-12 features in build order, ' +
-	'each {"id": "short-lowercase-slug", "title": "what the user gets", "doneWhen": ["an observable behavior a test can check", ...1-6]}. Example:\n' +
+	'End the PRD with ONE fenced code block whose info string is caddie-features, holding a JSON array of 1-12 items in build order, ' +
+	`each {"id": "short-lowercase-slug", "title": "something the owner does, in plain words", "doneWhen": ["an observable behavior a test can check", ...1-${ITEM_CHECKS_MAX}]}. ` +
+	`Items the owner did not ask for and the first version does not need get "later": true (at most ${FIRST_VERSION_MAX} items without it). ` +
+	'An item that cannot work without an earlier one lists it in "needs". Example:\n' +
 	'```caddie-features\n' +
-	'[{"id":"log-feed","title":"Log daily feed","doneWhen":["Entering 12 kg and saving shows 12 kg in today\'s list","The entry is still there after a reload"]}]\n' +
+	'[{"id":"log-feed","title":"Write down today\'s feed","doneWhen":["Entering 12 kg and saving shows 12 kg in today\'s list","The entry is still there after a reload"]},' +
+	'{"id":"feed-costs","title":"See what feed costs each week","later":true,"needs":["log-feed"],"doneWhen":["Adding a price shows the week\'s feed cost"]}]\n' +
 	'```';
+
+/** The change request text an added plan item carries (the ready card reads it back). */
+export const PLAN_ITEM_REQUEST_PREFIX = 'Add from your plan: ';
+
+/** The ids in the first version as the plan wrote it (no "later" flag). */
+export function plannedFirstVersion(features: readonly PlanFeature[]): string[] {
+	return features.filter((feature) => !feature.later).map((feature) => feature.id);
+}
+
+/** Every item `id` needs, directly or through another item, in list order. */
+export function itemNeeds(features: readonly PlanFeature[], id: string): string[] {
+	const found = new Set<string>();
+	const visit = (current: string) => {
+		for (const need of features.find((feature) => feature.id === current)?.needs ?? []) {
+			if (!found.has(need)) { found.add(need); visit(need); }
+		}
+	};
+	visit(id);
+	return features.filter((feature) => found.has(feature.id)).map((feature) => feature.id);
+}
+
+/** Every item that needs `id`, directly or through another item, in list order. */
+export function itemDependents(features: readonly PlanFeature[], id: string): string[] {
+	return features.filter((feature) => itemNeeds(features, feature.id).includes(id)).map((feature) => feature.id);
+}
+
+/**
+ * Why an owner's first-version choice cannot be built, in plain words, or
+ * null when it can. The choice is a set of ids from the approved list.
+ */
+export function firstVersionChoiceError(features: readonly PlanFeature[], ids: readonly string[]): string | null {
+	const chosen = new Set(ids);
+	if (chosen.size === 0) return 'Pick at least one thing for the first version.';
+	const unknown = ids.find((id) => !features.some((feature) => feature.id === id));
+	if (unknown) return 'That item is not in this plan.';
+	if (chosen.size > FIRST_VERSION_MAX) return `A first version holds at most ${FIRST_VERSION_MAX} things. Move one to “add after”.`;
+	for (const id of chosen) {
+		const missing = itemNeeds(features, id).find((need) => !chosen.has(need));
+		if (missing) {
+			const title = (key: string) => features.find((feature) => feature.id === key)?.title ?? key;
+			return `“${title(id)}” needs “${title(missing)}” in the first version too.`;
+		}
+	}
+	return null;
+}
+
+/**
+ * Rough build minutes for one item, shown as "about N min". A starting
+ * estimate (each check is a test the builder writes and the host runs); it
+ * should be recalibrated from measured builds.
+ */
+export function itemMinutes(feature: Pick<PlanFeature, 'doneWhen'>): number {
+	return 6 + 2 * feature.doneWhen.length;
+}
+/** Setting up the app and checking the whole first version, on top of its items. */
+export const FIRST_VERSION_SETUP_MINUTES = 8;
+export function firstVersionMinutes(features: readonly Pick<PlanFeature, 'doneWhen'>[]): number {
+	return FIRST_VERSION_SETUP_MINUTES + features.reduce((total, feature) => total + itemMinutes(feature), 0);
+}
+/** Minutes rounded up to the next 5, never under 5: the number the owner reads. */
+export function aboutMinutes(minutes: number): number {
+	return Math.max(5, Math.ceil(minutes / 5) * 5);
+}
+
+/**
+ * Words a non-technical owner should never have to decode in a plan item
+ * (owner 2026-10-29: "caddie is meant for non technical people first").
+ */
+const JARGON = /\b(sync(?:s|ed|ing)?|dashboard|crud|api|apis|backend|front-?end|database|db|pwa|endpoint|schema|webhook|toggle|flag(?:ged|s)?|auth|oauth|metadata|ui|ux|cache[ds]?|cron|deploy(?:ed|ment)?|repo)\b/i;
+/** Why an item title is not plain words for its owner, or null when it is. */
+export function itemTitleIssue(title: string): string | null {
+	const word = JARGON.exec(title)?.[0];
+	if (word) return `“${title}” uses “${word}”; say what the owner does or sees instead`;
+	if (title.trim().split(/\s+/).length > 10) return `“${title}” is longer than 10 words`;
+	return null;
+}
 
 const FENCE = new RegExp('^(`{3,}|~{3,})[ \\t]*' + FEATURE_BLOCK_INFO + '[ \\t]*\\r?\\n([\\s\\S]*?)\\r?\\n\\1[ \\t]*$', 'm');
 

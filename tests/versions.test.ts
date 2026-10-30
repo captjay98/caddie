@@ -1,3 +1,4 @@
+import { fixtureLegacyQualityPolicy } from './fixtures/migrations.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { Database } from 'bun:sqlite';
 import type { Scope } from '@caddie/contracts';
@@ -56,6 +57,8 @@ describe('versions and restore', () => {
 		const homeRun = await createRun(db, homeScope, { modelRouteId: 'nemotron-3-super', payerId: 'alice', conversationId: 'conv-home' });
 		const started = await startProjectFromChat(db, homeScope, { name: 'Farm Log', description: 'x', brief: 'Build a farm log. Show me the plan first.', operationKey: 'create-farm', sourceConversationId: homeRun.conversationId });
 		scope = await projectScopeForUser(db, 'alice', started.project.id);
+// Fixture models a project from before the default-on quality policy (see fixtureLegacyQualityPolicy).
+fixtureLegacyQualityPolicy(sqlite, scope.projectId);
 		runId = started.workflow.runId as string;
 		const plan = await createPlanDocRevision(db, scope, { kind: 'prd', body: '# Farm log\n\nLog feed.' });
 		planId = plan.id;

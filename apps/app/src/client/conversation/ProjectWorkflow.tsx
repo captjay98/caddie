@@ -1,4 +1,5 @@
 import { presentDesign } from "../planning/design-presentation.ts";
+import { preparationLines } from "../project/preparation-progress.ts";
 import { designCompletenessIssue } from "../../shared/design-completeness.ts";
 import { ProjectDialog } from "../project/ProjectDialog.tsx";
 import { useEffect, useRef, useState } from "react";
@@ -7,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { designWorkStatus } from "./design-work-status.ts";
 import { useSharedAgentActivity, useSharedAgent } from "./agent-keeper.tsx";
 import { Markdown } from "@caddie/ui/Markdown";
+import { plainWordsForOwner } from "./response-hygiene.ts";
 import type { PlanDocRevision, ApprovalRecord } from "@caddie/contracts";
 import { parseAppTheme, parseLooks } from "@caddie/contracts";
 import type { BuildWorkflow, WorkflowPhase } from "../../server/build-workflow.ts";
@@ -15,7 +17,6 @@ import { fetchJson, postJson } from "../api.ts";
 import { useWorkspaceChrome } from "../workspace/Chrome.tsx";
 import { useProjectRepo, useSourceSave, useBuildActivity, usePlanDocRevisions, type ProjectRepoView, type SourceSaveView } from "../queries.ts";
 import { Icon } from "../icons.tsx";
-import { InteractivePreview } from "../artifacts/InteractivePreview.tsx";
 import { PrototypePreview } from "../artifacts/PrototypePreview.tsx";
 import { DesignMockPreview } from "../artifacts/DesignMockPreview.tsx";
 import { ReplyText } from "./ReplyText.tsx";
@@ -25,10 +26,9 @@ import { SavedFeatures } from "../project/FeatureChecklist.tsx";
 import { PlanReview } from "../planning/PlanReview.tsx";
 import { LooksPicker } from "../planning/LooksPicker.tsx";
 import { AndroidDownload } from "../project/AndroidDownload.tsx";
-import { AppKeys } from "../project/AppKeys.tsx";
+import { AskForChange } from "../project/AskForChange.tsx";
 import { PublishApp } from "../project/PublishApp.tsx";
 import { AppVersions } from "../project/AppVersions.tsx";
-import { AppAi } from "../project/AppAi.tsx";
 import { TestInbox } from "../project/TestInbox.tsx";
 import { AppJobs } from "../project/AppJobs.tsx";
 import { ImportedApp, importedAppTitle } from "../project/ImportedApp.tsx";
@@ -36,6 +36,16 @@ import { CardHeader } from "../brief/CardFrame.tsx";
 import type { CardDesign } from "../brief/card-design.ts";
 import { workflowQueryOptions } from "../workflow-query.ts";
 import { ProjectChatSummary } from "./ProjectChatSummary.tsx";
+import { choiceDiffers } from "../planning/plan-choice.ts";
+import { AddNext } from "../project/AddNext.tsx";
+import { parsePlanFeatures, type PlanFeature } from "@caddie/contracts";
+
+/** A plan body's feature list, or null when it has none. */
+function planFeatureList(body: string): PlanFeature[] | null {
+  const parsed = parsePlanFeatures(body);
+  return parsed.ok ? parsed.features : null;
+}
+import { pausedPreparation, preparationRetryLabel } from '../../shared/preparation-stage.ts';
 import { DesignOverviewPanel, designApprovalHold, useDesignOverview } from "../planning/DesignReview.tsx";
 
 /** Phases before any build started: the copied app is still the one to try. */
@@ -43,8 +53,8 @@ const BEFORE_BUILD = new Set<WorkflowPhase>(["planning", "review", "looks", "loo
 const LABEL: Record<WorkflowPhase, string> = {
   planning: "Planning your app",
   review: "Your plan is ready",
-  looks: "Preparing looks for your app",
-  "looks-review": "Choose a look",
+  looks: "Drawing 3 looks",
+  "looks-review": "Pick a look",
   design: "Designing your app",
   "design-review": "Your design is ready",
   building: "Building your app",
@@ -66,7 +76,7 @@ export function ProjectWorkflow(props: {
   return <ProjectChatSummary projectId={props.projectId} name={props.name} />;
 }
 
-/** Full controls belong in the project workspace, never nested inside chat. */
+/** Shared review controls, mounted on the project page or in a chat review dialog. */
 function ProjectWorkspace({
   projectId,
   name,
@@ -85,7 +95,8 @@ function ProjectWorkspace({
   // "How your app works" and its safety review, read only while the design is
   // up for review (it decides whether the design can be approved).
   const designOverview = useDesignOverview(workflow?.phase === "design-review" ? projectId : null);
-  const activity = useBuildActivity({ actorId: chrome.actorId }, workflow?.phase === "building" ? projectId : null, false);
+  // Read while paused too: the paused headline names the part that stopped.
+  const activity = useBuildActivity({ actorId: chrome.actorId }, workflow?.phase === "building" || workflow?.phase === "blocked" ? projectId : null, false);
   const repairing = workflow?.phase === "building" && Boolean(activity.data && (activity.data.openIssues > 0 || activity.data.timeline?.stages.some(stage => stage.state === "failed")));
   const repoQuery = useProjectRepo(
     { actorId: chrome.actorId },
@@ -101,6 +112,8 @@ function ProjectWorkspace({
   const stopped = workflow?.phase === "blocked" && Boolean(workflow.detail?.startsWith(STOP_SENTINEL));
   const planEverApproved = PLAN_EVER_APPROVED.has(state.data?.approval?.status ?? "");
   const planningBlocked = workflow?.phase === "blocked" && !stopped && !planEverApproved;
+  // A user stop is always a stopped build, never a paused plan or look step.
+  const preparationBlocked = workflow && !stopped ? pausedPreparation(workflow, planEverApproved) : null;
   // Shared warm session (agent-keeper): visiting the project page adopts the
   // already-reduced transcript instead of replaying the whole stream per mount.
   const agent = useSharedAgent(
@@ -115,20 +128,35 @@ function ProjectWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [changes, setChanges] = useState(false);
+  const [checksOpen, setChecksOpen] = useState(false);
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [note, setNote] = useState("");
+  // Staged builds: the owner's first-version choice (null = the plan's own split).
+  const [choice, setChoice] = useState<string[] | null>(null);
   const retryKey = useRef<string | null>(null);
-  const designRetryKey = useRef<string | null>(null);
-  const designRetrying = useRef(false);
-  async function retryDesign() {
-    if (designRetrying.current) return;
-    designRetrying.current=true; setBusy(true); setError(null);
-    designRetryKey.current ??= `design-retry:${crypto.randomUUID()}`;
+  async function stopPreparation() {
+    setBusy(true); setError(null);
     try {
-      await agent.sendMessage('Continue preparing the design for the already approved plan and chosen look. Preserve the saved scope and theme. Save the complete design and stop for my review; do not build yet.',{idempotencyKey:designRetryKey.current});
-      designRetryKey.current=null;
+      await postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow/stop`, {});
       await state.refetch();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'The design could not be resumed. Try again.'); }
-    finally {designRetrying.current=false;setBusy(false);}
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "The stop request failed."); }
+    finally { setBusy(false); }
+  }
+  // Try again on a stalled step: stop what is (not) running, then resume the
+  // step from the saved work with one idempotent retry key.
+  const restartKey = useRef<string | null>(null);
+  async function restartPreparation() {
+    setBusy(true); setError(null);
+    restartKey.current ??= `restart:${crypto.randomUUID()}`;
+    try {
+      if (workflow && ["planning", "looks", "design"].includes(workflow.phase))
+        await postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow/stop`, {});
+      await postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow/retry`, { key: restartKey.current });
+      restartKey.current = null;
+      chrome.refreshAll();
+      await state.refetch();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Caddie could not start again. Try once more."); }
+    finally { setBusy(false); }
   }
 
   // R02: dispatch is server-owned. The browser no longer drives it — it only
@@ -146,6 +174,8 @@ function ProjectWorkspace({
           planId: state.data.plan.id,
           decision,
           note: decision === "rejected" ? note : undefined,
+          // Staged builds: only a split the owner actually changed is sent.
+          ...(decision === "approved" && choice && planFeatureList(state.data.plan.body) && choiceDiffers(planFeatureList(state.data.plan.body)!, choice) ? { firstVersion: choice } : {}),
         },
       );
       setChanges(false);
@@ -205,6 +235,27 @@ function ProjectWorkspace({
       await state.refetch();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Caddie could not save your choice.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  // The post-ready CHANGE gate (2026-10-27 plan P0-2): approving starts a
+  // bounded rebuild of the finished app; the previous preview stays open until
+  // the new one passes checks. Cancelling clears the review; nothing builds.
+  async function decideChange(changeId: string, decision: "approved" | "rejected") {
+    setBusy(true);
+    setError(null);
+    try {
+      await postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow/change/decision`, {
+        changeId,
+        decision,
+        requestHash: state.data?.change?.requestHash,
+        proposalHash: state.data?.change?.proposalHash,
+      });
+      chrome.refreshAll();
+      await state.refetch();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Caddie could not save your decision.");
     } finally {
       setBusy(false);
     }
@@ -282,7 +333,35 @@ function ProjectWorkspace({
   // The status text the header badge shows, and the phase title — kept apart so
   // the title only renders when it adds something the badge does not.
   const headerStatus = workflowHeaderStatus({ phase: workflow.phase, previewId: workflow.previewId }, { designFailed: workflow.phase === 'design' && designStatus.kind === 'failed', repairing });
-  const phaseTitle = workflow.phase === 'design' && designStatus.kind === 'failed' ? 'Design needs attention' : planningBlocked ? 'Plan needs another pass' : LABEL[workflow.phase];
+  // A paused build leads with one plain headline naming the part (owner
+  // 2026-10-30: a small blue "Needs attention" over grey text read as nothing).
+  const stuckPart = activity.data?.features?.find((feature) => feature.status === "building" || feature.status === "failed");
+  const buildPaused = workflow.phase === "blocked" && !stopped && !planningBlocked && !preparationBlocked;
+  const phaseTitle = workflow.phase === 'design' && designStatus.kind === 'failed' ? 'Design needs attention' : planningBlocked ? 'Plan needs another pass'
+    : buildPaused ? (stuckPart ? `The build paused on “${stuckPart.title.replace(/^\s*\d+[.)]\s*/, "")}”` : "The build paused")
+    : stopped && workflow.phase === "blocked" ? "You paused the build" : LABEL[workflow.phase];
+  // Plan, looks and (legacy) screens share ONE status block (owner
+  // 2026-10-29): the stage and its time on one line, a thin bar while work is
+  // recorded, and real actions — Stop, or Try again once Caddie has gone
+  // quiet. No "Refresh": the card already re-reads every two seconds.
+  const progressLines = state.data?.preparationProgress ? preparationLines(state.data.preparationProgress, nowMs) : null;
+  function preparationStatus(next: string) {
+    const quiet = progressLines?.quiet === true;
+    return (
+      <div className="prep-status" data-testid="preparation-status" data-quiet={quiet ? "true" : "false"}>
+        <p className="prep-line" role="status">
+          <span className="prep-dot" aria-hidden="true" data-quiet={quiet ? "true" : "false"} />
+          {progressLines ? <><b>{progressLines.stage}</b> · {progressLines.time}</> : <b>Working on it</b>}
+        </p>
+        {quiet ? null : <progress className="workflow-progress" data-testid="workflow-progress" aria-label={progressLines?.stage ?? "In progress"} />}
+        <p className="state-detail">{quiet ? "Caddie may have stalled. Try again picks it up from your saved work." : next}</p>
+        <div className="row-actions">
+          {quiet ? <button type="button" className="btn-key" disabled={busy} data-testid="preparation-restart" onClick={() => void restartPreparation()}>{busy ? "Starting again…" : "Try again"}</button> : null}
+          <button type="button" className="btn-ghost" disabled={busy} data-testid="preparation-stop" onClick={() => void stopPreparation()}>Stop</button>
+        </div>
+      </div>
+    );
+  }
   return (
     <section
       className="caddie-card project-workflow"
@@ -317,7 +396,7 @@ function ProjectWorkspace({
         </div>
         ) : null}
       </> : null}
-      {workflow.phase === "blocked" && active ? (
+      {active && workflow.phase === 'blocked' ? (
         <button type="button" className="btn-ghost" disabled={busy} onClick={async () => {
           setBusy(true); setError(null);
           try {
@@ -327,7 +406,66 @@ function ProjectWorkspace({
             await state.refetch();
           } catch (cause) { setError(cause instanceof Error ? cause.message : "The stop request failed."); }
           finally { setBusy(false); }
-        }}>Stop build</button>
+        }}>{preparationBlocked ? 'Stop' : 'Stop build'}</button>
+      ) : null}
+      {state.data?.change && state.data.change.status !== "completed" ? (
+        <div className="ready-change-review" data-testid="ready-change" data-status={state.data.change.status}>
+          {state.data.change.status === "proposed" ? (
+            <>
+              {state.data.change.proposal ? <>
+                <p><strong>Change requested.</strong> Caddie's plan for it is below.</p>
+                <details className="state-detail-report">
+                  <summary>Your exact wording</summary>
+                  {state.data.change.request}
+                </details>
+                <p className="ready-change-summary">{state.data.change.proposal.summary}</p>
+                <div className="ready-change-sections">
+                  <section><h4>What will change</h4><ul>{state.data.change.proposal.affected.map((item, index) => <li key={index}>{item}</li>)}</ul></section>
+                  <section><h4>Things to know</h4><ul>{state.data.change.proposal.risks.map((item, index) => <li key={index}>{item}</li>)}</ul></section>
+                  <section><h4>How Caddie will check it</h4><ul>{state.data.change.proposal.checks.map((item, index) => <li key={index}>{item}</li>)}</ul></section>
+                </div>
+                <p>Your current app remains available while Caddie works on the change.</p>
+              </> : <p role="status">Caddie is preparing the change for your review. Your current app is still available.</p>}
+              {state.data.change.failure ? <p role="status">{state.data.change.failure}</p> : null}
+              <div className="row-actions">
+                <button
+                  type="button"
+                  className="btn-key"
+                  disabled={busy || !state.data.change.proposalHash}
+                  data-testid="approve-change"
+                  onClick={() => void decideChange(state.data!.change!.id, "approved")}
+                >
+                  {busy ? "Saving…" : "Approve change"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={busy}
+                  data-testid="cancel-change"
+                  onClick={() => void decideChange(state.data!.change!.id, "rejected")}
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : state.data.change.status === "approved" ? (
+            <p role="status">
+              <strong>Making your change.</strong> Your current app stays right here until the new version passes its checks.
+              <details className="state-detail-report">
+                <summary>What you asked for</summary>
+                {state.data.change.request}
+              </details>
+            </p>
+          ) : state.data.change.status === "failed" ? (
+            <p role="status">
+              <strong>The change didn’t work out.</strong> Your previous app is still here, unchanged. You can ask for the change again, or review what happened with Caddie.
+              <details className="state-detail-report">
+                <summary>Technical report</summary>
+                {state.data.change.failure}
+              </details>
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {workflow.phase === "planning" ? (
         state.data?.dispatchStalled ? (
@@ -360,10 +498,7 @@ function ProjectWorkspace({
             </button>
           </div>
         ) : (
-          <p className="state-detail">
-            Caddie is turning your request into a plan. You’ll review it before
-            building starts.
-          </p>
+          preparationStatus("You’ll review it before anything is built.")
         )
       ) : null}
       {workflow.phase === "review" && plan ? (
@@ -372,20 +507,20 @@ function ProjectWorkspace({
           title={name}
           projectName={name ?? chrome.selectedProject?.name}
           version={plan.revision}
+          choice={choice}
+          onChoiceChange={busy ? undefined : setChoice}
           decision={
             <>
               {/* Reassurance STRIP: the safety facts the host actually enforces
                   (sandbox build; deploy/spend gated behind a separate approval),
                   as glanceable chips instead of a grey paragraph the user must
                   read to feel safe. */}
-              <div className="workflow-assurance" data-testid="workflow-assurance">
-                <span className="workflow-chip workflow-chip-ok">
-                  <Icon name="shield" title="" /> Runs in a sandbox
-                </span>
-                <span className="workflow-chip">No deploy</span>
-                <span className="workflow-chip">No spending</span>
-                <span className="workflow-assurance-note">— those need separate permission</span>
-              </div>
+              {/* Owner 2026-10-29: one calm sentence, not three pills and a
+                  dangling "— Caddie asks you first". */}
+              <p className="workflow-assurance" data-testid="workflow-assurance">
+                <Icon name="shield" title="" />
+                <span>A private test copy. Nothing is published or paid for until you say so.</span>
+              </p>
               <div className="row-actions">
                 <button
                   className="btn-key"
@@ -407,16 +542,16 @@ function ProjectWorkspace({
                   caution-coloured paragraph above the primary button. */}
               {!repoQuery.isPending && !linkedRepo ? (
                 <p className="state-detail workflow-repo-nudge" data-testid="workflow-repo-nudge">
-                  <Icon name="github" title="" /> Your code lives only in the sandbox for now.{" "}
+                  Optional: keep a copy of the code on GitHub.{" "}
                   <button
                     type="button"
                     className="r-link"
                     data-testid="workflow-connect-repo"
                     onClick={() => chrome.goProjectTab("/project/settings", { project: projectId })}
                   >
-                    Connect a GitHub repo
+                    Connect GitHub
                   </button>{" "}
-                  to save it — now or after the build.
+                  — now or later.
                 </p>
               ) : null}
               {changes ? (
@@ -445,13 +580,7 @@ function ProjectWorkspace({
           }
         />
       ) : null}
-      {workflow.phase === "looks" ? (
-        <p className="state-detail">
-          Caddie is putting together a few looks for your app — different colours
-          and styles to choose from. You’ll pick one before the screens are
-          designed.
-        </p>
-      ) : null}
+      {workflow.phase === "looks" ? preparationStatus("Each look is your app’s first screen. Pick one and building starts.") : null}
       {workflow.phase === "looks-review" && state.data?.looks ? (
         (() => {
           const parsed = parseLooks(state.data.looks.body);
@@ -476,15 +605,14 @@ function ProjectWorkspace({
         })()
       ) : null}
       {workflow.phase === "design" ? (
-        <div className="design-work-progress" data-testid="design-work-progress" data-state={designStatus.kind}>
-          <p role={designStatus.kind === 'failed' ? 'alert' : 'status'}><strong>{designStatus.title}</strong></p>
-          <p className="state-detail">{designStatus.detail}</p>
-          <p className="state-detail">You’ll review the screens before building starts.</p>
-          <div className="row-actions">
-            {designStatus.kind === 'failed' || designStatus.kind === 'waiting' ? <button type="button" className="btn-key" disabled={busy} onClick={() => void retryDesign()}>{busy ? 'Continuing…' : designStatus.kind === 'failed' ? 'Retry design' : 'Continue design'}</button> : <button type="button" className="btn-ghost" onClick={() => { agent.refresh(); void state.refetch(); }}>Check status</button>}
-            <button type="button" className="btn-ghost" onClick={() => chrome.openProject(projectId,true)}>Discuss with Caddie</button>
+        designStatus.kind === 'failed' || designStatus.kind === 'waiting' ? (
+          <div className="prep-status" data-testid="design-work-progress" data-state={designStatus.kind}>
+            <p className="prep-line" role={designStatus.kind === 'failed' ? 'alert' : 'status'}>{designStatus.kind === 'failed' ? 'The screens could not be finished.' : 'Nothing is running for your screens right now.'}</p>
+            <div className="row-actions">
+              <button type="button" className="btn-key" disabled={busy} onClick={() => void restartPreparation()}>{busy ? 'Starting again…' : 'Try again'}</button>
+            </div>
           </div>
-        </div>
+        ) : preparationStatus("You’ll review the screens before anything is built.")
       ) : null}
       {workflow.phase === "design-review" && state.data?.design ? (
         <>
@@ -494,14 +622,10 @@ function ProjectWorkspace({
           <DesignBriefPreview projectId={projectId} design={state.data.design} looks={state.data.looks} />
           {/* Same reassurance the plan review carries — approving the design is
               the gate to a sandbox build, and deploy/spend stay separate. */}
-          <div className="workflow-assurance" data-testid="workflow-design-assurance">
-            <span className="workflow-chip workflow-chip-ok">
-              <Icon name="shield" title="" /> Runs in a sandbox
-            </span>
-            <span className="workflow-chip">No deploy</span>
-            <span className="workflow-chip">No spending</span>
-            <span className="workflow-assurance-note">— those need separate permission</span>
-          </div>
+          <p className="workflow-assurance" data-testid="workflow-design-assurance">
+            <Icon name="shield" title="" />
+            <span>A private test copy. Nothing is published or paid for until you say so.</span>
+          </p>
           <div className="row-actions">
             <button
               className="btn-key"
@@ -580,13 +704,12 @@ function ProjectWorkspace({
             if (!detail) {
               return planningBlocked
                 ? "Caddie didn't finish the plan. Nothing was built — continue and it will pick up your request and feedback."
-                : "Build stopped. Your plan and saved files are retained.";
+                : preparationBlocked ? "Preparation paused. Your approved work is saved." : "Build stopped. Your plan and saved files are retained.";
             }
             if (detail.startsWith(STOP_SENTINEL) || detail.length <= 200) return detail;
             return (
               <>
-                Caddie hit a blocker while building. Nothing was lost — retry when
-                you’re ready, or ask Caddie what happened.
+                {preparationBlocked ? 'Caddie could not finish this preparation step. Your approved work is saved.' : 'Caddie could not finish the build. Your plan and saved files are retained.'}
                 <details className="state-detail-report">
                   <summary>Technical report</summary>
                   {detail}
@@ -629,19 +752,24 @@ function ProjectWorkspace({
               ? planningBlocked
                 ? "Continuing…"
                 : "Resuming…"
-              : planningBlocked
-                ? "Continue the plan"
-                : "Retry build"}
+              : preparationBlocked === 'looks' || preparationBlocked === 'design' ? 'Try again' : preparationRetryLabel(preparationBlocked)}
           </button>
-          <button
-            className="btn-ghost"
-            onClick={() => chrome.openProject(projectId, true)}
-          >
-            Review with Caddie
-          </button>
+          {/* A paused look or screens step has one thing to do: try again.
+              Elsewhere one main button, and asking Caddie is a quiet link
+              (owner 2026-10-30: two equal buttons for one decision). */}
+          {preparationBlocked === 'looks' || preparationBlocked === 'design' ? null : (
+            <button
+              type="button"
+              className="build-text-action"
+              onClick={() => chrome.openProject(projectId, true)}
+            >
+              Ask Caddie what happened
+            </button>
+          )}
         </div>
       ) : null}
-      {workflow.phase === "blocked" && !planningBlocked && chrome.actorId ? (
+      {/* Nothing is built before the look is picked: no feature checklist yet. */}
+      {workflow.phase === "blocked" && !planningBlocked && !preparationBlocked && chrome.actorId ? (
         <SavedFeatures actorId={chrome.actorId} projectId={projectId} />
       ) : null}
       {importPreview && chrome.actorId && (BEFORE_BUILD.has(workflow.phase) || planningBlocked) ? (
@@ -672,32 +800,34 @@ function ProjectWorkspace({
           <div data-testid="ready-parts">
             <ModuleProgress projectId={projectId} missingOnly />
           </div>
-          <InteractivePreview
-            actorId={chrome.actorId}
-            projectId={projectId}
-            artifactId={workflow.previewId}
-            contentUrl={`/api/projects/${encodeURIComponent(projectId)}/workflow/preview/${encodeURIComponent(workflow.previewId)}`}
-            {...(state.data?.previewKind === "flutter" ? { kind: "flutter" as const } : {})}
-            {...(state.data?.previewHasServer
-              ? {
-                  appRequestUrl: `/api/projects/${encodeURIComponent(projectId)}/workflow/preview/${encodeURIComponent(workflow.previewId)}/app`,
-                  onResetData: async () => {
-                    await postJson(`/api/projects/${encodeURIComponent(projectId)}/workflow/preview-data/reset`, {});
-                  },
-                }
-              : {})}
-          />
+          {/* Owner 2026-10-28: this is the BUILD tab — status, checks and records.
+              The live app lives on the Preview tab; here it is one clear entry,
+              not a second preview surface pushing the checklist down. */}
+          <div className="ready-preview-entry" data-testid="ready-preview-entry">
+            <button
+              type="button"
+              className="btn-key"
+              onClick={() => chrome.goProjectTab('/preview', { project: projectId, preview: workflow.previewId, source: 'workflow' })}
+            >
+              Open your app
+            </button>
+            <span className="state-detail">The live preview opens on the Preview tab.</span>
+          </div>
+          <AddNext projectId={projectId} />
+          <div className="project-ready-actions">
+            <AskForChange projectId={projectId} />
+            <button type="button" className="btn-ghost" onClick={() => setChecksOpen(true)}>See checks</button>
+            <button type="button" className="btn-ghost" onClick={() => setDeliveryOpen(true)}>Publishing &amp; versions</button>
+          </div>
           {state.data?.previewHasServer ? <TestInbox actorId={chrome.actorId} projectId={projectId} /> : null}
           {state.data?.previewHasServer ? <AppJobs actorId={chrome.actorId} projectId={projectId} outputId={workflow.previewId} /> : null}
-          <details className="workflow-checks"><summary>What Caddie checked</summary>
+          <ProjectDialog open={checksOpen} onClose={() => setChecksOpen(false)} title="What Caddie checked" wide>
             <SavedFeatures actorId={chrome.actorId} projectId={projectId} />
-          </details>
-          <details className="workflow-app-options"><summary>App settings, versions & delivery</summary>
-          <AppKeys actorId={chrome.actorId} projectId={projectId} hasServer={Boolean(state.data?.previewHasServer)} />
+          </ProjectDialog>
+          <ProjectDialog open={deliveryOpen} onClose={() => setDeliveryOpen(false)} title="Publishing and versions" wide>
           <PublishApp actorId={chrome.actorId} projectId={projectId} />
           {state.data?.previewKind === "flutter" ? <AndroidDownload actorId={chrome.actorId} projectId={projectId} /> : null}
           <AppVersions actorId={chrome.actorId} projectId={projectId} onRestored={() => state.refetch()} />
-          <AppAi actorId={chrome.actorId} projectId={projectId} />
           <SaveToGithub
             actorId={chrome.actorId}
             projectId={projectId}
@@ -705,7 +835,7 @@ function ProjectWorkspace({
             repo={linkedRepo}
             onConnect={() => chrome.goProjectTab("/project/settings", { project: projectId })}
           />
-          </details>
+          </ProjectDialog>
         </>
       ) : null}
       {failed && workflow.phase !== "ready" && !active ? (
@@ -961,7 +1091,7 @@ export function DesignBriefPreview({ projectId, design, looks, readOnly = false 
     <ProjectDialog open={open} onClose={() => setOpen(false)} title="Design details" wide>
       <div className="design-notes-intro"><h3>About these screens</h3><p>{mocks.length} screens saved in version {selected.revision}. The preview shows the visual design; it does not test saving or other app behaviour.</p></div>
       {mocks.length ? <ul className="design-screen-index">{mocks.map((mock,index) => <li key={index}>{mock.title}</li>)}</ul> : null}
-      <details className="design-source-notes"><summary>Read the saved specification</summary><div className="workflow-plan" data-testid="workflow-design-brief"><Markdown text={notes} /></div></details>
+      <details className="design-source-notes"><summary>Read the saved specification</summary><div className="workflow-plan" data-testid="workflow-design-brief"><Markdown text={plainWordsForOwner(notes)} /></div></details>
     </ProjectDialog>
     <ProjectDialog open={compare} onClose={() => setCompare(false)} title="Earlier look options" wide>
       <p className="state-detail">These were the visual directions proposed before the screen design. Comparing them does not change your chosen look or the active build.</p>

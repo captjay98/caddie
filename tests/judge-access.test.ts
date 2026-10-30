@@ -150,9 +150,14 @@ describe('judge access', () => {
 	test('GET /judge/access serves the panel state', async () => {
 		const res = await router.request(`${ORIGIN}/judge/access`, {}, envOf());
 		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual({ open: true, canStart: true });
+		expect(await res.json()).toEqual({ open: true, canStart: true, example: false });
 		const closed = await router.request(`${ORIGIN}/judge/access`, {}, envOf({ JUDGE_ACCESS_ENABLED: '0' }));
-		expect(await closed.json()).toEqual({ open: false, canStart: true });
+		expect(await closed.json()).toEqual({ open: false, canStart: true, example: false });
+		// Only whether an example exists is exposed, never its project id.
+		const withExample = await router.request(`${ORIGIN}/judge/access`, {}, envOf({ JUDGE_EXAMPLE_PROJECT_ID: 'proj_demo' }));
+		const body = await withExample.json();
+		expect(body).toEqual({ open: true, canStart: true, example: true });
+		expect(JSON.stringify(body)).not.toContain('proj_demo');
 	});
 
 	test('the judge name and password rules are the panel sentences', async () => {

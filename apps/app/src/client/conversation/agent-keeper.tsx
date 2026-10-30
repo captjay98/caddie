@@ -128,6 +128,8 @@ function Keeper(props: { url: string; register: (url: string, agent: SharedAgent
   setOlder([]); setNextCursor(observedCursor); setOlderError(undefined);
  }, [observedCursor]);
  const messages = useMemo(() => older.length ? mergeHistory(older, live.messages) : live.messages, [older, live.messages]);
+ const refreshRef = useRef(live.refresh);
+ refreshRef.current = live.refresh;
  const loadOlder = useMemo(() => async () => {
   if (!nextCursor || pending.current) return;
   pending.current = true; setOlderPending(true); setOlderError(undefined);
@@ -140,10 +142,10 @@ function Keeper(props: { url: string; register: (url: string, agent: SharedAgent
   } catch (error) {
    if (generation.current === current) {
     setOlderError(error instanceof Error ? error : new Error('Earlier messages could not be loaded'));
-    if (typeof error === 'object' && error !== null && 'status' in error && error.status === 410) live.refresh();
+    if (typeof error === 'object' && error !== null && 'status' in error && error.status === 410) refreshRef.current();
    }
   } finally { pending.current = false; setOlderPending(false); }
- }, [transport, nextCursor, live.refresh]);
+ }, [transport, nextCursor]);
  const agent: SharedAgentResult = { ...live, messages, hasOlder: Boolean(nextCursor), olderPending, olderError, loadOlder };
  const agentRef = useRef(agent); agentRef.current = agent;
  useEffect(() => { props.register(props.url, agentRef.current); return () => { generation.current++; props.unregister(props.url); }; }, [props.url, props.register, props.unregister]);

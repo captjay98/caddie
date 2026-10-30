@@ -1,3 +1,4 @@
+import { fixtureLegacyQualityPolicy } from './fixtures/migrations.ts';
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
@@ -87,6 +88,8 @@ async function world() {
       sourceConversationId: homeRun.conversationId,
     });
     const scope = await projectScopeForUser(db, "alice", started.project.id);
+// Fixture models a project from before the default-on quality policy (see fixtureLegacyQualityPolicy).
+fixtureLegacyQualityPolicy(sqlite, scope.projectId);
     const plan = await createPlanDocRevision(db, scope, {
       kind: "prd",
       body: "# Todo app\n\nAdd, complete, delete, filter and persist tasks.",
@@ -155,6 +158,24 @@ describe("buildActivity — honest build-progress projection", () => {
     expect(activity.rounds[0]!.issue).toBe("saved-tasks");
     expect(activity.rounds[0]!.outcome).toBe("failed");
     expect(activity.openIssues).toBe(1);
+  });
+
+  // Owner 2026-10-30: the card read "Fixing “Get a tip…”" before that part had
+  // run a single check, because the previous part's failures were still open.
+  test("a part that failed and then passed is no longer an open issue", async () => {
+    const w = await world();
+    const item = await w.planned();
+    await w.toBuilding(item.scope, item.plan.id);
+    const runId = (await workflowSnapshot(w.db, item.scope)).workflow!.runId;
+    await recordRepairRound(w.db, item.scope, runId, { issue: "see-days:independent-criteria", round: "repair_attempt", outcome: "failed", detail: "x" });
+    await recordRepairRound(w.db, item.scope, runId, { issue: "odd-day-tip:behavior-tests", round: "repair_attempt", outcome: "failed", detail: "y" });
+    const now = new Date().toISOString();
+    const insert = 'insert into build_features (projectId,runId,planId,featureId,position,title,doneWhen,status,attempts,updatedAt) values (?,?,?,?,?,?,?,?,?,?)';
+    await w.db.prepare(insert).bind(item.scope.projectId, runId, item.plan.id, "see-days", 1, "See your days", "[]", "passed", 0, now).run();
+    await w.db.prepare(insert).bind(item.scope.projectId, runId, item.plan.id, "odd-day-tip", 2, "Get a tip", "[]", "building", 0, now).run();
+    const activity = await buildActivity(w.db, item.scope);
+    expect(activity.openIssues).toBe(1);
+    expect(activity.rounds).toHaveLength(2);
   });
 
   test("check history is in words: old rows that stored a raw check result read as one sentence (plan 3.3)", async () => {

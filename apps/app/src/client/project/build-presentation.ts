@@ -50,14 +50,14 @@ export function buildPresentation(
         "Build checks passed. Try the main journeys yourself before publishing.",
       mood: "done" as const,
     };
+  // While it runs, the title is the whole message (owner 2026-10-29: less
+  // text, one level each). The feature list below says what is being built.
   return {
     quiet,
     repairing,
     title: repairing ? "Fixing a check that failed." : "Building your app.",
     label: "Caddie is working",
-    summary: repairing
-      ? "A check found something that needs fixing. Caddie is working on it before checking the app again."
-      : "Caddie is building the approved features and checking them as it goes.",
+    summary: "",
     mood: "building" as const,
   };
 }

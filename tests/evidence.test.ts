@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Scope } from '@caddie/contracts';
+import { allMigrationPaths, createTableSql } from './fixtures/migrations.ts';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import {
 	AUTHORITY_VALUES,
@@ -41,10 +42,7 @@ import {
  */
 
 const REPO_ROOT = join(import.meta.dir, '..');
-const MIGRATION_PATHS = [
-	join(REPO_ROOT, 'apps', 'app', 'migrations', '0001_product.sql'),
-	join(REPO_ROOT, 'apps', 'app', 'migrations', '0004_evidence.sql'),
-];
+const MIGRATION_PATHS = allMigrationPaths();
 
 // --- in-memory D1 (same wrap pattern as tests/project-isolation.integration.test.ts) --
 
@@ -265,14 +263,11 @@ describe('P10 slice 1: one shared authority vocabulary (audit defect #6)', () =>
 		expect(isSourceAuthority(null)).toBe(false);
 	});
 
-	test('the 0004 DDL authority check constraint lists EXACTLY the shared vocabulary', () => {
+	test('the source DDL authority check constraint lists EXACTLY the shared vocabulary', () => {
 		// ONE vocabulary means storage cannot drift from logic or UI: the check
 		// constraint in the migration must enumerate the same values, in the
 		// same canonical order, as authority.ts.
-		const ddl = readFileSync(
-			join(REPO_ROOT, 'apps', 'app', 'migrations', '0004_evidence.sql'),
-			'utf8',
-		);
+		const ddl = createTableSql('evidence_sources');
 		const match = /"authority" text not null check \("authority" in \(([^)]+)\)\)/.exec(ddl);
 		expect(match).not.toBeNull();
 		const ddlValues = match![1]!
@@ -987,11 +982,20 @@ describe('P10 slice 2: deadline normalization', () => {
 		expect(sameInstant('not a date', '2026-09-01T00:00:00Z')).toBe(false);
 	});
 
+	test('daylight-saving gaps and repeated local hours do not become guessed deadline instants', () => {
+		expect(normalizeDeadline('March 8, 2026 at 2:30 AM', 'America/Los_Angeles').status).toBe('ambiguous');
+		expect(normalizeDeadline('November 1, 2026 at 1:30 AM', 'America/Los_Angeles').status).toBe('ambiguous');
+		expect(normalizeDeadline('April 5, 2026 at 1:45 AM', 'Australia/Lord_Howe').status).toBe('ambiguous');
+		expect(normalizeDeadline('October 4, 2026 at 2:15 AM', 'Australia/Lord_Howe').status).toBe('ambiguous');
+		expect(normalizeDeadline('October 30, 2026 at 10:00 AM', 'America/Los_Angeles').utc).toBe('2026-10-30T17:00:00.000Z');
+	});
+
 	test('deadlineInstantKey pins ISO instants and refuses date-only or prose (fact vs guess)', () => {
 		expect(deadlineInstantKey('endDate: 2026-08-31T20:00:00-04:00')).toBe(
 			deadlineInstantKey('2026-09-01T00:00:00Z'),
 		);
 		expect(deadlineInstantKey('September 21, 2026')).toBeNull(); // date-only: no instant
+		expect(deadlineInstantKey('2026-02-31T12:00:00Z')).toBeNull();
 		expect(deadlineInstantKey('sometime in the fall')).toBeNull();
 	});
 });
@@ -1273,4 +1277,26 @@ describe('P10 slice 3: fetch policy — real fetches against the 127.0.0.1 stub 
 		);
 		expect(mismatch).toMatchObject({ code: 'url_mismatch' });
 	});
+});
+
+test('contest rules reconcile within their own event, never across discovered contests', async () => {
+ const world = makeEvidenceWorld();
+ try {
+  const record = async (url: string, value: string) => {
+   const source = await registerSource(world.db, world.aliceScope, { url, kind: 'page', authority: 'binding_rules' });
+   const capture = await captureSnapshot(world.db, world.aliceScope, source.id, { content: `Closes ${value}`, mediaType: 'text/plain' });
+   await addClaim(world.db, world.aliceScope, { snapshotId: capture.snapshot.id, claimType: 'requirement.submission_deadline', value, quote: `Closes ${value}`, extractionVersion: 'test' });
+  };
+  await record('https://event-one.devpost.com/rules', 'October 28, 2026');
+  await record('https://event-two.devpost.com/rules', 'October 30, 2026');
+  const separate = await surveyClaims(world.db, world.aliceScope, {});
+  expect(separate).toHaveLength(2);
+  expect(separate.every(s => s.conflict === null && s.winner !== null)).toBe(true);
+  await record('https://event-one.devpost.com/faq', 'October 29, 2026');
+  const surveyed = await surveyClaims(world.db, world.aliceScope, {});
+  expect(surveyed).toHaveLength(2);
+  const conflict = surveyed.find(s => s.conflict);
+  expect(conflict?.conflict?.claimIds).toHaveLength(2);
+  expect(surveyed.find(s => s.winner)?.winner?.value).toBe('October 30, 2026');
+ } finally { world.sqlite.close(); }
 });

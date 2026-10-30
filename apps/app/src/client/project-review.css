@@ -123,3 +123,44 @@
 .conversation-load-recovery { padding:16px; border:1px solid var(--color-line); border-radius:13px; background:var(--color-panel); font-size:14px; line-height:1.5; }
 .conversation-load-recovery strong { font-weight:600; }
 .conversation-load-recovery p { margin:6px 0 14px; color:var(--color-muted); font-size:13px; }
+
+/* Owner 2026-10-29: one card rhythm on the project page, the same discipline
+   as the sign-in card — one inset, short vertical steps, nothing stacked twice.
+   The Plan/Design tabs sit on the card's top edge (their 44px hit area is the
+   space above the content), so the card does not pad above them again. */
+.focused-project-content:has(> .plan-design-switch) { padding-top: 4px; }
+.focused-project-content > .plan-design-switch { margin: 0 0 8px; }
+.focused-project-content > .project-workflow { gap: 12px; }
+.focused-project-content > .project-workflow > .workflow-heading h3 { font-size: 19px; }
+.focused-project-content .design-review-panel { gap: 12px; }
+.focused-project-content .plan-decision .row-actions { margin-top: 10px; }
+
+/* Plan tab: one title row — "Your plan", a quiet version, one status pill. */
+.plan-decision-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.plan-decision-title .ev-title { margin: 0; font-size: 19px; line-height: 1.3; }
+.plan-decision-version { font-size: 13px; color: var(--color-muted); white-space: nowrap; }
+.plan-decision-head .badge { font-family: inherit; letter-spacing: 0; text-transform: none; }
+.plan-review-details.fold > summary.ev-head { min-height: 44px; }
+.plan-decision-footer { padding: 12px 0 0; border-top: 0; }
+
+/* Preparation status (plan, looks, legacy screens): stage · time on one line,
+   a thin bar while work is recorded, then the real actions. */
+.prep-status { display: grid; gap: 8px; min-width: 0; }
+.prep-status > * { margin: 0; }
+.prep-line { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--color-text); }
+.prep-line b { font-weight: 600; color: var(--color-bright); }
+.prep-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--m-blue, #4d9fff); }
+.prep-dot[data-quiet='true'] { background: var(--color-warn, #d9a441); }
+@media (prefers-reduced-motion: no-preference) {
+	.prep-dot[data-quiet='false'] { animation: prep-dot-pulse 1.6s ease-in-out infinite; }
+}
+@keyframes prep-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.prep-status .workflow-progress { margin: 0; }
+.prep-status .row-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+
+.focused-project-content .plan-decision-footer .row-actions { margin: 0; }
+/* While a step is prepared the title and the live stage line say it all; the
+   "In progress" pill above them was a third way of saying the same thing. */
+.focused-project-content > .project-workflow:is([data-phase='planning'], [data-phase='looks'], [data-phase='design']) > .compact-card-head { display: none; }
+/* Stop is a quiet escape hatch, never a full-width slab on a phone. */
+.prep-status .row-actions > [data-testid='preparation-stop'] { flex: 0 0 auto; min-width: 88px; }

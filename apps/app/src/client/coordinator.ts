@@ -125,7 +125,19 @@ export function useCoordinatorTransport(
 			throw error;
 		}
 	}, [sendAttempt, actor.actorId, projectId]);
-	const baseSource: ChannelSource = run ? agent : standbySource;
+	// Standby says "history is ready and there is none of it". That is only true
+	// once the run lookup has ANSWERED and found no run; while it is still in
+	// flight the conversation may well have saved messages, so the honest state
+	// is "loading". Claiming otherwise painted "No conversation here yet" for a
+	// moment under twenty arriving messages, which pushed the in-chat status
+	// card out of the transcript's clip and back — a measured 0.27 layout shift
+	// on the Preview tab (owner 2026-10-27).
+	const runLookupPending = actor.actorId !== null && projectId !== null && bindings.isPending;
+	const baseSource: ChannelSource = run
+		? agent
+		: runLookupPending
+			? { ...standbySource, historyReady: false }
+			: standbySource;
 	const source: ChannelSource = sendFailure && sendFailure.actorId === actor.actorId && sendFailure.projectId === projectId
 		? { ...baseSource, status: 'error', error: sendFailure.error }
 		: baseSource;

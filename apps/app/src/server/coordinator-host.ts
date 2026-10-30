@@ -1,14 +1,19 @@
 import {parseAcceptanceJourneys} from '@caddie/contracts';
+import {previewBase as isolatedPreviewBase,previewSigningSecret} from './isolated-preview.ts';
 import {openAcceptanceCandidate,closeAcceptanceCandidate} from './acceptance-candidate.ts';
 import {configuredBrowserChecks,serviceFidelity} from './browser-check-service.ts';
 import { currentBuildTask, effectiveBuildSignal } from './task-deadline-context.ts';
-import { runIndependentAcceptance, serviceIndependentAcceptance, type IndependentAcceptancePort } from './independent-acceptance.ts';
-import { parseLooks, lookThemeBlock } from '@caddie/contracts';
-import { qualityEnabled } from './artifact-quality.ts';
+import { acceptanceRepairBrief, runIndependentAcceptance, serviceIndependentAcceptance, type IndependentAcceptancePort } from './independent-acceptance.ts';
+import { deliveryFromEnv } from './notifications.ts';
+import { parseLooks, lookProposalIssues, checksLintIssues } from '@caddie/contracts';
+import { configuredDesignAudit, measureLooks, measureStates, type DesignAuditPort } from './design-audit.ts';
+import { checkFailureSignature, noteCheckFailure } from './repeat-failures.ts';
+import { qualityEnabled, recordMachineReview } from './artifact-quality.ts';
 import { findModelRouteForRole } from '../agents/providers.ts';
 import { reviewArtifactCandidate } from './artifact-quality.ts';
+import { saveReadyChangeProposal, type ChangeProposal } from './build-workflow.ts';
 import { nebiusQualityReviewer } from './artifact-quality-model.ts';
-import { configuredDesignCapture, type DesignReviewCapturePort } from './design-review-capture.ts';
+import type { DesignReviewCapturePort } from './design-review-capture.ts';
 import { buildResumeContext } from './build-resume-context.ts';
 import { assertBuildEnvironment } from './build-environment.ts';
 import { recipe as webRecipe } from '../../../../stacks/react-hono/recipe.ts';
@@ -53,6 +58,7 @@ import {
   readWorkflow,
   type RepairPauseScope,
   continueProjectFromChat,
+  recordOwnerChangeRequest,
 } from "./build-workflow.ts";
 import { stackCatalog } from "./stacks.ts";
 import { recordBuildActivity } from "./build-activity.ts";
@@ -110,7 +116,8 @@ import { runVerifiedInstall } from "./verified-install.ts";
 import { parseTestCounts } from "./build-timeline.ts";
 import { checkSentence, newTestsSentence } from "./round-detail.ts";
 import { projectStatusForActor } from "./project-experience.ts";
-import { PROTOTYPE_GUIDE, splitDesignPrototype, FEATURE_BLOCK_GUIDE, LOOKS_BLOCK_GUIDE, looksSaveError, parseDemoContract, parsePlanFeatures, themeSaveError, THEME_BLOCK_GUIDE } from "@caddie/contracts";
+import { FIRST_VERSION_MAX, ITEM_CHECKS_MAX, itemTitleIssue } from "@caddie/contracts";
+import { PROTOTYPE_GUIDE, splitDesignPrototype, FEATURE_BLOCK_GUIDE, looksSaveError, parseDemoContract, internalVocabularyError, ownerProse, parsePlanFeatures, themeSaveError, THEME_BLOCK_GUIDE } from "@caddie/contracts";
 import { collectSourceSnapshot } from "./source-export.ts";
 import { recordCodeVersion } from "./code-versions.ts";
 import { codeStoreFor } from "./code-store-env.ts";
@@ -126,6 +133,12 @@ const VERSION_SOURCE_CAPS = {
 };
 
 const NO_SUCH_TABLE = (error: unknown) => String(error).includes("no such table");
+
+/** Features already told "write the code first" once (runId:featureId). */
+const WRITE_FIRST_REFUSED = new Set<string>();
+/** A shell command that writes files (redirect, tee, copy/move, in-place edit, patch). */
+const SHELL_WRITE = /(^|[^<>&0-9])>{1,2}\s*[^\s&>]|\btee\b|\b(cp|mv|install)\s|\bsed\s+-i|\bpatch\b|\bgit\s+apply\b|\bmkdir\b/;
+
 
 /** Sandbox actions spent in the current build window (since the last user retry). */
 async function buildWindowActionCount(db: CoordinatorEnvironment["DB"], runId: string): Promise<number> {
@@ -166,6 +179,9 @@ async function recentActions(db: CoordinatorEnvironment["DB"], runId: string, li
 const tail = (text: string | undefined, limit = 4000) =>
   !text ? "" : text.length > limit ? `…${text.slice(-limit)}` : text;
 export interface CoordinatorEnvironment {
+  PREVIEW_BASE_URL?: string;
+  PREVIEW_SIGNING_SECRET?: string;
+  BETTER_AUTH_SECRET?: string;
   DB: AuthEnv["DB"];
   /** Public HTTPS Caddie origin for the installed Android app backend relay. */
   BETTER_AUTH_URL?: string;
@@ -195,9 +211,12 @@ export interface CoordinatorEnvironment {
  * and the foundation step says so plainly.
  */
 export interface CoordinatorHostDeps {
+  previewSmoke?: (document:string,signal?:AbortSignal)=>Promise<{passed:boolean;errors:string[]}>;
   /** Host-owned browser capture/comparison. Never exposed as an agent tool. */
   visualFidelity?: FidelityPort;
   designReviewCapture?: DesignReviewCapturePort;
+  /** Host-owned rendered-screen measurements (contrast, tap size, fit). */
+  designAudit?: DesignAuditPort;
   independentAcceptance?: IndependentAcceptancePort;
   qualityReviewer?: import('./artifact-quality.ts').QualityReviewer;
   dispatchModuleBuilder?: DispatchModuleBuilder;
@@ -855,6 +874,11 @@ export async function createCoordinatorContext(
       await scaffold();
       const { driver, id } = await ensureSession();
       const operationKey = `exec:${runId}:${input.operationKey}`;
+      // The edit-time parse check after a write is Caddie's own check, not a
+      // command the builder chose: it never trips the repeat guard and is not
+      // listed in the build history.
+      if (input.operationKey.startsWith("edit-check:"))
+        return driver.execute({ sessionId: id, command: input.command, operationKey, signal: input.signal, timeoutMs: input.timeoutMs, cwd: root, env: runtimeEnv });
       if (!(await isReplay(operationKey)))
         await guardAction({ kind: "command", subject: input.command });
       const execStarted = new Date().toISOString();
@@ -1027,6 +1051,24 @@ export async function createCoordinatorContext(
       if (!passed) {
         // A join's failure goes back to the part's builder (module-join.ts).
         if (mode === "join") return { passed: false as const, paused: false, receipts, workflow, plan, driver, id };
+        // The builder's own mid-work run_checks is how it iterates, not a
+        // hand-in: it is ledgered as a diagnosis and spends no repair try.
+        // (2026-10-30 EggOps: "Write down today's eggs" spent five of its six
+        // tries on its own test runs and paused one round after its first real
+        // check.) Hand-ins still count: finish_feature/verify failures, failed
+        // independent checks, and a builder that overruns its task deadline.
+        // Big-app part builders keep counting their own runs: a part stops
+        // itself after six, without a coordinator watching each part.
+        if (mode === "checks" && !moduleId) {
+          await recordRepairRound(env.DB, scope, workflow.runId, { admissionId: workflow.spendPayerId ?? undefined,
+            issue: issuePrefix ? `${issuePrefix}:${check.check}` : check.check,
+            operationKey,
+            round: "diagnosis",
+            outcome: "failed",
+            detail: checkSentence(receipts.at(-1) ?? {}),
+          });
+          return { passed: false as const, paused: false, receipts, workflow, plan, driver, id };
+        }
         await recordRepairRound(env.DB, scope, workflow.runId, { admissionId: workflow.spendPayerId ?? undefined,
           issue: issuePrefix ? `${issuePrefix}:${check.check}` : check.check,
           operationKey,
@@ -1084,21 +1126,69 @@ export async function createCoordinatorContext(
     const endImage = (await driver.checkpoint(id)).checkpointRef;
     return { passed: true as const, paused: false, receipts, workflow, plan, driver, id, contractChecks, endImage };
   };
+  /**
+   * Code before checks (owner 2026-10-29). Farm Ops ran the checks before it
+   * had written a single file, failed behavior-tests on the bare scaffold and
+   * spent a repair attempt on nothing. A feature with no file written since
+   * the previous feature passed gets this answer instead of a check run.
+   * Part builders (big apps) keep their own activity, so they are exempt.
+   */
+  const nothingWrittenYet = async (features: readonly { passedAt: string | null }[], featureId: string): Promise<boolean> => {
+    if (moduleId) return false;
+    // At most one refusal per feature, so a write the log cannot see (an
+    // unusual shell command) never locks the feature out of its checks.
+    const key = `${runId}:${featureId}`;
+    if (WRITE_FIRST_REFUSED.has(key)) return false;
+    const since = features.reduce((latest, row) => (row.passedAt && row.passedAt > latest ? row.passedAt : latest), "");
+    try {
+      // Only a run whose scaffold this host recorded has a complete action log.
+      const setup = await env.DB.prepare("select 1 as n from build_activity where runId=? and kind='setup' limit 1").bind(runId).all();
+      if (!setup.results.length) return false;
+      const found = await env.DB
+        .prepare("select kind, subject from build_activity where runId=? and outcome='ok' and kind in ('file','command') and startedAt>? limit 400")
+        .bind(runId, since)
+        .all<{ kind: string; subject: string }>();
+      const wrote = found.results.some((row) => row.kind === "file" || SHELL_WRITE.test(row.subject));
+      if (wrote) return false;
+      WRITE_FIRST_REFUSED.add(key);
+      return true;
+    } catch (error) {
+      if (/no such (table|column)/i.test(String(error))) return false;
+      throw error;
+    }
+  };
+  /** What the coordinator tells the owner when a part runs out of tries: the
+ * part by its plan title and the one thing to do, nothing about checks or
+ * tools (2026-10-30: "the sandbox is locked waiting for review controls"). */
+const pausedNext = (title: string | null) =>
+  `The build is paused. Stop now and tell the owner in one or two plain sentences: Caddie couldn't finish ${title ? `“${title}”` : "this part"} this time, the parts already built are saved, and pressing Retry on the build card tries again. Do not mention checks, tests, tools, files or the sandbox.`;
+  const WRITE_FIRST_NEXT =
+    "Nothing has been written for this feature yet, so there is nothing to check. Write the feature's code and its test file first (each file once, complete), then run the checks.";
   const runChecks = async (attempt: string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
     const { plan } = await requireBuildApproval(env.DB, scope, pauseScope);
     // Failures count toward the feature being built, not one build-wide bucket.
-    const current = currentFeature(scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan)));
+    const featureRows = scopeToModule(await ensureBuildFeatures(env.DB, scope, runId, plan));
+    const current = currentFeature(featureRows);
+    if (current && (await nothingWrittenYet(featureRows, current.featureId))) return { passed: false, receipts: [], next: WRITE_FIRST_NEXT };
     const outcome = await runHostChecks("checks", attempt, signal, current?.featureId);
-    if (!outcome.passed)
+    if (!outcome.passed) {
+      // Change approach when the same failure repeats (owner 2026-10-29): the
+      // same first error twice in a row means the last fix did not touch it.
+      const failed = (outcome.receipts as { passed?: boolean; check?: string; stdout?: string; stderr?: string }[] | undefined)?.find((receipt) => receipt.passed === false);
+      const signature = failed ? `${failed.check}: ${checkFailureSignature(`${failed.stderr ?? ""}\n${failed.stdout ?? ""}`)}` : "";
+      const repeats = signature ? noteCheckFailure(`${runId}:${current?.featureId ?? "build"}`, signature) : 1;
       return {
         passed: false,
         paused: outcome.paused,
         receipts: outcome.receipts,
         next: outcome.paused
-          ? "The build is paused after repeated failures. Stop and report what is failing."
-          : "Read the failing check's output above, fix its cause, then run run_checks again.",
+          ? pausedNext(current?.title ?? null)
+          : repeats >= 2
+            ? `This is the SAME failure as the last run_checks (${signature}). Your last fix did not reach it, so do not repeat it: re-read the failing test and the code it exercises, find the actual cause, and change approach (simplify the code, or rewrite the failing part) before running run_checks again.`
+            : "Read the failing check's output above, fix its cause, then run run_checks again.",
       };
+    }
     return {
       passed: true,
       receipts: outcome.receipts,
@@ -1186,7 +1276,7 @@ export async function createCoordinatorContext(
         paused: outcome.paused,
         receipts: outcome.receipts,
         next: outcome.paused
-          ? `“${current.title}” used its repair allowance, so the build is paused. Report what is failing.`
+          ? pausedNext(current.title)
           : `Delegate a focused repair for the failing check, then call finish_feature again. ${FEATURE_DELEGATION_RULE}`,
       };
     }
@@ -1218,11 +1308,15 @@ export async function createCoordinatorContext(
       if(independent.status!=='passed') {
         const unavailable=independent.status==='not-checked';
         if(unavailable)await pauseOrStop('Caddie could not complete the independent app checks. Your plan and saved files are retained. The app is not ready to try yet.');
-        else await recordRepairRound(env.DB,scope,runId,{admissionId:workflow.spendPayerId??undefined,issue:`${featureId}:independent-criteria`,round:'repair_attempt',outcome:'failed',operationKey:`criteria:${runId}:${plan.id}:${featureId}:${attempt}`});
+        // The checker's own reasons go to the repair (and the round record):
+        // a blind "criteria failed" sent the 2026-10-30 run into a whole-app
+        // re-read on the costliest rung while the fix was one missing <SignIn />.
+        const brief=unavailable?'':acceptanceRepairBrief(independent.failures,journeys);
+        if(!unavailable)await recordRepairRound(env.DB,scope,runId,{admissionId:workflow.spendPayerId??undefined,issue:`${featureId}:independent-criteria`,round:'repair_attempt',outcome:'failed',operationKey:`criteria:${runId}:${plan.id}:${featureId}:${attempt}`,detail:brief.slice(0,2000)});
         const paused=unavailable||(await workflowRepairPause(env.DB,runId,pauseScope)).paused;
         if(paused&&!unavailable)await pauseOrStop('Caddie could not get the approved feature checks passing within this build’s allowance. Your plan and saved files are retained.');
         await recordFeatureAttempt(env.DB,current,paused);
-        return {passed:false,paused,next:unavailable?'Independent runtime checks are unavailable; do not claim this feature is built.':'Repair the failed independent criteria without changing the approved scope.'};
+        return {passed:false,paused,...(unavailable?{}:{failures:brief}),next:unavailable?'Independent runtime checks are unavailable; do not claim this feature is built.':paused?pausedNext(current.title):`Delegate ONE focused repair that hands the builder these failures word for word, then call finish_feature again. Do not change the approved scope. ${FEATURE_DELEGATION_RULE}`};
       }
       independentCriteriaPassed=true;
     }
@@ -1530,11 +1624,56 @@ export async function createCoordinatorContext(
         };
       }
     }
+    const approvedDesignId = (await env.DB.prepare('select "approvedDesignRevisionId" from "build_workflows" where "projectId" = ?')
+      .bind(scope.projectId).all<{ approvedDesignRevisionId: string | null }>()).results?.[0]?.approvedDesignRevisionId;
+    // Every web app is opened in the real preview security/storage environment.
+    // This also applies to legacy plans without declarative acceptance journeys.
+    if (built.kind === 'web') {
+      try {
+        isolatedPreviewBase(env.PREVIEW_BASE_URL,env.BETTER_AUTH_URL??'http://localhost:5176');
+        previewSigningSecret({...env,BETTER_AUTH_URL:env.BETTER_AUTH_URL??'http://localhost:5176'});
+      }catch {
+        await recordVerification(env.DB,scope,runId,{check:'preview-runtime',passed:false,evidence:JSON.stringify({checkedImage,status:'not-checked',reason:'Isolated preview configuration is unavailable.'}),planRevision:plan.id});
+        await pauseOrStop('Caddie could not prepare the isolated preview. Your checked app and files are saved.');
+        return {passed:false,paused:true,receipts,next:'Configure the separate preview origin before checking or publishing a ready preview. Do not change app code or consume repair attempts for this configuration gap.'};
+      }
+      const document=previewDocument({js:built.js,css:built.css});
+      const operationKey=`verify:${runId}:${plan.id}:${attempt}:preview-runtime`;
+      let smoke:{passed:boolean;errors:string[]}={passed:false,errors:['The private browser check service is unavailable.']};
+      let checked=false;
+      let candidate:Awaited<ReturnType<typeof openAcceptanceCandidate>>|undefined;
+      try {
+        if(hostDeps.previewSmoke){smoke=await hostDeps.previewSmoke(document,signal);checked=true;}
+        else {
+          const browser=configuredBrowserChecks(env);
+          if(browser&&approvedDesignId) {
+            candidate=await openAcceptanceCandidate(env.DB,scope,{projectId:scope.projectId,runId,admissionId:workflow.spendPayerId??'',planId:plan.id,designId:approvedDesignId,featureId:'final',checkedImage},
+              {document,server,migrations},env.BETTER_AUTH_URL??'http://localhost:5176');
+            const response=await browser.fetch(new Request('https://caddie-capture.internal/preview-smoke',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({runtime:candidate}),signal}));
+            if(response.ok) {
+              checked=true;
+              const result=await response.json() as {passed?:boolean;errors?:unknown};
+              smoke={passed:result.passed===true,errors:Array.isArray(result.errors)?result.errors.filter((x):x is string=>typeof x==='string').map(x=>x.slice(0,1000)):['The browser check returned an invalid result.']};
+            }
+          }
+        }
+      }catch(error){smoke={passed:false,errors:[error instanceof Error?error.message.slice(0,1000):'The preview check did not complete.']};}
+      finally{if(candidate)await closeAcceptanceCandidate(env.DB,candidate.id);}
+      await recordVerification(env.DB,scope,runId,{check:'preview-runtime',passed:smoke.passed,evidence:JSON.stringify({checkedImage,...smoke}),planRevision:plan.id});
+      if(!smoke.passed) {
+        const detail=smoke.errors.join('; ')||'The preview did not pass its runtime checks.';
+        if(!checked) {
+          await pauseOrStop('Caddie could not run the preview checks. Your plan and checked files are saved; the app is not ready to try yet.');
+          return {passed:false,paused:true,receipts,next:'The private browser verification service is unavailable. Retain the saved work; do not claim ready or spend repair attempts changing app code to fix missing check infrastructure.'};
+        }
+        await recordRepairRound(env.DB,scope,runId,{admissionId:workflow.spendPayerId??undefined,issue:'preview-runtime',operationKey,round:'repair_attempt',outcome:'failed',detail});
+        const paused=(await workflowRepairPause(env.DB,runId,pauseScope)).paused;
+        return {passed:false,paused,receipts:[...receipts,{check:'preview-runtime',passed:false,exitCode:1,stdout:'',stderr:detail,operationKey}],next:`The actual preview failed: ${detail}. Repair the app without replacing persistent records with an in-memory fallback, then run verify_build again. If the browser service is unavailable, retain the checked files and report that verification is unavailable.`};
+      }
+    }
     // Appearance is separate from functional checks. Bind real screenshot
     // receipts to the approved design AND checked image; absent infrastructure
     // never becomes a visual pass or prevents trying the functional preview.
-    const approvedDesignId = (await env.DB.prepare('select "approvedDesignRevisionId" from "build_workflows" where "projectId" = ?')
-      .bind(scope.projectId).all<{ approvedDesignRevisionId: string | null }>()).results?.[0]?.approvedDesignRevisionId;
     if (approvedDesignId) {
       const design = (await env.DB.prepare(`select "id","body","bodyHash" from "plan_doc_revisions" where "projectId" = ? and "id" = ? and "kind" = 'design'`)
         .bind(scope.projectId, approvedDesignId).all<{ id: string; body: string; bodyHash: string }>()).results?.[0];
@@ -1608,7 +1747,7 @@ export async function createCoordinatorContext(
         built.kind === "flutter"
           ? { server, migrations, flutterWeb: built.page, ...(storedAndroid ? { android: storedAndroid } : {}) }
           : { server, migrations, client: { js: built.js, css: built.css } },
-    });
+    }, deliveryFromEnv(env));
     // Team mode (part G): bind this output's contract-check results (sign-in,
     // second-person, restart) to its id, so publish-safety can refuse a publish
     // whose own output was not green. The verify run above produced the map.
@@ -1705,6 +1844,7 @@ export async function createCoordinatorContext(
     finishModuleBuild: moduleScope ? finishModuleBuild : undefined,
     projectId: scope.projectId,
     homeOverview,
+    existingProjectCount: projects.filter(project => project.kind !== 'home').length,
     actorContext: actor.text,
     currentPlanRevision: () => planRevision,
     listStacks: async () => stackCatalog(env),
@@ -1783,6 +1923,15 @@ export async function createCoordinatorContext(
         return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}($|[^\\p{L}\\p{N}_])`, "iu").test(input.request);
       });
       if (candidates.length !== 1) return null;
+      // What is forwarded here is the owner's delivery text, word for word, so
+      // it may be recorded as a change they asked for: the handoff carries the
+      // same authority as typing on the project page. The `continueProject`
+      // tool below is model-authored and deliberately does not record.
+      await recordOwnerChangeRequest(
+        env.DB,
+        await projectScopeForUser(env.DB, scope.actorId, candidates[0]!.id),
+        input.request,
+      );
       return continueProjectFromChat(env.DB, scope, {
         ...input, operationKey: `${input.operationKey}:${candidates[0]!.id}`, projectId: candidates[0]!.id, resumeBlocked: true,
       }, env);
@@ -1852,17 +2001,48 @@ export async function createCoordinatorContext(
       if (isHome)
         throw new SandboxError(409, "HOME_NO_PLAN", "Create a project first.");
       await ensureWorkflow(env.DB, scope, env);
+      if (input.kind === 'change-proposal') {
+        let proposal: ChangeProposal;
+        try { proposal = JSON.parse(input.body) as ChangeProposal; }
+        catch { throw new Error('INVALID_CHANGE_PROPOSAL: provide valid JSON with summary, affected, risks and checks.'); }
+        await saveReadyChangeProposal(env.DB, scope, { changeId: input.planRevision, proposal });
+        return;
+      }
       if (input.kind === "prd") {
         // A complete PRD can still describe a toy. The demo contract makes the
         // judge-facing path and the real integration explicit before approval.
         const demo = parseDemoContract(input.body);
         if (!demo.ok)
           throw new Error(`DEMO_CONTRACT_INVALID: not saved — ${demo.error}`);
+        // The owner reads the whole PRD on the review card, so plumbing
+        // vocabulary is refused anywhere in its prose, not only in the demo
+        // contract. Machine blocks (the feature list) are checked as data.
+        const proseLeak = internalVocabularyError(ownerProse(input.body));
+        if (proseLeak)
+          throw new Error(
+            `PRD_INTERNAL_VOCABULARY: not saved — the PRD carries ${proseLeak} in prose the owner reads. Say "Caddie's AI" and, for the core call, "(a deep answer)" or "(a quick answer)"; the tier belongs in the design's caddie-architecture block, never in the PRD.`,
+          );
         // The approval binds to this revision's hash, so the feature list the
         // host will build must be inside it, valid, before it is saved.
         const features = parsePlanFeatures(input.body);
         if (!features.ok)
           throw new Error(`PLAN_FEATURES_INVALID: not saved — ${features.error}. ${FEATURE_BLOCK_GUIDE}`);
+        // Staged builds (owner 2026-10-30): the plan's size follows what was
+        // asked for, but the FIRST version stays small so it is ready fast;
+        // everything else is an "add after" item the owner adds one at a
+        // time. Team mode plans a complete app and keeps the wider limit.
+        if (!teamMode) {
+          const first = features.features.filter((feature) => !feature.later);
+          const heavy = features.features.find((feature) => feature.doneWhen.length > ITEM_CHECKS_MAX);
+          if (first.length > FIRST_VERSION_MAX || heavy)
+            throw new Error(
+              `PLAN_TOO_BIG: not saved — ${heavy ? `“${heavy.title}” has ${heavy.doneWhen.length} doneWhen checks` : `the first version holds ${first.length} items`}. The first version holds at most ${FIRST_VERSION_MAX} items (the rest get "later": true and stay in the list), and every item has at most ${ITEM_CHECKS_MAX} doneWhen checks.`,
+            );
+        }
+        // Every item title is read by a non-technical owner on the plan card.
+        const unplain = features.features.map((feature) => itemTitleIssue(feature.title)).find(Boolean);
+        if (unplain)
+          throw new Error(`PLAN_WORDING: not saved — ${unplain}. Write each item title as something the owner does, in plain words, in 10 words or fewer.`);
       }
       // A design brief must carry a valid caddie-theme block, so every app gets
       // its own validated look. Refuse a new save with no valid theme (hex +
@@ -1879,32 +2059,44 @@ export async function createCoordinatorContext(
       // A looks proposal must carry 2-3 valid, clearly different looks and the
       // key screen to preview them on, or the owner's picker has nothing real
       // to show. Same refusal shape as the theme and PRD checks.
+      // The merged look step (owner 2026-10-29): three looks, each drawn as
+      // the app's real first screen, a screen inventory covering every plan
+      // feature and the browser-check manifest — all checked in code, all
+      // errors at once, nothing saved until they pass. The refusal names the
+      // fixes only; the designer already has the guide (context hygiene).
       if (input.kind === "looks") {
         const looksError = looksSaveError(input.body);
-        if (looksError)
-          throw new Error(`LOOKS_INVALID: not saved — ${looksError}. ${LOOKS_BLOCK_GUIDE}`);
+        if (looksError) throw new Error(`LOOKS_INVALID: not saved — ${looksError}`);
+        const workflow = await readWorkflow(env.DB, scope);
+        const plan = (await env.DB.prepare('select body from plan_doc_revisions where id=? and projectId=?').bind(workflow?.planId ?? '', scope.projectId).all<{ body: string }>()).results[0];
+        const planFeatures = plan ? parsePlanFeatures(plan.body) : null;
+        // Checks that can never pass are refused here, at save, instead of
+        // costing paid repair rounds in the build (owner 2026-10-30, EggOps).
+        const issues = [...lookProposalIssues(input.body, { features: planFeatures?.ok ? planFeatures.features : [] }), ...checksLintIssues(input.body)];
+        if (issues.length) throw new Error(`LOOKS_INVALID: not saved — fix all of these, then save again: ${issues.map((issue, index) => `(${index + 1}) ${issue}`).join(' ')}`);
       }
-      if ((input.kind==='prd'||input.kind==='looks'||input.kind==='design') && await qualityEnabled(env.DB,scope.projectId)) {
-        if(input.kind==='design') {
-          const workflow=await readWorkflow(env.DB,scope);
-          const plan=(await env.DB.prepare('select body from plan_doc_revisions where id=? and projectId=?').bind(workflow?.planId??'',scope.projectId).all<{body:string}>()).results[0];
-          parseAcceptanceJourneys(input.body,featuresForPlan(plan?.body??'').flatMap(row=>row.doneWhen.map(text=>({featureId:row.id,text}))));
+      // Screens are judged by machine checks, not an AI reviewer: the looks
+      // (and a legacy design brief) are rendered and measured in seconds.
+      if ((input.kind === 'looks' || input.kind === 'design') && await qualityEnabled(env.DB, scope.projectId)) {
+        if (input.kind === 'design') {
+          const workflow = await readWorkflow(env.DB, scope);
+          const plan = (await env.DB.prepare('select body from plan_doc_revisions where id=? and projectId=?').bind(workflow?.planId ?? '', scope.projectId).all<{ body: string }>()).results[0];
+          parseAcceptanceJourneys(input.body, featuresForPlan(plan?.body ?? '').flatMap(row => row.doneWhen.map(text => ({ featureId: row.id, text }))));
         }
-        const states=input.kind==='design'?approvedAppearanceDocuments(input.body).map((item,index)=>({id:`state-${index+1}`,document:item.document})):undefined;
-        // Look options each carry their own layout and theme, all of which must
-        // be captured. A text-only reviewer cannot approve visual design.
-        let lookStates: Array<{id:string;document:string}>|undefined;
-        if(input.kind==='looks') {
-          const parsed=parseLooks(input.body);
-          if(parsed.ok) lookStates=parsed.set.looks.flatMap(look=>{
-            const brief=[lookThemeBlock(look),'',`\`\`\`html-mock ${look.id}`,(look.screen??parsed.set.screen).html,'\`\`\`'].join('\n');
-            return approvedAppearanceDocuments(brief).map(item=>({id:look.id,document:item.document}));
-          });
-        }
+        const audit = hostDeps.designAudit ?? configuredDesignAudit(env);
+        const parsedLooks = input.kind === 'looks' ? parseLooks(input.body) : null;
+        await recordMachineReview(env.DB, {
+          projectId: scope.projectId, kind: input.kind, body: input.body,
+          authorRouteId: input.authorRouteId ?? findModelRouteForRole('designAuthor').id,
+          signal: input.signal,
+          check: (signal) => parsedLooks?.ok
+            ? measureLooks(input.body, parsedLooks.set, audit, signal)
+            : measureStates(approvedAppearanceDocuments(input.body).map((item, index) => ({ id: item.title || `screen-${index + 1}`, document: item.document })), audit, signal),
+        });
+      } else if (input.kind === 'prd' && await qualityEnabled(env.DB,scope.projectId)) {
         await reviewArtifactCandidate(env.DB,{projectId:scope.projectId,kind:input.kind,body:input.body,
           authorRouteId:input.authorRouteId??findModelRouteForRole('chat').id,
-          reviewer:hostDeps.qualityReviewer??nebiusQualityReviewer(env.DB,env.NEBIUS_API_KEY??''),states:lookStates??states,
-          capture:hostDeps.designReviewCapture??configuredDesignCapture(env),signal:input.signal});
+          reviewer:hostDeps.qualityReviewer??nebiusQualityReviewer(env.DB,env.NEBIUS_API_KEY??'',fetch,{projectId:scope.projectId,env}),signal:input.signal});
       }
       const revision = await createPlanDocRevision(env.DB, scope, {
         kind: input.kind as "prd",

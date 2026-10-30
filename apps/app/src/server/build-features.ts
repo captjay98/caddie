@@ -14,7 +14,13 @@
  */
 
 import {
+	aboutMinutes,
+	firstVersionChoiceError,
+	firstVersionMinutes,
+	itemMinutes,
+	itemNeeds,
 	parsePlanFeatures,
+	plannedFirstVersion,
 	WHOLE_PLAN_FEATURE,
 	type BuildFeatureStatus,
 	type BuildFeatureView,
@@ -45,10 +51,29 @@ export interface BuildFeatureRow {
 const now = () => new Date().toISOString();
 const NO_SUCH_TABLE = (error: unknown) => String(error).includes('no such table');
 
-/** The features a plan revision builds: its block, or the whole plan as one. */
+/**
+ * Rows at or past this position were added after the first version (staged
+ * builds). Positions only order rows, so the gap carries that one fact
+ * without a schema change.
+ */
+export const ADDED_ITEM_POSITION = 100;
+
+/** Every feature a plan revision approves: its block, or the whole plan as one. */
 export function featuresForPlan(body: string): PlanFeature[] {
 	const parsed = parsePlanFeatures(body);
 	return parsed.ok ? parsed.features : [WHOLE_PLAN_FEATURE];
+}
+
+/**
+ * The items the FIRST build makes (staged builds, owner 2026-10-30): the
+ * owner's choice when one was made at approval, else the plan's own split.
+ * Ideas for later stay in the approved list and are added one at a time.
+ */
+export function firstVersionFeatures(body: string, chosen?: readonly string[] | null): PlanFeature[] {
+	const all = featuresForPlan(body);
+	const ids = chosen && chosen.length ? new Set(chosen) : new Set(plannedFirstVersion(all));
+	const first = all.filter((feature) => ids.has(feature.id));
+	return first.length ? first : all;
 }
 
 function toRow(row: Record<string, unknown>): BuildFeatureRow {
@@ -101,7 +126,7 @@ export async function ensureBuildFeatures(
 	if (existing.length > 0) return existing;
 	const stamp = now();
 	await db.batch(
-		featuresForPlan(plan.body).map((feature, index) =>
+		firstVersionFeatures(plan.body).map((feature, index) =>
 			db
 				.prepare(
 					'insert or ignore into "build_features" ("projectId","runId","planId","featureId","position","title","doneWhen","status","attempts","updatedAt") values (?,?,?,?,?,?,?,?,0,?)',
@@ -216,8 +241,149 @@ export async function featureViewsFor(
 ): Promise<BuildFeatureView[]> {
 	if (!plan) return [];
 	const rows = await listBuildFeatures(db, projectId, plan.id);
-	return rows.length > 0 ? featureViews({ rows }, phase) : featureViews({ planned: featuresForPlan(plan.body) }, phase);
+	return rows.length > 0 ? featureViews({ rows }, phase) : featureViews({ planned: firstVersionFeatures(plan.body) }, phase);
 }
+
+/**
+ * Record the owner's first-version choice when they approve the plan. It
+ * becomes the build's rows, so the first build makes exactly those items; the
+ * rest stay "add after". Replaces an earlier choice only while nothing has
+ * started (every row still pending). Throws the plain refusal when the choice
+ * cannot be built (an item without what it needs).
+ */
+export async function chooseFirstVersion(
+	db: D1Database,
+	scope: Scope,
+	runId: string,
+	plan: Pick<PlanDocRevision, 'id' | 'body'>,
+	ids: readonly string[],
+): Promise<void> {
+	await assertProjectScope(db, scope);
+	const parsed = parsePlanFeatures(plan.body);
+	if (!parsed.ok) return;
+	const issue = firstVersionChoiceError(parsed.features, ids);
+	if (issue) throw new ScopeError(400, 'FIRST_VERSION_INVALID', issue);
+	const existing = await listBuildFeatures(db, scope.projectId, plan.id);
+	if (existing.some((row) => row.status !== 'pending')) return;
+	const chosen = firstVersionFeatures(plan.body, ids);
+	const stamp = now();
+	await db.batch([
+		db.prepare('delete from "build_features" where "projectId" = ? and "planId" = ? and "status" = \'pending\'').bind(scope.projectId, plan.id),
+		...chosen.map((feature, index) =>
+			db
+				.prepare(
+					'insert or ignore into "build_features" ("projectId","runId","planId","featureId","position","title","doneWhen","status","attempts","updatedAt") values (?,?,?,?,?,?,?,?,0,?)',
+				)
+				.bind(scope.projectId, runId, plan.id, feature.id, index + 1, feature.title, JSON.stringify(feature.doneWhen), 'pending', stamp),
+		),
+	]);
+}
+
+/**
+ * Queue ONE "add after" item as the next thing to build on a finished app.
+ * Unbuilt rows left by an earlier failed add are cleared first, so the item
+ * the owner just chose is the one built next (the host builds the first row
+ * that has not passed). Returns the queued row's title.
+ */
+export async function queuePlanItem(
+	db: D1Database,
+	scope: Scope,
+	runId: string,
+	plan: Pick<PlanDocRevision, 'id' | 'body'>,
+	featureId: string,
+): Promise<PlanFeature> {
+	await assertProjectScope(db, scope);
+	const parsed = parsePlanFeatures(plan.body);
+	const feature = parsed.ok ? parsed.features.find((item) => item.id === featureId) : undefined;
+	if (!parsed.ok || !feature) throw new ScopeError(404, 'PLAN_ITEM_NOT_FOUND', 'That idea is not in your approved plan.');
+	const rows = await listBuildFeatures(db, scope.projectId, plan.id);
+	if (rows.some((row) => row.featureId === featureId && row.status === 'passed'))
+		throw new ScopeError(409, 'PLAN_ITEM_BUILT', `“${feature.title}” is already in your app.`);
+	const built = new Set(rows.filter((row) => row.status === 'passed').map((row) => row.featureId));
+	const missing = itemNeeds(parsed.features, featureId).find((need) => !built.has(need));
+	if (missing) {
+		const title = parsed.features.find((item) => item.id === missing)?.title ?? missing;
+		throw new ScopeError(409, 'PLAN_ITEM_NEEDS', `Add “${title}” first. “${feature.title}” needs it.`);
+	}
+	// Added items sort after the first version and are told apart by position.
+	const position = Math.max(ADDED_ITEM_POSITION - 1, ...rows.filter((row) => row.status === 'passed').map((row) => row.position)) + 1;
+	// delete + insert, not ON CONFLICT: the local D1 emulator mishandles upserts (P08 note).
+	await db.batch([
+		db.prepare('delete from "build_features" where "projectId" = ? and "planId" = ? and "status" <> \'passed\'').bind(scope.projectId, plan.id),
+		db
+			.prepare(
+				'insert into "build_features" ("projectId","runId","planId","featureId","position","title","doneWhen","status","attempts","updatedAt") values (?,?,?,?,?,?,?,?,0,?)',
+			)
+			.bind(scope.projectId, runId, plan.id, feature.id, position, feature.title, JSON.stringify(feature.doneWhen), 'pending', now()),
+	]);
+	return feature;
+}
+
+/** One plan item as the owner sees it on the plan and ready cards. */
+export interface PlanStageItem {
+	readonly id: string;
+	readonly title: string;
+	readonly minutes: number;
+	/** Titles of the items this one needs that are not in the app yet. */
+	readonly needs: readonly string[];
+	/**
+	 * first: in the first version. built: in the app. adding: being added now.
+	 * available: can be added now. waiting: needs something not built yet.
+	 */
+	readonly status: 'first' | 'built' | 'adding' | 'available' | 'waiting';
+}
+export interface PlanStages {
+	/** The first version and roughly how long it takes, rounded for reading. */
+	readonly first: readonly PlanStageItem[];
+	readonly firstMinutes: number;
+	/** Everything else in the approved plan, in plan order. */
+	readonly later: readonly PlanStageItem[];
+}
+
+/**
+ * The approved list split the way the owner sees it. Before the build, the
+ * first version is the plan's split (or the choice already recorded); after
+ * it, rows say what is built and what is being added.
+ */
+export async function planStages(
+	db: D1Database,
+	projectId: string,
+	phase: WorkflowPhase,
+	plan: Pick<PlanDocRevision, 'id' | 'body'> | null,
+	adding: string | null = null,
+): Promise<PlanStages | null> {
+	if (!plan) return null;
+	const parsed = parsePlanFeatures(plan.body);
+	if (!parsed.ok) return null;
+	const features = parsed.features;
+	const rows = await listBuildFeatures(db, projectId, plan.id);
+	const titles = (ids: readonly string[]) => ids.map((id) => features.find((feature) => feature.id === id)?.title ?? id);
+	const firstIds = rows.some((row) => row.position < ADDED_ITEM_POSITION)
+		? new Set(rows.filter((row) => row.position < ADDED_ITEM_POSITION).map((row) => row.featureId))
+		: new Set(plannedFirstVersion(features));
+	const built = new Set(rows.filter((row) => row.status === 'passed').map((row) => row.featureId));
+	const item = (feature: PlanFeature, status: PlanStageItem['status']): PlanStageItem => ({
+		id: feature.id,
+		title: feature.title,
+		minutes: aboutMinutes(itemMinutes(feature)),
+		// What it is still waiting for, so the card can say "needs X first".
+		needs: titles((feature.needs ?? []).filter((id) => !built.has(id))),
+		status,
+	});
+	const first = features.filter((feature) => firstIds.has(feature.id));
+	const later = features.filter((feature) => !firstIds.has(feature.id)).map((feature) => {
+		if (built.has(feature.id)) return item(feature, 'built');
+		if (adding === feature.id || (phase === 'building' && rows.some((row) => row.featureId === feature.id && row.status !== 'passed'))) return item(feature, 'adding');
+		const ready = itemNeeds(features, feature.id).every((need) => built.has(need));
+		return item(feature, ready ? 'available' : 'waiting');
+	});
+	return {
+		first: first.map((feature) => item(feature, built.has(feature.id) ? 'built' : 'first')),
+		firstMinutes: aboutMinutes(firstVersionMinutes(first)),
+		later,
+	};
+}
+
 
 /** The sandbox session a build should use when it is not the default one. */
 export async function buildSessionOverride(

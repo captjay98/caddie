@@ -87,7 +87,12 @@ export async function openLocalVisualFidelity(options: { directory: string; brow
         const differences: VisualDifference[] = [];
         if (built.overflow) differences.push({ severity: 'blocking', area: 'overflow', message: 'The built screen extends beyond the viewport horizontally.' });
         if (built.errors.length) differences.push({ severity: 'blocking', area: 'content', message: 'The built screen raised a browser error during capture.' });
-        if (fraction > maximum) differences.push({ severity: 'blocking', area: 'appearance', message: `${(fraction * 100).toFixed(2)}% of the captured key screen differs from the approved reference (local pixel tolerance ${(maximum * 100).toFixed(2)}%). Inspect the saved pair before accepting intentional changes.` });
+        // Advisory, not a stop (owner 2026-10-30): the approved look is a still
+        // picture filled with sample data, the built app a real empty account,
+        // so a pixel match under a few percent is not reachable (EggOps: 22%
+        // phone, 9.5% desktop) and repairs only chase it. Overflow and browser
+        // errors stay blocking; the difference is recorded for the owner.
+        if (fraction > maximum) differences.push({ severity: 'advisory', area: 'appearance', message: `${(fraction * 100).toFixed(2)}% of the captured key screen differs from the approved look (sample data versus a new account's real screen; tolerance ${(maximum * 100).toFixed(2)}%).` });
         input.signal?.throwIfAborted();
         return { differences };
       } finally { await context.close(); }

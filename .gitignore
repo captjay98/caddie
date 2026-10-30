@@ -27,3 +27,10 @@ playwright-report/
 tests/briefs/runs/
 # per-run deploy step logs (scripts/deploy.ts, item H)
 .deploy-logs/
+
+# Temp routing/livestock verification artifacts (regenerable; never committed)
+apps/app/../test-support/routing-evidence-shots/
+test-support/routing-evidence-shots/
+test-support/routing-runningapp-drive.ts
+test-support/livestock-shots.ts
+test-support/dev-app-slash-probe.ts

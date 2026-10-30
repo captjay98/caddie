@@ -94,7 +94,14 @@ export function createJudgeAccessRouter(): Hono<{ Bindings: Env }> {
 		return c.json({ error: 'internal_error' }, 500);
 	});
 
-	router.get('/judge/access', (c) => c.json(judgeAccessState(configOf(c.env), new Date())));
+	// `example` is only whether a demo project is configured (a boolean, never
+	// the id), so the judge form can promise "an example is waiting" truthfully.
+	router.get('/judge/access', (c) =>
+		c.json({
+			...judgeAccessState(configOf(c.env), new Date()),
+			example: (c.env.JUDGE_EXAMPLE_PROJECT_ID ?? '').trim() !== '',
+		}),
+	);
 
 	router.post('/judge/start', async (c) => {
 		const now = new Date();

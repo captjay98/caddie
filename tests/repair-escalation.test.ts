@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import { sqliteD1 } from './fixtures/sqlite-d1.ts';
+import { applyFinalSchema } from './fixtures/migrations.ts';
 import { recordCheckedRepair, repairRoute, repairState } from '../apps/app/src/server/repair-escalation.ts';
 import { findModelRoute, routeAcceptsImage } from '../apps/app/src/agents/providers.ts';
 
@@ -15,7 +16,7 @@ function fixture() {
  create table build_features(runId text,planId text,featureId text,status text,position integer);
  insert into build_workflows values('p','r','plan','payer','building');
  insert into build_features values('r','plan','feature-1','building',1);`);
- sqlite.exec(readFileSync(new URL('../apps/app/migrations/0048_repair_escalation.sql', import.meta.url),'utf8'));
+ applyFinalSchema(sqlite);
  sqlite.exec(`update build_workflows set repairPolicyVersion='repair-v1'`);
  return { sqlite, db: sqliteD1(sqlite) };
 }
@@ -23,10 +24,13 @@ const failure = (key: string) => ({runId:'r',operationKey:key,issue:'feature-1:t
 describe('durable checked repair escalation', () => {
  test('two attempts per model, six total, with pinned priced routes', async () => {
   const {db,sqlite} = fixture();
-  expect((await repairState(db,'r'))?.routeId).toBe('nemotron-3.5-super-vl');
+  // Owner 2026-10-29: the builder is MiniMax; GLM-5.3 ($4.40/Mtok out) is off the ladder.
+  expect((await repairState(db,'r'))?.routeId).toBe('minimax-m3.1-flash');
   const routes=[];
   for(let i=1;i<=6;i++) routes.push((await recordCheckedRepair(db,failure(String(i))))?.routeId);
-  expect(routes).toEqual(['nemotron-3.5-super-vl','deepseek-v4.1-flash-1017','deepseek-v4.1-flash-1017','glm-5.3','glm-5.3',null]);
+  // 2026-10-30: the last code rung is DeepSeek again; Super VL (slowest, least
+  // effective at code repair in the EggOps run) now repairs image issues only.
+  expect(routes).toEqual(['minimax-m3.1-flash','deepseek-v4.1-flash-1017','deepseek-v4.1-flash-1017','deepseek-v4.1-flash-1017','deepseek-v4.1-flash-1017',null]);
   expect((await recordCheckedRepair(db,failure('7')))?.paused).toBe(true);
   expect(sqlite.query('select count(*) n from build_repair_attempts').get()).toEqual({n:6});
   expect(findModelRoute('deepseek-v4.1-flash-1017').modelId).toBe('deepseek-ai/DeepSeek-V4.1-Flash-1017');
@@ -57,6 +61,7 @@ describe('durable checked repair escalation', () => {
  test('legacy admission has no new policy; vision never falls through to text-only model',async()=>{
   const {db,sqlite}=fixture();sqlite.exec('update build_workflows set repairPolicyVersion=null');
   expect(await recordCheckedRepair(db,failure('one'))).toBeNull();
+  expect(repairRoute(0,true)).toBe('nemotron-3.5-super-vl');
   expect(repairRoute(3,true)).toBe('deepseek-v4.1-flash-1017');expect(repairRoute(4,true)).toBeNull();
   expect(repairRoute(Infinity)).toBeNull();expect(repairRoute(-1)).toBeNull();
  });

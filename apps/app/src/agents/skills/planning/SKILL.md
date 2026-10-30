@@ -116,15 +116,19 @@ than omitting one):
    1. the first thing the judge does, with real input
    2. the core value happening in front of them
    3. the result they can see and check
-   **Real integration:** the model or service the core value depends on, the
-   exact call path, and what the judge sees it do; when that call is
-   `c.env.CADDIE.ai`, name the tier it waits on (`"fast"` or `"super"` — super
-   is the deeper one, ~3.75x cost, for the call a judge watches). "None" is
-   allowed only with a reason the app is still real.
+   **Real integration:** the service the core value depends on, the exact call
+   path, and what the judge sees it do; when that call is Caddie's AI, say in
+   plain words how hard it thinks — "(a deep answer)" for the call a judge
+   watches, "(a quick answer)" for a small one. "None" is allowed only with a
+   reason the app is still real.
    **Mocks:** every mocked thing and why it does not carry the demo; "None"
    when nothing is mocked.
    **Why this wins:** the hard part, and why a generic CRUD entry would lose.
    ```
+
+   This section is the owner's own words: a model name, a provider, an AI tier
+   or a cost in it (or anywhere else in the PRD's prose) is refused at save —
+   the tier belongs in the design's caddie-architecture block.
 
    At least three numbered demo steps. The real integration cannot be a mock,
    and the path must be something a person can actually do in the preview.

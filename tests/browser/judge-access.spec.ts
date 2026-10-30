@@ -156,7 +156,7 @@ async function stubJudgeAccess(context: BrowserContext, access: JudgeAccess): Pr
 	await context.route('**/api/judge/access', (route) => json(route, 200, access));
 }
 
-const JUDGE_LINK_TEXT = 'Judging the hackathon? Use your access code';
+const JUDGE_LINK_TEXT = 'Judging the hackathon? Sign in here';
 
 const VIEWPORTS = [
 	{ name: 'desktop 1440x900', width: 1440, height: 900 },
@@ -225,17 +225,21 @@ for (const vp of VIEWPORTS) {
 			await page.goto(`${BASE}/app/`);
 			await page.getByTestId('judge-link').click();
 			const panel = page.getByTestId('judge-panel');
-			await expect(panel.getByRole('heading', { name: 'Judge access' })).toBeVisible();
+			// Sign-in first (owner 2026-10-30): one shared judge account, its name
+			// and password in the Devpost testing instructions.
+			await expect(panel.getByRole('heading', { name: 'Judge sign-in' })).toBeVisible();
+			await expect(panel).toContainText('Devpost testing instructions');
 			await expect(page.getByTestId('sign-in-google')).toHaveCount(0);
 			await expect(page.getByTestId('sign-in-github')).toHaveCount(0);
+			await expect(page.getByTestId('judge-name')).toBeFocused();
+			await expect(page.getByTestId('judge-sign-in')).toHaveText('Sign in');
+			await expect(page.getByTestId('judge-new-link')).toHaveText('Have an access code instead? Make a judge account');
+			// The access-code door: its own title, one primary action, focus on the code.
+			await page.getByTestId('judge-new-link').click();
+			await expect(panel.getByRole('heading', { name: 'Judge access' })).toBeVisible();
 			await expect(page.getByTestId('judge-code')).toBeFocused();
 			await expect(panel.getByRole('button', { name: 'Start judging' })).toBeVisible();
-			await expect(page.getByTestId('judge-returning-link')).toHaveText('Judged here before? Sign in instead');
-			// Returning judge: its own title, a plain "Sign in", focus on the name.
-			await page.getByTestId('judge-returning-link').click();
-			await expect(panel.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-			await expect(page.getByTestId('judge-sign-in')).toHaveText('Sign in');
-			await expect(page.getByTestId('judge-name')).toBeFocused();
+			await expect(page.getByTestId('judge-returning-link')).toHaveText('Have a judge name and password? Sign in instead');
 			// Backing out restores the providers and returns focus to the door.
 			await page.getByTestId('judge-back').click();
 			await expect(page.getByTestId('sign-in-google')).toBeVisible();
@@ -244,7 +248,51 @@ for (const vp of VIEWPORTS) {
 			await context.close();
 		});
 
-		test('a first visit with a short password shows the server’s plain error', async ({ browser }) => {
+		test('an empty first-visit form names the first missing field, under that field, in field order', async ({ browser }) => {
+			const { context, page } = await newPage(browser);
+			await stubProviders(context);
+			await stubSignedOut(context);
+			await stubJudgeAccess(context, { open: true, canStart: true });
+			let posts = 0;
+			await context.route('**/api/judge/start', (route) => {
+				posts += 1;
+				return json(route, 500, {});
+			});
+			await page.goto(`${BASE}/app/`);
+			await page.getByTestId('judge-link').click();
+			await page.getByTestId('judge-new-link').click();
+			await page.getByTestId('judge-start').click();
+			// The access code comes first; its error sits under it and focus moves there.
+			await expect(page.getByTestId('judge-error')).toHaveText('Enter your access code.');
+			await expect(page.getByTestId('judge-code')).toHaveAttribute('aria-invalid', 'true');
+			await expect(page.getByTestId('judge-code')).toBeFocused();
+			await page.getByTestId('judge-code').fill('a-four-teen-char-code');
+			await expect(page.getByTestId('judge-error')).toHaveCount(0);
+			await page.getByTestId('judge-start').click();
+			await expect(page.getByTestId('judge-error')).toContainText('judge name (3 to 24 characters)');
+			await expect(page.getByTestId('judge-name')).toBeFocused();
+			expect(posts).toBe(0);
+			// Show/Hide reveals the password without changing it.
+			await page.getByTestId('judge-password').fill('a-long-enough-password');
+			await page.getByTestId('judge-password-reveal').click();
+			await expect(page.getByTestId('judge-password')).toHaveAttribute('type', 'text');
+			await page.getByTestId('judge-password-reveal').click();
+			await expect(page.getByTestId('judge-password')).toHaveAttribute('type', 'password');
+			await context.close();
+		});
+		test('a returning judge is told plainly that a password cannot be reset, with the way back', async ({ browser }) => {
+			const { context, page } = await newPage(browser);
+			await stubProviders(context);
+			await stubSignedOut(context);
+			await stubJudgeAccess(context, { open: true, canStart: true });
+			await page.goto(`${BASE}/app/`);
+			await page.getByTestId('judge-link').click();
+			await expect(page.getByTestId('judge-forgot')).toContainText('can’t be reset');
+			await page.getByTestId('judge-forgot-start').click();
+			await expect(page.getByTestId('judge-start-form')).toBeVisible();
+			await context.close();
+		});
+		test('a first visit with a short password shows the plain password rule', async ({ browser }) => {
 			const { context, page } = await newPage(browser);
 			await stubProviders(context);
 			await stubSignedOut(context);
@@ -255,6 +303,7 @@ for (const vp of VIEWPORTS) {
 			);
 			await page.goto(`${BASE}/app/`);
 			await page.getByTestId('judge-link').click();
+			await page.getByTestId('judge-new-link').click();
 			await expect(page.getByTestId('judge-start-form')).toBeVisible();
 			await page.getByTestId('judge-code').fill('a-four-teen-char-code');
 			await page.getByTestId('judge-name').fill('ada-judge');
@@ -282,6 +331,7 @@ for (const vp of VIEWPORTS) {
 			});
 			await page.goto(`${BASE}/app/`);
 			await page.getByTestId('judge-link').click();
+			await page.getByTestId('judge-new-link').click();
 			await page.getByTestId('judge-code').fill('a-four-teen-char-code');
 			await page.getByTestId('judge-name').fill('ada-judge');
 			await page.getByTestId('judge-password').fill('a-long-enough-password');
@@ -322,9 +372,8 @@ for (const vp of VIEWPORTS) {
 			await page.locator('[data-testid="account-menu"]:visible').first().click();
 			await page.locator('[data-testid="sign-out"]:visible').first().click();
 			await expect(page.getByTestId('sign-in-panel')).toBeVisible({ timeout: 10_000 });
-			// Returning judge: the quiet link, then the sign-in form.
+			// The judge door opens straight on the sign-in form.
 			await page.getByTestId('judge-link').click();
-			await page.getByTestId('judge-returning-link').click();
 			await expect(page.getByTestId('judge-sign-in-form')).toBeVisible();
 			await page.getByTestId('judge-name').fill('ada-judge');
 			await page.getByTestId('judge-password').fill('a-long-enough-password');
@@ -372,12 +421,12 @@ for (const vp of VIEWPORTS) {
 				await page.goto(`${BASE}/app/`);
 				await page.getByTestId('judge-link').click();
 				if (entry.endpoint === 'sign-in') {
-					await page.getByTestId('judge-returning-link').click();
 					await expect(page.getByTestId('judge-sign-in-form')).toBeVisible();
 					await page.getByTestId('judge-name').fill('ada-judge');
 					await page.getByTestId('judge-password').fill('a-long-enough-password');
 					await page.getByTestId('judge-sign-in').click();
 				} else {
+					await page.getByTestId('judge-new-link').click();
 					await expect(page.getByTestId('judge-start-form')).toBeVisible();
 					await page.getByTestId('judge-code').fill('a-four-teen-char-code');
 					await page.getByTestId('judge-name').fill('ada-judge');

@@ -26,6 +26,7 @@ import {
 	type StartedGithubFixtureWorker,
 } from './fixtures/github-harness.ts';
 import { GithubStub } from './fixtures/github-stub.ts';
+import { allMigrationPaths } from './fixtures/migrations.ts';
 import { githubInstallUrl, readGithubConfig, verifyWebhookSignature } from '../apps/app/src/server/adapters/github.ts';
 import { connectState } from '../apps/app/src/server/github-connect.ts';
 
@@ -126,8 +127,8 @@ function nextDeliveryId(): string {
 // --- fixture lifecycle ------------------------------------------------------------
 
 beforeAll(async () => {
-	for (const p of ['apps/app/migrations/0006_github.sql']) {
-		if (!existsSync(join(REPO_ROOT, p))) throw new Error(`missing: ${p}`);
+	for (const p of allMigrationPaths()) {
+		if (!existsSync(p)) throw new Error(`missing: ${p}`);
 	}
 	// RSA keypair: the worker signs App JWTs with the private key; the stub
 	// verifies them against the public key (never shared with the worker).
@@ -164,22 +165,7 @@ beforeAll(async () => {
 		GITHUB_WEBHOOK_SECRET,
 		GITHUB_API_BASE_URL: stub.url,
 	});
-	await applyMigrations(WORKER_BASE, [
-		join(REPO_ROOT, 'apps/app/migrations/0001_product.sql'),
-		join(REPO_ROOT, 'apps/app/migrations/0002_controls.sql'),
-		join(REPO_ROOT, 'apps/app/migrations/0006_github.sql'),
-		// The projects table carries the Home `kind` column since 0011 —
-		// POST /api/projects fails without it (fixture schema drift, fixed
-		// with the production numbering order).
-		join(REPO_ROOT, 'apps/app/migrations/0011_home_project.sql'),
-		join(REPO_ROOT, 'apps/app/migrations/0012_brief_read.sql'),
-		// 0013 alters discovery_candidates, so 0009 must come first — the same
-		// fixture schema drift class as 0011 above.
-		join(REPO_ROOT, 'apps/app/migrations/0009_discovery.sql'),
-		join(REPO_ROOT, 'apps/app/migrations/0013_discovery_saved.sql'),
-		join(REPO_ROOT, 'apps/app/migrations/0014_stack_notify.sql'),
-		join(REPO_ROOT, 'apps/app/migrations/0015_plan_decisions.sql'),
-	]);
+	await applyMigrations(WORKER_BASE, allMigrationPaths());
 
 	ALICE = await signIn(worker, idp, ALICE_EMAIL, 'alice-p08', 'Alice');
 	BOB = await signIn(worker, idp, BOB_EMAIL, 'bob-p08', 'Bob');

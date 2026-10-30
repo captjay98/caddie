@@ -3,6 +3,7 @@ import * as v from 'valibot';
 import { defineTool } from '@flue/runtime';
 import { isProtectedPath, mentionsProtectedPath } from './permissions.ts';
 import { type Area, inArea } from '../server/part-manifests.ts';
+import { CADDIE_SCRATCH_DIR } from '../server/source-export.ts';
 
 /**
  * Team-mode part guard (plan part D). When a part is active, a build role may
@@ -69,7 +70,7 @@ const ReadProjectContextInput = v.object({
 	paths: v.array(v.string()),
 });
 const WritePlanNoteInput = v.object({
-	kind: v.picklist(['kernel', 'scope', 'prd', 'looks', 'design', 'spec', 'note']),
+	kind: v.picklist(['kernel', 'scope', 'prd', 'looks', 'design', 'spec', 'note', 'change-proposal']),
 	body: v.string(),
 	planRevision: v.string(),
 });
@@ -151,7 +152,7 @@ export function makeWritePlanNote(deps: {
 	return defineTool({
 		name: 'write_plan_note',
 		description:
-			'Append a plan note (kernel/scope/prd/looks/design/spec/note) to the project. Immutable revisions; never edits acceptance surfaces. "looks" is the 2-3 looks the owner chooses from after approving the plan; "design" is the design brief written in the chosen look.',
+			'Append a plan note (kernel/scope/prd/looks/design/spec/note) to the project. "looks" is the visual choices; "design" is the design brief in the chosen look. For a finished app change, use kind "change-proposal", put the change id in planRevision, and provide JSON with summary and arrays affected, risks, checks. The host saves it for the user to review before building.',
 		input: WritePlanNoteInput,
 		run: async (ctx) => {
 			await deps.writePlanNote({
@@ -161,7 +162,9 @@ export function makeWritePlanNote(deps: {
         authorRouteId: deps.authorRouteId,
         signal: ctx.signal,
 			});
-			return { output: `SAVED: plan note ${ctx.data.kind} recorded by the host as a new immutable revision.` };
+			return { output: ctx.data.kind === 'change-proposal'
+				? 'SAVED: change proposal is ready for the user to review. Do not build until it is approved.'
+				: `SAVED: plan note ${ctx.data.kind} recorded by the host as a new immutable revision.` };
 		},
 	});
 }
@@ -234,6 +237,29 @@ export function makeReadSandboxFile(deps: {
 	});
 }
 
+/** Files the edit-time check parses (Bun's own parser: the same front end the host's tests and build use). */
+const PARSED_SOURCE = /\.(?:[cm]?[jt]sx?)$/;
+/** Printed by the edit check when a file parses but its imports do not link. */
+const UNRESOLVED_MARK = '::caddie-unresolved::';
+const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+/** The first error line of a parse failure, without positions, so a repeat is recognisable. */
+export function editFailureSignature(output: string): string {
+	const line = output.split('\n').map((row) => row.trim()).find((row) => /^error:/i.test(row)) ?? output.trim().split('\n')[0] ?? 'unknown error';
+	return line.replace(/:\d+:\d+/g, '').replace(/\s+/g, ' ').slice(0, 240);
+}
+/**
+ * The same broken edit, repeated: keyed by session and path. Module state on
+ * purpose — the tool is re-mounted per render, the sandbox session is not.
+ */
+const repeatedEdits = new Map<string, { signature: string; count: number }>();
+export function noteEditFailure(key: string, signature: string): number {
+	const last = repeatedEdits.get(key);
+	const count = last && last.signature === signature ? last.count + 1 : 1;
+	repeatedEdits.set(key, { signature, count });
+	if (repeatedEdits.size > 500) repeatedEdits.delete(repeatedEdits.keys().next().value!);
+	return count;
+}
+
 /** Write a file in the sandbox session — THE protected-path enforcement point. */
 export function makeWriteSandboxFile(deps: {
 	driver: SandboxToolDeps;
@@ -244,17 +270,72 @@ export function makeWriteSandboxFile(deps: {
 	return defineTool({
 		name: 'write_sandbox_file',
 		description:
-			'Write a file inside the sandbox. Protected acceptance surfaces (tests/acceptance/**, evaluator manifests, verifiers) are refused.',
+			'Write a file inside the sandbox. Protected acceptance surfaces (tests/acceptance/**, evaluator manifests, verifiers) are refused. Source files are checked straight after the write: a file that does not parse is put back as it was and the error is returned; an import of a missing file or export is reported (the file is kept).',
 		input: WriteSandboxFileInput,
 		run: async (ctx) => {
 			assertNotProtectedPath(ctx.data.path);
 			await assertInArea(deps.partGuard, ctx.data.path);
-			await deps.driver.writeFile({
+			const { path, content } = ctx.data;
+			const key = `${deps.sessionId}\u0000${path}`;
+			// Edit-time checks (owner 2026-10-29): reject a broken edit straight
+			// away instead of discovering it a whole run_checks later.
+			if (path.endsWith('.json')) {
+				try {
+					JSON.parse(content);
+				} catch (error) {
+					const signature = `invalid JSON: ${error instanceof Error ? error.message : 'parse error'}`;
+					const count = noteEditFailure(key, signature);
+					throw new Error(`EDIT_REJECTED: ${path} is not valid JSON, so it was not written (${signature}).${count >= 2 ? ' Same error as your last attempt: write the whole file fresh instead of patching it.' : ''}`);
+				}
+			}
+			const parsed = PARSED_SOURCE.test(path);
+			const previous = parsed ? await deps.driver.readFile({ sessionId: deps.sessionId, path }).catch(() => null) : null;
+			await deps.driver.writeFile({ sessionId: deps.sessionId, path, content });
+			if (!parsed) return { output: `wrote ${path}` };
+			// One sandbox call, two checks. (1) Parse: a file that does not parse
+			// is put back. (2) Only once it parses: bundle it with packages left
+			// external, which fails on an import of a missing file or a name the
+			// other file does not export — the type-level mistakes the starter
+			// can catch without a TypeScript install, in milliseconds.
+			const scratch = CADDIE_SCRATCH_DIR;
+			const check = await deps.driver.execute({
 				sessionId: deps.sessionId,
-				path: ctx.data.path,
-				content: ctx.data.content,
-			});
-			return { output: `wrote ${ctx.data.path}` };
+				command:
+					`bun build --no-bundle ${shellQuote(path)} --outfile ${scratch}/edit-check.js 2>&1 && ` +
+					`{ bun build ${shellQuote(path)} --target=bun --packages=external --outdir ${scratch}/edit-resolve >/dev/null 2>${scratch}/edit-resolve.log || { echo '${UNRESOLVED_MARK}'; head -c 1500 ${scratch}/edit-resolve.log; }; }`,
+				operationKey: `edit-check:${ctx.toolCallId}`,
+				timeoutMs: 20_000,
+				signal: ctx.signal,
+			}).catch(() => null);
+			// No answer from the checker is not a failed edit: keep the write.
+			if (!check || check.timedOut || check.exitCode === 0 || check.exitCode == null) {
+				const said = `${check?.stdout ?? ''}\n${check?.stderr ?? ''}`;
+				const at = said.indexOf(UNRESOLVED_MARK);
+				if (check && !check.timedOut && at >= 0) {
+					// Kept on purpose: the import may name a file written next.
+					const detail = said.slice(at + UNRESOLVED_MARK.length).trim();
+					const count = noteEditFailure(key, `unresolved: ${editFailureSignature(detail)}`);
+					return {
+						output:
+							`wrote ${path} (kept), but it does not link yet: ${detail.split('\n').find((row) => /^error:/i.test(row.trim()))?.trim() ?? detail.slice(0, 300)}. ` +
+							(count >= 2
+								? 'Same problem as your last write of this file: fix the import or export now instead of writing it again.'
+								: 'If that file or export is what you write next, carry on; otherwise fix the import now.'),
+					};
+				}
+				repeatedEdits.delete(key);
+				return { output: `wrote ${path}` };
+			}
+			const output = `${check.stdout ?? ''}\n${check.stderr ?? ''}`.replace(UNRESOLVED_MARK, '').trim();
+			if (previous !== null) await deps.driver.writeFile({ sessionId: deps.sessionId, path, content: previous });
+			else await deps.driver.execute({ sessionId: deps.sessionId, command: `rm -f ${shellQuote(path)}`, operationKey: `edit-restore:${ctx.toolCallId}`, timeoutMs: 10_000, signal: ctx.signal }).catch(() => null);
+			const count = noteEditFailure(key, editFailureSignature(output));
+			throw new Error(
+				`EDIT_REJECTED: ${path} does not parse, so the edit was not kept (${previous !== null ? 'the file is back as it was' : 'the new file was removed'}).\n${output.slice(0, 1200)}\n` +
+					(count >= 2
+						? 'This is the SAME error as your last attempt. Stop repeating that edit: re-read the file, then rewrite the broken part a different, simpler way (smaller components, plain JSX, no clever syntax).'
+						: 'Fix it and write the whole file again.'),
+			);
 		},
 	});
 }

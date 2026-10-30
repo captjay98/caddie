@@ -39,9 +39,9 @@ describe('P15b/c/d local scaffolding', () => {
 
 	test('flutter defaults to the proven Hono backend (per the frozen scope)', async () => {
 		const { FLUTTER_SCAFFOLD_FILES } = await import(join(REPO, 'stacks', 'flutter', 'scaffold.ts'));
-		// The app's API client is plain http, and the scaffold ships the same
-		// Hono server every react-hono app gets.
-		expect(FLUTTER_SCAFFOLD_FILES['pubspec.yaml']).toContain('http: ');
+		// Either HTTP transport can serve the Flutter client; the shared Hono
+		// backend contract remains independent of that client-side choice.
+		expect(FLUTTER_SCAFFOLD_FILES['pubspec.yaml']).toMatch(/(?:http|dio): /);
 		expect(FLUTTER_SCAFFOLD_FILES['src/server.ts']).toContain('new Hono');
 	});
 

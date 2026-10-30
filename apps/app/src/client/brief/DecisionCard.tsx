@@ -103,6 +103,7 @@ export function statusLabel(card: DecisionCardType): string {
 	if (cardDesign(card) === 'opportunity') return 'Worth a look';
 	if (card.kind === 'deadline') return 'Deadline';
 	if (card.status === 'handled') return 'Done';
+	if (card.kind === 'change' && card.evidenceIds.length > 0 && card.primaryAction.kind === 'inspect') return 'Needs checking';
 	if (card.status === 'changed') return 'Changes to review';
 	// needs-you — word it for what the card is about.
 	switch (card.kind) {
@@ -113,6 +114,27 @@ export function statusLabel(card: DecisionCardType): string {
 		default:
 			return 'Needs you';
 	}
+}
+
+/**
+ * The header badge, only when it says something the header label does not
+ * (owner 2026-10-30: "Checking & repairing · 39m ago · I’m on it · New" was
+ * three labels for one state). A build, repair, ready or found-for-you card's
+ * label already is its status; a decision, deadline or stopped build keeps it.
+ */
+export function headerBadge(card: DecisionCardType): string {
+	const design = cardDesign(card);
+	if (card.status !== 'blocked' && (design === 'build' || design === 'repair' || design === 'preview' || design === 'opportunity')) return '';
+	return statusLabel(card);
+}
+
+/** Only open a real HTTPS contest URL, even if old stored data is malformed. */
+function safeDeadlineSource(value: string | undefined): string | null {
+	if (!value) return null;
+	try {
+		const url = new URL(value);
+		return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : null;
+	} catch { return null; }
 }
 
 /** Build-feed state label (mockup "Built"/"Building"/"Waiting"). */
@@ -131,6 +153,7 @@ export function DecisionCardView(props: {
 }): ReactElement {
 	const { card } = props;
 	const design = cardDesign(card);
+	const deadlineSource = safeDeadlineSource(card.deadline?.sourceUrl);
 	const [detailOpen, setDetailOpen] = useState(false);
 	const secondary = secondaryLabel(design);
 	// Resolved decisions use the same frame and actions as the current feed.
@@ -158,8 +181,7 @@ export function DecisionCardView(props: {
 			data-status={card.status}
 			data-seen={props.seen === true ? 'true' : 'false'}
 		>
-            <CardHeader design={design} context={props.contextLabel} status={statusLabel(card)} fresh={props.seen === false} freshLabel={formatTimeAgo(card.updatedAt, props.now)} />
-            {props.seen === false ? <span className="sr-only" data-testid="card-unseen">New</span> : null}
+            <CardHeader design={design} context={props.contextLabel} status={headerBadge(card)} fresh={props.seen === false} freshLabel={formatTimeAgo(card.updatedAt, props.now)} />
 			<h3>{card.headline}</h3>
 			{/* The lede (mockup `cc-copy`) sits under the title on every big card;
 			    the plan's feature list follows in its own panel. Owner 2026-10-25:
@@ -273,6 +295,9 @@ export function DecisionCardView(props: {
                     <div className="compact-card-when">
                         <strong>{card.deadline.dateLabel}</strong>
                         {card.deadline.localTimeLabel ? <p data-testid="card-local-time">{card.deadline.localTimeLabel} · Your local time</p> : null}
+						{card.deadline.timeLabel && !card.deadline.localTimeLabel ? /not confirmed/i.test(card.deadline.timeLabel)
+							? <p data-testid="card-time-unstated">{card.deadline.timeLabel} — confirm the exact closing hour with the source before you rely on this date.</p>
+							: <p data-testid="card-source-time">{card.deadline.timeLabel}</p> : null}
                         {card.deadline.source ? <p className="compact-card-when-source">{card.deadline.source}</p> : null}
                     </div>
                 </div>
@@ -356,7 +381,9 @@ export function DecisionCardView(props: {
 				>
 					{card.primaryAction.label}
 				</button>
-				{secondary ? (
+				{design === 'deadline' && deadlineSource ? (
+					<a className="btn-ghost" data-testid="card-secondary-action" href={deadlineSource} target="_blank" rel="noopener noreferrer">Deadline source</a>
+				) : secondary ? (
 					<button
 						type="button"
 						className="btn-ghost"
@@ -364,7 +391,7 @@ export function DecisionCardView(props: {
 						data-testid="card-secondary-action"
 						onClick={() => setDetailOpen((open) => !open)}
 					>
-						{secondary}
+						{design === 'deadline' ? 'Details' : secondary}
 					</button>
 				) : (
 					<button
@@ -721,19 +748,14 @@ export function AccountBriefV2(props: {
                     </div>
                 ) : (
 					<div className="card-stack" data-testid="brief-new-user">
-						<section className="decision-card card-surface brief-teach brief-teach-quiet">
-							<span className="brief-teach-mascot" aria-hidden="true">
-								<Mascot mood="ready" size={44} live />
-							</span>
-							<p className="kind-kicker brief-teach-eyebrow">
-								<Icon name="target" title="brief" /> BRIEF
-							</p>
-							<h3>Nothing needs you yet</h3>
-							<p className="summary">
-								Once you start a project with Caddie, the decisions it needs from you — plans to
-								approve, previews to check, blockers to clear — land here, one at a time.
-							</p>
-                            <div className="actions"><button type="button" className="btn-key" onClick={props.onAskCaddie}>Start with Caddie</button><button type="button" className="btn-ghost" onClick={props.onBrowse}>Find a hackathon</button></div>
+						{/* Owner review 2026-10-28: one line, one action. The header
+						    above already has the mascot and says nothing needs you;
+						    "Start in chat" only appears when chat isn't on screen. */}
+						<section className="decision-card card-surface brief-teach brief-teach-quiet" data-testid="brief-new-user-card">
+							<p className="summary">Plans to approve, previews to check and blockers will show up here.</p>
+							{props.onAskCaddie ? (
+								<div className="actions"><button type="button" className="btn-key" data-testid="brief-start-chat" onClick={props.onAskCaddie}>Start in chat</button></div>
+							) : null}
 						</section>
 					</div>
 				)}
@@ -750,7 +772,7 @@ export function AccountBriefV2(props: {
 
 	return (
 		<div data-testid="account-brief-lane">
-			{!props.hideHeader ? <div className="brief-v2-head" data-testid="brief-head">
+			{!props.hideHeader ? <div className="brief-v2-head" data-testid="brief-feed-head">
 				<span className="brief-head-count" data-testid="brief-count">
 					{cards.length} update{cards.length === 1 ? '' : 's'}
 					{waitingCount > 0 ? <span className="brief-head-waiting"> · {waitingCount} waiting on you</span> : null}

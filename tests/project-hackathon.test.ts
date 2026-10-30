@@ -116,6 +116,10 @@ describe('project hackathon (header chips)', () => {
 });
 
 describe('daysUntil', () => {
+	test('does not claim a date-only event ended while that date still exists in any time zone', () => {
+		expect(daysUntil(`${YEAR}-10-30`, Date.parse(`${YEAR}-10-31T06:00:00Z`))).toEqual({ daysLeft: 0, ended: false });
+		expect(daysUntil(`${YEAR}-10-30`, Date.parse(`${YEAR}-10-31T12:01:00Z`))).toEqual({ daysLeft: 0, ended: true });
+	});
 	test('counts whole days to the end of the deadline day and marks a past deadline as ended', () => {
 		expect(daysUntil(`${YEAR}-10-30`, NOW)).toEqual({ daysLeft: 15, ended: false });
 		expect(daysUntil(`${YEAR}-10-15`, NOW)).toEqual({ daysLeft: 0, ended: false });
@@ -124,6 +128,25 @@ describe('daysUntil', () => {
 });
 
 describe('the hackathon on each project card (plan 5.7)', () => {
+	test('a fresh sourced deadline closes both the project header and list at the same instant', async () => {
+		const w = await world();
+		try {
+			await seedCandidates(w.db, [{ source: 'devpost', url: 'https://nebiusglobalaihackathon.devpost.com/', title: 'Nebius x NVIDIA Global AI Hackathon', summary: `By Nebius · Oct 01 - Oct 30, ${YEAR} · Online` }]);
+			await runDiscoveryFeed(w.db, w.homeScope, { adapters: [createLocalSeedAdapter(w.db, 'devpost')] });
+			const scope = await w.startFrom(NEBIUS);
+			const end = Date.parse(`${YEAR}-10-30T17:00:00Z`);
+			const stamp = new Date(end - 60_000).toISOString();
+			const value = `October 30, ${YEAR} at 10:00 AM Pacific Time`;
+			const url = 'https://nebiusglobalaihackathon.devpost.com/rules';
+			w.sqlite.prepare('insert into evidence_sources (id,projectId,canonicalUrl,kind,authority,latestSnapshotId,lastOutcome,observedAt,createdAt,updatedAt) values (?,?,?,?,?,?,?,?,?,?)').run('src-deadline', scope.projectId, url, 'page', 'binding_rules', 'snap-deadline', 'succeeded', stamp, stamp, stamp);
+			w.sqlite.prepare('insert into evidence_snapshots (id,projectId,sourceId,contentHash,mediaType,byteLength,content,originalUrl,provenance,capturedAt,capturedBy) values (?,?,?,?,?,?,?,?,?,?,?)').run('snap-deadline', scope.projectId, 'src-deadline', 'hash-deadline', 'text/html', value.length, value, url, 'original', stamp, 'alice');
+			w.sqlite.prepare('insert into evidence_claims (id,projectId,sourceId,snapshotId,claimType,value,quote,extractionVersion,status,snapshotCapturedAt,createdAt) values (?,?,?,?,?,?,?,?,?,?,?)').run('claim-deadline', scope.projectId, 'src-deadline', 'snap-deadline', 'requirement.submission_deadline', value, value, 'test', 'active', stamp, stamp);
+			expect((await projectHackathon(w.db, scope, end - 1))?.ended).toBe(false);
+			expect((await projectHackathonsForActor(w.db, 'alice', end - 1))[scope.projectId]?.ended).toBe(false);
+			expect((await projectHackathon(w.db, scope, end))?.ended).toBe(true);
+			expect((await projectHackathonsForActor(w.db, 'alice', end))[scope.projectId]?.ended).toBe(true);
+		} finally { w.sqlite.close(); }
+	});
 	test("one read gives each of a person's projects its hackathon and days left; a project without one is left out", async () => {
 		const w = await world();
 		try {

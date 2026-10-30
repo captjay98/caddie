@@ -161,7 +161,7 @@ test.describe('Profile wizard (minimal onboarding)', () => {
 		await page.getByTestId('onboarding-profile-continue').click();
 		await expect(page.getByRole('heading', { name: 'Where are you joining from?' })).toBeVisible();
 
-		await page.getByLabel('Where do you live?').fill('Nigeria');
+		await page.getByLabel('Country').fill('Nigeria');
 		await page.getByTestId('onboarding-profile-continue').click();
 
 		// Step 2 (the last step) pairs experience + participation format as
@@ -178,7 +178,7 @@ test.describe('Profile wizard (minimal onboarding)', () => {
 
 		// Back returns to step 1 with the country intact; forward keeps step-2 answers.
 		await page.getByRole('button', { name: 'Back' }).click();
-		await expect(page.getByLabel('Where do you live?')).toHaveValue('Nigeria');
+		await expect(page.getByLabel('Country')).toHaveValue('Nigeria');
 		await page.getByTestId('onboarding-profile-continue').click();
 		await expect(page.getByTestId('onboarding-format')).toHaveAttribute('data-value', 'either');
 		await context.close();
@@ -193,7 +193,7 @@ test.describe('Profile wizard (minimal onboarding)', () => {
 		await page.getByTestId('welcome-next').click();
 		await page.getByTestId('welcome-name-skip').click();
 
-		await page.getByLabel('Where do you live?').fill('Nigeria');
+		await page.getByLabel('Country').fill('Nigeria');
 		await page.getByTestId('onboarding-profile-continue').click();
 
 		await page.getByTestId('onboarding-experience').getByRole('radio', { name: 'A few apps' }).click();

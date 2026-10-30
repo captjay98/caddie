@@ -208,7 +208,7 @@ describe('hackathon deadline card (step 6)', () => {
 		`);
 	}
 
-	test('the deadline card reads the real hackathon deadline (days left + local-time line), not a schedule', async () => {
+	test('the deadline card reads the real hackathon deadline (date + day countdown), not a schedule', async () => {
 		const world = makeWorld();
 		try {
 			seedHackathon(world.sqlite);
@@ -222,8 +222,21 @@ describe('hackathon deadline card (step 6)', () => {
 			expect(typeof deadline!.deadline!.daysLeft).toBe('number');
 			// The source is the hackathon title, never a schedule name.
 			expect(deadline!.deadline!.source).toBe('Farm Innovation Challenge');
-			// Mutation proof: drop the localTimeLabel spread and this is undefined.
-			expect(deadline!.deadline!.localTimeLabel).toBeDefined();
+			expect(deadline!.deadline!.sourceUrl).toBe('https://contest.example/fic');
+			// The stored listing is date-only: no clock time may be shown, and no
+			// invented "Your time" line may appear. Mutation proof: bring back the
+			// `T23:59:59Z` fabrication (brief.ts, 2026-10-27 freeze) and both of
+			// these fail.
+			expect(deadline!.deadline!.timeLabel).toMatch(/not confirmed/i);
+			expect(deadline!.deadline!.timeLabel).not.toMatch(/\d{1,2}[:.]\d{2}/);
+			expect(deadline!.deadline!.localTimeLabel).toBeUndefined();
+			// The date is the calendar day from the listing, still readable.
+			expect(deadline!.deadline!.dateLabel).toMatch(/October/);
+			// The visible summary names the gap: the hour is unstated, confirm it
+			// on the contest site before relying on the date.
+			expect(deadline!.summary).toMatch(/confirm the exact time/i);
+			expect(deadline!.summary).toMatch(/hasn.t confirmed/i);
+			expect(deadline!.summary).not.toMatch(/source lists only a date/i);
 			// It carries NO schedule field (it is a hackathon, not a schedule).
 			expect(deadline!.schedule).toBeUndefined();
 		} finally {
@@ -239,6 +252,27 @@ describe('hackathon deadline card (step 6)', () => {
 		} finally {
 			world.sqlite.close();
 		}
+	});
+
+	test('a fresh quoted rules deadline shows the reader’s actual timezone and source', async () => {
+		const world = makeWorld();
+		try {
+			seedHackathon(world.sqlite);
+			const stamp = new Date().toISOString();
+			const value = 'October 23, 2026 at 10:00 AM Pacific Time';
+			world.sqlite.prepare('insert into user_profiles (userId, timezone, createdAt, updatedAt) values (?,?,?,?)').run('unit-alice', 'Africa/Lagos', stamp, stamp);
+			world.sqlite.prepare('insert into evidence_sources (id,projectId,canonicalUrl,kind,authority,latestSnapshotId,lastOutcome,observedAt,createdAt,updatedAt) values (?,?,?,?,?,?,?,?,?,?)')
+				.run('deadline-source', 'unit-proj-a', 'https://contest.example/fic/rules', 'page', 'binding_rules', 'deadline-snapshot', 'succeeded', stamp, stamp, stamp);
+			world.sqlite.prepare('insert into evidence_snapshots (id,projectId,sourceId,contentHash,mediaType,byteLength,content,originalUrl,provenance,capturedAt,capturedBy) values (?,?,?,?,?,?,?,?,?,?,?)')
+				.run('deadline-snapshot', 'unit-proj-a', 'deadline-source', 'deadline-hash', 'text/html', value.length, value, 'https://contest.example/fic/rules', 'original', stamp, 'unit-alice');
+			world.sqlite.prepare('insert into evidence_claims (id,projectId,sourceId,snapshotId,claimType,value,quote,extractionVersion,status,snapshotCapturedAt,createdAt) values (?,?,?,?,?,?,?,?,?,?,?)')
+				.run('deadline-claim', 'unit-proj-a', 'deadline-source', 'deadline-snapshot', 'requirement.submission_deadline', value, value, 'test', 'active', stamp, stamp);
+			const deadline = (await projectBrief(world.db, world.aliceScope)).find(card => card.id.startsWith('brf_hackathon-deadline_'))!;
+			expect(deadline.deadline?.localTimeLabel).toContain('18:00');
+			expect(deadline.deadline?.sourceUrl).toBe('https://contest.example/fic/rules');
+			expect(deadline.evidenceIds).toContain('deadline-claim');
+			expect(deadline.summary).not.toContain('hasn’t confirmed');
+		} finally { world.sqlite.close(); }
 	});
 });
 
@@ -331,6 +365,25 @@ describe('repair card: body from detail + fixed expectation panel (step 2)', () 
 			// the body does not contain the expectation.
 			expect(repair!.repair!.expectation).not.toBe(repair!.summary);
 			expect(repair!.summary).not.toContain(repair!.repair!.expectation);
+		} finally {
+			world.sqlite.close();
+		}
+	});
+
+	// Owner 2026-10-30: "One check needs another pass / The app's own tests: 73
+	// of 75 passed / What needs fixing: The app's own tests must all pass /
+	// Check attempt 60". The card names the part, in plain words, once.
+	test('an internal test failure reads as fixing the named part, with no test counts or attempt number', async () => {
+		const world = makeWorld();
+		try {
+			seedRepair(world.sqlite, 'offline:behavior-tests', 'The app tests: 73 of 75 passed.');
+			const cards = await projectBrief(world.db, world.aliceScope);
+			const repair = cards.find((card) => card.id.startsWith('brf_workflow_repair_'));
+			expect(repair!.headline).toBe('Fixing “Save and sync entries”');
+			expect(repair!.summary).toBe('Caddie found a problem in this part and is fixing it before you see the app.');
+			expect(repair!.summary).not.toContain('73 of 75');
+			expect(repair!.repair).toBeUndefined();
+			expect(JSON.stringify(repair!.footer ?? {})).not.toContain('Check attempt');
 		} finally {
 			world.sqlite.close();
 		}

@@ -2,6 +2,7 @@ import { afterEach, describe, test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import type { Scope } from '@caddie/contracts';
+import { applyFinalSchema } from './fixtures/migrations.ts';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import { researchForActor } from '../apps/app/src/server/coordinator-context.ts';
 import { createWorkspace, createProject } from '../apps/app/src/server/projects.ts';
@@ -34,9 +35,7 @@ function stubFetch(handler: (url: string) => { body: unknown; ok?: boolean; stat
 async function world() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec('PRAGMA foreign_keys=ON');
-	for (const name of ['0001_product.sql', '0004_evidence.sql', '0008_profile.sql', '0009_discovery.sql', '0011_home_project.sql', '0013_discovery_saved.sql', '0015_plan_decisions.sql', '0017_profile_preferences.sql']) {
-		sqlite.exec(readFileSync(new URL(`../apps/app/migrations/${name}`, import.meta.url), 'utf8'));
-	}
+	applyFinalSchema(sqlite);
 	const db = {
 		prepare(sql: string) {
 			const stmt = sqlite.prepare(sql);

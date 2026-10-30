@@ -1,5 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import { makeScratchDir, splitSqlStatements } from './controls-harness.ts';
+import { allMigrationPaths } from './migrations.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import net from 'node:net';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -18,16 +19,6 @@ import { join } from 'node:path';
 
 export const REPO_ROOT = join(import.meta.dir, '..', '..');
 export const FIXTURE_ENTRY = join(REPO_ROOT, 'tests', 'fixtures', 'profile.ts');
-export const IDENTITY_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0001_product.sql');
-export const PROFILE_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0008_profile.sql');
-export const PROFILE_PREFERENCES_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0017_profile_preferences.sql');
-export const SCHEDULES_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0007_schedules.sql');
-export const DISCOVERY_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0009_discovery.sql');
-export const HOME_PROJECT_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0011_home_project.sql');
-export const BRIEF_READ_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0012_brief_read.sql');
-export const DISCOVERY_SAVED_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0013_discovery_saved.sql');
-export const STACK_NOTIFY_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0014_stack_notify.sql');
-export const PLAN_DECISIONS_MIGRATION_PATH = join(REPO_ROOT, 'apps', 'app', 'migrations', '0015_plan_decisions.sql');
 
 export const ALICE_EMAIL = 'alice@example.com';
 export const BOB_EMAIL = 'bob@example.com';
@@ -178,9 +169,9 @@ export function stopProfileFixture(port: number) {
 	rmSync(`/tmp/caddie-p14-profile-worker-${port}.log`, { force: true });
 }
 
-/** Apply the production migrations P14 depends on: identity+product, then P14. */
+/** Apply the production schema the P14 fixture worker needs. */
 export async function applyMigrations(port: number): Promise<void> {
-	for (const path of [IDENTITY_MIGRATION_PATH, SCHEDULES_MIGRATION_PATH, PROFILE_MIGRATION_PATH, PROFILE_PREFERENCES_MIGRATION_PATH, DISCOVERY_MIGRATION_PATH, HOME_PROJECT_MIGRATION_PATH, BRIEF_READ_MIGRATION_PATH, DISCOVERY_SAVED_MIGRATION_PATH, STACK_NOTIFY_MIGRATION_PATH, PLAN_DECISIONS_MIGRATION_PATH]) {
+	for (const path of allMigrationPaths()) {
 		const ddl = readFileSync(path, 'utf8');
 		// The proper splitter (controls-harness) skips comment lines and
 		// trigger bodies — the naive ';' split emits comment-only chunks that

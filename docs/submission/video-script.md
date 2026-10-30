@@ -10,11 +10,11 @@ is under 3:00 with audio that names Nebius Token Factory and NVIDIA Nemotron;
 the submission plan (S12) asks for at most 2:45 and this cut leaves a ~5 second
 margin below even that.
 
-**Where to record.** On the hosted production deployment, which is **live**
-(S10/G4): production runs at `https://caddie.jamalibrahim.dev` and its P17
-hosted acceptance smoke is **LIVE VERIFIED** (`docs/release-evidence.md`,
-"Hosted acceptance smoke" = 5/5 PASS; `docs/live-receipts.json` receipt
-`lr_5bf0b08f5db1bbcb`, deploy 2026-10-22). Record against that origin. If for
+**Where to record.** Prefer the hosted production deployment after verifying
+the deployed revision and the complete judge journey. The earlier P17 hosted
+acceptance smoke passed at `https://caddie.jamalibrahim.dev` (receipt
+`lr_5bf0b08f5db1bbcb`, deploy 2026-10-22); that historical result does not
+establish that the current worktree is deployed or that today's demo works. If for
 any reason you record on a **local build with live models and the live
 sandbox** instead, say so on screen — a local recording is **not** evidence of
 the hosted deployment and must not be presented as the hosted demo, and in that

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { createTableSql } from './fixtures/migrations.ts';
 
 /**
  * B05 — one chat thread per "Talking about" scope
@@ -51,12 +52,9 @@ describe('B05: per-scope chat threads (current behaviour, pinned)', () => {
 	});
 
 	test('run bindings are per project in the database schema', () => {
-		const migrations = readFileSync(
-			join(REPO_ROOT, 'apps/app/migrations/0001_product.sql'),
-			'utf8',
-		);
+		const migrations = createTableSql('run_bindings');
 		// run_bindings carry projectId — the conversation identity is scoped.
-		expect(migrations).toMatch(/create table "run_bindings"/);
+		expect(migrations).toMatch(/create table "run_bindings"/i);
 		expect(migrations).toContain('"projectId"');
 		expect(migrations).toContain('"conversationId"');
 	});

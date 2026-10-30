@@ -91,7 +91,7 @@ test.afterAll(async () => {
 
 async function exploreIdeas(page: Page, candidateId: string) {
     await page.getByTestId(`disc-open-${candidateId}`).click();
-    await page.getByTestId('contest-detail-pane').getByRole('button',{name:'Find an idea',exact:true}).click();
+    await page.getByTestId('contest-detail-pane').getByRole('button',{name:'Plan a project for this',exact:true}).click();
 }
 
 // --- fixture data (mirrors the real P11 router payload shapes) ------------------
@@ -412,7 +412,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 		// country chip) only appears once candidates are ranked.
 		await expect(page.getByTestId('discovery-sweep')).toHaveCount(0);
 		// The persistent conversation stays on the GENERAL (account) scope here.
-		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
+		await expect(page.getByTestId('conv-context-label')).toContainText('General');
 		await context.close();
 	});
 
@@ -496,7 +496,7 @@ test.describe('Discovery-first: account-level Discover (composed build, stubbed 
 
 		await expect(page.getByTestId('disc-row-cand-1').getByRole('button',{name:'Find an idea',exact:true})).toHaveCount(0);
         await page.getByTestId('disc-open-cand-1').click();
-        await expect(page.getByTestId('contest-detail-pane').getByRole('button',{name:'Find an idea',exact:true})).toBeVisible();
+        await expect(page.getByTestId('contest-detail-pane').getByRole('button',{name:'Plan a project for this',exact:true})).toBeVisible();
 		await expect(page.getByTestId('save-candidate-cand-1')).toBeVisible();
 		// The redesign replaces "Accept" with an explicit explore/save pair.
 		await expect(page.getByRole('button', { name: 'Accept', exact: true })).toHaveCount(0);
@@ -753,7 +753,8 @@ test('Fit first detail retains supporting facts, prizes and exact rules behind r
  await expect(pane.getByTestId('contest-detail-judging')).toContainText('Working prototype');
  await pane.getByRole('tab',{name:'Entry rules',exact:true}).click();
  await expect(pane.getByTestId('contest-detail-verdict')).toContainText('Your profile matches');
- await expect(pane.getByTestId('contest-detail-group-entry')).toHaveAttribute('open','');
+ // Flat by design (owner 2026-10-28): the rules show directly, no fold to open.
+ await expect(pane.getByTestId('contest-detail-group-entry')).toBeVisible();
  await expect(pane.getByText('“International entrants may participate.”')).toBeVisible();
  await expect(pane.getByRole('tabpanel',{name:'Entry rules',exact:true}).locator('.hk-why')).toHaveCount(0);
  await expect(pane.getByRole('link',{name:'Official entry rules',exact:true})).toHaveAttribute('href','https://contest.example/solar-hackweek/rules');

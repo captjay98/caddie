@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { allMigrationPaths } from './migrations.ts';
 import {
 	ALICE_EMAIL,
 	BOB_EMAIL,
@@ -47,18 +48,7 @@ export const GITHUB_ACCOUNT_B = 'octocat-b';
 export const GITHUB_POLICY_VERSION = 'policies/2026-10-05';
 
 export function githubMigrationPaths(): string[] {
-	const root = join(import.meta.dir, '..', '..');
-	return [
-		join(root, 'apps', 'app', 'migrations', '0001_product.sql'),
-		join(root, 'apps', 'app', 'migrations', '0002_controls.sql'),
-		join(root, 'apps', 'app', 'migrations', '0006_github.sql'),
-		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
-		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
-		join(root, 'apps', 'app', 'migrations', '0009_discovery.sql'),
-		join(root, 'apps', 'app', 'migrations', '0013_discovery_saved.sql'),
-		join(root, 'apps', 'app', 'migrations', '0014_stack_notify.sql'),
-		join(root, 'apps', 'app', 'migrations', '0015_plan_decisions.sql'),
-	];
+	return allMigrationPaths();
 }
 
 const FIXTURE_ENTRY = join(import.meta.dir, 'github.ts');

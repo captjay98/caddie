@@ -18,6 +18,7 @@ import {
 	isLikelyEventPage,
 	isPastEvent,
 	listCandidates,
+	parseEventDates,
 	parseFormat,
 	prewarmDigest,
 	runDiscoveryFeed,
@@ -27,7 +28,7 @@ import { describeEligibility, evaluateEligibility, type EligibilityEvaluation } 
 import { listClaims } from './evidence/claims.ts';
 import { listSources } from './evidence/sources.ts';
 import { tavilySearch, tavilyExtract, TavilyNotConfiguredError, TavilyRequestError } from './tavily.ts';
-import { digestProfileFrom, inspectCandidates, type AiFitVerdict, type InspectCandidatesResult } from './candidate-inspection.ts';
+import { digestProfileFrom, FIT_UNAVAILABLE_GAP, inspectCandidates, type AiFitVerdict, type InspectCandidatesResult } from './candidate-inspection.ts';
 import { readRulesForCandidates } from './rules-reading.ts';
 
 const MAX_CONTEXT = 18_000;
@@ -246,6 +247,29 @@ export interface ActorDiscoveryResult {
 		readonly saved: boolean;
 	}[];
 	readonly gaps: readonly string[];
+	/** How many of the returned events had their entry rules read (honest count for the reply/footer). */
+	readonly rulesCheckedCount: number;
+	/** First-timer search: events closing within FIRST_TIMER_MIN_DAYS were ranked lower. */
+	readonly firstTimer: boolean;
+}
+
+/** The stages a live discovery reports while it runs (plain words, real work only). */
+export type DiscoveryProgressStage = 'sources' | 'rules' | 'ranking';
+export interface DiscoveryProgress {
+	readonly stage: DiscoveryProgressStage;
+	/** Plain sentence for the person, e.g. "Reading the entry rules for 5 events". */
+	readonly text: string;
+}
+
+/** A first build needs time: events closing sooner than this rank lower for a first-timer. */
+export const FIRST_TIMER_MIN_DAYS = 3;
+
+/** Whole days from `now` to an ISO date/instant (end of that day for a bare date); null when unknown. */
+export function daysLeft(iso: string | null | undefined, now: Date = new Date()): number | null {
+	if (!iso) return null;
+	const end = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? Date.parse(`${iso}T23:59:59Z`) : Date.parse(iso);
+	if (!Number.isFinite(end)) return null;
+	return Math.floor((end - now.getTime()) / 86_400_000);
 }
 
 /* belongsToCandidate / authoritativeSourceUrls live in discovery.ts so the card
@@ -304,14 +328,34 @@ export async function discoverForActor(
 		 * outlives the response; without it the work still runs, unawaited.
 		 */
 		background?: (task: Promise<unknown>) => void;
+		/**
+		 * Pre-warm the detail-pane digests for the top events (default true).
+		 * The chat passes false (review 2026-10-28): a chat turn has no
+		 * waitUntil, so the five background model calls were unawaited, could be
+		 * cut off when the turn ended, and were not counted against a judge's
+		 * limit. A detail pane fetches its digest on open instead (counted).
+		 */
+		prewarm?: boolean;
+		/** Live progress for the chat: called as each real stage starts. */
+		onProgress?: (progress: DiscoveryProgress) => void;
+		/** The person asked for a first / beginner event in their own words (the query may not say so). */
+		firstTimer?: boolean;
 	} = {},
 ): Promise<ActorDiscoveryResult> {
+	const progress = (stage: DiscoveryProgressStage, text: string) => {
+		try {
+			options.onProgress?.({ stage, text });
+		} catch {
+			// progress is best-effort; it never breaks the search
+		}
+	};
 	const verified = await assertProjectScope(db, scope);
 	const parsed = v.safeParse(DiscoveryInputSchema, input);
 	if (!parsed.success) throw new ScopeError(400, 'invalid_input', 'invalid discovery query, limit or refresh');
-	const gaps = ["Open Devpost contests come from Devpost's live open-contests API; other platforms (Devfolio, HackerEarth, DoraHacks, …) come from a live web search. Dates and availability can still change after a read.",
-		'Solo participation, deadlines, age/student restrictions and costs require quoted event rules; missing rules remain unknown.',
-		'Interest matches are topical hints. Weekly availability and budget are not filtered without reliable event duration/cost information.'];
+	// "How I checked", in plain words for a non-technical reader (review
+	// 2026-10-28). Source outages and rules-page results are appended below.
+	const gaps = ['I looked at hackathons open right now on Devpost, plus a web search for other sites. Dates can still change, so check the event page before you commit.',
+		'I only say you can enter after reading that event’s official rules.'];
 	// Profile first: it drives the profile-aware discovery queries (interests/
 	// skills/country), so the live search casts a wider net than one generic
 	// sweep. Reused below for interest-matching and eligibility — fetched once.
@@ -328,7 +372,7 @@ export async function discoverForActor(
 		'building', 'build', 'what\'s', 'whats', 'current', 'events', 'event', 'new', 'list', 'get', 'want', 'looking',
 	]);
 	const queryWords = (parsed.output.query?.split(/[\s,.;:!?()]+/) ?? []).map((w) => w.trim().toLowerCase()).filter((w) => w && !QUERY_STOPWORDS.has(w));
-	const firstTimer = profile?.experienceLevel === 'beginner' || /\b(first|beginner|new to)\b/i.test(parsed.output.query ?? '');
+	const firstTimer = options.firstTimer === true || profile?.experienceLevel === 'beginner' || /\b(first|beginner|new to)\b/i.test(parsed.output.query ?? '');
 	const searchTerms = [...new Set([
 		// "Open to anything" is a breadth answer, never a search term.
 		...searchableInterests(profile?.freeTextInterests ?? []),
@@ -341,6 +385,7 @@ export async function discoverForActor(
 	// noisy page an older adapter ingested) never resurface just because they
 	// are still in the table. Without a refresh, the stored catalog is used.
 	let pool: readonly CandidateRecord[];
+	progress('sources', 'Looking through hackathons that are open right now');
 	if (parsed.output.refresh !== false) {
 		// Topic terms for the Tavily sweep (the adapter caps how many it uses).
 		const queryTerms = searchTerms.filter((term) => term !== 'beginner');
@@ -361,9 +406,14 @@ export async function discoverForActor(
 				createLocalSeedAdapter(db),
 			],
 		});
-		for (const source of feed.sources) if (source.outcome === 'failed') gaps.push(`${source.source}: ${bounded(source.failureReason ?? 'source failed', 200)}`);
+		// Plain words for "How I checked" (review 2026-10-28); the technical
+		// reason stays on the feed run record, not in front of the person.
+		const SOURCE_LABEL: Readonly<Record<string, string>> = { devpost: 'Devpost', tavily: 'the web search for other sites', 'local-seed': 'the saved list' };
+		for (const source of feed.sources) {
+			if (source.outcome === 'failed') gaps.push(`I couldn’t reach ${SOURCE_LABEL[source.source] ?? source.source} this time, so some events may be missing.`);
+		}
 		if (devpostUnavailable) {
-			gaps.push("Devpost's open-contests API was unavailable, so Devpost events below come from a web search instead — their open status, dates and prizes are unverified until you open the event page.");
+			gaps.push('Devpost’s own list was not available, so its events came from a web search. Their dates and prizes may be out of date until you open the event page.');
 		}
 		pool = feed.candidates;
 	} else {
@@ -470,13 +520,15 @@ export async function discoverForActor(
 			skills: profile?.skills ?? [],
 		},
 		candidates: shortlist.slice(0, 20).map((c) => ({ id: c.id, url: c.url, title: c.title, summary: c.summary })),
-	}).catch((): InspectCandidatesResult => ({ byId: new Map(), gap: 'AI fit inspection failed — results are ranked by heuristics only.' }));
+	}).catch((): InspectCandidatesResult => ({ byId: new Map(), gap: FIT_UNAVAILABLE_GAP }));
 	// RULES READING (live sweeps only): Tavily reads the official rules page of
 	// the top Devpost contests, the helper model extracts quoted eligibility
 	// rules, and eligibility is re-evaluated from those quotes — so the cards
 	// can say "You can enter" / "Not eligible" with the rule cited. Bounded (≤5
 	// pages, 24h cache) and fail-soft: anything unread stays honestly 'unknown'.
 	if (parsed.output.refresh !== false && options.tavilyApiKey) {
+		const toCheck = Math.min(5, shortlist.length);
+		if (toCheck > 0) progress('rules', `Reading the official entry rules for the top ${toCheck === 1 ? 'event' : `${toCheck} events`}`);
 		const rules = await readRulesForCandidates(
 			db,
 			verified,
@@ -494,9 +546,7 @@ export async function discoverForActor(
 				entry.rulesUrl = fresh.rulesUrl;
 			}
 		}
-		if (rules.pagesAvailable > 0) {
-			gaps.push(`Eligibility for ${rules.pagesAvailable === 1 ? 'the top event' : `the top ${rules.pagesAvailable} events`} is read from their official rules pages (via Tavily), quoting the rule; other events stay "unknown" until their rules are checked.`);
-		}
+
 		// PRE-WARM the AI digest for the top 5 using the overview prose the sweep
 		// just read, so a later detail-open is a cache hit. OFF the critical
 		// path: each digest is a ~20-30s model call, and awaiting five in a row
@@ -506,7 +556,7 @@ export async function discoverForActor(
 		// to bound concurrent model calls; every failure is swallowed (a miss
 		// just falls back to the pane's on-open path). Starts AFTER the
 		// eligibility refresh above so the pre-warmed hash matches candidateDetail's.
-		if (options.nebiusApiKey) {
+		if (options.nebiusApiKey && options.prewarm !== false) {
 			const nebiusApiKey = options.nebiusApiKey;
 			const jobs = shortlist.slice(0, 5).map((entry) => () =>
 				prewarmDigest(
@@ -525,6 +575,7 @@ export async function discoverForActor(
 		}
 	}
 	// The fit inspection started before the rules read; collect it now.
+	progress('ranking', 'Ranking them for you');
 	const inspection = await inspectionPending;
 	if (inspection.gap) gaps.push(inspection.gap);
 	const withFit = shortlist.map(({ signals: _signals, display, ...c }) => {
@@ -545,13 +596,25 @@ export async function discoverForActor(
 	// fit keeps the heuristic order.
 	const order = { eligible: 0, unknown: 1, ineligible: 2 };
 	const fitOrder: Readonly<Record<AiFitVerdict, number>> = { strong: 0, possible: 1, unknown: 1, weak: 2 };
+	// A first build needs time (review 2026-10-28): for a first-timer, an event
+	// that closes within FIRST_TIMER_MIN_DAYS ranks after the ones they can
+	// realistically finish. It is still shown, with its deadline, never hidden.
+	const tooSoon = (c: (typeof withFit)[number]) => {
+		if (!firstTimer) return 0;
+		const dates = parseEventDates(c.summary);
+		const left = daysLeft(dates.deadline ?? dates.endsAt, now);
+		return left !== null && left < FIRST_TIMER_MIN_DAYS ? 1 : 0;
+	};
 	const ranked = [...withFit].sort((a, b) =>
 		order[a.eligibility.verdict] - order[b.eligibility.verdict] ||
+		tooSoon(a) - tooSoon(b) ||
 		fitOrder[a.aiFit] - fitOrder[b.aiFit]);
-	if (!ranked.length) gaps.push('No matching events are available in the stored catalog. This does not mean no suitable hackathons exist.');
-	if (!profile) gaps.push('No saved profile is available; recommendations cannot yet use personal interests or location.');
+	if (!ranked.length) gaps.push('Nothing matched this time. That does not mean there are no good hackathons. Try again later or with a different topic.');
+	if (!profile) gaps.push('You have not set up a profile yet, so I could not match your interests or check your country.');
+	const shown = ranked.slice(0, parsed.output.limit ?? 5);
+	const rulesCheckedCount = shown.filter((c) => c.eligibility.rules.length > 0).length;
 	return { source: 'live-web+catalog', liveWebSearch: true, profileCountry: profile?.country ?? null,
-		formatPreference, candidates: ranked.slice(0, parsed.output.limit ?? 5), gaps };
+		formatPreference, candidates: shown, gaps, rulesCheckedCount, firstTimer };
 }
 
 // --- research (Tavily-powered live web research) ------------------------------------

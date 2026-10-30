@@ -239,7 +239,7 @@ test.describe('discovery-first acceptance journey (composed build, one account, 
 		// The empty-state teaching card itself is pinned by brief.spec.ts; here
 		// we only assert the Brief surface loads on the general scope.
 		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
-		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
+		await expect(page.getByTestId('conv-context-label')).toContainText('General');
 		// Exactly three global destinations; no global chat/build/ship tab.
 		await expect(page.getByTestId('nav-brief')).toHaveAttribute('aria-current', 'page');
 		await expect(page.getByTestId('nav-discover')).toBeVisible();

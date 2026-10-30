@@ -395,12 +395,14 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		const storedAfterLoad = await page.evaluate(() => localStorage.getItem('caddie-theme'));
 		expect(storedAfterLoad).toBeNull();
 
-		// The toggle's label names the theme it switches TO.
+		// The theme lives in the account menu; its label names the theme it switches TO.
+		await page.getByTestId('nav-capsule').getByTestId('account-menu').click();
 		const toggle = page.getByTestId('theme-toggle');
-		await expect(toggle).toHaveAttribute('aria-label', 'Switch to light theme');
+		await expect(toggle).toHaveText('Light theme');
 		await toggle.click();
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-		await expect(toggle).toHaveAttribute('aria-label', 'Switch to dark theme');
+		await page.getByTestId('nav-capsule').getByTestId('account-menu').click();
+		await expect(page.getByTestId('theme-toggle')).toHaveText('Dark theme');
 		expect(await page.evaluate(() => localStorage.getItem('caddie-theme'))).toBe('light');
 
 		// The choice persists; loading the page never rewrites it.
@@ -454,7 +456,7 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		// Tapping it opens the Caddie tab (pane=channel), scoped to Everything.
 		await page.getByTestId('ask-bar').click();
 		await expect(page).toHaveURL(/pane=channel/);
-		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
+		await expect(page.getByTestId('conv-context-label')).toContainText('General');
 
 		// On a project route the ask bar names the project it will open.
 		await page.goto(`${BASE}/app/project?project=proj-a`);
@@ -494,14 +496,14 @@ test.describe('shell v2: resizable Caddie panel, bands, theme (U01)', () => {
 		await expect(menu).toBeVisible();
 		// U02 honesty (B05 pending): the switch describes itself as a scope
 		// switch, never as separate chat threads.
-		await expect(menu).toContainText('Switches what this chat is about.');
+		await expect(menu).toContainText('Talk about everything, or one project.');
 		await expect(menu.getByTestId('scope-everything')).toBeVisible();
 		await expect(menu.getByTestId('scope-proj-a')).toBeVisible();
 
 		// Selecting Everything navigates out of the project; scope follows.
 		await menu.getByTestId('scope-everything').click();
 		await expect(page).toHaveURL(/\/app\/$/);
-		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
+		await expect(page.getByTestId('conv-context-label')).toContainText('General');
 
 		// Back into the project via the switch.
 		await page.getByTestId('talking-about').click();
@@ -543,57 +545,52 @@ test.describe('notifications reach you (plan 5.4)', () => {
 		return reads;
 	}
 
-	test('a paused build shows on the bell; opening it marks it read and goes to that build', async ({ browser }) => {
+	// Owner review 2026-10-28: the desktop bell is gone; the Brief is the one
+	// inbox. Unread notifications show in the Brief and count on its tab.
+	test('a paused build shows in the Brief and on its tab; opening it marks it read and goes to that build', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context);
 		const reads = await stubNotifications(context, [PAUSED]);
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/`);
 
-		const bell = page.getByTestId('nav-capsule').getByTestId('notifications-bell');
-		await expect(bell.getByTestId('notifications-count')).toHaveText('1');
-		await expect(bell).toHaveAttribute('aria-label', 'Notifications, 1 new');
-		await bell.click();
-		const panel = page.getByTestId('notifications-panel');
-		await expect(panel.getByTestId('notification')).toHaveCount(1);
-		await expect(panel).toContainText('Caddie paused the build of Pit wall');
-		await expect(panel).toContainText('could not get the app checks passing');
-		await panel.getByTestId('notification-open').click();
+		const capsule = page.getByTestId('nav-capsule');
+		await expect(capsule.getByTestId('notifications-bell')).toHaveCount(0);
+		await expect(capsule.getByTestId('nav-brief-badge')).toHaveText('1');
+		const notes = page.getByTestId('brief-notifications');
+		await expect(notes.getByTestId('notification')).toHaveCount(1);
+		await expect(notes).toContainText('Caddie paused the build of Pit wall');
+		await expect(notes).toContainText('could not get the app checks passing');
+		await notes.getByTestId('notification-open').click();
 		await expect(page).toHaveURL(/\/app\/runs\?project=proj-a/);
 		expect(reads).toEqual(['ntf-1']);
-		await expect(bell.getByTestId('notifications-count')).toHaveCount(0);
 		await context.close();
 	});
 
-	test('with nothing new the bell shows no count and says so', async ({ browser }) => {
+	test('with nothing new the Brief shows no notification list and the bar has no bell', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 		await stubAccount(context);
 		await stubNotifications(context, []);
 		const page = await context.newPage();
 		await page.goto(`${BASE}/app/`);
 
-		const bell = page.getByTestId('nav-capsule').getByTestId('notifications-bell');
-		await expect(bell).toBeVisible();
-		await expect(bell).toHaveAttribute('aria-label', 'Notifications');
-		await expect(bell.getByTestId('notifications-count')).toHaveCount(0);
-		await bell.click();
-		await expect(page.getByTestId('notifications-panel')).toContainText('Nothing new.');
+		await expect(page.getByTestId('nav-capsule')).toBeVisible();
+		await expect(page.getByTestId('nav-capsule').getByTestId('notifications-bell')).toHaveCount(0);
+		await expect(page.getByTestId('brief-notifications')).toHaveCount(0);
 		await context.close();
 	});
 
-	test('on a phone the bell sits in the header too', async ({ browser }) => {
+	test('on a phone there is no bell; the Brief tab carries the count and the Brief lists it', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
 		await stubAccount(context);
 		await stubNotifications(context, [PAUSED]);
 		const page = await context.newPage();
-		// A page tab: on the Caddie tab the chat fills the phone and its own
-		// header replaces the page header.
 		await page.goto(`${BASE}/app/projects`);
 
-		const bell = page.getByTestId('mobile-header').getByTestId('notifications-bell');
-		await expect(bell.getByTestId('notifications-count')).toHaveText('1');
-		await bell.click();
-		await expect(page.getByTestId('notifications-panel')).toContainText('Caddie paused the build of Pit wall');
+		await expect(page.getByTestId('mobile-header').getByTestId('notifications-bell')).toHaveCount(0);
+		await expect(page.getByTestId('tab-brief-badge')).toHaveText('1');
+		await page.goto(`${BASE}/app/?pane=brief`);
+		await expect(page.getByTestId('brief-notifications')).toContainText('Caddie paused the build of Pit wall');
 		await context.close();
 	});
 });

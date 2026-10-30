@@ -1,4 +1,5 @@
 import type { Scope } from '@caddie/contracts';
+import {readContestDeadline, type ContestDeadline} from './contest-source-deadline.ts';
 import { DEVPOST_TIMEOUT_MS, timeoutSignal } from './http-timeouts.ts';
 import type { D1Database } from './auth.ts';
 import { ScopeError, assertProjectScope } from './scope.ts';
@@ -1684,6 +1685,7 @@ export interface CandidateDetailGroup {
 
 /** The full detail model the pane renders: evaluation + AI digest + grouped verbatim rules. */
 export interface CandidateDetail {
+	readonly deadlineEvidence: ContestDeadline | null;
 	readonly candidate: CandidateRecord;
 	readonly fit: FitResult;
 	readonly eligibility: EligibilityEvaluation;
@@ -1846,7 +1848,8 @@ export async function candidateDetail(
     // or authorizing a new model call. Exact-labelled source rows win.
     const { prizes: officialPrizes, sourceUrl: prizesSourceUrl } = await readOfficialPrizeTable(db, scope, candidate.url);
     digest = overlayOfficialPrizeAmounts(digest, officialPrizes);
-    return { candidate, fit, eligibility, digest, digestGap, digestPending, groups, officialPrizes, prizesSourceUrl };
+    const deadlineEvidence = await readContestDeadline(db,scope.projectId,candidate.url,parseEventDates(candidate.summary).deadline);
+    return { candidate, fit, eligibility, digest, digestGap, digestPending, groups, officialPrizes, prizesSourceUrl, deadlineEvidence };
 }
 
 /**

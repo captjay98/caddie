@@ -1,3 +1,4 @@
+import { pausedPreparation } from "../../shared/preparation-stage.ts";
 import { useQuery } from "@tanstack/react-query";
 import { workflowQueryOptions } from "../workflow-query.ts";
 import { planReviewState } from "../planning/plan-decision.ts";
@@ -15,8 +16,11 @@ import {
 } from "../queries.ts";
 import { activeStep, workflowSteps } from "./project-status.ts";
 import { hackathonChips } from "./project-header.ts";
-import { deadlineTime } from "../discovery/deadline-time.ts";
+import { deadlineCountdown, deadlineShortLocal, deadlineTime } from "../discovery/deadline-time.ts";
 import { ProjectDialog } from "../project/ProjectDialog.tsx";
+import { AppKeys, type AppKeyView } from "../project/AppKeys.tsx";
+import { AppAi } from "../project/AppAi.tsx";
+import { fetchJson } from "../api.ts";
 
 /**
  * Project header + step bar (Caddie v2, HANDOFF §3.7) — replaces the old tab
@@ -41,6 +45,7 @@ export type ProjectTabId =
   | "plan"
   | "build"
   | "check"
+  | "preview"
   | "submission";
 
 /** A step's status in words, from real data only. */
@@ -50,7 +55,7 @@ export interface StepStatus {
 }
 
 /** The four steps; Overview is not one of them (it orients above them). */
-export type ProjectStepId = "plan" | "build" | "check" | "submission";
+export type ProjectStepId = "plan" | "build" | "check" | "submission" | "preview";
 
 const STEPS: ReadonlyArray<{
   id: ProjectStepId;
@@ -65,12 +70,8 @@ const STEPS: ReadonlyArray<{
     testid: "project-tab-plan",
   },
   { id: "build", label: WORDS.build, to: "/runs", testid: "project-tab-build" },
-  {
-    id: "check",
-    label: WORDS.check,
-    to: "/evidence",
-    testid: "project-tab-evidence",
-  },
+  // Try it, then hand it in (owner 2026-10-30: Preview came after Submit).
+  { id: "preview", label: "Preview", to: "/preview", testid: "project-tab-preview" },
   {
     id: "submission",
     label: WORDS.submit,
@@ -92,7 +93,11 @@ export function ProjectTabs(props: {
   const project = chrome.selectedProject;
   const location = useLocation();
   const [infoOpen, setInfoOpen] = useState(location.hash === 'todo');
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
   useEffect(() => { if (location.hash === 'todo') setInfoOpen(true); }, [location.hash]);
+  // The deadline countdown ticks once a minute.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setNowMs(Date.now()), 60_000); return () => clearInterval(timer); }, []);
   const actor = useMemo(() => ({ actorId: chrome.actorId }), [chrome.actorId]);
   const hackathon = useProjectHackathon(actor, project?.id ?? null);
   const profile = useProfile(actor);
@@ -107,6 +112,11 @@ export function ProjectTabs(props: {
   // count) overrides by passing `steps` explicitly; both are real server
   // state, never a client guess.
   const workflow = useQuery(workflowQueryOptions(chrome.actorId, project?.id ?? null));
+  const connections = useQuery({
+    queryKey: ["app-keys", chrome.actorId, project?.id],
+    enabled: Boolean(chrome.actorId && project?.id),
+    queryFn: () => fetchJson<{ configured: boolean; keys: AppKeyView[] }>(`/api/projects/${encodeURIComponent(project!.id)}/keys`),
+  });
   const phase = workflow.data?.workflow?.phase ?? null;
   const reviewLabel = phase === "review" ? planReviewState(workflow.data?.plan, workflow.data?.approval).label : undefined;
   // Whether the plan was approved, from the project status (the same shared
@@ -116,6 +126,7 @@ export function ProjectTabs(props: {
   const planApproved = experience.data
     ? experience.data.plan?.approved === true
     : undefined;
+  const pausedBeforeBuild = Boolean(workflow.data?.workflow && planApproved && pausedPreparation(workflow.data.workflow, true));
   const derivedSteps = useMemo(
     () =>
       project
@@ -123,9 +134,10 @@ export function ProjectTabs(props: {
             personal: isPersonal,
             planApproved,
             reviewLabel,
+            pausedBeforeBuild,
           })
         : undefined,
-    [project, phase, isPersonal, planApproved, reviewLabel],
+    [project, phase, isPersonal, planApproved, reviewLabel, pausedBeforeBuild],
   );
   const activity = useBuildActivity(
     actor,
@@ -144,9 +156,10 @@ export function ProjectTabs(props: {
         },
       }
     : (props.steps ?? derivedSteps);
-  const active = project
-    ? activeStep(phase ?? null, { planApproved })
+  const workStep = project
+    ? activeStep(phase ?? null, { planApproved, pausedBeforeBuild })
     : null;
+  const active = workStep === 'check' ? 'preview' : workStep;
   const activeIndex = active
     ? STEPS.findIndex((step) => step.id === active)
     : -1;
@@ -184,8 +197,8 @@ export function ProjectTabs(props: {
       ) : null}
       <div className="project-steps" data-testid="project-tabs">
         {STEPS.map((step) => {
-          const status = steps?.[step.id];
-          const isCurrent = props.current === step.id;
+          const status = step.id === 'preview' ? (workflow.data?.workflow?.previewId || workflow.data?.importPreview?.status === 'ready' ? { text: 'Ready to try', tone: 'done' as const } : { text: 'After it’s built', tone: 'neutral' as const }) : steps?.[step.id];
+          const isCurrent = props.current === step.id || (props.current === 'check' && step.id === 'build');
           const isActive = active === step.id;
           const label = step.id === "submission" ? lastLabel : step.label;
           const stepClass = [
@@ -226,22 +239,43 @@ export function ProjectTabs(props: {
   if (!project) {
     // No project resolved yet (or a bad ?project=): the steps still orient;
     // the header facts stay hidden until a real project exists.
-    return <div className="project-head project-head-empty">{stepsNav}</div>;
+    //
+    // Two things keep this frame from jumping when the project lands
+    // (owner 2026-10-27 on the Preview tab): the rail wears the SAME focused
+    // styling it will have with a project, and the rows above it — the title
+    // and the deadline line, both of which the project itself decides — hold
+    // the space they will be given, so the four steps never move.
+    return (
+      <div
+        className="project-head project-head-empty focused-project-head"
+        data-testid="project-header-empty"
+      >
+        <div className="project-head-title project-head-placeholder" aria-hidden="true">
+          <span className="project-back" />
+          <span className="project-head-name">&nbsp;</span>
+          <span className="project-head-settings" />
+        </div>
+        <ReservedDeadlineLine />
+        {stepsNav}
+      </div>
+    );
   }
 
   const chips = hackathonChips(hackathon.data?.hackathon ?? null);
   // The routine deadline chip stays only when the hackathon gives no deadline.
   const showRoutineDeadline =
     deadline && !chips.some((chip) => chip.id === "deadline");
-  const urgent = chips.find(
-    (chip) =>
-      chip.id === "deadline" &&
-      (chip.tone === "warn" || chip.tone === "danger"),
-  );
-  const localDeadline = deadlineTime(
-    hackathon.data?.hackathon?.deadline,
-    profile.data?.profile?.timezone ?? undefined,
-  ).local;
+  const deadlineChip = chips.find((chip) => chip.id === "deadline") ?? null;
+  const isUrgent =
+    deadlineChip !== null &&
+    (deadlineChip.tone === "warn" || deadlineChip.tone === "danger");
+  const deadlineSource = hackathon.data?.hackathon?.deadlineUtc ?? hackathon.data?.hackathon?.deadline;
+  const timeZone = profile.data?.profile?.timezone ?? undefined;
+  const localDeadline = deadlineTime(deadlineSource, timeZone).local;
+  // Owner 2026-10-29: lead with how long is left; the exact time, in the
+  // person's own zone, follows quietly (the full form stays in the tooltip).
+  const countdown = hackathon.data?.hackathon?.ended ? null : deadlineCountdown(deadlineSource, nowMs);
+  const shortLocalDeadline = countdown ? deadlineShortLocal(deadlineSource, timeZone) : null;
 
   return (
     <header
@@ -277,28 +311,51 @@ export function ProjectTabs(props: {
         >
           <Icon name="info" title="" />
         </button>
+        {/* Owner 2026-10-30: two labelled buttons beside the title outweighed
+            the page's one real action. Quiet icons, named by tooltip and label. */}
+        <button type="button" className="project-head-info project-connections" title="Connections" onClick={() => setConnectionsOpen(true)} aria-label={connections.data?.keys?.some(key => key.status === 'requested') ? 'Connections, needs attention' : 'Connections'}>
+          <Icon name="key" title="" />{connections.data?.keys?.some(key => key.status === 'requested') ? <span className="connection-needed" aria-hidden="true">•</span> : null}
+        </button>
         <Link
           to="/project/settings"
-          className="btn-ghost project-head-settings"
+          className="project-head-info project-head-settings"
           data-testid="project-settings-gear"
           aria-label="Project settings"
+          title="Project settings"
           search={(prev: Record<string, unknown>) => ({ ...(typeof prev.project === 'string' ? { project: prev.project } : {}), ...(prev.pane === 'channel' ? { pane: 'channel' as const } : {}) })}
         >
           <Icon name="settings" title="" />
-          <span>Settings</span>
         </Link>
       </div>
-      {urgent ? (
+      <ProjectDialog open={connectionsOpen} onClose={() => setConnectionsOpen(false)} title="Connections" wide>
+        {chrome.actorId ? <><AppKeys actorId={chrome.actorId} projectId={project.id} hasServer={Boolean(workflow.data?.previewHasServer)} /><AppAi actorId={chrome.actorId} projectId={project.id} /><p className="state-detail">A saved key has not necessarily been tested. Try the connected feature in your preview.</p></> : null}
+      </ProjectDialog>
+      {/* The deadline row is the header's only optional row, and the event
+          record arrives after the page is already on screen, so on every tab the
+          four steps used to drop 26px half a second after opening (owner
+          2026-10-27: "the 4 tabs still move a little"). The row is therefore
+          always there: it carries the deadline when the project has one — in
+          muted words when it is not close yet, in warn colour when it is — and
+          holds its own height invisibly when there is nothing true to say. */}
+      {deadlineChip ? (
         <p
           className="project-head-urgent"
+          data-tone={isUrgent ? deadlineChip.tone : "neutral"}
           data-testid="project-urgent-deadline"
         >
           <Icon name="clock" title="" />
-          {localDeadline
+          {countdown ? (
+            <span title={localDeadline ? `${localDeadline} · Your time` : undefined}>
+              {countdown}
+              {shortLocalDeadline ? <span className="project-head-deadline-at"> · {shortLocalDeadline}</span> : null}
+            </span>
+          ) : localDeadline
             ? `${hackathon.data?.hackathon?.ended ? "Closed" : "Closes"} ${localDeadline} · Your time`
-            : urgent.text}
+            : deadlineChip.text}
         </p>
-      ) : null}
+      ) : (
+        <ReservedDeadlineLine />
+      )}
       <ProjectDialog
         open={infoOpen}
         onClose={() => setInfoOpen(false)}
@@ -381,6 +438,20 @@ export function ProjectTabs(props: {
 			    (docked beside the page on desktop, the composer above the mobile
 			    nav), so a second input here would only duplicate it. */}
     </header>
+  );
+}
+
+/**
+ * The deadline line's height, held before the event is known: the same row with
+ * the same icon and nothing to say. Invisible and never announced, it is the
+ * reason the four steps keep their place from the first paint.
+ */
+function ReservedDeadlineLine(): ReactElement {
+  return (
+    <p className="project-head-urgent" data-tone="reserved" aria-hidden="true">
+      <Icon name="clock" title="" />
+      &nbsp;
+    </p>
   );
 }
 

@@ -237,16 +237,40 @@ export async function buildActivity(db: D1Database, scope: Scope, nowMs: number 
 	}));
 
 	const sawCheckActivity = rounds.some((r) => r.round === 'repair_attempt' || r.round === 'verification');
+	const features = await featureViewsFor(db, scope.projectId, phase, plan ?? null);
+	// An issue is open only while its feature is unfinished. A part that failed
+	// a check and then passed is not still "being fixed" (2026-10-30: the card
+	// read "Fixing “Get a tip…”" before that part had run a single check,
+	// because the previous part's failures were still counted).
+	const passedFeatures = new Set(features.filter((f) => f.status === 'passed').map((f) => f.id));
 	const openIssues = new Set(
-		rounds.filter((r) => r.round === 'repair_attempt' && r.outcome === 'failed').map((r) => r.issue),
+		rounds
+			.filter((r) => r.round === 'repair_attempt' && r.outcome === 'failed')
+			.filter((r) => !passedFeatures.has(r.issue.split(':')[0] ?? ''))
+			.map((r) => r.issue),
 	).size;
 
 	const rows = workflow ? await activityRows(db, workflow.runId) : [];
+	// A model call is work too: a builder thinking for two minutes before its
+	// next write is not "no recent activity".
+	let lastModelCallAt: string | null = null;
+	if (workflow?.conversationId) {
+		try {
+			const found = (await db
+				.prepare('select max("createdAt") as "t" from "model_call_usage" where "instanceId" = ? and "isError" = 0')
+				.bind(workflow.conversationId)
+				.all()).results as Record<string, unknown>[];
+			lastModelCallAt = found[0]?.['t'] ? String(found[0]['t']) : null;
+		} catch (error) {
+			if (!/no such (table|column)/i.test(String(error))) throw error;
+		}
+	}
 	const timeline = buildTimeline({
 		phase,
 		rows,
 		planBody: plan?.body ?? null,
 		blockedDetail: workflow?.detail ?? null,
+		lastWorkAt: [workflow?.updatedAt, lastModelCallAt],
 		nowMs,
 	});
 
@@ -258,6 +282,6 @@ export async function buildActivity(db: D1Database, scope: Scope, nowMs: number 
 		rounds,
 		openIssues,
 		timeline,
-		features: await featureViewsFor(db, scope.projectId, phase, plan ?? null),
+		features,
 	};
 }

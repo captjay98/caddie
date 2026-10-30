@@ -20,6 +20,13 @@ remote D1 database (`caddie`), schema = 39 append-only migrations.
 There is no staging, no containers, no CI. Deploys run from a terminal on
 the owner's Mac — whoever deploys *is* the pipeline.
 
+A second address matters to the build: every web build is opened for a real
+browser check on an **isolated preview origin**, never on the app's own
+host, so app cookies and sessions cannot reach generated code. In production
+that origin comes from `PREVIEW_BASE_URL` plus its own signing key — a
+separate registrable domain with a `*.<preview zone>/*` wildcard route, set
+up once (step 5 of `production-deploy.md`). Local dev derives both.
+
 ## The one non-obvious rule: production is chosen at build time
 
 Never `wrangler deploy --env production`. Instead:
@@ -43,7 +50,7 @@ From the repo root, on `main`, with a clean tree:
 |---|---|---|
 | 1. Gate | `bun scripts/release-check.ts` | the whole local gate in one command; bar = 0 FAIL. Its final `[BLOCKED] deployment authorization` line is permanent by design — a human's explicit "deploy" is what satisfies it |
 | 2. Build | `CLOUDFLARE_ENV=production bun run build` | see the rule above |
-| 3. Preflight | `bun scripts/deploy-preflight.ts` | 12 required `.prod.vars` values present, `dist/` is the production build, every DO class bound. Read every WARN — they don't block |
+| 3. Preflight | `bun scripts/deploy-preflight.ts` | 14 required `.prod.vars` values present (including the preview address and its signing key), `dist/` is the production build, every DO class bound. Read every WARN — they don't block |
 | 4. Dry run | `cd apps/app && bunx wrangler deploy --dry-run` | uploads nothing; shows what WOULD be bound |
 | 5. Migrations | `bunx wrangler d1 migrations apply caddie --remote --config wrangler.jsonc --env production` | **migrations before code, always** — they are additive, so old code ignores them for the seconds before the new code lands; the reverse order is new code hitting missing tables |
 | 6. Deploy | `bunx wrangler deploy --secrets-file .prod.vars` | the real deploy; prints the **Version ID**, the rollback handle |

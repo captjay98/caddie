@@ -29,13 +29,46 @@ describe("a generic Flutter app with the shared backend", () => {
 	test("is an empty starter, not an app", () => {
 		const dart = paths.filter((p) => p.endsWith(".dart")).map((p) => files[p]!).join("\n");
 		expect(dart).not.toMatch(/\b(todo|task)s?\b/i);
-		expect(files["lib/main.dart"]).toContain("Text('Your app'");
+		// The starter heading lives on the home (status) screen; main.dart is just the entry point.
+		expect(files["lib/main.dart"]).toContain("runApp(const ProviderScope(child: App()))");
+		expect(files["lib/features/status/presentation/status_screen.dart"]).toContain("Text('Your app')");
 	});
 
-	test("ships the Flutter app, its API helper and examples outside the gated test folder", () => {
-		for (const path of ["pubspec.yaml", "analysis_options.yaml", "lib/main.dart", "lib/api.dart", "test/examples/widget_example_test.dart"]) expect(paths).toContain(path);
+	test("ships a layered Clean-Architecture app (app/core/features/shared) with codegen, outside the gated test folder", () => {
+		for (const path of [
+			"pubspec.yaml",
+			"analysis_options.yaml",
+			"lib/main.dart",
+			"lib/app/app.dart",
+			"lib/app/router.dart",
+			"lib/app/theme.dart",
+			"lib/core/network/dio_client.dart",
+			"lib/core/network/auth_interceptor.dart",
+			"lib/core/storage/secure_storage_service.dart",
+			"lib/core/error/failures.dart",
+			"lib/core/config/api_config.dart",
+			"lib/features/status/data/server_status.dart",
+			"lib/features/status/data/status_api.dart",
+			"lib/features/status/data/status_repository.dart",
+			"lib/features/status/providers/status_providers.dart",
+			"lib/features/status/presentation/status_screen.dart",
+			"lib/features/status/presentation/widgets/status_card.dart",
+			"lib/shared/widgets/async_value_view.dart",
+			"test/examples/widget_example_test.dart",
+		])
+			expect(paths).toContain(path);
 		expect(paths.some((p) => p.startsWith(`${FLUTTER_TEST_DIR}/`))).toBe(false);
 		expect(files["pubspec.yaml"]).toContain(`name: ${FLUTTER_PACKAGE_NAME}`);
+		// Riverpod 3 / Dio / go_router / freezed + json codegen are the real stack, not http.
+		for (const dep of ["flutter_riverpod:", "riverpod_annotation:", "dio:", "go_router:", "freezed_annotation:", "json_annotation:", "flutter_secure_storage:", "google_fonts:"])
+			expect(files["pubspec.yaml"]).toContain(dep);
+		for (const dev of ["build_runner:", "riverpod_generator:", "freezed:", "json_serializable:"]) expect(files["pubspec.yaml"]).toContain(dev);
+		// The generated files are produced at build time by caddie/setup.dart, never shipped in the scaffold.
+		expect(paths.some((p) => p.endsWith(".g.dart") || p.endsWith(".freezed.dart"))).toBe(false);
+		expect(files["caddie/setup.dart"]).toContain("build_runner");
+		// freezed/riverpod/json source generates into .g.dart / .freezed.dart via `part` directives.
+		expect(files["lib/features/status/data/server_status.dart"]).toContain("part 'server_status.freezed.dart';");
+		expect(files["lib/features/status/data/server_status.dart"]).toContain("part 'server_status.g.dart';");
 	});
 
 	test("ships the same server as React apps, minus the React-only sign-in screen", () => {

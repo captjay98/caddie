@@ -191,14 +191,14 @@ describe('brief feed (projectBrief)', () => {
 		expect(needsYou[0]!.kind).toBe('approval');
 		// A plain promise for a non-technical person, never "authorises specialists
 		// building against this plan revision".
-		expect(needsYou[0]!.headline).toBe('Your plan is ready to build');
-		expect(needsYou[0]!.summary).toBe('Approve it and Caddie starts building. Nothing is published until you decide.');
+		expect(needsYou[0]!.headline).toBe('Your plan is ready to review');
+		expect(needsYou[0]!.summary).toBe('Review what your app will do. You’ll approve its design before building starts.');
 		// The decided plan reads as what the person did.
 		const decided = cards.find((card) => card.kind === 'approval' && card.status === 'handled' && card.id.includes('unit-ap-done'));
 		expect(decided?.headline).toBe('You approved the plan');
 		for (const card of cards.filter((c) => c.kind === 'approval')) expect(card.summary).not.toMatch(/authoris|revision|specialists/);
 		expect(needsYou[0]!.primaryAction).toEqual({
-			label: 'Review the design',
+			label: 'Review plan',
 			kind: 'review',
 			targetId: 'unit-ap-live',
 		});
@@ -208,11 +208,11 @@ describe('brief feed (projectBrief)', () => {
 		expect(changed.length).toBe(2);
 		const conflictCard = changed.find((card) => card.evidenceIds.length > 0);
 		expect(conflictCard).toBeDefined();
-		expect(conflictCard!.headline).toContain('deadline');
-		expect(conflictCard!.headline).toContain('retained');
+		expect(conflictCard!.headline).toBe('The submission deadline needs checking');
+		expect(conflictCard!.summary).not.toMatch(/authority|retained|built on/);
 		expect([...conflictCard!.evidenceIds].sort()).toEqual(['unit-claim-1', 'unit-claim-2']);
 		expect(conflictCard!.primaryAction).toEqual({
-			label: 'Read the conflict',
+			label: 'Compare sources',
 			kind: 'inspect',
 			targetId: 'deadline',
 		});
@@ -579,32 +579,9 @@ describe('brief cards never show raw machine strings', () => {
 });
 
 // --- OPTIONAL CARD DETAIL FIELDS (Brief cards, lane 14) --------------------------
-// Each new field comes from a REAL record or is absent — never guessed. The
-// deterministic helper is tested directly; the card-level tests prove the field
-// is attached (or absent) from the same seeded state.
-
-import { deadlineParts } from '../apps/app/src/server/brief.ts';
+// Each new field comes from a REAL record or is absent — never guessed.
 
 describe('deadline countdown (lane 14 step 2)', () => {
-	test('deadlineParts counts whole days and reads the date in the deadline timezone', () => {
-		// 3 days + a few hours ahead, in Africa/Lagos (UTC+1). 16:00 UTC = 17:00 WAT.
-		const parts = deadlineParts('2026-10-23T16:00:00.000Z', 'Africa/Lagos', '2026-10-20T08:00:00.000Z');
-		expect(parts).not.toBeNull();
-		expect(parts!.daysLeft).toBe(3);
-		expect(parts!.dateLabel).toContain('October');
-		expect(parts!.dateLabel).toContain('Friday');
-		expect(parts!.timeLabel).toBe('17:00');
-	});
-
-	test('a passed deadline floors at zero days, never negative', () => {
-		const parts = deadlineParts('2026-10-01T00:00:00.000Z', 'UTC', '2026-10-20T08:00:00.000Z');
-		expect(parts!.daysLeft).toBe(0);
-	});
-
-	test('an unparseable timestamp yields no parts, so the card keeps its summary', () => {
-		expect(deadlineParts('not a date', 'UTC', '2026-10-20T08:00:00.000Z')).toBeNull();
-	});
-
 	test('an armed schedule card carries a schedule field (next-run label) and NO deadline countdown', async () => {
 		const world = makeWorld();
 		try {
@@ -682,7 +659,7 @@ describe('"What you\u2019re approving" plan list (lane 14 step 3)', () => {
 			const cards = await projectBrief(world.db, world.aliceScope);
 			const approval = cards.find((card) => card.kind === 'approval' && card.status === 'needs-you');
 			expect(approval!.planItems).toBeUndefined();
-			expect(approval!.summary).toBe('Approve it and Caddie starts building. Nothing is published until you decide.');
+			expect(approval!.summary).toBe('Review what your app will do. You’ll approve its design before building starts.');
 		} finally {
 			world.sqlite.close();
 		}

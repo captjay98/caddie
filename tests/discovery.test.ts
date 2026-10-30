@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Scope } from '@caddie/contracts';
+import { allMigrationPaths } from './fixtures/migrations.ts';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import {
 	addClaim,
@@ -54,12 +55,7 @@ import {
  */
 
 const REPO_ROOT = join(import.meta.dir, '..');
-const MIGRATION_PATHS = [
-	join(REPO_ROOT, 'apps', 'app', 'migrations', '0001_product.sql'),
-	join(REPO_ROOT, 'apps', 'app', 'migrations', '0004_evidence.sql'),
-	join(REPO_ROOT, 'apps', 'app', 'migrations', '0009_discovery.sql'),
-	join(REPO_ROOT, 'apps', 'app', 'migrations', '0020_discovery_digest_cache.sql'),
-];
+const MIGRATION_PATHS = allMigrationPaths();
 
 // --- in-memory D1 (same wrap pattern as tests/evidence.test.ts) -----------------
 
@@ -150,10 +146,12 @@ async function addEvidenceClaim(
 	claimType: string,
 	value: string,
 	quote: string,
+	/** One contest's own page (e.g. its /rules or /faq); default: a new contest per claim. */
+	url?: string,
 ): Promise<string> {
 	evidenceCounter += 1;
 	const source = await registerSource(world.db, scope, {
-		url: `https://rules.example/contest-${evidenceCounter}`,
+		url: url ?? `https://rules.example/contest-${evidenceCounter}`,
 		kind: 'page',
 		authority: 'binding_rules',
 		displayName: `Contest rules ${evidenceCounter}`,
@@ -474,9 +472,11 @@ describe('P11 explainable fit + ranking: hard-ineligible cannot rank as eligible
 		]);
 		const feed = await runDiscoveryFeed(world.db, world.aliceScope, { adapters: [createLocalSeedAdapter(world.db)] });
 		await addEvidenceClaim(world, world.aliceScope, theme.claimType, 'accessibility', `"${theme.text}"`);
-		// Two equally binding rules pages disagree about team size: a retained conflict.
-		await addEvidenceClaim(world, world.aliceScope, team.claimType, '4', '"Teams of up to 4"');
-		await addEvidenceClaim(world, world.aliceScope, team.claimType, '6', '"Teams of up to 6"');
+		// Two equally binding pages OF THE SAME CONTEST (its rules and its FAQ)
+		// disagree about team size: a retained conflict. Pages of different
+		// contests are different subjects and never conflict (evidence/claims.ts).
+		await addEvidenceClaim(world, world.aliceScope, team.claimType, '4', '"Teams of up to 4"', 'https://rules.example/plain-words/rules');
+		await addEvidenceClaim(world, world.aliceScope, team.claimType, '6', '"Teams of up to 6"', 'https://rules.example/plain-words/faq');
 		const fit = await computeFit(world.db, world.aliceScope, feed.candidates[0]!);
 		const byType = new Map(fit.claims.map((claim) => [claim.claimType, claim]));
 		expect(byType.get(theme.claimType)?.verdict).toBe('supported');

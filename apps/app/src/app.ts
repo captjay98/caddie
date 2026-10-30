@@ -1,4 +1,5 @@
 import {recoverTimedOutTask} from './server/task-recovery.ts';
+import {isolatedPreviewRequest} from './server/isolated-preview.ts';
 import {buildSandboxFromEnv} from './server/build-sandbox.ts';
 import { createAcceptanceRuntimeRouter } from './server/routes/acceptance-runtime.ts';
 import type { D1Database } from './server/auth.ts';
@@ -142,6 +143,11 @@ instrument(makeModelCallInstrumentation({
 }));
 
 const app = new Hono<{ Bindings: Env }>();
+app.use('*',async(c,next)=>{
+ const response=await isolatedPreviewRequest(c.req.raw,c.env);
+ if(response)return response;
+ return next();
+});
 
 // --- product API -----------------------------------------------------------
 const api = new Hono<{ Bindings: Env }>();

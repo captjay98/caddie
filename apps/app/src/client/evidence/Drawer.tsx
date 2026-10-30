@@ -6,6 +6,7 @@ import { authorityLabel, authorityRank, isSourceAuthority } from '../../server/e
 import { StatePanel, failureKind } from '../states.tsx';
 import { readableFailure } from '../api.ts';
 import { CopyableId } from '../copyable.tsx';
+import { evidenceConflictCopy, evidenceTopic, evidenceValue } from '../../shared/evidence-copy.ts';
 
 /**
  * P10 evidence inspector (feature-ledger H7) — rebuilt on the shared token
@@ -82,10 +83,9 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 function AuthorityChip({ value }: { value: string }): ReactElement {
 	const known = isSourceAuthority(value);
-	const rank = known ? authorityRank(value) : null;
 	return (
-		<span className={`badge${known ? '' : ' badge-unknown'}`} data-tone={known ? 'neutral' : 'roadmap'} title={known ? undefined : 'unknown authority never wins reconciliation'}>
-			{known ? authorityLabel(value) : 'unknown'} · rank {rank ?? 'null'}
+		<span className={`badge${known ? '' : ' badge-unknown'}`} data-tone={known ? 'neutral' : 'roadmap'}>
+			{known ? authorityLabel(value) : 'Source not yet checked'}
 		</span>
 	);
 }
@@ -146,7 +146,6 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 	const claimList = claims.data?.claims ?? [];
 	const surveyList = surveys.data?.surveys ?? [];
 	const conflicts = surveyList.filter((survey) => survey.conflict);
-	const winners = surveyList.filter((survey) => survey.winner);
 	const claimsById = new Map(claimList.map((claim) => [claim.id, claim]));
 	const activeClaims = claimList.filter((claim) => claim.status !== 'superseded');
 	const historyClaims = claimList.filter((claim) => claim.status === 'superseded');
@@ -206,18 +205,17 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 				{/* A section shows only when it has something (or is loading or
 				    failed): an empty "Still unsettled" heading over nothing is
 				    noise, and the count line above already says 0. */}
-				{surveys.isPending || surveys.error || conflicts.length > 0 || winners.length > 0 ? (
+				{surveys.isPending || surveys.error || conflicts.length > 0 ? (
 				<section className="evidence-section" data-testid="evidence-conflicts-section">
 					<h3 className="ev-head">Still unsettled</h3>
 					{conflicts.length > 0 ? (
 						<p className="state-detail">
-							Two sources Caddie trusts equally said different things. It keeps both instead of quietly
-							picking one — resolve it in the chat when it matters.
+							Caddie found different answers in the source material. Compare the original excerpts below.
 						</p>
 					) : null}
 					<SectionStates
 					pending={surveys.isPending}
-					empty={conflicts.length === 0 && winners.length === 0}
+					empty={conflicts.length === 0}
 					emptyTitle="Nothing read yet"
 					emptyDetail="As soon as Caddie reads a hackathon's rules page or your repo, what it saw shows up here — with a link back to the exact page."
 					error={surveys.error}
@@ -231,13 +229,11 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 							const historyAvailable = claims.isPending || claims.error != null;
 							return (
 								<div key={survey.conflict!.conflictId} className="ev-conflict" data-testid="evidence-conflict">
-									<b>Retained — winner is null.</b> Sources of equal authority state different
-									{' '}
-									{survey.claimType} values, so neither outranks the other and the disagreement is
-									kept instead of being resolved. Nothing has been built on either reading.
+									<h4 className="ev-conflict-title">{evidenceConflictCopy(survey.claimType).headline}</h4>
+									<p className="state-detail">{evidenceConflictCopy(survey.claimType).summary}</p>
 									{sides.length === 0 && !historyAvailable ? (
 										<p className="state-detail">
-											The conflicting claim rows are not loaded — retry the claims section below.
+											The source excerpts couldn’t be loaded. Try loading this section again.
 										</p>
 									) : (
 										<div className="ev-sides">
@@ -249,13 +245,7 @@ export function EvidenceDrawer(props: { projectId: string; focusClaimType?: stri
 								</div>
 							);
 						})}
-						{winners.length > 0 ? (
-							<p className="mono-id" data-testid="evidence-winners">
-								Current readings with a winner:{' '}
-								{winners.map((survey) => `${survey.claimType} = ${survey.winner!.value}`).join(' · ')}
-								. Unknown authority has no rank: it can never win a reconciliation.
-							</p>
-						) : null}
+
 					</>
 				</SectionStates>
 			</section>
@@ -351,11 +341,13 @@ function ClaimRow({ claim }: { claim: EvidenceClaim }): ReactElement {
 		<div className="inspector-row ev-claim" data-testid="evidence-claim" data-status={claim.status}>
 			<div className="row-main">
 				<span className="row-title">
-					<code>{claim.claimType}</code> = {claim.value}
+					<strong>{evidenceTopic(claim.claimType)}</strong>
 					{claim.status === 'superseded' ? <span className="mono-id"> · superseded — history</span> : null}
 				</span>
 				<AuthorityChip value={claim.sourceAuthority} />
 			</div>
+			<p className="ev-value">{evidenceValue(claim.claimType, claim.value)}</p>
+			<a className="ev-source-link" href={claim.canonicalUrl} target="_blank" rel="noopener noreferrer">Read original source ↗</a>
 			<blockquote className="ev-quote">
 				“{claim.quote}”
 				{claim.locator ? <em> — {claim.locator}</em> : null}
@@ -363,6 +355,9 @@ function ClaimRow({ claim }: { claim: EvidenceClaim }): ReactElement {
 			<details className="ev-devdetail">
 				<summary className="kicker">For developers — exact snapshot &amp; hash</summary>
 				<div className="row-details">
+				<span className="ev-field"><span className="fk">claim type</span><code className="fv">{claim.claimType}</code></span>
+				<span className="ev-field"><span className="fk">recorded value</span><span className="fv">{claim.value}</span></span>
+				<span className="ev-field"><span className="fk">authority rank</span><span className="fv">{isSourceAuthority(claim.sourceAuthority) ? authorityRank(claim.sourceAuthority) : 'Unranked'}</span></span>
 				<span className="ev-field">
 					<span className="fk">claim id</span>
 					<Ident value={claim.id} label="claim id" />

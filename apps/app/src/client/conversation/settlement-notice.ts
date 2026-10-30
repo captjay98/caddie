@@ -25,7 +25,16 @@ function errorType(error: unknown): string | null {
 	return typeof type === 'string' ? type : null;
 }
 
-export function settlementNotice(settlement: Pick<FlueConversationSettlement, 'outcome' | 'error'>): SettlementNotice {
+export function settlementNotice(settlement: Pick<FlueConversationSettlement, 'outcome' | 'error'>, context: { building?: boolean } = {}): SettlementNotice {
+	// During a build the owner sent nothing: "send your message again" was
+	// wrong advice (owner 2026-10-30). The build card's watchdog picks it up.
+	if (context.building && settlement.outcome !== 'aborted') {
+		return {
+			kind: 'failed',
+			title: 'The build was interrupted.',
+			detail: 'The parts already built are saved. Caddie picks the build up again on its own within a few minutes; if it doesn’t, press Retry on the build card.',
+		};
+	}
 	if (errorType(settlement.error) === 'submission_timeout') {
 		return {
 			kind: 'timeout',

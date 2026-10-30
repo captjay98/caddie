@@ -24,6 +24,7 @@ import { qualityAdmission, qualityEnabled } from './artifact-quality.ts';
 import type { FlueEvent, FlueExecutionContext, FlueExecutionOperation, FlueInstrumentation } from '@flue/runtime';
 import type { D1Database } from './auth.ts';
 import { readSwitch, type SwitchEnv } from './platform-switches.ts';
+import { assertModelSpendAllowed, ModelSpendCapError, pauseForSpendCap } from './model-spend-guard.ts';
 import {
 	costliestRoute,
 	estimateCallMicros,
@@ -53,6 +54,11 @@ const payerByKey = new Map<string, string>();
 /** Register that a build identity (an instanceId or conversationId) pays through `payerId`. */
 export function registerBuildPayer(key: string, payerId: string): void {
 	if (key) payerByKey.set(key, payerId);
+}
+
+/** Remove only the binding installed by the failed admission. */
+export function unregisterBuildPayer(key: string, payerId: string): void {
+	if (payerByKey.get(key) === payerId) payerByKey.delete(key);
 }
 
 /**
@@ -295,6 +301,16 @@ export function makeSpendInstrumentation(config: SpendInstrumentConfig): FlueIns
 			// pass straight through rather than risk a throw from a missing handle.
 			if (!resolved) return next();
 			const { db, env } = resolved;
+
+			// The account-wide and per-project ceilings come first and apply to
+			// EVERY call, chat included (model-spend-guard.ts).
+			const conversationIds = [ctx.instanceId ?? '', ctx.conversationId ?? ''];
+			try {
+				await assertModelSpendAllowed(db, env, { conversationIds });
+			} catch (error) {
+				if (error instanceof ModelSpendCapError) await pauseForSpendCap(db, error, { conversationIds });
+				throw error;
+			}
 
 			const payerId = await resolveTurnPayer(db, ctx);
 			// No payer (ordinary chat): pass straight through (plan §A step 2).

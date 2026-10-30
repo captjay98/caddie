@@ -1,0 +1,11 @@
+import { chromium } from '@playwright/test';
+const browser = await chromium.launch();
+const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+const page = await context.newPage();
+await page.goto('http://localhost:5176/app/', { waitUntil: 'networkidle' });
+await page.getByTestId('sign-in-panel').waitFor({ state: 'visible', timeout: 15000 });
+await page.getByTestId('theme-toggle').click();
+await page.waitForTimeout(400);
+console.log('theme:', await page.evaluate(() => document.documentElement.dataset.theme ?? document.documentElement.getAttribute('data-theme')));
+await page.screenshot({ path: 'test-support/unauth-header-light-390.png' });
+await browser.close();

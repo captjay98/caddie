@@ -1,3 +1,4 @@
+import { allMigrationPaths } from "./fixtures/migrations.ts";
 import {SandboxDriver} from '../apps/app/src/server/adapters/sandbox.ts';
 import { putLarge } from "../apps/app/src/server/large-content.ts";
 import { describe, test, expect, spyOn } from "bun:test";
@@ -5,6 +6,7 @@ import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { Scope } from "@caddie/contracts";
+import { CANONICAL_LOOKS_PROPOSAL, CANONICAL_LOOK_FEATURES } from "@caddie/contracts";
 import type { D1Database } from "../apps/app/src/server/auth.ts";
 import {
   ScopeError,
@@ -43,9 +45,14 @@ import {
   planIntent,
   designIntent,
   retryWorkflow,
+  requestReadyChange,
+  saveReadyChangeProposal,
+  decideReadyChange,
   workflowRepairPause,
   continueProjectFromChat,
+  recordOwnerChangeRequest,
   reconcileStalledBuild,
+  reconcileStalledChangeAdmission,
   sweepStalledBuilds,
   BUILD_STALL_MS,
   MAX_PREVIEW_PAGE_BYTES,
@@ -56,7 +63,12 @@ import { androidDownloadView, createAndroidAppRouter } from "../apps/app/src/ser
 import { buildActivity } from "../apps/app/src/server/build-activity.ts";
 import { rollbackToFeature } from "../apps/app/src/server/build-features.ts";
 import { BUILD_ACTION_BUDGET, REPEATED_ACTION_LIMIT, ROLE_TOOL_POLICY } from "../apps/app/src/agents/permissions.ts";
-import { resolveCoordinatorContext, resolveModuleBuilderContext } from "../apps/app/src/server/coordinator-host.ts";
+import { resolveCoordinatorContext as realCoordinatorContext, resolveModuleBuilderContext as realModuleContext } from "../apps/app/src/server/coordinator-host.ts";
+// Governance fixtures simulate the private browser result. Actual native
+// storage/reload and broken-app failures are tested in real Chromium separately.
+const previewFixtureEnv={BETTER_AUTH_URL:'http://localhost:5176',BETTER_AUTH_SECRET:'local-preview-governance-fixture-secret'};
+const resolveCoordinatorContext=(...args:Parameters<typeof realCoordinatorContext>)=>realCoordinatorContext({...previewFixtureEnv,...args[0]},args[1],{previewSmoke:async()=>({passed:true,errors:[]}),...args[2]});
+const resolveModuleBuilderContext=(...args:Parameters<typeof realModuleContext>)=>realModuleContext({...previewFixtureEnv,...args[0]},args[1],{previewSmoke:async()=>({passed:true,errors:[]}),...args[2]});
 import { getModule, seedModules, takeSlot } from "../apps/app/src/server/module-slots.ts";
 import { ContreeClient } from "../apps/app/src/server/adapters/contree.ts";
 import { retryPart } from "../apps/app/src/server/module-join.ts";
@@ -64,6 +76,7 @@ import { listAppSecrets, setAppSecret } from "../apps/app/src/server/app-secrets
 import { parseKeyring } from "../apps/app/src/server/secret-box.ts";
 import { makeRequestAppKey } from "../apps/app/src/agents/tools.ts";
 import { LocalCodeStore, listCodeVersions, readVersionFiles, recordCodeVersion } from "../apps/app/src/server/code-versions.ts";
+import { openWorkingCopy } from "../apps/app/src/server/working-copy.ts";
 import { restoreVersion } from "../apps/app/src/server/version-restore.ts";
 import { SCAFFOLD_COMMANDS } from "../stacks/react-hono/scaffold.ts";
 import {
@@ -76,6 +89,7 @@ import { upsertProfile } from "../apps/app/src/server/profiles.ts";
 import { splitSqlStatements } from "./fixtures/controls-harness.ts";
 import { documentHash, type FidelityPort } from "../apps/app/src/server/visual-fidelity.ts";
 import { chooseLook, saveLooks, FIELD_LOOK } from "./fixtures/looks-fixture.ts";
+import { recordMachineReview, reviewArtifactCandidate } from "../apps/app/src/server/artifact-quality.ts";
 
 /** LOCAL VERIFIED: real production migrations/services over SQLite, with
  * D1-shaped results and a real synchronous transaction backing D1.batch.
@@ -121,47 +135,28 @@ function d1Adapter(
   } as unknown as D1Database;
 }
 
-async function world() {
+// The quality gate (0050 family) ships folded into 0004_quality.sql, so a
+// database predating it can only be expressed by removing the objects it
+// added: without the two plan_doc_revisions triggers a plan revision is
+// admitted the way it was before the gate existed.
+const QUALITY_GATE_OBJECTS = [
+  "drop trigger if exists artifact_quality_publication_guard",
+  "drop trigger if exists artifact_quality_published",
+  "drop table if exists artifact_quality_reviews",
+  "drop table if exists quality_admissions",
+  "drop table if exists quality_projects",
+  "drop table if exists acceptance_candidates",
+];
+
+async function world(options: { qualityGate?: boolean } = {}) {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys=ON");
-  for (const migration of [
-    "0001_product.sql",
-    "0002_controls.sql",
-    "0003_artifacts.sql",
-    "0005_runs.sql",
-    "0008_profile.sql",
-    "0017_profile_preferences.sql",
-    "0011_home_project.sql",
-    "0015_plan_decisions.sql",
-    "0018_build_workflow.sql",
-    "0022_build_activity.sql",
-    "0023_build_features.sql",
-    "0024_design_phase.sql",
-    "0026_code_versions.sql",
-    "0027_app_secrets.sql",
-    "0028_app_publishing.sql",
-    // Track 3: the large-file store (an Android app's preview page and APK).
-    "0039_large_content.sql",
-    // Judge accounts (the build-start payer reads them) and team mode (the
-    // spending-limit tables and the workflow mode columns).
-    "0033_judge_accounts.sql",
-    "0040_team_mode.sql",
-    // Part P: the module rows and slots the module-builder tests seed.
-    "0042_module_builders.sql",
-    // Part Q: the integration lock a part's join takes.
-    "0043_integration_lock.sql",
-    // The choose-a-look step: the workflow's looks / looks-review phases.
-    "0044_looks_phase.sql",
-    // B03: content hash on build_activity for the progress guard.
-    "0047_build_activity_content_hash.sql",
-    "0048_repair_escalation.sql",
-    "0049_build_environment.sql",
-  ]) {
-    const ddl = readFileSync(
-      new URL(`../apps/app/migrations/${migration}`, import.meta.url),
-      "utf8",
-    );
+  for (const path of allMigrationPaths()) {
+    const ddl = readFileSync(path, "utf8");
     for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);
+  }
+  if (options.qualityGate !== true) {
+    for (const statement of QUALITY_GATE_OBJECTS) sqlite.exec(statement);
   }
   for (const user of ["alice", "bob"])
     sqlite
@@ -834,6 +829,73 @@ describe("plan review and durable build approval", () => {
   });
 });
 
+/** Publish a PRD through the quality gate with a reviewer that passes it. */
+async function recordPassingPlan(w: Awaited<ReturnType<typeof world>>, scope: Scope, body: string) {
+  await reviewArtifactCandidate(w.db, { projectId: scope.projectId, kind: "prd", body, authorRouteId: "deepseek-v4.1-flash-1017",
+    reviewer: { async review() { return { verdict: "pass" as const, findings: [] }; } } });
+  await createPlanDocRevision(w.db, scope, { kind: "prd", body });
+  await workflowSnapshot(w.db, scope);
+}
+
+describe("merged look step (owner 2026-10-29)", () => {
+  test("choosing a look drawn as the real first screen composes the design, approves it and starts the build in one click", async () => {
+    const w = await world();
+    try {
+      const started = await w.start();
+      const plan = await createPlanDocRevision(w.db, started.scope, {
+        kind: "prd",
+        body: `# Poultry log\n\nLog the day.\n\n\`\`\`caddie-features\n${JSON.stringify(CANONICAL_LOOK_FEATURES.map((feature) => ({ id: feature.id, title: feature.id, doneWhen: [...feature.doneWhen] })))}\n\`\`\``,
+      });
+      await workflowSnapshot(w.db, started.scope);
+      await decideWorkflow(w.db, started.scope, { planId: plan.id, decision: "approved" });
+      const { looks, snapshot } = await saveLooks(w.db, started.scope, CANONICAL_LOOKS_PROPOSAL);
+      expect(snapshot.workflow?.phase).toBe("looks-review");
+      const built = await decideLooks(w.db, started.scope, { looksId: looks.id, choice: "number", note: "bigger egg numbers" });
+      // No design step and no design review: the pick is the design approval.
+      expect(built.workflow?.phase).toBe("building");
+      expect(built.workflow?.pendingKey?.startsWith("design-decision:")).toBe(true);
+      expect(built.design?.body).toContain("# One big number");
+      expect(built.design?.body).toContain("```caddie-checks");
+      expect(built.design?.body).toContain("bigger egg numbers");
+      expect(built.design?.body).toContain("**Log today**");
+      expect(built.workflow?.approvedDesignRevisionId).toBe(built.design!.id);
+      expect(built.designApproval?.status).toBe("approved");
+      expect((await requireBuildApproval(w.db, started.scope)).plan.id).toBe(plan.id);
+      // The look decision and the design decision are both on record.
+      const [lookDecision] = await listPlanDecisions(w.db, started.scope, looks.id);
+      expect(lookDecision?.note).toBe("look:number\nbigger egg numbers");
+      // A retried click changes nothing.
+      const again = await decideLooks(w.db, started.scope, { looksId: looks.id, choice: "number" });
+      expect(again.workflow?.phase).toBe("building");
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("with the quality gate on, machine checks are the reviewer: measured findings block a save, and the composed design passes the publication trigger", async () => {
+    const w = await world({ qualityGate: true });
+    try {
+      const started = await w.start();
+      const prd = `# Poultry log\n\nLog the day.\n\n\`\`\`caddie-features\n${JSON.stringify(CANONICAL_LOOK_FEATURES.map((feature) => ({ id: feature.id, title: feature.id, doneWhen: [...feature.doneWhen] })))}\n\`\`\``;
+      await recordPassingPlan(w, started.scope, prd);
+      const plan = (await workflowSnapshot(w.db, started.scope)).plan!;
+      await decideWorkflow(w.db, started.scope, { planId: plan.id, decision: "approved" });
+      // A measured contrast problem is a blocking finding: nothing is saved.
+      await rejectsCode(recordMachineReview(w.db, { projectId: started.project.id, kind: "looks", body: CANONICAL_LOOKS_PROPOSAL + "\n", authorRouteId: "minimax-m3.1-flash",
+        check: async () => [{ severity: "blocking", criterion: "contrast", detail: "\"Pen A\" is hard to read: contrast 2.1:1, needs 4.5:1" }] }), "QUALITY_REVISION_REQUIRED");
+      expect(w.count("artifact_quality_reviews", "reviewerRouteId = 'machine-checks-v1' and verdict = 'revise'")).toBe(1);
+      await recordMachineReview(w.db, { projectId: started.project.id, kind: "looks", body: CANONICAL_LOOKS_PROPOSAL, authorRouteId: "minimax-m3.1-flash", check: async () => [] });
+      const { looks } = await saveLooks(w.db, started.scope, CANONICAL_LOOKS_PROPOSAL);
+      const built = await decideLooks(w.db, started.scope, { looksId: looks.id, choice: "field" });
+      expect(built.workflow?.phase).toBe("building");
+      expect(w.count("artifact_quality_reviews", "reviewerRouteId = 'machine-checks-v1' and verdict = 'pass'")).toBe(2);
+      expect(w.count("artifact_candidates", "kind = 'design' and status = 'published'")).toBe(1);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+});
+
 describe("design review and the build gate", () => {
   test("approving the PRD enters the look step; choosing a look starts the design in it; building stays gated until the design is approved", async () => {
     const w = await world();
@@ -845,8 +907,10 @@ describe("design review and the build gate", () => {
       });
       // PRD approval goes to the LOOKS step, NOT design or building.
       expect(afterPlan.workflow?.phase).toBe("looks");
-      expect(afterPlan.workflow?.pendingBody).toContain("CHOOSE A LOOK");
+      expect(afterPlan.workflow?.pendingBody).toContain("3 clearly different looks");
       expect(afterPlan.workflow?.pendingBody).toContain("kind:'looks'");
+      // The designer carries the guide; the coordinator message stays short.
+      expect(afterPlan.workflow?.pendingBody!.length).toBeLessThan(1200);
       expect(afterPlan.looks).toBeNull();
       await rejectsCode(requireBuildApproval(w.db, item.scope), "BUILD_NOT_APPROVED");
       // A design saved before a look is chosen does not jump the owner's choice.
@@ -1520,6 +1584,88 @@ describe("explicit build recovery and existing project handoff", () => {
     }
   });
 
+  test("a resume prompt written by the framework is not recorded as the owner's words", async () => {
+    // `plan_decisions` notes are the evidence the independent reviewer trusts
+    // for a scope change, so only a human boundary may write them. The resume
+    // paths below are also reached by framework prompts (the build-steps retry
+    // port, the coordinator's continue tool), and recording their text would
+    // let an author sign off its own scope change.
+    const w = await world();
+    try {
+      const item = await planned(w);
+      w.sqlite.prepare("update build_workflows set phase='blocked' where projectId=?").run(item.scope.projectId);
+      await retryWorkflow(w.db, item.scope, "framework-replan", "make it a hackathon entry: my app can use AI");
+      expect((w.sqlite.prepare("select count(*) n from plan_decisions where projectId=?").get(item.scope.projectId) as { n: number }).n).toBe(0);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("planning");
+      // The words still reach the author: a prompt is work, just not evidence.
+      expect((await readWorkflow(w.db, item.scope))?.pendingBody).toContain("my app can use AI");
+      await continueProjectFromChat(w.db, w.homeScope, {
+        projectId: item.project.id,
+        request: "The owner has confirmed the full scope: add AI.",
+        operationKey: "model-authored-continue",
+      });
+      expect((w.sqlite.prepare("select count(*) n from plan_decisions where projectId=?").get(item.scope.projectId) as { n: number }).n).toBe(0);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a change typed on the project page is recorded by the conversation guard, not by the coordinator", async () => {
+    // The project conversation's composer posts straight to the coordinator
+    // endpoint, so continueProjectFromChat never sees the owner's words (Street
+    // Food Share: the reviewer cited "ownerRequests is empty" at 17:38Z even
+    // with the log field wired). The guard is the one server-side point that
+    // reads a typed message, and it records it here.
+    const w = await world();
+    try {
+      const item = await planned(w);
+      const words = "my app can use AI to warn when food is about to go off";
+      await recordOwnerChangeRequest(w.db, item.scope, words);
+      const recorded = w.sqlite
+        .prepare("select decision,note,planRevisionId,approvalId from plan_decisions where projectId=? order by rowid desc limit 1")
+        .get(item.scope.projectId) as { decision: string; note: string; planRevisionId: string; approvalId: string | null };
+      expect(recorded.decision).toBe("changes");
+      expect(recorded.note).toBe(words);
+      expect(recorded.planRevisionId).toBe(item.plan.id);
+      // No approval row backs it: this is the owner's statement, not a card
+      // answer, so the "Approve plan" card still reaches them.
+      expect(recorded.approvalId).toBeNull();
+      // The same words twice is one decision.
+      await recordOwnerChangeRequest(w.db, item.scope, words);
+      expect((w.sqlite.prepare("select count(*) n from plan_decisions where projectId=?").get(item.scope.projectId) as { n: number }).n).toBe(1);
+      // Outside the planning steps a decision row would read as an answered
+      // card and suppress the auto-advance, so nothing is written.
+      w.sqlite.prepare("update build_workflows set phase='looks' where projectId=?").run(item.scope.projectId);
+      await recordOwnerChangeRequest(w.db, item.scope, "make the buttons bigger");
+      expect((w.sqlite.prepare("select count(*) n from plan_decisions where projectId=?").get(item.scope.projectId) as { n: number }).n).toBe(1);
+      // Blocked at the looks step the workflow's planId names a LOOKS revision.
+      // Recording there would look like the owner had answered the look card,
+      // so the revision's kind, not the phase, is what keeps it out.
+      const looksRevision = "pdr_test_looks_gate";
+      w.sqlite
+        .prepare(
+          "insert into plan_doc_revisions (id,projectId,kind,revision,bodyHash,body,createdBy,createdAt) select ?,?,'looks',revision+1,bodyHash,body,createdBy,? from plan_doc_revisions where id=?",
+        )
+        .run(looksRevision, item.scope.projectId, new Date().toISOString(), item.plan.id);
+      w.sqlite.prepare("update build_workflows set phase='blocked',planId=? where projectId=?").run(looksRevision, item.scope.projectId);
+      await recordOwnerChangeRequest(w.db, item.scope, "the third look suits us better");
+      expect((w.sqlite.prepare("select count(*) n from plan_decisions where projectId=?").get(item.scope.projectId) as { n: number }).n).toBe(1);
+      // Blocked at the plan is the state a refused review leaves the owner in,
+      // and their reply must still reach the next review.
+      w.sqlite.prepare("update build_workflows set phase='blocked',planId=? where projectId=?").run(item.plan.id, item.scope.projectId);
+      await recordOwnerChangeRequest(w.db, item.scope, words);
+      expect((w.sqlite.prepare("select count(*) n from plan_decisions where projectId=?").get(item.scope.projectId) as { n: number }).n).toBe(1);
+      await recordOwnerChangeRequest(w.db, item.scope, "keep the plan, but my app must use AI");
+      expect((w.sqlite.prepare("select count(*) n from plan_decisions where projectId=?").get(item.scope.projectId) as { n: number }).n).toBe(2);
+      // A framework prompt is never the owner's words.
+      w.sqlite.prepare("update build_workflows set phase='planning' where projectId=?").run(item.scope.projectId);
+      await recordOwnerChangeRequest(w.db, item.scope, "   ");
+      expect((w.sqlite.prepare("select count(*) n from plan_decisions where projectId=?").get(item.scope.projectId) as { n: number }).n).toBe(2);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
   test("a build retry carries a message parked while blocked, instead of dropping it", async () => {
     // A user asks to continue a blocked build WITHOUT resumeBlocked: the request
     // is parked under a `continue:` pendingKey (continueProjectFromChat). When the
@@ -1667,6 +1813,28 @@ describe("fresh coordinator host authority", () => {
 });
 
 
+test("run_checks before any code is written is answered 'write first', once per feature (Farm Ops, 2026-10-29)", async () => {
+  const w = await world();
+  const stub = new SandboxStub({ expectedToken: "local-write-first-token" });
+  stub.seedImage("tag:write-first:1");
+  await stub.start();
+  try {
+    const item = await approved(w);
+    const host = await resolveCoordinatorContext({ DB: w.db, CONTREE_BASE_URL: stub.url,
+      CONTREE_API_TOKEN: "local-write-first-token", CONTREE_PROJECT_ID: "local-project", CONTREE_IMAGE: "tag:write-first:1" }, item.workflow.conversationId);
+    // The scaffold and a directory listing are not the feature's code.
+    seedActivity(w, item.project.id, item.workflow.runId, { id: "act-scaffold", kind: "setup", subject: "react-hono scaffold (31 files)", at: Date.now() - 2000 });
+    seedActivity(w, item.project.id, item.workflow.runId, { id: "act-ls", kind: "command", subject: "ls src", at: Date.now() - 1000 });
+    const refused = (await host.runChecks!("too-early")) as { passed: boolean; next: string };
+    expect(refused.passed).toBe(false);
+    expect(refused.next).toContain("Nothing has been written for this feature yet");
+    expect(stub.spawnRequestCount()).toBe(0);
+    // Only once: a write the log cannot see never locks the feature out.
+    await host.runChecks!("second-try");
+    expect(stub.spawnRequestCount()).toBeGreaterThan(0);
+  } finally { await stub.stop(); w.sqlite.close(); }
+});
+
 describe("build runtime environment", () => {
   test("specialist execution and host checks receive the Bun runtime path without credentials", async () => {
     const w = await world();
@@ -1679,6 +1847,8 @@ describe("build runtime environment", () => {
       const host = await resolveCoordinatorContext({ DB: w.db, CONTREE_BASE_URL: stub.url,
         CONTREE_API_TOKEN: "local-runtime-token", CONTREE_PROJECT_ID: "local-project", CONTREE_IMAGE: "tag:runtime:1" }, item.workflow.conversationId);
       await host.driver.execute({ sessionId: host.sessionId, command: "bun --version", operationKey: "runtime-check", timeoutMs: 1000 });
+      // Checks run on written code (a check before any write is answered "write first").
+      seedActivity(w, item.project.id, item.workflow.runId, { id: "act-runtime-write", kind: "file", subject: "src/App.tsx", at: Date.now() });
       await host.runChecks!("runtime-verification");
       const commands = stub.requests.filter(r => r.method === "POST" && r.path === "/v1/instances")
         .map(r => r.body as { command: string; env?: Record<string,string> })
@@ -1756,7 +1926,7 @@ describe("app keys during a build", () => {
 });
 
 describe("specialist repair boundaries", () => {
-  test("shell test runs are refused; failed run_checks count once per receipt and stop the next effect after six attempts", async () => {
+  test("shell test runs are refused; the builder's own failed run_checks are ledgered once per receipt and spend no repair try", async () => {
     const w = await world();
     const stub = new SandboxStub({ expectedToken: "local-repair-token" });
     stub.seedImage("tag:repair:1");
@@ -1782,28 +1952,19 @@ describe("specialist repair boundaries", () => {
       const restored = await resolveCoordinatorContext(env, item.workflow.conversationId);
       await restored.runChecks!("failure-one");
       expect(w.count("run_rounds", "outcome='failed'")).toBe(1);
-      await host.runChecks!("failure-two");
-      await host.runChecks!("failure-three");
-      await host.runChecks!("failure-four");
-      await host.runChecks!("failure-five");
-      expect(w.count("run_rounds", "outcome='failed'")).toBe(5);
-      // Five failures do not yet pause — the ladder allows six (two per model).
-      expect((await workflowRepairPause(w.db, item.workflow.runId)).paused).toBe(false);
-      await host.runChecks!("failure-six");
-      expect(w.count("run_rounds", "outcome='failed'")).toBe(6);
-      expect((await workflowRepairPause(w.db, item.workflow.runId)).paused).toBe(true);
-      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
-      expect((await readWorkflow(w.db, item.scope))?.detail).toContain("saved");
-      const before = stub.spawnRequestCount();
-      await expect(host.driver.execute({ sessionId: host.sessionId, command: "ls", operationKey: "must-not-dispatch", timeoutMs: 1000 })).rejects.toThrow();
-      expect(stub.spawnRequestCount()).toBe(before);
-      // run_checks never publishes a preview, even before the pause.
-      expect(w.count("workflow_outputs")).toBe(0);
-      await retryWorkflow(w.db, item.scope, "explicit-bounded-retry");
-      expect((await workflowRepairPause(w.db, item.workflow.runId)).paused).toBe(false);
-      await host.runChecks!("failure-seven");
+      for (const attempt of ["failure-two", "failure-three", "failure-four", "failure-five", "failure-six", "failure-seven"]) await host.runChecks!(attempt);
       expect(w.count("run_rounds", "outcome='failed'")).toBe(7);
+      // 2026-10-30 EggOps: a builder iterating with run_checks is not handing
+      // work in, so its failures are diagnoses and spend none of the six tries
+      // ("Write down today's eggs" paused after five of its own test runs and
+      // one real check). Hand-ins (finish_feature, independent checks) and a
+      // builder that overruns its task deadline still count.
+      expect(w.count("run_rounds", "outcome='failed' and round='diagnosis'")).toBe(7);
+      expect(w.count("build_repair_attempts")).toBe(0);
+      expect((await workflowRepairPause(w.db, item.workflow.runId)).paused).toBe(false);
       expect((await readWorkflow(w.db, item.scope))?.phase).toBe("building");
+      // run_checks never publishes a preview.
+      expect(w.count("workflow_outputs")).toBe(0);
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 
@@ -1856,6 +2017,48 @@ test("Stop propagates through the host to a running sandbox command", async () =
   } finally { await stub.stop(); w.sqlite.close(); }
 });
 
+
+test("a project blocked at the look step resumes the look step, never the build", async () => {
+  const w = await world();
+  try {
+    const item = await planned(w);
+    await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    expect((await readWorkflow(w.db, item.scope))?.phase).toBe("looks");
+    await setWorkflowBlocker(w.db, item.scope, "The looks were not saved. Ask Caddie to continue with the look options.");
+    const input = { projectId: item.project.id, request: "the looks failed — please try again", operationKey: "lazy-user-looks-retry" };
+    const resumed = await continueProjectFromChat(w.db, w.homeScope, input);
+    expect(resumed.workflow?.phase).toBe("looks");
+    expect(resumed.workflow?.detail).toBeNull();
+    expect(resumed.workflow?.pendingBody).toContain("write_plan_note kind:'looks'");
+    expect(resumed.workflow?.pendingBody).toContain(input.request);
+    expect(w.count("workflow_resumes")).toBe(1);
+    // A valid proposal saved after the resume reaches the owner's picker: the
+    // looks card only exists while the phase is 'looks'.
+    await saveLooks(w.db, item.scope);
+    expect((await readWorkflow(w.db, item.scope))?.phase).toBe("looks-review");
+  } finally { w.sqlite.close(); }
+});
+
+test("a valid looks proposal saved while the project is blocked still reaches the owner", async () => {
+  const w = await world();
+  try {
+    const item = await planned(w);
+    await decideWorkflow(w.db, item.scope, { planId: item.plan.id, decision: "approved" });
+    await setWorkflowBlocker(w.db, item.scope, "The looks were not saved. Ask Caddie to continue with the look options.");
+    expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
+    // The owner asked Caddie to try again from the project chat, and this time
+    // the proposal is valid: it must be shown, not left orphaned under a block.
+    await saveLooks(w.db, item.scope);
+    expect((await readWorkflow(w.db, item.scope))?.phase).toBe("looks-review");
+    // A project blocked AFTER the look was chosen is not awaiting the look step.
+    const other = await planned(w);
+    await decideWorkflow(w.db, other.scope, { planId: other.plan.id, decision: "approved" });
+    await chooseLook(w.db, other.scope);
+    await setWorkflowBlocker(w.db, other.scope, "A later step failed.");
+    await saveLooks(w.db, other.scope);
+    expect((await readWorkflow(w.db, other.scope))?.phase).toBe("blocked");
+  } finally { w.sqlite.close(); }
+});
 
 test("a user continuation resumes the approved stopped project with their full request, once", async () => {
   const w = await world();
@@ -1949,7 +2152,10 @@ describe("stalled build watchdog", () => {
     const w = await world();
     try {
       const item = await approved(w);
-      const started = Date.parse((await readWorkflow(w.db, item.scope))!.updatedAt);
+      const workflow = (await readWorkflow(w.db, item.scope))!;
+      const started = Date.parse(workflow.updatedAt);
+      // The turn is still calling the model, so only the 20-minute idle rule applies.
+      w.sqlite.exec(`insert into model_call_usage (turnId,instanceId,purpose,providerId,requestedModel,selectionReason,isError,createdAt) values ('t-alive','${workflow.conversationId}','agent','nebius','m','x',0,'${new Date(started + BUILD_STALL_MS - 120_000).toISOString()}')`);
       expect(await reconcileStalledBuild(w.db, item.project.id, started + BUILD_STALL_MS - 1)).toBe(false);
       // A sandbox action is progress: the quiet window restarts from it.
       seedActivity(w, item.project.id, item.workflow.runId, { id: "act-progress", at: started + 60_000 });
@@ -1967,6 +2173,88 @@ describe("stalled build watchdog", () => {
       expect(await reconcileStalledBuild(w.db, item.project.id, started + 10 * BUILD_STALL_MS)).toBe(false);
       await retryWorkflow(w.db, item.scope, "resume-after-stall");
       expect((await requireBuildApproval(w.db, item.scope)).plan.id).toBe(item.plan.id);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("a build whose last model call failed and that did nothing since is paused in minutes, not 20 (Farm Ops, 2026-10-29)", async () => {
+    const { BUILD_DEAD_TURN_MS } = await import("../apps/app/src/server/build-workflow.ts");
+    const w = await world();
+    try {
+      const item = await approved(w);
+      const workflow = (await readWorkflow(w.db, item.scope))!;
+      const started = Date.parse(workflow.updatedAt);
+      const call = (id: string, at: number, isError: 0 | 1) => w.sqlite.exec(`insert into model_call_usage (turnId,instanceId,purpose,providerId,requestedModel,selectionReason,isError,createdAt) values ('${id}','${workflow.conversationId}','agent','nebius','m','x',${isError},'${new Date(at).toISOString()}')`);
+      // A failed call that the turn recovered from (a later good call) is not a dead turn.
+      call("t-bad-1", started + 60_000, 1);
+      call("t-good", started + 70_000, 0);
+      expect(await reconcileStalledBuild(w.db, item.project.id, started + 70_000 + BUILD_DEAD_TURN_MS + 1)).toBe(false);
+      // A sandbox action after the last failure means the turn went on.
+      call("t-bad-2", started + 120_000, 1);
+      seedActivity(w, item.project.id, item.workflow.runId, { id: "act-after-error", at: started + 125_000 });
+      expect(await reconcileStalledBuild(w.db, item.project.id, started + 120_000 + BUILD_DEAD_TURN_MS + 1)).toBe(false);
+      // The last thing the turn did was fail, and nothing since: paused, honestly.
+      call("t-bad-3", started + 200_000, 1);
+      expect(await reconcileStalledBuild(w.db, item.project.id, started + 200_000 + BUILD_DEAD_TURN_MS - 1000)).toBe(false);
+      expect(await reconcileStalledBuild(w.db, item.project.id, started + 200_000 + BUILD_DEAD_TURN_MS + 1000)).toBe(true);
+      const stopped = await readWorkflow(w.db, item.scope);
+      expect(stopped?.phase).toBe("blocked");
+      expect(stopped?.detail).toContain("lost its connection to the AI service");
+      expect(stopped?.detail).toContain("Press Retry");
+    } finally { w.sqlite.close(); }
+  });
+
+  test("a build with no model call and no sandbox action for 8 minutes is paused, then resumes itself at most twice (owner 2026-10-29)", async () => {
+    const { BUILD_QUIET_MS, BUILD_AUTO_RESUMES, autoResumeWatchdogPause } = await import("../apps/app/src/server/build-workflow.ts");
+    const w = await world();
+    try {
+      const item = await approved(w);
+      const workflow = (await readWorkflow(w.db, item.scope))!;
+      const started = Date.parse(workflow.updatedAt);
+      const call = (id: string, at: number) => w.sqlite.exec(`insert into model_call_usage (turnId,instanceId,purpose,providerId,requestedModel,selectionReason,isError,createdAt) values ('${id}','${workflow.conversationId}','agent','nebius','m','x',0,'${new Date(at).toISOString()}')`);
+      // A model call inside the window keeps it alive even with no sandbox action.
+      call("t-thinking", started + BUILD_QUIET_MS - 60_000);
+      expect(await reconcileStalledBuild(w.db, item.project.id, started + BUILD_QUIET_MS + 1000)).toBe(false);
+      // Nothing at all for 8 minutes: paused, with the watchdog's wording.
+      expect(await reconcileStalledBuild(w.db, item.project.id, started + 2 * BUILD_QUIET_MS)).toBe(true);
+      const paused = await readWorkflow(w.db, item.scope);
+      expect(paused?.phase).toBe("blocked");
+      expect(paused?.detail).toContain("stopped making progress on the build");
+      // The watchdog pause resumes by itself, keyed per run, and only twice.
+      for (let n = 1; n <= BUILD_AUTO_RESUMES; n++) {
+        expect(await autoResumeWatchdogPause(w.db, item.scope)).toBe(true);
+        const resumed = await readWorkflow(w.db, item.scope);
+        expect(resumed?.phase).toBe("building");
+        expect(resumed?.pendingKey).toBe(`retry:auto:${workflow.runId}:${n}`);
+        await setWorkflowBlocker(w.db, item.scope, "Caddie lost its connection to the AI service, so the build was paused. Your plan and files are saved. Press Retry to continue from here.");
+      }
+      expect(await autoResumeWatchdogPause(w.db, item.scope)).toBe(false);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
+      // An owner Stop or a real blocker is never resumed for them.
+      await setWorkflowBlocker(w.db, item.scope, "App checks failed; your files are saved.");
+      expect(await autoResumeWatchdogPause(w.db, item.scope)).toBe(false);
+      // A step-budget pause resumes by itself ONCE per run (owner 2026-10-30),
+      // counted apart from the watchdog's two, then waits for the owner.
+      const budget = "Caddie used this build's 150-step budget without getting the checks to pass, so the build was paused. Your plan and files are saved. Retry to continue with a fresh budget.";
+      await setWorkflowBlocker(w.db, item.scope, budget);
+      expect(await autoResumeWatchdogPause(w.db, item.scope)).toBe(true);
+      expect((await readWorkflow(w.db, item.scope))?.pendingKey).toBe(`retry:auto:budget:${workflow.runId}:1`);
+      await setWorkflowBlocker(w.db, item.scope, budget);
+      expect(await autoResumeWatchdogPause(w.db, item.scope)).toBe(false);
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
+    } finally { w.sqlite.close(); }
+  });
+
+  test("a step-budget pause does not use up the watchdog's own resumes", async () => {
+    const { autoResumeWatchdogPause } = await import("../apps/app/src/server/build-workflow.ts");
+    const w = await world();
+    try {
+      const item = await approved(w);
+      const workflow = (await readWorkflow(w.db, item.scope))!;
+      await setWorkflowBlocker(w.db, item.scope, "Caddie used this build's 150-step budget without getting the checks to pass, so the build was paused. Your plan and files are saved. Retry to continue with a fresh budget.");
+      expect(await autoResumeWatchdogPause(w.db, item.scope)).toBe(true);
+      await setWorkflowBlocker(w.db, item.scope, "Caddie stopped making progress on the build, so it was paused. Your plan and files are saved. Press Retry to continue from here.");
+      expect(await autoResumeWatchdogPause(w.db, item.scope)).toBe(true);
+      expect((await readWorkflow(w.db, item.scope))?.pendingKey).toBe(`retry:auto:${workflow.runId}:1`);
     } finally { w.sqlite.close(); }
   });
 
@@ -2129,7 +2417,9 @@ describe("host-driven feature loop", () => {
       for(let i=0;i<6;i++) {
         const fresh=await resolveCoordinatorContext(env(w,stub),item.workflow.conversationId);
         expect(fresh.resumeContext).toContain('log-feed');
-        expect(fresh.repairModelRouteId).toBe(['nemotron-3.5-super-vl','nemotron-3.5-super-vl','deepseek-v4.1-flash-1017','deepseek-v4.1-flash-1017','glm-5.3','glm-5.3'][i]);
+        // Owner 2026-10-29: MiniMax first, then DeepSeek (GLM-5.3 is off the ladder);
+        // 2026-10-30: DeepSeek is also the last rung (Super VL is image-only).
+        expect(fresh.repairModelRouteId).toBe(['minimax-m3.1-flash','minimax-m3.1-flash','deepseek-v4.1-flash-1017','deepseek-v4.1-flash-1017','deepseek-v4.1-flash-1017','deepseek-v4.1-flash-1017'][i]);
         await recordRepairRound(w.db,item.scope,item.workflow.runId,{issue:'log-feed:test-'+i,round:'repair_attempt',outcome:'failed',operationKey:'repair-'+i,admissionId:payer ?? undefined});
       }
       expect((await workflowRepairPause(w.db,item.workflow.runId)).paused).toBe(true);
@@ -2321,6 +2611,28 @@ describe("host-driven feature loop", () => {
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 
+  test('a failed or unavailable real-preview check never publishes ready',async()=>{
+    for(const mode of ['failed','unavailable','missing-key']) {
+      const w=await world();const stub=new SandboxStub({expectedToken:'local-feature-token'});
+      stub.seedImage('tag:feature:1');stub.setBehavior('bun run test',{stdout:'3 pass\n0 fail'});await stub.start();
+      try {
+        const item=await featureBuild(w);const root=`/workspace/${item.scope.projectId}`;
+        const bindings={...previewFixtureEnv,...env(w,stub),...(mode==='missing-key'?{BETTER_AUTH_URL:'https://app.example.com',PREVIEW_BASE_URL:'https://preview.example.net'}:{})};
+        const host=await realCoordinatorContext(bindings,item.workflow.conversationId,mode!=='unavailable'?{previewSmoke:async()=>({passed:false,errors:["Couldn't open your records"]})}:{});
+        await host.buildNextFeature();
+        w.sqlite.prepare("update build_features set status='passed',testsPassed=3 where projectId=?").run(item.scope.projectId);
+        stub.setBehavior('bun run build',{stdout:'built',writes:{[`${root}/dist/main.js`]:'console.log("checked")',[`${root}/dist/main.css`]:'body{}'}});
+        const result=await host.verifyBuild('preview-regression') as {passed:boolean;paused?:boolean};
+        expect(result.passed).toBe(false);expect(w.count('workflow_outputs')).toBe(0);
+        expect(w.count('run_verifications',`"check"='preview-runtime' and passed=0`)).toBe(1);
+        if(mode!=='failed'){
+          expect(result.paused).toBe(true);expect((await readWorkflow(w.db,item.scope))?.phase).toBe('blocked');
+          expect(w.count('run_rounds',"issue='preview-runtime' and outcome='failed'")).toBe(0);
+        }
+      }finally{await stub.stop();w.sqlite.close();}
+    }
+  });
+
   test("verify_build stores the preview and records it as a version with the app's own source", async () => {
     const w = await world();
     const stub = new SandboxStub({ expectedToken: "local-feature-token" });
@@ -2361,6 +2673,119 @@ describe("host-driven feature loop", () => {
     } finally { await stub.stop(); w.sqlite.close(); }
   });
 
+  // Staged builds (owner 2026-10-30): the approved list is built in stages.
+  const STAGED_PRD = FEATURE_PRD.replace(/```caddie-features[\s\S]*?```/, "```caddie-features\n" + JSON.stringify([
+    { id: "log-feed", title: "Log daily feed", doneWhen: ["Saving 12 kg shows 12 kg in today's list"] },
+    { id: "view-dashboard", title: "See this week's feed", later: true, needs: ["log-feed"], doneWhen: ["The page totals this week's feed"] },
+    { id: "feed-costs", title: "See what feed costs", later: true, needs: ["view-dashboard"], doneWhen: ["Adding a price shows the week's cost"] },
+  ]) + "\n```");
+
+  test("staged builds: the first build makes only the first version; 'Add this' builds one approved idea on the finished app", async () => {
+    const { planStages } = await import("../apps/app/src/server/build-features.ts");
+    const { addPlanItem } = await import("../apps/app/src/server/plan-stages.ts");
+    const w = await world();
+    const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+    stub.seedImage("tag:feature:1");
+    stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+    await stub.start();
+    try {
+      const item = await featureBuild(w, STAGED_PRD);
+      const root = `/workspace/${item.scope.projectId}`;
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      // The first build is the first version only.
+      expect((await host.buildNextFeature()) as object).toMatchObject({ feature: { id: "log-feed" }, total: 1 });
+      expect(((await host.finishFeature("log-feed", "staged-finish-1")) as { passed: boolean; next: string }).next).toContain("verify_build");
+      stub.setBehavior("bun run build", { stdout: "built", writes: { [`${root}/dist/main.js`]: "1", [`${root}/dist/main.css`]: "a{}" } });
+      const first = (await host.verifyBuild("staged-verify-1")) as { passed: boolean; outputId: string };
+      expect(first.passed).toBe(true);
+      let state = (await readWorkflow(w.db, item.scope))!;
+      expect(state.phase).toBe("ready");
+      let stages = (await planStages(w.db, item.project.id, state.phase, item.plan))!;
+      expect(stages.first.map((row) => [row.id, row.status])).toEqual([["log-feed", "built"]]);
+      expect(stages.later.map((row) => [row.id, row.status])).toEqual([["view-dashboard", "available"], ["feed-costs", "waiting"]]);
+      expect(stages.later[1]!.needs).toEqual(["See this week's feed"]);
+      // An idea whose prerequisite is not built is refused in plain words.
+      await rejectsCode(addPlanItem(w.db, item.scope, { featureId: "feed-costs", key: "staged-add-too-early" }), "PLAN_ITEM_NEEDS");
+      // "Add this": one tap is the decision; the build starts on the working app.
+      await addPlanItem(w.db, item.scope, { featureId: "view-dashboard", key: "staged-add-1" });
+      state = (await readWorkflow(w.db, item.scope))!;
+      expect(state.phase).toBe("building");
+      expect(state.previewId).toBe(first.outputId);
+      expect(state.pendingBody).toContain("See this week's feed");
+      expect(w.count("ready_changes", "status = 'approved'")).toBe(1);
+      // The same tap replayed starts nothing twice.
+      await addPlanItem(w.db, item.scope, { featureId: "view-dashboard", key: "staged-add-1" });
+      expect(w.count("ready_changes")).toBe(1);
+      stages = (await planStages(w.db, item.project.id, "building", item.plan))!;
+      expect(stages.later[0]!.status).toBe("adding");
+      // The feature loop builds exactly the added item, then publishes a new version.
+      const adding = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      expect((await adding.buildNextFeature()) as object).toMatchObject({ feature: { id: "view-dashboard" } });
+      stub.setBehavior("bun run test", { stdout: "3 pass\n0 fail" });
+      expect(((await adding.finishFeature("view-dashboard", "staged-finish-2")) as { passed: boolean }).passed).toBe(true);
+      const second = (await adding.verifyBuild("staged-verify-2")) as { passed: boolean; outputId: string };
+      expect(second.passed).toBe(true);
+      state = (await readWorkflow(w.db, item.scope))!;
+      expect(state.phase).toBe("ready");
+      expect(state.previewId).toBe(second.outputId);
+      expect(w.count("ready_changes", "status = 'completed'")).toBe(1);
+      stages = (await planStages(w.db, item.project.id, state.phase, item.plan))!;
+      expect(stages.later.map((row) => [row.id, row.status])).toEqual([["view-dashboard", "built"], ["feed-costs", "available"]]);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("staged builds: an add that fails leaves the app unchanged and offers Try again", async () => {
+    const { planStages } = await import("../apps/app/src/server/build-features.ts");
+    const { addPlanItem } = await import("../apps/app/src/server/plan-stages.ts");
+    const { addNextView } = await import("../apps/app/src/client/project/add-next.ts");
+    const w = await world();
+    const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+    stub.seedImage("tag:feature:1");
+    stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+    await stub.start();
+    try {
+      const item = await featureBuild(w, STAGED_PRD);
+      const root = `/workspace/${item.scope.projectId}`;
+      const host = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+      await host.buildNextFeature();
+      await host.finishFeature("log-feed", "fail-finish-1");
+      stub.setBehavior("bun run build", { stdout: "built", writes: { [`${root}/dist/main.js`]: "1", [`${root}/dist/main.css`]: "a{}" } });
+      const first = (await host.verifyBuild("fail-verify-1")) as { outputId: string };
+      await addPlanItem(w.db, item.scope, { featureId: "view-dashboard", key: "fail-add-1" });
+      // The build gives up on the added part.
+      await setWorkflowBlocker(w.db, item.scope, "App checks failed; your files are saved.");
+      const state = (await readWorkflow(w.db, item.scope))!;
+      expect(state.phase).toBe("ready");
+      expect(state.previewId).toBe(first.outputId);
+      const snapshot = await workflowSnapshot(w.db, item.scope);
+      const stages = await planStages(w.db, item.project.id, state.phase, item.plan);
+      const view = addNextView(stages, snapshot.change);
+      expect(view.failed).toBe("See this week's feed");
+      expect(view.next?.id).toBe("view-dashboard");
+      // Try again is a fresh add of the same idea.
+      await addPlanItem(w.db, item.scope, { featureId: "view-dashboard", key: "fail-add-2" });
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe("building");
+      expect(w.sqlite.query("select featureId, status from build_features where status <> 'passed'").all()).toEqual([{ featureId: "view-dashboard", status: "pending" }]);
+    } finally { await stub.stop(); w.sqlite.close(); }
+  });
+
+  test("staged builds: the owner's first-version choice at approval becomes the first build, and a broken choice approves nothing", async () => {
+    const { decidePlan } = await import("../apps/app/src/server/plan-stages.ts");
+    const w = await world();
+    try {
+      const started = await w.start();
+      const plan = await createPlanDocRevision(w.db, started.scope, { kind: "prd", body: STAGED_PRD });
+      await workflowSnapshot(w.db, started.scope);
+      // "See what feed costs" needs "See this week's feed": refused, nothing approved.
+      await rejectsCode(decidePlan(w.db, started.scope, { planId: plan.id, decision: "approved", firstVersion: ["log-feed", "feed-costs"] }), "FIRST_VERSION_INVALID");
+      expect((await readWorkflow(w.db, started.scope))?.phase).toBe("review");
+      await decidePlan(w.db, started.scope, { planId: plan.id, decision: "approved", firstVersion: ["log-feed", "view-dashboard"] });
+      expect((await readWorkflow(w.db, started.scope))?.phase).toBe("looks");
+      const rows = w.sqlite.query("select featureId, position, status from build_features order by position").all();
+      expect(rows).toEqual([{ featureId: "log-feed", position: 1, status: "pending" }, { featureId: "view-dashboard", position: 2, status: "pending" }]);
+    } finally { w.sqlite.close(); }
+  });
+
   describe("when the sandbox no longer keeps the working copy", () => {
     const install = SCAFFOLD_COMMANDS.install.join(" && ");
     /**
@@ -2392,6 +2817,30 @@ describe("host-driven feature loop", () => {
     }
     const setupRows = (w: Awaited<ReturnType<typeof world>>) =>
       (w.sqlite.query("select subject, outcome from build_activity where kind = 'setup' order by startedAt").all() as { subject: string; outcome: string }[]);
+
+    test("a change rebuild restores its exact approved base version when the checked image expires", async () => {
+      const w = await world();
+      const stub = new SandboxStub({ expectedToken: "local-feature-token" });
+      stub.seedImage("tag:feature:1");
+      stub.setBehavior("bun run test", { stdout: "1 pass\n0 fail" });
+      await stub.start();
+      try {
+        const { item, root, version } = await checkedApp(w, stub);
+        const request = await requestReadyChange(w.db, item.scope, { request: "Update the heading", operationKey: "recover-change-base" });
+        const proposal = await saveReadyChangeProposal(w.db, item.scope, { changeId: request.change!.id, proposal: { summary: "Update the heading", affected: ["Home"], risks: ["No data change"], checks: ["Heading appears"] } });
+        await decideReadyChange(w.db, item.scope, { changeId: request.change!.id, decision: "approved", requestHash: request.change!.requestHash, proposalHash: proposal.change!.proposalHash! });
+        // An unrelated newer source snapshot must not become the base.
+        await recordCodeVersion(w.db, new LocalCodeStore(w.db), item.scope, { kind: 'feature', title: 'Unrelated later work', files: [{ path: 'src/feed.ts', contentBase64: btoa("export const feed = 'wrong';") }], actorId: item.scope.actorId });
+		stub.seedTaggedFile("tag:feature:1", `${root}/unrelated-base-file.txt`, "must not become app source");
+        expect(stub.loseBuiltImages()).toBeGreaterThan(0);
+        const later = await resolveCoordinatorContext(env(w, stub), item.workflow.conversationId);
+        expect(await later.driver.readFile({ sessionId: later.sessionId, path: `${root}/src/feed.ts` })).toBe("export const feed = 'saved';");
+		await expect(later.driver.readFile({ sessionId: later.sessionId, path: `${root}/unrelated-base-file.txt` })).rejects.toMatchObject({ code: 'FILE_NOT_FOUND' });
+        const override = w.sqlite.prepare("select reason from build_sandbox_sessions where projectId=?").get(item.project.id) as { reason: string };
+        expect(override.reason).toContain(version.commitId);
+        expect(override.reason).toContain(request.change!.baseOutputId);
+      } finally { await stub.stop(); w.sqlite.close(); }
+    });
 
     test("a resumed build continues from the newest saved version; with nothing lost the builder never notices", async () => {
       const w = await world();
@@ -2587,11 +3036,28 @@ describe("host-driven feature loop", () => {
       const duplicate = FEATURE_PRD.replace('"view-dashboard"', '"log-feed"');
       await expect(host.writePlanNote({ kind: "prd", body: duplicate, planRevision: "rev-0" })).rejects.toThrow("unique");
       expect(w.count("plan_doc_revisions", "kind = 'prd'")).toBe(0);
-      await host.writePlanNote({ kind: "prd", body: FEATURE_PRD, planRevision: "rev-0" });
+      // Staged builds (owner 2026-10-30): the list is sized by the request,
+      // but the FIRST version holds at most 3 items (the rest carry "later"),
+      // every item has at most 3 checks, and titles are plain words.
+      const featureBlock = (list: { id: string; title: string; doneWhen: string[]; later?: boolean }[]) =>
+        FEATURE_PRD.replace(/```caddie-features[\s\S]*?```/, "```caddie-features\n" + JSON.stringify(list) + "\n```");
+      const four = Array.from({ length: 4 }, (_, i) => ({ id: `feature-${i + 1}`, title: `Feature ${i + 1}`, doneWhen: ["It saves."] }));
+      await expect(host.writePlanNote({ kind: "prd", body: featureBlock(four), planRevision: "rev-0" })).rejects.toThrow("PLAN_TOO_BIG");
+      const heavy = [{ id: "log-feed", title: "Log daily feed", doneWhen: ["a", "b", "c", "d"] }];
+      await expect(host.writePlanNote({ kind: "prd", body: featureBlock(heavy), planRevision: "rev-0" })).rejects.toThrow("at most 3 doneWhen");
+      await expect(host.writePlanNote({ kind: "prd", body: FEATURE_PRD, planRevision: "rev-0" })).rejects.toThrow("PLAN_WORDING");
+      expect(w.count("plan_doc_revisions", "kind = 'prd'")).toBe(0);
+      // The owner reads the whole PRD on the review card, so plumbing vocabulary
+      // anywhere in its prose is refused at save, not only inside the demo
+      // contract (Street Food Share's `tier:"super"` leak, 2026-10-28).
+      const leaked = FEATURE_PRD.replace("## Demo contract", 'The AI call uses tier:"super" for the deep reasoning.\n\n## Demo contract');
+      await expect(host.writePlanNote({ kind: "prd", body: leaked, planRevision: "rev-0" })).rejects.toThrow("PRD_INTERNAL_VOCABULARY");
+      expect(w.count("plan_doc_revisions", "kind = 'prd'")).toBe(0);
+      await host.writePlanNote({ kind: "prd", body: FEATURE_PRD.replace("See the feed dashboard", "See this week's feed"), planRevision: "rev-0" });
       expect((await readWorkflow(w.db, item.scope))?.phase).toBe("review");
       const activity = await buildActivity(w.db, item.scope);
       // In review the plan's features are shown, all pending, without creating rows.
-      expect(activity.features.map((f) => [f.title, f.status])).toEqual([["Log daily feed", "pending"], ["See the feed dashboard", "pending"]]);
+      expect(activity.features.map((f) => [f.title, f.status])).toEqual([["Log daily feed", "pending"], ["See this week's feed", "pending"]]);
       expect(w.count("build_features")).toBe(0);
     } finally { w.sqlite.close(); }
   });
@@ -3171,20 +3637,15 @@ describe("host-driven feature loop", () => {
   });
 });
 
-describe("a paused build tells its owner once per run (plan 5.4)", () => {
+describe("a paused build tells its owner once per attempt (plan 5.4; 2026-10-30)", () => {
   // Live finding (2026-10-20): a build Caddie paused only showed up if the
   // owner happened to open the Brief; nothing was raised where it paused.
-  function withNotifications(w: Awaited<ReturnType<typeof world>>) {
-    const ddl = readFileSync(new URL("../apps/app/migrations/0007_schedules.sql", import.meta.url), "utf8");
-    for (const statement of splitSqlStatements(ddl)) w.sqlite.exec(statement);
-  }
   const notes = (w: Awaited<ReturnType<typeof world>>) =>
     w.sqlite.query('select "userId", "projectId", "kind", "title", "body", "dedupeKey" from "notifications"').all();
 
-  test("Caddie pausing the build notifies its owner once, with the reason, and never again for the same run", async () => {
+  test("Caddie pausing the build notifies its owner once per attempt, with the reason", async () => {
     const w = await world();
     try {
-      withNotifications(w);
       const item = await approved(w);
       const reason = "Caddie could not get the app checks passing after three attempts. Your plan and files are saved. The app is not ready to try yet.";
       await setWorkflowBlocker(w.db, item.scope, reason);
@@ -3196,7 +3657,8 @@ describe("a paused build tells its owner once per run (plan 5.4)", () => {
           kind: "build_paused",
           title: "Caddie paused the build of Todo app",
           body: reason,
-          dedupeKey: `brief:${item.workflow.runId}:blocked`,
+          // Keyed by the attempt (its payer): a later pause after Retry notifies again.
+          dedupeKey: `brief:${item.workflow.runId}:blocked:${(await readWorkflow(w.db, item.scope))?.spendPayerId ?? ""}`,
         },
       ]);
     } finally { w.sqlite.close(); }
@@ -3205,7 +3667,6 @@ describe("a paused build tells its owner once per run (plan 5.4)", () => {
   test("a build that stops making progress notifies its owner too", async () => {
     const w = await world();
     try {
-      withNotifications(w);
       const item = await approved(w);
       const started = Date.parse((await readWorkflow(w.db, item.scope))!.updatedAt);
       expect(await reconcileStalledBuild(w.db, item.project.id, started + BUILD_STALL_MS + 1)).toBe(true);
@@ -3213,14 +3674,13 @@ describe("a paused build tells its owner once per run (plan 5.4)", () => {
       expect(note?.userId).toBe("alice");
       expect(note?.title).toBe("Caddie paused the build of Todo app");
       expect(note?.body).toContain("stopped making progress on the build");
-      expect(note?.dedupeKey).toBe(`brief:${item.workflow.runId}:blocked`);
+      expect(note?.dedupeKey).toBe(`brief:${item.workflow.runId}:blocked:${(await readWorkflow(w.db, item.scope))?.spendPayerId ?? ""}`);
     } finally { w.sqlite.close(); }
   });
 
   test("the person's own Stop never notifies", async () => {
     const w = await world();
     try {
-      withNotifications(w);
       const item = await approved(w);
       await stopWorkflow(w.db, item.scope);
       expect((await readWorkflow(w.db, item.scope))?.phase).toBe("blocked");
@@ -3484,5 +3944,583 @@ describe("B02 §D — late effects cannot advance a stopped build (inv.4 lock)",
     } finally {
       w.sqlite.close();
     }
+  });
+});
+
+// --- Post-ready change lifecycle (2026-10-27 plan P0-2) --------------------------
+// A finished app takes a plain-language change request; the owner approves or
+// cancels it; only then does a bounded new build start. The last working
+// preview stays live through review, failure and stop. The Farmhand regression
+// this repairs: a change request typed on a ready app hit the closed build
+// gate, and report_blocker overwrote ready with blocked.
+test("project creation is graceful when the quality migration is missing (no gate to admit into)", async () => {
+  // Owner 2026-10-27: the gate is default-on and never env-gated; a database
+  // predating migration 0050 simply has no gate, and creation must not half-
+  // fail on the missing admission target. The env argument is ignored now.
+  const w = await world();
+  try {
+    const started = await startProjectFromChat(w.db, w.homeScope, w.intake, { CADDIE_QUALITY_POLICY: "quality-v1" });
+    expect(started.project.id).toBeDefined();
+    expect(started.workflow.phase).toBe("planning");
+    // The gate table itself is absent in this fixture — that is the premise.
+    expect(
+      w.sqlite.query("select count(*) n from sqlite_master where type='table' and name='quality_projects'").get(),
+    ).toEqual({ n: 0 });
+  } finally { w.sqlite.close(); }
+});
+
+test("quality policy is stamped for new projects and does not rewrite a legacy project on replay", async () => {
+  // Needs the gate installed: the stamp only happens when quality_projects
+  // exists, which the default no-gate world has removed.
+  const w = await world({ qualityGate: true });
+  try {
+    const legacy = await w.start({ ...w.intake, operationKey: "legacy-quality" });
+    // The gate is folded into 0004_quality and default-on, so a pre-gate
+    // project is modelled by dropping its admission: the row and intake exist,
+    // the policy stamp does not.
+    w.sqlite.prepare("delete from quality_projects where projectId=?").run(legacy.project.id);
+    const enabled = { CADDIE_QUALITY_POLICY: "quality-v1" };
+    const fresh = await startProjectFromChat(w.db, w.homeScope, { ...w.intake, operationKey: "new-quality" }, enabled);
+    const row = w.sqlite.prepare("select policyVersion,authorRouteId from quality_projects where projectId=?").get(fresh.project.id) as { policyVersion: string; authorRouteId: string };
+    expect(row).toEqual({ policyVersion: "quality-v1", authorRouteId: "deepseek-v4.1-flash-1017" });
+    await startProjectFromChat(w.db, w.homeScope, { ...w.intake, operationKey: "legacy-quality" }, enabled);
+    expect(w.sqlite.prepare("select count(*) n from quality_projects where projectId=?").get(legacy.project.id)).toEqual({ n: 0 });
+  } finally { w.sqlite.close(); }
+});
+
+describe("post-ready change lifecycle", () => {
+  async function readyWithPreview(w: Awaited<ReturnType<typeof world>>) {
+    const item = await approved(w);
+    const html = "<!doctype html><html><body><h1>Farmhand home</h1></body></html>";
+    const output = await storeBuildOutput(w.db, item.scope, {
+      html,
+      image: "sha256:actual-sandbox-image",
+      planId: item.plan.id,
+      runId: item.workflow.runId,
+    });
+    // Production acknowledges the design-decision dispatch when the
+    // coordinator consumes it; the fixture does the same so the dispatch slot
+    // is free for the change lifecycle, as it is on a real ready app.
+    const pending = (await readWorkflow(w.db, item.scope))?.pendingKey;
+    if (pending) await acknowledgeDispatch(w.db, item.scope, pending);
+    return { ...item, output, html };
+  }
+  async function proposalFor(w: Awaited<ReturnType<typeof world>>, scope: Scope, changeId: string) {
+    const saved = await saveReadyChangeProposal(w.db, scope, { changeId, proposal: { summary: "Change the heading", affected: ["Home"], risks: ["No data changes"], checks: ["Heading visible"] } });
+    return saved.change!.proposalHash!;
+  }
+
+  test("approval requires the exact saved proposal against the original preview", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const requested = await requestReadyChange(w.db, item.scope, { request: "Change the heading", operationKey: "proposal-test" });
+      const id = requested.change!.id;
+      await rejectsCode(decideReadyChange(w.db, item.scope, { changeId: id, decision: "approved", requestHash: requested.change!.requestHash }), "CHANGE_PROPOSAL_PENDING");
+      const proposal = { summary: "Change the home heading", affected: ["Home screen"], risks: ["No data changes"], checks: ["Heading appears after reload"] };
+      const saved = await saveReadyChangeProposal(w.db, item.scope, { changeId: id, proposal });
+      expect(saved.change?.proposal).toEqual(proposal);
+      await rejectsCode(decideReadyChange(w.db, item.scope, { changeId: id, decision: "approved", requestHash: requested.change!.requestHash, proposalHash: "stale" }), "STALE_CHANGE");
+      const approved = await decideReadyChange(w.db, item.scope, { changeId: id, decision: "approved", requestHash: requested.change!.requestHash, proposalHash: saved.change!.proposalHash! });
+      expect(approved.workflow?.phase).toBe("building");
+      expect(approved.workflow?.pendingBody).toContain("Heading appears after reload");
+      expect(approved.workflow?.previewId).toBe(item.output.outputId);
+      const session = w.sqlite.prepare("select sessionKey,image,reason from build_sandbox_sessions where projectId=?").get(item.project.id) as { sessionKey: string; image: string; reason: string };
+      expect(session.image).toBe("sha256:actual-sandbox-image");
+      expect(session.sessionKey).toBe(`change:${id}`);
+      expect(session.reason).toBe(`change:${item.output.outputId}`);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("coordinator saves a scoped proposal; changes and cancellations fence stale approvals", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const requested = await requestReadyChange(w.db, item.scope, { request: "Change the heading", operationKey: "host-proposal" });
+      const id = requested.change!.id;
+      const host = await resolveCoordinatorContext({ DB: w.db }, item.workflow.conversationId);
+      const proposal = { summary: "Update the home heading", affected: ["Home"], risks: ["Existing data stays unchanged"], checks: ["Home shows the new heading"] };
+      await host.writePlanNote({ kind: "change-proposal", body: JSON.stringify(proposal), planRevision: id });
+      const first = await workflowSnapshot(w.db, item.scope);
+      expect(first.change?.proposal).toEqual(proposal);
+      await rejectsCode(saveReadyChangeProposal(w.db, { ...item.scope, actorId: "bob" }, { changeId: id, proposal }), "not_a_member");
+      await rejectsCode(saveReadyChangeProposal(w.db, item.scope, { changeId: id, proposal: { ...proposal, checks: [] } }), "INVALID_CHANGE_PROPOSAL");
+      await rejectsCode(saveReadyChangeProposal(w.db, item.scope, { changeId: id, proposal: { ...proposal, hidden: "change unrelated data" } as typeof proposal }), "INVALID_CHANGE_PROPOSAL");
+      await saveReadyChangeProposal(w.db, item.scope, { changeId: id, proposal: { ...proposal, summary: "Update both headings" } });
+      await rejectsCode(decideReadyChange(w.db, item.scope, { changeId: id, decision: "approved", requestHash: first.change!.requestHash, proposalHash: first.change!.proposalHash! }), "STALE_CHANGE");
+      await decideReadyChange(w.db, item.scope, { changeId: id, decision: "rejected" });
+      await rejectsCode(saveReadyChangeProposal(w.db, item.scope, { changeId: id, proposal }), "STALE_CHANGE");
+    } finally { w.sqlite.close(); }
+  });
+
+  test("a refused judge build leaves the change reviewable and the prior preview available", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      w.sqlite.prepare("insert into judge_accounts (judgeName,userId,state,createdAt) values (?,?,?,?)")
+        .run("alice-judge", "alice", "active", "2026-10-11T00:00:00.000Z");
+      const requested = await requestReadyChange(w.db, item.scope, { request: "Change the heading", operationKey: "refusal-test" });
+      const proposalHash = await proposalFor(w, item.scope, requested.change!.id);
+      const previousPayer = requested.workflow?.spendPayerId;
+      await rejectsCode(decideReadyChange(w.db, item.scope, { changeId: requested.change!.id, decision: "approved", requestHash: requested.change!.requestHash, proposalHash }, { JUDGE_MAX_BUILDS_PER_DAY: 0 }), "JUDGE_LIMIT_BUILDS");
+      const after = await workflowSnapshot(w.db, item.scope);
+      expect(after.change?.status).toBe("proposed");
+      expect(after.workflow?.phase).toBe("ready");
+      expect(after.workflow?.previewId).toBe(item.output.outputId);
+      expect(after.workflow?.spendPayerId).toBe(previousPayer);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("a missing checked change workspace never falls back to unrelated latest files", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const requested = await requestReadyChange(w.db, item.scope, { request: "Change the heading", operationKey: "missing-base" });
+      const proposalHash = await proposalFor(w, item.scope, requested.change!.id);
+      await decideReadyChange(w.db, item.scope, { changeId: requested.change!.id, decision: "approved", requestHash: requested.change!.requestHash, proposalHash });
+      let created = false;
+      const driver = {
+        workingCopyAvailable: async () => false,
+        hasSession: async () => false,
+        ensureSession: async () => { created = true; return { sessionId: 'wrong' }; },
+        uploadFiles: async () => {}, execute: async () => ({ exitCode: 0 }),
+      };
+      await expect(openWorkingCopy({ db: w.db, store: new LocalCodeStore(w.db), driver: driver as never, scope: item.scope, runId: item.workflow.runId, sessionKey: 'original', baseImage: 'unrelated', root: '/app', env: {} }))
+        .rejects.toMatchObject({ code: 'CHANGE_BASE_UNAVAILABLE' });
+      expect(created).toBe(false);
+      expect((await workflowSnapshot(w.db, item.scope)).workflow?.previewId).toBe(item.output.outputId);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("a change cannot start from a preview checked against a different plan", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const request = await requestReadyChange(w.db, item.scope, { request: "Change the heading", operationKey: "wrong-plan-base" });
+      const proposalHash = await proposalFor(w, item.scope, request.change!.id);
+      w.sqlite.prepare("update workflow_outputs set planId=? where id=?").run('different-plan', item.output.outputId);
+      await rejectsCode(decideReadyChange(w.db, item.scope, { changeId: request.change!.id, decision: "approved", requestHash: request.change!.requestHash, proposalHash }), "CHANGE_BASE_UNAVAILABLE");
+      expect((await readWorkflow(w.db, item.scope))?.phase).toBe('ready');
+    } finally { w.sqlite.close(); }
+  });
+
+  test("the failure that was: building is refused on a ready app, and a refused attempt never demotes ready to blocked", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      await rejectsCode(requireBuildApproval(w.db, item.scope), "BUILD_NOT_APPROVED");
+      // The coordinator's report_blocker on that refusal used to overwrite
+      // ready with blocked (Farmhand, 2026-10-27). It must not.
+      await setWorkflowBlocker(w.db, item.scope, "Show the plan and wait for the review controls before building.");
+      const after = await readWorkflow(w.db, item.scope);
+      expect(after?.phase).toBe("ready");
+      expect(after?.previewId).toBe(item.output.outputId);
+      expect(after?.detail).toContain("Show the plan");
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a ready app records a change request for review without leaving ready or touching the preview", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const snapshot = await requestReadyChange(w.db, item.scope, {
+        request: "Change the home heading",
+        operationKey: "op-1",
+      });
+      expect(snapshot.workflow?.phase).toBe("ready");
+      expect(snapshot.workflow?.previewId).toBe(item.output.outputId);
+      expect(snapshot.change?.status).toBe("proposed");
+      expect(snapshot.change?.baseOutputId).toBe(item.output.outputId);
+      expect(snapshot.change?.request).toBe("Change the home heading");
+      expect(snapshot.workflow?.pendingKey).toBe(`change:${snapshot.change!.id}`);
+      // The same request replayed is idempotent: one row, same change.
+      const replay = await requestReadyChange(w.db, item.scope, {
+        request: "Change the home heading",
+        operationKey: "op-2",
+      });
+      expect(replay.change?.id).toBe(snapshot.change!.id);
+      expect(w.count("ready_changes")).toBe(1);
+      // A different request while one is open is refused.
+      await rejectsCode(
+        requestReadyChange(w.db, item.scope, { request: "A different change", operationKey: "op-3" }),
+        "CHANGE_IN_REVIEW",
+      );
+      // A non-member cannot request a change on someone else's app.
+      const other = { ...item.scope, actorId: "bob" };
+      await rejectsCode(
+        requestReadyChange(w.db, other, { request: "Bob change", operationKey: "op-4" }),
+        "not_a_member",
+      );
+      // A non-ready workflow cannot.
+      await rejectsCode(
+        requestReadyChange(w.db, { ...item.scope, projectId: (await w.start({ ...w.intake, operationKey: "other-2" })).project.id }, { request: "x", operationKey: "op-5" }),
+        "NOT_READY",
+      );
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("decision fencing: stale review hash, non-member, and a decided change are refused; approval starts a bounded new build", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const snapshot = await requestReadyChange(w.db, item.scope, {
+        request: "Change the home heading",
+        operationKey: "op-1",
+      });
+      const changeId = snapshot.change!.id;
+      await rejectsCode(
+        decideReadyChange(w.db, item.scope, { changeId, decision: "approved" }),
+        "STALE_CHANGE",
+      );
+      await rejectsCode(
+        decideReadyChange(w.db, item.scope, { changeId, decision: "approved", requestHash: "stale" }),
+        "STALE_CHANGE",
+      );
+      await rejectsCode(
+        decideReadyChange(w.db, { ...item.scope, actorId: "bob" }, { changeId, decision: "rejected" }),
+        "not_a_member",
+      );
+      const proposalHash = await proposalFor(w, item.scope, changeId);
+      const approvedSnapshot = await decideReadyChange(w.db, item.scope, { changeId, decision: "approved", requestHash: snapshot.change!.requestHash, proposalHash });
+      expect(approvedSnapshot.change?.status).toBe("approved");
+      expect(approvedSnapshot.workflow?.phase).toBe("building");
+      expect(approvedSnapshot.workflow?.pendingKey).toBe(`change-build:${changeId}`);
+      expect(approvedSnapshot.workflow?.pendingBody).toContain("Change the home heading");
+      expect(approvedSnapshot.workflow?.pendingBody).toContain("verify_build");
+      // A bounded new build: a fresh payer and limit, not the finished build's.
+      expect(w.count("build_spend_limits")).toBe(2);
+      await rejectsCode(
+        decideReadyChange(w.db, item.scope, { changeId, decision: "approved" }),
+        "change_already_decided",
+      );
+      await rejectsCode(
+        decideReadyChange(w.db, item.scope, { changeId, decision: "rejected" }),
+        "change_already_decided",
+      );
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("an approved change builds to a NEW preview; the old output stays readable; the change completes", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const snapshot = await requestReadyChange(w.db, item.scope, {
+        request: "Change the home heading",
+        operationKey: "op-1",
+      });
+      const proposalHash = await proposalFor(w, item.scope, snapshot.change!.id);
+      await decideReadyChange(w.db, item.scope, { changeId: snapshot.change!.id, decision: "approved", requestHash: snapshot.change!.requestHash, proposalHash });
+      const html2 = "<!doctype html><html><body><h1>Your farm starts here</h1></body></html>";
+      const output2 = await storeBuildOutput(w.db, item.scope, {
+        html: html2,
+        image: "sha256:actual-sandbox-image",
+        planId: item.plan.id,
+        runId: item.workflow.runId,
+      });
+      const after = await workflowSnapshot(w.db, item.scope);
+      expect(after.workflow?.phase).toBe("ready");
+      expect(after.workflow?.previewId).toBe(output2.outputId);
+      expect(after.change?.status).toBe("completed");
+      expect(after.change?.outputId).toBe(output2.outputId);
+      // The immutable base is still readable and byte-identical.
+      expect(new TextDecoder().decode(await readBuildOutput(w.db, item.scope, item.output.outputId))).toBe(item.html);
+      expect(new TextDecoder().decode(await readBuildOutput(w.db, item.scope, output2.outputId))).toBe(html2);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a failed change build returns to ready with the previous preview untouched — never blocked", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const snapshot = await requestReadyChange(w.db, item.scope, {
+        request: "Change the home heading",
+        operationKey: "op-1",
+      });
+      const proposalHash = await proposalFor(w, item.scope, snapshot.change!.id);
+      await decideReadyChange(w.db, item.scope, { changeId: snapshot.change!.id, decision: "approved", requestHash: snapshot.change!.requestHash, proposalHash });
+      await setWorkflowBlocker(w.db, item.scope, "Caddie could not get the app checks passing within this build's repair allowance.");
+      const after = await workflowSnapshot(w.db, item.scope);
+      expect(after.workflow?.phase).toBe("ready");
+      expect(after.workflow?.previewId).toBe(item.output.outputId);
+      expect(after.change?.status).toBe("failed");
+      expect(after.change?.failure).toContain("checks passing");
+      // The previous app is still openable, byte-identical.
+      expect(new TextDecoder().decode(await readBuildOutput(w.db, item.scope, item.output.outputId))).toBe(item.html);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("the stall watchdog preserves the prior preview when a change build stops", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const request = await requestReadyChange(w.db, item.scope, { request: "Update the heading", operationKey: "stalled-change" });
+      const proposalHash = await proposalFor(w, item.scope, request.change!.id);
+      await decideReadyChange(w.db, item.scope, { changeId: request.change!.id, decision: "approved", requestHash: request.change!.requestHash, proposalHash });
+      const stopped = await reconcileStalledBuild(w.db, item.project.id, Date.now() + BUILD_STALL_MS + 5000);
+      expect(stopped).toBe(true);
+      const after = await workflowSnapshot(w.db, item.scope);
+      expect(after.workflow?.phase).toBe('ready');
+      expect(after.workflow?.previewId).toBe(item.output.outputId);
+      expect(after.change?.status).toBe('failed');
+      // One "your app is ready" from the first build, one for the stopped change.
+      expect(w.count('notifications', "kind='build_paused'")).toBe(1);
+      expect(w.count('notifications', "kind='build_ready'")).toBe(1);
+      expect(new TextDecoder().decode(await readBuildOutput(w.db, item.scope, item.output.outputId))).toBe(item.html);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("an interrupted change admission becomes reviewable again without touching the ready preview", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const request = await requestReadyChange(w.db, item.scope, { request: "Update the heading", operationKey: "crashed-admission" });
+      await proposalFor(w, item.scope, request.change!.id);
+      const old = new Date(Date.now() - 5 * 60_000).toISOString();
+      w.sqlite.prepare("update ready_changes set status='approved',decidedBy=?,decidedAt=?,admissionToken=?,updatedAt=? where id=?")
+        .run('alice', old, 'old-token', old, request.change!.id);
+      expect(await reconcileStalledChangeAdmission(w.db, item.project.id)).toBe(true);
+      const after = await workflowSnapshot(w.db, item.scope);
+      expect(after.change?.status).toBe('proposed');
+      expect(after.change?.proposalHash).toBeTruthy();
+      expect(after.workflow?.phase).toBe('ready');
+      expect(after.workflow?.previewId).toBe(item.output.outputId);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("the sweep keeps a fresh change admission and recovers it only after the timeout", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const request = await requestReadyChange(w.db, item.scope, { request: "Update the heading", operationKey: "admission-sweep" });
+      await proposalFor(w, item.scope, request.change!.id);
+      const started = Date.now();
+      const stamp = new Date(started).toISOString();
+      w.sqlite.prepare("update ready_changes set status='approved',decidedBy=?,decidedAt=?,admissionToken=?,updatedAt=? where id=?")
+        .run('alice', stamp, 'fresh-token', stamp, request.change!.id);
+      expect(await sweepStalledBuilds(w.db, started + 119_000)).toBe(0);
+      expect((await workflowSnapshot(w.db, item.scope)).change?.status).toBe('approved');
+      expect(await sweepStalledBuilds(w.db, started + 121_000)).toBe(1);
+      expect((await workflowSnapshot(w.db, item.scope)).change?.status).toBe('proposed');
+    } finally { w.sqlite.close(); }
+  });
+
+  test("a superseded admission cannot launch or fail a newer decision", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const request = await requestReadyChange(w.db, item.scope, { request: "Update the heading", operationKey: "superseded-admission" });
+      const proposalHash = await proposalFor(w, item.scope, request.change!.id);
+      w.hooks.beforeBatch = () => {
+        w.hooks.beforeBatch = null;
+        w.sqlite.prepare("update ready_changes set status='proposed',admissionToken=null where id=?").run(request.change!.id);
+      };
+      await rejectsCode(decideReadyChange(w.db, item.scope, { changeId: request.change!.id, decision: "approved", requestHash: request.change!.requestHash, proposalHash }), "STALE_CHANGE");
+      const after = await workflowSnapshot(w.db, item.scope);
+      expect(after.change?.status).toBe('proposed');
+      expect(after.workflow?.phase).toBe('ready');
+      expect(after.workflow?.previewId).toBe(item.output.outputId);
+    } finally { w.sqlite.close(); }
+  });
+
+  test("stopping a change build returns to ready and cancels the change", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const snapshot = await requestReadyChange(w.db, item.scope, {
+        request: "Change the home heading",
+        operationKey: "op-1",
+      });
+      const proposalHash = await proposalFor(w, item.scope, snapshot.change!.id);
+      await decideReadyChange(w.db, item.scope, { changeId: snapshot.change!.id, decision: "approved", requestHash: snapshot.change!.requestHash, proposalHash });
+      const stopped = await stopWorkflow(w.db, item.scope);
+      expect(stopped.workflow?.phase).toBe("ready");
+      expect(stopped.workflow?.previewId).toBe(item.output.outputId);
+      expect(stopped.change?.status).toBe("cancelled");
+      expect(new TextDecoder().decode(await readBuildOutput(w.db, item.scope, item.output.outputId))).toBe(item.html);
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a rejected change clears the review and the app stays ready", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      const snapshot = await requestReadyChange(w.db, item.scope, {
+        request: "Change the home heading",
+        operationKey: "op-1",
+      });
+      const decided = await decideReadyChange(w.db, item.scope, {
+        changeId: snapshot.change!.id,
+        decision: "rejected",
+      });
+      expect(decided.workflow?.phase).toBe("ready");
+      expect(decided.workflow?.pendingKey ?? "").not.toContain("change:");
+      expect(decided.change?.status).toBe("cancelled");
+      // After cancelling, a new request is accepted again.
+      const next = await requestReadyChange(w.db, item.scope, {
+        request: "A different change",
+        operationKey: "op-9",
+      });
+      expect(next.change?.status).toBe("proposed");
+      expect(next.change?.request).toBe("A different change");
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("retry of a blocked finished app parks a change proposal instead of restarting the feature loop (Farmhand recovery)", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      // Emulate the observed legacy state: blocked after ready, the user's
+      // request parked, preview intact — the exact Farmhand state at freeze.
+      w.sqlite
+        .prepare("update build_workflows set phase='blocked', pendingKey='continue:legacy', pendingBody='change the home heading', detail='gate closed' where projectId=?")
+        .run(item.scope.projectId);
+      const snapshot = await retryWorkflow(w.db, item.scope, "farmhand-recovery-1", "change the home heading");
+      expect(snapshot.workflow?.phase).toBe("ready");
+      expect(snapshot.change?.status).toBe("proposed");
+      expect(snapshot.change?.request).toContain("change the home heading");
+      expect(snapshot.workflow?.previewId).toBe(item.output.outputId);
+      // A replayed recovery with the same key is idempotent.
+      const again = await retryWorkflow(w.db, item.scope, "farmhand-recovery-1");
+      expect(again.change?.id).toBe(snapshot.change!.id);
+      expect(again.workflow?.phase).toBe("ready");
+    } finally {
+      w.sqlite.close();
+    }
+  });
+
+  test("a blocked finished app with unfinished features still resumes the feature loop, not the change path", async () => {
+    const w = await world();
+    try {
+      const item = await readyWithPreview(w);
+      w.sqlite
+        .prepare("insert into build_features (projectId,runId,planId,featureId,position,title,doneWhen,status,attempts,updatedAt) values (?,?,?,?,?,?,?,?,?,?)")
+        .run(item.scope.projectId, item.workflow.runId, item.plan.id, "f1", 1, "Half built feature", '["still there after a reload"]', "building", 0, new Date().toISOString());
+      w.sqlite
+        .prepare("update build_workflows set phase='blocked' where projectId=?")
+        .run(item.scope.projectId);
+      const snapshot = await retryWorkflow(w.db, item.scope, "mid-build-retry-1");
+      expect(snapshot.workflow?.phase).toBe("building");
+      expect(snapshot.change).toBeNull();
+    } finally {
+      w.sqlite.close();
+    }
+  });
+});
+
+test('a paused design resumes the chosen look from chat and after an owner stop', async () => {
+ const w = await world();
+ try {
+  const item = await planned(w);
+  await decideWorkflow(w.db, item.scope, {planId:item.plan.id,decision:'approved'});
+  const {looks} = await saveLooks(w.db,item.scope);
+  await decideLooks(w.db,item.scope,{looksId:looks.id,choice:'field'});
+  await setWorkflowBlocker(w.db,item.scope,'The design review could not finish.');
+  const resumed = await continueProjectFromChat(w.db,w.homeScope,{projectId:item.project.id,request:'Please continue',operationKey:'continue-design-in-chat'});
+  expect(resumed.workflow?.phase).toBe('design');
+  expect(resumed.workflow?.pendingBody).toContain('Field-ready');
+  expect(resumed.workflow?.pendingBody).toContain("kind:'design'");
+  const stopped = await stopWorkflow(w.db,item.scope);
+  expect(stopped.workflow?.phase).toBe('blocked');
+  expect(stopped.workflow?.pendingKey).toBeNull();
+  expect(stopped.workflow?.detail).toContain('Preparation stopped');
+  const again = await retryWorkflow(w.db,item.scope,'resume-design-after-stop');
+  expect(again.workflow?.phase).toBe('design');
+  expect(again.workflow?.pendingBody).toContain('Field-ready');
+ } finally {w.sqlite.close();}
+});
+
+test('a preparation spending refusal is visible only on its unchanged owning workflow', async () => {
+ const w = await world({qualityGate:true});
+ try {
+  const item = await w.start();
+  const workflow = (await readWorkflow(w.db,item.scope))!;
+  const {createBuildPayer,blockBuildByPayer} = await import('../apps/app/src/server/build-spend.ts');
+  const payer='preparation:unit-visible-refusal';
+  await createBuildPayer(w.db,payer,1_000_000);
+  await w.db.prepare('insert into quality_admissions(id,projectId,stage,dependencyHash,payerId,expiresAt,createdAt,phase,planId,brief,decisionId) values(?,?,?,?,?,?,?,?,?,?,?)')
+   .bind('unit-visible-refusal',item.project.id,'prd','test-refusal',payer,new Date(Date.now()+60000).toISOString(),new Date().toISOString(),workflow.phase,workflow.planId,workflow.brief,null).run();
+  await blockBuildByPayer(w.db,payer,'Preparation reached its spending limit. Your work is saved.');
+  const stopped=(await readWorkflow(w.db,item.scope))!;
+  expect(stopped.phase).toBe('blocked');
+  expect(stopped.detail).toContain('spending limit');
+  await w.db.prepare("update build_workflows set phase='planning',brief='New owner scope',detail=null where projectId=?").bind(item.project.id).run();
+  await blockBuildByPayer(w.db,payer,'Old refusal');
+  expect((await readWorkflow(w.db,item.scope))?.phase).toBe('planning');
+ } finally {w.sqlite.close();}
+});
+
+// Poultry Farm Monitor, 2026-10-29: the looks turn died (Flue settled it after
+// three restarts) and the project sat in 'looks' with nothing running.
+describe("preparation stall watchdog", () => {
+  test("a silent looks step becomes the plain Try again state; a fresh one is left alone", async () => {
+    // With no model call at all, the quiet limit is what applies.
+    const { reconcileStalledBuild, PREPARATION_QUIET_MS: PREPARATION_STALL_MS } = await import("../apps/app/src/server/build-workflow.ts");
+    const { migratedDatabase } = await import("./fixtures/sqlite-d1.ts");
+    const { db, sqlite } = await migratedDatabase();
+    try {
+      const stamp = "2026-10-29T10:00:00.000Z";
+      sqlite.exec("pragma foreign_keys = off");
+      sqlite.exec(`insert into build_workflows (projectId,runId,conversationId,intakeKey,brief,phase,updatedAt) values ('p1','r1','c1','intake:x','brief','looks','${stamp}')`);
+      const start = Date.parse(stamp);
+      expect(await reconcileStalledBuild(db, "p1", start + PREPARATION_STALL_MS - 1000)).toBe(false);
+      expect(await reconcileStalledBuild(db, "p1", start + PREPARATION_STALL_MS + 1000)).toBe(true);
+      const row = sqlite.query("select phase, detail from build_workflows where projectId='p1'").get() as { phase: string; detail: string };
+      expect(row.phase).toBe("blocked");
+      expect(row.detail).toContain("tap Try again");
+      expect(row.detail).not.toMatch(/PRD|brief|specialist/);
+    } finally { sqlite.close(); }
+  });
+});
+
+describe("preparation turn that died early", () => {
+  test("ten quiet minutes with no model call becomes Try again; a recent model call keeps it running", async () => {
+    const { reconcileStalledBuild, PREPARATION_QUIET_MS } = await import("../apps/app/src/server/build-workflow.ts");
+    const { migratedDatabase } = await import("./fixtures/sqlite-d1.ts");
+    const { db, sqlite } = await migratedDatabase();
+    try {
+      const stamp = "2026-10-29T10:00:00.000Z";
+      sqlite.exec("pragma foreign_keys = off");
+      sqlite.exec(`insert into build_workflows (projectId,runId,conversationId,intakeKey,brief,phase,updatedAt) values ('p1','r1','c1','intake:x','brief','design','${stamp}')`);
+      const start = Date.parse(stamp);
+      sqlite.exec(`insert into model_call_usage (turnId,instanceId,purpose,providerId,requestedModel,selectionReason,isError,createdAt) values ('t1','c1','agent','nebius','m','x',0,'${new Date(start + 8 * 60_000).toISOString()}')`);
+      expect(await reconcileStalledBuild(db, "p1", start + PREPARATION_QUIET_MS + 60_000)).toBe(false);
+      expect(await reconcileStalledBuild(db, "p1", start + 8 * 60_000 + PREPARATION_QUIET_MS + 1000)).toBe(true);
+      const row = sqlite.query("select phase, detail from build_workflows where projectId='p1'").get() as { phase: string; detail: string };
+      expect(row.phase).toBe("blocked");
+      expect(row.detail).toContain("screen designs");
+    } finally { sqlite.close(); }
+  });
+
+  test("a looks turn whose first call failed is paused in minutes, not ten (Poultry Daily Log, 2026-10-29)", async () => {
+    const { reconcileStalledBuild, BUILD_DEAD_TURN_MS } = await import("../apps/app/src/server/build-workflow.ts");
+    const { migratedDatabase } = await import("./fixtures/sqlite-d1.ts");
+    const { db, sqlite } = await migratedDatabase();
+    try {
+      const stamp = "2026-10-29T21:43:06.000Z";
+      sqlite.exec("pragma foreign_keys = off");
+      sqlite.exec(`insert into build_workflows (projectId,runId,conversationId,intakeKey,brief,phase,updatedAt) values ('p1','r1','c1','intake:x','brief','looks','${stamp}')`);
+      const start = Date.parse(stamp);
+      const failed = start + 6_000;
+      sqlite.exec(`insert into model_call_usage (turnId,instanceId,purpose,providerId,requestedModel,selectionReason,isError,createdAt) values ('t1','c1','agent','nebius','m','x',1,'${new Date(failed).toISOString()}')`);
+      expect(await reconcileStalledBuild(db, "p1", failed + BUILD_DEAD_TURN_MS - 1000)).toBe(false);
+      expect(await reconcileStalledBuild(db, "p1", failed + BUILD_DEAD_TURN_MS + 1000)).toBe(true);
+      const row = sqlite.query("select phase, detail from build_workflows where projectId='p1'").get() as { phase: string; detail: string };
+      expect(row.phase).toBe("blocked");
+      expect(row.detail).toContain("look options");
+    } finally { sqlite.close(); }
   });
 });

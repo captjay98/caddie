@@ -28,9 +28,18 @@ export function paidDiscoveryTools(
 ): Pick<CoordinatorHostContext, 'discover' | 'research' | 'hackathonDetails'> {
 	const admit = () => admitJudgeDiscovery(env.DB, scope.actorId, env);
 	return {
-		discover: async (input) => {
+		discover: async (input, hooks) => {
 			await admit();
-			return discoverForActor(env.DB, scope, input, { tavilyApiKey: env.TAVILY_API_KEY, nebiusApiKey: env.NEBIUS_API_KEY });
+			// No digest pre-warm from chat: a chat turn has no waitUntil, so those
+			// five model calls ran unawaited and uncounted (review 2026-10-28). The
+			// detail pane fetches a digest on open, which IS counted for judges.
+			return discoverForActor(env.DB, scope, input, {
+				tavilyApiKey: env.TAVILY_API_KEY,
+				nebiusApiKey: env.NEBIUS_API_KEY,
+				prewarm: false,
+				...(hooks?.firstTimer ? { firstTimer: true } : {}),
+				...(hooks?.onProgress ? { onProgress: hooks.onProgress } : {}),
+			});
 		},
 		research: async (input) => {
 			await admit();

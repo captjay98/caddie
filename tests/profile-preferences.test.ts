@@ -2,6 +2,7 @@ import { test, expect } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
+import { applyFinalSchema } from './fixtures/migrations.ts';
 import { getProfile, upsertProfile } from '../apps/app/src/server/profiles.ts';
 
 /**
@@ -13,8 +14,7 @@ import { getProfile, upsertProfile } from '../apps/app/src/server/profiles.ts';
 function makeDb(): { db: D1Database; sqlite: Database } {
  const sqlite = new Database(':memory:');
  sqlite.exec('PRAGMA foreign_keys=ON; CREATE TABLE user (id TEXT PRIMARY KEY); INSERT INTO user VALUES (\'alice\');');
- sqlite.exec(readFileSync(new URL('../apps/app/migrations/0008_profile.sql', import.meta.url), 'utf8'));
- sqlite.exec(readFileSync(new URL('../apps/app/migrations/0017_profile_preferences.sql', import.meta.url), 'utf8'));
+ applyFinalSchema(sqlite);
  const db = { prepare(sql: string) { return { bind(...args: any[]) { return {
   async all() { return { results: sqlite.prepare(sql).all(...args) }; },
   async run() { return sqlite.prepare(sql).run(...args); },

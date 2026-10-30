@@ -488,7 +488,7 @@ test('the plan review lists what will be built as a checklist, never as raw JSON
 	await page.goto(`${BASE}/app/project?project=proj-workflow`);
 	const card = page.getByTestId('focused-project-home').getByTestId('design-review');
 	await expect(card.getByTestId('design-review-decision-bar')).toContainText('Plan version 1');
-	await card.getByRole('button', { name: 'Explore the full plan', exact: true }).click();
+	await card.getByRole('button', { name: 'Read the full plan', exact: true }).click();
 	const list = card.getByTestId('plan-features');
 	await expect(list.getByRole('heading', { name: 'What Caddie will build · 2' })).toBeVisible();
 	await expect(list.locator('.plan-feature-title')).toHaveText(['Log daily feed', 'See the feed dashboard']);
@@ -516,7 +516,7 @@ test('a finished build shows each feature and rolls back to a save point in two 
 	await expect(card).toHaveAttribute('data-phase', 'ready');
 	await card.getByText('What Caddie checked', { exact: true }).click();
 	const features = card.getByTestId('build-features');
-	await expect(features.getByRole('heading')).toContainText('2 of 2 checked');
+	await expect(features.getByRole('heading')).toContainText('2 of 2 parts built and checked');
 	await expect(card.getByTestId('build-feature-log-feed')).toContainText('Built and checked');
 	await expect(card.getByTestId('rollback-view-dashboard')).toHaveCount(0);
 	await card.getByTestId('rollback-log-feed').click();
@@ -543,10 +543,10 @@ test('The project workspace shows a readable plan; approval admits the correct b
 	const card = page.getByTestId('focused-project-home').getByTestId('design-review');
 	await expect(card).toHaveCount(1);
 	await expect(card.getByTestId('design-review-decision-bar')).toContainText('Plan version 1');
-	await expect(card.getByRole('heading', { name: 'What your app will do' })).toBeVisible();
-	await card.getByRole('button', { name: 'Explore the full plan', exact: true }).click();
+	await expect(card.getByTestId('plan-first-version')).toBeVisible();
+	await card.getByRole('button', { name: 'Read the full plan', exact: true }).click();
 	await expect(card.getByRole('tabpanel').locator('li')).toHaveText(['Add tasks', 'Complete and delete tasks', 'Save tasks in your browser']);
-	await card.getByRole('button', { name: 'Close explore the full plan' }).click();
+	await card.getByRole('button', { name: 'Close the full plan' }).click();
 	await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'project');
     expect(state.admissions).toHaveLength(0);
 	await card.getByTestId('plan-approve-open').click();
@@ -580,9 +580,9 @@ test('feedback requires text, continues planning in the target conversation and 
 	state.revise();
 	await page.reload();
 	await expect(card.getByTestId('design-review-decision-bar')).toContainText('Plan version 2');
-	await card.getByRole('button', { name: 'Explore the full plan', exact: true }).click();
+	await card.getByRole('button', { name: 'Read the full plan', exact: true }).click();
 	await expect(card.getByRole('tabpanel').locator('li')).toContainText(['Filter active and completed tasks']);
-	await card.getByRole('button', { name: 'Close explore the full plan' }).click();
+	await card.getByRole('button', { name: 'Close the full plan' }).click();
 	await card.getByTestId('plan-approve-open').click();
 	await card.getByTestId('design-review-approve').click();
 	await expect(page.getByTestId('focused-project-home').getByTestId('project-workflow')).toHaveAttribute('data-phase', 'design');
@@ -733,10 +733,8 @@ test('an app with a server lists the keys it needs; a key is pasted once and nev
 	const mobile = Boolean(process.env.CADDIE_SHOTS_MOBILE);
 	if (mobile) await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto(`${BASE}/app/project?project=proj-workflow`);
-	await page.getByText('App settings, versions & delivery', { exact: true }).click();
-	const card = page.getByTestId('focused-project-home').getByTestId('project-workflow');
-	await expect(card).toHaveAttribute('data-phase', 'ready');
-	const panel = card.getByTestId('app-keys');
+	await page.getByRole('button', { name: /Connections/ }).click();
+	const panel = page.getByRole('dialog', { name: 'Connections' }).getByTestId('app-keys');
 	const shot = async (name: string) => {
 		const dir = process.env.CADDIE_SHOTS;
 		if (!dir) return;
@@ -760,7 +758,8 @@ test('an app with a server lists the keys it needs; a key is pasted once and nev
 	await shot('2-paste');
 	await weather.getByTestId('app-key-save-WEATHER_API_KEY').click();
 	await expect(weather).toHaveAttribute('data-status', 'set');
-	await expect(weather).toContainText('Saved');
+	await expect(weather).toContainText('Saved · not tested');
+	await expect(weather.locator('.badge')).toHaveAttribute('data-tone', 'neutral');
 	await expect(panel.getByTestId('app-keys-needed')).toHaveCount(0);
 	await expect(page.getByText('ow_live_not_a_real_key')).toHaveCount(0);
 	expect(state.keys.writes).toEqual([{ method: 'PUT', name: 'WEATHER_API_KEY', body: { value: 'ow_live_not_a_real_key' } }]);
@@ -783,6 +782,25 @@ test('an app with a server lists the keys it needs; a key is pasted once and nev
 	await panel.getByTestId('app-key-remove-confirm-MAPS_KEY').click();
 	await expect(panel.getByTestId('app-key-MAPS_KEY')).toHaveCount(0);
 	expect(state.keys.writes.map((w) => `${w.method} ${w.name}`)).toEqual(['PUT WEATHER_API_KEY', 'PUT MAPS_KEY', 'DELETE WEATHER_API_KEY', 'DELETE MAPS_KEY']);
+});
+
+test('Connections does not claim key storage is available while its status is loading', async ({ page, context }) => {
+	await fixture(context, { phase: 'ready', keys: true });
+	let finish!: () => void;
+	const gate = new Promise<void>(resolve => { finish = resolve; });
+	await context.route('**/api/projects/proj-workflow/keys', async route => {
+		await gate;
+		await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ configured: false, keys: [] }) });
+	});
+	await page.goto(`${BASE}/app/project?project=proj-workflow`);
+	await page.getByRole('button', { name: /Connections/ }).click();
+	const panel = page.getByRole('dialog', { name: 'Connections' }).getByTestId('app-keys');
+	await expect(panel.getByRole('status')).toHaveText('Checking connections…');
+	await expect(panel.getByTestId('app-keys-add')).toHaveCount(0);
+	await expect(panel.getByTestId('app-keys-unavailable')).toHaveCount(0);
+	finish();
+	await expect(panel.getByTestId('app-keys-unavailable')).toBeVisible();
+	await expect(panel.getByTestId('app-keys-add')).toHaveCount(0);
 });
 
 test('Publish puts the checked app on the web in one click, then unpublishes it on request', async ({ page, context }) => {
@@ -1048,8 +1066,8 @@ test('project chat summarizes the same plan and opens its full workspace on mobi
 	await expect(summary.getByRole('button', { name: 'Review plan' })).toBeVisible();
 	await expect(summary.locator('iframe')).toHaveCount(0);
 	await summary.getByRole('button', { name: 'Review plan' }).click();
-	await expect(page).toHaveURL(/design-review\?project=proj-workflow/);
-	await expect(page.getByTestId('project-tab-plan')).toHaveAttribute('aria-current', 'page');
+	await expect(page).toHaveURL(/pane=channel/);
+	await expect(page.getByRole('dialog').filter({has:page.getByTestId('project-workflow')})).toBeVisible();
 });
 
 test('repeated project handoffs keep one live card and one preview', async ({ context, page }) => {
@@ -1162,7 +1180,10 @@ test('check history uses readable summaries and keeps raw recorded results behin
   await page.getByRole('button',{name:'Build activity',exact:true}).click();
   await page.getByRole('navigation',{name:'Build activity views'}).getByRole('button',{name:'Attempts',exact:true}).click();
   await expect(history.getByTestId('build-history-item')).toHaveCount(2);
-  await expect(history).toContainText("Tried a fix — The app's own tests: 7 of 9 passed.");
+  // Owner 2026-10-30: grouped by part, in plain words, a clock time per row.
+  await expect(history.getByTestId('attempt-part')).toHaveCount(1);
+  await expect(history).toContainText('Fix handed in: its own tests — 7 of 9 passed');
+  await expect(history).toContainText('Build for the browser — Failed');
   await expect(history.locator('pre')).toBeHidden();
   await history.getByText('Exact recorded result').click();
   await expect(history.locator('pre')).toContainText('exitCode');
@@ -1458,8 +1479,8 @@ ${featureBlock}`;
   await expect(plan.locator('.plan-decision-warnings')).toContainText('Photo analysis is not confirmed');
   await expect(plan.locator('details')).toHaveCount(0);
   await expect(plan.getByTestId('plan-scope')).toHaveCount(0);
-  await plan.getByRole('button', {name:'Explore the full plan',exact:true}).click();
-  const dialog=page.getByRole('dialog',{name:'Explore the full plan',exact:true});
+  await plan.getByRole('button', {name:'Read the full plan',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Read the full plan',exact:true});
   await expect(dialog).toBeVisible();
   await expect(dialog.getByTestId('plan-scope')).toContainText('Left for later: payments');
   await expect(dialog.getByTestId('plan-limitations')).toContainText('supports one farm');
@@ -1478,7 +1499,7 @@ ${featureBlock}`;
   expect(await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
-  await expect(plan.getByRole('button',{name:'Explore the full plan',exact:true})).toBeFocused();
+  await expect(plan.getByRole('button',{name:'Read the full plan',exact:true})).toBeFocused();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.getByTestId('design-review-decision-bar').scrollIntoViewIfNeeded();
   if(process.env.CADDIE_SHOTS) await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-plan-guided-${width}.png`,fullPage:true});
@@ -1557,13 +1578,98 @@ test('An urgent deadline remains visible without opening Project Info',async({co
  await expect(page.getByRole('dialog',{name:'About this project'})).toContainText('exact closing time and time zone have not been confirmed');
 });
 
+test('The header facts load without moving the four steps',async({context,page})=>{
+ await fixture(context,{phase:'ready'});
+ // The event record is the header's one fact that arrives after the page is
+ // already on screen, and it used to push the step rail 26px down half a second
+ // after opening (owner 2026-10-27: "the 4 tabs still move a little" on the
+ // Preview tab). Hold that read, measure the rail, then let it land.
+ let release:(()=>void)=()=>{};
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ await context.route('**/api/projects/proj-workflow/hackathon',async route=>{await gate;return json(route,200,{hackathon:{title:'Closing event',url:'https://example.org/event',track:null,deadline:'2026-10-30',daysLeft:1,ended:false,eligibility:'eligible'}});});
+ await page.addInitScript(() => {
+  (window as any).__shifts = [];
+  new PerformanceObserver((list) => {
+   for (const raw of list.getEntries()) {
+    const entry = raw as any;
+    if (entry.hadRecentInput) continue;
+    (window as any).__shifts.push({ value: entry.value ?? 0, sources: (entry.sources ?? []).map((source: any) => `${source.node.nodeName}.${String(source.node.className).slice(0, 40)}`) });
+   }
+  }).observe({ type: 'layout-shift', buffered: true });
+ });
+ await page.goto(`${BASE}/app/preview?project=proj-workflow`);
+ const rail=page.getByTestId('project-tabs');
+ await expect(rail).toBeVisible({timeout:20_000});
+ await expect(page.locator('.project-head-urgent[data-tone="reserved"]')).toHaveCount(1);
+ await expect(page.getByTestId('project-urgent-deadline')).toHaveCount(0);
+ const before=await rail.boundingBox();
+ release();
+ await expect(page.getByTestId('project-urgent-deadline')).toHaveText('Ends Oct 30 · 1 day left');
+ // The only shift left in this window is the preview area growing when the app
+ // arrives (its own actions row moves with it) — nothing in or above the steps.
+ const headerShifts=await page.evaluate(()=>(window as any).__shifts.filter((shift:{sources:string[]})=>/project-head|project-step|step-|preview-bar/.test(shift.sources.join(' '))) as {value:number;sources:string[]}[]);
+ expect(await rail.boundingBox()).toEqual(before);
+ expect(headerShifts).toEqual([]);
+ // And a project with no event at all keeps the steps at exactly that height:
+ // the row holds its place invisibly instead of taking 26px back out from under
+ // the rail.
+ await context.route('**/api/projects/proj-workflow/hackathon',route=>json(route,200,{hackathon:null}));
+ await page.goto(`${BASE}/app/preview?project=proj-workflow`);
+ await expect(rail).toBeVisible();
+ await expect(page.getByTestId('project-urgent-deadline')).toHaveCount(0);
+ expect(await rail.boundingBox()).toEqual(before);
+});
+
+test('Preview keeps the project header exactly where the other tabs put it',async({context,page})=>{
+ await fixture(context,{phase:'ready',approved:true});
+ // Every project tab paints its title block inside .page-col's 0.6rem top
+ // inset. The Preview page had no inset, so clicking Preview lifted the whole
+ // header 10px and closed the gap over the title (owner 2026-10-27). CLS
+ // cannot see this: the two routes paint the header fresh at different
+ // heights, so nothing has a previous rectangle to move from.
+ await page.goto(`${BASE}/app/runs?project=proj-workflow`);
+ await expect(page.getByTestId('project-tabs')).toBeVisible({timeout:20_000});
+ const onBuild=await page.getByTestId('project-header').boundingBox();
+ expect(onBuild?.height).toBeGreaterThan(100);
+ await page.getByTestId('project-tab-preview').click();
+ await expect(page.getByTestId('preview-page')).toBeVisible({timeout:20_000});
+ const onPreview=await page.getByTestId('project-header').boundingBox();
+ expect(onPreview?.height).toBeGreaterThan(100);
+ expect(onPreview).toEqual(onBuild);
+});
+
+test('The feature row takes its own space, so the card does not grow under the cursor',async({context,page})=>{
+ await fixture(context,{phase:'ready',approved:true,features:[
+  featureView('log-feed','Log daily feed',1),
+  featureView('view-dashboard','See the feed dashboard',2),
+ ]});
+ // The activity read lands after the card is already on screen and used to
+ // push the row below it 44px down under the owner's cursor (owner 2026-10-27
+ // on the Preview tab). The card now holds the row's height from the first
+ // paint and the feature count fills it in place. (That row, "Earlier · Plan
+ // decision", was removed 2026-10-30; the card's own size is the measure.)
+ let release:(()=>void)=()=>{};
+ const gate=new Promise<void>(resolve=>{release=resolve;});
+ await context.route('**/api/projects/proj-workflow/activity',async route=>{await gate;return route.fallback();});
+ await page.goto(`${BASE}/app/preview?project=proj-workflow`);
+ const card=page.getByTestId('workflow-summary');
+ const progress=card.locator('.workflow-summary-progress');
+ await expect(progress).toHaveAttribute('data-reserved','true',{timeout:20_000});
+ await expect(card.locator('.workflow-summary-history')).toHaveCount(0);
+ const before=await progress.boundingBox();
+ release();
+ await expect(progress).toContainText('All parts · 2 of 2 done');
+ await expect(progress).not.toHaveAttribute('data-reserved','true');
+ expect(await progress.boundingBox()).toEqual(before);
+});
+
 test('Earlier plan versions remain inspectable in the technical view without deciding them',async({context,page})=>{
  const fx=await fixture(context,{phase:'review'});
  await context.route('**/api/projects/proj-workflow/plan-docs',route=>json(route,200,{revisions:[plan(2),plan(1)],latest:plan(2)}));
  await page.goto(`${BASE}/app/design-review?project=proj-workflow`);
  await expect(page.getByTestId('design-review-earlier')).toHaveCount(0);
- await page.getByRole('button',{name:'Explore the full plan',exact:true}).click();
- const dialog=page.getByRole('dialog',{name:'Explore the full plan',exact:true});
+ await page.getByRole('button',{name:'Read the full plan',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'Read the full plan',exact:true});
  await dialog.getByRole('tab',{name:'Technical specification',exact:true}).click();
  await expect(dialog.getByTestId('design-review-earlier')).toContainText('Version 1');
  await expect(dialog.getByTestId('copy-revision hash')).toHaveCount(1);
@@ -1571,7 +1677,7 @@ test('Earlier plan versions remain inspectable in the technical view without dec
  await expect(page.getByTestId('plan-viewing')).toContainText('Plan version 1');
  await expect(page.getByTestId('plan-approve-open')).toHaveCount(0);
  await page.getByTestId('plan-viewing-back').click();
- await expect(page.getByTestId('design-review-decision-bar')).toContainText('Plan version 2');
+ await expect(page.getByTestId('design-review-decision-bar')).toContainText('Version 2');
  expect(fx.decisions).toHaveLength(0);
  expect(fx.admissions).toHaveLength(0);
 });
@@ -1588,14 +1694,14 @@ test('Plan review has one enclosing surface and clearly starts design before bui
    expect(await surface.evaluate(el=>getComputedStyle(el).borderTopWidth)).toBe('1px');
    expect(await surface.evaluate(el=>getComputedStyle(el).paddingLeft)).toBe(width===390?'16px':'24px');
    expect(await surface.locator('.plan-review-note').evaluate(el=>getComputedStyle(el).borderTopWidth)).toBe('0px');
-   await expect(surface.getByTestId('approve-meaning')).toContainText('Building starts only after you approve the design');
+   await expect(surface.getByTestId('approve-meaning')).toContainText('Building starts when you pick one');
    await expect(surface.getByTestId('plan-approve-open')).toHaveText('Approve plan');
    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
    if(process.env.CADDIE_SHOTS) await page.screenshot({path:`${process.env.CADDIE_SHOTS}/caddie-plan-surface-${theme}-${width}.png`});
   }
  }
  await page.getByTestId('plan-approve-open').click();
- await expect(page.getByRole('dialog',{name:'Approve plan version 1?'})).toContainText('prepares the screens for you to review');
+ await expect(page.getByRole('dialog',{name:'Approve plan version 1?'})).toContainText('Caddie draws three looks');
  await page.getByTestId('design-review-approve').click();
  expect(fx.decisions).toEqual([{planId:'plan-1',decision:'approved'}]);
  expect(fx.admissions).toHaveLength(0);
@@ -1611,7 +1717,7 @@ test('Opening a project and selecting Plan show the same minimal review and cont
    const review=page.getByTestId('design-review');
    await expect(review).toHaveClass(/plan-review-surface/);
    await expect(review.getByTestId('plan-approve-open')).toHaveText('Approve plan');
-   await expect(review.getByTestId('approve-meaning')).toContainText('approve the design');
+   await expect(review.getByTestId('approve-meaning')).toContainText('pick one');
    await expect(review.locator('.plan-review--minimal details')).toHaveCount(0);
    await expect(page.getByTestId('workflow-assurance')).toHaveCount(0);
    await expect(page.getByTestId('workflow-repo-nudge')).toHaveCount(0);

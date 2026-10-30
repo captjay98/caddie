@@ -1,3 +1,4 @@
+import { allMigrationPaths, fixtureLegacyQualityPolicy } from "./fixtures/migrations.ts";
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
@@ -66,25 +67,8 @@ function d1Adapter(sqlite: Database): D1Database {
 async function world() {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys=ON");
-  for (const migration of [
-    "0001_product.sql",
-    "0002_controls.sql",
-    "0003_artifacts.sql",
-    "0005_runs.sql",
-    "0008_profile.sql",
-    "0017_profile_preferences.sql",
-    "0011_home_project.sql",
-    "0015_plan_decisions.sql",
-    "0018_build_workflow.sql",
-    "0024_design_phase.sql",
-    // A build start opens its spending limit (judge status, team-mode tables).
-    "0033_judge_accounts.sql",
-    "0040_team_mode.sql",
-    // The choose-a-look step's phases.
-    "0044_looks_phase.sql",
-    "0048_repair_escalation.sql",
-  ]) {
-    const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), "utf8");
+  for (const path of allMigrationPaths()) {
+    const ddl = readFileSync(path, "utf8");
     for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);
   }
   sqlite
@@ -114,6 +98,9 @@ async function world() {
 
 async function planned(w: Awaited<ReturnType<typeof world>>) {
   const started = await w.start();
+  // Pre-gate project: this fixture writes plan drafts directly, so its drafts
+  // were never subject to quality-v1's review (see fixtureLegacyQualityPolicy).
+  fixtureLegacyQualityPolicy(w.sqlite, started.scope.projectId);
   const plan = await createPlanDocRevision(w.db, started.scope, {
     kind: "prd",
     body: "# Todo app\n\nAdd, complete, delete, filter and persist tasks.",
@@ -185,7 +172,7 @@ describe("ProjectExperience projection — stage mapping (table-driven)", () => 
     await saveLooks(w.db, item.scope);
     const exp = await projectExperience(w.db, item.scope);
     expect(exp.stage).toBe("looks_review");
-    expect(exp.message).toContain("Choose how your app should look");
+    expect(exp.message).toContain("Pick a look");
     expect(exp.actions.map((a) => a.kind)).toEqual(["choose_look"]);
     expect(exp.actions[0]!.primary).toBe(true);
   });

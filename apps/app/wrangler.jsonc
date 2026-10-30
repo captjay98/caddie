@@ -62,7 +62,13 @@
 		// sign-in cannot work.
 		"workers_dev": false,
 		"preview_urls": false,
-		"routes": [{ "pattern": "caddie.jamalibrahim.dev", "custom_domain": true }],
+		// Isolated app previews (owner 2026-10-30): p-<hash>.preview.jamalibrahim.dev,
+		// served by this Worker. Needs the proxied `*.preview` DNS record and an
+		// Advanced certificate for *.preview.jamalibrahim.dev.
+		"routes": [
+			{ "pattern": "caddie.jamalibrahim.dev", "custom_domain": true },
+			{ "pattern": "*.preview.jamalibrahim.dev/*", "zone_name": "jamalibrahim.dev" }
+		],
 			// Workers Logs on for judging, alongside the traces above.
 			"observability": { "enabled": true, "traces": { "enabled": true } },
 			"worker_loaders": [{ "binding": "LOADER" }],

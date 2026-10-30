@@ -258,7 +258,7 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		// The persistent conversation is present and bound to the account scope.
 		await expect(page.getByTestId('conversation-panel')).toBeVisible();
 		await expect(page.getByTestId('conv-context')).toHaveAttribute('data-scope', 'general');
-		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
+		await expect(page.getByTestId('conv-context-label')).toContainText('General');
 		await context.close();
 	});
 
@@ -501,6 +501,8 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await expect(page.getByTestId('shell')).toBeVisible();
 		const darkBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+		// The theme switch lives in the account menu (review 2026-10-28).
+		await page.getByTestId('nav-capsule').getByTestId('account-menu').click();
 		await page.getByTestId('theme-toggle').click();
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
 		const lightBg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
@@ -522,7 +524,9 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		await page.keyboard.press('Tab');
 		await expect(page.locator('.skip-link')).toBeFocused();
 
-		// Theme toggle works from the keyboard.
+		// Theme toggle works from the keyboard, via the account menu.
+		await page.getByTestId('nav-capsule').getByTestId('account-menu').focus();
+		await page.keyboard.press('Enter');
 		await page.getByTestId('theme-toggle').focus();
 		await page.keyboard.press('Enter');
 		await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
@@ -648,7 +652,7 @@ test.describe('discovery-first workspace shell (composed build)', () => {
 		// navigate away (no Back button in the Today grammar). The pill carries
 		// the scope name; the tooltip carries the explanation.
 		await expect(page.getByTestId('conv-context')).toBeVisible();
-		await expect(page.getByTestId('conv-context-label')).toContainText('Everything');
+		await expect(page.getByTestId('conv-context-label')).toContainText('General');
 		// The scope label is now the "Talking about" switch button (U02).
 		await expect(page.getByTestId('talking-about')).toHaveAttribute(
 			'title',

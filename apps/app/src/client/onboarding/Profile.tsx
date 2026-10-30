@@ -7,6 +7,10 @@ import { InterestPicker } from '../interests/InterestPicker.tsx';
 import { SegmentField } from '../forms/SegmentField.tsx';
 import { COUNTRY_OPTIONS } from '../country.ts';
 import { OPEN_TO_ANYTHING_INTEREST } from '../interests/catalog.ts';
+import { ONBOARDING_STEP_COUNT } from './Start.tsx';
+
+/** The two welcome screens before this form; the step count covers every screen. */
+const WELCOME_STEPS_BEFORE = ['Starting point', 'Your name'];
 
 const names = new Intl.DisplayNames(['en'], { type: 'region' });
 const countries = COUNTRY_OPTIONS;
@@ -30,11 +34,15 @@ function ProfileForm({ initial, actorId, onDone }: { initial: ProfileRecord | nu
  const [country, setCountry] = useState(initial?.country ?? '');
  const [countryQuery, setCountryQuery] = useState(initial?.country ? (names.of(initial.country) ?? '') : '');
  const [timezone, setTimezone] = useState(initial?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
- const [format, setFormat] = useState(initial?.formatPreference ?? '');
+ // "Either" is the neutral answer, so it is the starting value; experience
+ // has no honest default and must be picked.
+ const [format, setFormat] = useState(initial?.formatPreference ?? 'either');
+ const [experienceError, setExperienceError] = useState<string | null>(null);
  const [experience, setExperience] = useState(initial?.experienceLevel ?? '');
  const [interests, setInterests] = useState<string[]>(initial?.freeTextInterests?.length ? initial.freeTextInterests : [OPEN_TO_ANYTHING_INTEREST]);
  const [busy, setBusy] = useState(false);
  const [error, setError] = useState<string | null>(null);
+ const [countryError, setCountryError] = useState<string | null>(null);
  const lastStep = steps.length - 1;
  const mood: MascotMood = step === 0 ? 'listening' : 'ready';
  async function save() {
@@ -49,7 +57,7 @@ function ProfileForm({ initial, actorId, onDone }: { initial: ProfileRecord | nu
     country,
     timezone,
     experienceLevel: experience,
-    formatPreference: format === '' ? null : format,
+    formatPreference: format,
     freeTextInterests: interests,
    }) });
    cache.setQueryData(['profile', actorId], result);
@@ -61,19 +69,27 @@ function ProfileForm({ initial, actorId, onDone }: { initial: ProfileRecord | nu
   <header className="onboarding-head">
    {step === lastStep ? <button className="btn-ghost onboarding-back" type="button" aria-label="Back" onClick={() => { setError(null); setStep(step - 1); }}>← Back</button> : <span className="onboarding-head-mascot" aria-hidden="true"><Mascot mood={mood} size={44} live /></span>}
    <div className="onboarding-head-progress">
-    <p className="onboarding-head-step">Step {step + 1} of {steps.length}{step === lastStep ? ' · almost done' : ''}</p>
-    <ol className="onboarding-bar" aria-label="Profile setup progress">{steps.map((item, index) => <li key={item.label} aria-current={step === index ? 'step' : undefined} data-done={index < step} data-current={index === step}><span className="sr-only">{item.label}</span></li>)}</ol>
+    <p className="onboarding-head-step" data-testid="onboarding-step">Step {WELCOME_STEPS_BEFORE.length + step + 1} of {ONBOARDING_STEP_COUNT}{step === lastStep ? ' · almost done' : ''}</p>
+    <ol className="onboarding-bar" aria-label="Setup progress">
+     {WELCOME_STEPS_BEFORE.map(label => <li key={label} data-done="true" data-current="false"><span className="sr-only">{label}</span></li>)}
+     {steps.map((item, index) => <li key={item.label} aria-current={step === index ? 'step' : undefined} data-done={index < step} data-current={index === step}><span className="sr-only">{item.label}</span></li>)}
+    </ol>
    </div>
   </header>
   <div className="onboarding-title-row">{step === lastStep ? <span aria-hidden="true"><Mascot mood={mood} size={56} live /></span> : null}<h1 ref={heading} tabIndex={-1} className="onboarding-title">{steps[step]!.title}</h1></div>
   <p className="onboarding-lede">{steps[step]!.description}</p>
-  <form onSubmit={event => { event.preventDefault(); if (step < lastStep) { if (step === 0 && !country) { setError('Please choose your country from the list as you type.'); return; } setError(null); setStep(step + 1); } else { if (!experience || !format) { setError('Please choose your experience and how you’d like to take part.'); return; } void save(); } }}>
+  <form onSubmit={event => { event.preventDefault(); if (step < lastStep) { if (step === 0 && !country) { setCountryError('Choose your country from the list.'); return; } setCountryError(null); setError(null); setStep(step + 1); } else { if (!experience) { setExperienceError('Pick how much you’ve built before. It sets how Caddie explains things.'); document.querySelector<HTMLElement>('[data-testid="onboarding-experience"] [role="radio"]')?.focus(); return; } void save(); } }}>
    <fieldset disabled={busy}>
     {step === 0 ? <>
     <div className="onboarding-fieldgroup">
-    <label className="onboarding-field">Where do you live?<input className="input" required list="onboarding-countries" placeholder="Start typing your country" autoComplete="country-name" value={countryQuery} onChange={event => { setCountryQuery(event.target.value); const match = countries.find(c => c.name.toLowerCase() === event.target.value.trim().toLowerCase()); setCountry(match ? match.code : ''); }} /><small>Choose your country to check entry requirements.</small></label>
+    <label className="onboarding-field">Country<input className="input" aria-required="true" list="onboarding-countries" placeholder="Start typing your country" autoComplete="country-name" value={countryQuery} onChange={event => { setCountryQuery(event.target.value); const match = countries.find(c => c.name.toLowerCase() === event.target.value.trim().toLowerCase()); setCountry(match ? match.code : ''); setCountryError(null); }} /><small>Choose your country to check entry requirements.</small></label>
     <datalist id="onboarding-countries">{countries.map(item => <option key={item.code} value={item.name} />)}</datalist>
-    <label className="onboarding-field">Your time zone<input className="input" required list="onboarding-timezones" value={timezone} onChange={event => setTimezone(event.target.value)} /><small>Detected from your device. Change it if needed.</small></label>
+    </div>
+    {countryError ? <p role="alert" className="form-error onboarding-zone-error">{countryError}</p> : null}
+    <div className="onboarding-zone">
+    <label htmlFor="onboarding-timezone">Time zone</label>
+    <input id="onboarding-timezone" className="input" list="onboarding-timezones" aria-describedby="onboarding-timezone-hint" size={Math.min(28, Math.max(10, timezone.length + 1))} value={timezone} onChange={event => setTimezone(event.target.value)} />
+    <span className="sr-only" id="onboarding-timezone-hint">Detected from your device. Type to change it.</span>
     </div>
     <datalist id="onboarding-timezones">{Intl.supportedValuesOf('timeZone').map(zone => <option key={zone} value={zone} />)}</datalist>
     </> : null}
@@ -82,13 +98,14 @@ function ProfileForm({ initial, actorId, onDone }: { initial: ProfileRecord | nu
      legend="Your building experience"
      testId="onboarding-experience"
      value={experience}
-     onChange={(value) => setExperience(value as typeof experience)}
+     onChange={(value) => { setExperience(value as typeof experience); setExperienceError(null); }}
      options={[
       { value: 'beginner', label: 'New to it' },
       { value: 'intermediate', label: 'A few apps' },
       { value: 'senior', label: 'Build often' },
      ]}
     />
+    {experienceError ? <p role="alert" className="form-error onboarding-field-error" data-testid="onboarding-experience-error">{experienceError}</p> : null}
     <SegmentField
      legend="How would you like to join?"
      testId="onboarding-format"

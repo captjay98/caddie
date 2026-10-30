@@ -298,7 +298,8 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 		await expect(page.getByTestId('project-chip-deadline')).toHaveText('Ends Oct 30 · 15 days left');
 		await expect(page.getByTestId('project-chip-eligibility')).toHaveText('You can enter');
 		await page.getByRole('button',{name:'Close about this project'}).click();
-		await expect(page.getByTestId('project-settings-gear')).toHaveText('Settings');
+		// Owner 2026-10-30: a quiet icon, named by its label (no visible text).
+		await expect(page.getByTestId('project-settings-gear')).toHaveAccessibleName('Project settings');
 		await expect(page.getByTestId('project-ask-caddie')).toHaveCount(0);
 		await expect(page.getByTestId('project-head-model')).toHaveCount(0);
 		await context.close();
@@ -446,9 +447,10 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
 
         // A settled revision cannot be re-decided by an opposite button.
         await expect(page.getByTestId('plan-changes-open')).toHaveCount(0);
-        await expect(page.getByRole('button', { name: 'Continue with Caddie' })).toBeVisible();
-        // What approving means is one plain sentence; the approved plan folds.
-        await expect(page.getByTestId('approve-meaning')).toBeVisible();
+        // Owner 2026-10-29: once approved there is nothing left to press here
+        // before the build — no "Your recorded decision", no repeat sentence.
+        await expect(page.getByRole('button', { name: 'Continue with Caddie' })).toHaveCount(0);
+        await expect(page.getByTestId('approve-meaning')).toHaveCount(0);
         await expect(page.getByTestId('design-review-plan-body')).not.toHaveAttribute('open');
 
 		// No earlier versions → no "Earlier versions · 0" noise fold.
@@ -497,7 +499,7 @@ test.describe('Project Overview / Plan / Build v2 (U06)', () => {
         await page.goto(`${BASE}/app/design-review?project=proj-a`);
         await expect(page.getByTestId('design-review-outcome')).toHaveAttribute('data-decision', 'approved');
         await page.reload();
-        await expect(page.getByTestId('design-review-outcome')).toContainText('Plan approved');
+        await expect(page.getByTestId('design-review-outcome')).toHaveText('Approved');
         await expect(page.getByTestId('plan-approve-open')).toHaveCount(0);
         await context.close();
     });
@@ -677,7 +679,7 @@ test.describe('the Plan tab follows the build (plan 5.3)', () => {
 	// what approving means sat in a fold of boxes.
 	const PLAN = { id: 'pdr-follow', projectId: 'proj-a', kind: 'prd', revision: 1, body: '# FarmLog AI\n\n- Log daily feed', bodyHash: 'sha256-follow', createdAt: NOW };
 	const APPROVED = { resourceId: 'pdr-follow', revisionHash: 'sha256-follow', status: 'approved', expiresAt: '2027-01-01T00:00:00Z' };
-	const MEANING = 'Next, Caddie prepares the screens for you to review. Building starts only after you approve the design.';
+const MEANING = 'Next, Caddie draws three looks. Building starts when you pick one.';
 
 	test('before a decision: as wide as the other tabs, one plain sentence on approving, the plan open to read', async ({ browser }) => {
 		const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -698,9 +700,9 @@ test.describe('the Plan tab follows the build (plan 5.3)', () => {
 	});
 
 	for (const [phase, badge, action] of [
-		['building', 'Building now · version 1', 'See build progress'],
-		['blocked', 'Build paused · version 1', 'See what’s needed'],
-		['ready', 'App built · version 1', 'See your app'],
+		['building', 'Building now', 'See build progress'],
+		['blocked', 'Build paused', 'See what’s needed'],
+		['ready', 'App built', 'See your app'],
 	] as const) {
 		test(`approved and ${phase}: the badge and the button follow the build, and the plan is folded`, async ({ browser }) => {
 			const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });

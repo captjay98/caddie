@@ -80,6 +80,36 @@ describe("R04 response hygiene (text-part leakage)", () => {
     expect(cleanAssistantText("Your plan is ready: six features.")).toBe("Your plan is ready: six features.");
   });
 
+  // Live finding (2026-10-28, Street Food Share): Caddie's replies put the AI
+  // tier names in front of a builder who is told only that their app can use AI.
+  test("a reply's tier names are rewritten in the owner's words", () => {
+    const r = sanitizeAssistantText('The diagnosis uses tier:"super" and the alerts use tier: fast.');
+    expect(r.stripped).toContain("plumbing-vocabulary");
+    expect(r.text).toBe("The diagnosis uses a deep answer and the alerts use a quick answer.");
+    expect(cleanAssistantText("Choose the super tier for the core call; the fast tier is enough elsewhere.")).toBe(
+      "Choose the deeper AI for the core call; the standard AI is enough elsewhere.",
+    );
+    expect(cleanAssistantText("It runs NVIDIA Nemotron 3.5 Super VL on Nebius Token Factory.")).toBe(
+      "It runs Caddie's AI on the platform.",
+    );
+    // The plain-words form the gates now demand needs no rewriting.
+    expect(sanitizeAssistantText("The core call takes a deep answer; the rest are quick.").changed).toBe(false);
+  });
+
+  // Live finding (2026-10-28, same transcript): the replies also quoted the
+  // service handle Caddie's code uses — wiring a builder never sees, and the
+  // one plumbing word the tier rules above left standing.
+  test("a reply's CADDIE.ai service handle is rewritten in the owner's words", () => {
+    expect(cleanAssistantText("AI expiry prediction via `c.env.CADDIE.ai` returns ranked causes.")).toBe(
+      "AI expiry prediction via Caddie's AI returns ranked causes.",
+    );
+    expect(cleanAssistantText("recipe suggestion via c.env.CADDIE.ai")).toBe(
+      "recipe suggestion via Caddie's AI",
+    );
+    const r = sanitizeAssistantText('The warning reads c.env.CADDIE.ai with tier:"fast".');
+    expect(r.text).toBe("The warning reads Caddie's AI with a quick answer.");
+  });
+
   // Live-observed failure (2026-10-12): the model leaked its planning as PLAIN
   // PROSE with no <think> wrapper. These pin the untagged-leak stripper AND its
   // conservatism (a real answer saying "we need to" survives).

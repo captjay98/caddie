@@ -1,0 +1,108 @@
+{
+  "physicalRequests": 2,
+  "description": "Synthetic broken screenshots; json_object request shape; not end-to-end D1 or publish gate",
+  "results": [
+    {
+      "model": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          {
+            "severity": "blocking",
+            "criterion": "Text legibility",
+            "detail": "The page title, subtitle, and card contents are nearly indistinguishable from the background on both phone and desktop. They are effectively unreadable, so the claim that all text is legible is false. Use dark, high-contrast text for headings and body copy; reserve pale gray for disabled states."
+          },
+          {
+            "severity": "blocking",
+            "criterion": "Primary action",
+            "detail": "No primary action button or control is visible on either viewport. The cards do not present a clear CTA. Add a high-contrast, clearly labeled primary action such as 'Record what happened' within the initial phone and desktop views."
+          },
+          {
+            "severity": "blocking",
+            "criterion": "Mobile overflow",
+            "detail": "On the phone viewport the subtitle runs off the right edge without wrapping or truncation, and the record card appears clipped at the right edge. Constrain content to the 390px viewport and ensure text wraps and card borders are fully visible."
+          },
+          {
+            "severity": "advisory",
+            "criterion": "Layout/empty state",
+            "detail": "Desktop leaves most of the canvas blank while two low-contrast cards sit at the top. If this is an empty state, replace the blank area with an explicit empty-state message and next action; otherwise strengthen the content hierarchy."
+          }
+        ]
+      },
+      "usage": {
+        "completion_tokens": 2035,
+        "prompt_tokens": 1227,
+        "total_tokens": 3262,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 1752,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 0,
+          "created_cache_tokens": 1152,
+          "multimodal_tokens": {
+            "image": 1027
+          }
+        }
+      },
+      "estimatedUsd": 0.0028101,
+      "durationMs": 12375
+    },
+    {
+      "model": "MiniMaxAI/MiniMax-M3.1-Flash",
+      "verdict": "PASS",
+      "finishReason": "stop",
+      "answer": {
+        "verdict": "revise",
+        "findings": [
+          {
+            "severity": "blocking",
+            "criterion": "Text contrast",
+            "detail": "The heading, description, and card text are extremely faint against the white background, making them effectively unreadable. Increase text color contrast substantially."
+          },
+          {
+            "severity": "blocking",
+            "criterion": "Primary action visibility",
+            "detail": "No clearly labeled, visually prominent primary action is visible in either the mobile or desktop screenshot. Add a prominent, high-contrast button for the intended main task and ensure it is fully within the viewport."
+          },
+          {
+            "severity": "blocking",
+            "criterion": "Mobile layout fit",
+            "detail": "The mobile description and card extend beyond the 390px viewport; the card's right edge is clipped and its text is cut off. Constrain the content to the viewport width and stack or resize components so all content is visible."
+          },
+          {
+            "severity": "advisory",
+            "criterion": "Visual hierarchy",
+            "detail": "The desktop layout uses very wide empty space with small, faint cards, giving the interface an unfinished or toy-like appearance. Use a more deliberate content width and stronger hierarchy to make the page feel coherent."
+          }
+        ]
+      },
+      "usage": {
+        "completion_tokens": 280,
+        "prompt_tokens": 2495,
+        "total_tokens": 2775,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": null,
+          "audio_tokens": null,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": null
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": null,
+          "cached_tokens": 128,
+          "image_tokens": 2150
+        },
+        "prompt_cache_hit_tokens": 128,
+        "prompt_cache_miss_tokens": 2367,
+        "reasoning_tokens": 0
+      },
+      "estimatedUsd": 0.00054225,
+      "durationMs": 5470
+    }
+  ]
+}

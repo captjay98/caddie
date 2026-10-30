@@ -200,6 +200,8 @@ export const DecisionCardSchema = v.pipe(
 				dateLabel: v.string(),
 				timeLabel: v.string(),
 				source: v.optional(v.string()),
+				/** The contest listing cited for this deadline, when available. */
+				sourceUrl: v.optional(v.string()),
 				/** The TheCard "Your time →" line: the deadline rendered in the
 				 *  reader's own locale/timezone, when known. */
 				localTimeLabel: v.optional(v.string()),

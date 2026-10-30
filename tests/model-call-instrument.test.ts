@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import { sqliteD1 } from './fixtures/sqlite-d1.ts';
+import { applyFinalSchema } from './fixtures/migrations.ts';
 import { bootModelUsageFixture } from '../apps/app/test-support/model-usage-harness.ts';
 import { makeModelCallInstrumentation, modelCallRecord, persistModelCall } from '../apps/app/src/server/model-call-instrument.ts';
 import { coordinatorModelSelection, findModelRouteForRole } from '../apps/app/src/agents/providers.ts';
@@ -21,9 +22,8 @@ describe('model call leaf accounting', () => {
 	afterEach(async () => { await fixture?.stop(); fixture = undefined; sqlite?.close(); sqlite = undefined; });
 	function database() {
 		sqlite = new Database(':memory:');
-		// Read the committed append-only schema, never maintain a divergent test schema.
-		sqlite.exec(readFileSync(new URL('../apps/app/migrations/0046_model_call_usage.sql', import.meta.url), 'utf8'));
-    sqlite.exec(readFileSync(new URL('../apps/app/migrations/0051_model_completion_metadata.sql', import.meta.url), 'utf8'));
+		// Read the committed schema, never maintain a divergent test schema.
+		applyFinalSchema(sqlite);
 		return sqliteD1(sqlite);
 	}
 	test('one project switches between Ultra ideation and Super status with real Flue calls and no run-label guess', async () => {

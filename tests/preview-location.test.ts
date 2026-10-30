@@ -31,8 +31,8 @@ describe('D14: location is allowed on the interactive preview iframe', () => {
 		expect(interactiveFrame(readFileSync(PREVIEW, 'utf8'))).toContain('allow="geolocation"');
 	});
 
-	test('the sandbox is unchanged — still only scripts and forms', () => {
-		expect(interactiveFrame(readFileSync(PREVIEW, 'utf8'))).toContain('sandbox="allow-scripts allow-forms"');
+	test('native storage is granted only to an isolated launch; opaque frames retain scripts/forms only', () => {
+		expect(interactiveFrame(readFileSync(PREVIEW, 'utf8'))).toContain("loaded.nativeStorage ? 'allow-scripts allow-forms allow-same-origin' : 'allow-scripts allow-forms'");
 	});
 
 	test('only geolocation is granted — no camera, microphone or wider allow list', () => {

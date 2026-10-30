@@ -118,6 +118,21 @@ export function LooksPicker(props: {
     setTimeout(() => { programmaticScroll.current = false; }, prefersReduced ? 50 : 450);
   }
 
+  // Open on Caddie's pick. The track starts scrolled to the first card, so
+  // without this the shown card and the chosen one could disagree, and the
+  // scroll sync later latched whichever card the strip happened to rest on
+  // (Poultry Farm Monitor, 2026-10-29: "Use Barn Flow" offered while Caddie
+  // recommended Field Cards).
+  useEffect(() => {
+    const strip = track.current;
+    const card = strip?.children[recommendedIndex] as HTMLElement | undefined;
+    if (!strip || !card) return;
+    programmaticScroll.current = true;
+    strip.scrollTo({ left: card.offsetLeft, behavior: "auto" });
+    const release = setTimeout(() => { programmaticScroll.current = false; }, 100);
+    return () => clearTimeout(release);
+  }, [recommendedIndex]);
+
   useEffect(() => {
     const strip = track.current;
     if (!strip) return;
@@ -266,7 +281,7 @@ export function LooksPicker(props: {
           disabled={props.busy}
           onClick={() => props.onChoose(chosen.id, note.trim())}
         >
-          {props.busy ? "Saving…" : `Use ${chosen.name}`}
+          {props.busy ? "Starting the build…" : `Build with ${chosen.name}`}
         </button>
         <div className="row-actions look-quiet">
           <button

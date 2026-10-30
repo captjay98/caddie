@@ -218,19 +218,29 @@ a.btn-ghost.topbar-nav-link {
 	white-space: nowrap;
 }
 
-/* Sign-in panel: full-width provider buttons on the token surfaces */
+/* Sign-in panel: full-width provider buttons on the token surfaces.
+   The mark is pinned to the button's left edge so Google and GitHub line up
+   with each other and the labels keep their own centre; the two buttons share
+   one rhythm (the panel's gap) instead of each carrying its own margins
+   (owner 2026-10-27: "there is just something about the two buttons"). */
 .sign-in-btn {
+	position: relative;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	gap: 0.55rem;
 	width: 100%;
-	margin: 0.5rem 0;
-	padding: 0.7rem 1rem;
+	margin: 0;
+	padding: 0.7rem 3rem;
 	font-size: 1rem;
 }
 
-.sign-in-btn svg {
+.sign-in-btn > svg {
+	position: absolute;
+	left: 1rem;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 18px;
+	height: 18px;
 	flex: none;
 }
 
@@ -239,22 +249,20 @@ a.btn-ghost.topbar-nav-link {
 	cursor: not-allowed;
 }
 
-/* One row per provider. Availability is expressed through the control itself:
-   a provider that cannot work on this deployment is blurred and inert (no
-   label, no clickable affordance), with a quiet inline reason beside it. */
+/* One row per provider, one shared rhythm. Availability is expressed through
+   the control itself: a provider that cannot work on this deployment is blurred
+   and inert (no label, no clickable affordance), with a quiet inline reason
+   beside it. */
+.signin-card [data-testid='sign-in-panel'] {
+	display: grid;
+	gap: 0.6rem;
+}
 .sign-in-provider {
-	display: flex;
-	flex-direction: column;
+	display: grid;
 	gap: 0.2rem;
 }
-
-.sign-in-provider .sign-in-btn {
-	margin: 0.4rem 0;
-}
-
 .sign-in-provider.is-unavailable {
 	gap: 0.35rem;
-	margin: 0.4rem 0;
 }
 
 .sign-in-provider.is-unavailable .sign-in-btn {
@@ -394,13 +402,16 @@ a.btn-ghost.topbar-nav-link {
    provider buttons, the judge door as a quiet text link, and one honest
    access line. No marketing panel, no pill tags: the landing page sells,
    this page only lets you in. It fills the main column under the header,
-   or the whole viewport as a chrome-free page (.signin-page). */
+   or the whole viewport as a chrome-free page (.signin-page).
+   Two rows: the column takes the space, the access line closes the screen
+   (owner 2026-10-27: it sat right under the buttons, inside the column). */
 .signin-screen {
 	flex: 1;
 	min-height: 100%;
 	display: grid;
+	grid-template-rows: 1fr auto;
 	place-items: center;
-	padding: clamp(2rem, 8vh, 5rem) 1.5rem calc(2rem + var(--safe-bottom));
+	padding: clamp(2rem, 8vh, 5rem) 1.5rem calc(1.5rem + var(--safe-bottom));
 	background: var(--horizon), var(--color-ink);
 }
 .signin-page {
@@ -414,6 +425,54 @@ a.btn-ghost.topbar-nav-link {
    signed-in person has) is for pages. */
 .shell-main[data-signed-out='true'] {
 	padding: 0;
+}
+/* The glow belongs to the page, not to the screen below the header: with the
+   header transparent, a gradient that started under it read as an accidental
+   hairline across the top of the page. */
+.shell-left:has(> .capsule-nav-unauth) {
+	background: var(--horizon), var(--color-ink);
+}
+.shell-main[data-signed-out='true'] .signin-screen {
+	background: none;
+}
+/* Signed out, the header is the page's own, not an app bar: the wordmark at the
+   page's left gutter, the two quiet exits at the right, and no pill — there is
+   no app to navigate yet, so nothing floats above a page whose only object is
+   the sign-in card (owner 2026-10-27). It scrolls with the page, so the glow
+   behind it is never cut by an opaque bar. */
+.capsule-nav-unauth {
+	position: static;
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	margin: 0;
+	padding: 1rem 1.5rem;
+	background: none;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+}
+/* The wordmark is the page's name here, not a logo badge: no inner padding, and
+   no separator dot (nothing follows it). */
+.capsule-nav-unauth .capsule-wordmark {
+	padding: 0;
+	font-size: 13px;
+}
+.capsule-nav-unauth .capsule-wordmark b {
+	display: none;
+}
+/* "← Home" is plain text that underlines on hover — no pill, no hover fill. */
+.capsule-nav-unauth .capsule-tab {
+	min-height: 44px;
+	padding: 0;
+	border-radius: 0;
+	color: var(--color-muted);
+}
+.capsule-nav-unauth .capsule-tab:hover {
+	color: var(--color-bright);
+	background: none;
+	text-decoration: underline;
+	text-underline-offset: 3px;
 }
 .signin-screen .signin-col {
 	width: min(380px, 100%);
@@ -431,27 +490,191 @@ a.btn-ghost.topbar-nav-link {
 	font-size: 1rem;
 	max-width: none;
 }
-.signin-screen .signin-nobreak {
-	white-space: nowrap;
+/* Opened, the judge door is its own screen: a small mono kicker names the
+   door, one title, one sentence, then the fields — the same grammar as the
+   welcome card. While it is open the general sign-in brand steps aside, so
+   "Sign in to start building" never stacks over "Judge access". Because the
+   brand leaves, this title IS the screen heading: it keeps the sign-in h1's
+   size instead of shrinking to a card label. */
+.judge-access-panel {
+	display: grid;
+	gap: 0.9rem;
+	text-align: left;
 }
-/* Opened, the judge door is its own titled form (the providers step aside). */
+.signin-col:has([data-testid='judge-panel']) .signin-brand {
+	display: none;
+}
+/* The way out belongs at the top, where the eye lands. The footer keeps only
+   the alternate mode, so the card never ends on two identical gray lines. */
+/* The judge form is the tallest thing this screen ever holds: start it near
+   the top instead of centering it, so the CTA and the alternate mode stay
+   within reach on a phone. */
+.signin-screen:has([data-testid='judge-panel']) {
+	align-items: start;
+	padding-top: clamp(1.25rem, 4vh, 2.25rem);
+}
+.judge-panel-top {
+	display: flex;
+	margin-bottom: -0.35rem;
+}
+.judge-panel-foot {
+	display: grid;
+	justify-items: center;
+	margin-top: 0.15rem;
+	padding-top: 0.85rem;
+	border-top: 1px solid var(--color-line);
+}
 .signin-screen .judge-panel-head {
 	display: grid;
-	gap: 0.35rem;
-	margin-bottom: 0.4rem;
+	gap: 0.3rem;
+}
+.judge-access-kicker {
+	margin: 0;
+	font: 11px var(--font-mono, monospace);
+	letter-spacing: 0.08em;
+	color: var(--color-action);
 }
 .signin-screen .judge-panel-title {
 	margin: 0;
-	font-size: 1.125rem;
+	font-size: clamp(21px, 3.2vw, 24px);
 	font-weight: 640;
-	letter-spacing: -0.01em;
+	letter-spacing: -0.02em;
+	line-height: 1.2;
 	color: var(--color-bright);
 }
 .signin-screen .judge-panel-lede {
 	margin: 0;
 	color: var(--color-muted);
 	font-size: 0.875rem;
+	line-height: 1.55;
+	text-wrap: pretty;
+}
+/* A hint sits close to the field it explains and clearly further from the next
+   one: 0.4rem + 0.1rem inside a field, 1.15rem between fields. */
+.judge-field {
+	display: grid;
+	gap: 0.4rem;
+}
+.judge-access-form {
+	display: grid;
+	gap: 1.15rem;
+}
+.judge-access-form .judge-field > label {
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: var(--color-bright);
+}
+.judge-access-form .judge-field .input {
+	min-height: 46px;
+	font-size: 1rem;
+	background: var(--color-ink);
+	border-color: var(--color-line);
+}
+/* The field that is wrong says so itself: a red edge plus its sentence
+   directly under the input (not a box below the button). */
+.judge-field.is-invalid .input {
+	border-color: var(--color-danger, #f87171);
+}
+.judge-field.is-invalid .input:focus-visible {
+	outline-color: var(--color-danger, #f87171);
+}
+.judge-field-error {
+	margin: 0;
+	color: var(--color-danger, #f87171);
+	font-size: 0.8125rem;
+	line-height: 1.45;
+}
+/* Password + Show/Hide: the toggle sits inside the field's right edge. */
+.judge-input-wrap {
+	position: relative;
+	display: grid;
+}
+.judge-input-wrap .input {
+	padding-right: 4.25rem;
+}
+.judge-reveal {
+	position: absolute;
+	top: 50%;
+	right: 0.35rem;
+	transform: translateY(-50%);
+	min-width: 44px;
+	min-height: 36px;
+	padding: 0 0.6rem;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+	color: var(--color-muted);
+	font: inherit;
+	font-size: 0.8125rem;
+	cursor: pointer;
+}
+.judge-reveal:hover {
+	color: var(--color-bright);
+}
+.judge-reveal:focus-visible {
+	outline: 2px solid var(--color-action);
+	outline-offset: 1px;
+}
+.judge-forgot {
+	margin: 0.9rem 0 0;
+	color: var(--color-muted);
+	font-size: 0.8125rem;
 	line-height: 1.5;
+	text-wrap: pretty;
+}
+.judge-inline-link {
+	display: inline;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--color-action);
+	font: inherit;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	cursor: pointer;
+}
+.judge-inline-link:hover {
+	color: var(--color-bright);
+}
+.judge-access-submit {
+	width: 100%;
+	min-height: 48px;
+	font-size: 1rem;
+	margin-top: 0.1rem;
+}
+/* Alternate modes and the way back are quiet text, never twin buttons. */
+.signin-card .judge-access-panel .judge-link {
+	justify-self: center;
+	width: 100%;
+	min-height: 40px;
+	margin: 0;
+	padding: 0.35rem 0.25rem;
+	border-color: transparent;
+	background: transparent;
+	color: var(--color-muted);
+	font-size: 0.8125rem;
+	font-weight: 400;
+	text-decoration: none;
+	white-space: normal;
+}
+.signin-card .judge-access-panel .judge-link:hover {
+	background: transparent;
+	color: var(--color-bright);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+.signin-card .judge-access-panel .judge-panel-foot .judge-link {
+	min-height: 36px;
+	padding: 0.25rem;
+}
+.signin-card .judge-access-panel .judge-panel-top .judge-link {
+	justify-self: start;
+	width: auto;
+	min-height: 36px;
+	margin: 0;
+	padding: 0.25rem 0.5rem 0.25rem 0;
+	font-size: 0.8125rem;
+	opacity: 1;
 }
 /* On a phone the column sits high, so the providers are in the first screen. */
 @media (max-width: 720px) {
@@ -481,6 +704,46 @@ a.btn-ghost.topbar-nav-link {
 	color: var(--color-bright);
 	text-decoration: underline;
 	text-underline-offset: 3px;
+}
+/* The judge door is its own step below the providers, with air above it, so
+   two buttons plus a link never read as three buttons in a row. It takes the
+   card's width so its one sentence stays on one line instead of breaking
+   around "access code" (owner 2026-10-27). */
+.signin-card [data-testid='judge-link'] {
+	margin-top: 0.75rem;
+	width: 100%;
+	justify-self: stretch;
+	justify-content: center;
+}
+/* During judging most visitors are judges and the providers are invite-only,
+   so the judge door is a real button with the same footprint as the
+   providers, set apart by an action-tinted edge (owner review 2026-10-28). */
+.signin-screen .judge-link.judge-door {
+	min-height: 48px;
+	padding: 0.6rem 1rem;
+	border: 1px solid color-mix(in srgb, var(--color-action) 55%, transparent);
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--color-action) 10%, transparent);
+	color: var(--color-bright);
+	font-size: 0.9375rem;
+	font-weight: 560;
+}
+/* Keep the door's one sentence on one line on a phone. */
+@media (max-width: 420px) {
+	.signin-screen .judge-link.judge-door {
+		padding-inline: 0.5rem;
+		font-size: 0.875rem;
+		letter-spacing: -0.01em;
+	}
+}
+.signin-screen .judge-link.judge-door:hover {
+	background: color-mix(in srgb, var(--color-action) 18%, transparent);
+	color: var(--color-bright);
+	text-decoration: none;
+}
+.signin-screen .judge-link.judge-door:focus-visible {
+	outline: 2px solid var(--color-action);
+	outline-offset: 2px;
 }
 
 .signin-col {
@@ -529,43 +792,22 @@ a.btn-ghost.topbar-nav-link {
    together — without it the inputs float on the bare page and read as unfinished. */
 .signin-card:has([data-testid='judge-panel']) {
 	gap: 0;
-	padding: 1.25rem;
+	padding: 1.5rem;
 	border: 1px solid var(--color-line);
 	border-radius: 16px;
 	background: var(--color-panel);
 	box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
 	text-align: left;
 }
-/* Field rhythm: a clear label, a visible input, then its hint — evenly spaced. */
-.signin-card .judge-field {
-	gap: 0.3rem;
-	margin-bottom: 0.85rem;
-}
-.signin-card .judge-field > span {
-	font-size: 0.8125rem;
-	font-weight: 600;
-	color: var(--color-bright);
-}
+/* Field rhythm lives in .judge-access-form above; the hint is one quiet line
+   under its input. */
 .signin-card .judge-field .sign-in-unavailable-note {
 	margin-top: 0.1rem;
-}
-.signin-card .judge-field .input {
-	background: var(--color-ink);
-	border-color: var(--color-line);
-}
-/* The primary alternative (new/returning judge) is a present secondary action;
-   "Other ways to sign in" is a quieter back-link beneath it, not its twin. */
-.signin-card [data-testid='judge-panel'] > .judge-link {
-	margin-top: 0.35rem;
-}
-.signin-card [data-testid='judge-panel'] > [data-testid='judge-back'] {
-	margin-top: 0.1rem;
-	font-size: 0.8125rem;
-	opacity: 0.8;
 }
 
 .signin-note {
 	margin: 0 auto;
+	padding-top: 1rem;
 	color: var(--color-muted);
 	font-size: 0.75rem;
 	line-height: 1.5;
@@ -1846,35 +2088,19 @@ a.btn-ghost.topbar-nav-link {
    grey paragraph. Theme tokens only; each tinted chip sets its own text colour. */
 .workflow-assurance {
 	display: flex;
-	flex-wrap: wrap;
-	align-items: center;
-	gap: 0.4rem;
-	margin-top: 0.5rem;
-}
-.workflow-chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.3rem;
-	font-size: var(--r-meta);
-	padding: 0.2rem 0.55rem;
-	border-radius: 999px;
-	background: color-mix(in srgb, var(--color-muted) 12%, transparent);
+	align-items: flex-start;
+	gap: 8px;
+	margin: 8px 0 0;
+	font-size: 13px;
+	line-height: 1.5;
 	color: var(--color-muted);
-	border: 1px solid color-mix(in srgb, var(--color-muted) 24%, transparent);
-	white-space: nowrap;
 }
-/* The one POSITIVE guarantee (it is sandboxed) carries the ok tint; the
-   "no deploy / no spending" chips stay neutral — they state a boundary, not a
-   warning, so they must not read as danger. */
-.workflow-chip-ok {
-	background: color-mix(in srgb, var(--color-ok) 13%, transparent);
+.workflow-assurance svg {
+	flex: none;
+	width: 16px;
+	height: 16px;
+	margin-top: 2px;
 	color: var(--color-ok);
-	border-color: color-mix(in srgb, var(--color-ok) 26%, transparent);
-}
-.workflow-assurance-note {
-	font-size: var(--r-meta);
-	color: var(--color-muted);
-	opacity: 0.85;
 }
 
 /* Repo connection is optional housekeeping, demoted to a quiet footnote BELOW
@@ -2150,13 +2376,27 @@ a.btn-ghost.topbar-nav-link {
 /* Live activity strip — "what Caddie is doing" during a running turn: a live
    dot, the current action (thinking / a named tool), and a running step count.
    All real transport data; a quiet turn shows just "Caddie is working". */
+/* Plain text, not a code font (review 2026-10-28): this is Caddie telling a
+   person what it is doing. The note wraps under the label on a phone. */
 .channel-activity {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.5rem;
-	font-family: var(--font-mono);
-	font-size: var(--r-meta);
+	flex-wrap: wrap;
+	gap: 0.3rem 0.5rem;
+	font-size: 14px;
+	line-height: 1.45;
 	color: var(--color-muted);
+}
+.channel-activity-note {
+	flex-basis: 100%;
+	padding-left: calc(7px + 0.5rem);
+	font-size: 12.5px;
+	color: var(--color-muted);
+}
+.tool-steps {
+	margin: 0.2rem 0 0;
+	padding: 0;
+	list-style: none;
 }
 .channel-activity-dot {
 	width: 7px;
@@ -2387,10 +2627,15 @@ a.btn-ghost.topbar-nav-link {
 .hk-stat[data-stat='deadline'] dd {
 	color: var(--color-action);
 }
-/* AI fit reads as a verdict word: colour it by its own meaning (strong = ok,
-   weak = muted), never as another number. */
+/* AI fit reads as a verdict word: colour it by its own meaning. Only
+   "Strong" earns the green; "Possible" is a neutral maybe, "Weak" is muted
+   (review 2026-10-28). */
 .hk-stat[data-stat='fit'] dd {
 	color: var(--color-ok);
+}
+.hk-feature[data-ai-fit='possible'] .hk-stat[data-stat='fit'] dd,
+.hk-feature[data-ai-fit='unknown'] .hk-stat[data-stat='fit'] dd {
+	color: var(--color-bright);
 }
 .hk-feature[data-ai-fit='weak'] .hk-stat[data-stat='fit'] dd {
 	color: var(--color-muted);
@@ -2835,7 +3080,12 @@ a.btn-ghost.topbar-nav-link {
 	background: var(--color-raised);
 	color: var(--color-muted);
 	cursor: pointer;
-	transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+	transition: color 0.15s ease, border-color 0.15s ease;
+}
+/* Only the "+" icon turns into an "×"; the button itself never rotates
+   (it used to become a tilted diamond, review 2026-10-28). */
+.composer-tools-toggle svg {
+	transition: transform 0.15s ease;
 }
 .composer-tools-toggle:hover:not(:disabled) {
 	color: var(--color-action);
@@ -2849,14 +3099,13 @@ a.btn-ghost.topbar-nav-link {
 .composer-tools-toggle.open {
 	color: var(--color-action);
 	border-color: var(--color-action);
+}
+.composer-tools-toggle.open svg {
 	transform: rotate(45deg);
 }
 @media (prefers-reduced-motion: reduce) {
-	.composer-tools-toggle {
-		transition: color 0.15s ease, border-color 0.15s ease;
-	}
-	.composer-tools-toggle.open {
-		transform: none;
+	.composer-tools-toggle svg {
+		transition: none;
 	}
 }
 
@@ -2999,9 +3248,7 @@ a.btn-ghost.topbar-nav-link {
 }
 
 .composer-hint {
-	font-family: var(--font-mono);
-	font-size: var(--r-label);
-	letter-spacing: 0.03em;
+	font-size: 12px;
 	color: color-mix(in srgb, var(--color-muted) 75%, transparent);
 	margin: 0;
 	text-align: center;
@@ -4848,10 +5095,9 @@ a.btn-ghost.topbar-nav-link {
 	padding: 0.2rem 1rem 1.4rem;
 }
 
-/* --- floating navigation capsule (left panel, sticky) ----------------------- */
+/* --- floating navigation capsule (signed in, left panel, sticky) ----------- */
 
-.nav-capsule,
-.capsule-nav-unauth {
+.nav-capsule {
 	position: sticky;
 	top: 0;
 	z-index: 15;
@@ -4897,6 +5143,83 @@ a.btn-ghost.topbar-nav-link {
 .capsule-spacer {
 	flex: 1;
 }
+/* Centred capsule (owner review 2026-10-28): equal-width ends keep the three
+   destinations centred over the centred Brief; the account sits at the end. */
+/* The bar itself is invisible; only the three tabs get the pill, sized to
+   fit them, and the avatar stands alone at the right (review 2026-10-28). */
+/* The bar stays sticky, so it must still hide what scrolls under it: the page
+   colour fills the bar (fading out at its bottom edge) behind the pill. A fully
+   transparent bar let the project's Plan/Design tabs show through and look
+   like they overlapped the navigation (owner 2026-10-29). */
+.nav-capsule.nav-capsule--centred {
+	margin: 0;
+	padding: 0.7rem 0.9rem 0.6rem;
+	background: linear-gradient(to bottom, var(--color-ink) 78%, transparent);
+	border: 0;
+	box-shadow: none;
+	border-radius: 0;
+}
+.nav-capsule--centred .capsule-tabs {
+	padding: 0.35rem 0.45rem;
+	background: var(--color-raised);
+	border: 1px solid var(--color-line-soft);
+	border-radius: 999px;
+	box-shadow:
+		0 6px 18px rgb(0 0 0 / 0.28),
+		inset 0 1px 0 color-mix(in srgb, var(--seed-fg) 6%, transparent);
+}
+.nav-capsule--centred .capsule-spacer {
+	flex: 1 1 0;
+	min-width: 0;
+}
+.nav-capsule--centred .capsule-end {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 0.35rem;
+}
+.nav-capsule--centred .capsule-tabs {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+.nav-capsule--centred .capsule-tab {
+	padding: 0.45rem 0.95rem;
+	font-size: 14px;
+}
+.brief-notes {
+	width: 100%;
+	max-width: 640px;
+	margin: 0 auto 1rem;
+	display: grid;
+	gap: 0.5rem;
+}
+.brief-notes-title {
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--color-muted);
+}
+.brief-notes .notify-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	display: grid;
+	gap: 0.5rem;
+}
+/* Same card family as the Brief cards below it (border, radius, padding), so a
+   Caddie note never reads as an unstyled block (owner 2026-10-29). */
+.brief-notes .notify-item {
+	gap: 6px;
+	padding: 16px 18px;
+	border: 1px solid var(--color-line);
+	border-radius: 13px;
+	background: var(--card-gradient, var(--color-raised));
+}
+.brief-notes .notify-title { font-size: 15px; line-height: 1.35; }
+.brief-notes .notify-body { font-size: 13.5px; line-height: 1.5; }
+.brief-notes .notify-meta { margin-top: 6px; }
+.brief-notes .notify-open { min-height: 40px; padding: 0 16px; font-size: 13px; }
 
 .capsule-tab {
 	display: inline-flex;
@@ -5304,6 +5627,31 @@ a.btn-ghost.topbar-nav-link {
 	flex-direction: column;
 	gap: 0.4rem;
 }
+/* The new-user line sits in the same centred 640px column as the header,
+   so the two share one left edge instead of the line hugging the pane. */
+.home-panel [data-testid='brief-new-user'] {
+	width: 100%;
+	max-width: 640px;
+	margin-inline: auto;
+}
+/* Wider than a phone: the date + greeting group and the empty-state line are
+   centred in the pane, matching the centred chat welcome beside them
+   (owner review 2026-10-28). Phones keep the left-aligned layout. */
+@media (min-width: 561px) {
+	.home-head.home-head--unified {
+		grid-template-columns: 64px auto;
+		justify-content: center;
+	}
+	.home-panel [data-testid='brief-new-user'] .summary {
+		text-align: center;
+		margin-inline: auto;
+	}
+	.home-panel [data-testid='brief-new-user'] .actions {
+		display: flex;
+		justify-content: center;
+		justify-self: center;
+	}
+}
 
 /* Adaptive Brief header: one skeleton (status disc + title + sub-line) that
    fills differently for "caught up" vs "N things need you". Colours read from
@@ -5405,6 +5753,22 @@ a.btn-ghost.topbar-nav-link {
 
 /* Date-first personal greeting; feed controls belong with the cards. */
 .home-head--unified { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 18px; padding: 0; margin-bottom: 26px; border: 0; }
+.home-head--unified .home-head-main { position: relative; min-width: 0; }
+.brief-actions { position: absolute; top: 0; right: 0; z-index: 2; }
+.brief-actions summary { display: grid; place-items: center; width: 44px; height: 44px; cursor: pointer; color: var(--color-muted); border-radius: 12px; list-style: none; font-size: 22px; line-height: 1; }
+.brief-actions summary::-webkit-details-marker { display: none; }
+.brief-actions summary:focus-visible { outline: 2px solid var(--color-action); outline-offset: 2px; }
+.brief-actions-menu { position: absolute; right: 0; top: 44px; min-width: 160px; padding: 6px; border: 1px solid var(--color-line); border-radius: 12px; background: var(--color-panel); box-shadow: 0 8px 24px #0003; }
+.brief-actions-menu button { width: 100%; min-height: 44px; border: 0; border-radius: 8px; background: transparent; color: var(--color-bright); text-align: left; padding: 8px 12px; cursor: pointer; }
+.brief-actions-menu button:hover { background: var(--color-hover, #80808020); }
+.home-head--unified:has(.brief-actions) .home-head-leading { padding-right: 44px; }
+.ready-change-review { margin: 20px 0; padding-top: 18px; border-top: 1px solid var(--color-line); color: var(--color-text); overflow-wrap: anywhere; }
+.ready-change-review p { margin: 0 0 12px; line-height: 1.5; }
+.ready-change-review .ready-change-summary { color: var(--color-bright); font-weight: 600; }
+.ready-change-sections { display: grid; gap: 14px; margin: 16px 0; }
+.ready-change-sections h4 { margin: 0 0 4px; color: var(--color-bright); font-size: 13px; }
+.ready-change-sections ul { margin: 0; padding-left: 20px; color: var(--color-muted); line-height: 1.5; }
+.ready-change-review .row-actions { margin-top: 16px; }
 .home-head-calendar { display: flex; flex-direction: column; align-items: center; justify-content: center; align-self: stretch; padding-right: 12px; min-height: 100px; border-right: 1px solid var(--color-line); color: var(--color-muted); font-size: 11px; }
 .home-head-calendar strong { font-size: 34px; line-height: 1.2; font-weight: 600; color: var(--color-bright); }
 .home-head-leading { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -5428,7 +5792,8 @@ a.btn-ghost.topbar-nav-link {
 	.home-head--unified .mascot * { animation: none !important; transition: none !important; }
 }
 @media (max-width: 560px) {
-	.home-head.home-head--unified { grid-template-columns: 53px minmax(0, 1fr); gap: 14px; padding: 0; margin-bottom: 22px; }
+	/* Greeting centred against the date block, not pinned to its top. */
+	.home-head.home-head--unified { grid-template-columns: 53px minmax(0, 1fr); gap: 14px; padding: 0; margin-bottom: 22px; align-items: center; }
 	.home-head-calendar { padding-right: 10px; min-height: 110px; }
 	.home-head--unified .home-head-title { font-size: 19px; }
 	.home-head-leading { gap: 8px; flex-wrap: wrap; }
@@ -5601,12 +5966,6 @@ a.btn-ghost.topbar-nav-link {
 	.shell-right .transcript {
 		padding-bottom: calc(160px + var(--safe-bottom));
 	}
-	/* The unauth header keeps its capsule margins on mobile; the authed
-	   capsule is desktop-only (mobile uses the page-aware MobileHeader +
-	   bottom bar). */
-	.capsule-nav-unauth {
-		margin-inline: 0.6rem;
-	}
 	.main[data-hidden='true'],
 	.shell-main[data-hidden='true'] {
 		display: none;
@@ -5729,7 +6088,9 @@ a.btn-ghost.topbar-nav-link {
 	display: grid;
 	gap: 0.6rem;
 	width: 100%;
-	max-width: 420px;
+	/* Same column as the full-screen composer, so the cards and the composer
+	   line up instead of a narrow stack over a wide field. */
+	max-width: 640px;
 }
 
 .welcome-card {
@@ -5856,7 +6217,75 @@ a.btn-ghost.topbar-nav-link {
 		margin: 0 auto;
 		background: transparent;
 	}
+	/* Review 2026-10-28: no leftover panel band. The composer bar blends into
+	   the page; the composer field keeps its own outline. */
+	.app-split[data-conv-state='full'] .composer-wrap {
+		background: transparent;
+		border-top: 0;
+	}
+	/* The header's fade-out backing used the panel colour, which drew a band
+	   across the column; match the page instead. */
+	.app-split[data-conv-state='full'] .conv-head-float::before {
+		background: var(--color-ink, rgb(9, 11, 16));
+	}
+	/* Nothing scrolls under the header before the first message, so no
+	   backing at all there. */
+	.app-split[data-conv-state='full'] .shell-right:has([data-testid='welcome-panel']) .conv-head-float::before {
+		display: none;
+	}
+	/* With no panel behind it, the composer needs its own outline to read as
+	   a field. */
+	.app-split[data-conv-state='full'] .composer {
+		padding: 0.3rem;
+		border: 1px solid var(--color-line);
+		border-radius: 16px;
+		background: var(--color-panel);
+	}
+	.app-split[data-conv-state='full'] .composer:focus-within {
+		border-color: color-mix(in srgb, var(--color-action) 55%, transparent);
+		outline: none;
+	}
+	/* One shared width (640px) for the welcome cards and the composer. */
+	.app-split[data-conv-state='full'] .welcome-templates,
+	.app-split[data-conv-state='full'] .composer-wrap {
+		width: 100%;
+		max-width: 640px;
+		margin-inline: auto;
+	}
+	/* Before the first message, the greeting, cards and composer sit together
+	   in the middle of the screen; once the conversation starts the welcome
+	   is gone and the composer docks at the bottom again. */
+	.app-split[data-conv-state='full'] .shell-right:has([data-testid='welcome-panel']) {
+		justify-content: center;
+	}
+	.app-split[data-conv-state='full'] .shell-right:has([data-testid='welcome-panel']) .channel-pane {
+		flex: 0 0 auto;
+	}
+	.app-split[data-conv-state='full'] .shell-right:has([data-testid='welcome-panel']) .transcript {
+		flex: 0 0 auto;
+		min-height: 0;
+	}
+	.app-split[data-conv-state='full'] .shell-right:has([data-testid='welcome-panel']) .welcome-panel {
+		padding-bottom: 1.5rem;
+	}
 }
+/* The scope label with nothing to switch to: not a button, no hover. */
+.talking-about-static {
+	cursor: default;
+}
+/* Labelled exit from full screen. */
+.conv-head-btn.conv-head-btn--label {
+	width: auto;
+	display: inline-flex;
+	gap: 0.4rem;
+	padding: 0 0.85rem;
+	border-radius: 999px;
+	font: inherit;
+	font-size: 13px;
+	font-weight: 560;
+	color: var(--color-bright);
+}
+
 
 /* --- the closed rail (desktop): 64px, character only, click reopens -------- */
 .conv-rail {
@@ -6036,22 +6465,25 @@ body.conv-resizing * {
 	.shell-right[data-conv-state='open'] .transcript {
 		padding-inline: max(0.9rem, calc((100% - 720px) / 2));
 	}
-	/* The desktop conversation head carries expand + collapse actions. */
-	.conv-head-btn {
-		width: 2.1rem;
-		height: 2.1rem;
-		border-radius: 50%;
-		display: grid;
-		place-items: center;
-		background: var(--color-panel);
-		border: 1px solid var(--color-line-soft);
-		color: var(--color-muted);
-		cursor: pointer;
-		box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
-	}
-	.conv-head-btn:hover {
-		color: var(--color-action);
-	}
+}
+
+/* The conversation head's expand/collapse buttons. Not inside the desktop
+   media query: the tablet overlay renders the close button too, and without
+   this it fell back to the browser's grey square (review 2026-10-28). */
+.conv-head-btn {
+	width: 2.1rem;
+	height: 2.1rem;
+	border-radius: 50%;
+	display: grid;
+	place-items: center;
+	background: var(--color-panel);
+	border: 1px solid var(--color-line-soft);
+	color: var(--color-muted);
+	cursor: pointer;
+	box-shadow: 0 4px 12px rgb(0 0 0 / 0.25);
+}
+.conv-head-btn:hover {
+	color: var(--color-action);
 }
 
 .conv-head-chips {
@@ -7482,38 +7914,71 @@ mark {
 }
 .welcome-starting-point {
  max-width: 440px;
- padding: clamp(20px, 5vw, 32px);
- gap: 20px;
+ padding: clamp(20px, 5vw, 28px);
+ gap: 18px;
  justify-items: stretch;
  text-align: left;
  border-radius: 13px;
 }
 .welcome-start-label { margin: 0; font: 11px var(--font-mono, monospace); letter-spacing: .08em; color: var(--color-muted); }
-.welcome-start-head { display: flex; align-items: center; gap: 14px; }
-.welcome-start-head .welcome-intro-hello { font-size: clamp(22px, 4vw, 27px); line-height: 1.18; letter-spacing: -.035em; }
+.welcome-start-head { display: flex; align-items: center; gap: 12px; }
+.welcome-start-head .welcome-intro-hello { font-size: clamp(21px, 4vw, 24px); line-height: 1.2; letter-spacing: -.03em; }
 .welcome-start-mascot { flex: none; }
 /* Preserve Caddie's original palette, bubbly eyes and pink cheeks. */
-.welcome-start-lede { margin: 0; color: var(--color-muted); font-size: 14px; line-height: 1.65; }
+.welcome-start-lede { margin: 0; color: var(--color-muted); font-size: 13.5px; line-height: 1.6; }
 .welcome-start-choices { display: grid; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
-.welcome-start-choice { display: flex; align-items: center; gap: 12px; padding: 14px 12px; min-height: 72px; border: 1px solid var(--color-line); border-radius: 13px; background: var(--color-raised); cursor: pointer; }
-.welcome-start-choice[data-selected='true'] { border-color: var(--color-action); background: color-mix(in srgb, var(--color-action) 12%, var(--color-raised)); }
-.welcome-start-choice:focus-within { outline: 2px solid var(--color-action); outline-offset: 3px; }
-.welcome-start-choice input { flex: none; margin: 0; accent-color: var(--color-action); width: 16px; height: 16px; }
-.welcome-start-icon { display: flex; color: var(--color-action); flex: none; }
-.welcome-start-choice strong { display: block; font-size: 14px; font-weight: 600; line-height: 1.4; }
-.welcome-start-choice small { display: block; margin-top: 3px; font-size: 12px; color: var(--color-muted); line-height: 1.5; }
+/* The card is the option: the native radio is invisible over the whole row (it
+   stays a real radio for screen readers and the arrow keys), so the eye reads
+   one icon, one title and one line — plus a check when chosen. The visible dot
+   was a third column of noise before the icon and the words (owner 2026-10-27). */
+.welcome-start-choice { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 14px; min-height: 68px; border: 1px solid var(--color-line); border-radius: 13px; background: var(--color-raised); cursor: pointer; }
+.welcome-start-choice input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.welcome-start-choice[data-selected='true'] { border-color: color-mix(in srgb, var(--color-action) 60%, var(--color-line)); background: color-mix(in srgb, var(--color-action) 9%, var(--color-raised)); }
+/* Keyboard focus rings the card; a mouse click does not need the extra halo
+   around an already-highlighted row. */
+.welcome-start-choice:has(input:focus-visible) { outline: 2px solid var(--color-action); outline-offset: 3px; }
+.welcome-start-icon { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 10px; color: var(--color-action); background: color-mix(in srgb, var(--color-action) 12%, transparent); }
+.welcome-start-choice[data-selected='true'] .welcome-start-icon { background: var(--color-action); color: var(--color-ink); }
+.welcome-start-copy { flex: 1; min-width: 0; }
+.welcome-start-copy strong { display: block; font-size: 14.5px; font-weight: 600; line-height: 1.35; }
+.welcome-start-copy small { display: block; margin-top: 2px; font-size: 12.5px; color: var(--color-muted); line-height: 1.45; }
 .welcome-starting-point .welcome-primary,
 .onboarding-card .welcome-primary { width: 100%; border-radius: 13px; font-size: 14px; }
+/* The name step: back, the one question, the field, one note — and a single
+   full-width action with the skip as quiet text under it (owner 2026-10-27:
+   mascot + kicker + lede + label + two notes + two buttons was too much). */
 .welcome-name-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.welcome-card-pick { font-weight: 500; color: var(--color-action); }
+.welcome-card[data-picked='true'] { border-color: color-mix(in srgb, var(--color-action) 55%, transparent); }
 .welcome-name-top .btn-ghost { min-height: 44px; padding: 8px 0; font-size: 12px; color: var(--color-muted); background: transparent; border-color: transparent; }
-.welcome-name-top .welcome-start-label { text-align: right; }
-.welcome-name-form { display: grid; gap: 24px; min-width: 0; }
+/* Caddie stays on this step, small enough to sit beside the question rather
+   than headline it. */
+.welcome-name-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.welcome-name-mascot { flex: none; display: grid; place-items: center; width: 40px; height: 40px; }
+.welcome-name-head .welcome-intro-hello { font-size: clamp(20px, 4.2vw, 23px); }
+.welcome-name-form { display: grid; gap: 18px; min-width: 0; }
 .welcome-name-step .welcome-name-ask { max-width: none; justify-items: stretch; text-align: left; gap: 8px; }
-.welcome-name-ask label { font-size: 13px; font-weight: 500; }
 .welcome-name-step .welcome-name-ask .input { min-height: 48px; height: auto; font-size: 16px; text-align: left; border-radius: 13px; }
 .welcome-name-step .welcome-name-note { font-size: 12px; line-height: 1.5; }
-.welcome-name-step .row-actions { margin-top: 0; gap: 8px; }
-.welcome-name-step [data-testid='welcome-name-skip'] { min-height: 44px; font-size: 12px; color: var(--color-muted); background: transparent; border-color: transparent; }
+/* Not .row-actions: the app-wide phone rule splits a two-button row 50/50,
+   and here the skip is a footnote under the one action, not its peer. */
+.welcome-name-actions { display: grid; gap: 0.35rem; }
+.welcome-name-step .welcome-primary { width: 100%; }
+.welcome-name-step [data-testid='welcome-name-skip'] {
+	min-height: 44px;
+	padding: 0 0.5rem;
+	justify-self: center;
+	border-color: transparent;
+	background: transparent;
+	color: var(--color-muted);
+	font-size: 0.8125rem;
+	font-weight: 400;
+}
+.welcome-name-step [data-testid='welcome-name-skip']:hover {
+	color: var(--color-bright);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
 .welcome-starting-point .welcome-definition { font-size: 12px; }
 @media(max-width: 360px) {
  .welcome-start-head { gap: 8px; }
@@ -7667,6 +8132,25 @@ mark {
 /* R07/CL — approved onboarding visual redesign (segmented pickers, mascot
    header, progress bar, soft callout). Uses seed tokens only. */
 .onboarding-card { max-width: 440px; margin: 0 auto; padding: clamp(20px, 5vw, 32px); border-radius: 13px; }
+/* On a phone the outer gutter and the card inset stack into ~36px of dead
+   margin per side. Trim both so the columns and chips get the width back. */
+@media (max-width: 480px) { .onboarding-card { padding: 16px; } }
+
+/* One phone gutter. The floating composer and tab bar are pinned 12px from the
+   screen edge, the mobile header sat at 13.6px and page content at 16px — so a
+   page never lined up with the bar above it. Everything now shares the 12px
+   edge; surfaces inside keep their own inset. */
+@media (max-width: 480px) {
+ .shell-main { padding-inline: 12px; }
+ .mobile-header { padding-inline: 12px; }
+ .signin-screen { padding-inline: 12px; }
+ .gate-view, .route-error-view { padding-inline: 12px; }
+ .signin-card:has([data-testid='judge-panel']) { padding: 16px; }
+ /* The conversation column had its own gutters (transcript 16, welcome 19.2)
+    inside the same bar — its text never lined up with the composer either. */
+ .transcript { padding-inline: 12px; }
+ .welcome-panel { padding-inline: 12px; }
+}
 .onboarding-head { display: flex; align-items: center; gap: 14px; margin-bottom: 22px; }
 .onboarding-head-mascot { width: 44px; height: 44px; border-radius: 50%; background: color-mix(in srgb, var(--color-action) 14%, transparent); display: grid; place-items: center; flex: none; }
 .onboarding-head-progress { flex: 1; min-width: 0; }
@@ -7674,10 +8158,12 @@ mark {
 .onboarding-bar { display: flex; gap: 6px; list-style: none; margin: 0; padding: 0; }
 .onboarding-bar li { flex: 1; height: 4px; border-radius: 999px; background: var(--color-line); }
 .onboarding-bar li[data-done="true"], .onboarding-bar li[data-current="true"] { background: var(--color-action); }
+/* A field's own error sits right under it, not a fieldset gap away. */
+.onboarding-card .onboarding-field-error { margin: -14px 0 0; }
 .onboarding-title { font-size: clamp(22px, 4vw, 27px); line-height: 1.18; letter-spacing: -.035em; font-weight: 650; margin: 0 0 12px; }
 .onboarding-lede { font-size: 14px; line-height: 1.55; color: var(--color-muted); margin: 0 0 24px; }
 .onboarding-card fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 22px; min-width: 0; }
-.onboarding-card .onboarding-field { display: grid; gap: 8px; font-size: 13px; font-weight: 600; }
+.onboarding-card .onboarding-field { display: grid; gap: 8px; font-size: 14px; font-weight: 600; }
 .onboarding-fieldgroup { display: grid; gap: 20px; min-width: 0; }
 .onboarding-card .onboarding-field .input { font-weight: 400; min-height: 48px; font-size: 16px; border-radius: 13px; }
 .onboarding-card small { font-size: 12.5px; font-weight: 400; line-height: 1.5; color: var(--color-muted); }
@@ -7701,18 +8187,26 @@ mark {
 .onboarding-quick-picks .onboarding-head-progress { max-width: 180px; }
 .onboarding-quick-picks .onboarding-head { justify-content: space-between; }
 .onboarding-back { min-height: 44px; padding: 8px 0; font-size: 12px; color: var(--color-muted); background: transparent; border-color: transparent; }
-.onboarding-quick-picks .segment-option { border-radius: 13px; min-height: 46px; padding: 10px 5px; font-size: 12px; }
-.onboarding-quick-picks .segment-option[data-selected='true'] { border-width: 1px; }
+/* Step 2's two single-selects sit on one line each: a track of three equal
+   segments, so the row lines up with the fields and the CTA. Selection is a
+   tonal thumb, which leaves the CTA as the only solid accent on the card. */
+.onboarding-quick-picks .segment-options { grid-template-columns: repeat(3, minmax(0, 1fr)); justify-content: stretch; gap: 4px; padding: 4px; border-radius: 13px; background: var(--color-ink); }
+.onboarding-quick-picks .segment-option { display: flex; align-items: center; justify-content: center; border: 0; border-radius: 9px; background: transparent; min-height: 44px; padding: 10px 4px; font-size: 14px; line-height: 17px; color: var(--color-muted); white-space: nowrap; }
+.onboarding-quick-picks .segment-option:hover { background: color-mix(in srgb, var(--color-bright) 6%, transparent); color: var(--color-bright); }
+.onboarding-quick-picks .segment-option[data-selected='true'] { background: color-mix(in srgb, var(--color-action) 26%, var(--color-raised)); color: var(--color-bright); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 0 0 1px color-mix(in srgb, var(--color-action) 40%, transparent); }
+/* Selection is tonal everywhere; the CTA is the only solid accent on the card. */
+.onboarding-quick-picks .onboarding-chips .chip-on { background: color-mix(in srgb, var(--color-action) 18%, transparent); border-color: color-mix(in srgb, var(--color-action) 60%, transparent); color: var(--color-bright); }
 .onboarding-quick-picks .onboarding-segment { gap: 8px; }
-.onboarding-quick-picks .onboarding-segment legend { margin-bottom: 0; }
+.onboarding-quick-picks .onboarding-segment legend, .onboarding-quick-picks .onboarding-chips legend { margin-bottom: 0; font-size: 14px; }
+.onboarding-quick-picks .onboarding-optional-tag { font-size: 12.5px; }
 .onboarding-quick-picks .onboarding-chips { gap: 10px; }
-.onboarding-quick-note { margin: -10px 0 0; color: var(--color-muted); font-size: 11px; line-height: 1.5; text-align: center; }
+.onboarding-quick-note { margin: -10px 0 0; color: var(--color-muted); font-size: 12.5px; line-height: 1.5; text-align: center; }
 .interest-picker-compact .chips-legend { flex-wrap: wrap; }
 .interest-picker-compact .chip { font-size: 12px; padding: 8px 10px; min-height: 44px; }
 .interest-picker-compact .interest-search { font-size: 16px; min-height: 44px; }
 @media(max-width:360px) {
- .onboarding-quick-picks .segment-options { gap: 5px; }
- .onboarding-quick-picks .segment-option { font-size: 11px; }
+ .onboarding-quick-picks .segment-options { gap: 3px; padding: 3px; }
+ .onboarding-quick-picks .segment-option { padding: 10px 3px; font-size: 13px; white-space: normal; }
  .onboarding-quick-picks .onboarding-title-row > span .mascot { width: 44px; height: 44px; }
 }
 
@@ -7746,6 +8240,19 @@ mark {
    right edge, and make the field label/hint rhythm match the segmented steps. */
 .onboarding-card .onboarding-field select.input { appearance: none; -webkit-appearance: none; padding-right: 40px; background-image: linear-gradient(45deg, transparent 50%, var(--color-muted) 50%), linear-gradient(135deg, var(--color-muted) 50%, transparent 50%); background-position: calc(100% - 18px) calc(50% - 2px), calc(100% - 13px) calc(50% - 2px); background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
 .onboarding-card .onboarding-field select.input:focus { background-image: linear-gradient(45deg, transparent 50%, var(--color-action) 50%), linear-gradient(135deg, var(--color-action) 50%, transparent 50%); }
+/* Step 1 asks one thing — the country. The time zone is detected, so it reads
+   as a setting line under the field, not a second field to fill. */
+.onboarding-zone { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 0 10px; margin-top: -4px; color: var(--color-muted); }
+.onboarding-zone > label { display: inline; font-size: 13px; font-weight: 600; color: var(--color-muted); }
+.onboarding-zone .input { justify-self: end; width: auto; max-width: 100%; min-height: 38px; padding: 4px 10px; font-size: 13px; font-weight: 400; text-align: right; color: var(--color-bright); background: transparent; border-color: transparent; border-radius: 9px; }
+.onboarding-zone .input:hover { border-color: var(--color-line); }
+.onboarding-zone .input:focus { background: var(--color-ink); border-color: var(--color-action); }
+/* The action completes a 16px field: it reads at the same size, not one smaller. */
+.onboarding-card .onboarding-step-actions .btn-key { font-size: 16px; }
+/* Chrome paints a native triangle on datalist inputs — the only OS chrome on
+   this screen. The zone is editable text; hide it. */
+.onboarding-zone .input::-webkit-calendar-picker-indicator { display: none; }
+.onboarding-zone-error { margin: -8px 0 0; }
 
 /* Project work remains a readable part of the existing conversation shell. */
 .project-workflow { margin-block: 1rem; padding: 1.15rem; border: 1px solid var(--color-line-soft); border-radius: 1.15rem; background: var(--card-gradient); min-width: 0; }
@@ -9408,16 +9915,43 @@ mark {
 .channel-jump-latest { position:static; align-self:center; flex:none; margin:8px auto; z-index:1; background:var(--color-raised); border:1px solid var(--color-line); border-radius:999px; min-height:44px; box-shadow:0 4px 20px #0002; }
 .composer-send, .composer-tools-toggle { width:44px; height:44px; min-width:44px; min-height:44px; border-radius:13px; }
 .composer textarea { font-size:16px; min-height:44px; }
-.composer:focus-within { outline:1px solid color-mix(in srgb,var(--color-action) 40%,transparent); outline-offset:4px; border-radius:13px; }
+/* Focus ring hugs the composer (offset 0) so a panel edge never clips it. */
+.composer:focus-within { outline:1px solid color-mix(in srgb,var(--color-action) 40%,transparent); outline-offset:0; border-radius:13px; }
 .app-preview-window { display:block; position:static; inset:auto; width:100%; max-width:none; max-height:none; margin:0; padding:0; border:0; background:transparent; color:inherit; min-width:0; }
 .app-preview-window.expanded { position:fixed; inset:0; width:100dvw; height:100dvh; max-width:100dvw; max-height:100dvh; padding:16px; margin:0; background:var(--color-panel); overflow:auto; box-sizing:border-box; }
 .app-preview-window::backdrop { background:#0008; }
 .preview-window-toolbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
 .preview-window-toolbar .row-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .app-preview-window.expanded iframe { min-height:calc(100dvh - 170px) !important; }
-.preview-page { display:grid; gap:20px; min-width:0; }
-.preview-page > header { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; align-items:start; }
+/* Same top inset as .page-col on the other project tabs (0.6rem): without it
+   the title block sat 10px higher here, so switching to Preview lifted the
+   header and closed the gap over the page title (owner 2026-10-27). */
+.preview-page { display:grid; gap:20px; min-width:0; padding-top:0.6rem; }
+/* The page's own bar only. `> header` also matched the ProjectTabs header,
+   which turned its step rail into a shrink-to-fit flex item (536px inside a
+   608px column) and re-laid it out as each query landed (owner 2026-10-27). */
+.preview-page > .preview-bar { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; align-items:start; }
 .preview-page h1 { margin-block:6px; }
+.preview-page .app-preview-window { max-width:none; }
+.preview-page .artifact-panel { width:100%; max-width:none; }
+/* Holds the app's own height before the app is in the frame, so the window and
+   the Download row under it stay put while the preview opens. Only the page's
+   own window reserves this: inside the chat the card is meant to grow. Picking
+   Phone afterwards is a user action, not a shift. */
+.preview-stage { display:grid; min-width:0; }
+.preview-stage > iframe { align-self:stretch; }
+.preview-stage-standalone { min-height:max(520px,calc(100dvh - 210px)); }
+.preview-device-switch { display:inline-flex; gap:3px; padding:3px; border:1px solid var(--color-line); border-radius:12px; background:var(--color-raised); }
+.preview-device-switch button { min-height:38px; padding:0 14px; border:0; border-radius:9px; background:transparent; color:var(--color-muted); cursor:pointer; }
+.preview-device-switch button[aria-pressed="true"] { background:var(--color-panel); color:var(--color-text); box-shadow:0 1px 4px #0002; }
+.project-ready-actions { display:flex; flex-wrap:wrap; gap:10px; margin:20px 0; }
+.project-ready-actions > button { min-height:44px; }
+.connection-needed { margin-left:6px; color:var(--color-warning, #df9d30); font-size:12px; }
+.project-connections { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:44px; flex:none; }
+.project-connections svg { width:16px; height:16px; }
+.change-dialog { display:grid; gap:12px; }
+.change-dialog textarea { width:100%; min-width:0; box-sizing:border-box; resize:vertical; }
+.change-dialog .row-actions { display:flex; gap:8px; flex-wrap:wrap; }
 .preview-page .btn-key, .preview-page .btn-ghost, .preview-window-toolbar .btn-key, .preview-window-toolbar .btn-ghost { min-height:44px; border-radius:13px; display:inline-flex; align-items:center; justify-content:center; }
 @media(max-width:760px) {
  .caddie-card .workflow-heading { flex-wrap:wrap; }
@@ -9425,6 +9959,10 @@ mark {
  .caddie-card .row-actions > button { flex:1 1 120px; max-width:100%; white-space:normal; }
  .preview-window-toolbar .row-actions { width:100%; }
  .preview-window-toolbar .row-actions > * { flex:1; }
+ .project-ready-actions > button, .change-dialog .row-actions > button { flex:1 1 130px; }
+ .project-connections { width:44px; padding:0; position:relative; }
+ .project-connections .connection-label { display:none; }
+ .project-connections .connection-needed { position:absolute; right:2px; top:0; font-size:18px; }
  .app-preview-window.expanded { padding:12px 12px calc(12px + var(--safe-bottom)); }
  .channel-jump-latest { margin-bottom:calc(160px + var(--safe-bottom)); }
  .composer-hint:not(.draft-note) { display:none; }
@@ -9689,6 +10227,10 @@ mark {
 .project-card-foot .btn-key:hover { background:color-mix(in srgb, var(--color-action) 10%, transparent); border-color:var(--color-action); }
 .project-back { flex:none; display:inline-grid; place-items:center; width:44px; height:44px; margin-left:-7px; color:var(--color-muted); text-decoration:none; border-radius:11px; }
 .project-back:hover { background:var(--color-raised); color:var(--color-bright); }
+/* Reserved, unseen row: keeps the step rail and everything under it at the
+   same place while the project's own facts are still loading. Invisible,
+   unfocusable, and never announced. */
+.project-head-placeholder { visibility:hidden; }
 .focused-project-page { gap:22px; }
 .focused-project-head { padding:0; border:0; background:none; gap:10px; }
 /* One title row: [<-] Name ........ [Settings]. The arrow's glyph is pulled
@@ -9708,12 +10250,18 @@ mark {
    base carded chips with a clear now/done/next treatment and the per-step
    status line (which the flat version hid). */
 .focused-project-head .project-steps { grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; border-bottom:0; padding:0; }
-.focused-project-head .project-step { border:1px solid var(--color-line-soft); border-radius:10px; min-width:0; padding:9px 11px; background:var(--color-panel); box-shadow:none; display:grid; gap:2px; justify-content:stretch; position:relative; }
+/* The cards carry two short lines (step + its state) and no description, so
+   they sit at 44px — the app's action height — with the pair centred in the
+   card instead of pinned to the top edge (owner 2026-10-27: "too tall, and
+   for nothing"). The state row is reserved from the first paint (minmax), so
+   the label holds one position instead of jumping 7px up when the state —
+   which arrives with the project's data — fills the row in. */
+.focused-project-head .project-step { border:1px solid var(--color-line-soft); border-radius:10px; min-width:0; min-height:44px; padding:5px 11px; background:var(--color-panel); box-shadow:none; display:grid; grid-template-rows:auto minmax(13px,auto); gap:1px; align-content:center; justify-content:stretch; position:relative; }
 .focused-project-head .project-step.current { color:var(--color-bright); border-color:color-mix(in srgb, var(--color-action) 55%, transparent); background:color-mix(in srgb, var(--color-action) 10%, transparent); }
 .focused-project-head .project-step.current::after { content:none; }
 .focused-project-head .step-top { justify-content:flex-start; font-size:13.5px; gap:7px; }
 .focused-project-head .step-num { width:18px; height:18px; min-width:18px; font-size:11px; }
-.focused-project-head .step-state { display:block; font-size:11px; line-height:1.35; }
+.focused-project-head .step-state { display:block; font-size:11px; line-height:1.2; }
 /* Option B overview summary (owner 2026-10-23): a plain-language "where it
    stands" line above the step content. Promoted from a loose muted paragraph
    to a bordered status strip with a live dot while Caddie is working. */
@@ -9730,9 +10278,10 @@ mark {
    card stack, a .card-surface) is never double-boxed or shrunk below the
    column width (project-v2 asserts the Plan panel equals the column). */
 .focused-project-content { min-width:0; }
-.focused-project-content:has(> .project-workflow),
-.focused-project-content:has(> .focused-project-empty),
-.focused-project-content[data-testid='project-app-checks']:has(> section) {
+/* Owner 2026-10-28: ONE content rhythm for every project tab — Plan, Build,
+   Submit and Preview all start at the same inset inside the same card frame,
+   instead of Build carrying a 16px card while Plan/Submit ran edge-to-edge. */
+.focused-project-content {
 	border:1px solid var(--color-line); border-radius:12px; background:var(--color-panel); padding:16px;
 }
 /* Anti-nesting (owner 2026-10-23): PlanReview already cards its own sections,
@@ -9742,13 +10291,34 @@ mark {
 .focused-project-content:has(.plan-review),
 .focused-project-content:has(> .project-workflow[data-phase='looks-review']),
 .focused-project-content:has(> .saved-design) {
-	border:0; background:none; border-radius:0; padding:0;
+	/* Anti-nesting stays: inner plan/design surfaces render bare inside the
+	   shared frame (their own padding is zeroed below), so nothing double-
+	   pads — but the OUTER rhythm is now identical on every tab. */
 }
 .focused-project-content > .project-workflow,
 .focused-project-content .build-progress,
 .focused-project-content .settings-panel,
-.focused-project-content .imported-app { border:0; background:transparent; border-radius:0; padding:0; box-shadow:none; }
-.focused-project-content > .project-workflow { gap:18px; }
+.focused-project-content .imported-app,
+.focused-project-content > .submission-panel,
+.focused-project-content > .design-review-panel { border:0; background:transparent; border-radius:0; padding:0; box-shadow:none; }
+/* Truthful in-progress bar (owner 2026-10-28): an indeterminate stripe for the
+   planning/design turns — motion explains that work is happening, no fake %. */
+.workflow-progress { appearance:none; -webkit-appearance:none; width:100%; height:4px; border:0; border-radius:2px; overflow:hidden; background:var(--color-line); margin:10px 0 2px; }
+.workflow-progress::-webkit-progress-bar { background:var(--color-line); }
+.workflow-progress::-webkit-progress-value { background:var(--m-blue, #4d9fff); animation: workflow-progress-slide 1.6s ease-in-out infinite; }
+.workflow-progress:not([value])::-webkit-progress-value, .workflow-progress[indeterminate]::-webkit-progress-value { background:var(--m-blue, #4d9fff); }
+@keyframes workflow-progress-slide { 0% { margin-left:-40%; } 100% { margin-left:100%; } }
+@media (prefers-reduced-motion: reduce) { .workflow-progress::-webkit-progress-value { animation:none; } }
+
+/* The change-review strip and the ready entry sit inside the shared frame:
+   one inset, a hairline under the strip, no card-in-card. */
+.focused-project-content .ready-change-review { border:0; border-bottom:1px solid var(--color-line); border-radius:0; padding:0 0 12px; margin:0 0 12px; background:none; }
+.focused-project-content .ready-change-review .state-detail-report,
+.focused-project-content .ready-change-review ~ .state-detail { font-size:12.5px; }
+.focused-project-content .ready-change-review p[role="status"] { margin:0 0 8px; }
+.focused-project-content .ready-preview-entry { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:14px 0; }
+.focused-project-content .ready-preview-entry .state-detail { margin:0; }
+.focused-project-content > .project-workflow { gap:18px; margin-block:0; }
 .focused-project-content > .project-workflow > .compact-card-head { margin:0; padding:0; }
 .focused-project-content > .project-workflow > .compact-card-head .compact-card-kicker { display:none; }
 .focused-project-content > .project-workflow > .compact-card-head .compact-card-badge { border:0; padding:0; background:none; margin:0; }
@@ -9830,6 +10400,10 @@ mark {
 .project-chat-summary .compact-card-badge { white-space:normal; text-align:right; font-size:11px; }
 .project-chat-summary .workflow-summary-progress,.project-chat-summary .workflow-summary-history { border:0; background:none; padding:0; margin:0; }
 .project-chat-summary summary { min-height:44px; padding:10px 0; color:var(--color-muted); font-size:12px; }
+/* Same row, the activity read is not back yet: it holds its height without
+   being announced, so the decision row under it does not move when the
+   feature count arrives. */
+.project-chat-summary .workflow-summary-progress[data-reserved] { visibility:hidden; }
 .workflow-summary-features { list-style:none; margin:0; padding:0; }
 .workflow-summary-features li { display:flex; justify-content:space-between; gap:12px; padding:9px 0; border-top:1px solid var(--color-line); font-size:12px; }
 .focused-project-content :is(input,select,textarea) { font-size:16px; }
@@ -9852,7 +10426,13 @@ mark {
     keeps the same side padding as everything else on the page. */
  .focused-project-head .project-steps-compact { display:none; }
  .focused-project-head .project-steps { display:grid; grid-auto-flow:row; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; overflow:visible; padding:0; margin:0; }
- .focused-project-head .project-step { min-width:0; scroll-snap-align:none; padding:9px 11px; }
+ .focused-project-head .project-step { min-width:0; scroll-snap-align:none; grid-template-rows:auto; }
+ /* The status line is always off on a phone — the summary line above the grid
+    says it. The compact line only exists once the route names a step, so
+    relying on its sibling selector left the first frame with the status row
+    visible; hiding it there then moved the label 7px down inside the centred
+    card (owner 2026-10-27: the rail must not move). */
+ .focused-project-head .step-state { display:none; }
  .focused-project-content { padding:12px; }
  /* Anti-nesting (owner 2026-10-23): phones trim the supporting <details> card
     side padding to ~12px so the one card level does not steal content width. */
@@ -10525,6 +11105,7 @@ mark {
 .build-feature-check-detail {margin-top:5px;font-size:12px;color:var(--color-muted)}
 .build-feature-check-detail summary {min-height:32px;align-content:center}
 .build-feature-check-detail p {margin:5px 0}
+.build-feature-checks {margin:5px 0 0;padding-left:18px;display:grid;gap:4px;line-height:1.5}
 .build-progress--focused[data-quiet='true'] .build-stage-spinner {animation:none}
 @media(max-width:560px){
  .build-status-panel{padding:16px}
@@ -10598,11 +11179,20 @@ mark {
 .project-head-info:focus-visible,.plan-explore-link:focus-visible {outline:2px solid var(--color-action);outline-offset:3px}
 .project-head-urgent {display:flex;gap:8px;align-items:center;margin:0;font-size:13px;color:var(--color-warn)}
 .project-head-urgent svg {width:16px;height:16px;flex:none}
+/* A deadline that is not close yet is still a fact, told quietly (owner
+   2026-10-27: the row must not appear after the steps are already on screen). */
+.project-head-urgent[data-tone="neutral"] {color:var(--color-muted)}
+/* Same row, nothing known yet: it only holds the steps' place and is never
+   announced, so the rail never drops when the event lands. */
+.project-head-urgent[data-tone="reserved"] {visibility:hidden}
+.project-head-deadline-at {color:var(--color-muted)}
 .project-dialog {width:min(600px,calc(100vw - 40px));max-height:85dvh;box-sizing:border-box;padding:0;border:1px solid var(--color-line);border-radius:18px;background:var(--color-panel);color:var(--color-text);box-shadow:0 24px 90px #0006;overflow:auto;overscroll-behavior:contain}
 .project-dialog--wide {width:min(880px,calc(100vw - 40px))}
 .project-dialog::backdrop {background:#0009;backdrop-filter:blur(4px)}
 .project-dialog-head {position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 20px;background:var(--color-panel);border-bottom:1px solid var(--color-line-soft)}
 .project-dialog-head h2 {margin:0;font-size:20px;line-height:1.3}
+.project-dialog-body { padding:20px; min-width:0; overflow-wrap:anywhere; }
+.project-dialog-body > :first-child { margin-top:0; }
 .project-dialog-close {display:inline-grid;place-items:center;flex:none;width:44px;height:44px;padding:0;border:0;border-radius:12px;background:transparent;color:var(--color-muted);cursor:pointer}
 .project-dialog-close:hover {background:var(--color-raised);color:var(--color-text)}
 .project-info-body {padding:20px 24px;line-height:1.6;overflow-wrap:anywhere}
@@ -10625,10 +11215,15 @@ mark {
 .plan-detail-content h3 {margin:0 0 14px;font-size:17px}
 .plan-detail-content > section,.plan-detail-content .plan-review-source {margin-bottom:24px}
 .plan-detail-content pre {max-width:100%;overflow:auto}
+/* Owner 2026-10-29: inside the dialog the body already pads the sides; the
+   tabs and the content added a second 20-24px on each side for nothing. */
+.project-dialog-body > .plan-detail-tabs {padding-inline:0;margin-top:-8px}
+.project-dialog-body > .plan-detail-content {padding:16px 0 0}
 .plan-revision-hash {display:flex;flex-wrap:wrap;gap:8px;margin:20px 0;font-size:12px;color:var(--color-muted)}
 @media(max-width:560px){
  .project-dialog,.project-dialog--wide {width:100%;max-width:none;max-height:88dvh;margin:auto 0 0;border-radius:20px 20px 0 0;border-bottom:0}
  .project-dialog-head {padding:12px 16px}
+ .project-dialog-body {padding:16px}
  .project-dialog-head h2 {font-size:18px}
  .project-info-body,.plan-detail-content {padding:20px 16px}
  .plan-detail-tabs {top:69px;padding:8px;gap:0}
@@ -10636,8 +11231,48 @@ mark {
 }
 
 /* One enclosing review surface; note, journeys and actions remain unframed. */
-.plan-review-surface {padding:24px;border:1px solid var(--color-line);border-radius:13px;background:var(--color-panel);box-shadow:0 2px 8px #00000004}
+.plan-review-surface {padding:20px;border:1px solid var(--color-line);border-radius:13px;background:var(--color-panel);box-shadow:0 2px 8px #00000004}
 @media(max-width:560px){.plan-review-surface {padding:16px}}
+/* Owner 2026-10-29 ("too much nesting"): the title row and the plan share
+   the one surface — no card inside the card, tight vertical rhythm. */
+.plan-review-surface > .plan-decision.card-surface {padding:0;border:0;background:none;box-shadow:none;border-radius:0}
+.plan-review-surface .plan-decision > .plan-body {margin-top:12px}
+.plan-review-surface .plan-review--minimal {gap:12px}
+.plan-review-surface .plan-review-overview {margin:0 0 8px}
+.plan-review-surface .plan-journey-rows {margin:0}
+.plan-review-surface .plan-explore-link {min-height:44px;padding:4px 0}
+
+/* Staged builds (owner 2026-10-30): the first version, then the ideas to add
+   after — two flat lists, one quiet action per row. */
+.plan-stage {display:grid;gap:6px;min-width:0}
+.plan-stage + .plan-stage {margin-top:14px}
+.plan-stage-title {margin:0;font-size:15px;line-height:1.4}
+.plan-stage-time {font-weight:400;color:var(--color-muted)}
+.plan-stage-list {list-style:none;margin:0;padding:0;display:grid}
+.plan-stage-list li {display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:4px 0;border-bottom:1px solid var(--color-line-soft);font-size:14px;line-height:1.45}
+.plan-stage-list li:last-child {border-bottom:0}
+.plan-stage-item {min-width:0;overflow-wrap:anywhere}
+.plan-stage--later .plan-stage-item {color:var(--color-muted)}
+.plan-stage-meta {flex:none;font-size:13px;color:var(--color-muted);white-space:nowrap}
+.plan-stage-move {flex:none;min-height:44px;padding:0 4px;border:0;background:transparent;color:var(--color-action);font-size:13px;cursor:pointer;white-space:nowrap}
+.plan-stage-move:hover {text-decoration:underline}
+.plan-stage-move:focus-visible {outline:2px solid var(--color-action);outline-offset:2px;border-radius:6px}
+.plan-stage-note {margin:6px 0 0;font-size:13px;line-height:1.5;color:var(--color-muted)}
+
+/* "Add next" on a finished app: one suggestion, one button, the promise. */
+.add-next {display:grid;gap:6px;margin:12px 0 4px;padding:12px 0 0;border-top:1px solid var(--color-line-soft);min-width:0}
+.add-next-row {display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.add-next-title {display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin:0;font-size:14px;line-height:1.45;min-width:0}
+.add-next-kicker {font-size:12px;font-weight:600;color:var(--color-action)}
+.add-next-time {font-size:13px;color:var(--color-muted)}
+.add-next-note {margin:0;font-size:13px;line-height:1.5;color:var(--color-muted)}
+.add-next-failed {margin:0;font-size:13px;line-height:1.5;color:var(--color-warn)}
+.add-next-more {justify-self:start;min-height:44px;padding:0;border:0;background:transparent;color:var(--color-action);font-size:13px;cursor:pointer}
+.add-next-more:focus-visible {outline:2px solid var(--color-action);outline-offset:2px;border-radius:6px}
+.add-next-list {list-style:none;margin:0;padding:0;display:grid}
+.add-next-list li {display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px;padding:4px 0;border-bottom:1px solid var(--color-line-soft);font-size:14px}
+.add-next-list li:last-child {border-bottom:0}
+.add-next-list li[data-waiting] > span:first-child {color:var(--color-muted)}
 .plan-review-decision .plan-review-guide {margin-bottom:0}
 .plan-review-decision .plan-review-guide h3 {margin:0;font-size:16px}
 .plan-review-decision > .page-lede {margin:0}
@@ -10712,7 +11347,9 @@ mark {
 .look-option input { position: absolute; opacity: 0; pointer-events: none; }
 .look-option:has(input:checked) { border-color: var(--color-action); box-shadow: 0 0 0 1px var(--color-action); }
 .look-option:has(input:focus-visible) { outline: 2px solid var(--color-action); outline-offset: 3px; }
-.look-selected { display: none; position: absolute; top: -12px; right: 16px; z-index: 1; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; background: var(--color-action); color: var(--color-ink); font-size: 12px; font-weight: 700; }
+/* Inside the card: the scrolling track clips anything above it, so the badge
+   at -12px showed as a cut-off sliver ("Selected" half hidden, 2026-10-29). */
+.look-selected { display: none; position: absolute; top: 10px; right: 12px; z-index: 1; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 999px; background: var(--color-action); color: var(--color-ink); font-size: 12px; font-weight: 700; }
 .look-selected svg { width: 14px; height: 14px; }
 .look-option:has(input:checked) .look-selected { display: inline-flex; }
 
@@ -10766,3 +11403,318 @@ mark {
 
 .notif-push-enable { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; justify-content: space-between; padding: 14px 16px; margin-bottom: 16px; border: 1px solid var(--color-line); border-radius: 12px; background: var(--color-panel); }
 .notif-push-enable .settings-row-main { flex: 1; min-width: 200px; display: grid; gap: 2px; }
+
+/* Evidence comparisons use one surface and readable source values. */
+.ev-conflict { padding: 18px; border-radius: 13px; min-width: 0; }
+.ev-conflict-title { margin: 0 0 6px; font-size: 16px; line-height: 1.4; }
+.ev-conflict > .state-detail { margin: 0; }
+.ev-sides { gap: 0; margin-top: 16px; }
+.ev-sides .ev-claim { background: transparent; border: 0; border-top: 1px solid var(--color-line-soft); border-radius: 0; padding: 16px 0; min-width: 0; }
+.ev-claim .row-main { flex-wrap: wrap; gap: 8px; }
+.ev-value { margin: 6px 0; font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.ev-source-link { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; }
+.ev-quote { font-size: 14px; line-height: 1.6; }
+.ev-devdetail > summary { min-height: 44px; align-content: center; font-size: 12px; letter-spacing: 0; text-transform: none; }
+
+/* ==========================================================================
+   Hackathon card + detail pane polish (review 2026-10-28)
+   ========================================================================== */
+/* The whole featured card opens the details; the eligibility fold and links
+   inside it keep their own behaviour (HackathonResultsCard openFromCard). */
+.hk-feature[data-openable='true'] {
+	cursor: pointer;
+	transition: border-color 0.15s ease;
+}
+.hk-feature[data-openable='true']:hover {
+	border-color: color-mix(in srgb, var(--color-action) 45%, var(--color-line));
+}
+.hk-details-link {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	min-height: 36px;
+	padding: 0 0.25rem;
+	border: 0;
+	background: none;
+	color: var(--color-action);
+	font: inherit;
+	font-size: 0.875rem;
+	font-weight: 600;
+	text-decoration: none;
+	cursor: pointer;
+}
+.hk-details-link:hover {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+/* The featured card's action row: the verdict on the left, "See details" on
+   the right, on one line (it used to stack a big blue Devpost button). */
+.hk-feature .hk-feature-actions {
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	width: 100%;
+}
+/* The eligibility chip: same height as its neighbours, a small caret instead
+   of the word "why", and the reason in plain words first when opened. */
+.hk-elig-summary .hk-chip-elig {
+	padding: 0.2rem 0.55rem;
+	font-weight: 600;
+}
+.hk-elig-caret {
+	width: 14px;
+	height: 14px;
+	color: var(--color-muted);
+	transition: transform 0.15s ease;
+}
+.hk-elig-disclosure[open] .hk-elig-caret {
+	transform: rotate(180deg);
+}
+.hk-elig-disclosure[open] {
+	flex-basis: 100%;
+}
+/* Flat: no box or indent around the reason (owner 2026-10-28). */
+.hk-why-body {
+	margin: 0.45rem 0 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	display: grid;
+	gap: 0.3rem;
+}
+.hk-why-reason {
+	margin: 0;
+	font-size: 0.875rem;
+	line-height: 1.45;
+	color: var(--color-bright);
+}
+.hk-why-rule > summary {
+	width: fit-content;
+	cursor: pointer;
+	font-size: 0.8125rem;
+	color: var(--color-action);
+}
+.hk-why-quote {
+	margin: 0;
+	font-size: 0.8125rem;
+	line-height: 1.5;
+	color: var(--color-muted);
+}
+/* The honesty line is a sentence, not code. */
+.cdp-digest .cdp-digest-ai {
+	font-family: inherit;
+}
+@media (prefers-reduced-motion: reduce) {
+	.hk-elig-caret {
+		transition: none;
+	}
+}
+/* Detail pane: the header verdict is the same chip as the card. */
+/* Beats the older ".cdp-pane .cdp-header-verdict { background:none; border:0 }". */
+.cdp-pane .cdp-topbar .hk-chip.cdp-header-verdict {
+	font-size: 0.8125rem;
+	font-weight: 600;
+	padding: 0.25rem 0.6rem;
+	border: 1px solid transparent;
+	border-radius: 999px;
+}
+.cdp-pane .cdp-topbar .hk-chip.cdp-header-verdict[data-eligibility='eligible'] {
+	background: color-mix(in srgb, var(--color-ok) 14%, transparent);
+	border-color: color-mix(in srgb, var(--color-ok) 30%, transparent);
+	color: var(--color-ok);
+}
+.cdp-pane .cdp-topbar .hk-chip.cdp-header-verdict[data-eligibility='ineligible'],
+.cdp-pane .cdp-topbar .hk-chip.cdp-header-verdict[data-eligibility='closed'] {
+	background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+	border-color: color-mix(in srgb, var(--color-danger) 28%, transparent);
+	color: var(--color-danger);
+}
+.cdp-pane .cdp-topbar .hk-chip.cdp-header-verdict[data-eligibility='unknown'] {
+	background: color-mix(in srgb, var(--color-muted) 12%, transparent);
+	border-color: color-mix(in srgb, var(--color-muted) 24%, transparent);
+	color: var(--color-muted);
+}
+/* One calm honesty line under the summary. */
+.cdp-digest .cdp-digest-ai {
+	margin: 0.5rem 0 0;
+	font-size: 0.8125rem;
+	line-height: 1.45;
+	color: var(--color-muted);
+}
+/* "Can you enter?" answer, then anything else to check. */
+.cdp-entry-verdict[data-verdict='eligible'] {
+	color: var(--color-ok);
+	font-weight: 600;
+}
+.cdp-entry-verdict[data-verdict='ineligible'] {
+	color: var(--color-danger);
+	font-weight: 600;
+}
+.cdp-entry-also {
+	margin: 0.6rem 0 0.25rem;
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: var(--color-bright);
+}
+.cdp-entry-summary ul {
+	margin: 0 0 0.6rem;
+	padding-left: 1.1rem;
+	color: var(--color-muted);
+	line-height: 1.5;
+}
+/* Footer: the next step in Caddie first, the event page as a quiet link. */
+.cdp-foot .cdp-plan {
+	flex: 1 1 auto;
+	min-height: 46px;
+	white-space: nowrap;
+}
+.cdp-foot .cdp-event-link {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	min-height: 44px;
+	padding: 0 0.35rem;
+	color: var(--color-muted);
+	font-size: 0.875rem;
+	white-space: nowrap;
+	text-decoration: none;
+}
+.cdp-foot .cdp-event-link:hover {
+	color: var(--color-bright);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+/* Flat entry rules in the detail pane: no box, border or indent. */
+.cdp-group-flat {
+	margin: 0.75rem 0 0;
+}
+.cdp-group-flat .cdp-group-label {
+	margin: 0 0 0.25rem;
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: var(--color-bright);
+}
+.cdp-quote-flat {
+	margin: 0 0 0.4rem;
+	font-size: 0.875rem;
+	line-height: 1.55;
+	color: var(--color-muted);
+}
+/* Tight rhythm in "Can you enter?" — no big gaps between answer and rule. */
+.cdp-pane .cdp-fine .cdp-section-title {
+	margin: 0 0 0.25rem;
+}
+.cdp-pane .cdp-fine .cdp-entry-verdict {
+	margin: 0 0 0.5rem;
+}
+.cdp-pane .cdp-fine .cdp-entry-summary {
+	padding: 0;
+}
+.cdp-pane .cdp-entry-also {
+	margin: 0.25rem 0 0.15rem;
+}
+/* Footer: the plan button full width, the event page a plain text link
+   (beats the older ".cdp-pane .cdp-foot > *" button box). */
+.cdp-pane .cdp-foot > .cdp-event-link {
+	grid-column: 1 / -1;
+	justify-self: center;
+	min-height: 40px;
+	padding: 0 0.5rem;
+	border: 0;
+	background: none;
+}
+
+/* Owner 2026-10-29: the project card opened in a window was a card inside the
+   window — a second border, a second padding and a second "FarmLog AI · Plan"
+   header under the window's own "FarmLog AI" title. In a dialog the window IS
+   the frame: the workflow renders bare, and only its status badge stays. */
+.project-dialog-body > .project-workflow.caddie-card { margin:0; padding:0; border:0; border-radius:0; background:none; box-shadow:none; }
+.project-dialog-body > .project-workflow > .compact-card-head { margin:0 0 6px; padding:0; }
+.project-dialog-body > .project-workflow > .compact-card-head .compact-card-kicker { display:none; }
+.project-dialog-body > .project-workflow > .compact-card-head .compact-card-badge { margin:0; }
+.project-dialog-body > .project-workflow .workflow-heading { margin-block:0 12px; }
+.project-dialog-body > .project-workflow .workflow-plan { border:0; border-radius:0; padding:0; background:none; }
+/* The in-chat project card: one level, no empty action row, a quiet bar while
+   the plan is written. */
+.project-chat-summary > .workflow-progress { margin:8px 0 0; }
+.project-chat-summary > .row-actions { margin-top:12px; }
+.project-chat-summary > h3 + .state-detail { margin:4px 0 0; }
+/* The planning intake: a quiet fold, not a "You" bubble. */
+.intake-note { margin:4px 0 12px; color:var(--color-muted); font-size:13px; }
+.intake-note > summary { min-height:44px; display:flex; align-items:center; cursor:pointer; }
+.intake-note > p { margin:0 0 4px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
+/* The GitHub footnote is one sentence that wraps, never three columns. */
+.workflow-repo-nudge { display:block; margin-top:14px; padding-top:12px; border-top:1px solid var(--color-line-soft); font-size:12.5px; line-height:1.55; }
+.workflow-repo-nudge .r-link { display:inline; min-height:0; padding:0; }
+/* Honest progress while a plan, the looks or the screens are prepared. */
+.preparation-progress { margin-top: 10px; }
+.preparation-progress > .workflow-progress { margin: 0 0 8px; }
+.preparation-progress-stage { margin: 0; font-size: 14px; color: var(--color-bright); }
+.preparation-progress .state-detail { margin: 2px 0 0; font-size: 12.5px; }
+/* A stopped turn is plain words, not a code-font alarm box (2026-10-29). */
+.settlement-banner { font-family: inherit; font-size: 13.5px; line-height: 1.5; border-radius: 12px; padding: 10px 14px; }
+
+/* Owner 2026-10-30 hierarchy pass: one loud thing per screen. */
+/* Connections and Settings are quiet icons beside the title, like Info. */
+.focused-project-head .project-head-info.project-head-settings,
+.project-head-info.project-connections { width:44px; min-width:44px; height:44px; min-height:44px; padding:0; gap:0; border:0; background:transparent; color:var(--color-muted); position:relative; }
+.project-head-info.project-head-settings:hover,
+.project-head-info.project-connections:hover { color:var(--color-text); background:var(--color-raised); }
+.project-head-info.project-connections .connection-needed { position:absolute; right:7px; top:3px; font-size:18px; color:var(--color-warn); }
+/* A paused build leads with one plain headline in the warning colour. */
+.project-workflow[data-phase='blocked'] .workflow-heading h3 { color:var(--color-warn); }
+/* Roll back is a rare, careful action: a small link, not a button. */
+.build-text-action.build-feature-rollback { min-height:32px; padding:4px 0; font-size:13px; white-space:nowrap; }
+/* Beside its own project page the chat card is one line; the page owns the actions. */
+.project-chat-summary--compact { padding:12px 14px; }
+.project-chat-summary--compact .project-chat-summary-line { margin:6px 0 0; font-size:14px; line-height:1.45; color:var(--color-bright); }
+
+/* Build activity → Checks and Attempts (owner 2026-10-30): the current part's
+   loop, every part's state, and attempts grouped by part. Rows, not cards. */
+.build-checks-view { display:grid; gap:20px; }
+.build-checks-view h3 { margin:0; font-size:var(--r-body, 0.95rem); color:var(--color-bright); }
+.checks-kicker { margin:0 0 2px; font-size:12px; letter-spacing:0.06em; text-transform:uppercase; color:var(--color-muted); }
+.checks-now h3 { font-size:1.05rem; }
+.build-loop { list-style:none; margin:12px 0 0; padding:0; display:grid; gap:0; counter-reset:loop; }
+.build-loop-step { display:grid; grid-template-columns:18px minmax(0, 12rem) minmax(0, 1fr); align-items:baseline; gap:4px 10px; padding:8px 0; border-bottom:1px solid var(--color-line-soft); }
+.build-loop-step:last-child { border-bottom:0; }
+.build-loop-label { color:var(--color-bright); font-weight:600; }
+.build-loop-detail { color:var(--color-muted); font-size:var(--r-meta); overflow-wrap:anywhere; }
+.build-loop-step[data-state='active'] .build-loop-label { color:var(--color-action); }
+.build-loop-step[data-state='ok'] .build-stage-mark,
+.checks-parts li[data-status='passed'] .build-stage-mark,
+.build-check-results li[data-outcome='passed'] .build-stage-mark,
+.build-history li[data-outcome='passed'] > .build-stage-mark { color:var(--color-ok); }
+.build-loop-step[data-state='failed'] .build-stage-mark,
+.checks-parts li[data-status='failed'] .build-stage-mark,
+.build-check-results li[data-outcome='failed'] .build-stage-mark,
+.build-history li[data-outcome='failed'] > .build-stage-mark { color:var(--color-warn); }
+.build-loop-note { margin:8px 0 0; font-size:var(--r-meta); color:var(--color-muted); }
+.checks-failing { margin-top:10px; padding-left:12px; border-left:3px solid var(--color-warn); }
+.checks-failing-title { margin:0 0 4px; font-size:var(--r-meta); font-weight:600; color:var(--color-bright); }
+.checks-failing ul, .attempt-failing { margin:4px 0 0; padding-left:1.1rem; list-style:disc; display:grid; gap:2px; font-size:var(--r-meta); color:var(--color-bright); }
+.checks-parts ul, .checks-host ul { list-style:none; margin:8px 0 0; padding:0; display:grid; gap:0; }
+.checks-parts li, .checks-host li { display:grid; grid-template-columns:18px minmax(0, 1fr) auto; align-items:baseline; gap:4px 10px; padding:6px 0; border-bottom:1px solid var(--color-line-soft); font-size:var(--r-meta); color:var(--color-bright); }
+.checks-parts li:last-child, .checks-host li:last-child { border-bottom:0; }
+.checks-parts li[data-status='pending'] { opacity:0.6; }
+.checks-part-meta { color:var(--color-muted); font-size:12px; text-align:right; }
+.build-checks-view .build-check-results { gap:0; }
+.build-checks-view .build-check-results li { display:grid; grid-template-columns:18px minmax(0, 1fr) auto; gap:4px 10px; }
+.attempt-part { border-top:1px solid var(--color-line-soft); padding:10px 0; }
+.attempt-part > summary { display:grid; grid-template-columns:18px minmax(0, 1fr); gap:2px 10px; cursor:pointer; list-style:none; }
+.attempt-part > summary::-webkit-details-marker { display:none; }
+.attempt-part > summary .checks-part-meta { grid-column:2; text-align:left; }
+.attempt-part-title { color:var(--color-bright); font-weight:600; }
+.build-history .attempt-part > ul { margin:8px 0 0 28px; }
+.build-history .attempt-part > ul > li { display:grid; grid-template-columns:18px minmax(0, 1fr) auto; gap:2px 10px; align-items:baseline; }
+.build-history-summary { color:var(--color-muted); }
+.build-history .attempt-part > ul > li details { margin-top:4px; }
+.build-history .attempt-part > ul > li details > summary { cursor:pointer; color:var(--color-muted); font-size:12px; }
+.build-recorded-at { color:var(--color-muted); font-size:12px; font-variant-numeric:tabular-nums; }
+@media (max-width: 560px) {
+	.build-loop-step { grid-template-columns:18px minmax(0, 1fr); }
+	.build-loop-detail { grid-column:2; }
+	.build-history .attempt-part > ul { margin-left:0; }
+}

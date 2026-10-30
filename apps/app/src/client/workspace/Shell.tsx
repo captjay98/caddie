@@ -8,6 +8,8 @@ import { AccountBriefV2 } from '../brief/DecisionCard.tsx';
 import { useDecisionCardAction } from '../brief/actions.ts';
 import { useAccountBrief, useMarkBriefRead, useSessionDisplayName } from '../queries.ts';
 import { useWorkspaceChrome } from './Chrome.tsx';
+import { readProfileName, suggestFirstName } from '../onboarding/Start.tsx';
+import { BriefNotifications } from './NotificationsBell.tsx';
 
 /**
  * Brief — the default left-hand surface (approved navigation 2026-10-09).
@@ -58,11 +60,13 @@ function BriefBody(): ReactElement {
 
 	const isNewUser = chrome.buildProjects.length === 0;
 	const cards = brief.data?.cards ?? [];
-	const unseenCount = cards.filter(card => !card.seen).length;
+	const hasUnread = cards.some(card => !card.seen && typeof card.key === 'string');
 	const header = briefHeaderState({ cards, pending: brief.isPending, error: Boolean(brief.error), transportMood: chrome.caddieMood });
 	const now = new Date();
 	const datePart = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(undefined, options).format(now);
-	const name = displayName.data?.trim().split(/\s+/)[0];
+	// The name the person gave Caddie wins; an account name that looks like a
+	// username (e.g. a judge name) is never used as a greeting.
+	const name = readProfileName() ?? (suggestFirstName(displayName.data ?? null) || undefined);
 	const nextCard = cards.find(card => card.status !== 'handled');
 	const nextProject = brief.data?.projects.find(project => project.id === nextCard?.projectId);
 	const context = nextCard?.kind === 'deadline' && !nextCard.schedule && nextProject
@@ -78,6 +82,12 @@ function BriefBody(): ReactElement {
 					<span>{datePart({ month: 'long' })}</span>
 				</time>
 				<div className="home-head-main">
+					{hasUnread ? <details className="brief-actions" data-testid="brief-actions"
+						onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false; }}
+						onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); event.preventDefault(); } }}>
+						<summary aria-label="Brief actions" title="Brief actions">···</summary>
+						<div className="brief-actions-menu"><button type="button" data-testid="brief-mark-all-read" onClick={markAllRead} disabled={markRead.isPending}>{markRead.isPending ? 'Marking read…' : 'Mark all read'}</button></div>
+					</details> : null}
 					<div className="home-head-leading">
 						<span className="home-head-mascot" data-testid="brief-mascot" aria-hidden="true"><Mascot mood={header.mood} size={46} live /></span>
 						<div><p className="home-head-greeting">Your brief{name ? `, ${name}` : ''}</p><h1 className="home-head-title">{header.title}</h1></div>
@@ -86,11 +96,8 @@ function BriefBody(): ReactElement {
 				</div>
 			</header>
 
+			<BriefNotifications />
 			<section className="home-panel" data-testid="brief-lane-panel">
-				{brief.data && unseenCount > 0 ? <div className="brief-feed-toolbar" data-testid="brief-feed-toolbar">
-					<span className="home-head-updates" data-testid="brief-count"><span className="home-head-new-dot" aria-hidden="true" />{unseenCount} new update{unseenCount === 1 ? '' : 's'}</span>
-					<button type="button" className="brief-head-markread" data-testid="brief-mark-all-read" onClick={markAllRead} disabled={markRead.isPending}>{markRead.isPending ? 'Marking read…' : 'Mark all read'}</button>
-				</div> : null}
 				{markRead.error ? <p className="state-detail" role="alert">Couldn’t mark these updates read. Try again.</p> : null}
 				<AccountBriefV2
 					state={{ kind: 'empty', stale: chrome.projectsFetching || brief.isFetching, retry: chrome.refreshAll }}
@@ -103,7 +110,18 @@ function BriefBody(): ReactElement {
 					hasBuildProjects={!isNewUser}
 					onAction={onCardAction}
 					onMarkAllRead={markAllRead}
-					onAskCaddie={() => chrome.goProjectTab('/', { pane: 'channel' })}
+					// Chat already beside the Brief: no button pointing at it. When it
+					// is hidden, the button reopens it in place: the side panel on
+					// desktop, the overlay on tablet, the Chat tab on a phone.
+					onAskCaddie={
+						chrome.convVisible
+							? undefined
+							: chrome.viewportMode === 'desktop'
+								? () => chrome.setConvOpen(true)
+								: chrome.viewportMode === 'tablet'
+									? chrome.toggleConvOverlay
+									: () => chrome.goProjectTab('/', { pane: 'channel' })
+					}
 					onBrowse={() => chrome.goProjectTab('/discover', {})}
 				/>
 			</section>

@@ -1,3 +1,4 @@
+import { allMigrationPaths } from "./fixtures/migrations.ts";
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
@@ -64,15 +65,8 @@ function d1Adapter(sqlite: Database): D1Database {
 function freshDb(): D1Database {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys=ON");
-  for (const migration of [
-    "0001_product.sql",
-    "0002_controls.sql",
-    "0003_artifacts.sql",
-    "0005_runs.sql",
-    "0018_build_workflow.sql",
-    "0048_repair_escalation.sql",
-  ]) {
-    sqlite.exec(readFileSync(`apps/app/migrations/${migration}`, "utf8"));
+  for (const path of allMigrationPaths()) {
+    sqlite.exec(readFileSync(path, "utf8"));
   }
   // Seed the project `external_operations.projectId` references (workspaces has
   // no FK; projects → workspaces). The fixture must stand on its own, not fail

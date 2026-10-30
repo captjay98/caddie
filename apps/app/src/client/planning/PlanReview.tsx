@@ -5,6 +5,7 @@ import { splitFeatureBlock, parsePlanFeatures } from "@caddie/contracts";
 import { PlanFeatureList } from "../project/FeatureChecklist.tsx";
 import { ProjectDialog } from "../project/ProjectDialog.tsx";
 import { CopyableId } from "../copyable.tsx";
+import { plainWordsForOwner } from "../conversation/response-hygiene.ts";
 import {
   parsePlanSections,
   planSectionGroup,
@@ -15,12 +16,19 @@ import {
   type PlanSection,
 } from "./plan-sections.ts";
 export { parsePlanSections } from "./plan-sections.ts";
+import { itemAboutMinutes, moveToFirst, moveToLater, planChoice, type MoveResult } from "./plan-choice.ts";
+import type { PlanStages } from "../../server/build-features.ts";
+
+/** The first-version ids the server recorded, when it has a view. */
+function stagesChoice(stages: PlanStages | null | undefined): string[] | null {
+  return stages?.first.length ? stages.first.map((item) => item.id) : null;
+}
 
 function SectionText({ section }: { section: PlanSection }) {
   return (
     <section className="plan-review-source">
       <h3>{section.heading}</h3>
-      <Markdown text={section.body} />
+      <Markdown text={plainWordsForOwner(section.body)} />
     </section>
   );
 }
@@ -42,6 +50,12 @@ export function PlanReview(props: {
   revisionHash?: string;
   context?: ReactNode;
   history?: ReactNode;
+  /** Staged builds: the owner's first-version choice (ids), before approval. */
+  choice?: readonly string[] | null;
+  /** Present only while the plan can still be approved: makes the lists movable. */
+  onChoiceChange?: (ids: string[]) => void;
+  /** The server's view after approval: what is built, adding, or waiting. */
+  stages?: PlanStages | null;
 }): ReactElement {
   const { display } = splitFeatureBlock(props.body);
   const { intro, sections } = parsePlanSections(display);
@@ -54,11 +68,24 @@ export function PlanReview(props: {
   const caveats = embeddedPlanCaveats(sections);
   const [exploring, setExploring] = useState(false);
   const [tab, setTab] = useState<DetailTab>("scope");
+  const [moveNote, setMoveNote] = useState<string | null>(null);
   const tabId = useId();
-  const rows = journeys.length
-    ? journeys.map((journey) => journey.heading)
-    : features.ok
-      ? features.features.slice(0, 4).map((feature) => feature.title)
+  // Staged builds (owner 2026-10-30): with a feature list, the card shows
+  // the first version and the "add after" ideas, and — before approval —
+  // lets the owner move items between them.
+  const staged = features.ok ? planChoice(features.features, props.choice ?? stagesChoice(props.stages)) : null;
+  const editable = Boolean(staged && props.onChoiceChange);
+  const statusOf = (id: string) =>
+    [...(props.stages?.first ?? []), ...(props.stages?.later ?? [])].find((item) => item.id === id)?.status ?? null;
+  const move = (result: MoveResult) => {
+    if (!result.ok) { setMoveNote(result.reason); return; }
+    setMoveNote(null);
+    props.onChoiceChange?.(result.chosen);
+  };
+  const rows = staged
+    ? []
+    : journeys.length
+      ? journeys.map((journey) => journey.heading)
       : [];
   return (
     <div className="plan-review plan-review--guided plan-review--minimal">
@@ -73,16 +100,57 @@ export function PlanReview(props: {
           ) : null}
         </p>
       ) : null}
+      {/* Owner 2026-10-29: no second title or lead-in line under "Your plan" —
+          the one-line overview (when the plan has one) and the list say it. */}
       <section className="plan-review-note" data-testid="plan-outcomes">
-        <h3>What your app will do</h3>
-        {overview ? (
-          <p className="plan-review-overview">{overview}</p>
-        ) : (
-          <p className="state-detail">
-            Your plan is ready to review. Explore it below to see the full
-            scope.
-          </p>
-        )}
+        {overview ? <p className="plan-review-overview">{overview}</p> : null}
+        {staged && features.ok ? (
+          <>
+            <section className="plan-stage" data-testid="plan-first-version">
+              <h3 className="plan-stage-title">
+                Your first version <span className="plan-stage-time">· about {staged.firstMinutes} min</span>
+              </h3>
+              <ul className="plan-stage-list">
+                {staged.first.map((feature) => (
+                  <li key={feature.id} data-testid={`plan-item-${feature.id}`}>
+                    <span className="plan-stage-item">{feature.title}</span>
+                    {editable ? (
+                      <button type="button" className="plan-stage-move" aria-label={`Move “${feature.title}” to later`}
+                        onClick={() => move(moveToLater(features.features, staged.first.map((item) => item.id), feature.id))}>
+                        Move to later
+                      </button>
+                    ) : statusOf(feature.id) === "built" ? <span className="plan-stage-meta">In your app</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+            {staged.later.length ? (
+              <section className="plan-stage plan-stage--later" data-testid="plan-add-after">
+                <h3 className="plan-stage-title">You can add these after</h3>
+                <ul className="plan-stage-list">
+                  {staged.later.map((feature) => {
+                    const status = statusOf(feature.id);
+                    return (
+                      <li key={feature.id} data-testid={`plan-item-${feature.id}`}>
+                        <span className="plan-stage-item">{feature.title}</span>
+                        {editable ? (
+                          <button type="button" className="plan-stage-move" aria-label={`Include “${feature.title}” now`}
+                            onClick={() => move(moveToFirst(features.features, staged.first.map((item) => item.id), feature.id))}>
+                            Include now
+                          </button>
+                        ) : (
+                          <span className="plan-stage-meta">{status === "built" ? "In your app" : status === "adding" ? "Adding now" : `about ${itemAboutMinutes(feature)} min`}</span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+                <p className="plan-stage-note">You approve the whole list. Caddie builds the first version, then you add the rest one at a time.</p>
+              </section>
+            ) : null}
+            {moveNote ? <p className="plan-stage-note" role="status">{moveNote}</p> : null}
+          </>
+        ) : null}
         {rows.length ? (
           <ul className="plan-journey-rows">
             {rows.map((row, index) => (
@@ -118,12 +186,12 @@ export function PlanReview(props: {
           setExploring(true);
         }}
       >
-        Explore the full plan <span aria-hidden="true">↗</span>
+        Read the full plan <span aria-hidden="true">↗</span>
       </button>
       <ProjectDialog
         open={exploring}
         onClose={() => setExploring(false)}
-        title="Explore the full plan"
+        title="The full plan"
         wide
       >
         <div
@@ -248,7 +316,7 @@ export function PlanReview(props: {
           ) : (
             <section data-testid="plan-review-reference">
               <h3>Technical specification</h3>
-              <Markdown text={display} />
+              <Markdown text={plainWordsForOwner(display)} />
               {props.revisionHash ? (
                 <div className="plan-revision-hash">
                   <span>Exact revision</span>

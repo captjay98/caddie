@@ -1,5 +1,13 @@
 interface PlanNote { kind: string; body: string; planRevision: string; authorRouteId?: string; signal?: AbortSignal }
 
+/**
+ * Refused looks saves allowed per turn. Each refusal names every fix at once,
+ * and a designer pass costs about half a US cent, so five lets a real
+ * correction land (EggOps Nigeria, 2026-10-30: three rounds fixed three
+ * different things and the step stopped one fix short).
+ */
+export const LOOKS_REPAIR_ATTEMPTS = 5;
+
 /** One repair budget shared by direct and delegated writes. The coordinator
  * supplies persisted counters; the last valid revision is never overwritten. */
 export function guardPlanWrites(deps: {
@@ -9,7 +17,7 @@ export function guardPlanWrites(deps: {
  block: (reason: string) => Promise<void>;
 }) {
  return async (input: PlanNote): Promise<void> => {
-  if (input.kind === 'looks' && deps.failures() >= 3)
+  if (input.kind === 'looks' && deps.failures() >= LOOKS_REPAIR_ATTEMPTS)
    throw new Error('LOOKS_REPAIR_LIMIT: stop retrying. Explain that the looks could not be prepared; the saved plan and last valid options are retained.');
   try {
    await deps.write(input);
@@ -18,7 +26,7 @@ export function guardPlanWrites(deps: {
    if (input.kind === 'looks' && error instanceof Error && error.message.includes('LOOKS_INVALID')) {
     const failures = deps.failures() + 1;
     deps.remember(failures);
-    if (failures === 3) await deps.block('Caddie could not prepare valid look options after three attempts. Your saved plan and earlier options are retained. You can ask Caddie to try again.');
+    if (failures === LOOKS_REPAIR_ATTEMPTS) await deps.block('Caddie couldn’t finish the look options this time. Your plan is safe — tap Try again.');
    }
    throw error;
   }

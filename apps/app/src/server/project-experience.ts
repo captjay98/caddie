@@ -39,6 +39,7 @@ import { summariseArchitecture } from './architecture-summary.ts';
 import { architectureBlockHash, listArchitectureReviews, reviewVerdict } from './architecture-review.ts';
 import { listModules, type ModuleRow, type ModuleStatus } from './module-slots.ts';
 import { lookupRunByConversation } from './runs.ts';
+import { pausedPreparation, preparationRetryLabel } from '../shared/preparation-stage.ts';
 
 /** The sentinel stopWorkflow writes into detail; distinguishes stop from repair/infra block. */
 export const STOP_SENTINEL = 'Stop requested.';
@@ -222,9 +223,9 @@ function messageOf(
 		case 'review':
 			return 'A plan is ready for your review.';
 		case 'looks':
-			return 'Caddie is preparing a few looks for your app. You pick one before the screens are designed.';
+			return 'Caddie is drawing 3 looks for your app. Pick one and building starts.';
 		case 'looks_review':
-			return 'Choose how your app should look. Caddie then designs every screen in that look.';
+			return 'Pick a look. Each one is your app’s first screen, and picking it starts the build.';
 		case 'design':
 			return 'Caddie is designing the screens. You review the design before anything is built.';
 		case 'design_review':
@@ -330,6 +331,7 @@ export async function projectExperience(db: D1Database, scope: Scope): Promise<P
 	const planEverApproved =
 		approval?.status === 'approved' || approval?.status === 'revoked' || approval?.status === 'expired';
 	const stage = stageOf(workflow, planEverApproved);
+	const preparation = workflow ? pausedPreparation(workflow, planEverApproved) : null;
 	const hasPlan = Boolean(plan);
 	const previewId = workflow?.previewId ?? null;
 	const hasPreview = Boolean(previewId);
@@ -372,8 +374,8 @@ export async function projectExperience(db: D1Database, scope: Scope): Promise<P
 		preview: previewId
 			? { id: previewId, revision: plan ? String(plan.revision) : 'unknown', current: previewCurrent }
 			: null,
-		message: messageOf(stage, workflow, planApproved),
-		actions: actionsOf(stage, hasPlan, hasPreview, canTryAgain),
+		message: preparation && preparation !== 'plan' ? `Caddie paused while preparing the ${preparation === 'looks' ? 'look options' : preparation}. Your saved work is retained.` : messageOf(stage, workflow, planApproved),
+		actions: actionsOf(stage, hasPlan, hasPreview, canTryAgain).map(action => preparation && action.kind === 'retry' ? {...action,label:preparationRetryLabel(preparation)} : action),
 		...(design_overview ? { design: design_overview } : {}),
 		...(modules ? { modules } : {}),
 		...(spendStop ? { spendStop } : {}),

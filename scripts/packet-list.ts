@@ -64,7 +64,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 		live: [],
 	},
 	P07: {
-		tests: ['tests/preview-access.integration.test.ts'],
+		tests: ['tests/preview-access.integration.test.ts', 'tests/isolated-preview.test.ts'],
 		browser: ['tests/browser/artifacts.spec.ts'],
 		live: ['tests/live/preview.spec.ts'],
 	},
@@ -93,6 +93,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/discovery-prizes.test.ts',
 			'tests/detail-facts.test.ts',
 			'tests/deadline-time.test.ts',
+			'tests/contest-source-deadline.test.ts',
 			'tests/generated-app-policy.test.ts',
 			'tests/planning.integration.test.ts',
 			'tests/candidate-digest.test.ts',
@@ -101,7 +102,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/devpost-source.test.ts',
 			'tests/discover-quality.test.ts',
 			'tests/discovery-sanitize.test.ts',
-			'tests/hackathon-card-builder.test.ts',
+			'tests/hackathon-card-builder.test.ts', 'tests/discovery-hooks-forwarding.test.ts', 'tests/response-hygiene-handoff.test.ts', 'tests/owner-words.test.ts', 'tests/preparation-progress.test.ts', 'tests/chat-intent.test.ts', 'tests/evidence-copy.test.ts', 'tests/preparation-stage.test.ts',
 			'tests/hackathon-card.test.ts',
 			'tests/research.test.ts',
 			'tests/rules-reading.test.ts',
@@ -291,7 +292,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 		tests: [
 			'tests/build-workflow.test.ts',
 			'tests/demo-contract.test.ts',
-			'tests/build-activity.test.ts',
+			'tests/build-activity.test.ts', 'tests/build-checks-model.test.ts',
 			'tests/build-timeline.test.ts',
 			'tests/sandbox-durability.test.ts',
 			'tests/single-recipe.test.ts',
@@ -358,6 +359,10 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			// the instrument wiring.
 			'tests/spend-instrument-spike.test.ts',
 			'tests/build-spend.test.ts',
+			// The account-wide and per-project AI spending ceiling (owner 2026-10-29).
+			'tests/model-spend-guard.test.ts',
+			// Staged builds: first version, then "add after" items (owner 2026-10-30).
+			'tests/staged-builds.test.ts',
 			'tests/spend-instrument.test.ts',
 			// Lane 5 follow-up: the real snapshot reads and the Try-again card.
 			'tests/part-snapshot.test.ts',
@@ -506,7 +511,7 @@ export const PACKET_MAP: Record<string, Record<PacketCategory, string[]>> = {
 			'tests/markdown-cache.test.ts',
 			'tests/refresh-policy.test.ts',
 			'tests/design-look-handoff.test.ts',
-			'tests/looks.test.ts',
+			'tests/looks.test.ts', 'tests/look-machine-checks.test.ts',
 			'tests/navigation-search.test.ts',
 			'tests/design-reaches-code.test.ts',
 			'tests/design-mock-theme.test.ts',

@@ -1,4 +1,3 @@
-import { Mascot } from "@caddie/ui/Mascot";
 import { resumeWorkflow } from "../conversation/workflow-dispatch.ts";
 import { useState } from "react";
 import * as v from "valibot";
@@ -6,6 +5,15 @@ import { Link } from "@tanstack/react-router";
 import type { ApprovalRecord, DesignOverview } from "@caddie/contracts";
 import { ProjectExperienceSchema } from "@caddie/contracts";
 import { PlanReview } from "./PlanReview.tsx";
+import { choiceDiffers } from "./plan-choice.ts";
+import type { PlanStages } from "../../server/build-features.ts";
+import { parsePlanFeatures, type PlanFeature } from "@caddie/contracts";
+
+/** A revision's feature list, or null when it has none. */
+function revisionFeatures(body: string): PlanFeature[] | null {
+  const parsed = parsePlanFeatures(body);
+  return parsed.ok ? parsed.features : null;
+}
 import { approvalForRevision, approvalExpired } from "./plan-decision.ts";
 import type { ReactElement, ReactNode } from "react";
 import { formatTimeAgo } from "@caddie/ui/time";
@@ -62,6 +70,8 @@ interface DecisionRecord {
 /** What approving means, in one plain sentence (plan 5.3) — two lines at most on a phone. */
 export const APPROVE_MEANING =
   "Caddie builds exactly this plan, privately. It asks you before publishing or changing real data.";
+/** What happens after approving, in the merged look step (owner 2026-10-29). */
+export const NEXT_AFTER_APPROVAL = "Next, Caddie draws three looks. Building starts when you pick one.";
 
 /**
  * Once the plan is approved, the badge and the button follow the build itself
@@ -89,15 +99,21 @@ export function DesignReview(props: {
   onContinue?: () => void;
   /** The build's own phase; once the plan is approved the badge and button follow it. */
   buildPhase?: WorkflowPhase | null;
+  /** A pause BEFORE the build (the looks or screens): nothing was built, so there is no build to follow. */
+  pausedBeforeBuild?: boolean;
   /** The "How your app works" panel, passed in by the shell (it needs the workspace's data). */
   howItWorks?: ReactNode;
   /** The project's name: the plan's `# Title` is hidden when it only repeats it. */
   projectName?: string;
+  /** Staged builds: the server's first-version / add-after view, after approval. */
+  planStages?: PlanStages | null;
   isPending?: boolean;
   error?: unknown;
   retry?: () => void;
 }): ReactElement {
   const [busy, setBusy] = useState<"approved" | "rejected" | null>(null);
+  // The owner's first-version choice for the plan on screen (null = the plan's own split).
+  const [choice, setChoice] = useState<string[] | null>(null);
   const [records, setRecords] = useState<DecisionRecord[]>([]);
   const [decisionError, setDecisionError] = useState<string | null>(null);
   // Decision windows confirm the plan or collect a concrete change request.
@@ -168,6 +184,8 @@ export function DesignReview(props: {
           planId: revision.id,
           decision,
           note: decision === "rejected" ? changeNote.trim() : undefined,
+          // Staged builds: only a split the owner actually changed is sent.
+          ...(decision === "approved" && choice && revisionFeatures(revision.body) && choiceDiffers(revisionFeatures(revision.body)!, choice) ? { firstVersion: choice } : {}),
         },
       );
       props.onDecisionSaved?.();
@@ -256,7 +274,7 @@ export function DesignReview(props: {
       (persisted && persisted.status !== "pending" && !stuckAtReview),
     );
   const approved = effectiveRecord?.decision === "approved";
-  const follow = approved ? buildFollow(props.buildPhase) : null;
+  const follow = approved && !props.pausedBeforeBuild ? buildFollow(props.buildPhase) : null;
   // Only an unusual approval state earns a badge; the normal case is "IS THIS OK?".
   const approvalNote = props.approvalPending
     ? "Checking decision…"
@@ -279,9 +297,7 @@ export function DesignReview(props: {
   };
 
   const decisionControls = <>
-        <p className="page-lede" data-testid="approve-meaning">
-          {effectiveRecord ? APPROVE_MEANING : 'Next, Caddie prepares the screens for you to review. Building starts only after you approve the design.'}
-        </p>
+        {effectiveRecord ? null : <p className="page-lede" data-testid="approve-meaning">{NEXT_AFTER_APPROVAL}</p>}
         <div className="row-actions">
           {follow ? (
             <Link
@@ -292,14 +308,6 @@ export function DesignReview(props: {
             >
               {follow.action}
             </Link>
-          ) : effectiveRecord && props.onContinue ? (
-            <button
-              type="button"
-              className="btn-key"
-              onClick={props.onContinue}
-            >
-              Continue with Caddie
-            </button>
           ) : null}
           {!effectiveRecord ? (
             <>
@@ -395,7 +403,9 @@ export function DesignReview(props: {
             review" pill is not repeated here: the Plan step above already
             says it, so a badge appears only for an unusual state. */}
         <div className="plan-decision-head">
-          <div className="project-caddie-heading"><Mascot mood={approved ? "done" : "needs"} size={48} /><h2 className="ev-title">Plan version {latest.revision}</h2></div>
+          {/* Owner 2026-10-29: one title, one status, no repeats. The tab
+              already says "Plan"; the version is a quiet meta. */}
+          <div className="plan-decision-title"><h2 className="ev-title">Your plan</h2>{latest.revision > 1 ? <span className="plan-decision-version">Version {latest.revision}</span> : null}</div>
           {effectiveRecord ? (
             <span
               className="badge"
@@ -403,20 +413,27 @@ export function DesignReview(props: {
               data-testid="design-review-outcome"
               data-decision={effectiveRecord.decision}
             >
-              {follow ? follow.badge : approved ? "Plan approved" : "Changes requested"}{" "}
-              · version {latest.revision}
+              {follow ? follow.badge : approved ? "Approved" : "Changes requested"}
             </span>
           ) : approvalNote ? (
             <span className="badge" data-tone="warn" data-testid="design-review-status">
               {approvalNote}
             </span>
+          ) : null /* The ask lives once, above the buttons ("Does this plan look right?"). */}
+        </div>
+        {/* Owner 2026-10-29 ("too much nesting/folding"): the plan sits in
+            this one card, always open — title, status, the short list of what
+            the app does, one link to the full plan. No fold, no second title. */}
+        <div className="plan-body" data-testid="design-review-plan-body">
+          {latest.body.trim() === "" ? (
+            <p className="state-detail">This revision carries no plan text.</p>
           ) : (
-            <p className="kicker plan-decision-ask" data-tone="action">
-              IS THIS OK?
-            </p>
+            <div data-testid="plan-body-content">
+              <PlanReview body={latest.body} projectName={props.projectName} revisionHash={latest.bodyHash} context={props.howItWorks} history={versionHistory} decision={!effectiveRecord ? decisionControls : undefined}
+              choice={!effectiveRecord ? choice : null} onChoiceChange={!effectiveRecord && !decisionsDisabled ? setChoice : undefined} stages={effectiveRecord ? props.planStages : null} />
+            </div>
           )}
         </div>
-
       </section>
       )}
 
@@ -458,9 +475,7 @@ export function DesignReview(props: {
             <h3 id="approve-plan-title" className="state-title">
               Approve plan version {latest.revision}?
             </h3>
-            <p className="state-detail">
-              Next, Caddie prepares the screens for you to review.
-            </p>
+            <p className="state-detail">{NEXT_AFTER_APPROVAL}</p>
             {/* Only say something if it is genuinely useful here: a spending
                limit the owner actually set. At plan-approval there is no app to
                publish and no money is spent, so those "reassurances" are noise. */}
@@ -600,30 +615,11 @@ export function DesignReview(props: {
             <PlanReview body={viewed.body} projectName={props.projectName} revisionHash={viewed.bodyHash} history={versionHistory} />
           )}
         </div>
-      ) : (
-      <details
-        className={approved ? "plan-review-details fold" : "plan-review-details"}
-        data-testid="design-review-plan-body"
-        open={!approved}
-      >
-        <summary className="ev-head">
-          What you're making — plan version {latest.revision}
-        </summary>
-        {latest.body.trim() === "" ? (
-          <p className="state-detail">This revision carries no plan text.</p>
-        ) : (
-          <div className="plan-body" data-testid="plan-body-content">
-            <PlanReview body={latest.body} projectName={props.projectName} revisionHash={latest.bodyHash} context={props.howItWorks} history={versionHistory} decision={!effectiveRecord ? decisionControls : undefined} />
-          </div>
-        )}
+      ) : null}
 
-      </details>
-      )}
-
-      {!viewed && effectiveRecord ? <section className="plan-decision-footer" data-testid="plan-decision-actions">
-        <h3>Your recorded decision</h3>
-        {decisionControls}
-      </section> : null}
+      {/* Decided: the only thing left to do here is follow the build. Before the
+          build there is nothing to press — the Design tab carries the next step. */}
+      {!viewed && effectiveRecord && follow ? <div className="row-actions plan-decision-footer" data-testid="plan-decision-actions">{decisionControls}</div> : null}
 
       {/* Earlier versions (§4 anchor #earlier): one fold row like the others,
           a flat list inside. "View" swaps the version into the plan's place
@@ -631,40 +627,8 @@ export function DesignReview(props: {
           Hidden when there is nothing earlier (owner steering, 2026-10-15). */}
 
 
-      {records.length > 0 ? (
-        <details
-          className="card-surface settings-panel"
-          data-testid="design-review-record"
-        >
-          <summary className="ev-head">Your decisions this session</summary>
-          <div className="row-list">
-            {records.map((record) => (
-              <div
-                className="inspector-row"
-                key={`${record.revisionId}:${record.at}`}
-              >
-                <div className="row-main">
-                  <span className="row-title">
-                    <span
-                      className="badge"
-                      data-tone={
-                        record.decision === "approved" ? "ok" : "danger"
-                      }
-                    >
-                      {record.decision}
-                    </span>{" "}
-                    Plan version{" "}
-                    {props.planRevisions.find(
-                      (revision) => revision.id === record.revisionId,
-                    )?.revision ?? "previous"}
-                  </span>
-                  <span className="mono-id">{formatTimeAgo(record.at)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </details>
-      ) : null}
+      {/* The decision itself is the badge on the title row; a second
+          "Your decisions this session" fold repeated it (owner 2026-10-29). */}
     </div>
   );
 }

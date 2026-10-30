@@ -68,10 +68,20 @@ export function dateRange(candidate: HackathonCandidate): string | null {
 	return single ? shortDate(single) : null;
 }
 
-/** The submission deadline ("Oct 23"), or null when no end date is known. */
-export function deadline(candidate: HackathonCandidate): string | null {
+/**
+ * The submission deadline, with the time left when it is close: "Today",
+ * "Tomorrow", "2 days", else "Oct 23"; null when no end date is known.
+ */
+export function deadline(candidate: HackathonCandidate, now: Date = new Date()): string | null {
 	const end = candidate.deadline ?? candidate.endsAt;
-	return end ? deadlineTime(end).closed ? 'Closed' : deadlineTime(end).today ? 'Today' : shortDate(end) : null;
+	if (!end) return null;
+	const time = deadlineTime(end);
+	if (time.closed) return 'Closed';
+	if (time.today) return 'Today';
+	const left = daysUntil(end, now);
+	if (left === 1) return 'Tomorrow';
+	if (left === 2) return '2 days';
+	return shortDate(end);
 }
 
 export const FORMAT_LABEL: Readonly<Record<NonNullable<HackathonCandidate['format']>, string>> = {
@@ -87,7 +97,7 @@ export function rowFacts(candidate: HackathonCandidate): string[] {
 	if (prize) facts.push(prize);
 	if (candidate.participants && candidate.participants > 0) facts.push(`${compactCount(candidate.participants)} entered`);
 	const end = deadline(candidate);
-	if (end) facts.push(`ends ${end}`);
+	if (end) facts.push(end === 'Today' ? 'ends today' : end === 'Tomorrow' ? 'ends tomorrow' : end === '2 days' ? 'ends in 2 days' : end === 'Closed' ? 'closed' : `ends ${end}`);
 	return facts;
 }
 
@@ -159,5 +169,29 @@ export function eligibilityView(candidate: HackathonCandidate): EligibilityView 
 		return { state: 'confirm', label, short: ask ? `Confirm ${ask}` : 'Confirm rules', why: hasQuote ? 'What to confirm' : null };
 	}
 	if (note) return { state: 'unknown', label: note, short: note, why: hasQuote ? 'What the rules say' : null };
-	return { state: 'unknown', label: 'Entry not checked yet', short: 'Not checked', why: null };
+	// "Not checked" read as Caddie failing (review 2026-10-28); this says what
+	// the person can do.
+	return { state: 'unknown', label: 'I have not read this event’s rules yet. Check them on the event page', short: 'Check the rules', why: null };
+}
+
+/** True when the submission closes within 2 days (today, tomorrow or the day after). */
+export function endsSoon(candidate: HackathonCandidate, now: Date = new Date()): boolean {
+	const left = daysUntil(candidate.deadline ?? candidate.endsAt, now);
+	return left !== null && left >= 0 && left < 3;
+}
+
+/**
+ * Calendar days from today (in the reader's own time zone) to the closing
+ * day: 0 today, 1 tomorrow. A bare date is that calendar day; an instant is
+ * the local day it falls on. Null when unknown.
+ */
+function daysUntil(iso: string | null | undefined, now: Date): number | null {
+	if (!iso) return null;
+	const dayKey = (date: Date) => {
+		const p = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+		return Date.parse(`${p}T00:00:00Z`);
+	};
+	const endDay = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? Date.parse(`${iso}T00:00:00Z`) : Number.isFinite(Date.parse(iso)) ? dayKey(new Date(iso)) : NaN;
+	if (!Number.isFinite(endDay)) return null;
+	return Math.round((endDay - dayKey(now)) / 86_400_000);
 }

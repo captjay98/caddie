@@ -8,8 +8,11 @@ import {
 	routeAcceptsImage,
 	IDEATION_TURN_WINDOW,
 	ROLE_THINKING,
+	compactionFor,
+	CONTEXT_BUDGET_TOKENS,
 	type ModelRole,
 } from '../apps/app/src/agents/providers.ts';
+import { specialistModelRole } from '../apps/app/src/agents/specialists.ts';
 
 /**
  * Stage 2 — the extended frozen model registry. The routes themselves are
@@ -57,14 +60,14 @@ describe('model registry (providers.ts)', () => {
 		}
 	});
 
-	test('chat and build use the 3.5 mid tier; plan stays on GLM; helper stays on Nano', () => {
+	test('chat uses the 3.5 mid tier; build runs on MiniMax; plan stays on GLM; helper stays on Nano', () => {
 		expect(findModelRouteForRole('chat').id).toBe('nemotron-3.5-super-vl');
-		expect(findModelRouteForRole('build').id).toBe('nemotron-3.5-super-vl');
+		// Owner 2026-10-29: the builder moves to MiniMax-M3.1-Flash (half Super
+		// VL's input price, a quarter of its cached price).
+		expect(findModelRouteForRole('build').id).toBe('minimax-m3.1-flash');
 		expect(findModelRouteForRole('plan').id).toBe('glm-5.3-flash');
-		// The build move is a deliberate quality-for-cost trade: implementation
-		// turns now cost more than planning turns, the reverse of 2026-10-15.
-		expect(findModelRouteForRole('build').outputPriceMinorUnits)
-			.toBeGreaterThan(findModelRouteForRole('plan').outputPriceMinorUnits);
+		expect(findModelRouteForRole('build').inputPriceMinorUnits)
+			.toBeLessThan(findModelRouteForRole('chat').inputPriceMinorUnits);
 		// The helper job is rules-reading: strict JSON out of a long page.
 		// Lightning was tried again on 2026-10-20 at the route's real 4,096 cap:
 		// 17,867 chars of narrated reasoning, `finish_reason: length`, no JSON.
@@ -141,11 +144,70 @@ test('execution instructions do not inherit the brainstorming window', () => {
   expect(coordinatorModelRole({ isHome: false, ideationTurnsLeft: 8, request: 'For small farms' })).toBe('ideation');
 });
 
-test('every role carries a thinking level, at the live-verified maximum (2026-10-25)', () => {
-	// scripts/probe-thinking.ts LIVE VERIFIED all five Nebius routes accept
-	// reasoning_effort up to 'max'. The owner directive is maximum effort per
-	// model; this pins the registry so a future edit cannot silently drop it.
+test('every role carries a thinking level: medium, and low for the design author and builder (owner 2026-10-29: context hygiene)', () => {
+	// 'max' (2026-10-25) made the design author think for minutes and return
+	// nothing, and every saved thinking token rode along into later turns. At
+	// 'medium' the design author still spent its whole output on reasoning twice
+	// on the merged looks task, and the builder thought for 437 s and 306 s in
+	// single calls (Farm Ops, 2026-10-29), so both run on 'low'.
+	const LOW = new Set<ModelRole>(['designAuthor', 'build']);
 	for (const role of Object.keys(MODEL_ROLES) as ModelRole[]) {
-		expect(ROLE_THINKING[role], `role ${role}`).toBe('max');
+		expect(ROLE_THINKING[role], `role ${role}`).toBe(LOW.has(role) ? 'low' : 'medium');
 	}
+});
+test('the coordinator compacts past a bounded budget, not at the 1M window', () => {
+	const settings = compactionFor({ contextWindow: 1_048_576 });
+	// Owner 2026-10-29 bill: the conversation's size is the bill, so it stays small.
+	expect(CONTEXT_BUDGET_TOKENS).toBe(60_000);
+	expect(1_048_576 - settings.reserveTokens).toBe(CONTEXT_BUDGET_TOKENS);
+	expect(settings.keepRecentTokens).toBeLessThan(CONTEXT_BUDGET_TOKENS);
+	// A small window keeps Flue's floor instead of going negative.
+	expect(compactionFor({ contextWindow: 70_000 }).reserveTokens).toBe(20_000);
+});
+
+// --- Owner routing decision 2026-10-27 (model-role split) ------------------------
+// product authors the PRD on deepseek, the designer authors looks/design on
+// MiniMax, the independent plan reviewer is full GLM-5.3, and the legacy
+// `plan` role keeps glm-5.3-flash for the tech-lead and historic bindings.
+describe('2026-10-27 routing decision', () => {
+	test('the new roles resolve to their decided routes', () => {
+		expect(MODEL_ROLES.planAuthor).toBe('deepseek-v4.1-flash-1017');
+		expect(MODEL_ROLES.planReviewer).toBe('glm-5.3');
+		expect(MODEL_ROLES.designAuthor).toBe('minimax-m3.1-flash');
+		// Legacy route is retained for historic run bindings.
+		expect(MODEL_ROLES.plan).toBe('glm-5.3-flash');
+		expect(findModelRouteForRole('planAuthor').modelId).toBe('deepseek-ai/DeepSeek-V4.1-Flash-1017');
+		expect(findModelRouteForRole('planReviewer').modelId).toBe('zai-org/GLM-5.3');
+		expect(findModelRouteForRole('designAuthor').modelId).toBe('MiniMaxAI/MiniMax-M3.1-Flash');
+		// Every role — including the new ones — still resolves (fail closed).
+		for (const role of Object.keys(MODEL_ROLES) as ModelRole[]) {
+			expect(findModelRouteForRole(role).id).toBe(MODEL_ROLES[role]);
+		}
+	});
+
+	test('the MiniMax route carries the live-checked catalog values', () => {
+		const route = findModelRoute('minimax-m3.1-flash');
+		expect(route.modelId).toBe('MiniMaxAI/MiniMax-M3.1-Flash');
+		expect(route.specifier).toBe('nebius/MiniMaxAI/MiniMax-M3.1-Flash');
+		// Catalog 2026-10-27: $0.15 in / $0.60 out per Mtok, context up to 1M.
+		expect(route.inputPriceMinorUnits).toBe(15);
+		expect(route.outputPriceMinorUnits).toBe(60);
+		expect(route.contextWindow).toBe(1048576);
+		expect(route.maxTokens).toBeGreaterThanOrEqual(16384);
+		expect(route.pricingVersion).toBe('2026-10-27-nebius-catalog');
+	});
+
+	test('full GLM-5.3 can never take images, and MiniMax is not a vision route yet', () => {
+		expect(routeAcceptsImage('glm-5.3')).toBe(false);
+		expect(routeAcceptsImage('minimax-m3.1-flash')).toBe(false);
+	});
+
+	test('the specialist split routes product and tech-lead to the plan author, designer to the design author', () => {
+		const roleOf = (role: string, skills: string[]) =>
+			specialistModelRole({ role: role as never, skills });
+		expect(roleOf('product', ['planning'])).toBe('planAuthor');
+		expect(roleOf('designer', ['planning', 'design'])).toBe('designAuthor');
+		expect(roleOf('tech-lead', ['planning', 'build-verify'])).toBe('planAuthor');
+		expect(roleOf('frontend', ['build-verify'])).toBe('build');
+	});
 });

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, setSystemTime } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { readFileSync } from 'node:fs';
 import type { Scope } from '@caddie/contracts';
+import { applyFinalSchema } from './fixtures/migrations.ts';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import { actorContext, discoverForActor } from '../apps/app/src/server/coordinator-context.ts';
 import { createWorkspace, createProject, createPlanDocRevision } from '../apps/app/src/server/projects.ts';
@@ -29,9 +30,7 @@ afterEach(() => {
 async function world() {
 	const sqlite = new Database(':memory:');
 	sqlite.exec('PRAGMA foreign_keys=ON');
-	for (const name of ['0001_product.sql', '0004_evidence.sql', '0008_profile.sql', '0009_discovery.sql', '0011_home_project.sql', '0013_discovery_saved.sql', '0015_plan_decisions.sql', '0017_profile_preferences.sql']) {
-		sqlite.exec(readFileSync(new URL(`../apps/app/migrations/${name}`, import.meta.url), 'utf8'));
-	}
+	applyFinalSchema(sqlite);
 	const db = {
 		prepare(sql: string) {
 			const stmt = sqlite.prepare(sql);
@@ -114,10 +113,10 @@ describe('actor discovery', () => {
 			expect(result.candidates[0]?.interestMatches).toEqual(['education']);
 			expect(result.candidates[0]?.eligibility.verdict).toBe('unknown');
 			expect(result.candidates[1]?.eligibility.verdict).toBe('ineligible');
-			expect(result.gaps.join(' ')).toContain('open-contests API');
+			expect(result.gaps.join(' ')).toContain('on Devpost');
 			// The (stubbed-offline) Devpost primary is a visible named gap, never silent.
-			expect(result.gaps.some((gap) => gap.startsWith('devpost:'))).toBe(true);
-			expect(result.gaps.join(' ')).toContain('Solo participation');
+			expect(result.gaps.some((gap) => gap.includes('couldn’t reach Devpost'))).toBe(true);
+			expect(result.gaps.join(' ')).toContain('official rules');
 		} finally { sqlite.close(); }
 	});
 
@@ -144,7 +143,7 @@ describe('actor discovery', () => {
 		try {
 			const empty = await discoverForActor(db, scope);
 			expect(empty.candidates).toEqual([]);
-			expect(empty.gaps.join(' ')).toContain('does not mean no suitable hackathons exist');
+			expect(empty.gaps.join(' ')).toContain('does not mean there are no good hackathons');
 			await expect(discoverForActor(db, { ...scope, actorId: 'bob' })).rejects.toThrow('membership');
 			await expect(discoverForActor(db, scope, { actorId: 'bob' } as never)).rejects.toThrow('invalid discovery');
 			await expect(discoverForActor(db, scope, { limit: 51 })).rejects.toThrow('invalid discovery');
@@ -186,6 +185,40 @@ describe('actor discovery', () => {
 	});
 });
 
+describe('actor discovery — a first build needs time (review 2026-10-28)', () => {
+	beforeEach(() => setSystemTime(new Date('2026-10-29T12:00:00Z')));
+	afterEach(() => setSystemTime());
+	const seed = async (db: D1Database, scope: Scope) => {
+		await seedCandidates(db, [
+			// Bigger, so the heuristic order would put it first.
+			{ source: 'devpost', url: 'https://soon.devpost.com/', title: 'Closes Tomorrow Jam', summary: 'By Nebius · Aug 26 - Oct 30, 2026 · 28800 registered · Online · $50,000 in prizes' },
+			{ source: 'devpost', url: 'https://later.devpost.com/', title: 'Three Weeks Jam', summary: 'By ACME · Oct 01 - Nov 20, 2026 · 300 registered · Online · $500 in prizes' },
+		]);
+		await runDiscoveryFeed(db, scope, { adapters: [createLocalSeedAdapter(db, 'devpost')] });
+	};
+	test('a first-timer gets the event they can finish first; the closing-tomorrow one is still shown', async () => {
+		const { db, sqlite, scope } = await world();
+		try {
+			await upsertProfile(db, 'alice', { country: 'NG', formatPreference: 'either' });
+			await seed(db, scope);
+			const firstTimer = await discoverForActor(db, scope, { refresh: false, limit: 10 }, { inspect: false, firstTimer: true });
+			expect(firstTimer.firstTimer).toBe(true);
+			expect(firstTimer.candidates.map((c) => c.title)).toEqual(['Three Weeks Jam', 'Closes Tomorrow Jam']);
+			const regular = await discoverForActor(db, scope, { refresh: false, limit: 10 }, { inspect: false });
+			expect(regular.candidates[0]?.title).toBe('Closes Tomorrow Jam');
+		} finally { sqlite.close(); }
+	});
+	test('the chat path skips the digest pre-warm and reports its stages', async () => {
+		const { db, sqlite, scope } = await world();
+		try {
+			await upsertProfile(db, 'alice', { country: 'NG' });
+			await seed(db, scope);
+			const stages: string[] = [];
+			await discoverForActor(db, scope, { refresh: false, limit: 10 }, { inspect: false, prewarm: false, onProgress: (p) => stages.push(p.stage) });
+			expect(stages).toEqual(['sources', 'ranking']);
+		} finally { sqlite.close(); }
+	});
+});
 describe('actor discovery — Devpost API as the primary list (Stage 2)', () => {
 	beforeEach(() => setSystemTime(new Date('2026-10-20T12:00:00Z')));
 	afterEach(() => setSystemTime());
@@ -339,8 +372,8 @@ describe('actor discovery — Tavily for other platforms and as Devpost backup (
 			const amazon = result.candidates.find((c) => c.url.includes('amazonappdev2026'))!;
 			expect(amazon.summary.startsWith('Open status unverified')).toBe(true);
 			expect(amazon.title).toBe('Build, Ship, Shape: Amazon Developer Hackathon');
-			expect(result.gaps.some((g) => g.startsWith('devpost:'))).toBe(true);
-			expect(result.gaps.join(' ')).toContain('open status, dates and prizes are unverified');
+			expect(result.gaps.some((g) => g.includes('couldn’t reach Devpost'))).toBe(true);
+			expect(result.gaps.join(' ')).toContain('may be out of date until you open the event page');
 		} finally { sqlite.close(); }
 	});
 });
@@ -364,7 +397,6 @@ describe('hackathon_details — follow-ups read the stored, checked detail', () 
 		const { hackathonDetailsForActor } = await import('../apps/app/src/server/coordinator-context.ts');
 		const { db, sqlite, scope } = await world();
 		try {
-			sqlite.exec(readFileSync(new URL('../apps/app/migrations/0020_discovery_digest_cache.sql', import.meta.url), 'utf8'));
 			await upsertProfile(db, 'alice', { country: 'NG' });
 			await seedCandidates(db, [
 				{ source: 'catalog', url: 'https://events.example/design', title: 'Design challenge', summary: 'Create a design app' },
@@ -424,7 +456,6 @@ describe('find_hackathons does not wait for the digest pre-warm', () => {
 	test('the search resolves while every digest call is still hanging; the pre-warm finishes later in the background', async () => {
 		const { db, sqlite, scope } = await world();
 		try {
-			sqlite.exec(readFileSync(new URL('../apps/app/migrations/0020_discovery_digest_cache.sql', import.meta.url), 'utf8'));
 			await upsertProfile(db, 'alice', { country: 'NG', formatPreference: 'online', freeTextInterests: ['AI'] });
 			await seedCandidates(db, [
 				{ source: 'catalog', url: 'https://events.example/ai-one', title: 'AI builders one', summary: 'Build AI tools online' },

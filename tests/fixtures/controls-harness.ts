@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import net from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { allMigrationPaths } from './migrations.ts';
 
 /**
  * P03 test-side harness (controls + budget-races suites): the P01/P02 fixture
@@ -116,17 +117,7 @@ export function freePort(): Promise<number> {
 const FIXTURE_ENTRY = join(import.meta.dir, 'controls.ts');
 
 export function controlsMigrationPaths(): string[] {
-	const root = join(import.meta.dir, '..', '..');
-	return [
-		join(root, 'apps', 'app', 'migrations', '0001_product.sql'),
-		join(root, 'apps', 'app', 'migrations', '0002_controls.sql'),
-		join(root, 'apps', 'app', 'migrations', '0011_home_project.sql'),
-		join(root, 'apps', 'app', 'migrations', '0012_brief_read.sql'),
-		join(root, 'apps', 'app', 'migrations', '0009_discovery.sql'),
-		join(root, 'apps', 'app', 'migrations', '0013_discovery_saved.sql'),
-		join(root, 'apps', 'app', 'migrations', '0014_stack_notify.sql'),
-		join(root, 'apps', 'app', 'migrations', '0015_plan_decisions.sql'),
-	];
+	return allMigrationPaths();
 }
 
 function wranglerCliPath(repoRoot: string): string {

@@ -70,17 +70,19 @@ describe('describeEligibility — the card wording, never a softer verdict', () 
 		const c = claim('r1', 'eligibility.restricted_countries', 'BR,RU,CU,IR,KP', 'including Brazil, Russia, Cuba, Iran, North Korea');
 		const evaluation = evaluateEligibility([c], { country: 'NG' });
 		expect(evaluation.verdict).toBe('eligible');
-		expect(describeEligibility(evaluation, new Map([['r1', c.value]]), 'NG')).toEqual({ note: 'You can enter', quote: c.quote, needsConfirm: false });
+		// The note says WHY in plain words: the country is not on the excluded
+		// list (review 2026-10-28) — never the excluded list read as the reason.
+		expect(describeEligibility(evaluation, new Map([['r1', c.value]]), 'NG')).toEqual({ note: 'You can enter: Nigeria is not on the list of excluded countries', quote: c.quote, needsConfirm: false });
 	});
 	test('ineligible via allowlist → "Only open to US"', () => {
 		const c = claim('r1', 'eligibility.open_countries', 'US', 'legal residents of the 50 United States');
 		const evaluation = evaluateEligibility([c], { country: 'NG' });
 		expect(describeEligibility(evaluation, new Map([['r1', 'US']]), 'NG')).toEqual({ note: 'Only open to US', quote: c.quote, needsConfirm: false });
 	});
-	test('ineligible via restriction → "Not open to residents of NG"', () => {
+	test('ineligible via restriction → "Not open to residents of Nigeria" (country name, not the code)', () => {
 		const c = claim('r1', 'eligibility.restricted_countries', 'NG,GH', 'residents of Nigeria and Ghana are excluded');
 		const evaluation = evaluateEligibility([c], { country: 'NG' });
-		expect(describeEligibility(evaluation, new Map([['r1', c.value]]), 'NG').note).toBe('Not open to residents of NG');
+		expect(describeEligibility(evaluation, new Map([['r1', c.value]]), 'NG').note).toBe('Not open to residents of Nigeria');
 	});
 	test('country passes + age gate → "Open to US · confirm you\'re 18+", verdict stays unknown', () => {
 		const country = claim('r1', 'eligibility.open_countries', 'US', 'legal residents of the 50 United States');
@@ -88,7 +90,7 @@ describe('describeEligibility — the card wording, never a softer verdict', () 
 		const evaluation = evaluateEligibility([country, age], { country: 'US' });
 		expect(evaluation.verdict).toBe('unknown');
 		expect(describeEligibility(evaluation, new Map([['r1', 'US'], ['r2', '18']]), 'US')).toEqual({
-			note: "Open to US · confirm you're 18+",
+			note: "Open to United States · confirm you're 18+",
 			quote: country.quote,
 			needsConfirm: true,
 		});
@@ -188,7 +190,7 @@ describe('HackathonResultsCard render (server-side, the real component)', () => 
 		expect(html.match(/data-testid="hk-card"/g)?.length).toBe(1);
 		expect(html.match(/data-testid="hk-row"/g)?.length).toBe(result.candidates.length - 1);
 		expect(html).not.toContain(AMAZON_SUMMARY);
-		expect(html).toContain('Entry checked for Nigeria');
+		expect(html).toContain('Entry rules read for 2 of 3 · for Nigeria');
 	});
 
 	test('past four rows the rest fold behind "Show N more"', () => {

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import type { D1Database } from '../apps/app/src/server/auth.ts';
 import { D1_MAX_VALUE_BYTES, createD1ContentStore } from '../apps/app/src/server/artifacts.ts';
 import { ScopeError } from '../apps/app/src/server/scope.ts';
+import { createTableSql } from './fixtures/migrations.ts';
 
 /**
  * Found 2026-10-19: production D1 refuses any single BLOB over 2,000,000
@@ -67,7 +68,7 @@ describe('the content store never writes a value production D1 would reject', ()
 	test('the stated limit really is below what the deployed DDL allows, so the guard is load-bearing', () => {
 		// The migration's CHECK is 5 MiB; D1's row limit is lower, so a value
 		// between the two passes the CHECK and is still refused by production.
-		const ddl = readFileSync(new URL('../apps/app/migrations/0003_artifacts.sql', import.meta.url), 'utf8');
+		const ddl = createTableSql('artifact_content');
 		const checkCap = Number(/<= *(\d+)\)/.exec(ddl)?.[1]);
 		expect(checkCap).toBeGreaterThan(D1_MAX_VALUE_BYTES);
 	});

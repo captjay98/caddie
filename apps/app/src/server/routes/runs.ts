@@ -1,8 +1,11 @@
 import { Hono } from "hono";
+import { requestsDifferentProject } from '../../shared/chat-intent.ts';
+import { getProject } from '../projects.ts';
+import type { Scope } from "@caddie/contracts";
 import type { AuthEnv } from "../auth.ts";
 import { ScopeError, projectScopeForUser, sessionUserId } from "../scope.ts";
 import { lookupRunByConversation } from "../runs.ts";
-import { readWorkflow } from "../build-workflow.ts";
+import { readWorkflow, recordOwnerChangeRequest } from "../build-workflow.ts";
 import { createRun, recordRepairRound, runSnapshot } from "../runs.ts";
 import { admitJudgeMessage } from "../judge-limits.ts";
 import { isJudgeAccount } from "../judge-access.ts";
@@ -185,8 +188,9 @@ export function conversationGuard(): Hono<{ Bindings: Env }> {
         "no run is bound to this conversation",
       );
     }
+    let projectScope: Scope;
     try {
-      await projectScopeForUser(c.env.DB, userId, binding.projectId);
+      projectScope = await projectScopeForUser(c.env.DB, userId, binding.projectId);
     } catch {
       throw new ScopeError(
         403,
@@ -211,6 +215,12 @@ export function conversationGuard(): Hono<{ Bindings: Env }> {
         conversationId,
       );
       if (!fromServer) {
+        let submitted: {kind?:unknown;body?:unknown} | null = null;
+        try { submitted = await c.req.raw.clone().json(); } catch { /* Transport validates malformed messages. */ }
+        if (submitted?.kind === 'user' && typeof submitted.body === 'string' && requestsDifferentProject(submitted.body)) {
+          const project = await getProject(c.env.DB, projectScope);
+          if (project.kind !== 'home') throw new ScopeError(409,'NEW_PROJECT_IN_PROJECT_CHAT',`This conversation is about ${project.name}. Start a new project from Everything so this project's plan stays separate.`);
+        }
         await admitJudgeMessage(c.env.DB, userId, c.env);
         // A lasting preference the person states ("Always use TypeScript.")
         // is offered to remember, for them to confirm (plan 6.2). It reads a
@@ -223,6 +233,22 @@ export function conversationGuard(): Hono<{ Bindings: Env }> {
           );
         } catch (error) {
           console.warn("stated preference not captured:", error);
+        }
+        // A change the owner asks for in chat is the only evidence the
+        // independent quality reviewer is allowed to trust for a scope change,
+        // and it reads that evidence from the decision log — so the owner's own
+        // words are recorded here, before the coordinator runs. A message the
+        // server dispatched itself is a framework prompt, not the owner's words,
+        // and never reaches this line (Street Food Share, 2026-10-28).
+        try {
+          const message = (await c.req.raw.clone().json()) as {
+            kind?: unknown;
+            body?: unknown;
+          };
+          if (message.kind === "user" && typeof message.body === "string")
+            await recordOwnerChangeRequest(c.env.DB, projectScope, message.body);
+        } catch (error) {
+          console.warn("owner change request not recorded:", error);
         }
       }
     }

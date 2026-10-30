@@ -6,8 +6,13 @@ import type { D1Database } from './auth.ts';
 import { findModelRouteForRole, type ModelRole } from '../agents/providers.ts';
 import { persistModelCall, type ModelCallRecord } from './model-call-instrument.ts';
 import { DIGEST_CALL_TIMEOUT_MS, MODEL_CALL_TIMEOUT_MS } from './http-timeouts.ts';
+import { assertModelSpendAllowed } from './model-spend-guard.ts';
 
 export interface HelperAccounting { db: D1Database; projectId?: string }
+/** Unmetered helper calls are refused: without a ledger the spending ceiling cannot see them. */
+export class HelperUnmeteredError extends Error {
+ constructor() { super('Helper model call refused: it has no spending ledger to record against.'); this.name = 'HelperUnmeteredError'; }
+}
 type HelperRole = Extract<ModelRole, 'helperRules' | 'helperRanking' | 'helperSummary'>;
 const REASON: Record<HelperRole, string> = { helperRules: 'rules_extraction', helperRanking: 'candidate_ranking', helperSummary: 'candidate_summary' };
 const HELPER_MAX_RETRIES = 2;
@@ -56,6 +61,9 @@ export async function helperModelCompletion(input: {
  const route = findModelRouteForRole(input.role);
  const requested = typeof input.request.body === 'string' ? object(JSON.parse(input.request.body)) : {};
  if (requested.model !== route.modelId || new URL(input.url).origin !== 'https://api.tokenfactory.nebius.com') throw new Error('Helper model request does not match its registered route');
+ // The spending ceiling sees every call it lets through (model-spend-guard.ts).
+ if (!input.accounting) throw new HelperUnmeteredError();
+ await assertModelSpendAllowed(input.accounting.db, undefined, { projectId: input.accounting.projectId ?? null });
  const allowance = input.role === 'helperSummary' ? DIGEST_CALL_TIMEOUT_MS : MODEL_CALL_TIMEOUT_MS;
  const deadlineAt = Math.min(input.deadlineAt ?? Infinity, Date.now() + allowance);
  const remaining = deadlineAt - Date.now();

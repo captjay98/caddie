@@ -264,6 +264,6 @@ describe('the idea stays in plain words; the stack lives only in the brief (plan
 
 	test('the proposal tool says so before the model writes the idea', () => {
 		const coordinator = readFileSync(new URL('../apps/app/src/agents/coordinator.ts', import.meta.url), 'utf8');
-		expect(coordinator).toContain('The idea is for the person: plain words on what the app does for them');
+		expect(coordinator).toContain('The idea and firstStep are for the person: plain words on what the app does for them');
 	});
 });

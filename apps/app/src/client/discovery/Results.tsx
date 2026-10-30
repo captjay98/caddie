@@ -206,8 +206,13 @@ export function DiscoveryResults(props: {
 	 */
 	onExplore?: (candidate: DiscoveryCandidateRecord) => void;
 	exploreBusy?: boolean;
+	/** Owner 2026-10-28 chat-first: the empty state's primary action hands off
+	 *  to the conversation. Optional so project-scoped uses keep working. */
+	openChat?: () => void;
+	/** Pre-fills the conversation composer with the hand-off ask. */
+	setComposerText?: (text: string) => void;
 }): ReactElement {
-	const { projectId, apiBase = '', onExplore, exploreBusy } = props;
+	const { projectId, apiBase = '', onExplore, exploreBusy, openChat, setComposerText } = props;
 	const [list, setList] = useState<DiscoveryEvaluatedList | null>(null);
 	const [latestFeed, setLatestFeed] = useState<DiscoveryFeedRecord | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -393,9 +398,28 @@ export function DiscoveryResults(props: {
 							Kaggle, checks the top ones' entry rules, and ranks them for you. Nothing here starts a build until you
 							say so.
 						</p>
-						<button type="button" className="btn-key" onClick={() => void runFeed()} disabled={busy} data-testid="discovery-sweep-empty">
-							{busy ? 'Checking…' : 'Find hackathons for me'}
-						</button>
+						{openChat ? (
+							<div className="row-actions">
+								<button
+									type="button"
+									className="btn-key"
+									data-testid="discovery-ask-in-chat"
+									onClick={() => {
+										setComposerText?.('Find hackathons that fit me — check the entry rules and show me the top picks.');
+										openChat();
+									}}
+								>
+									Ask Caddie in chat
+								</button>
+								<button type="button" className="btn-ghost" onClick={() => void runFeed()} disabled={busy} data-testid="discovery-sweep-empty">
+									{busy ? 'Checking…' : 'Just browse here'}
+								</button>
+							</div>
+						) : (
+							<button type="button" className="btn-key" onClick={() => void runFeed()} disabled={busy} data-testid="discovery-sweep-empty">
+								{busy ? 'Checking…' : 'Find hackathons for me'}
+							</button>
+						)}
 					</div>
 				) : (
 					<StatePanel kind="loading" title="Reading the list…" />

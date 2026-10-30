@@ -1,3 +1,4 @@
+import { allMigrationPaths, fixtureLegacyQualityPolicy } from "./fixtures/migrations.ts";
 import { describe, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
@@ -22,6 +23,7 @@ import {
   REDELIVERY_AFTER_MS,
   workerSelfDeliver,
   workerSelfAbort,
+  WORKFLOW_SIGNAL_TYPE,
   type CoordinatorDeliver,
 } from "../apps/app/src/server/workflow-dispatch.ts";
 import { getOperation, markDispatched, prepareOperation, recordReceipt } from "../apps/app/src/server/operations.ts";
@@ -69,25 +71,8 @@ function d1Adapter(sqlite: Database): D1Database {
 async function world() {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys=ON");
-  for (const migration of [
-    "0001_product.sql",
-    "0002_controls.sql",
-    "0003_artifacts.sql",
-    "0005_runs.sql",
-    "0008_profile.sql",
-    "0017_profile_preferences.sql",
-    "0011_home_project.sql",
-    "0015_plan_decisions.sql",
-    "0018_build_workflow.sql",
-    "0024_design_phase.sql",
-    // A build start opens its spending limit (judge status, team-mode tables).
-    "0033_judge_accounts.sql",
-    "0040_team_mode.sql",
-    // The choose-a-look step's phases.
-    "0044_looks_phase.sql",
-    "0048_repair_escalation.sql",
-  ]) {
-    const ddl = readFileSync(new URL(`../apps/app/migrations/${migration}`, import.meta.url), "utf8");
+  for (const path of allMigrationPaths()) {
+    const ddl = readFileSync(path, "utf8");
     for (const statement of splitSqlStatements(ddl)) sqlite.exec(statement);
   }
   sqlite
@@ -110,6 +95,9 @@ async function world() {
       sourceConversationId: homeRun.conversationId,
     });
     const scope = await projectScopeForUser(db, "alice", started.project.id);
+    // Pre-gate project: this fixture writes plan drafts directly, so its drafts
+    // were never subject to quality-v1's review (see fixtureLegacyQualityPolicy).
+    fixtureLegacyQualityPolicy(sqlite, scope.projectId);
     const plan = await createPlanDocRevision(db, scope, { kind: "prd", body: "# Todo\n\nAdd/complete/delete/filter/persist." });
     await workflowSnapshot(db, scope); // planning -> review
     await decideWorkflow(db, scope, { planId: plan.id, decision: "approved" });
@@ -193,6 +181,16 @@ describe("R02 server-owned durable dispatch", () => {
 
     const after = await readWorkflow(w.db, scope);
     expect(after?.pendingKey).toBeNull(); // acked
+  });
+
+  test("stores the durable Flue submission id as the coordinator admission receipt", async () => {
+    const w = await world();
+    const { scope } = await w.approvedProject();
+    const key = (await readWorkflow(w.db, scope))!.pendingKey!;
+
+    await dispatchPendingWorkflow(w.db, scope, async () => ({ delivered: true, receiptId: "sub_durable_123" }));
+
+    expect((await getOperation(w.db, key))?.receiptId).toBe("sub_durable_123");
   });
 
   test("duplicate dispatch (double-click / retried request) is a no-op — one logical job", async () => {
@@ -409,7 +407,7 @@ describe("workerSelfDeliver — the real self-fetch boundary", () => {
     const app = {
       async fetch(request: Request, env?: unknown, ctx?: unknown) {
         seen.push({ url: request.url, env, ctx, body: await request.text(), cookie: request.headers.get("cookie"), room: request.headers.get("x-partykit-room") });
-        return new Response("{}", { status: env ? 200 : 500 });
+        return Response.json({ submissionId: "sub_self_fetch_123" }, { status: env ? 202 : 500 });
       },
     };
     const env = { DB: {}, BETTER_AUTH_SECRET: "x" };
@@ -417,6 +415,7 @@ describe("workerSelfDeliver — the real self-fetch boundary", () => {
     const deliver = workerSelfDeliver(app, "http://localhost:5176", "session=abc", env, ctx);
     const result = await deliver({ conversationId: "conv_1", body: "Prepare a plan", idempotencyKey: "intake:k" });
     expect(result.delivered).toBe(true);
+    expect(result.receiptId).toBe("sub_self_fetch_123");
     expect(seen).toHaveLength(1);
     expect(seen[0]!.env).toBe(env);
     expect(seen[0]!.ctx).toBe(ctx);
@@ -434,6 +433,103 @@ describe("workerSelfDeliver — the real self-fetch boundary", () => {
     // siblings). The nested { message: {...} } shape this test once pinned was
     // the second cause of the stuck "Planning your app" card.
     expect(JSON.parse(seen[0]!.body)).toEqual({ idempotencyKey: "intake:k", kind: "user", body: "Prepare a plan" });
+  });
+
+  test("returns Flue's durable submission receipt from the admission response", async () => {
+    const app = {
+      async fetch() {
+        return Response.json({ submissionId: "sub_receipt_123", streamUrl: "/stream", offset: "0" }, { status: 202 });
+      },
+    };
+    const deliver = workerSelfDeliver(app, "http://localhost:5176", null, { DB: {} });
+
+    await expect(deliver({ conversationId: "conv_1", body: "Continue", idempotencyKey: "retry:stable-key" }))
+      .resolves.toEqual({ delivered: true, receiptId: "sub_receipt_123" });
+  });
+
+  test("does not call an OK response delivered when its durable receipt is missing", async () => {
+    const app = { async fetch() { return Response.json({ ok: true }, { status: 202 }); } };
+    const deliver = workerSelfDeliver(app, "http://localhost:5176", null, { DB: {} });
+
+    await expect(deliver({ conversationId: "conv_1", body: "Continue", idempotencyKey: "retry:stable-key" }))
+      .resolves.toEqual({ delivered: false });
+  });
+
+  // Defect (owner, 2026-10-28): a step prompt the server wrote itself arrived in
+  // the project conversation as `kind:'user'`, so the transcript rendered
+  // "You at 16:37: The authenticated review controls approved plan …" — internal
+  // instructions in the person's own bubble. A caller-defined signal is the
+  // shape Flue classifies as dispatch/control, so it cannot be read as owner
+  // speech; only words that came from the person keep the owner lane.
+  test("posts a control step as a signal, not as the owner's message", async () => {
+    const seen: string[] = [];
+    const app = {
+      async fetch(request: Request) {
+        seen.push(await request.text());
+        return Response.json({ submissionId: "sub_control_1" }, { status: 202 });
+      },
+    };
+    const deliver = workerSelfDeliver(app, "http://localhost:5176", null, { DB: {} });
+
+    await deliver({
+      conversationId: "conv_1",
+      body: "The authenticated review controls approved plan plan_1. Propose 2 or 3 looks.",
+      idempotencyKey: "decision:apr_1",
+      voice: "control",
+    });
+    expect(JSON.parse(seen[0]!)).toEqual({
+      idempotencyKey: "decision:apr_1",
+      kind: "signal",
+      type: WORKFLOW_SIGNAL_TYPE,
+      tagName: "workflow",
+      body: "The authenticated review controls approved plan plan_1. Propose 2 or 3 looks.",
+    });
+  });
+
+  test("keeps the owner's own request in the message lane", async () => {
+    const seen: string[] = [];
+    const app = {
+      async fetch(request: Request) {
+        seen.push(await request.text());
+        return Response.json({ submissionId: "sub_owner_1" }, { status: 202 });
+      },
+    };
+    const deliver = workerSelfDeliver(app, "http://localhost:5176", null, { DB: {} });
+
+    await deliver({
+      conversationId: "conv_1",
+      body: "Yes — that is what I want. Keep it simple and carry on.",
+      idempotencyKey: "continue:abc",
+      voice: "owner",
+    });
+    expect(JSON.parse(seen[0]!)).toEqual({
+      idempotencyKey: "continue:abc",
+      kind: "user",
+      body: "Yes — that is what I want. Keep it simple and carry on.",
+    });
+  });
+
+  test("the voice comes from who wrote the pending message: intake is the person, step prompts are not", async () => {
+    const w = await world();
+    const voices: Record<string, string | undefined> = {};
+    const deliver: CoordinatorDeliver = async (input) => {
+      voices[input.idempotencyKey.split(":")[0]!] = input.voice;
+      return { delivered: true };
+    };
+
+    // Intake: the person pressed Start on the proposal card.
+    const intake = await w.intakeProject("Voice app");
+    expect((await readWorkflow(w.db, intake.scope))!.pendingKey).toMatch(/^intake:/);
+    await dispatchPendingWorkflow(w.db, intake.scope, deliver);
+
+    // Plan approval parks the looks step; the look choice parks the design step;
+    // both are text Caddie wrote, so neither may arrive as owner speech.
+    const approved = await w.approvedProject();
+    expect((await readWorkflow(w.db, approved.scope))!.pendingKey).toMatch(/^decision:/);
+    await dispatchPendingWorkflow(w.db, approved.scope, deliver);
+
+    expect(voices.intake).toBe("owner");
+    expect(voices.decision).toBe("control");
   });
 });
 

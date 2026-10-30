@@ -106,6 +106,8 @@ export function previewDocument(
   seed: Record<string, string>,
   bridgeFetch = false,
   kind: "web" | "flutter" = "web",
+  nativeStorage = false,
+  migrationId = 'legacy-v1',
 ): string {
   // Keep all generated HTML parsing inside the sandbox, including resource tags.
   // The policy and synchronous storage shim precede every generated script.
@@ -144,11 +146,12 @@ export function previewDocument(
 		Object.defineProperty(window, 'localStorage', { value: storage, configurable: false, writable: false });
 	})();`;
   const fetchShim = kind === "flutter" ? flutterFetchShim(nonce, bridgeFetch) : bridgeFetch ? fetchBridgeShim(nonce) : null;
+  const nativeShim=`(function(){var seed=${scriptJSON(seed)},marker=${scriptJSON('__caddie_legacy_migrated:'+migrationId)};if(Object.keys(seed).length&&!sessionStorage.getItem(marker)){Object.keys(seed).forEach(function(key){if(localStorage.getItem(key)===null)localStorage.setItem(key,seed[key]);});sessionStorage.setItem(marker,'1');}parent.postMessage({kind:${scriptJSON(BRIDGE_KIND)},nonce:${scriptJSON(nonce)},storageMigrated:true},'*');})();`;
   // The shims stay CLASSIC scripts: they must be installed BEFORE the app's own
   // scripts run, because a generated app may read localStorage or call fetch
   // at parse time. Making them modules defers them past the app's first
   // statements and breaks exactly that ordering (browser spec, 2026-10-21).
-  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${kind === "flutter" ? FLUTTER_CSP : CSP}"><meta name="referrer" content="no-referrer"><script>${shim}</script>${fetchShim ? `<script>${fetchShim}</script>` : ""}</head><body>${html}</body></html>`;
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${kind === "flutter" ? FLUTTER_CSP : CSP}"><meta name="referrer" content="no-referrer"><script>${nativeStorage ? nativeShim : shim}</script>${fetchShim ? `<script>${fetchShim}</script>` : ""}</head><body>${html}</body></html>`;
 }
 
 /**

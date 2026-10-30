@@ -101,16 +101,22 @@ export function planOverview(
   intro: string,
   sections: readonly PlanSection[],
 ): string | null {
-  const overview = sections.find((s) =>
-    /^(overview|what .*do|product summary)\b/i.test(s.heading),
-  );
+  // The plan's own summary first ("What this is, in one paragraph"), then
+  // an overview-like section. A journeys section ("What your app will do —
+  // the journeys") opens with numbered steps, not a summary: its "**1." was
+  // shown as the overview (EggOps Nigeria, 2026-10-30).
+  const overview =
+    sections.find((s) => /^(what (this|it) is|overview|product summary|summary)\b/i.test(s.heading)) ??
+    sections.find((s) => /^what .*do\b/i.test(s.heading) && !/journeys|flows|stories/i.test(s.heading));
   const source = overview?.body ?? intro;
   const paragraphs = source.split(/\n\s*\n/).map((p) => p.trim());
   const prose = paragraphs.find(
-    (p) => p && !/^(?:#|[-*]\s|\d+\.|\*\*[^*]+:\*\*)/.test(p),
+    (p) => p && !/^(?:#|>|[-*]\s|\d+[.)]|\*\*\s*\d|\*\*[^*]+:\*\*|\|)/.test(p),
   );
   if (!prose) return null;
-  const sentence = prose.match(/^.*?[.!?](?:\s|$)/s)?.[0].trim() ?? prose;
+  const sentence = (prose.match(/^.*?[.!?](?:\s|$)/s)?.[0].trim() ?? prose).replace(/\*\*/g, "");
+  // A fragment ("**1.", "Note.") is not an overview.
+  if (sentence.split(/\s+/).length < 4) return null;
   return sentence.length > 280
     ? sentence.slice(0, 277).trimEnd() + "…"
     : sentence;

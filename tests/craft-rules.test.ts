@@ -18,29 +18,28 @@ const read = (p: string) => readFileSync(join(REPO, p), "utf8");
 
 describe("part 2f — the design skill carries the chosen look and uses the app theme", () => {
   const skill = read("apps/app/src/agents/skills/design/SKILL.md");
-  test("the design skill carries the chosen look's theme (not re-deciding it)", () => {
-    expect(skill).toContain("caddie-theme");
-    // The look is chosen upstream; the design skill must say so and not re-pick.
-    expect(skill).toContain("LOOK is already chosen");
-    expect(skill).toContain("do NOT re-decide colours");
+  // Owner 2026-10-29: the looks ARE the design — three looks, each the app's
+  // real first screen; the pick starts the build.
+  test("the design skill makes the looks the design, with no later screens step", () => {
+    expect(skill).toContain("The looks ARE the design");
+    expect(skill).toContain("three looks");
+    expect(skill).toContain("no later");
+    expect(skill).toContain("structurally different");
   });
-  test("the looks step names the audience and forbids reaching for the same look every time", () => {
-    // Both the audience line and the 'different looks' discipline moved to the
-    // LOOKS step on the coordinator.
+  test("the looks step names the audience and keeps the three looks different", () => {
     const coordinator = read("apps/app/src/agents/coordinator.ts");
     expect(coordinator).toContain("LOOKS STEP");
-    expect(coordinator).toContain("CLEARLY different");
+    expect(coordinator).toContain("exactly 3 looks");
     expect(coordinator.toLowerCase()).toContain("who the app is for");
   });
   test("it names one primary action per view and an intentional type scale", () => {
-    expect(skill).toContain("ONE primary action");
+    expect(skill).toContain("One primary button");
     expect(skill.toLowerCase()).toContain("type scale");
   });
-  test("mockups use the app theme's plain names, and it says use the icon kit not emoji", () => {
-    expect(skill).toContain("var(--bg)");
-    expect(skill).toContain("var(--primary)");
+  test("mockups use the app theme's variables, and it says use the icon kit not emoji", () => {
+    expect(skill).toContain("theme variables");
     expect(skill).toContain("caddie/icons.tsx");
-    expect(skill).toContain("NEVER");
+    expect(skill).toContain("never");
     expect(skill).toContain("emoji");
   });
 });
@@ -79,7 +78,7 @@ describe("part 2f — the planning skill asks who and where; the coordinator lea
   test("the coordinator's PRD instruction names the audience and leaves the look to the design step", () => {
     const coordinator = read("apps/app/src/agents/coordinator.ts");
     expect(coordinator).toContain("who the app is for and where they use it");
-    expect(coordinator).toContain("the design step owns the app's look");
+    expect(coordinator).toContain("the looks step owns the app's look");
     expect(coordinator).not.toContain("concrete visual direction");
   });
 });

@@ -110,7 +110,7 @@ function OnboardingFlow(): ReactElement {
   );
  }
  return (
-  <main id="main" data-testid="onboarding-page" style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 'clamp(16px, 4vw, 48px)' }}><div style={{ width: '100%', maxWidth: 720 }}>
+  <main id="main" data-testid="onboarding-page" style={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', padding: 'clamp(12px, 3vw, 48px)' }}><div style={{ width: '100%', maxWidth: 720 }}>
    {status.data?.completedAt ? (
     <StatePanel kind="loading" title="Getting your workspace ready…" />
    ) : (

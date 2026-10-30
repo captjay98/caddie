@@ -20,5 +20,5 @@ export function briefHeaderState(input: {
 		return { title: 'Caddie is building your app', mood: 'building', state: 'working' };
 	}
 	if (input.transportMood === 'thinking') return { title: 'Caddie is working on it', mood: 'thinking', state: 'working' };
-	return { title: 'Nothing needs you — I’ve got the watch.', mood: 'done', state: 'calm' };
+	return { title: 'Nothing needs you yet.', mood: 'done', state: 'calm' };
 }

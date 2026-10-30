@@ -35,7 +35,7 @@ export function briefActionRoute(
 		case 'approval':
 			return { to: '/design-review', search: card.status === 'handled' ? { ...search, approval: card.primaryAction.targetId } : search };
 		case 'deadline':
-			return { to: '/schedules', search };
+			return { to: card.id.startsWith('brf_hackathon-deadline_') ? '/submission' : '/schedules', search };
 		case 'result':
 			return { to: '/project', search };
 		case 'change':

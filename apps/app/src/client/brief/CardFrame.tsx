@@ -17,7 +17,7 @@ export function CardHeader({ design, context, status, fresh, freshLabel }: {
     {freshLabel ? <span className="compact-card-fresh" data-testid="card-fresh">· {freshLabel}</span> : null}
    </span>
    {status ? <span className="compact-card-badge">{status}</span> : null}
-   {fresh ? <span className="compact-card-new">New</span> : null}
+   {fresh ? <span className="compact-card-new" data-testid="card-unseen">New</span> : null}
   </div>
  );
 }

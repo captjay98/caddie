@@ -115,6 +115,13 @@ export class SandboxStub {
 		return imageUuid;
 	}
 
+	/** Seed a tagged base image with an unrelated file to test clean restores. */
+	seedTaggedFile(tagRef: string, path: string, content: string): void {
+		const id = this.seedImage(tagRef);
+		const image = this.images.get(id)!;
+		image.files.set(this.normalize(path), { bytes: Buffer.from(content, 'utf8'), mode: 0o100644, mtime: 1_760_000_000 });
+	}
+
 	/** Drop an image (eviction/loss): inspect reads 404, spawns refuse it. */
 	loseImage(imageUuid: string): void {
 		this.goneImages.add(imageUuid);

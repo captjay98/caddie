@@ -14,6 +14,7 @@ import {
 	type SnapshotRecord,
 } from './evidence/sources.ts';
 import { tavilyExtract } from './tavily.ts';
+import { extractSubmissionDeadline } from './contest-source-deadline.ts';
 
 /**
  * Rules reading (discovery Stage 4): Tavily READS each top candidate's official
@@ -380,6 +381,18 @@ export async function readRulesForCandidates(
 			}
 		}
 		if (snapshots.size === 0) return { ...empty(), pagesAvailable: 0 };
+		// Extract a narrowly formatted submission-period end directly from the
+		// immutable rules text. This is deterministic and does not depend on the
+		// eligibility model; an uncertain or conflicting pattern yields no claim.
+		const recorded = await listClaims(db, scope);
+		for (const { snapshot } of snapshots.values()) {
+			const value = extractSubmissionDeadline(snapshot.content);
+			if (!value || recorded.some(claim => claim.snapshotId === snapshot.id && claim.claimType === 'requirement.submission_deadline' && claim.quote === value)) continue;
+			try {
+				await addClaim(db, scope, { snapshotId: snapshot.id, claimType: 'requirement.submission_deadline', value, quote: value, extractionVersion: 'submission-deadline-1' });
+				claimsAdded += 1;
+			} catch { quotesRejected += 1; }
+		}
 		// 4–5. Extract claims for snapshots this extractor has not analysed yet.
 		if (!options.nebiusApiKey) {
 			gaps.push('Rules pages were saved but not analysed: the model key is not configured, so eligibility stays unknown.');

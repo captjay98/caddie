@@ -1,4 +1,6 @@
 import { Hono } from "hono";
+import { preparationProgress } from "../preparation-progress.ts";
+import {createPreviewLaunch} from '../isolated-preview.ts';
 import { androidDownloadView, androidQrSvg } from "../android-app.ts";
 import type { AuthEnv } from "../auth.ts";
 import { ScopeError, requireProjectScope, sessionUserId, assertProjectOwner } from "../scope.ts";
@@ -19,7 +21,10 @@ import {
   readBuildBundle,
   readOutputManifest,
   retryWorkflow,
+  autoResumeWatchdogPause,
   stopBuild,
+  requestReadyChange,
+  decideReadyChange,
 } from "../build-workflow.ts";
 import {
   PreviewRuntimeError,
@@ -29,7 +34,8 @@ import {
   type PreviewDatabaseEnv,
   type WorkerLoaderLike,
 } from "../preview-runtime.ts";
-import { rollbackToFeature } from "../build-features.ts";
+import { planStages, rollbackToFeature } from "../build-features.ts";
+import { addPlanItem, decidePlan } from "../plan-stages.ts";
 import { retryPart } from "../module-join.ts";
 import type { DispatchModuleBuilder } from "../modules.ts";
 import { tryAgainFromSavePoint } from "../build-steps.ts";
@@ -124,13 +130,21 @@ export function createBuildWorkflowRouter(
       c.req.param("projectId"),
     );
     await reconcileStalledBuild(c.env.DB, scope.projectId);
+    // A watchdog pause (dead connection, silent turn) resumes on its own, at
+    // most twice per run; the owner only sees Retry after that.
+    const deliver = deliverFor(c);
+    if (deliver && (await autoResumeWatchdogPause(c.env.DB, scope, c.env))) {
+      await dispatchPendingWorkflow(c.env.DB, scope, deliver).catch((error: unknown) => console.error("auto-resume dispatch failed", error));
+    }
     const snapshot = await workflowSnapshot(c.env.DB, scope);
+    const progress = await preparationProgress(c.env.DB, snapshot.workflow);
+    const stages = snapshot.workflow ? await planStages(c.env.DB, scope.projectId, snapshot.workflow.phase, snapshot.plan) : null;
     const previewId = snapshot.workflow?.previewId ?? null;
     const previewHasServer = previewId ? (await readBuildBundle(c.env.DB, scope, previewId).catch(() => null)) !== null : false;
     const previewKind = previewId ? ((await readOutputManifest(c.env.DB, scope, previewId).catch(() => null))?.kind ?? "web") : "web";
     // "Start from my GitHub repo": the copied app, shown until the first build has a preview of its own.
     const importPreview = await readImportPreview(c.env.DB, scope);
-    return c.json({ ...snapshot, previewHasServer, previewKind, importPreview });
+    return c.json({ ...snapshot, previewHasServer, previewKind, importPreview, preparationProgress: progress, planStages: stages });
   });
 
   // The signed phone link is a bearer capability: return it only to the
@@ -256,10 +270,25 @@ export function createBuildWorkflowRouter(
     } catch {
       throw new ScopeError(400, "invalid_input", "Expected JSON.");
     }
-    const snapshot = await decideWorkflow(c.env.DB, scope, input, c.env);
+    // Staged builds: an approval may carry the owner's first-version choice.
+    const snapshot = await decidePlan(c.env.DB, scope, input, c.env);
     // Server-owned dispatch (R02): deliver the pending coordinator message now,
     // from the server, so an approved build starts even if the browser closes.
     // The DO's own onStart drain owns re-delivery after a crash.
+    const deliver = deliverFor(c);
+    if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
+    return c.json(snapshot);
+  });
+  // "Add this": build one approved "add after" item on the finished app.
+  router.post("/projects/:projectId/workflow/add-item", async (c) => {
+    const scope = await requireProjectScope(c.env.DB, c.env, c.req.raw.headers, c.req.param("projectId"));
+    let input: { featureId: string; key: string };
+    try {
+      input = await c.req.json();
+    } catch {
+      throw new ScopeError(400, "invalid_input", "Expected JSON.");
+    }
+    const snapshot = await addPlanItem(c.env.DB, scope, { featureId: input?.featureId, key: input?.key }, c.env);
     const deliver = deliverFor(c);
     if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
     return c.json(snapshot);
@@ -317,6 +346,55 @@ export function createBuildWorkflowRouter(
     const snapshot = await retryWorkflow(c.env.DB, scope, input.key, undefined, c.env);
     const deliver = deliverFor(c);
     if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
+    return c.json(snapshot);
+  });
+  // Post-ready change lifecycle (2026-10-27 plan P0-2): record a change request
+  // against a finished app for review. Nothing builds until the owner approves;
+  // the last working preview stays live the whole time.
+  router.post("/projects/:projectId/workflow/change", async (c) => {
+    const scope = await requireProjectScope(
+      c.env.DB,
+      c.env,
+      c.req.raw.headers,
+      c.req.param("projectId"),
+    );
+    const input = await c.req.json<{ request?: string; operationKey?: string }>();
+    const requester = await sessionUserId(c.env, c.req.raw.headers);
+    const operationKey = input.operationKey ?? `change-request:${requester ?? "anonymous"}:${Date.now()}`;
+    const snapshot = await requestReadyChange(c.env.DB, scope, {
+      request: String(input.request ?? ""),
+      operationKey,
+    });
+    const deliver = deliverFor(c);
+    if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
+    return c.json(snapshot);
+  });
+  router.post("/projects/:projectId/workflow/change/decision", async (c) => {
+    const scope = await requireProjectScope(
+      c.env.DB,
+      c.env,
+      c.req.raw.headers,
+      c.req.param("projectId"),
+    );
+    const input = await c.req.json<{ changeId?: string; decision?: string; requestHash?: string; proposalHash?: string; note?: string }>();
+    if (input.decision !== "approved" && input.decision !== "rejected")
+      throw new ScopeError(400, "invalid_decision", "Choose approve or cancel.");
+    const snapshot = await decideReadyChange(
+      c.env.DB,
+      scope,
+      {
+        changeId: String(input.changeId ?? ""),
+        decision: input.decision,
+        requestHash: input.requestHash === undefined ? undefined : String(input.requestHash),
+        proposalHash: input.proposalHash === undefined ? undefined : String(input.proposalHash),
+        note: input.note,
+      },
+      c.env,
+    );
+    if (input.decision === "approved") {
+      const deliver = deliverFor(c);
+      if (deliver) await dispatchPendingWorkflow(c.env.DB, scope, deliver);
+    }
     return c.json(snapshot);
   });
   // Big apps: Try again on one part that stopped or couldn't be joined
@@ -430,6 +508,18 @@ export function createBuildWorkflowRouter(
     if (!storage) throw new ScopeError(400, "invalid_request", "The preview's saved data could not be read.");
     const { contentHash } = await createD1ContentStore(c.env.DB).put(new TextEncoder().encode(JSON.stringify(storage)));
     return c.json({ seedRef: contentHash });
+  });
+
+  router.post('/projects/:projectId/workflow/preview/:outputId/launch',async c=>{
+    const scope=await requireProjectScope(c.env.DB,c.env,c.req.raw.headers,c.req.param('projectId'));
+    const outputId=c.req.param('outputId');
+    await readBuildOutput(c.env.DB,scope,outputId);
+    const body=await c.req.json<{nonce?:string;storage?:unknown}>();
+    if(typeof body.nonce!=='string'||!/^[A-Za-z0-9-]{8,64}$/.test(body.nonce))throw new ScopeError(400,'invalid_request','A preview nonce is required.');
+    const seed=previewSeed(body.storage??{});
+    if(!seed)throw new ScopeError(400,'invalid_request','The previous preview data is invalid.');
+    const stored=Object.keys(seed).length?await createD1ContentStore(c.env.DB).put(new TextEncoder().encode(JSON.stringify(seed))):null;
+    return c.json(createPreviewLaunch(c.env,scope,outputId,body.nonce,new URL(c.req.url).origin,stored?.contentHash));
   });
 
   router.get("/projects/:projectId/workflow/preview/:outputId/document", async (c) => {
