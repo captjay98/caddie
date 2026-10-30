@@ -33,10 +33,10 @@ The loop is Find → Plan → Build → Prove → Ship.
 | Stage | What Caddie does | Where it lives |
 | :--- | :--- | :--- |
 | **Find** | Reads live opportunity sources (Devpost's API plus Tavily web search), filters to open events, and ranks fit with the claims it rests on. A failed retrieval shows as a visible gap, never a confident guess. | `apps/app/src/server/discovery.ts`, `apps/app/src/server/tavily.ts` |
-| **Plan** | Turns a chosen contest's rules page into an immutable snapshot and verbatim, line-cited claims; produces a versioned scope, PRD and spec, and binds approval to the exact revision. | `apps/app/src/server/rules-reading.ts`, `apps/app/src/server/planning.ts`, `apps/app/src/server/build-workflow.ts` |
+| **Plan** | Turns a chosen contest's rules page into an immutable snapshot and verbatim, line-cited claims; produces a versioned scope, PRD and spec, and binds approval to the exact revision. You then pick a look for the app. | `apps/app/src/server/rules-reading.ts`, `apps/app/src/server/planning.ts`, `apps/app/src/server/build-workflow.ts` |
 | **Build** | A coordinator delegates to restricted specialists (product, designer, tech-lead, frontend, backend, mobile, QA) that write code in an isolated sandbox. Permissions are per-role; destructive and default-branch actions always need explicit approval. | `apps/app/src/agents/coordinator.ts`, `apps/app/src/agents/specialists.ts`, `apps/app/src/agents/permissions.ts` |
-| **Prove** | The host — not the model — runs the checks: install, `bun test src/`, build the browser bundle, and for apps with a server, the runs-on-Cloudflare check. Receipts are recorded per check. | `apps/app/src/server/coordinator-host.ts`, `apps/app/src/server/preview-runtime.ts` |
-| **Ship** | Prepares judge-rubric scoring over recorded evidence, a submission checklist with missing fields honestly missing, and a one-click publish path to a Cloudflare-hosted app. Caddie never submits for you. | `apps/app/src/server/judge.ts`, `apps/app/src/server/submission.ts`, `apps/app/src/server/publish.ts` |
+| **Prove** | The host — not the model — runs the checks: install, `bun test src/`, build the browser bundle, the runs-on-Cloudflare check for apps with a server, and each part's own checks in a real browser on a brand-new account. Receipts are recorded per check. | `apps/app/src/server/coordinator-host.ts`, `apps/app/src/server/preview-runtime.ts`, `apps/app/src/server/independent-acceptance.ts` |
+| **Ship** | Prepares the hand-in list from the contest's own rules, with missing items shown as missing, and a publish path to a Cloudflare-hosted app (publishing is not deployed yet). Caddie never submits for you. | `apps/app/src/server/judge.ts`, `apps/app/src/server/submission.ts`, `apps/app/src/server/publish.ts` |
 
 ### Screenshots
 
@@ -108,41 +108,70 @@ when something cannot be checked, Caddie says so instead of guessing.
 
 ## Nebius Token Factory and NVIDIA Nemotron
 
-Model access is Nebius Token Factory's OpenAI-compatible endpoint
-(`https://api.tokenfactory.nebius.com/v1`), registered as the `nebius` provider
-in `apps/app/src/agents/providers.ts` and installed once per isolate by
-`registerNebiusProvider()` (called from `apps/app/src/app.ts`).
+**Everything Caddie thinks with, and everywhere its code runs, is on Nebius
+Token Factory.** Every model call goes to Token Factory's OpenAI-compatible
+endpoint (`https://api.tokenfactory.nebius.com/v1`), and the sandbox where
+generated code is installed, built and tested is Token Factory's sandbox API
+(`https://api.tokenfactory.nebius.com/sandboxes`) on the same account.
 
-**Role → route → model id.** Both the route ids and the model ids below are the
-real values in the code at the time of writing; the model ids are the exact
-Nebius listing spellings (case-sensitive, including `Nemotron-3.5-…` with a dot
-and `Nemotron-3_5-Lightning` with an underscore).
+**What NVIDIA Nemotron does in Caddie.** Nemotron is the part of Caddie you
+talk to and the part your app talks with. **Nemotron 3.5 Super VL** holds the
+conversation and understands images you attach. **Nemotron 3 Ultra**
+brainstorms what to build with you and reviews the architecture of big apps.
+**Nemotron 3 Nano** reads contest rules into cited claims, ranks hackathons
+and writes their summaries. And the AI inside every app Caddie builds runs on
+**Nemotron 3.5 Lightning** (fast) or **Nemotron 3.5 Super VL** (when the app
+asks for the deeper tier). Writing the plan, the looks and the code goes to
+other open models on the same Token Factory account (DeepSeek, GLM, MiniMax),
+picked from measured runs.
 
-| Role | Route id | Nebius model id (`GET /v1/models`) | Runtime call site |
-| :--- | :--- | :--- | :--- |
-| `chat` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts` (`useModel`, resolved by `coordinatorModelRole`) |
-| `ideation` | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/coordinator.ts` (Home conversation) |
-| `plan` | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts` (`specialistModelRole` → planning specialists) |
-| `build` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/specialists.ts` (`specialistModelRole` → coding + QA), `apps/app/src/server/build-workflow.ts` |
-| `helper` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/rules-reading.ts`, `apps/app/src/server/candidate-inspection.ts` |
-| `app` | `nemotron-3.5-lightning` | `nvidia/Nemotron-3_5-Lightning` | `apps/app/src/server/app-ai.ts` (`env.CADDIE.ai`, the fast tier) |
-| `appSuper` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/server/app-ai.ts` (`tier: "super"`) |
-| `vision` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts` (image turn), `apps/app/src/server/attachments.ts` |
+**Role → route → model id**, as it is in the code today
+(`apps/app/src/agents/providers.ts`: `MODEL_ROLES`, `MODEL_ROUTES`). The model
+ids are the exact, case-sensitive Nebius listing spellings (`Nemotron-3.5-…`
+with a dot, `Nemotron-3_5-Lightning` with an underscore).
 
-Route definitions, prices and the role map are all in one place:
-`apps/app/src/agents/providers.ts` (`MODEL_ROUTES`, `MODEL_ROLES`,
-`VISION_ROUTE_IDS`). Prices carry **`PRICING_VERSION =
-'2026-10-nemotron-listing'`**, re-read from a live `GET /v1/models?verbose=true`
-listing on 2026-10-18. A run binding records the route and pricing it started
-under, so re-pricing never silently rewrites an old run's history.
+| Role | What it does | Route id | Nebius model id | Call site |
+| :--- | :--- | :--- | :--- | :--- |
+| `chat` | Caddie's conversation (the coordinator) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts` (`coordinatorModelSelection`) |
+| `ideation` | Brainstorming what to build (Home) | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/coordinator.ts` (`coordinatorModelSelection` → `ideation`) |
+| `architect` | Architecture review of big apps (team mode) | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/specialists.ts` (architect delegate, `findModelRouteForRole('architect')`) |
+| `vision` | Understanding attached images | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/server/attachments.ts` (`MODEL_ROLES.vision`) |
+| `helperRules` | Reading contest rules into cited claims | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/rules-reading.ts` |
+| `helperRanking` | Ranking hackathon fit | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/candidate-inspection.ts` |
+| `helperSummary` | Hackathon summaries | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/candidate-inspection.ts` |
+| `helper` | Other small helper calls | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/agents/hello.ts` |
+| `app` | AI inside generated apps (fast tier) | `nemotron-3.5-lightning` | `nvidia/Nemotron-3_5-Lightning` | `apps/app/src/server/app-ai.ts` |
+| `appSuper` | AI inside generated apps (deeper tier, `tier: "super"`) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/server/app-ai.ts` |
+| `planAuthor` | Writing the plan (product and tech-lead) | `deepseek-v4.1-flash-1017` | `deepseek-ai/DeepSeek-V4.1-Flash-1017` | `apps/app/src/agents/specialists.ts` (`specialistModelRole`), `apps/app/src/server/build-workflow.ts` |
+| `planReviewer` | Independent review of the plan | `glm-5.3` | `zai-org/GLM-5.3` | `apps/app/src/server/artifact-quality.ts` (plan review ladder starts on `glm-5.3`; the author's model family never reviews) |
+| `designAuthor` | Writing the looks and screens (designer) | `minimax-m3.1-flash` | `MiniMaxAI/MiniMax-M3.1-Flash` | `apps/app/src/agents/specialists.ts` (`specialistModelRole`), `apps/app/src/server/coordinator-host.ts` |
+| `build` | Writing code and its tests (frontend, backend, mobile, QA) | `minimax-m3.1-flash` | `MiniMaxAI/MiniMax-M3.1-Flash` | `apps/app/src/agents/specialists.ts` (`specialistModelRole`); a build's model is the first rung of the repair ladder below |
+| `plan` | Older planning route, kept so earlier runs still resolve | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts` (planning-skill fallback only) |
 
-The compatibility options (`supportsDeveloperRole: false`, `supportsStore:
-false`, `maxTokensField: 'max_tokens'`) exist because Token Factory rejects the
-OpenAI `developer` role; the notes are on the `nebius` provider registration.
+**The repair ladder** (`apps/app/src/server/repair-escalation.ts`). Two failed
+checks on the same issue move it one rung: `REPAIR_ROUTES` =
+`minimax-m3.1-flash` → `deepseek-v4.1-flash-1017` →
+`deepseek-v4.1-flash-1017`. An issue that needs to see an image repairs on
+routes that read images: `VISION_REPAIR_ROUTES` = `nemotron-3.5-super-vl` →
+`deepseek-v4.1-flash-1017`. When the ladder runs out, the build pauses and asks
+you. The 2026-10-30 EggOps run is why the last code rung is DeepSeek, not Super
+VL (the notes are on `REPAIR_ROUTES`).
 
-Two routes are also true vision models: `nemotron-3.5-super-vl` and
-`glm-5.3-flash` (both demonstrably read an image and returned a tool call — see
-`VISION_ROUTE_IDS`).
+**Prices.** Each route carries the price list it was priced from, and a run
+binding records the route and pricing it started under, so a re-price never
+rewrites an old run. The Nemotron routes and GLM-5.3-Flash carry
+`PRICING_VERSION = '2026-10-nemotron-listing'` (re-read from a live
+`GET /v1/models?verbose=true` listing on 2026-10-18); DeepSeek and GLM-5.3
+carry `'2026-10-25-repair-catalog'`, and MiniMax `'2026-10-27-nebius-catalog'`.
+
+**Images.** `VISION_ROUTE_IDS` lists the routes that demonstrably read an image
+and returned a tool call: `nemotron-3.5-super-vl` and `glm-5.3-flash`.
+
+**Compatibility.** The `nebius` provider is registered once per isolate by
+`registerNebiusProvider()` (called from `apps/app/src/app.ts`) with
+`supportsDeveloperRole: false`, `supportsStore: false` and
+`maxTokensField: 'max_tokens'`, because Token Factory rejects the OpenAI
+`developer` role.
 
 ---
 
@@ -162,12 +191,13 @@ so.
 
 **Code runs in Token Factory.** The competition's Coding track asks for
 "agents that write, run, and test code in Token Factory" (the official rules
-page, as re-read on 2026-10-03). Caddie's sandbox API is
-`https://api.tokenfactory.nebius.com/sandboxes`, on the same Token Factory
-account that serves its models. Builds install, build and test the generated
-code there. The template every new app starts from did that live on
-2026-10-19 (**LIVE VERIFIED**, `scripts/probe-sandbox-scaffold.ts`); a full
-build driven by Caddie's agents has not been run live yet (status table below).
+page, as re-read on 2026-10-03). Caddie's sandbox API is on the same Token
+Factory account that serves its models, and builds install, build and test the
+generated code there. The full **EggOps Nigeria** build (plan → looks → 4 parts
+→ browser checks → ready preview) ran this way on 2026-10-30 (**LOCAL
+VERIFIED**: Caddie ran on this machine; its models and sandbox were the real
+Token Factory services). A full build on the deployed Worker is not verified
+yet.
 
 ### The host-enforced feature loop
 
@@ -175,20 +205,51 @@ A build is never "done" because the model says so. The host owns the loop
 (`apps/app/src/server/coordinator-host.ts`,
 `apps/app/src/server/build-features.ts`):
 
-1. **`build_next_feature`** — the coordinator asks the host which feature is
-   current. It may only work on that one; it cannot pick a different one.
+1. **`build_next_feature`** — the coordinator asks the host which part is
+   current. It may only work on that one.
 2. **`run_checks`** — the implementation specialists run the project's checks
    **only** through this host tool: install dependencies, run `bun test src/`,
-   build the browser bundle. Shell test commands are refused outright (an
-   earlier build escaped the repair counter by piping a test command through
-   `head`), and the refusal is in `apps/app/src/server/coordinator-host.ts`.
-3. **`finish_feature`** — the host re-runs the checks, and additionally requires
-   that this feature added **new passing tests** compared with the baseline it
-   recorded before the feature started (`passing > baseline`). No new tests, no
-   finished feature. Failures count against a bounded repair limit (three on the
-   same issue), after which the run pauses for a human.
-4. **`verify_build`** — the QA specialist asks the host for the final check.
-   Only this path publishes a preview and saves a version.
+   build the browser bundle. Shell test commands are refused outright.
+3. **`finish_feature`** — the host re-runs the checks, requires new passing
+   tests for this part, and runs the part's browser checks (below). Failures
+   count against the repair ladder, after which the run pauses for a human.
+4. **`verify_build`** — the final check. Only this path publishes a preview and
+   saves a version.
+
+### Caddie's own checks
+
+- **Small first versions.** A first version holds at most **3 parts**, each
+  with **1 to 3 checks** ("done when …" sentences a browser can test).
+  Anything else waits under "add after", and each can be built later with
+  **Add this**. (`FIRST_VERSION_MAX` and `ITEM_CHECKS_MAX` in
+  `packages/contracts/src/features.ts`.)
+- **Checks that can never pass are refused at plan time.** Every check starts
+  on an empty app for a brand-new person, so a check that presses Save before
+  typing anything, or clicks a number instead of a button label, is sent back
+  with a plain fix (`journeyLintIssues` in
+  `packages/contracts/src/acceptance-journeys.ts`).
+- **Screen measuring at the look step.** Each screen is rendered at phone
+  (390×844) and desktop (1440×900) size and measured: text contrast against
+  its real painted background, tap targets of at least 44×44 px, and sideways
+  scrolling. Findings are plain sentences
+  (`scripts/local-design-audit.ts`). Looks and screens are judged by these
+  machine checks, not by a second AI reviewer; the plan keeps an independent
+  AI review on a different model family (`apps/app/src/server/artifact-quality.ts`).
+- **Independent browser checks for every part.** After the builder's own tests
+  pass, the host runs that part's checks (and every earlier part's) in a real
+  Chromium, signed in as a brand-new account, against the app running in its
+  own isolated runtime (`apps/app/src/server/independent-acceptance.ts`,
+  `scripts/acceptance-browser.ts`). The checks live outside the builder's
+  workspace and are never a model tool; a failure reaches the repair with the
+  checker's own reason.
+- **Pixel comparison is advisory.** How closely the built screen matches the
+  approved look is measured and reported, but it never blocks a part
+  (`scripts/local-visual-fidelity.ts`).
+- **Where the browser runs.** These checks run in a separate private service,
+  `scripts/serve-design-capture.ts` (headless Chromium through Playwright).
+  Caddie calls it at `DESIGN_CAPTURE_URL` with `DESIGN_CAPTURE_TOKEN` as a
+  bearer token (`apps/app/src/server/browser-check-service.ts`); the address
+  must be HTTPS unless it is localhost, so production calls it over HTTPS.
 
 ### The runs-on-Cloudflare check
 
@@ -197,13 +258,11 @@ Bun in the sandbox. `checkServerStarts`
 (`apps/app/src/server/preview-runtime.ts`) loads the app's server bundle in an
 isolated Worker Loader with no database and no network, and requires
 `GET /api/health` to answer **200**. A failure is recorded as its own check
-(`server-starts`) with the real reason, and the coordinator is told to fix
-`src/server.ts` — never to claim success.
+(`server-starts`) with the real reason.
 
 **A model's own claims never count as evidence.** Every check above is executed
 by the host, and success is a recorded machine receipt (exit code, command,
-checkpoint). `record_acceptance` and other "trust me" inputs are explicitly
-refused: caller-supplied pass flags are not evidence
+checkpoint). Caller-supplied pass flags are refused
 (`apps/app/src/agents/tools.ts`).
 
 ---
@@ -232,43 +291,47 @@ continuation of the earlier `caddie` project — no history was carried over).
 
 | Date | What landed |
 | :--- | :--- |
-| **2026-10-03** | **First commit.** The fresh-build plan rescued from the planning session, then the bootstrap and frozen shared contracts (P00). |
-| 2026-10-04 – 10-06 | Packets P00–P17: identity and sign-in, projects and approvals with budgets, the sandbox driver, specialists and the coordinator, evidence and previews, GitHub, artifacts, discovery, judge/submission, tasks and schedules, profile, the four extra stacks (TanStack Start, Laravel, FastAPI, Flutter), the landing page, and the release-check harness. |
-| 2026-10-07 – 10-10 | Home (the project-less conversation with Caddie) and five waves of UI redesign (U01–U10), plus saved hackathons, search, per-scope chat threads and in-chat spend approval (B01–B06). |
-| 2026-10-15 – 10-16 | Project-page redesign around "what Caddie is doing now", the host-driven feature build loop, the PRD + design review step, saving source to GitHub as a PR, and model re-routing (vision moved to a served VLM). |
-| 2026-10-17 | The publish programme: `Publish on Cloudflare` plan, app-host ports and the Cloudflare adapter (Workers for Platforms, D1, KV routes, custom hostnames), an Artifacts-backed code store, and running an app's server in a Worker Loader isolate for previews. |
-| 2026-10-18 | Publishing end to end (service, `/api` routes, the Publish card, safety scan + takedowns), keys for outside services, AI inside generated apps with a per-project allowance, app sign-in, versions/restore, "Start from my GitHub repo"; then S01–S04: one packet table with a completeness net, a purpose-specific report rate-limit key, model routing re-read from the live Nebius listing, and the fast/super app-AI tiers. |
-| **2026-10-19** | S06: judges sign in with an access code, a name and a password (no Google or GitHub, no email delivery); S07: judge limits (3 projects, 3 build starts, 300 messages and 20 discovery lookups per rolling 24 hours, server-side, before any sandbox or model work); S08: this README, the MIT `LICENSE` and `scripts/license-audit.ts`; models re-priced from the live listing with `helper` returned to Nemotron Nano; CI tightened to `--frozen-lockfile`. Owner review then closed two S06 holes (Better Auth's own sign-in route was a rate-limit bypass, and judge places are now reserved atomically), added the fourth quota with `0` meaning *none* at every quota, and turned the licence audit clean by accepting OFL-1.1 for the `@fontsource/*` family only. |
+| **2026-10-03** | **First commit.** The fresh-build plan, then the bootstrap and frozen shared contracts (P00). |
+| 2026-10-04 – 10-06 | Packets P00–P17: sign-in, projects and approvals with budgets, the sandbox driver, specialists and the coordinator, evidence and previews, GitHub, discovery, judge/submission, tasks, the four extra stacks (TanStack Start, Laravel, FastAPI, Flutter), the landing page, and the release-check harness. |
+| 2026-10-07 – 10-10 | Home (the project-less conversation with Caddie), five waves of UI redesign, saved hackathons, search, per-scope chat threads and in-chat spend approval. |
+| 2026-10-15 – 10-16 | Project-page redesign, the host-driven feature build loop, the PRD + design review step, saving source to GitHub as a PR, and model re-routing (vision moved to a served VLM). |
+| 2026-10-17 – 10-18 | Publishing to Cloudflare (Workers for Platforms adapter, safety scan, takedowns), keys for outside services, AI inside generated apps with a per-project allowance, app sign-in, versions/restore, "Start from my GitHub repo", and model routing re-read from the live Nebius listing. |
+| 2026-10-19 | Judge sign-in and judge limits, the MIT licence and licence audit, checked installs in the sandbox (every package's sha512 checked before unpacking), Caddie installable on a phone's home screen. |
+| 2026-10-20 | A plan must name what judges will see before it is saved; whether an app's AI is fast or deeper is decided at plan time. |
+| 2026-10-21 | One card family across chat and the Brief; Discover shows official prize tables; a production deploy with its hosted smoke receipt. |
+| 2026-10-22 | Brief cards redone to seven approved mockups; a focused project workspace with four steps; **team mode for big apps**: an Ultra architecture review, a spending limit checked before every model call, contract checks, several parts built in parallel and joined, room for apps up to 2,000 files. |
+| 2026-10-23 | A one-command deploy with per-step logs; generated apps can take payments (test mode), photo uploads, emails to a test inbox and scheduled jobs; every app gets its own theme and icon kit; nine review findings fixed. |
+| 2026-10-24 | **The look picker**: you choose one of several looks between plan approval and design; 44 px touch targets; email and phone notifications with per-kind settings. |
+| 2026-10-25 | Build reliability: per-call model usage, deadlines, guards against empty or repeated work, "Ready" only with a real preview; a new landing page for first-time builders; a production deploy recorded. |
+| 2026-10-26 | A calm sign-in screen with its own judge form; the repair ladder saved and always on; **each candidate checked in its own isolated browser runtime**. |
+| 2026-10-30 | (Work from 10-27 to 10-29 landed in this day's commits.) **Machine checks instead of an AI design reviewer**; first versions capped at 3 parts × 3 checks, with later parts built one at a time through **Add this**; checks that can never pass refused at plan time; Checks and Attempts views grouped by part; **app previews on their own origin** (`p-<hash>.preview.jamalibrahim.dev`); the judge door opens on the **one shared judge account**; plain wording on the Submit tab; a **fresh production database**. The full **EggOps Nigeria** build ran end to end the same day (LOCAL VERIFIED). |
 
 ---
 
 ## Status table
 
 Conservative and per-surface. "Not built" and "not deployed" are recorded as
-such rather than omitted.
+such rather than omitted. As of 2026-10-30.
 
 | Surface | Status | What backs it |
 | :--- | :--- | :--- |
-| Test suite (`bun run test`) | **LOCAL VERIFIED** | 1545 pass, 0 fail, 115 files — run at the time of writing. |
-| Browser acceptance suite (`bun run test:browser`) | **LOCAL VERIFIED** (2026-10-19) | `bun run test:browser -- --all` against the composed build: 24 packets PASS, 0 FAIL, 22 have no browser spec (named, not counted), at the last full run (2026-10-19, with the PWA spec). PUBLISH has since gained `tests/browser/app-install.spec.ts`; it and BUILD's spec pass on their own runs. Six cases had failed earlier the same day; every one was a spec that no longer matched the shipped client, now updated, with one root-caused stub-ordering bug (`docs/release-evidence.md`). CI now runs this suite. |
-| Typecheck (`bun run typecheck`) | **LOCAL VERIFIED** | exit 0 (root project + `apps/app`). |
-| Build composition (`bun run build`) | **LOCAL VERIFIED** | One composed Workers assets tree from the Astro landing + Vite SPA. |
-| Direct model calls on Nebius Token Factory | **LIVE VERIFIED** (probes recorded 2026-10-18, re-probed 2026-10-19) | Owner-authorized calls recorded in `docs/release-evidence.md` and the execution ledger (P05); the route/pricing table is refreshed from a live `GET /v1/models?verbose=true` listing (2026-10-18) and `scripts/probe-lightning.ts` re-probed the routed roles on 2026-10-19. |
-| P05 conversation round-trip (a full coordinator turn through the app) | **PROVISIONED** | No live receipt: `tests/live/flue-lifecycle.spec.ts` needs a deployed conversation URL and a session cookie. `docs/release-evidence.md` records P05 as PROVISIONED; direct model calls are live-verified in the row above. |
-| Sandbox execution (the sandbox *service*: session create + remote exec) | **LIVE VERIFIED** (recorded 2026-10-06) | A real contree session and remote exec probe recorded in `docs/release-evidence.md` (P04). This row covers the sandbox service only; it is not a claim that a generated app installs inside it — see the next row. |
-| A generated React + Hono app installing and building in the sandbox | **LIVE VERIFIED** for the template every new app starts from (2026-10-19); a full build through the product **not yet run live** | The production base image's Bun (`tag:tt-base:1`, Bun 1.4.2) cannot unpack react-dom (`error: Fail extracting tarball from react-dom`), so every install now goes through one verified step (`apps/app/src/server/verified-install.ts`): each tarball `bun.lock` pins is downloaded, checked against its sha512 before it is unpacked, and unpacked with GNU `tar`; then the unchanged `bun install --frozen-lockfile` runs. `scripts/probe-sandbox-scaffold.ts`, one real session on that image, 2026-10-19: 63 of 63 packages downloaded and checked (13.1 s), Bun then reported `Checked 63 installs across 64 packages (no changes)`; a second run downloaded nothing; the template's 8 example tests passed; the build passed, including its runs-on-Cloudflare check. The earlier P09 journey (2026-10-06) passed only with an unchecked `curl` + `tar` workaround in the test script. The other four stacks are **BLOCKED** on their own live gates. |
-| Real outbound email (Resend) | **LIVE VERIFIED** (recorded 2026-10-06) | One real send to the owner's own address, provider receipt id in `docs/release-evidence.md` (P12). |
-| Judge access by code (`S06`) | **LOCAL VERIFIED** | `tests/judge-access.test.ts`; the gate, rate limits and refusals are tested. Not exercised against a deployed Worker. |
-| Judge limits (`S07`) | **LOCAL VERIFIED** | `apps/app/src/server/judge-limits.ts`, `tests/judge-limits.test.ts`; the four limits (projects, build starts, messages, discovery lookups) are enforced server-side and refused before any write. Not exercised against a deployed Worker. |
-| Install Caddie on a phone (web app) | **LOCAL VERIFIED** in Chromium; **not tried on a phone** | `apps/app/public/manifest.webmanifest`, `apps/app/public/sw.js`, `tests/pwa.test.ts`, `tests/browser/pwa.spec.ts`. Opened with no connection, the app says it is offline (it no longer shows sign-in). A link shared to Caddie from another app lands in the chat box and is never sent for you. The service worker never caches `/api` or `/agents`. Not yet installed on a real Android phone or iPhone. |
-| Install a published app on a phone | **LOCAL VERIFIED** in Chromium; **not tried on a phone**, publishing not deployed | `apps/app/src/server/published-page.ts`, `app-icons.ts`, `tests/published-page.test.ts`, `tests/app-icons.test.ts`, `tests/browser/app-install.spec.ts`. Every publish adds a web app manifest and home-screen icons (the app's first letter on a colour picked for it), so Chrome on Android offers Install app and an iPhone's Add to Home Screen opens it full screen. Chromium's own install check passes on the exact published files under the dispatch Worker's CSP. No service worker, so a new publish is never hidden behind a cached copy. |
-| Landing page product art / workspace illustrations | **SIMULATED** | Labelled on the page itself: illustrative compositions, not live captures. |
-| **Hosted demo (the judge URL)** | **LIVE VERIFIED** | Deployed at `https://caddie.jamalibrahim.dev` (owner-gated deploy, 2026-10-22); the P17 hosted acceptance smoke is 5/5 PASS, `docs/live-receipts.json` receipt `lr_5bf0b08f5db1bbcb`, recorded in `docs/release-evidence.md`. |
-| App publishing (Workers for Platforms) | **Not deployed** | The dispatch Worker is **PROPOSED** (`workers/dispatch/wrangler.jsonc`); the publish service and `/api` routes exist locally. |
-| Custom domains for published apps | **Not built** | Only the plan and the adapter's headroom exist; nothing is configured. |
-| Cloudflare Artifacts code store, Web Risk safety scan, Worker Loader preview on a **deployed** Worker | **Not live-verified** | Implemented and locally tested; never run on a deployed Worker. |
-| Licence audit (`bun scripts/license-audit.ts`) | **LOCAL VERIFIED** — clean | 24 production dependencies, 24 allowed, 0 flagged, 0 unresolved (exit 0). The two `@fontsource/*` webfont packages are OFL-1.1, accepted for that package family only (owner decision, 2026-10-19). Full table in `docs/licenses.md`. |
-| Screenshots in `docs/reviews/` | **LOCAL VERIFIED** | Real captures from local browser acceptance runs (2026-10-08 / 2026-10-09). |
+| **Hosted demo (the judge URL)** | **LIVE VERIFIED** (4 of 5 smoke checks, 2026-10-30); 1 smoke check **FAILED** | `https://caddie.jamalibrahim.dev`, deployed 2026-10-30 at 15:38 UTC from commit `cbe680e` (Worker version `ddf92e7a-9a68-49cf-8775-6d2e169fc445`), serving `caddie.jamalibrahim.dev` and `*.preview.jamalibrahim.dev`. Hosted smoke (`tests/live/release.spec.ts`): `/app/`, the session probe and the API checks pass; the landing check fails on a stale `LOCKED LINE` text assertion in the spec. Before the upload, the deploy logs show the release check (52 PASS, 0 FAIL), the production build and preflight (20 PASS, 2 WARN, 0 FAIL), and the fresh production D1 database (`caddie-v2`, id `29db3fc3…` in `apps/app/wrangler.jsonc`) read back remotely with exactly the 4 migrations `0001_foundation.sql` … `0004_quality.sql`. The upload and smoke were run by hand, so they are not yet in `.deploy-logs/` or `docs/live-receipts.json`. |
+| Full build through the product (EggOps Nigeria: plan → looks → 4 parts → browser checks → ready preview) | **LOCAL VERIFIED** (2026-10-30) | Caddie ran on this machine; every model call and the sandbox were the real Nebius Token Factory services. A full build on the deployed Worker is **not verified yet**. |
+| Release check (`bun scripts/release-check.ts`) | **LOCAL VERIFIED** (2026-10-30) | 52 PASS, 0 FAIL, 1 BLOCKED, 4 PROVISIONED in the newest deploy log. BLOCKED is deployment authorization, which never reports PASS by design; the 4 PROVISIONED live gates have keys present but no current live receipt. |
+| Direct model calls on Nebius Token Factory | **LIVE VERIFIED** (probes recorded 2026-10-18, re-probed 2026-10-19) | Owner-authorized calls recorded in `docs/release-evidence.md` and the execution ledger (P05); the 2026-10-30 EggOps build also ran on them (local Caddie). |
+| Sandbox service on Token Factory | **LIVE VERIFIED** (session + remote exec 2026-10-06; starting template installed, built and tested 2026-10-19) | `docs/release-evidence.md` (P04), `scripts/probe-sandbox-scaffold.ts`. The release check marks the P04 receipt stale because the code changed since. |
+| Caddie's browser checks and screen measuring | **LOCAL VERIFIED** (2026-10-30, EggOps build); **not verified on production** | `scripts/serve-design-capture.ts` on the owner's machine. For production it runs on that machine behind a Cloudflare tunnel (moving it to a hosted server is blocked); no production build has used it yet. |
+| Isolated app previews (`p-<hash>.preview.jamalibrahim.dev`) | **Deployed, not live-verified** | The route and certificate are in place and the Worker serves `*.preview.jamalibrahim.dev`, but no preview has been opened on that origin yet. |
+| Email from generated apps | **Test inbox only** | Sign-in codes and other emails from built apps go to the test inbox on the Build tab, never to a real address. (Caddie's own outbound email through Resend was LIVE VERIFIED once on 2026-10-06; it is off in the production config.) |
+| Shared judge account | **LIVE VERIFIED** (2026-10-30) | Created on production through `/api/judge/start` (200 ok). Gate and refusals also tested locally (`tests/judge-access.test.ts`). |
+| Judge limits | **LOCAL VERIFIED** | `tests/judge-limits.test.ts`; not exercised against the deployed Worker. |
+| App publishing (Workers for Platforms) | **Not deployed** | The dispatch Worker is **PROPOSED** (`workers/dispatch/wrangler.jsonc`); the publish service and `/api` routes exist locally. Publishing is off in production. |
+| Flutter / Android builds | **LOCAL VERIFIED**; **not run on production** | Implemented and locally tested (the `FLUTTER` packet passes in the release check). |
+| Install Caddie on a phone (web app) | **LOCAL VERIFIED** in Chromium; **not tried on a phone** | `apps/app/public/manifest.webmanifest`, `apps/app/public/sw.js`, `tests/pwa.test.ts`, `tests/browser/pwa.spec.ts`. |
+| Custom domains for published apps | **Not built** | Only the plan and the adapter's headroom exist. |
+| Cloudflare Artifacts code store, Web Risk safety scan on a **deployed** Worker | **Not live-verified** | Implemented and locally tested. |
+| Landing page product art | Real captures (LOCAL VERIFIED run) | `apps/site/public/shots/`, from the 2026-10-30 EggOps build. |
+| Licence audit (`bun scripts/license-audit.ts`) | **LOCAL VERIFIED** — clean (2026-10-19) | 24 production dependencies, 24 allowed, 0 flagged. The `@fontsource/*` webfonts are OFL-1.1, accepted for that family only. Full table in `docs/licenses.md`. |
 
 ---
 
@@ -281,32 +344,73 @@ print secrets.
 export PATH="$HOME/.bun/bin:$PATH"
 
 bun install
-bun run fixtures:setup             # the P09 fixture app some tests start
-cp .dev.vars.example .dev.vars     # then fill in what you need
-bun run db:migrate:local           # local D1
-bun run dev                        # dev server pinned to http://localhost:5176
+bun run fixtures:setup               # builds the small fixture app some tests start
+cp .dev.vars.example .dev.vars       # then fill in what you need (below)
+ln -s ../../.dev.vars apps/app/.dev.vars   # the dev server reads apps/app/.dev.vars
+bun run db:migrate:local             # local D1: applies the 4 migrations
+bun run dev                          # dev server pinned to http://localhost:5176
 ```
 
-The SPA is served under `/app` (`http://localhost:5176/app`); the landing page is
-at `/`. Sign-in and model calls need credentials in `.dev.vars`; without them the
-app runs and fails closed with visible gaps.
+Open `http://localhost:5176/app` (the landing page is at `/`).
+
+**What needs real keys.** The app starts without them and shows visible gaps
+instead of guessing:
+
+- `NEBIUS_API_KEY` — **required** for any conversation, planning or building
+  (Nebius Token Factory).
+- `CONTREE_BASE_URL`, `CONTREE_API_TOKEN`, `CONTREE_PROJECT_ID` — **required**
+  to build anything (the Token Factory sandbox; see `docs/setup/sandbox.md`).
+- `TAVILY_API_KEY` — needed for live hackathon search and reading rules pages.
+- `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` — sign-in; `GOOGLE_*` / `GITHUB_*`
+  only if you want those sign-in buttons; `INVITE_ALLOWLIST` limits who may
+  sign up.
+
+**Optional: Caddie's browser checks and screen measuring.** Without this
+service, builds cannot run the per-part browser checks or the look-step
+measuring. It needs Playwright's Chromium once:
+
+```sh
+bunx playwright install chromium
+bun scripts/serve-design-capture.ts ./browser-checks.json   # keep this file out of git
+```
+
+The config file:
+
+```json
+{
+  "token": "<at least 32 random characters>",
+  "port": 8790,
+  "directory": "<a local folder for captures>",
+  "allowedOrigins": ["http://localhost:5176"]
+}
+```
+
+Then add the matching keys to `.dev.vars` and restart `bun run dev`:
+
+```sh
+DESIGN_CAPTURE_URL=http://127.0.0.1:8790
+DESIGN_CAPTURE_TOKEN=<the same token>
+```
+
+The service listens on `127.0.0.1` only. Any address other than localhost must
+be HTTPS.
 
 ### Tests and checks
 
-| Command | What it is | Last observed |
-| :--- | :--- | :--- |
-| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) | **1545 pass, 0 fail, 7664 expect() calls, 115 files** |
-| `bun run typecheck` | Root project + `apps/app` typecheck | exit 0 |
-| `bun run build` | Astro + Vite + asset composition into one Workers assets tree (no deploy) | exit 0 (LOCAL VERIFIED) |
-| `bun run verify:packet Pxx` | That packet's mapped tests; fails when a mapped test file is missing or empty | — |
-| `bun run test:browser -- Pxx` | Browser specs against the composed build (`bun run build` first) | — |
-| `bun run test:live -- Pxx` | Live specs; gated behind `CADDIE_LIVE_AUTHORIZED=1` and real credentials | BLOCKED without owner authorization |
-| `bun scripts/license-audit.ts` | Third-party licence audit → `docs/licenses.md` | 24 allowed, 0 flagged, 0 unresolved (exit 0 — CLEAN) |
-| `bun scripts/release-check.ts` | The local release gate (deployment is always BLOCKED by design) | — |
+| Command | What it is |
+| :--- | :--- |
+| `bun run test` | The local unit/integration suite (`bun test tests/`, browser and live specs excluded) |
+| `bun run typecheck` | Root project + `apps/app` typecheck |
+| `bun run build` | Astro + Vite + asset composition into one Workers assets tree (no deploy) |
+| `bun run verify:packet Pxx` | That packet's mapped tests; fails when a mapped test file is missing or empty |
+| `bun run test:browser -- Pxx` | Browser specs against the composed build (`bun run build` first) |
+| `bun run test:live -- Pxx` | Live specs; gated behind `CADDIE_LIVE_AUTHORIZED=1` and real credentials |
+| `bun scripts/license-audit.ts` | Third-party licence audit → `docs/licenses.md` |
+| `bun scripts/release-check.ts` | The local release gate (deployment is always BLOCKED by design); last result 52 PASS, 0 FAIL (2026-10-30) |
 
-Also in the repo: **35** SQL migrations (`apps/app/migrations/0001_…` →
-`0035_judge_discovery_events.sql`), counted at the time of writing
-(`ls apps/app/migrations/*.sql | wc -l`).
+Migrations: **4** folded SQL files in `apps/app/migrations/`
+(`0001_foundation.sql`, `0002_apps_and_judges.sql`, `0003_team_build.sql`,
+`0004_quality.sql`).
 
 ---
 

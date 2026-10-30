@@ -1,8 +1,9 @@
 # Caddie — Devpost submission draft (S13)
 
 **This file is a draft the owner pastes from. Nothing here is submitted
-automatically, and the owner submits.** It deliberately contains no access
-code — the code goes only into the Devpost form's testing-instructions field.
+automatically, and the owner submits.** It deliberately contains no judge
+password — the shared judge name and password go only into the Devpost form's
+testing-instructions field.
 
 Anything in angle brackets is an **unconfirmed submission value**. Do not
 replace a placeholder with an invented value.
@@ -10,7 +11,7 @@ replace a placeholder with an invented value.
 | Placeholder | What the owner must supply |
 | :--- | :--- |
 | `<REPO-URL>` | The confirmed public GitHub repository URL. A local origin is configured, but its public accessibility and suitability as the submission target are not established here. |
-| `<DEMO-URL>` | The hosted demo URL. An earlier acceptance smoke passed at `https://caddie.jamalibrahim.dev` on 22 October, commit `5f3574a` (receipt `lr_5bf0b08f5db1bbcb`). This is historical evidence, not proof that the current worktree is deployed or that the present judge journey works. |
+| `<DEMO-URL>` | The hosted demo URL, `https://caddie.jamalibrahim.dev`. Redeployed 2026-10-30 at 15:38 UTC from commit `cbe680e` (Worker version `ddf92e7a-9a68-49cf-8775-6d2e169fc445`) onto a fresh D1 database (`caddie-v2`, 4 migrations). Hosted smoke: 4 of 5 checks pass; the landing check fails on a stale `LOCKED LINE` text assertion in the spec (see §7). The shared judge account exists on production. Sign in as the judge once more before submitting. |
 | `<VIDEO-URL>` | The YouTube URL of the uploaded demo video (public or unlisted). **Not recorded yet** — see `docs/submission/video-script.md`. |
 | the shared judge name and password | Filled in **only** in the Devpost form's testing-instructions field, never in this repo. The placeholders live solely in the testing-instructions template in §6. |
 
@@ -18,95 +19,130 @@ replace a placeholder with an invented value.
 
 ## 1. Project text (for judges)
 
-Caddie is an evidence-backed build assistant for hackathons and small projects.
-It runs as a single Cloudflare Worker built on Flue agents (Durable Objects), a
-D1 database, a React SPA under `/app`, and a static landing page at `/`. The
-loop is **Find → Plan → Build → Prove → Ship**:
+Caddie is an evidence-backed build assistant for non-technical owners, built
+on **Nebius Token Factory** and **NVIDIA Nemotron**. Every model call goes
+through Token Factory, and the code Caddie writes is installed, built and
+tested in Token Factory's sandbox. The loop is **Find → Plan → Build → Prove →
+Ship**:
 
 - **Find** reads live opportunity sources — Devpost's public open-contests API
   plus a **Tavily** multi-platform web sweep — and ranks them, keeping every
   claim it rests on. A failed retrieval shows as a visible gap, not a guess.
 - **Plan** turns a contest's rules page into an immutable snapshot with
   verbatim, line-cited claims, then produces a versioned scope, PRD and spec,
-  and binds approval to the exact revision.
+  and binds approval to the exact revision. You then pick a look for the app.
 - **Build** delegates to restricted specialists (product, designer, tech-lead,
   frontend, backend, mobile, QA) that write code inside an isolated sandbox.
+  A first version holds at most 3 parts; the rest are added later with
+  **Add this**.
 - **Prove** has the **host**, not the model, run the checks: install, run the
-  project's tests, build the browser bundle, and — for apps with a server — a
-  check that the server actually boots on Cloudflare's runtime. Success is a
-  recorded machine receipt.
-- **Ship** prepares a submission checklist and a one-click Cloudflare publish
-  path. Caddie never submits or publishes for you; it stops and hands you the
-  evidence.
+  project's tests, build the browser bundle, check that an app's server boots
+  on Cloudflare's runtime, and then run each part's own checks in a real
+  browser on a brand-new account. Success is a recorded machine receipt.
+- **Ship** prepares the hand-in list from the contest's own rules. Caddie
+  never submits or publishes for you; it stops and hands you the evidence.
 
-**How it uses Nebius Token Factory and NVIDIA Nemotron.** Every model call goes
-to Nebius Token Factory's OpenAI-compatible endpoint
-(`https://api.tokenfactory.nebius.com/v1`), registered as the `nebius` provider
-in `apps/app/src/agents/providers.ts` and installed once per isolate by
-`registerNebiusProvider()` (`apps/app/src/app.ts`). Caddie routes each job to a
-model by role:
+The product is hosted as one Cloudflare Worker (Flue agents on Durable
+Objects, D1, a React app under `/app`, and a landing page at `/`).
+
+**What NVIDIA Nemotron does in Caddie.** **Nemotron 3.5 Super VL** holds the
+conversation and understands images you attach. **Nemotron 3 Ultra**
+brainstorms what to build with you and reviews the architecture of big apps.
+**Nemotron 3 Nano** reads contest rules into cited claims, ranks hackathons and
+writes their summaries. The AI inside every app Caddie builds runs on
+**Nemotron 3.5 Lightning** (fast) or **Nemotron 3.5 Super VL** (the deeper
+tier). Writing the plan, the looks and the code goes to other open models on
+the same Token Factory account (DeepSeek, GLM, MiniMax), picked from measured
+runs.
+
+**How it uses Nebius Token Factory.** Every model call goes to Token Factory's
+OpenAI-compatible endpoint (`https://api.tokenfactory.nebius.com/v1`),
+registered as the `nebius` provider in `apps/app/src/agents/providers.ts` and
+installed once per isolate by `registerNebiusProvider()`
+(`apps/app/src/app.ts`). Caddie routes each job to a model by role
+(`MODEL_ROLES`, `MODEL_ROUTES`):
 
 | Role | Route id | Nebius model id | Runtime call site |
 | :--- | :--- | :--- | :--- |
-| `chat` / coordinator | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts` |
+| `chat` (Caddie's conversation) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts` |
 | `ideation` (brainstorm) | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/coordinator.ts` (Home) |
-| `plan` (tech-lead plan of record; legacy) | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts` |
-| `planAuthor` (product / PRD author) | `deepseek-v4.1-flash-1017` | `deepseek-ai/DeepSeek-V4.1-Flash-1017` | `apps/app/src/agents/specialists.ts` (product specialist) |
-| `planReviewer` (independent plan review) | `glm-5.3` | `zai-org/GLM-5.3` | `apps/app/src/server/artifact-quality.ts` |
-| `designAuthor` (looks / design brief author) | `minimax-m3.1-flash` | `MiniMaxAI/MiniMax-M3.1-Flash` | `apps/app/src/agents/specialists.ts` (designer specialist) |
-| `build` (coding + QA) | `minimax-m3.1-flash` | `MiniMaxAI/MiniMax-M3.1-Flash` | `apps/app/src/agents/specialists.ts`, `apps/app/src/server/build-workflow.ts` (repairs step up to DeepSeek; Super VL repairs only issues that need image input) |
-| `helper` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/rules-reading.ts`, `candidate-inspection.ts` |
-| `helperRules` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | Rules extraction |
-| `helperRanking` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | Opportunity ranking |
-| `helperSummary` | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | Opportunity summaries |
+| `architect` (team mode: architecture review) | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/specialists.ts` (architect delegate) |
+| `vision` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/server/attachments.ts` |
+| `helperRules` (rules reading) | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/rules-reading.ts` |
+| `helperRanking` (hackathon ranking) | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/candidate-inspection.ts` |
+| `helperSummary` (hackathon summaries) | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/server/candidate-inspection.ts` |
+| `helper` (other small calls) | `nemotron-3-nano` | `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | `apps/app/src/agents/hello.ts` |
 | `app` (in-app AI, fast) | `nemotron-3.5-lightning` | `nvidia/Nemotron-3_5-Lightning` | `apps/app/src/server/app-ai.ts` |
-| `appSuper` (in-app AI, super) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/server/app-ai.ts` |
-| `vision` | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/agents/coordinator.ts`, `attachments.ts` |
-| `architect` (team mode: architecture review) | `nemotron-3-ultra` | `nvidia/Nemotron-3-Ultra-550b-a55b` | `apps/app/src/agents/specialists.ts` (architect delegate), `apps/app/src/server/architecture-review.ts` |
+| `appSuper` (in-app AI, deeper) | `nemotron-3.5-super-vl` | `nvidia/Nemotron-3.5-Super-VL` | `apps/app/src/server/app-ai.ts` |
+| `planAuthor` (product and tech-lead: the plan) | `deepseek-v4.1-flash-1017` | `deepseek-ai/DeepSeek-V4.1-Flash-1017` | `apps/app/src/agents/specialists.ts` (`specialistModelRole`) |
+| `planReviewer` (independent plan review) | `glm-5.3` | `zai-org/GLM-5.3` | `apps/app/src/server/artifact-quality.ts` |
+| `designAuthor` (designer: looks and screens) | `minimax-m3.1-flash` | `MiniMaxAI/MiniMax-M3.1-Flash` | `apps/app/src/agents/specialists.ts` (`specialistModelRole`) |
+| `build` (coding + QA) | `minimax-m3.1-flash` | `MiniMaxAI/MiniMax-M3.1-Flash` | `apps/app/src/agents/specialists.ts`; the first rung of the repair ladder below |
+| `plan` (older planning route, kept so earlier runs resolve) | `glm-5.3-flash` | `zai-org/GLM-5.3-Flash` | `apps/app/src/agents/specialists.ts` (fallback only) |
 
-So Caddie uses four NVIDIA Nemotron tiers — **Nemotron 3 Ultra** for
-brainstorming, **Nemotron 3.5 Super VL** for the coordinator conversation, the
-coding-and-QA build loop and vision, **Nemotron 3.5 Lightning** for in-app AI,
-and **Nemotron 3 Nano** for the fast rules-reading helper — plus GLM-5.3-Flash
-for the PRD and design planning step, all through Token Factory. Building and QA
-moved to Super VL on 2026-10-20 (the cheap Flash route produced small,
-fixture-shaped apps); planning keeps GLM. The model ids are the exact
-case-sensitive listing spellings (`Nemotron-3.5-…` with a dot,
-`Nemotron-3_5-Lightning` with an underscore).
+**Repairs** (`apps/app/src/server/repair-escalation.ts`): two failed checks on
+the same issue move it one rung. `REPAIR_ROUTES` = `minimax-m3.1-flash` →
+`deepseek-v4.1-flash-1017` → `deepseek-v4.1-flash-1017`; an issue that needs
+to see an image uses `VISION_REPAIR_ROUTES` = `nemotron-3.5-super-vl` →
+`deepseek-v4.1-flash-1017`. When the ladder runs out, the build pauses and asks
+the owner.
 
-**The sandbox.** Generated code runs in an isolated sandbox reached over an HTTP
-sandbox API (`apps/app/src/server/build-sandbox.ts`,
+So Caddie uses four NVIDIA Nemotron models — **Nemotron 3 Ultra**,
+**Nemotron 3.5 Super VL**, **Nemotron 3.5 Lightning** and **Nemotron 3 Nano** —
+for the conversation, brainstorming, architecture review, image understanding,
+rules reading, ranking, summaries and the AI inside every generated app, all
+through Token Factory. The model ids are the exact case-sensitive listing
+spellings (`Nemotron-3.5-…` with a dot, `Nemotron-3_5-Lightning` with an
+underscore).
+
+**The sandbox.** Generated code runs in an isolated sandbox reached over Token
+Factory's sandbox API, `https://api.tokenfactory.nebius.com/sandboxes`
+(`apps/app/src/server/build-sandbox.ts`,
 `apps/app/src/server/adapters/sandbox.ts`, REST client in
-`apps/app/src/server/adapters/contree.ts`). The base URL, token and project
-come from the deployment's environment (`CONTREE_BASE_URL`,
-`CONTREE_API_TOKEN`, `CONTREE_PROJECT_ID`); sessions boot from the
-`tag:tt-base:1` image (`docs/setup/sandbox.md`). The host enforces the build
-loop so a model's own claims never count: `build_next_feature` → `run_checks`
-→ `finish_feature` (which requires the feature to have added new *passing*
-tests over its baseline) → `verify_build`.
+`apps/app/src/server/adapters/contree.ts`; `CONTREE_BASE_URL`,
+`CONTREE_API_TOKEN`, `CONTREE_PROJECT_ID`; sessions boot from `tag:tt-base:1`,
+`docs/setup/sandbox.md`). The host enforces the build loop so a model's own
+claims never count: `build_next_feature` → `run_checks` → `finish_feature`
+(new passing tests, then the part's browser checks) → `verify_build`.
+
+**Caddie's own checks.** Each part's "done when" checks run in a real Chromium
+on a brand-new account, outside the builder's reach
+(`apps/app/src/server/independent-acceptance.ts`,
+`scripts/acceptance-browser.ts`). Checks that can never pass on an empty app
+are refused at plan time (`journeyLintIssues`,
+`packages/contracts/src/acceptance-journeys.ts`). At the look step every screen
+is measured at phone and desktop size for contrast, 44×44 px tap targets and
+sideways scrolling (`scripts/local-design-audit.ts`); looks and screens are
+judged by these machine checks, not by a second AI. The pixel comparison with
+the approved look is advisory (`scripts/local-visual-fidelity.ts`). The browser
+runs in a separate private service (`scripts/serve-design-capture.ts`) that
+Caddie calls over HTTPS with a bearer token
+(`apps/app/src/server/browser-check-service.ts`).
 
 **Code runs in Token Factory.** The Coding track asks for "agents that write,
-run, and test code in Token Factory". Caddie's sandbox API is
-`https://api.tokenfactory.nebius.com/sandboxes`, on the same Token Factory
-account that serves its models, and builds install, build and test the
-generated code there. The starting template did that live on 2026-10-19; a full
-build driven by Caddie's agents has not been run live yet.
+run, and test code in Token Factory". The full **EggOps Nigeria** build (plan →
+looks → 4 parts → browser checks → ready preview) ran this way on 2026-10-30:
+**LOCAL VERIFIED** — Caddie ran on the owner's machine, and its models and
+sandbox were the real Token Factory services. A full build on the deployed
+Worker is not verified yet.
 
-**Honest status.** The app is a working build that makes real runtime calls to
-Token Factory and runs the pipeline locally and in recorded live runs. The
-**hosted demo is deployed at `https://caddie.jamalibrahim.dev`** and its P17
-hosted acceptance smoke is **LIVE VERIFIED** (5/5 PASS, receipt
-`lr_5bf0b08f5db1bbcb`, deploy 2026-10-22). Publish (Workers for Platforms) is
-still **not** live-verified. The README's status table records each surface at
-its real status rather than implying otherwise. Full labels are in §7.
+**Honest status.** The hosted demo is `https://caddie.jamalibrahim.dev`,
+redeployed on 2026-10-30 onto a fresh production database. 4 of 5 hosted smoke
+checks pass (**LIVE VERIFIED**: `/app/`, the session probe and the API; the
+landing check fails on a stale text assertion in the spec), and the shared
+judge account was created on production (**LIVE VERIFIED**). A full build,
+isolated previews and Caddie's browser checks are **not** yet verified on
+production; the browser-check service runs on the owner's machine behind a
+Cloudflare tunnel. Publishing apps
+(Workers for Platforms) is **not** deployed, built apps' sign-in codes go to a
+test inbox rather than real email, and Flutter/Android builds are locally
+tested but not run on production. The README's status table records each
+surface at its real status. Full labels are in §7.
 
-<!--
-  SOFTWARE-TEAM MODE: not shipped. The team-mode build programme
-  (docs/plans/2026-10-22-software-team-mode.md) is decided on Tuesday
-  2026-10-27 against section 10's go/no-go marks. Its description goes here
-  ONLY after that decision, and only for what actually passed. Describe
-  nothing that isn't built. Leave this comment until then.
--->
+**Big apps (team mode).** For larger apps an architect (Nemotron 3 Ultra)
+reviews the design's architecture, and several parts are built in parallel and
+joined. Implemented and covered by the `TEAM_MODE` tests (LOCAL VERIFIED); not
+exercised on production.
 
 ---
 
@@ -118,56 +154,62 @@ the date it was observed; nothing here is a general impression.
 
 **What worked**
 
-- **Super VL's tool calls in the build loop (2026-10-18, 2026-10-20).** The
-  2026-10-18 listing probe (`GET /v1/models?verbose=true` plus a chat probe)
-  had `nvidia/Nemotron-3.5-Super-VL` return a clean tool call, and on
-  2026-10-20 the coding and QA roles were moved onto it for exactly that
-  reason — it drives the host's `build_next_feature → run_checks →
-  finish_feature → verify_build` loop reliably where the cheaper route did
-  not.
-- **Super VL reads images (2026-10-18).** The same probe sent a split
+- **Super VL reads images (2026-10-18).** The listing probe sent a split
   red/blue PNG with a `remember` tool: HTTP 200, both colours named, and the
   tool call returned (711 in / 260 out, 1267 ms). That is what moved the
   `vision` role onto it (`providers.ts` Super-VL entry).
+- **Super VL's tool calls (2026-10-18, 2026-10-20).** The same probe had
+  `nvidia/Nemotron-3.5-Super-VL` return a clean tool call; it has driven
+  Caddie's conversation since, and it was the coding route from 2026-10-20
+  until the 2026-10-29 re-route below.
 - **GLM-5.3-Flash as a vision model for planning (2026-10-15).** GLM-5.3-Flash
   read both halves of the split PNG and emitted a tool call (~7 s), which is
-  why it stayed the planning route and is listed in `VISION_ROUTE_IDS`.
+  why it is listed in `VISION_ROUTE_IDS`.
 - **Token Factory's OpenAI-compatible endpoint (recorded 2026-10-06).** One
   base URL (`https://api.tokenfactory.nebius.com/v1`) serves every role through
-  the standard OpenAI completions shape, so routing eight roles across five
-  models is a one-line change in `MODEL_ROLES` with no per-model client code
-  (live model round-trip recorded, ledger `P05-live`).
-- **One account for models and sandboxes (recorded 2026-10-06, 2026-10-19).**
-  The sandbox API (`https://api.tokenfactory.nebius.com/sandboxes`) is on the
-  same Token Factory account as the models; a real session + remote exec was
-  recorded 2026-10-06 (release-evidence P04), and the app template installed,
-  built and tested there on 2026-10-19.
+  the standard OpenAI completions shape, so routing fifteen roles across eight
+  models is a one-line change per role in `MODEL_ROLES`, with no per-model
+  client code (live model round-trip recorded, ledger `P05-live`).
+- **One account for models and sandboxes (recorded 2026-10-06, 2026-10-19,
+  2026-10-30).** The sandbox API (`https://api.tokenfactory.nebius.com/sandboxes`)
+  is on the same Token Factory account as the models; a real session + remote
+  exec was recorded 2026-10-06 (release-evidence P04), the app template
+  installed, built and tested there on 2026-10-19, and the EggOps Nigeria build
+  ran all four parts there on 2026-10-30 (from a local Caddie).
 
 **What didn't, and what we worked around**
 
 - **Token Factory rejects the OpenAI `developer` role (observed 2026-10-06).**
   It 422s without a compatibility block, so the `nebius` provider is
-  registered with `supportsDeveloperRole: false` /`supportsStore: false` /
+  registered with `supportsDeveloperRole: false` / `supportsStore: false` /
   `maxTokensField: 'max_tokens'` (`providers.ts`).
-- **Reasoning models need a generous output cap (2026-10-19).** Nemotron 3
-  Nano spends tokens thinking before any output; at a 2,048-token cap the
-  rules-reading probe hit the cap mid-reasoning and returned empty content
-  (9,270 chars of `reasoning_content`, no answer). Raising the cap to 8,192
-  fixed it. The same failure mode showed on Nemotron 3.5 Lightning at 512
-  (2026-10-18).
+- **Reasoning models need a generous output cap (2026-10-19, 2026-10-25).**
+  Nemotron 3 Nano spends tokens thinking before any output; at a 2,048-token
+  cap the rules-reading probe hit the cap mid-reasoning and returned empty
+  content (9,270 chars of `reasoning_content`, no answer). Raising the cap to
+  8,192 fixed it. Super VL and Ultra showed the same at 8,192 under maximum
+  reasoning effort, so their caps are now 32,768 (`providers.ts`).
+- **Too much thinking on long build calls (2026-10-29).** At `medium`
+  reasoning effort Super VL thought for 437 s and 306 s in single build calls,
+  and MiniMax-M3.1-Flash spent its whole 32,768-token output on reasoning
+  twice on the looks task; both roles now run at `low` (`ROLE_THINKING` in
+  `providers.ts`).
+- **Super VL as the last code-repair rung (2026-10-30).** In the EggOps run it
+  took 10–35 s per call and wrote no file in six minutes, while DeepSeek took
+  the same part from 0 to 3 of 4 host checks in five minutes, so the ladder's
+  last rung is DeepSeek and Super VL repairs only issues that need image input
+  (`repair-escalation.ts`).
 - **Nemotron 3.5 Lightning couldn't do the structured rules-reading job
   (2026-10-20).** Tried as the `helper` model, on the real rules prompt it
   returned `finish_reason: length` with no parseable JSON even at the route's
   4,096-token output cap, and its narration came back inside `content` rather
-  than `reasoning_content` (so the claim parser read null) — recorded in the
-  execution ledger's 2026-10-20 `probe-lightning` run (1,482 in / 4,096 out).
-  `helper` was reverted to Nemotron 3 Nano the same day. Both cost the same
-  ($0.06/$0.24 per Mtok), so nothing was lost.
+  than `reasoning_content` (1,482 in / 4,096 out, execution ledger
+  `probe-lightning` run). `helper` went back to Nemotron 3 Nano the same day;
+  both cost the same ($0.06/$0.24 per Mtok).
 - **The 3.x Nemotron ids don't accept image input (2026-10-15).** Every 3.x
   Nemotron route 400s an image ("This model does not support image input");
   only the 3.5 Super VL id does. The id spellings are also inconsistent and
-  case-sensitive (`Nemotron-3.5-…` with a dot, `Nemotron-3_5-Lightning` with
-  an underscore), which had to be read from the live listing rather than
+  case-sensitive, which had to be read from the live listing rather than
   guessed.
 - **The sandbox base image's Bun can't unpack some tarballs (2026-10-19).**
   On `tag:tt-base:1` (Bun 1.4.2), `bun install` failed to extract react-dom.
@@ -226,7 +268,7 @@ execution ledger 2026-10-03 fresh-build entry for **P11**
 
 Caddie-forge is a ground-up rebuild, not a continuation of the earlier `caddie`
 concept; no history was carried over. Read from this repository's own `git log`
-(347 commits as of 2026-10-19; first commit **2026-10-03**):
+(765 commits as of 2026-10-30; first commit **2026-10-03**):
 
 | Date(s) | What landed |
 | :--- | :--- |
@@ -234,9 +276,16 @@ concept; no history was carried over. Read from this repository's own `git log`
 | **2026-10-04 – 10-06** | Packets P00–P17: sign-in, projects and approvals, the sandbox driver, specialists and the coordinator, previews, GitHub, discovery, judge/submission, tasks, and the extra stacks. |
 | **2026-10-07 – 10-10** | Home (the project-less conversation with Caddie), five waves of UI redesign, saved hackathons, search, per-scope chat threads. |
 | **2026-10-15 – 10-16** | Project-page redesign, the host-driven feature build loop, the PRD + design review step, saving source to GitHub as a PR, and model re-routing. |
-| **2026-10-17** | The publish programme: app-host ports and the Cloudflare adapter, an Artifacts-backed code store, and running an app's server in a Worker Loader isolate for previews. |
-| **2026-10-18** | Publishing end to end (service, `/api` routes, the Publish card, safety scan + takedowns), keys for outside services, AI inside generated apps with a per-project allowance, app sign-in, versions/restore, "Start from my GitHub repo"; then S01–S04 (one packet table with a completeness net, a purpose-specific report rate-limit key, model routing re-read from the live Nebius listing, and the fast/super app-AI tiers). |
-| **2026-10-19** | S06: judges sign in with an access code, a name and a password (no Google or GitHub, no email). S07: judge limits enforced server-side: 3 projects, 3 build starts, 300 Caddie messages and 20 discovery lookups per rolling 24 hours, where `0` means none. S07b: when the deployment names a demo project (`JUDGE_EXAMPLE_PROJECT_ID`), each new judge finds a finished copy, "<Name> (example)", ready to try. Installs in the sandbox now check every package's sha512 from `bun.lock` before unpacking it, which fixed the react-dom unpacking failure on `tag:tt-base:1` (LIVE VERIFIED for the starting template). The browser acceptance suite passes (23 groups, 0 failures) and CI is set up to run it. Discover's "Why it fits" is in plain words. A pre-final review's five findings were fixed: every paid path counts against the judge limits, the project limit holds when creates race, an interrupted handoff to Caddie is re-sent instead of lost, live test receipts are tied to the code they tested, and the project Overview shows the app the build made. Caddie can also be added to a phone's home screen and opens like an app: with no connection it says it is offline, and a link shared to it from another app lands in the chat box, unsent (tested in Chromium, not yet on a phone). S08: the MIT `LICENSE`, this README and a licence audit; S10: a checked production deploy procedure. |
+| **2026-10-17 – 10-18** | Publishing to Cloudflare (adapter, safety scan, takedowns), keys for outside services, AI inside generated apps with a per-project allowance, app sign-in, versions/restore, "Start from my GitHub repo", model routing re-read from the live Nebius listing. |
+| **2026-10-19** | Judge sign-in and judge limits, the MIT `LICENSE` and licence audit, checked installs in the sandbox (every package's sha512 checked before unpacking), Caddie installable on a phone's home screen, a checked production deploy procedure. |
+| **2026-10-20** | A plan must name what judges will see before it is saved; whether an app's AI is fast or deeper is decided at plan time. |
+| **2026-10-21** | One card family across chat and the Brief; Discover shows official prize tables; a production deploy with its hosted smoke receipt. |
+| **2026-10-22** | Brief cards redone to seven approved mockups; a focused project workspace with four steps; **team mode for big apps** (an Ultra architecture review, a spending limit checked before every model call, contract checks, parts built in parallel and joined). |
+| **2026-10-23** | A one-command deploy with per-step logs; generated apps can take payments (test mode), photo uploads, emails to a test inbox and scheduled jobs; every app gets its own theme and icon kit; nine review findings fixed. |
+| **2026-10-24** | **The look picker** between plan approval and design; 44 px touch targets; email and phone notifications with per-kind settings. |
+| **2026-10-25** | Build reliability: per-call model usage, deadlines, guards against empty or repeated work, "Ready" only with a real preview; a new landing page for first-time builders. |
+| **2026-10-26** | A calm sign-in screen with its own judge form; the repair ladder saved and always on; each candidate checked in its own **isolated browser runtime**. |
+| **2026-10-30** | (Work from 10-27 to 10-29 landed in this day's commits.) **Machine checks instead of an AI design reviewer**; first versions capped at 3 parts × 3 checks, with later parts built through **Add this**; checks that can never pass refused at plan time; Build activity views grouped by part; **app previews on their own origin**; the judge door opens on the **one shared judge account**; plain wording on the Submit tab; a **fresh production database**. The full **EggOps Nigeria** build ran end to end the same day (LOCAL VERIFIED). |
 
 (The dates and counts come from `git log` in this repo. The README's "What
 changed during the submission period" section is the judge-facing version of the
@@ -248,10 +297,10 @@ same table.)
 
 - **Repository:** `<REPO-URL>` — confirm the intended public repository and
   its contents before submitting; a configured local remote alone is not proof.
-- **Live demo:** `<DEMO-URL>` — an earlier hosted smoke passed on 22 October
-  at `https://caddie.jamalibrahim.dev`, commit `5f3574a`, receipt
-  `lr_5bf0b08f5db1bbcb`. Verify the deployed revision and a fresh authenticated
-  judge journey before treating the current implementation as live-verified.
+- **Live demo:** `<DEMO-URL>` — `https://caddie.jamalibrahim.dev`, redeployed
+  2026-10-30 at 15:38 UTC (commit `cbe680e`) onto a fresh database; 4 of 5
+  hosted smoke checks pass (§7). Sign in as the judge and open the demo project
+  before submitting.
 - **Video:** `<VIDEO-URL>` — **not recorded yet.** Upload to YouTube as public
   or unlisted. See `docs/submission/video-script.md`. If production is not
   ready, the video is recorded on a local build with live models and the live
@@ -277,23 +326,28 @@ same one the demo video was recorded with.)
 > 3. Enter the judge name `<JUDGE NAME>` and the password `<JUDGE PASSWORD>`.
 >    No Google or GitHub account and no email are needed.
 > 4. **Projects** already holds the app built in the demo video,
->    **"<Name>"**. Open it to try the preview, or ask Caddie for a change.
-> 5. Try the loop yourself: ask Caddie for a project idea, open **Find** to see
->    live hackathons and a contest's cited rules, then ask Caddie to plan a
->    small app, approve the plan and the design, and the build starts. A build
->    takes about an hour.
+>    **"<Name>"**. Open it to try the preview, or ask Caddie for a change. The
+>    app signs in with an emailed code; the code arrives in the **test inbox**
+>    on the Build tab (built apps don't send real email yet).
+> 5. Try the loop yourself: ask Caddie for a project idea, open **Discover** to
+>    see live hackathons and a contest's cited rules, then ask Caddie to plan a
+>    small app (at most 3 parts), approve the plan, pick a look, and the build
+>    starts. A build takes about an hour.
 >
 > **Shared account:** every judge uses this one account, so you may see other
 > judges' projects. The account cannot publish apps.
 
-**Notes on these limits (not for the form, for the owner):** these are the
-defaults in code — `apps/app/src/server/judge-limits.ts` (3 projects / 3 builds /
-300 messages / 20 discovery lookups; `judgeLimits`), `apps/app/src/server/judge-access.ts`
-(`JUDGE_MAX_ACCOUNTS_DEFAULT = 40`), and the closing date is the deployment's
-`JUDGE_ACCESS_UNTIL` (`docs/setup/owner-inputs.md` records `2026-12-16` as the
-default). The README's "Judge limits (plain words)" section is the same
-sentence-for-sentence version. If the deployment's environment overrides any of
-these, update the form to the deployed numbers.
+**Notes on these limits (not for the form, for the owner):** the production
+config sets, per rolling 24 hours, 30 build starts, 1,000 Caddie messages and
+60 live hackathon searches, at most 20 projects (`JUDGE_MAX_*`, enforced in
+`apps/app/src/server/judge-limits.ts`; the code defaults are 3 / 3 / 300 / 20),
+and model spending caps of $30 a day and $15 per project
+(`MODEL_SPEND_DAILY_CAP_USD`, `MODEL_SPEND_PROJECT_CAP_USD`,
+`apps/app/src/server/model-spend-guard.ts`). The closing date is the
+deployment's `JUDGE_ACCESS_UNTIL` (`docs/setup/owner-inputs.md` records
+`2026-12-16` as the default). The README's "Limits on the shared account"
+section says the same in plain words. If the deployment's environment changes
+any of these, update the form to the deployed numbers.
 
 ---
 
@@ -310,27 +364,30 @@ status.
   `NEBIUS_BASE_URL = 'https://api.tokenfactory.nebius.com/v1'` and
   `registerNebiusProvider()`, called from `apps/app/src/app.ts`. Call sites that
   make the actual requests: `apps/app/src/agents/coordinator.ts`,
-  `apps/app/src/agents/specialists.ts`,
-  `apps/app/src/server/app-ai.ts`, `apps/app/src/server/rules-reading.ts`.
+  `apps/app/src/agents/specialists.ts`, `apps/app/src/server/app-ai.ts`,
+  `apps/app/src/server/rules-reading.ts`,
+  `apps/app/src/server/candidate-inspection.ts`,
+  `apps/app/src/server/artifact-quality.ts`.
 - **Recorded run:** `docs/release-evidence.md` row **P05** — "Model route
   round-trip (Nebius) — LIVE VERIFIED — real coordinator model call, ledger
   `P05-live`"; and the P09 React+Hono journey. Re-probed live on 2026-10-18
-  (G1 listing probe) and 2026-10-19 (`scripts/probe-lightning.ts`, ledger
-  "Owner review follow-ups").
-- **Caveat:** these live *model* calls were made from a local/dev origin under
-  owner authorization. The hosted deployment itself is live and smoke-verified
-  (P17, `https://caddie.jamalibrahim.dev`, receipt `lr_5bf0b08f5db1bbcb`), but a
-  model round-trip through the hosted origin needs an interactive owner sign-in,
-  so the P05 model-route receipt stays local/dev (`README.md` status table).
+  (G1 listing probe) and 2026-10-19 (`scripts/probe-lightning.ts`). The
+  2026-10-30 EggOps Nigeria build made its model calls to Token Factory from a
+  local Caddie (LOCAL VERIFIED as a whole build).
+- **Caveat:** these live model calls were made from a local/dev origin under
+  owner authorization. A model round-trip through the hosted origin has no
+  receipt yet; the release check of 2026-10-30 lists the P05 live gate as
+  PROVISIONED (key present, no current receipt).
 
 ### (b) At least one NVIDIA open-source model — **LIVE VERIFIED** (recorded 2026-10-18)
 
 - **Code (checkable):** `apps/app/src/agents/providers.ts` (`MODEL_ROLES`,
   `MODEL_ROUTES`) uses NVIDIA Nemotron models by role —
-  `nvidia/Nemotron-3-Ultra-550b-a55b` (ideation),
-  `nvidia/Nemotron-3.5-Super-VL` (chat, vision, appSuper),
+  `nvidia/Nemotron-3-Ultra-550b-a55b` (ideation, architect),
+  `nvidia/Nemotron-3.5-Super-VL` (chat, vision, appSuper, image repairs),
   `nvidia/Nemotron-3_5-Lightning` (app),
-  `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` (helper).
+  `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` (helper, helperRules, helperRanking,
+  helperSummary).
 - **Recorded run:** the 2026-10-18 G1 probe (`GET /v1/models?verbose=true` plus
   chat probes) confirmed the listing serves both
   `nvidia/Nemotron-3.5-Super-VL` and `nvidia/Nemotron-3_5-Lightning`, and that
@@ -342,17 +399,37 @@ status.
 
 ### Honest gaps (state these rather than overclaim)
 
-- **Hosted demo URL:** LIVE VERIFIED — deployed at
-  `https://caddie.jamalibrahim.dev`; the P17 hosted acceptance smoke is 5/5 PASS
-  (receipt `lr_5bf0b08f5db1bbcb`, `docs/release-evidence.md`).
-- **Publish / Worker Loader / Cloudflare Artifacts / Web Risk on a deployed
-  Worker:** implemented and locally tested, **not** live-verified on a deployed
-  Worker (`README.md`; `docs/release-evidence.md`).
+- **Hosted demo URL:** redeployed 2026-10-30 at 15:38 UTC (commit `cbe680e`,
+  version `ddf92e7a-9a68-49cf-8775-6d2e169fc445`). Before the upload the deploy
+  logs show the release check (52 PASS, 0 FAIL, 1 BLOCKED by design, 4
+  PROVISIONED), the preflight (20 PASS, 2 WARN, 0 FAIL) and the fresh
+  production database with exactly the 4 migrations
+  (`0001_foundation.sql` … `0004_quality.sql`). Hosted smoke
+  (`tests/live/release.spec.ts`): 4 of 5 **LIVE VERIFIED** (`/app/`, session
+  probe, API); the landing check **FAILED** on a stale `LOCKED LINE` text
+  assertion. The upload and smoke were run by hand and are not yet in
+  `.deploy-logs/` or `docs/live-receipts.json`.
+- **Shared judge account:** created on production through `/api/judge/start`
+  (200), **LIVE VERIFIED**.
+- **Caddie's browser checks on production:** not verified. The service runs on
+  the owner's machine behind a Cloudflare tunnel.
+- **A full build on the deployed Worker:** not verified. The full EggOps
+  Nigeria build is LOCAL VERIFIED (2026-10-30).
+- **Isolated app previews (`p-<hash>.preview.jamalibrahim.dev`):** the route is
+  deployed; no preview has been opened on that origin yet, so not
+  live-verified.
+- **Email from built apps:** sign-in codes go to a test inbox on the Build
+  tab, not to real email.
+- **Publish / Cloudflare Artifacts / Web Risk on a deployed Worker:**
+  implemented and locally tested, **not** deployed or live-verified
+  (`README.md`; `docs/release-evidence.md`).
+- **Flutter / Android builds:** implemented and locally tested, not run on
+  production.
 - **Custom domains:** NOT BUILT.
-- **Licence audit:** LOCAL VERIFIED and **clean** — 24 production dependencies,
-  24 allowed, 0 flagged, 0 unresolved (exit 0). The two `@fontsource/*` webfont
-  packages are OFL-1.1, accepted for that package family only (`docs/licenses.md`,
-  owner decision 2026-10-19).
+- **Licence audit:** LOCAL VERIFIED and **clean** (2026-10-19) — 24 production
+  dependencies, 24 allowed, 0 flagged, 0 unresolved. The two `@fontsource/*`
+  webfont packages are OFL-1.1, accepted for that package family only
+  (`docs/licenses.md`).
 - **The sandbox wording:** the rules say "in Token Factory", not "Token Factory
   Sandboxes" (the earlier quote was wrong; `nebius-forge-eval`'s compliance
   correction, rules re-read 2026-10-03). The sandbox API is on
@@ -365,11 +442,12 @@ status.
 
 - [ ] `<REPO-URL>` is public, with `LICENSE` (MIT) and `README.md` at the root.
 - [ ] `<DEMO-URL>` is deployed, free, and reachable without a paywall or
-      invite dead-end through the judging window.
+      invite dead-end through the judging window; the judge account signs in
+      and opens the demo project.
 - [ ] `<VIDEO-URL>` is uploaded, public or unlisted, under 3:00, and its audio
       names Nebius Token Factory and NVIDIA Nemotron.
-- [ ] The judge access code is entered **only** in the Devpost form, and the
-      code is not in the repo, README, screenshots or video.
+- [ ] The shared judge name and password are entered **only** in the Devpost
+      form, and they are not in the repo, README, screenshots or video.
 - [ ] Track(s) selected after checking the current Devpost rules (§2).
 - [ ] Re-read the live rules page: the Coding track still says code runs "in
       Token Factory" (last read 2026-10-03), and nothing new conflicts (§1).
