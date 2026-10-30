@@ -281,7 +281,9 @@ export function checkProductionConfig(config: WorkerConfig, appDir: string): { f
 
 	const routes = prod.routes ?? [];
 	const placeholder = routes.some((route) => /[<>]/.test(typeof route === 'string' ? route : route.pattern));
-	const hosts = placeholder ? [] : [...new Set(routes.map(routeHost))];
+	// The isolated-preview wildcard route (`*.preview.<zone>/*`) serves app
+	// previews, not Caddie: it is not a host Caddie is reached on.
+	const hosts = placeholder ? [] : [...new Set(routes.filter((route) => !(typeof route === 'string' ? route : route.pattern).startsWith('*.')).map(routeHost))];
 	const workersDev = prod.workers_dev === true;
 	if (placeholder) {
 		add('FAIL', 'the production route is still <CADDIE_DOMAIN>: put the hostname there (its zone must be on the same Cloudflare account), or remove routes and set workers_dev to true');

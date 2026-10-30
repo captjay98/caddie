@@ -79,7 +79,10 @@
 				{
 					"binding": "DB",
 					"database_name": "caddie",
-					"database_id": "f6315eae-99da-4afc-93d0-356afcd511a0",
+					// Fresh database 2026-10-30 (caddie-v2): the migrations were folded
+					// on 10-28, so the old database (f6315eae…, kept untouched) no
+					// longer matches the migration files.
+					"database_id": "29db3fc3-7af1-4f3e-b3a2-b19e7b79ecd3",
 					"migrations_dir": "migrations"
 				}
 			]

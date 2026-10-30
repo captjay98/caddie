@@ -75,7 +75,7 @@ export function dateRange(candidate: HackathonCandidate): string | null {
 export function deadline(candidate: HackathonCandidate, now: Date = new Date()): string | null {
 	const end = candidate.deadline ?? candidate.endsAt;
 	if (!end) return null;
-	const time = deadlineTime(end);
+	const time = deadlineTime(end, undefined, now);
 	if (time.closed) return 'Closed';
 	if (time.today) return 'Today';
 	const left = daysUntil(end, now);
