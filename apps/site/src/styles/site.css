@@ -110,6 +110,7 @@ body { margin: 0; }
 .pb .step { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 3rem; align-items: center; }
 .pb .step:nth-child(even) .step-text { order: 2; }
 .pb .step .shot-phone { max-width: 260px; justify-self: center; }
+.pb .split .shot-phone { max-width: 300px; justify-self: center; }
 .pb .step-n { font-size: var(--r-label); color: var(--pb-warn); font-weight: 700; margin-bottom: 0.75rem; }
 .pb .step h3 { font-size: 1.5rem; letter-spacing: -0.024em; line-height: 1.15; }
 .pb .step .lede { margin-top: 0.75rem; }

@@ -76,6 +76,9 @@ database (see the status table for the smoke result). You can also run Caddie
   own from an idea.
 - The account is shared by every judge, so you may see other judges' projects.
   It cannot publish apps.
+- **Two fresh judge accounts** (also in the testing instructions) have never
+  been signed in, so they show Caddie's first-time setup from the very first
+  screen. Each account has its own limits.
 
 ### Limits on the shared account (plain words)
 

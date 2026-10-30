@@ -317,7 +317,9 @@ Paste the following into Devpost's testing-instructions field and replace the
 judge name and password placeholders with the real ones **inside the form
 only**. Never put the password in the repository, the README, this file's body,
 a screenshot, or the video. (Owner 2026-10-30: one shared judge account, the
-same one the demo video was recorded with.)
+same one the demo video was recorded with, plus two fresh accounts that have
+never been signed in, so a judge can see first-time setup. The owner keeps
+the three names and passwords outside the repository.)
 
 > **How to try Caddie**
 >
@@ -334,8 +336,14 @@ same one the demo video was recorded with.)
 >    small app (at most 3 parts), approve the plan, pick a look, and the build
 >    starts. A build takes about an hour.
 >
-> **Shared account:** every judge uses this one account, so you may see other
-> judges' projects. The account cannot publish apps.
+> **Want to see Caddie from the very first screen?** Two fresh judge accounts
+> have never been used, so they start with Caddie's first-time setup (a few
+> questions about you, then an empty home):
+> `<FRESH JUDGE 1>` / `<FRESH PASSWORD 1>` and `<FRESH JUDGE 2>` /
+> `<FRESH PASSWORD 2>`. Sign in the same way. Each account has its own limits.
+>
+> **Shared account:** every judge uses the main account, so you may see other
+> judges' projects. Judge accounts cannot publish apps.
 
 **Notes on these limits (not for the form, for the owner):** the production
 config sets, per rolling 24 hours, 30 build starts, 1,000 Caddie messages and
