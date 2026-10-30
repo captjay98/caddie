@@ -51,7 +51,7 @@ describe('P17 hosted release acceptance (BLOCKED without authorization + deploym
 		const html = await res.text();
 		expect(html).toContain('Caddie');
 		expect(html).toContain('class="pb"'); // the ported landing structure
-		expect(html).toContain('LOCKED LINE'); // the honesty band shipped
+		// The 'LOCKED LINE' honesty band left the landing in the 2026-10-30 rewrite.
 	});
 
 	test('/app/ serves the SPA shell', async () => {
